@@ -1124,6 +1124,18 @@ def annotate_trace_io(
         logger.debug("annotate_trace_io failed; continuing without root span I/O")
 
 
+def attach_session_to_current_trace(session_id: UUID) -> None:
+    """Join the active trace to its chat Session. Fail-soft, like the other annotations."""
+    try:
+        import mlflow
+
+        trace_update = getattr(mlflow, "update_current_trace", None)
+        if callable(trace_update):
+            trace_update(session_id=str(session_id))
+    except Exception:
+        logger.debug("MLflow session attachment failed; continuing")
+
+
 def annotate_turn_attributes(attributes: Mapping[str, object]) -> None:
     """Attach bounded, sanitized attributes to the active ``fleet_turn`` span.
 
@@ -1550,9 +1562,12 @@ def turn_trace(
                     # labels can reveal repository or customer information.
                     metadata[key] = value.lower()
         span_id: str | None = None
+        # Preparation traces stay findable through fleet.session_id but never
+        # join the chat Session as an exchange; a failed one joins on failure.
+        session_kwargs: dict[str, str] = {} if trace_phase == "preparation" else {"session_id": str(session_id)}
         try:
             mlflow.update_current_trace(
-                session_id=str(session_id),
+                **session_kwargs,
                 user=_LOCAL_BYOK_USER,
                 tags=tags,
                 metadata=metadata,

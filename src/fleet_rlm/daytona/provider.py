@@ -312,10 +312,13 @@ async def acquire_ephemeral_interpreter(
             run_id=run_id,
         )
         loop = asyncio.get_running_loop()
+        dispatcher = SyncBridgeDispatcher()
+        dispatcher.sync_client_factory = lambda: build_sync_daytona_client(settings)
         interpreter = DaytonaCodeInterpreter(
             backend=sandbox_backend(
                 sandbox,
                 loop=loop,
+                dispatcher=dispatcher,
             )
         )
     except BaseException:
@@ -334,23 +337,58 @@ async def acquire_ephemeral_interpreter(
     )
 
 
-def build_daytona_client(settings: Settings) -> AsyncDaytona:
-    """Construct the process-owned asynchronous Daytona SDK client."""
-    from daytona import AsyncDaytona, DaytonaConfig
+def daytona_config(settings: Settings) -> Any:
+    """Share explicit host configuration between both official SDK clients."""
+    from daytona import DaytonaConfig
 
-    api_key: str | None = None
+    kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
     if settings.daytona_api_key is not None:
-        api_key = settings.daytona_api_key.get_secret_value()
-        api_key = api_key or None
-    config_kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
-    if api_key:
-        config_kwargs["api_key"] = api_key
+        kwargs["api_key"] = settings.daytona_api_key.get_secret_value() or None
     if settings.daytona_org_id:
-        config_kwargs["organization_id"] = settings.daytona_org_id
-    client = AsyncDaytona(DaytonaConfig(**config_kwargs))
-    if settings.daytona_org_id and api_key and hasattr(client, "_api_client"):
+        kwargs["organization_id"] = settings.daytona_org_id
+    return DaytonaConfig(**kwargs)
+
+
+def build_daytona_client(settings: Settings) -> AsyncDaytona:
+    from daytona import AsyncDaytona
+
+    client = AsyncDaytona(daytona_config(settings))
+    if settings.daytona_org_id:
         client._api_client.default_headers["X-Daytona-Organization-ID"] = settings.daytona_org_id
     return client
+
+
+def build_sync_daytona_client(settings: Settings) -> Any:
+    from daytona import Daytona
+
+    client = Daytona(daytona_config(settings))
+    if settings.daytona_org_id:
+        client._api_client.default_headers["X-Daytona-Organization-ID"] = settings.daytona_org_id
+    return client
+
+
+def close_sync_daytona_client(client: Any) -> None:
+    """Close pinned SDK resources: 0.220 has no public synchronous close()."""
+    # This compatibility seam only owns shutdown; all provider operations use
+    # the SDK. Keep it until Daytona publishes a synchronous close method.
+    operations = [
+        client._subscription_manager.shutdown,
+        client._http_client.close,
+        client._api_client.rest_client.pool_manager.clear,
+        client._toolbox_api_client.rest_client.pool_manager.clear,
+    ]
+    if client._event_dispatcher is not None:
+        operations.append(client._event_dispatcher.disconnect)
+    if client._tracer_provider is not None:
+        operations.append(client._tracer_provider.shutdown)
+    failure: Exception | None = None
+    for operation in operations:
+        try:
+            operation()
+        except Exception as exc:
+            failure = failure or exc
+    if failure is not None:
+        raise failure
 
 
 async def read_file(sandbox: Any, path: str) -> bytes:

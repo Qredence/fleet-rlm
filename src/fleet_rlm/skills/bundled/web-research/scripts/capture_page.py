@@ -1,4 +1,4 @@
-"""Bounded, read-only public-page evidence retrieval inside the Root Sandbox.
+"""Bounded HTTP capture and rendered-text evidence storage in the Root Sandbox.
 
 URL/DNS checks are best effort, not network containment (DNS rebinding and
 provider egress enforcement remain outside this helper's guarantees).
@@ -52,7 +52,7 @@ class PublicRedirects(HTTPRedirectHandler):
 
 
 def http_text(url: str) -> tuple[str, str, str, bool]:
-    """Fetch bounded HTML, checking redirects before requesting them."""
+    """Fetch bounded HTML or source text, checking redirects before requesting them."""
     from bs4 import BeautifulSoup
 
     opener = build_opener(ProxyHandler({}), PublicRedirects())
@@ -60,8 +60,16 @@ def http_text(url: str) -> tuple[str, str, str, bool]:
     request = Request(public_url(url), headers={"User-Agent": "Fleet-public-page/1"})
     with opener.open(request, timeout=TIMEOUT_S) as response:
         final_url = public_url(response.url)
-        if response.headers.get_content_type() not in {"text/html", "text/plain"}:
-            raise ValueError("only HTML or plain text pages are supported")
+        content_type = response.headers.get_content_type()
+        is_json = content_type == "application/json" or (
+            content_type.startswith("application/") and content_type.endswith("+json")
+        )
+        if content_type not in {"text/html", "text/plain"} and not is_json:
+            raise ValueError("only HTML, plain text, or JSON documents are supported")
+        declared = response.headers.get("Content-Length")
+        expected_size = int(declared) if declared is not None else None
+        if expected_size is not None and (expected_size < 0 or expected_size > MAX_RESPONSE_BYTES):
+            raise ValueError("HTTP response exceeds limit; no complete evidence saved")
         chunks = []
         size = 0
         while True:
@@ -78,8 +86,10 @@ def http_text(url: str) -> tuple[str, str, str, bool]:
             if not chunk:
                 break
             chunks.append(chunk)
+        if expected_size is not None and size != expected_size:
+            raise ValueError("incomplete HTTP response; no complete evidence saved")
         body = b"".join(chunks).decode(response.headers.get_content_charset() or "utf-8", errors="replace")
-        if response.headers.get_content_type() == "text/plain":
+        if content_type == "text/plain" or is_json:
             return body, final_url, "", False
     soup = BeautifulSoup(body, "html.parser")
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
@@ -93,110 +103,26 @@ def http_text(url: str) -> tuple[str, str, str, bool]:
     return text, final_url, title, needs_browser
 
 
-def browser_text(url: str) -> tuple[str, str, str]:
-    """Render one page in a fresh context; no profiles, clicks or downloads."""
-    from playwright.sync_api import Error, sync_playwright
-
-    public_url(url)
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, chromium_sandbox=True, timeout=TIMEOUT_S * 1000)
-        try:
-            context = browser.new_context(accept_downloads=False, service_workers="block")
-            try:
-                requests = 0
-
-                def route_request(route):
-                    nonlocal requests
-                    requests += 1
-                    request = route.request
-                    try:
-                        public_url(request.url)
-                    except (ValueError, OSError):
-                        route.abort()
-                        return
-                    if (
-                        requests > 100
-                        or request.method not in {"GET", "HEAD"}
-                        or request.resource_type in {"image", "media", "font"}
-                    ):
-                        route.abort()
-                        return
-                    # Chromium follows redirect chains without invoking the
-                    # routing handler again. Never hand it a redirect response:
-                    # the HTTP-first stage resolves checked public redirects.
-                    try:
-                        response = route.fetch(max_redirects=0, timeout=TIMEOUT_S * 1000)
-                    except Error:
-                        route.abort()
-                        return
-                    try:
-                        if 300 <= response.status < 400:
-                            route.abort()
-                        else:
-                            route.fulfill(response=response)
-                    finally:
-                        response.dispose()
-
-                context.route("**/*", route_request)
-                context.route_web_socket("**/*", lambda websocket: websocket.close())
-                page = context.new_page()
-                page.set_default_timeout(TIMEOUT_S * 1000)
-                print("browse: browser navigation started", flush=True)
-                response = page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_S * 1000)
-                if response is None or response.status >= 400:
-                    raise ValueError("browser navigation did not return a successful page")
-                # A bounded settle window, not a claim that all dynamic content loaded.
-                page.wait_for_timeout(1000)
-                final_url = public_url(page.url)
-                # Playwright evaluate has no execution timeout. Chromium's
-                # Runtime.evaluate bounds this extraction even if a getter stalls.
-                session = context.new_cdp_session(page)
-                try:
-                    extracted = session.send(
-                        "Runtime.evaluate",
-                        {
-                            "expression": """(() => {
-                        const text = document.body ? document.body.innerText : "";
-                        const title = document.title;
-                        const limit = MAX_BYTES;
-                        if (text.length > limit || new TextEncoder().encode(text).length > limit)
-                            return null;
-                        if (title.length > 4096 || new TextEncoder().encode(title).length > 4096)
-                            return null;
-                        return {text, title};
-                    })()""".replace("MAX_BYTES", str(MAX_TEXT_BYTES)),
-                            "returnByValue": True,
-                            "timeout": 5000,
-                        },
-                    )
-                except Error as exc:
-                    raise ValueError("rendered text extraction failed or timed out") from exc
-                finally:
-                    session.detach()
-                if "exceptionDetails" in extracted:
-                    raise ValueError("rendered text extraction failed")
-                value = extracted["result"].get("value")
-                if value is None:
-                    raise ValueError("rendered text exceeds limit; no complete evidence saved")
-                return value["text"], final_url, value["title"]
-            finally:
-                context.close()
-        finally:
-            browser.close()
-
-
-def retrieve(url: str, *, render: bool = False) -> dict[str, object]:
-    """HTTP first; render JS shells or explicitly requested dynamic evidence."""
+def retrieve(url: str) -> dict[str, object]:
+    """Capture static text; return needs_browser guidance for JavaScript shells."""
     scratch = Path(os.environ["FLEET_RUN_SCRATCH"])
     if not scratch.is_absolute() or not scratch.is_dir():
         raise ValueError("FLEET_RUN_SCRATCH must be an existing absolute directory")
     print("browse: HTTP retrieval started", flush=True)
     text, final_url, title, needs_browser = http_text(url)
-    method = "http"
-    if render or needs_browser:
-        print("browse: browser fallback selected", flush=True)
-        text, final_url, title = browser_text(final_url)
-        method = "browser"
+    return {**save_evidence(text, requested_url=url, final_url=final_url, title=title), "needs_browser": needs_browser}
+
+
+def save_evidence(
+    text: str, *, requested_url: str, final_url: str, title: str = "", rendered: bool = False
+) -> dict[str, object]:
+    """Save all available extracted text, never label a filtered preview complete."""
+    scratch = Path(os.environ["FLEET_RUN_SCRATCH"])
+    if not scratch.is_absolute() or not scratch.is_dir():
+        raise ValueError("FLEET_RUN_SCRATCH must be an existing absolute directory")
+    public_url(requested_url)
+    public_url(final_url)
+    method = "browser" if rendered else "http"
     encoded = text.encode("utf-8")
     if not text.strip() or len(encoded) > MAX_TEXT_BYTES:
         raise ValueError("empty or oversized text; no complete evidence saved")
@@ -206,7 +132,7 @@ def retrieve(url: str, *, render: bool = False) -> dict[str, object]:
     text_path = directory / "page.txt"
     provenance_path = directory / "provenance.json"
     provenance = {
-        "requested_url": url,
+        "requested_url": requested_url,
         "final_url": final_url,
         "title": title,
         "retrieved_at_utc": datetime.now(UTC).isoformat(),
@@ -235,7 +161,6 @@ def retrieve(url: str, *, render: bool = False) -> dict[str, object]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url")
-    parser.add_argument("--render", action="store_true", help="Render after HTTP for known dynamic pages")
     args = parser.parse_args()
-    result = retrieve(args.url, render=args.render)
+    result = retrieve(args.url)
     print(json.dumps({"text_path": result["text_path"], "provenance_path": result["provenance_path"]}), flush=True)

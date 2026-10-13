@@ -59,6 +59,7 @@ class SkillToolHost:
         self._loaded_ids: set[UUID] = set()
         self._installed_ids: set[UUID] = set()
         self._known_installed_paths: dict[UUID, set[str]] = {}
+        self._install_errors: dict[UUID, str] = {}
         self._pending_events: list[dict[str, Any]] = []
         self._lock = RLock()
 
@@ -95,6 +96,8 @@ class SkillToolHost:
             try:
                 workspace.write_text(path, resource.content, overwrite=True)
             except Exception:
+                with self._lock:
+                    self._install_errors[skill.card.id] = "workspace_write_failed"
                 break
             with self._lock:
                 known.add(path)
@@ -102,7 +105,26 @@ class SkillToolHost:
         with self._lock:
             if skill.resources and len(known) == len(skill.resources):
                 self._installed_ids.add(skill.card.id)
+                self._install_errors.pop(skill.card.id, None)
             return tuple(path for path in declared_paths if path in known)
+
+    def _resource_status(self, skill: SkillDefinition) -> dict[str, Any]:
+        """Bounded installation evidence shared by preload and progressive loading."""
+        with self._lock:
+            known = self._known_installed_paths.get(skill.card.id, set())
+            paths = [path for path in self._installed_paths(skill) if path in known]
+            error = self._install_errors.get(skill.card.id)
+        status: dict[str, Any] = {
+            "declared": len(skill.resources),
+            "installed": len(paths),
+            "complete": len(paths) == len(skill.resources),
+        }
+        if not status["complete"]:
+            if self._workspace is None:
+                status["error"] = "workspace_unavailable"
+            elif error:
+                status["error"] = error
+        return {"installed_paths": paths, "resource_install": status}
 
     @property
     def loaded_skill_ids(self) -> frozenset[UUID]:
@@ -140,12 +162,12 @@ class SkillToolHost:
             return None, "version_mismatch"
         return skill, None
 
-    def mark_preloaded(self, skill: SkillDefinition) -> None:
+    def mark_preloaded(self, skill: SkillDefinition) -> dict[str, Any]:
         with self._lock:
             if self._allowed_skill_ids is not None and skill.card.id not in self._allowed_skill_ids:
                 raise ValueError("preloaded Skill is outside the explicit restriction")
             if skill.card.id in self._loaded_ids:
-                return
+                return self._resource_status(skill)
             if len(self._loaded_ids) >= self._max_loaded_skills:
                 raise ValueError("too many loaded Skills")
             # Registration itself is the install guard (RC-7): the brokered
@@ -155,6 +177,7 @@ class SkillToolHost:
         self._install_resources(skill)
         with self._lock:
             self._pending_events.extend((skill_activated_public_payload(skill), skill_loaded_public_payload(skill)))
+        return self._resource_status(skill)
 
     def load_skill(self, skill_id: str, expected_version: str | None = None) -> dict[str, Any]:
         skill, error = self._resolve(skill_id, expected_version=expected_version)
@@ -166,7 +189,7 @@ class SkillToolHost:
                 if len(self._loaded_ids) >= self._max_loaded_skills:
                     return {"ok": False, "error": "skill_limit_exceeded"}
                 self._loaded_ids.add(skill.card.id)
-        installed_paths = self._install_resources(skill)
+        self._install_resources(skill)
         if not already_registered:
             with self._lock:
                 self._pending_events.extend((skill_activated_public_payload(skill), skill_loaded_public_payload(skill)))
@@ -189,13 +212,7 @@ class SkillToolHost:
                 for resource in skill.resources.values()
             ],
         }
-        if self._workspace is not None:
-            result["installed_paths"] = list(installed_paths)
-        result["resource_install"] = {
-            "declared": len(skill.resources),
-            "installed": len(installed_paths),
-            "complete": len(installed_paths) >= len(skill.resources),
-        }
+        result.update(self._resource_status(skill))
         return result
 
     def read_skill_resource(
@@ -256,7 +273,7 @@ class SkillToolHost:
             values = cast(Mapping[str, JsonValue], result)
             return {
                 key: bound_event_text(values[key]) if isinstance(values[key], str) else values[key]
-                for key in ("ok", "error", "skill_id", "name", "version")
+                for key in ("ok", "error", "skill_id", "name", "version", "resource_install")
                 if key in values
             }
 

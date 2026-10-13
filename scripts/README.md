@@ -19,6 +19,7 @@ receipts are evidence for only their stated contract.
 | `scripts/release_smoke.py` | Packaging tests install a built wheel into an isolated environment and smoke the supported application surface. | `make test-packaging` |
 | `scripts/circleci_trigger_release.py` | Release operators dispatch and correlate the GitHub release workflow from CircleCI. | `uv run pytest tests/scripts/test_release_tooling.py -q` |
 | `scripts/deployment_observability.py` | Release operators inspect bounded deployment observability inputs without changing deployment state. | `uv run python scripts/deployment_observability.py --help` |
+| `scripts/evaluate_skill_selection.py` | Operators compare Root Skill discovery with evaluation-only Jev advice; --run explicitly authorizes provider calls. | `uv run python scripts/evaluate_skill_selection.py --plan`; see [evaluation guide](../docs/how-to-guides/evaluation-optimization.md) |
 | `scripts/daytona_snapshot.py` | Daytona operators plan, create, check, or verify immutable Session and SemanticChild snapshots. | `make daytona-snapshot-check`; `make daytona-child-snapshot-check` |
 | `scripts/live_daytona_verify.py` | Authorized operators verify native FastAPI semantics, attachment/artifact durability, or recursive-batch behavior on a committed Daytona candidate. | `uv run python scripts/live_daytona_verify.py --help`; offline safety tests in `tests/scripts/test_live_daytona_verify.py` |
 
@@ -30,10 +31,11 @@ contract. Neither lane by itself certifies provider containment, promotion,
 release readiness, or deployment. Database certification requires an explicit
 exclusive test target and never runs migrations implicitly.
 
-## Preserved non-executable benchmark data
+## Non-executable benchmark data
 
 | Path | Preserved content | Status |
 | --- | --- | --- |
+| `scripts/benchmarks/skill_selection_cases.json` | Reviewed public synthetic requests for isolated Skill selection; 18 calibration and 18 held-out task families. | Active fixture for `scripts/evaluate_skill_selection.py` |
 | `scripts/benchmarks/phase6_evaluation_cases.json` | Frozen task-family inputs, rubrics, and content hashes; data only, with no runner. | Retained, not an executable benchmark |
 | `scripts/benchmarks/oolong/fixture_validation_row.json` | Fixed HF-shaped Oolong row for offline fixture/reference use. | Retained, not an executable benchmark |
 

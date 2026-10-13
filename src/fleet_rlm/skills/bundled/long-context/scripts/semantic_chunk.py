@@ -7,6 +7,7 @@ from itertools import pairwise
 from pathlib import Path
 
 Chunk = tuple[int, int, str]
+SECTION_HEADING = r"^[ \t]*\[[A-Za-z][A-Za-z0-9._ -]{0,127}\][ \t]+\S"
 
 
 def read_content(input_path: str) -> str:
@@ -15,11 +16,13 @@ def read_content(input_path: str) -> str:
 
 def detect_content_type(content: str) -> str:
     text = content.lstrip()
+    sectioned = re.search(SECTION_HEADING, content, re.MULTILINE) is not None
     probes = (
-        ("json", text[:1] in "{["),
+        ("json", bool(text) and text[:1] in "{[" and not sectioned),
         ("markdown", text.startswith("#") or "\n#" in content),
         ("python", re.search(r"^(?:async\s+def|class|def)\s+", content, re.MULTILINE) is not None),
         ("log", re.search(r"^\d{4}-\d{2}-\d{2}", content, re.MULTILINE) is not None),
+        ("sectioned", sectioned),
     )
     return next((name for name, matched in probes if matched), "text")
 
@@ -63,6 +66,7 @@ def regex_chunks(content: str, pattern: str, size: int, overlap: int) -> list[Ch
 def chunk_content(content: str, content_type: str, max_size: int, overlap: int) -> list[Chunk]:
     selected = detect_content_type(content) if content_type == "auto" else content_type
     patterns = {
+        "sectioned": SECTION_HEADING,
         "markdown": r"^#{1,6}\s+",
         "python": r"^(?:async\s+def|class|def)\s+",
         "log": r"^\d{4}-\d{2}-\d{2}",
@@ -95,7 +99,7 @@ def main() -> None:
     parser.add_argument(
         "--type",
         default="auto",
-        choices=("auto", "markdown", "log", "json", "python", "text"),
+        choices=("auto", "markdown", "log", "json", "python", "text", "sectioned"),
     )
     parser.add_argument("--max-size", type=int, default=8_000)
     parser.add_argument("--overlap", type=int, default=0)

@@ -48,6 +48,25 @@ async def _settled_preparation() -> bool:
     return True
 
 
+@pytest.mark.asyncio
+async def test_composition_closes_host_search_client_even_when_provider_disposal_fails():
+    from fleet_rlm.app_lifecycle import _dispose_components
+
+    closed = []
+
+    class Resources:
+        async def adispose(self):
+            raise RuntimeError("provider disposal failed")
+
+    class SearchClient:
+        async def aclose(self):
+            closed.append("search")
+
+    with pytest.raises(RuntimeError, match="provider disposal failed"):
+        await _dispose_components(resources=Resources(), web_search_client=SearchClient(), suppress_errors=False)
+    assert closed == ["search"]
+
+
 def _complete_runtime_inventory(**overrides: object) -> RuntimeInventory:
     return RuntimeInventory(route_services=_route_services(**overrides))
 

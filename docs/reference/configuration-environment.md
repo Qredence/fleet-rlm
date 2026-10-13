@@ -16,6 +16,7 @@ Generated from `config/fleet.toml`, the source of truth for the single runtime c
 | Database environment name | `FLEET_DATABASE_URL` |
 | Snapshot environment names | `FLEET_DAYTONA_SNAPSHOT`, `FLEET_DAYTONA_CHILD_SNAPSHOT` |
 | Optional MLflow environment names | — |
+| Optional Tavily environment name | `TAVILY_API_KEY` |
 
 Startup requires a configured database URL at Alembic head. Local SQLite and PostgreSQL are supported; the explicit Lakebase preflight additionally enforces its TLS and role requirements.
 

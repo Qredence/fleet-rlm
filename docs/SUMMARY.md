@@ -11,6 +11,7 @@ to its recorded revision and is not current production certification.
 * [Testing Strategy](how-to-guides/testing-strategy.md)
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
+* [Public web research](how-to-guides/web-research.md)
 * [Evaluation and optimization](how-to-guides/evaluation-optimization.md)
 * [MLflow evaluation pilot](how-to-guides/mlflow-evaluation.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)

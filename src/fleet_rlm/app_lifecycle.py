@@ -35,6 +35,7 @@ from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionO
 from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 from fleet_rlm.sessions.lifecycle import SessionActiveTurnDrain, SessionLifecycle
 from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.web_search import TavilySearch
 from fleet_rlm.workspace.artifacts import ArtifactReader
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler, run_deferred_memory_outbox_reconcile
 from fleet_rlm.workspace.mounted_gateway import (
@@ -57,6 +58,7 @@ async def _dispose_components(
     *,
     resources: DaytonaRuntime | None,
     database: RuntimeDatabaseLifecycle | None = None,
+    web_search_client: TavilySearch | None = None,
     suppress_errors: bool,
 ) -> bool:
     """Dispose available runtime components, optionally suppressing errors."""
@@ -71,6 +73,12 @@ async def _dispose_components(
     if database is not None:
         try:
             await database.aclose()
+        except Exception as exc:
+            settled = False
+            first_error = first_error or exc
+    if web_search_client is not None:
+        try:
+            await web_search_client.aclose()
         except Exception as exc:
             settled = False
             first_error = first_error or exc
@@ -114,6 +122,7 @@ async def _finish_daytona_disposal(
             components_settled = await _dispose_components(
                 resources=resources,
                 database=inventory.database,
+                web_search_client=inventory.web_search_client,
                 suppress_errors=True,
             )
         cleanup = inventory.run_cleanup_supervisor
@@ -243,6 +252,7 @@ async def build_daytona_composition(
     orphan_cleanup_task: asyncio.Task[None] | None = None
     memory_outbox_task: asyncio.Task[None] | None = None
     capture_store: TurnCaptureStore | None = None
+    web_search_client: TavilySearch | None = None
     try:
         # Fail closed on an unreachable or non-head database, inside the
         # cleanup scope so the engine above is always disposed on failure.
@@ -294,6 +304,12 @@ async def build_daytona_composition(
         task_service = SessionTaskService(session_catalog, gateway, volume_paths)
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
+        if (
+            resolved.web_search_enabled
+            and resolved.tavily_api_key is not None
+            and resolved.tavily_api_key.get_secret_value().strip()
+        ):
+            web_search_client = TavilySearch(resolved.tavily_api_key)
         run_preparation = DaytonaRunPreparation(
             runtime=runtime,
             attachment_lifecycle=attachment_lifecycle,
@@ -307,6 +323,7 @@ async def build_daytona_composition(
             workspace_gateway=mounted_workspace_gateway,
             volume_gateway=gateway,
             task_service=task_service,
+            web_search_client=web_search_client,
         ).plan()
         run_state = SqlAlchemyRunStateStore(
             session_factory,
@@ -465,6 +482,7 @@ async def build_daytona_composition(
             orphan_cleanup_task=orphan_cleanup_task,
             memory_outbox_task=memory_outbox_task,
             capture_store=capture_store,
+            web_search_client=web_search_client,
         )
         return inventory
     except BaseException:
@@ -478,6 +496,7 @@ async def build_daytona_composition(
             await _dispose_components(
                 resources=runtime,
                 database=database_lifecycle,
+                web_search_client=web_search_client,
                 suppress_errors=True,
             )
         raise
@@ -554,6 +573,7 @@ async def close_daytona_services(inventory: RuntimeInventory) -> None:
             components_settled = await _dispose_components(
                 resources=inventory.daytona_runtime_owner,
                 database=inventory.database,
+                web_search_client=inventory.web_search_client,
                 suppress_errors=False,
             )
             if components_settled is False:

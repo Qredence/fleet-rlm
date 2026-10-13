@@ -12,6 +12,8 @@ from uuid import UUID
 import fleet_rlm.turns
 from fleet_rlm.observability.tracing import (
     annotate_trace_io,
+    annotate_turn_attributes,
+    attach_session_to_current_trace,
     record_turn_stop_reason,
     turn_phase_span,
     turn_trace,
@@ -179,13 +181,13 @@ class TurnRuntime:
                 ):
                     prepared = await self._preparation.prepare(start, deadline=deadline)
             except BaseException:
+                attach_session_to_current_trace(start.session_id)
                 annotate_trace_io(
                     request=start.input.text,
                     response_text="Turn preparation failed",
                     failed=True,
                 )
                 raise
-            annotate_trace_io(request=start.input.text, response_text="Turn prepared")
             return _attach_preparation_trace_id(prepared, handle.trace_id, handle._span_id)
 
     async def _prepare_claimed(
@@ -861,9 +863,8 @@ class TurnRuntime:
             settlement_inputs["memory_candidate_count"] = len(resolution.memory_candidates)
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
             if isinstance(resolution, RLMOutcome) and resolution.succeeded:
-                # Native contexts and their callback gateway are the only
-                # prepared resources that must be contained before durable
-                # success. Other resources own post-commit artifact and
+                # Explicit native/browser cleanup obligations must settle
+                # before durable success. Other resources own post-commit artifact and
                 # provider lifecycle work and remain in the normal drain.
                 close_before_commit = getattr(prepared, "aclose_before_commit", None)
                 if callable(close_before_commit):
@@ -1229,6 +1230,8 @@ class TurnRuntime:
             record_turn_stop_reason("completed")
         else:
             record_turn_stop_reason("execution_failure")
+        if outcome.failure_cause_type is not None:
+            annotate_turn_attributes({"turn_failure_cause": outcome.failure_cause_type})
         annotate_trace_io(
             request=trace_request,
             response_text=(outcome.prediction.display_text if outcome.prediction else outcome.public_error_message),

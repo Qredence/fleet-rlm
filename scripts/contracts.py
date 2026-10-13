@@ -532,6 +532,8 @@ def config_render() -> str:
         f"{config__names((contract.database_url_env,) if contract.database_url_env else ())} |",
         f"| Snapshot environment names | {config__names(contract.daytona_snapshot_environment_names)} |",
         f"| Optional MLflow environment names | {config__names(contract.mlflow_environment_names)} |",
+        "| Optional Tavily environment name | "
+        f"{config__names((contract.web_api_key_env,) if contract.web_api_key_env else ())} |",
         "",
         (
             "Startup requires a configured database URL at Alembic head. Local SQLite and PostgreSQL are supported; "

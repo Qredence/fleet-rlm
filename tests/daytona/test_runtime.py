@@ -121,6 +121,25 @@ async def test_warm_workspace_replacement_closes_obsolete_lease(workspace_runtim
 
 
 @pytest.mark.asyncio
+async def test_workspace_prewarm_is_reused_by_the_next_turn_and_not_repeated(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    workspace_id = uuid4()
+
+    first = runtime.schedule_workspace_prewarm(workspace_id)
+    assert first is not None
+    # In flight: a second schedule must not start a competing creation.
+    assert runtime.schedule_workspace_prewarm(workspace_id) is None
+    await first
+    # Warm: the cache already holds the Sandbox, so there is nothing to schedule.
+    assert runtime.schedule_workspace_prewarm(workspace_id) is None
+
+    async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True) as sandbox:
+        assert sandbox.id == "io-0"
+    assert len(platform.created) == 1
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
 async def test_warm_workspace_cache_preserves_turn_capacity(workspace_runtime) -> None:
     runtime, platform = workspace_runtime
     for _ in range(4):

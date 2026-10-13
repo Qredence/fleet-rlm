@@ -53,6 +53,54 @@ def test_preload_restricts_catalog_and_events_are_metadata_only() -> None:
     assert selected.instructions not in repr(events)
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_preload_reports_installation_and_keeps_canonical_fallback(fails: bool) -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("web-research"))
+    workspace = _RecordingWorkspace(raise_on_write=fails)
+    host = SkillToolHost(catalog, workspace=workspace)
+
+    status = host.mark_preloaded(skill)
+
+    assert status["resource_install"]["complete"] is not fails
+    assert status["resource_install"]["installed"] == (0 if fails else 1)
+    assert status["installed_paths"] == ([] if fails else ["skills/web-research/scripts/capture_page.py"])
+    if fails:
+        assert status["resource_install"]["error"] == "workspace_write_failed"
+    assert "volume write failed" not in repr(status)
+    assert host.mark_preloaded(skill) == status
+    assert host.read_skill_resource(str(skill.card.id), "scripts/capture_page.py")["ok"] is True
+    assert len(host.drain_public_events()) == 2
+
+
+def test_preload_without_workspace_reports_unavailable_installation() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("web-research"))
+    status = SkillToolHost(catalog).mark_preloaded(skill)
+    assert status["resource_install"] == {
+        "declared": 1,
+        "installed": 0,
+        "complete": False,
+        "error": "workspace_unavailable",
+    }
+
+
+def test_partial_preload_exposes_exact_paths_and_recovery_clears_error() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+    workspace = _PartialRecordingWorkspace(fail_after=1)
+    host = SkillToolHost(catalog, workspace=workspace)
+    status = host.mark_preloaded(skill)
+    assert status["installed_paths"] == list(workspace.written)
+    assert status["resource_install"]["installed"] == 1
+    assert status["resource_install"]["error"] == "workspace_write_failed"
+    assert host.read_skill_resource(str(skill.card.id), "scripts/rank_chunks.py")["ok"] is True
+    workspace.fail_after = 100
+    recovered = host.load_skill(str(skill.card.id))
+    assert recovered["resource_install"] == {"declared": 3, "installed": 3, "complete": True}
+    assert len(host.drain_public_events()) == 2
+
+
 class _RecordingWorkspace:
     def __init__(self, *, raise_on_write: bool = False) -> None:
         self.written: dict[str, str] = {}
@@ -81,7 +129,6 @@ def test_progressive_load_reports_installed_paths_and_is_idempotent() -> None:
         "skills/long-context/scripts/semantic_chunk.py",
         "skills/long-context/scripts/rank_chunks.py",
         "skills/long-context/references/chunking-strategies.md",
-        "skills/long-context/scripts/browse_page.py",
     ]
     # One write pass for mark + one for the first load (dedupe), none on repeat.
     assert workspace.calls == workspace.calls[: len(workspace.written) * 2]
@@ -113,7 +160,12 @@ def test_mid_install_failure_reports_exact_successes_and_retries_best_effort() -
     assert first == second
     assert first["ok"] is True
     assert first["installed_paths"] == successful_paths
-    assert first["resource_install"] == {"declared": 4, "installed": 1, "complete": False}
+    assert first["resource_install"] == {
+        "declared": 3,
+        "installed": 1,
+        "complete": False,
+        "error": "workspace_write_failed",
+    }
     remaining = "skills/long-context/references/chunking-strategies.md"
     assert remaining not in workspace.written
     resource = host.read_skill_resource(str(skill.card.id), "references/chunking-strategies.md", skill.card.version)
@@ -125,9 +177,14 @@ def test_mid_install_failure_reports_exact_successes_and_retries_best_effort() -
 
 
 @pytest.mark.asyncio
-async def test_prepare_host_capabilities_installs_preloaded_skill_resources() -> None:
+@pytest.mark.parametrize("fails,cancel_during_write", [(False, False), (True, False), (False, True)])
+async def test_prepare_host_capabilities_installs_preloaded_skill_resources(
+    fails: bool, cancel_during_write: bool
+) -> None:
+    import asyncio
     from uuid import uuid4 as _uuid4
 
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -142,7 +199,22 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
 
     catalog = build_bundled_skill_catalog()
     skill = catalog.require(stable_skill_id("long-context"))
-    workspace = _RecordingWorkspace()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BridgedWorkspace(_RecordingWorkspace):
+        def write_text(self, path: str, content: str, *, overwrite: bool) -> None:
+            async def write() -> None:
+                if cancel_during_write:
+                    entered.set()
+                    await release.wait()
+                super(BridgedWorkspace, self).write_text(path, content, overwrite=overwrite)
+
+            dispatcher.run(write())
+
+    workspace = BridgedWorkspace(raise_on_write=fails)
     turn = ClaimedRun(
         _uuid4(),
         _uuid4(),
@@ -156,19 +228,37 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
         _RunClaimToken(_uuid4()),
     )
 
-    spec, _skill_host, notices = await prepare_host_capabilities(
-        turn=turn,
-        skill_catalog=catalog,
-        base_tools=(),
-        base_event_views={},
-        workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
-        workspace_fs=workspace,
-        deadline=float("inf"),
+    preparation = asyncio.create_task(
+        prepare_host_capabilities(
+            turn=turn,
+            skill_catalog=catalog,
+            base_tools=(),
+            base_event_views={},
+            workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
+            workspace_fs=workspace,
+            deadline=float("inf"),
+        )
     )
+    if cancel_during_write:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        preparation.cancel()
+        await asyncio.sleep(0)
+        assert not preparation.done()
+        assert workspace.written == {}
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(preparation, timeout=2)
+        assert len(workspace.written) == len(skill.resources)
+        return
+    spec, _skill_host, notices = await preparation
 
     assert notices == ()
     assert spec.output_schema_id == "fleet.default"  # long-context has no custom signature
-    assert "skills/long-context/references/chunking-strategies.md" in workspace.written
+    assert ("skills/long-context/references/chunking-strategies.md" in workspace.written) is not fails
+    context = "\n".join(spec.skill_instructions)
+    assert '"complete": false' in context if fails else '"complete": true' in context
+    assert "read_skill_resource" in context
+    assert "volume write failed" not in context
 
 
 def test_tool_event_view_projections_keep_skill_and_resource_bodies_private() -> None:
@@ -183,7 +273,7 @@ def test_tool_event_view_projections_keep_skill_and_resource_bodies_private() ->
     load_projection = views["load_skill"].output_projection(loaded)
     resource_projection = views["read_skill_resource"].output_projection(resource)
 
-    assert set(load_projection) == {"ok", "skill_id", "name", "version"}
+    assert set(load_projection) == {"ok", "skill_id", "name", "version", "resource_install"}
     assert set(resource_projection) == {"ok", "skill_id", "path", "encoding", "media_type", "byte_size"}
     assert "skill_markdown" not in repr(load_projection)
     assert "installed_paths" not in repr(load_projection)

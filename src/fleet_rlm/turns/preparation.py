@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -33,6 +34,7 @@ from fleet_rlm.rlm.execution import (
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
@@ -46,6 +48,7 @@ from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.sessions.task import (
     SessionTaskService,
     SessionTaskToolHost,
+    TaskCheckpoint,
     task_checkpoint_summary,
 )
 from fleet_rlm.skills.catalog import SkillCatalog
@@ -53,6 +56,7 @@ from fleet_rlm.skills.models import SkillDefinition
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.turns.settlement import MemoryIntentBuilder, OwnedPostCommitMemoryPromotion
+from fleet_rlm.web_search import TavilySearch, WebSearchToolHost
 from fleet_rlm.workspace.artifact_tools import ArtifactToolHost
 from fleet_rlm.workspace.artifacts import ArtifactAccess, ArtifactReader, RunArtifactSink
 from fleet_rlm.workspace.attachments import (
@@ -116,7 +120,7 @@ class _PreparedTurnResources:
         """Close the narrow execution boundary required before success commit.
 
         Explicit pre-commit obligations must settle before durable success.
-        Retained broker preparation currently registers none; attachment removal,
+        Browser processes must stop before success. Attachment removal,
         capabilities and provider lease release remain post-settlement owners.
         """
         await self._aclose_indices(self.pre_commit_cleanup_indices)
@@ -233,6 +237,9 @@ class RunEnvironment:
     # DSPy's synchronous interpreter seam.
     async_bridge: AsyncToolBridge | None = None
     image_identity: str | None = None
+    browser_cleanup: AsyncCleanup | None = None
+    host_tools: tuple[dspy.Tool, ...] = ()
+    host_tool_event_views: Mapping[str, ToolEventView] = field(default_factory=dict)
 
 
 RunEnvironmentAcquirer = Callable[..., Awaitable[RunEnvironment]]
@@ -256,6 +263,7 @@ class CapabilityPreparer(Protocol):
         attachments: PreparedAttachments,
         *,
         deadline: float,
+        task_checkpoint: TaskCheckpoint | None = None,
     ) -> PreparedCapabilities: ...
 
 
@@ -289,22 +297,30 @@ async def _check_cancellation(run: ClaimedRun) -> None:
 
 
 async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
-    await _check_cancellation(run)
-
-    if plan.task_service is not None:
-        try:
-            async with asyncio.timeout_at(deadline):
-                await plan.task_service.seed(
-                    run.session_id,
-                    user_id=run.access.user_id,
-                    workspace_id=run.access.workspace_id,
-                    first_request=run.input.text,
-                )
-        except TimeoutError:
-            raise RunPreparationTimeoutError("Turn preparation timed out") from None
-        except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
-            raise RunPreparationUnavailableError("Session task state is unavailable") from exc
+    with turn_phase_span("Turn.check_cancellation", inputs={}):
         await _check_cancellation(run)
+
+    task_checkpoint: TaskCheckpoint | None = None
+    if plan.task_service is not None:
+        with turn_phase_span("Turn.seed_task_state", inputs={}):
+            try:
+                async with asyncio.timeout_at(deadline):
+                    task_checkpoint = await plan.task_service.seed(
+                        run.session_id,
+                        user_id=run.access.user_id,
+                        workspace_id=run.access.workspace_id,
+                        first_request=run.input.text,
+                    )
+            except TimeoutError:
+                raise RunPreparationTimeoutError("Turn preparation timed out") from None
+            except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+                raise RunPreparationUnavailableError("Session task state is unavailable") from exc
+            except Exception as exc:
+                # Same contract as acquire_environment: a provider failure opening the Volume is
+                # this Turn's failure, so the stream projects turn_error instead of dying.
+                raise RunPreparationUnavailableError("Session task state is unavailable") from exc
+        with turn_phase_span("Turn.check_cancellation", inputs={}):
+            await _check_cancellation(run)
 
     with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
         try:
@@ -346,6 +362,7 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
 
     def _build_resources() -> _PreparedTurnResources:
         cleanups: list[AsyncCleanup] = []
+        pre_commit: set[int] = set()
         if environment_release is not None:
             cleanups.append(environment_release.release)
         if turn_environment_release is not None:
@@ -353,7 +370,10 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
         if capabilities is not None:
             cleanups.append(capabilities.aclose)
         cleanups.append(remove_staged)
-        return _PreparedTurnResources(tuple(cleanups))
+        if environment.browser_cleanup is not None:
+            pre_commit.add(len(cleanups))
+            cleanups.append(environment.browser_cleanup)
+        return _PreparedTurnResources(tuple(cleanups), pre_commit_cleanup_indices=frozenset(pre_commit))
 
     try:
         _check_deadline(deadline)
@@ -383,7 +403,9 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
         ) as capabilities_phase:
             try:
                 async with asyncio.timeout_at(deadline):
-                    capabilities = await _prepare_capabilities(plan, run, environment, staged, deadline)
+                    capabilities = await _prepare_capabilities(
+                        plan, run, environment, staged, deadline, task_checkpoint
+                    )
             except TimeoutError:
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
@@ -491,8 +513,13 @@ async def _prepare_capabilities(
     environment: RunEnvironment,
     staged: PreparedAttachments,
     deadline: float,
+    task_checkpoint: TaskCheckpoint | None,
 ) -> PreparedCapabilities:
-    task = asyncio.create_task(plan.capabilities.prepare(run, environment, staged, deadline=deadline))
+    # Only a seeded plan carries a checkpoint. Other preparers keep the three-argument contract.
+    checkpoint_options = {} if task_checkpoint is None else {"task_checkpoint": task_checkpoint}
+    task = asyncio.create_task(
+        plan.capabilities.prepare(run, environment, staged, deadline=deadline, **checkpoint_options)
+    )
     try:
         while not task.done():
             if await run.cancellation_requested():
@@ -714,8 +741,28 @@ async def prepare_host_capabilities(
         workspace=workspace,
         read_artifact=read_artifact if artifact_reader is not None else None,
     )
+    installation_context = []
     for skill in resolved.selected:
-        skill_host.mark_preloaded(skill)
+        await _check_cancellation(turn)
+        _check_deadline(deadline)
+        # Workspace sync views post SDK work back to this event loop. Run the
+        # install off-loop, retaining ownership until its writes settle even
+        # when preparation is cancelled; cleanup must not race a late write.
+        effect = OwnedEffect.start(asyncio.to_thread(skill_host.mark_preloaded, skill))
+        settled = await effect.settle()
+        if settled.caller_cancelled:
+            raise asyncio.CancelledError
+        status = settled.result()
+        await _check_cancellation(turn)
+        _check_deadline(deadline)
+        installation_context.append(
+            f"Preloaded Skill {skill.card.name} ({skill.card.id}, version {skill.card.version}): "
+            f"{json.dumps(status, sort_keys=True)}. Paths are relative to /workspace. "
+            "Use this Skill directly. If an installation is incomplete or an installed file is missing, "
+            "use read_skill_resource with the declared resource path and save its content in Run scratch; "
+            "do not reload the Skill."
+        )
+    spec = replace(spec, skill_instructions=(*spec.skill_instructions, *installation_context))
     return spec, skill_host, ()
 
 
@@ -728,6 +775,7 @@ class DaytonaCapabilityPreparer:
     volume_paths: VolumePaths
     artifact_reader: ArtifactReader | None = None
     task_service: SessionTaskService | None = None
+    web_search_client: TavilySearch | None = None
 
     async def prepare(
         self,
@@ -736,6 +784,7 @@ class DaytonaCapabilityPreparer:
         attachments: PreparedAttachments,
         *,
         deadline: float,
+        task_checkpoint: TaskCheckpoint | None = None,
     ) -> PreparedHostCapabilities:
         if (
             environment.volume_fs is None
@@ -771,14 +820,29 @@ class DaytonaCapabilityPreparer:
         workspace_host = WorkspaceToolHost(session_workspace, max_file_bytes=self.settings.max_upload_bytes)
         project_host = ProjectToolHost(projects_fs, max_file_bytes=self.settings.max_upload_bytes)
         memory_host = WorkspaceMemoryToolHost(environment.workspace_memory_store)
+        search_host = (
+            WebSearchToolHost(
+                self.web_search_client,
+                deadline=deadline,
+                is_authorized=lambda: not run.authority.revoked,
+                credit_limit=self.settings.web_search_credits_per_turn,
+            )
+            if self.web_search_client is not None
+            else None
+        )
 
         task_host = None
         task_summary = ""
         if self.task_service is not None:
-            checkpoint = await self.task_service.read(
-                run.session_id,
-                user_id=run.access.user_id,
-                workspace_id=run.access.workspace_id,
+            # Preparation makes no task writes after the seed, so the seeded value is what a read would return.
+            checkpoint = (
+                task_checkpoint
+                if task_checkpoint is not None
+                else await self.task_service.read(
+                    run.session_id,
+                    user_id=run.access.user_id,
+                    workspace_id=run.access.workspace_id,
+                )
             )
             task_summary = task_checkpoint_summary(checkpoint)
             if environment.async_bridge is not None:
@@ -820,6 +884,8 @@ class DaytonaCapabilityPreparer:
             )
 
         base_views = {
+            **environment.host_tool_event_views,
+            **(search_host.event_views() if search_host is not None else {}),
             **attachment_host.event_views(),
             **artifact_host.event_views(),
             **workspace_host.event_views(),
@@ -832,6 +898,8 @@ class DaytonaCapabilityPreparer:
             turn=run,
             skill_catalog=self.skill_catalog,
             base_tools=(
+                *environment.host_tools,
+                *(search_host.as_tools() if search_host is not None else ()),
                 *attachment_host.as_tools(),
                 *artifact_host.as_tools(),
                 *workspace_host.as_tools(),

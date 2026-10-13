@@ -191,7 +191,9 @@ class Settings(BaseModel):
         default=300, gt=0, description="Idle retention of the single warm Workspace I/O Sandbox"
     )
     workspace_io_acquisition_timeout_seconds: int = Field(
-        default=30, gt=0, description="Bound on Workspace I/O queueing, admission and Sandbox preparation"
+        default=120,
+        gt=0,
+        description="Bound on Workspace I/O queueing, admission and Sandbox preparation (incl. a stopped start)",
     )
     rlm_max_iters: int = Field(default=20, gt=0)
     rlm_max_llm_calls: int = Field(default=50, gt=0)
@@ -299,6 +301,11 @@ class Settings(BaseModel):
     )
     capture_retention_days: int = Field(default=14, ge=1)
     capture_max_captures: int = Field(default=500, ge=1)
+    web_search_enabled: bool = Field(default=True, description="Offer optional host-key Tavily public search")
+    tavily_api_key: SecretStr | None = Field(
+        default=None, description="Tavily credential resolved from web.api_key_env"
+    )
+    web_search_credits_per_turn: int = Field(default=62, ge=0, le=10000)
 
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
 

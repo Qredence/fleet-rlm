@@ -16,8 +16,11 @@ exec(compile(script_source, "scripts/semantic_chunk.py", "exec"), namespace)
 chunks = namespace["chunk_content"](document, "markdown", 8000, 0)
 ```
 
-The content type accepts `auto`, `markdown`, `log`, `json`, `python`, or
-`text`. Each returned tuple contains a stable source start, source end, and
+The content type accepts `auto`, `markdown`, `log`, `json`, `python`, `sectioned`, or
+`text`. `sectioned` splits at labelled heading lines such as `[POLICY-1] Rules`,
+retaining any preface and splitting oversized blocks within the size bound.
+It does not interpret authority or discard archived or training sections.
+Each returned tuple contains a stable source start, source end, and
 text. Call `write_chunks` only when persistent chunk files are actually useful.
 Its output directory is the only location the helper writes.
 

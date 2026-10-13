@@ -12,6 +12,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
+from textwrap import dedent
 from typing import Any
 
 from daytona import CreateSnapshotParams, Resources
@@ -150,6 +151,88 @@ async def check_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
     print(f"Snapshot {spec.snapshot} is active and matches the Fleet resource contract.")
 
 
+def _browser_driver_probe_code() -> str:
+    """Operator-only local fixture: real driver interaction and owned cleanup."""
+    return dedent("""
+        import http.server, os, runpy, subprocess, threading, uuid
+        version = subprocess.run(['agent-browser', '--version'], check=True, capture_output=True, text=True, timeout=10)
+        assert version.stdout.strip() == 'agent-browser ' + expected['agent_browser']['version']
+        core = subprocess.run(['agent-browser', 'skills', 'get', 'core'], check=True, capture_output=True, timeout=10)
+        assert b'agent-browser' in core.stdout
+        owner = runpy.run_path('/opt/fleet/browser_session.py')
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+                pages = {
+                    '/': (
+                        b'<body><button id="expand">Expand</button><p id="expanded"></p>'
+                        b'<p id="delayed"></p><a href="/page2">Next page</a>'
+                        b'<iframe id="frame" src="/frame"></iframe><script>'
+                        b'document.getElementById("expand").onclick=function(){'
+                        b'document.getElementById("expanded").innerText="Fleet expanded evidence"};'
+                        b'setTimeout(function(){document.getElementById("delayed").innerText='
+                        b'"Fleet delayed evidence"},100)</script></body>'
+                    ),
+                    '/page2': b'<body>Fleet second page evidence</body>',
+                    '/frame': b'<body>Fleet frame evidence</body>',
+                }
+                self.wfile.write(pages.get(self.path, b'<body></body>'))
+            def log_message(self, *_args):
+                pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for run_index in range(2):
+                scratch = pathlib.Path('/tmp/fleet') / str(uuid.uuid4())
+                scratch.mkdir(parents=True)
+                groups = {}
+                try:
+                    binding = owner['start'](str(scratch))
+                    groups = {int(pid): started for pid, started in binding['process_groups'].items()}
+                    prefix = binding['command']
+                    environment = {**os.environ, 'FLEET_BROWSER_RUN': scratch.name}
+                    def driver(*arguments):
+                        result = subprocess.run(
+                            prefix + list(arguments), env=environment, check=True,
+                            capture_output=True, text=True, timeout=30
+                        )
+                        return result.stdout
+                    driver('open', 'http://127.0.0.1:' + str(server.server_port))
+                    assert 'fleet_run=one' not in driver('eval', 'document.cookie')
+                    if run_index == 0:
+                        driver('eval', "document.cookie='fleet_run=one'; 'set'")
+                        assert 'fleet_run=one' in driver('eval', 'document.cookie')
+                    driver('wait', '--text', 'Fleet delayed evidence')
+                    assert 'Fleet delayed evidence' in driver('get', 'text', 'body')
+                    assert 'Expand' in driver('snapshot', '-i', '-c')
+                    driver('find', 'role', 'button', 'click', '--name', 'Expand')
+                    assert 'Fleet expanded evidence' in driver('get', 'text', 'body')
+                    driver('frame', '#frame')
+                    driver('wait', '--text', 'Fleet frame evidence')
+                    assert 'Fleet frame evidence' in driver('get', 'text', 'body')
+                    driver('frame', 'main')
+                    driver('find', 'role', 'link', 'click', '--name', 'Next page')
+                    driver('wait', '--url', '**/page2')
+                    assert 'Fleet second page evidence' in driver('get', 'text', 'body')
+                    for pid in owner['_owned_processes'](scratch.name):
+                        arguments = pathlib.Path('/proc', str(pid), 'cmdline').read_bytes().split(b'\\0')
+                        if any(item.startswith(b'--user-data-dir=') for item in arguments):
+                            assert b'--no-sandbox' not in arguments
+                finally:
+                    owner['close'](str(scratch), groups=groups)
+                    assert not owner['_owned_processes'](scratch.name)
+                    assert not owner['_groups_alive'](groups)
+                    shutil.rmtree(scratch)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    """)
+
+
 async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
     """Run a disposable no-Volume runtime probe for one immutable profile."""
     platform = LiveDaytonaPlatform(client, spec)
@@ -210,6 +293,8 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
                     "    finally:\n"
                     "        browser.close()\n"
                 )
+            if manifest.agent_browser_enabled:
+                code += _browser_driver_probe_code()
             code += "print('fleet-snapshot-runtime-ok')"
             result = await sandbox.code_interpreter.run_code(code, context=context)
             stdout = getattr(result, "stdout", result)

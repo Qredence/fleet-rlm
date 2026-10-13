@@ -70,6 +70,26 @@ def test_sessions_crud_happy_path() -> None:
         assert archived.json()["status"] == "archived"
 
 
+def test_resuming_a_session_schedules_the_same_prewarm_as_creating_one() -> None:
+    from fleet_rlm.api.dependencies import get_session_prewarm
+
+    app = create_testing_app()
+    headers = _headers(uuid4(), uuid4())
+    scheduled: list[tuple[UUID, UUID, UUID]] = []
+    app.dependency_overrides[get_session_prewarm] = lambda: (
+        lambda session, user, workspace: scheduled.append((session, user, workspace))
+    )
+    with TestClient(app) as client:
+        created = client.post("/api/sessions", json={"title": "Resume me"}, headers=headers)
+        session_id = created.json()["id"]
+        assert len(scheduled) == 1  # creation already schedules the pre-warm
+        assert client.get(f"/api/sessions/{session_id}", headers=headers).status_code == 200
+    # Resume is the common first touch after a restart, so it warms the root Sandbox too.
+    assert len(scheduled) == 2
+    assert scheduled[1][0] == UUID(session_id)
+    assert scheduled[1][2] == scheduled[0][2]
+
+
 def test_task_checkpoint_route_uses_the_authorized_existing_service() -> None:
     class _TaskService:
         async def read(self, session_id, *, user_id, workspace_id):

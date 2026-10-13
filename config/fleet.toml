@@ -10,7 +10,7 @@ live_enabled = true
 turn_timeout_seconds = 1800
 max_active_daytona_leases = 8
 workspace_io_idle_seconds = 300
-workspace_io_acquisition_timeout_seconds = 30
+workspace_io_acquisition_timeout_seconds = 120
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
@@ -101,3 +101,9 @@ host = "https://eu.i.posthog.com"
 enabled = true
 retention_days = 14
 max_captures = 500
+
+[web]
+# Missing credentials leave public URL access available without paid search.
+search_enabled = true
+api_key_env = "TAVILY_API_KEY"
+search_credits_per_turn = 62

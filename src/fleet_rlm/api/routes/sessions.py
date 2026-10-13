@@ -170,6 +170,7 @@ async def get_session(
     session_id: UUID,
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
+    prewarm: SessionPrewarmDep,
 ) -> SessionDetailResponse:
     try:
         record = await repo.get(
@@ -179,6 +180,10 @@ async def get_session(
         )
     except SessionNotFoundError as exc:
         raise http_error(404, "session_not_found", "Session not found") from exc
+    if prewarm is not None:
+        # Fire-and-forget. Resume is the first touch after a restart, so it warms the same
+        # Sandboxes creation does; a warm or in-flight Sandbox makes a repeat a no-op.
+        prewarm(record.id, identity.user_id, identity.workspace_id)
     return _to_detail(record)
 
 

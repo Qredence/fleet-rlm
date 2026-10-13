@@ -124,6 +124,6 @@ def bundled_skill_readme_diagnostics() -> tuple[str, ...]:
         f"| `{manifest.name}` | {manifest.version} | {manifest.description} |\n"
         for manifest in load_bundled_skill_manifests()
     ).rstrip("\n")
-    if f"Fleet ships five runtime Skills:\n\n{expected_table}" not in readme:
+    if f"Fleet ships these runtime Skills:\n\n{expected_table}" not in readme:
         return (f"README table differs from canonical manifests:\n{expected_table}",)
     return ()

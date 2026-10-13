@@ -111,7 +111,13 @@ def _turn():
     )
 
 
-async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
+async def _capabilities(
+    tmp_path,
+    *,
+    categories: tuple[str, ...],
+    task_service=None,
+    task_checkpoint=None,
+):
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
@@ -190,12 +196,14 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         settings=settings,
         skill_catalog=build_bundled_skill_catalog(),
         volume_paths=paths,
+        task_service=task_service,
     )
     return await preparer.prepare(
         turn,
         environment,
         PreparedAttachments(refs=(), staged=()),
         deadline=asyncio.get_running_loop().time() + 30,
+        task_checkpoint=task_checkpoint,
     )
 
 
@@ -207,6 +215,25 @@ async def test_default_empty_policy_exposes_no_memory_candidate_tool(tmp_path) -
 
     assert "propose_memory" not in names
     assert capabilities.drain_memory_candidates() == ()
+
+
+@pytest.mark.asyncio
+async def test_seeded_checkpoint_is_used_without_a_second_task_read(tmp_path) -> None:
+    from fleet_rlm.sessions.task import TaskCheckpoint, task_checkpoint_summary
+
+    class ReadMustNotRun:
+        async def read(self, *_args, **_kwargs):
+            raise AssertionError("the seeded checkpoint must not be read again")
+
+    checkpoint = TaskCheckpoint(1, "ship the fix", (), (), {}, (), ("write the test",))
+    prepared = await _capabilities(
+        tmp_path,
+        categories=(),
+        task_service=ReadMustNotRun(),
+        task_checkpoint=checkpoint,
+    )
+
+    assert prepared.active_task_summary == task_checkpoint_summary(checkpoint)
 
 
 @pytest.mark.asyncio

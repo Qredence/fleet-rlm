@@ -15,6 +15,7 @@ child RLM tools; the single TOML configuration controls their limits.
 | Configure a runtime configuration | [Configuration](reference/configuration.md) and [generated configuration environment reference](reference/configuration-environment.md) |
 | Use the backend or terminal | [HTTP API](reference/http-api.md), [CLI](reference/cli.md), and [terminal UI](how-to-guides/terminal-tui.md) |
 | Understand DSPy and Daytona execution | [Integration guide](how-to-guides/dspy-integration.md) and [Daytona Snapshot guide](how-to-guides/daytona-snapshot.md) |
+| Search public sources and navigate web pages | [Public web research](how-to-guides/web-research.md) |
 | Validate a change | [Testing strategy](how-to-guides/testing-strategy.md) |
 | Understand runtime routing, optimization, and MLflow observation | [Evaluation and optimization](how-to-guides/evaluation-optimization.md) |
 | Run MLflow evaluation and monitoring workflows | [MLflow evaluation pilot](how-to-guides/mlflow-evaluation.md) |

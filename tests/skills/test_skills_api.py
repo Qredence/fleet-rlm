@@ -44,9 +44,10 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
         "dspy-rlm",
         "long-context",
         "report-builder",
+        "web-research",
         "workspace-files",
     }
-    assert len(cards) == 5
+    assert len(cards) == 6
     for card in cards:
         UUID(card["id"])
         assert set(card) == _CARD_FIELDS
@@ -56,7 +57,6 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
 
     serialized = json.dumps(cards).lower()
     assert next(card for card in cards if card["name"] == "long-context")["affordances"] == [
-        "sandbox.search",
         "llm_query_batched",
         "workspace.files",
     ]

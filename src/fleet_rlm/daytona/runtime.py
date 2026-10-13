@@ -405,6 +405,10 @@ class DaytonaRuntime:
             base_image=sandbox_spec.base_image,
             profile=DaytonaEnvironmentProfile.WORKSPACE_CHILD,
         )
+        from fleet_rlm.daytona.provider import build_sync_daytona_client
+
+        dispatcher = dispatcher or SyncBridgeDispatcher()
+        dispatcher.sync_client_factory = lambda: build_sync_daytona_client(settings)
         client = build_daytona_client(settings)
         platform = LiveDaytonaPlatform(client, sandbox_spec, environment_specs)
         volume_client = LiveDaytonaVolumeClient(client)
@@ -949,6 +953,10 @@ class DaytonaRuntime:
         """Open a serialized host-I/O operation owned by the runtime."""
         return self._host_io.open_workspace_sandbox(workspace_id, purpose=purpose, reuse_warm=reuse_warm)
 
+    def schedule_workspace_prewarm(self, workspace_id: UUID) -> asyncio.Task[None] | None:
+        """Pre-warm the Workspace I/O Sandbox that a Turn in this Workspace will open first."""
+        return self._host_io.schedule_workspace_prewarm(workspace_id)
+
     def build_child_factory(
         self,
         *,
@@ -1216,6 +1224,10 @@ class DaytonaRuntime:
         user_id: UUID,
         workspace_id: UUID,
     ) -> asyncio.Task[None]:
+        # The Workspace I/O Sandbox is the slow cold open on a Turn's first preparation step, so
+        # the session-create trigger warms it alongside the session root lease.
+        self.schedule_workspace_prewarm(workspace_id)
+
         async def run_prewarm() -> None:
             try:
                 await self.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id)

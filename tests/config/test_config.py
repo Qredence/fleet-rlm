@@ -409,6 +409,33 @@ tracing_sql_warehouse_id_env = "TRACE_WAREHOUSE"
     assert settings.mlflow_tracing_sql_warehouse_id == "dotenv-warehouse"
 
 
+@pytest.mark.parametrize("credential", [None, "host-only-tavily"])
+def test_web_search_resolves_optional_declared_host_secret(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, credential):
+    import fleet_rlm.config.loader as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text().replace("[daytona]\n", '[daytona]\napi_key_env = "DAYTONA_KEY"\n')
+        + '\n[web]\nsearch_enabled = true\napi_key_env = "SEARCH_KEY"\nsearch_credits_per_turn = 3\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+    monkeypatch.setenv("TAVILY_API_KEY", "undeclared-credential-is-ignored")
+    monkeypatch.delenv("SEARCH_KEY", raising=False)
+    if credential is not None:
+        monkeypatch.setenv("SEARCH_KEY", credential)
+    settings = config.load_runtime_settings()
+    assert settings.web_search_enabled is True
+    assert settings.web_search_credits_per_turn == 3
+    assert config.load_configuration_environment_contract().web_api_key_env == "SEARCH_KEY"
+    if credential is None:
+        assert settings.tavily_api_key is None
+    else:
+        assert settings.tavily_api_key.get_secret_value() == credential
+        assert credential not in repr(settings)
+
+
 def test_redacted_policy_summary_never_includes_secret_values() -> None:
     from fleet_rlm.config.loader import redacted_policy_summary
 
@@ -485,7 +512,7 @@ def test_workspace_io_policy_requires_positive_timeouts(field: str, value: int) 
 def test_workspace_io_policy_defaults_and_overrides() -> None:
     defaults = Settings()
     assert defaults.workspace_io_idle_seconds == 300
-    assert defaults.workspace_io_acquisition_timeout_seconds == 30
+    assert defaults.workspace_io_acquisition_timeout_seconds == 120
     changed = Settings(workspace_io_idle_seconds=60, workspace_io_acquisition_timeout_seconds=10)
     assert changed.workspace_io_idle_seconds == 60
     assert changed.workspace_io_acquisition_timeout_seconds == 10

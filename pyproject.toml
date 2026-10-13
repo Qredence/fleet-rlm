@@ -82,6 +82,8 @@ benchmark = [
     "datasets>=5.0.1",
 ]
 optimize = [
+    # Optional, host-only decision evaluation; retain the certified DSPy pin.
+    "dspy[typesafe]==3.4.0",
     # Exact official published release; no Git override remains.
     "gepa==0.1.4",
 ]
@@ -164,6 +166,7 @@ namespaces = false
 "fleet_rlm" = [
     "py.typed",
     "daytona/snapshot-requirements.txt",
+    "daytona/browser-requirements.txt",
     "skills/bundled/README.md",
     "skills/bundled/**/SKILL.md",
     "skills/bundled/**/*.md",

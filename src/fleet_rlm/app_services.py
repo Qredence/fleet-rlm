@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.daytona.runtime import DaytonaRuntime
     from fleet_rlm.observability.turn_capture import TurnCaptureStore
+    from fleet_rlm.web_search import TavilySearch
 
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.validation import CompositionError
@@ -128,6 +129,7 @@ class RuntimeInventory:
     memory_outbox_task: asyncio.Task[None] | None = None
     runner: RLMRunner | None = None
     capture_store: TurnCaptureStore | None = None
+    web_search_client: TavilySearch | None = None
 
 
 @dataclass(frozen=True, slots=True)

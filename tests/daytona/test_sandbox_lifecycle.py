@@ -441,14 +441,15 @@ def test_spec_requires_an_immutable_versioned_name() -> None:
 def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependencies() -> None:
     from fleet_rlm.daytona.diagnostics import (
         build_snapshot_image,
-        snapshot_dependency_sha256,
         snapshot_execution_dependencies,
     )
     from fleet_rlm.daytona.specs import BASE_IMAGE
 
     spec = DaytonaSandboxSpec("fleet-rlm-python313-v11")
     dockerfile = build_snapshot_image(spec).dockerfile()
-    digest = snapshot_dependency_sha256()
+    from fleet_rlm.daytona.diagnostics import environment_manifest
+
+    digest = environment_manifest(spec).dependency_sha256
 
     assert f"FROM {BASE_IMAGE}" in dockerfile
     assert "groupadd --gid 1000 daytona" in dockerfile
@@ -457,11 +458,9 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
     assert f"FLEET_SNAPSHOT_DEPENDENCIES_SHA256={digest}" in dockerfile
     assert "WORKDIR /home/daytona" in dockerfile
     assert snapshot_execution_dependencies() == (
-        "mpmath==1.4.1",
         "numpy==2.5.1",
         "pandas==3.0.5",
         "beautifulsoup4==4.15.0",
-        "playwright==1.63.0",
     )
     install_line = "pip install beautifulsoup4==4.15.0 mpmath==1.4.1 numpy==2.5.1 pandas==3.0.5"
     assert install_line in dockerfile
@@ -616,6 +615,29 @@ def test_published_v10_image_identity_remains_unchanged() -> None:
 
 
 # --- Deletion Lifecycle and Absence Confirmation ---
+def test_published_v11_image_remains_playwright_only_and_new_image_has_pinned_driver() -> None:
+    from fleet_rlm.daytona.diagnostics import build_snapshot_image, environment_manifest
+
+    published = DaytonaSandboxSpec("fleet-rlm-python313-v11")
+    assert environment_manifest(published).digest == "99aff83219c3482f613f1ab266a9ecf5b6ff617350c6f5e66514b8c21e31a9b0"
+    assert (
+        hashlib.sha256(build_snapshot_image(published).dockerfile().encode()).hexdigest()
+        == "7c83f700eb731bb97b3a050e1b905b036b8195fc6fa1f367184ef2deb9c9e8ae"
+    )
+    assert environment_manifest(published).agent_browser_enabled is False
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v12")
+    manifest = environment_manifest(spec)
+    assert manifest.agent_browser_enabled
+    assert manifest.as_dict()["agent_browser"]["version"] == "0.39.0"
+    dockerfile = build_snapshot_image(spec).dockerfile()
+    # Embedded Python must remain one physical RUN line for Daytona's Image builder.
+    for line in dockerfile.splitlines():
+        assert line.startswith(("FROM ", "RUN ", "ENV ", "WORKDIR ", "USER "))
+    assert "agent-browser-linux-musl-x64" in dockerfile
+    assert "browser_session.py" in dockerfile
+    assert dockerfile.index("agent-browser-linux-musl-x64") < dockerfile.index("USER daytona")
+
+
 @dataclass
 class _FakeDeletionSandbox:
     state: str

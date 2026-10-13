@@ -77,6 +77,7 @@ class ConfigurationEnvironmentContract:
     mlflow_tracing_enabled: bool
     mlflow_tracking_uri: str | None
     mlflow_environment_names: tuple[str, ...]
+    web_api_key_env: str | None = None
 
     @property
     def provider_environment_names(self) -> tuple[str, ...]:
@@ -378,6 +379,7 @@ def load_configuration_environment_contract(path: Path | None = None) -> Configu
     daytona = table("daytona")
     storage = table("storage")
     mlflow = table("mlflow")
+    web = table("web")
 
     def required_text(value: object, location: str) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -429,6 +431,7 @@ def load_configuration_environment_contract(path: Path | None = None) -> Configu
         mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
         mlflow_tracking_uri=mlflow.get("tracking_uri"),
         mlflow_environment_names=mlflow_environment_names,
+        web_api_key_env=_validate_optional_environment_reference(web.get("api_key_env"), "web.api_key_env"),
     )
 
 

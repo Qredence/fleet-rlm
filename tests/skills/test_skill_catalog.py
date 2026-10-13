@@ -21,14 +21,15 @@ def test_catalog_contains_only_explicit_utf8_resources() -> None:
     workspace = catalog.require(stable_skill_id("workspace-files"))
     data_analysis = catalog.require(stable_skill_id("data-analysis"))
     report_builder = catalog.require(stable_skill_id("report-builder"))
+    web_research = catalog.require(stable_skill_id("web-research"))
     assert tuple(dspy_rlm.resources) == ("references/rlm-contract.md",)
     assert tuple(long_context.resources) == (
         "scripts/semantic_chunk.py",
         "scripts/rank_chunks.py",
         "references/chunking-strategies.md",
-        "scripts/browse_page.py",
     )
-    assert long_context.card.version == "2.4.0"
+    assert long_context.card.version == "2.6.0"
+    assert tuple(web_research.resources) == ("scripts/capture_page.py",)
     assert tuple(workspace.resources) == ("references/filesystem-contract.md",)
     assert all(
         isinstance(resource.content, str)
@@ -66,7 +67,8 @@ def test_bundled_cards_advertise_bounded_capability_affordances() -> None:
 
     catalog = build_bundled_skill_catalog()
     by_name = {card.name: card for card in catalog.cards()}
-    assert by_name["long-context"].affordances == ("sandbox.search", "llm_query_batched", "workspace.files")
+    assert by_name["long-context"].affordances == ("llm_query_batched", "workspace.files")
+    assert by_name["web-research"].affordances == ("sandbox.search", "sandbox.browser", "workspace.files")
     assert by_name["workspace-files"].affordances == ("workspace.files", "artifacts.publish")
     assert by_name["data-analysis"].affordances == ("artifacts.publish", "llm_query_batched")
     assert by_name["report-builder"].affordances == ("workspace.files", "artifacts.publish")
@@ -77,7 +79,7 @@ def test_bundled_cards_advertise_bounded_capability_affordances() -> None:
 
 def test_resolver_accepts_exact_ordered_selection() -> None:
     catalog = build_bundled_skill_catalog()
-    cards = tuple(card for card in catalog.cards() if card.name != "dspy-rlm")
+    cards = tuple(card for card in catalog.cards() if card.name not in {"dspy-rlm", "web-research"})
     resolved = resolve_selected_skills(
         catalog,
         tuple(SkillSelectionRef(card.id, card.version) for card in reversed(cards)),

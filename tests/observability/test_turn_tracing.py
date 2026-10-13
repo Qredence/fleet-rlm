@@ -590,6 +590,69 @@ def test_turn_trace_preparation_phase_records_phase_tag_without_link(
     assert calls.update_kwargs[-1] == {"state": "OK"}
 
 
+def test_turn_trace_preparation_phase_does_not_join_chat_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    session_id = uuid4()
+    with turn_trace(session_id, uuid4(), enabled=True, trace_phase="preparation"):
+        pass
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert "session_id" not in tagged[0]
+    # The tag keeps the preparation trace findable without making it a chat exchange.
+    assert tagged[0]["tags"]["fleet.session_id"] == str(session_id)
+
+
+@pytest.mark.asyncio
+async def test_failed_preparation_attaches_session_to_its_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime, coordinator
+    from fleet_rlm.turns.preparation import RunPreparationUnavailableError
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    attached: list[object] = []
+    monkeypatch.setattr(coordinator, "attach_session_to_current_trace", attached.append)
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="failed preparation",
+    )
+
+    class FailingPreparation:
+        async def prepare(self, _turn: Any, *, deadline: float) -> Any:
+            del deadline
+            raise RunPreparationUnavailableError("Turn environment is unavailable")
+
+    runtime = TurnRuntime(
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
+        preparation=FailingPreparation(),
+        runner=SimpleNamespace(stream=lambda _execution: None),
+        mlflow_tracing_enabled=False,
+        mlflow_expose_trace_id=False,
+    )
+    with pytest.raises(RunPreparationUnavailableError):
+        await runtime.open(OpenTurnCommand(access, session.id, TurnInput("hello"), "idem-failed-preparation", uuid4()))
+
+    assert attached == [session.id]
+
+
+def test_failed_outcome_records_turn_failure_cause(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.turns import TurnRuntime, coordinator
+
+    recorded: list[dict[str, object]] = []
+    monkeypatch.setattr(coordinator, "annotate_turn_attributes", lambda attributes: recorded.append(dict(attributes)))
+    outcome = RLMOutcome(
+        terminal_status="failed",
+        public_error_message="Turn output is invalid",
+        failure_cause_type="declared_output_rejected",
+    )
+
+    TurnRuntime._annotate_outcome("request", outcome)
+
+    assert {"turn_failure_cause": "declared_output_rejected"} in recorded
+
+
 def test_turn_trace_execution_phase_records_one_way_preparation_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -952,6 +1015,28 @@ def test_turn_trace_preserves_managed_body_exception(monkeypatch: pytest.MonkeyP
     assert calls.span_statuses[-1] == "ERROR"
     assert calls.update_kwargs[-1] == {"state": "ERROR"}
     assert current_turn_trace_id() is None
+
+
+def test_turn_trace_classifies_wrapped_lm_quota_without_provider_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dspy.utils.exceptions import LMRateLimitError
+
+    calls = _install_fake_mlflow(monkeypatch)
+    quota = LMRateLimitError("provider token=private https://provider.example/rate-limit")
+    wrapped = RuntimeError("outer failure")
+    wrapped.__cause__ = quota
+
+    with pytest.raises(RuntimeError) as raised, turn_trace(uuid4(), uuid4(), enabled=True):
+        raise wrapped
+
+    assert raised.value is wrapped
+    assert calls.span_outputs[-1] == {
+        "failure_category": "quota",
+        "failure_cause_class": "LMRateLimitError",
+        "provider_status_category": "none",
+    }
+    assert "private" not in str(calls.span_outputs)
+    assert calls.span_statuses[-1] == "ERROR"
+    assert trace_failure_category(RuntimeError("HTTP 429 from an ordinary operation")) == "unknown"
 
 
 def test_turn_trace_closes_root_when_failure_annotation_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1787,19 +1872,20 @@ async def test_prepare_emits_decomposed_phase_spans(monkeypatch: pytest.MonkeyPa
     prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=asyncio.get_running_loop().time() + 3600)
 
     assert calls.start_span_names == [
+        "Turn.check_cancellation",
         "Turn.acquire_environment",
         "Turn.stage_attachments",
         "Turn.prepare_capabilities",
     ]
-    assert calls.span_outputs[0]["has_interpreter"] is True
-    assert calls.span_outputs[0]["has_snapshot_sink"] is False
-    assert calls.span_outputs[0]["phase_status"] == "completed"
-    assert calls.span_inputs[1] == {"attachment_count": 0}
-    assert calls.span_outputs[1]["staged_count"] == 0
-    assert calls.span_outputs[1]["staged_bytes"] == 0
-    assert calls.span_inputs[2] == {"skill_selection_count": 0}
-    assert calls.span_outputs[2]["notice_count"] == 0
-    assert calls.span_outputs[2]["phase_status"] == "completed"
+    assert calls.span_outputs[1]["has_interpreter"] is True
+    assert calls.span_outputs[1]["has_snapshot_sink"] is False
+    assert calls.span_outputs[1]["phase_status"] == "completed"
+    assert calls.span_inputs[2] == {"attachment_count": 0}
+    assert calls.span_outputs[2]["staged_count"] == 0
+    assert calls.span_outputs[2]["staged_bytes"] == 0
+    assert calls.span_inputs[3] == {"skill_selection_count": 0}
+    assert calls.span_outputs[3]["notice_count"] == 0
+    assert calls.span_outputs[3]["phase_status"] == "completed"
     await prepared.aclose()
 
 
@@ -1819,8 +1905,8 @@ async def test_acquire_environment_failure_marks_phase_failed(monkeypatch: pytes
             _make_prep_turn(), deadline=asyncio.get_running_loop().time() + 3600
         )
 
-    assert calls.start_span_names == ["Turn.acquire_environment"]
-    assert calls.span_outputs[0]["phase_status"] == "failed"
+    assert calls.start_span_names == ["Turn.check_cancellation", "Turn.acquire_environment"]
+    assert calls.span_outputs[1]["phase_status"] == "failed"
 
 
 @pytest.mark.asyncio

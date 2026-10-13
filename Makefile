@@ -151,7 +151,7 @@ test-coverage:
 
 test-daytona-cov: test-coverage
 
-DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v11
+DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v12
 DAYTONA_SNAPSHOT_PROFILE ?= session
 DAYTONA_CHILD_SNAPSHOT_NAME ?= fleet-rlm-python313-child-v5
 

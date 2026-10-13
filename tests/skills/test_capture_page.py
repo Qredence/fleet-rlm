@@ -1,4 +1,4 @@
-"""Bundled page helper contracts; real Chromium is an explicit optional lane."""
+"""Bundled HTTP capture and rendered-text evidence contracts without public network access."""
 
 from __future__ import annotations
 
@@ -6,23 +6,21 @@ import hashlib
 import importlib.util
 import io
 import json
-import os
 import threading
 import time
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
-RESOURCE = Path("src/fleet_rlm/skills/bundled/long-context/scripts/browse_page.py")
+RESOURCE = Path("src/fleet_rlm/skills/bundled/web-research/scripts/capture_page.py")
 
 
 @pytest.fixture
 def helper():
-    spec = importlib.util.spec_from_file_location("browse_page", RESOURCE)
+    spec = importlib.util.spec_from_file_location("capture_page", RESOURCE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -73,6 +71,7 @@ def test_http_extraction_is_bounded_and_detects_js_shell(helper, monkeypatch):
 
 def test_evidence_provenance_and_small_milestones(helper, monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("FLEET_RUN_SCRATCH", str(tmp_path))
+    monkeypatch.setattr(helper, "public_url", lambda url: url)
     text = "verified evidence\n" * 100
     monkeypatch.setattr(helper, "http_text", lambda url: (text, url, "Example", False))
     receipt = helper.retrieve("https://example.org")
@@ -82,7 +81,9 @@ def test_evidence_provenance_and_small_milestones(helper, monkeypatch, tmp_path,
     assert receipt["bytes"] == len(stored)
     assert receipt["requested_url"] == receipt["final_url"] == "https://example.org"
     assert receipt["retrieved_at_utc"].endswith("+00:00")
-    assert json.loads(Path(receipt["provenance_path"]).read_text()) == receipt
+    assert json.loads(Path(receipt["provenance_path"]).read_text()) == {
+        key: value for key, value in receipt.items() if key != "needs_browser"
+    }
     assert receipt["completeness"]["truncated"] is False
     assert text not in capsys.readouterr().out
     monkeypatch.setattr(helper, "MAX_TEXT_BYTES", 10)
@@ -95,6 +96,7 @@ def test_evidence_provenance_and_small_milestones(helper, monkeypatch, tmp_path,
 @pytest.mark.parametrize("failed_path", ["page.txt", "provenance.json"])
 def test_failed_evidence_write_removes_only_its_new_directory(helper, monkeypatch, tmp_path, capsys, failed_path):
     monkeypatch.setenv("FLEET_RUN_SCRATCH", str(tmp_path))
+    monkeypatch.setattr(helper, "public_url", lambda url: url)
     monkeypatch.setattr(helper, "http_text", lambda url: ("Verified evidence", url, "Example", False))
     existing = tmp_path / "existing.txt"
     existing.write_text("keep")
@@ -161,134 +163,35 @@ def test_http_body_deadline_stops_real_slow_trickle(helper, monkeypatch):
         thread.join(timeout=5)
 
 
-def test_browser_fallback_retains_original_url(helper, monkeypatch, tmp_path):
+def test_rendered_evidence_keeps_scope_and_is_never_a_full_site_claim(helper, monkeypatch, tmp_path):
     monkeypatch.setenv("FLEET_RUN_SCRATCH", str(tmp_path))
-    monkeypatch.setattr(helper, "http_text", lambda url: ("Loading", url + "/final", "Before", True))
-
-    def render(url):
-        assert url == "https://example.org/final"
-        return "Rendered evidence", url, "After"
-
-    monkeypatch.setattr(helper, "browser_text", render)
-    receipt = helper.retrieve("https://example.org")
+    monkeypatch.setattr(helper, "public_url", lambda url: url)
+    receipt = helper.save_evidence(
+        "Rendered evidence",
+        requested_url="https://example.org",
+        final_url="https://example.org/final",
+        title="After",
+        rendered=True,
+    )
     assert receipt["requested_url"] == "https://example.org"
+    assert receipt["final_url"] == "https://example.org/final"
     assert receipt["method"] == "browser"
     assert receipt["completeness"]["dynamic_content_complete"] is False
+    assert Path(receipt["text_path"]).read_text() == "Rendered evidence"
 
 
-@pytest.mark.parametrize("resource_type", ["document", "script"])
-@pytest.mark.parametrize("status", [200, 301, 302, 303, 307, 308])
-def test_browser_never_hands_redirects_to_chromium(helper, monkeypatch, resource_type, status):
-    from playwright import sync_api
-
-    monkeypatch.setattr(helper.socket, "getaddrinfo", lambda *_a, **_k: [(0, 0, 0, "", ("93.184.216.34", 443))])
-    manager = MagicMock()
-    browser = manager.__enter__.return_value.chromium.launch.return_value
-    context = browser.new_context.return_value
-    page = context.new_page.return_value
-    page.url = "https://example.org"
-    context.new_cdp_session.return_value.send.return_value = {
-        "result": {"value": {"text": "Public evidence", "title": "Example"}}
-    }
-    response = MagicMock(status=status)
-    response.headers = {"location": "http://127.0.0.1/private"}
-    route = MagicMock()
-    route.request = SimpleNamespace(url="https://example.org/resource", method="GET", resource_type=resource_type)
-    route.fetch.return_value = response
-
-    def navigate(*_args, **_kwargs):
-        context.route.call_args.args[1](route)
-        return SimpleNamespace(status=200)
-
-    page.goto.side_effect = navigate
-    monkeypatch.setattr(sync_api, "sync_playwright", lambda: manager)
-    assert helper.browser_text("https://example.org") == ("Public evidence", "https://example.org", "Example")
-    route.fetch.assert_called_once_with(max_redirects=0, timeout=helper.TIMEOUT_S * 1000)
-    route.continue_.assert_not_called()
-    if status == 200:
-        route.fulfill.assert_called_once_with(response=response)
-        route.abort.assert_not_called()
-    else:
-        route.abort.assert_called_once_with()
-        route.fulfill.assert_not_called()
-    response.dispose.assert_called_once_with()
-    context.close.assert_called_once_with()
-    browser.close.assert_called_once_with()
-
-
-@pytest.mark.skipif(os.environ.get("FLEET_TEST_BROWSER") != "1", reason="opt-in actual Chromium fixture")
-@pytest.mark.parametrize("resource_type", ["document", "script"])
-def test_actual_chromium_blocks_redirects_before_private_request(helper, monkeypatch, resource_type):
-    from playwright.sync_api import Error
-
-    private_requests = []
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path == "/redirect":
-                self.send_response(302)
-                self.send_header("Location", "/private")
-                self.end_headers()
-            else:
-                if self.path == "/private":
-                    private_requests.append(self.path)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(b'<body>Public evidence<script src="/redirect"></script></body>')
-
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
-
-    def fixture_url(target):
-        if target not in {url + "/", url + "/redirect"}:
-            raise ValueError("private fixture target")
-        return target
-
-    monkeypatch.setattr(helper, "public_url", fixture_url)
-    try:
-        if resource_type == "document":
-            with pytest.raises(Error):
-                helper.browser_text(url + "/redirect")
-        else:
-            assert helper.browser_text(url + "/")[0] == "Public evidence"
-        assert private_requests == []
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-@pytest.mark.skipif(os.environ.get("FLEET_TEST_BROWSER") != "1", reason="opt-in actual Chromium fixture")
-def test_actual_chromium_renders_js_and_closes_on_oversize(helper, monkeypatch, tmp_path):
-    """Run with pinned Playwright and matching Chromium; no public network."""
-    import importlib.metadata
-
-    assert importlib.metadata.version("playwright") == "1.63.0"
+def test_early_eof_never_saves_complete_evidence(helper, monkeypatch, tmp_path):
     monkeypatch.setenv("FLEET_RUN_SCRATCH", str(tmp_path))
-    # Local fixture exception exists only in this test, never in shipped code.
     monkeypatch.setattr(helper, "public_url", lambda url: url)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "1000")
             self.end_headers()
-            if self.path == "/stall":
-                self.wfile.write(
-                    b"<body>Loading<script>Object.defineProperty(document.body, 'innerText',"
-                    b"{get(){while(true){}}})</script></body>"
-                )
-                return
-            self.wfile.write(
-                b"<title>JS fixture</title><body>Loading<script>"
-                b"document.body.textContent='Real Chromium evidence'</script></body>"
-            )
+            self.wfile.write(b"Only a partial response")
+            self.close_connection = True
 
         def log_message(self, *args):
             pass
@@ -297,20 +200,44 @@ def test_actual_chromium_renders_js_and_closes_on_oversize(helper, monkeypatch, 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        url = f"http://127.0.0.1:{server.server_port}/"
-        receipt = helper.retrieve(url)
-        assert receipt["method"] == "browser"
-        assert Path(receipt["text_path"]).read_text() == "Real Chromium evidence"
-        monkeypatch.setattr(helper, "MAX_TEXT_BYTES", 10)
-        with pytest.raises(ValueError, match="exceeds limit"):
-            helper.browser_text(url)
-        # A subsequent launch succeeds after the failure path closed resources.
-        monkeypatch.setattr(helper, "MAX_TEXT_BYTES", 1000)
-        assert helper.browser_text(url)[0] == "Real Chromium evidence"
-        with pytest.raises(ValueError, match="extraction failed"):
-            helper.browser_text(url + "stall")
-        assert helper.browser_text(url)[0] == "Real Chromium evidence"
+        with pytest.raises(ValueError, match="incomplete HTTP response"):
+            helper.retrieve(f"http://127.0.0.1:{server.server_port}/")
+        assert list(tmp_path.iterdir()) == []
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+@pytest.mark.parametrize("content_type", ["application/json", "application/ld+json"])
+def test_public_json_metadata_is_saved_without_html_interpretation(helper, monkeypatch, tmp_path, content_type):
+    pytest.importorskip("bs4", reason="snapshot-only dependency")
+    monkeypatch.setenv("FLEET_RUN_SCRATCH", str(tmp_path))
+    monkeypatch.setattr(helper, "public_url", lambda url: url)
+    body = b'{"name":"daytona","version":"0.220.0","description":"<script>source text</script>"}'
+    stream = io.BytesIO(body)
+    stream.url = "https://pypi.org/pypi/daytona/0.220.0/json"
+    stream.headers = Message()
+    stream.headers["Content-Type"] = content_type + "; charset=utf-8"
+    stream.headers["Content-Length"] = str(len(body))
+    monkeypatch.setattr(helper, "build_opener", lambda *_args: SimpleNamespace(open=lambda *_args, **_kwargs: stream))
+
+    receipt = helper.retrieve(stream.url)
+
+    assert Path(receipt["text_path"]).read_bytes() == body
+    assert receipt["sha256"] == hashlib.sha256(body).hexdigest()
+    assert receipt["needs_browser"] is False
+    assert receipt["title"] == ""
+    assert json.loads(Path(receipt["text_path"]).read_text())["version"] == "0.220.0"
+
+
+def test_public_evidence_helper_refuses_binary_content(helper, monkeypatch):
+    pytest.importorskip("bs4", reason="snapshot-only dependency")
+    monkeypatch.setattr(helper, "public_url", lambda url: url)
+    stream = io.BytesIO(b"binary archive")
+    stream.url = "https://example.org/source.tar.gz"
+    stream.headers = Message()
+    stream.headers["Content-Type"] = "application/octet-stream"
+    monkeypatch.setattr(helper, "build_opener", lambda *_args: SimpleNamespace(open=lambda *_args, **_kwargs: stream))
+    with pytest.raises(ValueError, match="supported"):
+        helper.http_text(stream.url)

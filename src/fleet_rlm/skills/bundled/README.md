@@ -1,14 +1,15 @@
 # Bundled runtime Skills
 
-Fleet ships five runtime Skills:
+Fleet ships these runtime Skills:
 
 | Skill | Version | Description |
 |---|---:|---|
 | `data-analysis` | 1.2.0 | Compute and verify descriptive statistics, trends, and qualified anomalies. |
 | `dspy-rlm` | 1.1.0 | Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve. |
-| `long-context` | 2.4.0 | Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python. |
-| `report-builder` | 1.3.0 | Create, save, read back, and verify reports from trusted source data. |
-| `workspace-files` | 1.4.0 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
+| `long-context` | 2.6.0 | Analyze large documents, transcripts, code, or acquired source text with sandbox Python. |
+| `report-builder` | 1.3.1 | Create, save, read back, and verify reports from trusted source data. |
+| `web-research` | 1.2.1 | Discover public web sources, read and navigate pages in the Sandbox, and retain verified evidence for citations. |
+| `workspace-files` | 1.4.2 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
 
 The catalog follows three disclosure levels:
 
@@ -39,4 +40,7 @@ Skill manifest/catalog/tool and Turn-selection suites after editing them.
   execute them. Installs are idempotent per Turn and best-effort: a partial
   Workspace write returns only the paths known to have installed, without
   unloading the Skill. `read_skill_resource` remains the canonical fallback
-  for every declared resource.
+  for every declared resource. Explicit preloads include installation counts,
+  successful Workspace paths, and safe failure codes in Root's context, just
+  as progressive loads do. A missing resource is read through the canonical
+  tool and saved in Run scratch without reloading the Skill.

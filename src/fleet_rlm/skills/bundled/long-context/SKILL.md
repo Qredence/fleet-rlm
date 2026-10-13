@@ -1,11 +1,10 @@
 ---
 name: long-context
-description: Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python.
+description: Analyze large documents, transcripts, code, or acquired source text with sandbox Python.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "2.4.0"
+  version: "2.6.0"
   affordances:
-    - sandbox.search
     - llm_query_batched
     - workspace.files
 allowed-tools: read_skill_resource
@@ -17,8 +16,6 @@ resources:
     media_type: text/x-python
   - path: references/chunking-strategies.md
     media_type: text/markdown
-  - path: scripts/browse_page.py
-    media_type: text/x-python
 
 ---
 
@@ -28,39 +25,15 @@ Keep large inputs in variable space. Inputs may come from the user query, commit
 
 ## Analyze
 
-1. Inspect variable names, types, lengths, and small previews. Keep reusable large data in variables or files; do not print a whole large value. If URLs must be discovered, install `ddgs==9.16.0` with the active interpreter and search in the REPL:
-
-   ```python
-   import importlib, site, subprocess, sys
-
-   subprocess.run([sys.executable, "-m", "pip", "install", "ddgs==9.16.0"], check=True, timeout=120, capture_output=True)
-   site.addsitedir(site.getusersitepackages())
-   importlib.invalidate_caches()
-   from ddgs import DDGS
-
-   results = DDGS(timeout=10).text(query, max_results=5)
-   ```
-
-   Keep only selected titles and URLs in the REPL output. For one selected public HTTP(S) page, use the bundled `scripts/browse_page.py` in the Root Sandbox:
-
-   ```python
-   import runpy
-
-   browser_helper = runpy.run_path("/workspace/skills/long-context/scripts/browse_page.py")
-   evidence = browser_helper["retrieve"](url)  # HTTP first, Chromium fallback for JS shells
-   ```
-
-   If installation was partial, obtain this resource with `read_skill_resource` and execute its returned source in the Root interpreter. For a known dynamic page with substantial static shell text, pass `render=True`. Read the saved `text_path` in bounded slices; retain `provenance_path` with URL, final URL, title, UTC retrieval time, UTF-8 bytes, SHA-256 and extraction scope. The helper emits small live stdout milestones, never the whole page. Scratch evidence is Turn-local: copy verified evidence into Session Workspace only if reuse is needed.
-
-   Retrieval has bounded operations (20-second browser navigation, 1-second render settle, 5-second Chromium extraction, 2 MB HTTP response, 1 MB extracted text); oversized evidence fails rather than silently truncating. HTTP uses a 20-second socket inactivity timeout and checks its body deadline between single reads; a stalled read may overshoot that deadline by one inactivity timeout. DNS resolution and HTTP headers/redirects are not covered by a strict whole-retrieval wall-clock deadline. Completeness covers the extracted static response or rendered body at retrieval, not every later dynamic update, linked page, hidden section or infinite-scroll item. No logins, authenticated profiles, clicks, purchases, crawling or screenshots. Run this only in the Root, never a semantic child. Browser-enabled immutable images are required for fallback; old images retain HTTP-only behavior. HTTP redirects are followed only after URL/DNS validation. Chromium requests use redirect-disabled fetching and reject redirect responses, including redirects from scripts and other subresources; the browser never follows unchecked hops. Private/local URLs are rejected on a best-effort URL/DNS basis, not a guarantee of network containment.
-2. Locate candidate regions with deterministic searches, indexes, regular expressions, or bounded slices.
+1. Inspect variable names, types, lengths, and small previews. Keep reusable large data in variables or files; do not print a whole large value. For public source discovery and page access, load the advertised `web-research` Skill when permitted by the current selection. Exact selections do not implicitly load other Skills; select both Skills when both workflows are needed. Analyze already acquired Attachments, Workspace files, and captured web evidence directly.
+2. Locate candidate regions with deterministic searches, indexes, regular expressions, or bounded slices. For labelled policy documents, inspect section headings and authority markers before ranking broad keywords: repeated training examples may dominate keyword hits. The `semantic_chunk.py` helper supports `[SECTION-ID] Heading` blocks with `sectioned` or `auto`; retain the complete block and original offsets so a cross-reference in prose is not mistaken for a heading.
 3. Choose the task's coverage rule. For a sparse question, search selected regions and expand when evidence calls for it. For exhaustive extraction, process every required partition, record which were processed, and keep a list of failed or unprocessed partitions. Ranking may prioritize reading order but cannot exclude unseen required evidence. For dependent questions, resolve prerequisites before comparing or parallelizing downstream findings.
 4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets or source identifiers, unless the request already specifies the exact prompt strings: then pass those strings unchanged and in the given order; do not add offsets, paraphrase, or substitute different wording. Use `rlm_query` only for the rare selected subproblem that needs a fresh iterative Python investigation; it is not the normal route for extraction, counting, parsing, aggregation, or independent excerpts.
 5. Validate semantic outputs against their source slices, retry only invalid items when justified, and reduce verified structured results in Python. Reconcile definitions, scope, dates, exceptions, amendments, cross-references, and precedence rules relevant to the task.
 6. Recover complete operative language from the original variable, then re-slice it to verify quotes, offsets, qualifiers, and conclusions.
 7. Call `SUBMIT(...)` once with exactly the requested output fields. If the evidence is absent, ambiguous, or insufficient, state that instead of forcing the requested count. Do not `SUBMIT` an entire large `llm_query` or `llm_query_batched` blob; keep declared answers within the Turn output character budget.
 
-Treat sub-model output as a candidate, never as source evidence. Respect the Turn's call and output budgets; reduce excerpts before making another call. Paging, indexes, and chunk files are useful when input size or reuse justifies them; keep source identifiers, revisions, and offsets with derived records. If an exhaustive scan stops early, report incomplete coverage instead of claiming a complete result.
+Treat sub-model output as a candidate, never as source evidence. Respect the Turn's call and output budgets; reduce excerpts before making another call. Budget the combined printed excerpts, not each excerpt separately; keep full blocks in variables and print a bounded index or selected complete clauses when many matches would truncate the interpreter output. Paging, indexes, and chunk files are useful when input size or reuse justifies them; keep source identifiers, revisions, and offsets with derived records. If an exhaustive scan stops early, report incomplete coverage instead of claiming a complete result.
 
 ## Strategy examples
 

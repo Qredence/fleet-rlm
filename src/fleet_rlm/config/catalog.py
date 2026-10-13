@@ -35,6 +35,13 @@ class FleetFieldPolicy:
 
 
 FIELD_POLICIES: dict[str, FleetFieldPolicy] = {
+    "tavily_api_key": FleetFieldPolicy(toml_path=None, secret=True, doc="Resolved from web.api_key_env"),
+    "web_search_enabled": FleetFieldPolicy(
+        toml_path="web.search_enabled", group="Web", label="Enable Tavily search", editor="boolean", rank=130
+    ),
+    "web_search_credits_per_turn": FleetFieldPolicy(
+        toml_path="web.search_credits_per_turn", group="Web", label="Search credits per Turn", editor="number", rank=132
+    ),
     "app_name": FleetFieldPolicy(
         toml_path="application.name", group="Application", label="Name", editor="text", rank=0, required_in_policy=True
     ),
@@ -486,6 +493,13 @@ class EnvironmentReferenceSpec:
 
 
 ENVIRONMENT_REFERENCE_SPECS: tuple[EnvironmentReferenceSpec, ...] = (
+    EnvironmentReferenceSpec(
+        toml_path="web.api_key_env",
+        group="Web",
+        label="Tavily API key environment variable",
+        rank=131,
+        resolves_to="tavily_api_key",
+    ),
     EnvironmentReferenceSpec(
         toml_path="llm.root.base_url_env",
         group="Root LLM",
