@@ -22,7 +22,7 @@ from pydantic import ValidationError
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.children import ChildRuntimeLease
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.daytona.leases import LeaseState
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
@@ -57,6 +57,7 @@ from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.workspace.errors import FilesystemToolError
 from tests.live.test_daytona_recursive_batch import _ChildEvidence, _install_batch_answer_capture
 from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities, configured_invocation_factory, invocation_factory
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 

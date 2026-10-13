@@ -11,7 +11,7 @@ import pytest
 
 import fleet_rlm.rlm.execution as runtime_module
 from fleet_rlm.daytona.children import ChildRuntimeLease
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.event_types import ChildProgress, Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.events import ObservationSession, _latest_lm_telemetry, _RLMTraceCallback
 from fleet_rlm.rlm.execution import (
@@ -36,6 +36,7 @@ from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
 from tests.rlm.fakes import EmptyCapabilities, configured_invocation_factory, invocation_factory
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 
 
 @pytest.mark.asyncio

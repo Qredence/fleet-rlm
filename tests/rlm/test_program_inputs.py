@@ -135,8 +135,9 @@ def test_invalid_request_fails_at_the_input_boundary() -> None:
 async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_path: Path) -> None:
     import hashlib
 
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.sessions.context import SessionContextManifest
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     body = b"Fleet context"
     context_file = tmp_path / "report.txt"
@@ -218,8 +219,8 @@ def test_attachment_context_rejects_paths_outside_mount(tmp_path: Path) -> None:
 def test_attachment_context_manifest_requires_the_host_bound_digest(tmp_path: Path) -> None:
     import hashlib
 
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
     from fleet_rlm.rlm.program import _materialize_context_manifest
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     body = b"bound context"
     context_file = tmp_path / "report.txt"
@@ -278,7 +279,8 @@ def test_attachment_context_manifest_requires_the_host_bound_digest(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_attachment_context_integrity_failure_aborts_before_reasoning(tmp_path: Path) -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     context_file = tmp_path / "report.txt"
     context_file.write_text("changed", encoding="utf-8")

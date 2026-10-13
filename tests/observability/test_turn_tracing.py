@@ -195,7 +195,8 @@ def _in_process_child_runtime(call_index: int, *, profile: str):
         ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
     from fleet_rlm.daytona.children import ChildRuntimeLease
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(

@@ -25,7 +25,6 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.interpreter import (
     FINAL_OUTPUT_MARKER,
     DaytonaCodeInterpreter,
-    InProcessInterpreterBackend,
     build_submit_setup_code,
     extract_final_payload,
     final_output_frame,
@@ -41,6 +40,7 @@ from fleet_rlm.daytona.provider import (
     write_file,
 )
 from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile, DaytonaSandboxSpec
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.session_manager import make_daytona_runtime
 
 # ============================================================================

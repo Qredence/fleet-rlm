@@ -15,7 +15,7 @@ import dspy
 import pytest
 from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
-from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.adapter import FleetJSONAdapter, _retry_correction_feedback
 from fleet_rlm.rlm.budget import (
@@ -29,6 +29,7 @@ from fleet_rlm.rlm.execution import _public_failure_message
 from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.recursion import _recursive_failure_category
 from fleet_rlm.rlm.submit_validation import is_finalization_action, normalize_action_code
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 

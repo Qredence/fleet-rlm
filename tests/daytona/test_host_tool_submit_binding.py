@@ -9,7 +9,6 @@ from dspy import FinalOutput
 
 from fleet_rlm.daytona.interpreter import (
     DaytonaCodeInterpreter,
-    InProcessInterpreterBackend,
     extract_final_payload,
     remote_submit_setup_code,
 )
@@ -17,6 +16,7 @@ from fleet_rlm.rlm.program import (
     FleetRLMSignature,
     RLMOptions,
 )
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.native_rlm import build_native_rlm_for_test
 
 

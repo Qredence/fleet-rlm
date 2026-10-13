@@ -11,7 +11,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.event_types import (
     RLMCode,
     RLMOutput,
@@ -34,6 +34,7 @@ from fleet_rlm.rlm.execution import (
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import TurnAccess
 from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.native_rlm import build_native_rlm_for_test
 
 

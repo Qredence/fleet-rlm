@@ -20,12 +20,12 @@ from fleet_rlm.daytona.interpreter import (
     DEFAULT_BROKER_PORT,
     BackendExecutionResult,
     DaytonaCodeInterpreter,
-    InProcessInterpreterBackend,
     _SyncBridgeLoop,
     sandbox_backend,
 )
 from fleet_rlm.rlm.event_types import RLMOutput
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.sdk_interpreter import LocalSDKInterpreter
 
 

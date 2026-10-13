@@ -60,10 +60,11 @@ def test_execute_returns_string_and_preserves_state() -> None:
 def test_invocation_installs_tools_output_and_context_once(monkeypatch: pytest.MonkeyPatch) -> None:
     from uuid import uuid4
 
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.events import observe_tool
     from fleet_rlm.rlm.output_contract import FleetOutputContract, OutputField
     from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     backend = InProcessInterpreterBackend()
     bind_tools = Mock(wraps=backend.bind_host_tools)
@@ -131,7 +132,8 @@ def test_post_seal_configuration_is_rejected_before_backend_action(mutate: Calla
 
 def test_failed_binding_installation_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     backend = InProcessInterpreterBackend()
     bind = Mock(side_effect=DaytonaAdapterError(message="binding failed", cause_type="InterpreterConfigurationError"))
@@ -226,7 +228,8 @@ def test_run_backend_does_not_retry_typeerror_from_stdout_callback() -> None:
 
 
 def test_run_backend_forwards_code_variables_and_callback_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     backend = InProcessInterpreterBackend()
     run = Mock(wraps=backend.run)
@@ -299,8 +302,9 @@ def test_typed_backend_context_accesses_are_drained_even_on_execution_error(monk
 
 
 def test_inprocess_stdout_reaches_adapter_output_projection() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.event_types import RLMOutput
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     observed: list[object] = []
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
@@ -317,8 +321,9 @@ def test_inprocess_stdout_reaches_adapter_output_projection() -> None:
 def test_validated_root_submit_output_uses_reserve_without_bypassing_byte_limit(
     monkeypatch, root_finalization, limit
 ) -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
     turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3, execution_output_bytes=limit))
@@ -347,8 +352,9 @@ def test_validated_root_submit_output_uses_reserve_without_bypassing_byte_limit(
 
 
 def test_reserve_exemption_requires_validated_finalization_code(monkeypatch) -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
     turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3))
@@ -407,7 +413,8 @@ def test_execution_error_preserves_bounded_sanitized_stdout_and_stderr(monkeypat
 
 
 def test_new_invocation_admission_refuses_the_next_action() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     refused = {"now": False}
 
@@ -442,7 +449,8 @@ def test_async_host_tool_without_bridge_fails_without_creating_loop() -> None:
 
 @pytest.mark.asyncio
 async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, _SyncBridgeLoop
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     loop = asyncio.get_running_loop()
 

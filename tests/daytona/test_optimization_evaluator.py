@@ -494,7 +494,7 @@ async def test_lifecycle_builds_fresh_interpreter_and_rlm_then_deletes(monkeypat
 
 @pytest.mark.asyncio
 async def test_lifecycle_runs_pinned_native_rlm_in_owned_worker(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     events: list[str] = []
     factory = _LifecycleFactory(events)

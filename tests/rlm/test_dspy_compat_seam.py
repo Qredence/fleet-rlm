@@ -16,12 +16,12 @@ from fleet_rlm.daytona.interpreter import (
     DAYTONA_EXECUTION_INSTRUCTIONS,
     BackendExecutionResult,
     DaytonaCodeInterpreter,
-    InProcessInterpreterBackend,
     OutputCallback,
 )
 from fleet_rlm.rlm.execution import DelegationPolicy
 from fleet_rlm.rlm.program import InstructedInterpreterFactory, RLMOptions
 from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 from tests.support.native_rlm import build_native_rlm_for_test
 
 
@@ -607,7 +607,8 @@ def test_copy_output_fields_does_not_share_nested_metadata() -> None:
 
 
 def test_output_metadata_cannot_mutate_invocation_through_aliases() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     fields = [{"name": "answer", "type": "str", "metadata": {"description": "original"}}]
     interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), output_fields=fields)

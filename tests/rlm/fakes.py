@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from fleet_rlm.daytona.children import ChildRuntimeLease
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.execution import RLMExecutionSpec
 from fleet_rlm.workspace.artifacts import ArtifactCandidate
 from fleet_rlm.workspace.memory import MemoryCandidate
+from tests.support.interpreter_backends import InProcessInterpreterBackend
 
 
 def invocation_factory(**configuration: Any) -> DaytonaCodeInterpreter:

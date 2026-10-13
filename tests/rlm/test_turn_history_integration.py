@@ -579,7 +579,7 @@ def _build_native_for_retrieval(**kwargs: object):
 
 @pytest.mark.asyncio
 async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -592,6 +592,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     from fleet_rlm.sessions.context import build_session_context_manifest
     from fleet_rlm.sessions.history import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     older_detail = "project codename is cobalt-orchid"
     history = SessionHistory(
@@ -672,7 +673,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
 
 @pytest.mark.asyncio
 async def test_native_rlm_reads_past_truncated_page_boundary() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -685,6 +686,7 @@ async def test_native_rlm_reads_past_truncated_page_boundary() -> None:
     from fleet_rlm.sessions.context import build_session_context_manifest
     from fleet_rlm.sessions.history import SESSION_HISTORY_RESULT_BYTE_BUDGET, SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
+    from tests.support.interpreter_backends import InProcessInterpreterBackend
 
     chunk = "y" * 150_000
     history = SessionHistory(
