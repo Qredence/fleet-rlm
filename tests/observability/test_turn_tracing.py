@@ -37,6 +37,7 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.execution import DelegationPolicy
 from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.role_lm import placeholder_bundle
+from tests.support.tracing_state import patch_tracing_state
 from tests.support.turn_preparation import TestingRunPreparer
 from tests.support.turn_settlement import TestingRunSettlement
 
@@ -46,12 +47,10 @@ def _activate_fleet_trace_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[N
     """Phase spans gate on an active fleet_turn trace; tests exercise span logic directly."""
     from fleet_rlm.observability import tracing
 
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
-    tracing.set_tracing_active_for_tests(True)
-    token = turn_tracing._fleet_trace_active.set(True)
+    patch_tracing_state(monkeypatch, active=True)
+    token = tracing._fleet_trace_active.set(True)
     yield
-    turn_tracing._fleet_trace_active.reset(token)
-    tracing.set_tracing_active_for_tests(False)
+    tracing._fleet_trace_active.reset(token)
 
 
 def _install_fake_mlflow(
@@ -82,13 +81,17 @@ def _install_fake_mlflow(
         span_statuses=[],
         span_ends=[],
         span_context_exit_args=[],
+        activated_spans=[],
+        detached_tokens=[],
+        child_span_ends=[],
     )
 
     class _FakeSpan:
-        request_id = "tr-from-span"
+        trace_id = "tr-from-span"
 
-        def __init__(self) -> None:
+        def __init__(self, *, child: bool = False) -> None:
             self.status: str | None = None
+            self.child = child
 
         def set_inputs(self, payload: dict[str, object]) -> None:
             calls.span_inputs.append(payload)
@@ -104,26 +107,23 @@ def _install_fake_mlflow(
             calls.span_statuses.append(status)
 
         def end(self) -> None:
-            calls.span_ends.append(self.request_id)
+            if self.child:
+                calls.child_span_ends.append(self.trace_id)
+                return
+            calls.span_ends.append(self.trace_id)
             if teardown_explode:
                 raise RuntimeError("span teardown boom")
 
     active_span = _FakeSpan()
 
-    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
+    def start_span_no_context(
+        *, name: str = "span", span_type: Any = None, parent_span: Any = None, **_kwargs: Any
+    ) -> Any:
         del span_type
         if explode:
             raise RuntimeError("span boom")
         calls.start_span_names.append(name)
-        return active_span
-
-    @contextmanager
-    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
-        del span_type
-        calls.start_span_names.append(name)
-        yield active_span
-        if teardown_explode:
-            raise RuntimeError("span teardown boom")
+        return active_span if parent_span is None else _FakeSpan(child=True)
 
     class _FakeSpanContext:
         def __init__(self, span: Any) -> None:
@@ -144,6 +144,13 @@ def _install_fake_mlflow(
     def safe_set_span_in_context(span: Any) -> _FakeSpanContext:
         return _FakeSpanContext(span)
 
+    def set_span_in_context(span: Any) -> object:
+        calls.activated_spans.append(span)
+        return object()
+
+    def detach_span_from_context(token: object) -> None:
+        calls.detached_tokens.append(token)
+
     def update_current_trace(**kwargs: Any) -> None:
         calls.update_kwargs.append(kwargs)
 
@@ -156,7 +163,6 @@ def _install_fake_mlflow(
 
     mlflow = ModuleType("mlflow")
     mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
-    mlflow.start_span = start_span  # type: ignore[attr-defined]
     mlflow.update_current_trace = update_current_trace  # type: ignore[attr-defined]
     mlflow.get_last_active_trace_id = get_last_active_trace_id  # type: ignore[attr-defined]
     mlflow.get_current_active_span = get_current_active_span  # type: ignore[attr-defined]
@@ -164,15 +170,17 @@ def _install_fake_mlflow(
     entities = ModuleType("mlflow.entities")
     entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
 
-    fluent = ModuleType("mlflow.tracing.fluent")
-    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    provider = ModuleType("mlflow.tracing.provider")
+    provider.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    provider.set_span_in_context = set_span_in_context  # type: ignore[attr-defined]
+    provider.detach_span_from_context = detach_span_from_context  # type: ignore[attr-defined]
     tracing_module = ModuleType("mlflow.tracing")
-    tracing_module.fluent = fluent  # type: ignore[attr-defined]
+    tracing_module.provider = provider  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
     monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
-    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.provider", provider)
     return calls
 
 
@@ -761,7 +769,7 @@ def test_concurrent_execution_traces_keep_session_context_isolated(monkeypatch: 
         nonlocal next_trace_id
         del name, span_type
         next_trace_id += 1
-        span = SimpleNamespace(request_id=f"tr-session-{next_trace_id}", span_id=f"span-{next_trace_id}")
+        span = SimpleNamespace(trace_id=f"tr-session-{next_trace_id}", span_id=f"span-{next_trace_id}")
         return span
 
     @contextmanager
@@ -774,8 +782,8 @@ def test_concurrent_execution_traces_keep_session_context_isolated(monkeypatch: 
 
     mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
     mlflow.get_current_active_span = current_span.get  # type: ignore[attr-defined]
-    fluent = sys.modules["mlflow.tracing.fluent"]
-    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    provider = sys.modules["mlflow.tracing.provider"]
+    provider.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
 
     async def trace_session() -> tuple[str | None, str | None]:
         with turn_trace(uuid4(), uuid4(), enabled=True):
@@ -1043,7 +1051,7 @@ def test_turn_trace_closes_root_when_failure_annotation_raises(monkeypatch: pyte
     exits: list[tuple[object, ...]] = []
 
     class Span:
-        request_id = "tr-from-span"
+        trace_id = "tr-from-span"
 
         def set_outputs(self, _payload: object) -> None:
             raise RuntimeError("annotation failed")
@@ -1067,12 +1075,12 @@ def test_turn_trace_closes_root_when_failure_annotation_raises(monkeypatch: pyte
     fake_mlflow.get_current_active_span = lambda: Span()  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN")))
-    fluent = ModuleType("mlflow.tracing.fluent")
-    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    provider = ModuleType("mlflow.tracing.provider")
+    provider.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
     tracing_module = ModuleType("mlflow.tracing")
-    tracing_module.fluent = fluent  # type: ignore[attr-defined]
+    tracing_module.provider = provider  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
-    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.provider", provider)
 
     expected = ValueError("original turn failure")
 
@@ -1279,6 +1287,27 @@ def test_start_turn_span_supports_callback_lifecycles_and_failure_status(
         "phase_status": "failed",
     }
     assert calls.span_statuses == ["ERROR"]
+
+
+def test_start_turn_span_activates_nested_spans_until_finish_but_never_callback_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    handle = start_turn_span("RLM.child.invoke", inputs={"call_index": 1})
+    assert len(calls.activated_spans) == 1
+    assert calls.detached_tokens == []
+    handle.finish(phase_status="completed")
+    handle.finish(phase_status="completed")
+    assert len(calls.detached_tokens) == 1
+    assert len(calls.child_span_ends) == 1
+
+    with turn_tracing.rlm_callback_parent(handle):
+        callback = start_turn_span("RLM.root_lm", inputs={"role": "root"}, callback_span=True)
+    callback.finish(phase_status="completed")
+    assert len(calls.activated_spans) == 1
+    assert len(calls.detached_tokens) == 1
+    assert len(calls.child_span_ends) == 2
 
 
 def test_start_turn_span_records_only_allowlisted_operational_attributes(
@@ -1592,41 +1621,47 @@ async def test_turn_execution_records_skill_versions_as_they_load(monkeypatch: p
     ]
 
 
-def test_dspy_turn_callbacks_carries_mlflow_autolog_callback() -> None:
-    """A Turn context REPLACES dspy.settings.callbacks, so the autolog callback must be re-added.
+def test_dspy_turn_callbacks_carries_every_global_callback() -> None:
+    """A Turn context REPLACES dspy.settings.callbacks, so every global callback must be re-added.
 
-    Without this, MLflow's ``MlflowCallback`` is unregistered for the whole Turn
-    and every module, adapter-format/parse, and LM autolog span is silently lost.
+    Without this, MLflow's ``MlflowCallback`` and any other globally configured
+    callback is unregistered for the whole Turn and its spans are silently lost.
     """
     from mlflow.dspy.callback import MlflowCallback
 
     from fleet_rlm.observability.tracing import dspy_turn_callbacks
 
     fleet_callback = object()
+    other_global = object()
     mlflow_callback = MlflowCallback()
     previous = dspy.settings.callbacks
-    turn_tracing.set_tracing_active_for_tests(True)
     try:
-        dspy.settings.configure(callbacks=[mlflow_callback])
+        dspy.settings.configure(callbacks=[mlflow_callback, other_global])
         composed = dspy_turn_callbacks(fleet_callback)
     finally:
         dspy.settings.configure(callbacks=previous)
-        turn_tracing.set_tracing_active_for_tests(False)
 
-    assert composed == [mlflow_callback, fleet_callback]
+    assert composed == [mlflow_callback, other_global, fleet_callback]
 
 
-def test_dspy_turn_callbacks_is_inert_when_tracing_is_inactive() -> None:
-    """Observability must never alter a Turn: inactive tracing returns callbacks unchanged."""
+def test_dspy_turn_callbacks_composes_without_tracing_and_dedupes_by_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Composition is not gated on tracing, and a callback object is installed only once."""
     from fleet_rlm.observability.tracing import dspy_turn_callbacks
 
+    patch_tracing_state(monkeypatch, active=False)
+    global_callback = object()
     fleet_callback = object()
-    prior = turn_tracing.is_tracing_active()
-    turn_tracing.set_tracing_active_for_tests(False)
+    previous = dspy.settings.callbacks
     try:
-        assert dspy_turn_callbacks(fleet_callback) == [fleet_callback]
+        dspy.settings.configure(callbacks=[global_callback])
+        composed = dspy_turn_callbacks(global_callback, fleet_callback, fleet_callback)
+        assert dspy_turn_callbacks() == [global_callback]
     finally:
-        turn_tracing.set_tracing_active_for_tests(prior)
+        dspy.settings.configure(callbacks=previous)
+
+    assert composed == [global_callback, fleet_callback]
 
 
 def test_composed_callbacks_survive_the_turn_context_boundary() -> None:
@@ -1642,18 +1677,16 @@ def test_composed_callbacks_survive_the_turn_context_boundary() -> None:
     fleet_callback = object()
     mlflow_callback = MlflowCallback()
     previous = dspy.settings.callbacks
-    turn_tracing.set_tracing_active_for_tests(True)
     try:
         dspy.settings.configure(callbacks=[mlflow_callback])
         with dspy.context(callbacks=dspy_turn_callbacks(fleet_callback)):
             inside = list(dspy.settings.callbacks)
+        after = list(dspy.settings.callbacks)
     finally:
         dspy.settings.configure(callbacks=previous)
-        turn_tracing.set_tracing_active_for_tests(False)
 
-    assert mlflow_callback in inside
-    assert fleet_callback in inside
-    assert dspy.settings.callbacks == previous
+    assert inside == [mlflow_callback, fleet_callback]
+    assert after == [mlflow_callback]
 
 
 def test_every_dspy_context_callback_list_composes_the_autolog_callback() -> None:
@@ -1722,7 +1755,7 @@ def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
     monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "0")
     mlflow.set_experiment("fleet-span-parentage")
     monkeypatch.setattr("mlflow.dspy.callback.get_autologging_config", lambda *_args: True)
-    tracing.set_tracing_active_for_tests(True)
+    patch_tracing_state(monkeypatch, active=True)
     active_token = tracing._fleet_trace_active.set(True)
     try:
         autolog = MlflowCallback()
@@ -1732,7 +1765,7 @@ def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
         action_callback = _RLMReasoningCallback(lambda _event: None)
 
         with mlflow.start_span("fleet_turn") as root:
-            trace_id = root.request_id
+            trace_id = root.trace_id
             with (
                 tracing.turn_phase_span("RLM.execute", inputs={}) as phase,
                 tracing.rlm_callback_parent(phase),
@@ -1756,7 +1789,6 @@ def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
         spans = mlflow.get_trace(trace_id).data.spans
     finally:
         tracing._fleet_trace_active.reset(active_token)
-        tracing.set_tracing_active_for_tests(False)
         mlflow.set_tracking_uri(prior_uri)
 
     by_id = {span.span_id: span for span in spans}
@@ -1772,7 +1804,7 @@ def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
         if span.name in {"Predict.forward", "RLM.root_action", "RLM.root_lm", "sandbox.execute"}:
             parent = by_id[span.parent_id]
             assert parent.start_time_ns <= span.start_time_ns <= span.end_time_ns <= parent.end_time_ns
-            if span.name in {"RLM.root_action", "RLM.root_lm"}:
+            if span.name in {"RLM.root_action", "RLM.root_lm", "Predict.forward"}:
                 assert parent.name == "RLM.execute"
 
 
@@ -1927,9 +1959,9 @@ async def test_prepare_without_active_trace_is_noop() -> None:
 
 
 class _PhaseLinkFakeSpan:
-    def __init__(self, request_id: str) -> None:
-        self.request_id = request_id
-        self.span_id = f"{len(request_id):016x}"
+    def __init__(self, trace_id: str) -> None:
+        self.trace_id = trace_id
+        self.span_id = f"{len(trace_id):016x}"
         self.inputs: list[dict[str, object]] = []
         self.outputs: list[dict[str, object]] = []
         self.statuses: list[str] = []
@@ -1966,19 +1998,18 @@ def _install_phase_link_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNa
         calls.spans.append((name, span))
         return span
 
-    @contextmanager
-    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+    def start_span_no_context(
+        *, name: str = "span", span_type: Any = None, links: list[Any] | None = None, **_kwargs: Any
+    ) -> Any:
         del span_type
         span = create_span(name)
-        calls.stack.append(span)
-        try:
-            yield span
-        finally:
-            calls.stack.pop()
-
-    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
-        del span_type
-        return create_span(name)
+        # Mirrors MLflow: an invalid link is skipped, never fatal to the span.
+        for link in links or []:
+            try:
+                span.add_link(link)
+            except RuntimeError:
+                continue
+        return span
 
     @contextmanager
     def safe_set_span_in_context(span: Any) -> Iterator[Any]:
@@ -1995,7 +2026,6 @@ def _install_phase_link_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNa
         return calls.stack[-1] if calls.stack else None
 
     mlflow = ModuleType("mlflow")
-    mlflow.start_span = start_span
     mlflow.start_span_no_context = start_span_no_context
     mlflow.update_current_trace = update_current_trace
     mlflow.get_current_active_span = get_current_active_span
@@ -2011,15 +2041,25 @@ def _install_phase_link_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNa
 
     entities.Link = Link
 
-    fluent = ModuleType("mlflow.tracing.fluent")
-    fluent.safe_set_span_in_context = safe_set_span_in_context
+    def set_span_in_context(span: Any) -> Any:
+        calls.stack.append(span)
+        return span
+
+    def detach_span_from_context(token: Any) -> None:
+        assert calls.stack and calls.stack[-1] is token
+        calls.stack.pop()
+
+    provider = ModuleType("mlflow.tracing.provider")
+    provider.safe_set_span_in_context = safe_set_span_in_context
+    provider.set_span_in_context = set_span_in_context
+    provider.detach_span_from_context = detach_span_from_context
     tracing_module = ModuleType("mlflow.tracing")
-    tracing_module.fluent = fluent
+    tracing_module.provider = provider
 
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
     monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
-    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.provider", provider)
     return calls
 
 
@@ -2139,7 +2179,7 @@ async def test_execution_trace_links_preparation_trace_id_one_way(monkeypatch: p
     preparation_update, execution_update = tagged
     roots = [span for name, span in calls.spans if name == "fleet_turn"]
     assert len(roots) == 2
-    preparation_id, execution_id = roots[0].request_id, roots[1].request_id
+    preparation_id, execution_id = roots[0].trace_id, roots[1].trace_id
     assert execution_id != preparation_id
     assert roots[0].links == []
     assert len(roots[1].links) == 1
@@ -2214,7 +2254,7 @@ async def test_preparation_link_is_disabled_for_unity_catalog_fallback(monkeypat
     assert len(roots) == 2
     assert roots[1].links == []
     execution_update = _trace_root_updates(calls)[1]
-    assert execution_update["tags"]["fleet.preparation_trace_id"] == roots[0].request_id
+    assert execution_update["tags"]["fleet.preparation_trace_id"] == roots[0].trace_id
 
 
 @pytest.mark.asyncio

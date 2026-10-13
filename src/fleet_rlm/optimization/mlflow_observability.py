@@ -60,7 +60,9 @@ def development_gepa_trace(*, metadata: Mapping[str, bool | float | int | str]) 
                 },
                 metadata=safe_metadata,
             )
-        raw_trace_id = mlflow.get_last_active_trace_id() or getattr(span, "request_id", None)
+        # The span's own trace is authoritative; the last active trace may
+        # belong to an earlier, already closed trace.
+        raw_trace_id = span.trace_id
         trace_id = str(raw_trace_id) if raw_trace_id is not None else None
         yield OptimizationTraceHandle(trace_id=trace_id)
     except BaseException:

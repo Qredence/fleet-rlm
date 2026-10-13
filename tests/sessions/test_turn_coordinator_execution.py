@@ -1593,13 +1593,12 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
 
         span = Span()
 
-        @contextmanager
-        def start_span(*, name: str = "span", **_kwargs: Any) -> Iterator[Span]:
+        def start_span_no_context(*, name: str = "span", **_kwargs: Any) -> Span:
             names.append(name)
-            yield span
+            return span
 
         mlflow = ModuleType("mlflow")
-        mlflow.start_span = start_span  # type: ignore[attr-defined]
+        mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
         mlflow.update_current_trace = lambda **_kwargs: None  # type: ignore[attr-defined]
         mlflow.get_last_active_trace_id = lambda: span.request_id  # type: ignore[attr-defined]
         mlflow.get_current_active_span = lambda: span  # type: ignore[attr-defined]

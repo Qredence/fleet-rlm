@@ -146,18 +146,6 @@ def capture(event: str, *, properties: Mapping[str, object] | None = None) -> No
         logger.warning("PostHog capture failed for event %s (%s); continuing", event, type(exc).__name__)
 
 
-def get_client() -> Posthog | None:
-    """Return the active PostHog analytics client.
-
-    Routes must use :func:`capture` rather than this raw client: it exists for
-    lifecycle introspection, not as a telemetry path.
-
-    Returns:
-        Posthog | None: The active client, or `None` when analytics are disabled.
-    """
-    return _client
-
-
 def get_distinct_id() -> str:
     """
     Provide the analytics identity for the current installation.

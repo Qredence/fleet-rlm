@@ -36,6 +36,7 @@ async def test_delayed_worker_trace_is_exported_with_complete_parentage(
     from fleet_rlm.observability import tracing
     from fleet_rlm.rlm.execution import WorkerOwnership
     from fleet_rlm.rlm.ownership import OwnedEffect
+    from tests.support.tracing_state import patch_tracing_state
 
     previous_uri = mlflow.get_tracking_uri()
     monkeypatch.setattr(fluent, "_active_experiment_id", None)
@@ -43,7 +44,8 @@ async def test_delayed_worker_trace_is_exported_with_complete_parentage(
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
     mlflow.set_tracking_uri(server_uri)
     experiment = mlflow.set_experiment("fleet-delayed-worker-trace")
-    tracing.set_tracing_active_for_tests(True)
+    patch_tracing_state(monkeypatch, active=True)
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
 
     entered = threading.Event()
     release = threading.Event()
@@ -125,7 +127,6 @@ async def test_delayed_worker_trace_is_exported_with_complete_parentage(
             await ownership.wait_owned()
         with suppress(Exception):
             mlflow.flush_trace_async_logging()
-        tracing.set_tracing_active_for_tests(False)
         mlflow.set_tracking_uri(previous_uri)
         _stop_server(server_process, server_log)
 

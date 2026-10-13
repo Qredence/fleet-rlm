@@ -340,7 +340,9 @@ def test_observe_tool_creates_bounded_mlflow_tool_span(monkeypatch: pytest.Monke
     monkeypatch.setitem(
         __import__("sys").modules,
         "mlflow",
-        SimpleNamespace(get_current_active_span=lambda: Span(), start_span=lambda **_kwargs: SpanContext()),
+        SimpleNamespace(
+            get_current_active_span=lambda: Span(), start_span_no_context=lambda **_kwargs: SpanContext().__enter__()
+        ),
     )
     monkeypatch.setitem(
         __import__("sys").modules,

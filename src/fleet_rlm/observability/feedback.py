@@ -9,6 +9,10 @@ from uuid import UUID
 from fleet_rlm.observability.tracing import is_tracing_active
 from fleet_rlm.rlm.result import sanitize_trace_text
 
+# MLflow ``TraceMetadataKey.TRACE_SESSION``; written by ``update_current_trace(session_id=...)``.
+_TRACE_SESSION_METADATA_KEY = "mlflow.trace.session"
+_TRACE_PHASE_METADATA_KEY = "fleet.trace_phase"
+
 
 class TraceFeedbackNotFoundError(LookupError):
     """Raised when a trace is absent or does not belong to the requested session."""
@@ -85,11 +89,17 @@ class TraceFeedbackService:
                 raise TraceFeedbackNotFoundError from None
             raise TraceFeedbackUnavailableError from None
 
+        # Ownership is read from immutable trace metadata. Trace tags are
+        # mutable through ``set_trace_tag`` and must not grant feedback access.
+        # Every execution root written by ``turn_trace`` carries both keys.
         info = getattr(trace, "info", None)
-        tags = getattr(info, "tags", None)
-        if not isinstance(tags, Mapping):
+        metadata = getattr(info, "trace_metadata", None)
+        if not isinstance(metadata, Mapping):
             raise TraceFeedbackNotFoundError
-        if tags.get("fleet.session_id") != str(session_id) or tags.get("fleet.trace_phase") != "execution":
+        if (
+            metadata.get(_TRACE_SESSION_METADATA_KEY) != str(session_id)
+            or metadata.get(_TRACE_PHASE_METADATA_KEY) != "execution"
+        ):
             raise TraceFeedbackNotFoundError
 
         rationale = None
@@ -101,21 +111,13 @@ class TraceFeedbackService:
             source_id="fleet-local",
         )
         try:
-            if rationale is None:
-                assessment = mlflow.log_feedback(
-                    trace_id=trace_id,
-                    name="user_feedback",
-                    value=value,
-                    source=source,
-                )
-            else:
-                assessment = mlflow.log_feedback(
-                    trace_id=trace_id,
-                    name="user_feedback",
-                    value=value,
-                    source=source,
-                    rationale=rationale,
-                )
+            assessment = mlflow.log_feedback(
+                trace_id=trace_id,
+                name="user_feedback",
+                value=value,
+                source=source,
+                rationale=rationale,
+            )
         except Exception:
             raise TraceFeedbackUnavailableError from None
 

@@ -314,7 +314,7 @@ def test_development_gepa_trace_uses_only_aggregate_metadata(monkeypatch) -> Non
     calls = SimpleNamespace(inputs=None, outputs=None, trace_updates=[], status=None)
 
     class Span:
-        request_id = "trace-123"
+        trace_id = "trace-123"
 
         def set_inputs(self, value):
             calls.inputs = value
@@ -335,7 +335,7 @@ def test_development_gepa_trace_uses_only_aggregate_metadata(monkeypatch) -> Non
     mlflow = ModuleType("mlflow")
     mlflow.__path__ = []  # type: ignore[attr-defined]
     mlflow.start_span = lambda **_kwargs: Context()  # type: ignore[attr-defined]
-    mlflow.get_last_active_trace_id = lambda: "trace-123"  # type: ignore[attr-defined]
+    mlflow.get_last_active_trace_id = lambda: "trace-stale"  # type: ignore[attr-defined]
     mlflow.update_current_trace = lambda **kwargs: calls.trace_updates.append(kwargs)  # type: ignore[attr-defined]
     entities = ModuleType("mlflow.entities")
     entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]

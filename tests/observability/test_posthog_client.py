@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.observability import posthog
 from fleet_rlm.observability.posthog import (
     capture,
-    get_client,
     get_distinct_id,
     init_posthog,
     shutdown_posthog,
@@ -49,7 +49,7 @@ def _install_failing_client(monkeypatch: pytest.MonkeyPatch, client: object, tmp
             data_root=str(tmp_path),
         )
     )
-    assert get_client() is client
+    assert posthog._client is client
 
 
 def _fake_posthog(created: list[tuple[str, str | None, bool]], shutdowns: list[str] | None = None) -> object:
@@ -119,7 +119,7 @@ def test_capture_contains_client_failures(monkeypatch: pytest.MonkeyPatch, tmp_p
     capture("turn_created", properties={"session_id": "s"})
 
     shutdown_posthog()
-    assert get_client() is None
+    assert posthog._client is None
 
 
 def test_capture_propagates_cancellation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -149,7 +149,7 @@ def test_init_contains_client_construction_failure(monkeypatch: pytest.MonkeyPat
         )
     )
 
-    assert get_client() is None
+    assert posthog._client is None
 
 
 def test_shutdown_contains_client_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -161,7 +161,7 @@ def test_shutdown_contains_client_failures(monkeypatch: pytest.MonkeyPatch, tmp_
 
     shutdown_posthog()
 
-    assert get_client() is None
+    assert posthog._client is None
 
 
 class _BrokenClient:

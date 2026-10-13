@@ -490,7 +490,7 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: Span(),
-        start_span=lambda **_kwargs: SpanContext(),
+        start_span_no_context=lambda **_kwargs: SpanContext().__enter__(),
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -582,7 +582,7 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: span,
-        start_span=lambda **_kwargs: SpanContext(),
+        start_span_no_context=lambda **_kwargs: SpanContext().__enter__(),
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -677,7 +677,7 @@ def test_lm_trace_callback_records_reasoning_tokens_from_usage(monkeypatch: pyte
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: Span(),
-        start_span=lambda **_kwargs: SpanContext(),
+        start_span_no_context=lambda **_kwargs: SpanContext().__enter__(),
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -772,7 +772,7 @@ def test_lm_trace_callback_keeps_diagnostics_without_duplicate_token_usage(monke
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: Span(),
-        start_span=lambda **_kwargs: SpanContext(),
+        start_span_no_context=lambda **_kwargs: SpanContext().__enter__(),
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -872,7 +872,9 @@ def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.M
     monkeypatch.setitem(
         sys.modules,
         "mlflow",
-        SimpleNamespace(get_current_active_span=lambda: Span(), start_span=lambda **_kwargs: SpanContext()),
+        SimpleNamespace(
+            get_current_active_span=lambda: Span(), start_span_no_context=lambda **_kwargs: SpanContext().__enter__()
+        ),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -1013,7 +1015,10 @@ def test_lm_trace_callback_avoids_duplicate_mlflow_usage(monkeypatch: pytest.Mon
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: Span(),
-        start_span=lambda **kwargs: (captured.span_types.append(kwargs.get("span_type")), SpanContext())[1],
+        start_span_no_context=lambda **kwargs: (
+            captured.span_types.append(kwargs.get("span_type")),
+            SpanContext().__enter__(),
+        )[1],
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)

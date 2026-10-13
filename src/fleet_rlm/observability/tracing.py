@@ -49,7 +49,8 @@ _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 _EXPERIMENT_PURPOSE_TAG = "fleet.experiment.purpose"
 _TRACE_CONTENT_MAX_CHARS = 10_000
-_TRACE_CONTENT_ENABLED = True
+# Readable content stays suppressed until configure_tracing applies policy.
+_TRACE_CONTENT_ENABLED = False
 # Set only after configure_tracing succeeds. Policy may request tracing while the
 # tracking backend is absent; Turn spans must not enter MLflow's HTTP retry loop
 # and starve claim heartbeats.
@@ -106,26 +107,6 @@ def _mlflow_export_versions_are_certified() -> bool:
 def is_tracing_active() -> bool:
     """Return whether configure_tracing successfully activated Turn spans."""
     return _TRACING_ACTIVE
-
-
-def set_tracing_active_for_tests(active: bool) -> None:
-    """Test-only override for Turn-span gate without a real tracking backend."""
-    global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE
-    global _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS, _TRACE_EXPERIMENT_ID, _TRACING_ACTIVE
-    _TRACING_ACTIVE = active
-    if not active:
-        # Test doubles are installed and removed per test. Do not let a prior
-        # fake configuration make a later test look like a live process
-        # lifespan, and do not import or mutate the real MLflow module here.
-        _DSPY_AUTOLOG_ENABLED = False
-        _TRACE_CONFIG_CONTEXT = None
-        _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
-        _TRACKING_URI_APPLIED = None
-        _TRACE_EXPERIMENT_ID = None
-        _TRACE_CONTENT_ENABLED = False
-        _TRACE_CONTENT_MAX_CHARS = 10_000
-        _TRACE_ENVIRONMENT_SNAPSHOT.clear()
-        _TRACE_ENVIRONMENT_APPLIED.clear()
 
 
 _CREDENTIAL_KEYS = frozenset(
@@ -574,7 +555,7 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
         return
 
     try:
-        mlflow.set_tracking_uri(_DEFAULT_TRACKING_URI)
+        # configure_tracing has already applied the Databricks tracking URI.
         experiment = mlflow.get_experiment_by_name(experiment_name)
     except (MlflowException, AttributeError):
         return  # Unavailable — will fail at set_experiment time if mismatch
@@ -784,11 +765,6 @@ def configure_tracing(settings: Settings) -> bool:
         _TRACE_EXPERIMENT_ID = experiment.experiment_id
 
         _apply_experiment_purpose(settings)
-
-        config = getattr(mlflow, "config", None)
-        enable_async_logging = getattr(config, "enable_async_logging", None)
-        if callable(enable_async_logging):
-            enable_async_logging(settings.mlflow_async_logging)
 
         tracing_api = getattr(mlflow, "tracing", None)
         configure_processors = getattr(tracing_api, "configure", None)
@@ -1208,9 +1184,10 @@ class TraceSpanHandle:
     lets tracing failures affect the owning Turn.
     """
 
-    _span_context: Any | None = None
     _span: Any | None = None
-    _detached: bool = False
+    # MLflow context token while a nested phase span is the active span. Callback
+    # spans are never activated, so they carry no token.
+    _context_token: Any | None = None
     outputs: dict[str, object] = field(default_factory=dict)
     _closed: bool = False
 
@@ -1251,13 +1228,17 @@ class TraceSpanHandle:
                 self._span.set_status("ERROR")
             except Exception:
                 logger.debug("trace span status annotation failed; continuing")
+        if self._context_token is not None:
+            try:
+                from mlflow.tracing.provider import detach_span_from_context
+
+                detach_span_from_context(self._context_token)
+            except BaseException:
+                logger.debug("trace span context detach failed; continuing")
         try:
             # Do not pass provider exceptions to MLflow: their messages can
             # contain prompts, generated code, or gateway response bodies.
-            if self._detached:
-                self._span.end()
-            elif self._span_context is not None:
-                self._span_context.__exit__(None, None, None)
+            self._span.end()
         except BaseException:
             logger.debug("trace span close failed; continuing")
 
@@ -1273,38 +1254,31 @@ def rlm_callback_parent(parent: TraceSpanHandle) -> Iterator[None]:
 
 
 def dspy_turn_callbacks(*callbacks: Any) -> list[Any]:
-    """Return Fleet's Turn callbacks together with MLflow's autolog callback.
+    """Compose the global DSPy callbacks with Fleet's callbacks for one scope.
 
     ``dspy.context(callbacks=...)`` REPLACES ``dspy.settings.callbacks`` for the
-    scope; it does not merge with the global list. MLflow's DSPy autolog
-    registers its ``MlflowCallback`` globally, so a Turn context that passes only
-    Fleet's callbacks silently unregisters it and drops every module, adapter,
-    and LM autolog span for the whole Turn. Carry it across the context boundary
-    explicitly instead.
-
-    Fail-soft by design: when tracing is inactive, or DSPy/MLflow cannot be
-    imported, the supplied callbacks are returned unchanged so observability
-    setup can never affect a Turn outcome.
+    scope; it does not merge with the global list. A Turn context that passed
+    only Fleet's callbacks would silently unregister every globally configured
+    callback, including MLflow's DSPy autolog ``MlflowCallback`` and with it
+    every module, adapter, and LM autolog span. Carry the whole global list
+    across the context boundary instead, whether or not tracing is active.
 
     Parameters:
         *callbacks (Any): Fleet-owned callbacks for the enclosing DSPy scope.
 
     Returns:
-        list[Any]: The MLflow autolog callback (when registered) followed by the
-            supplied callbacks.
+        list[Any]: The global callbacks followed by the supplied callbacks, keeping
+            the first occurrence of each callback object.
     """
-    ordered = list(callbacks)
-    if not _TRACING_ACTIVE:
-        return ordered
-    try:
-        import dspy
-        from mlflow.dspy.callback import MlflowCallback
+    import dspy
 
-        registered = [item for item in dspy.settings.callbacks if isinstance(item, MlflowCallback)]
-    except Exception:
-        logger.debug("MLflow DSPy autolog callback lookup failed; continuing")
-        return ordered
-    return [*registered, *ordered]
+    composed: list[Any] = []
+    seen: set[int] = set()
+    for item in (*dspy.settings.callbacks, *callbacks):
+        if id(item) not in seen:
+            seen.add(id(item))
+            composed.append(item)
+    return composed
 
 
 def start_turn_span(
@@ -1317,7 +1291,12 @@ def start_turn_span(
     """Start a bounded nested span when a ``fleet_turn`` trace is active.
 
     MLflow's manual span API is used because DSPy callback start/end hooks are
-    separate events and cannot be represented by a single ``with`` body.
+    separate events and cannot be represented by a single ``with`` body. Every
+    span is created detached and ended explicitly by ``TraceSpanHandle.finish``.
+    Callback spans hang under the enclosing ``rlm_callback_parent`` and never
+    become active. Other spans parent to the current active span and are set
+    active until they finish, so DSPy autolog and nested Fleet spans opened
+    inside them keep nesting under them.
     """
     handle = TraceSpanHandle()
     if not _fleet_trace_active.get():
@@ -1327,33 +1306,26 @@ def start_turn_span(
         import mlflow
         from mlflow.entities import SpanType
 
-        if callback_span:
-            parent = _rlm_callback_parent.get()
-            if parent is None:
-                return handle
-            from mlflow.tracing.fluent import start_span_no_context
-
-            span = start_span_no_context(
-                name=name,
-                span_type=getattr(SpanType, span_type, SpanType.CHAIN),
-                parent_span=parent,
-            )
-            span_context = None
-            handle._detached = True
-        else:
-            if mlflow.get_current_active_span() is None:
-                return handle
-            span_context = mlflow.start_span(
-                name=name,
-                span_type=getattr(SpanType, span_type, SpanType.CHAIN),
-            )
-            span = span_context.__enter__()
+        parent = _rlm_callback_parent.get() if callback_span else mlflow.get_current_active_span()
+        if parent is None:
+            return handle
+        span = mlflow.start_span_no_context(
+            name=name,
+            span_type=getattr(SpanType, span_type, SpanType.CHAIN),
+            parent_span=parent,
+        )
     except Exception:
         logger.debug("MLflow lifecycle span setup failed; continuing")
         return handle
 
-    handle._span_context = span_context
     handle._span = span
+    if not callback_span:
+        try:
+            from mlflow.tracing.provider import set_span_in_context
+
+            handle._context_token = set_span_in_context(span)
+        except Exception:
+            logger.debug("MLflow lifecycle span activation failed; continuing")
     try:
         span.set_inputs(_trace_mapping(inputs))
     except Exception:
@@ -1461,14 +1433,37 @@ def turn_trace(
             yield TraceHandle(trace_id=None)
             return
 
+        links: list[Any] = []
+        if (
+            trace_phase == "execution"
+            and preparation_trace_id
+            and preparation_span_id
+            and _is_local_supervised_tracking_uri(_TRACKING_URI_APPLIED)
+        ):
+            try:
+                from mlflow.entities import Link
+
+                links.append(
+                    Link(  # ty: ignore[call-non-callable] - mlflow declares from_proto abstract without ABCMeta
+                        trace_id=str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS],
+                        span_id=str(preparation_span_id)[:32],
+                        attributes={"fleet.relationship": "preparation"},
+                    )
+                )
+            except Exception:
+                # Cross-trace navigation is optional observability. A malformed
+                # or unsupported link must never prevent the Turn trace itself.
+                logger.warning("MLflow preparation Span Link setup failed; continuing without link")
+
         try:
             span = mlflow.start_span_no_context(
                 name=_SPAN_NAME,
                 span_type=SpanType.CHAIN,
                 log_level="INFO",
                 experiment_id=_TRACE_EXPERIMENT_ID,
+                links=links or None,
             )
-            from mlflow.tracing.fluent import safe_set_span_in_context
+            from mlflow.tracing.provider import safe_set_span_in_context
 
             span_context = safe_set_span_in_context(span)
             # A context manager may partially install its context before
@@ -1482,29 +1477,6 @@ def turn_trace(
             logger.warning("MLflow turn span setup failed; continuing without traces")
             yield TraceHandle(trace_id=None)
             return
-
-        if (
-            trace_phase == "execution"
-            and preparation_trace_id
-            and preparation_span_id
-            and _is_local_supervised_tracking_uri(_TRACKING_URI_APPLIED)
-        ):
-            try:
-                from mlflow.entities import Link
-
-                add_link = getattr(span, "add_link", None)
-                if callable(add_link):
-                    add_link(
-                        Link(  # ty: ignore[call-non-callable] - mlflow declares from_proto abstract without ABCMeta
-                            trace_id=str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS],
-                            span_id=str(preparation_span_id)[:32],
-                            attributes={"fleet.relationship": "preparation"},
-                        )
-                    )
-            except Exception:
-                # Cross-trace navigation is optional observability. A malformed
-                # or unsupported link must never prevent the Turn trace itself.
-                logger.warning("MLflow preparation Span Link setup failed; continuing without link")
 
         active_token = _fleet_trace_active.set(True)
         tags: dict[str, str] = {
@@ -1580,11 +1552,7 @@ def turn_trace(
             # ``get_last_active_trace_id`` can refer to a prior trace after a
             # preparation span has already been closed, which would leak the
             # previous trace ID into this Turn's SSE events.
-            raw = getattr(span, "request_id", None)
-            if raw is None:
-                get_current_active_span = getattr(mlflow, "get_current_active_span", None)
-                current_span = get_current_active_span() if callable(get_current_active_span) else None
-                raw = getattr(current_span, "request_id", None)
+            raw = span.trace_id
             if raw is not None:
                 trace_id = str(raw)
                 if expose_trace_id:

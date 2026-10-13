@@ -975,8 +975,6 @@ def fleet_trace_active():
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     import sys
-    from collections.abc import Iterator
-    from contextlib import contextmanager
     from types import ModuleType, SimpleNamespace
     from typing import Any
 
@@ -991,14 +989,13 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     active_span = _FakeSpan()
 
-    @contextmanager
-    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
         del span_type
         calls.start_span_names.append(name)
-        yield active_span
+        return active_span
 
     mlflow = ModuleType("mlflow")
-    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
     mlflow.get_current_active_span = lambda: active_span  # type: ignore[attr-defined]
 
     entities = ModuleType("mlflow.entities")

@@ -233,7 +233,7 @@ def test_provider_failure_trace_keeps_category_but_not_private_message(monkeypat
         "mlflow",
         SimpleNamespace(
             get_current_active_span=lambda: Span(),
-            start_span=lambda **_kwargs: SpanContext(),
+            start_span_no_context=lambda **_kwargs: SpanContext().__enter__(),
         ),
     )
     monkeypatch.setitem(

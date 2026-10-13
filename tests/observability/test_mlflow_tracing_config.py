@@ -18,14 +18,14 @@ import pytest
 
 import fleet_rlm.observability.tracing as tracing
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
+from tests.support.tracing_state import patch_tracing_state
 
 
 # --- from test_mlflow_tracing_config.py -------------------------------
 @pytest.fixture(autouse=True)
 def _reset_trace_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared readable content bound for a test."""
-    tracing.set_tracing_active_for_tests(False)
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
+    patch_tracing_state(monkeypatch, active=False)
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
 
 
@@ -329,7 +329,7 @@ def test_trace_value_redacts_camel_case_and_private_credential_keys() -> None:
 
 
 def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
-    _install_fake_mlflow(monkeypatch)
+    calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.setenv("MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE", "999999")
     settings = Settings(
         mlflow_tracing_enabled=True,
@@ -348,6 +348,9 @@ def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] == "3"
     assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "7"
     assert tracing.trace_content_preview("private content") == "[content suppressed]"
+    # Trace export is governed by MLFLOW_ENABLE_ASYNC_TRACE_LOGGING alone; the
+    # run-logging switch ``mlflow.config.enable_async_logging`` stays untouched.
+    assert calls.async_logging_args == []
 
 
 def test_mlflow_span_processor_preserves_namespaced_and_unknown_text_fields() -> None:
@@ -412,6 +415,16 @@ def test_configure_tracing_ignores_tracking_uri_environment_override(
 
     assert calls.tracking_uri_args == ["http://configured.example:5001"]
     assert calls.autolog_calls == 1
+
+
+def test_trace_location_preflight_does_not_change_the_tracking_uri(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch, experiment=None)
+    _install_fake_mlflow_exceptions(monkeypatch)
+
+    tracing._validate_experiment_trace_location(_enabled_settings())
+
+    assert calls.experiment_lookups == ["fleet-test-exp"]
+    assert calls.tracking_uri_args == []
 
 
 def test_configure_tracing_is_idempotent_until_explicit_reset(monkeypatch: pytest.MonkeyPatch) -> None:

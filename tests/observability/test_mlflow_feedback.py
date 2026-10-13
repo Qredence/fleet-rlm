@@ -59,13 +59,14 @@ def _install_fake_mlflow(
     return calls
 
 
-def _trace(session_id, *, phase: str = "execution") -> SimpleNamespace:
+def _trace(session_id, *, phase: str = "execution", tags: dict[str, str] | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         info=SimpleNamespace(
-            tags={
-                "fleet.session_id": str(session_id),
+            trace_metadata={
+                "mlflow.trace.session": str(session_id),
                 "fleet.trace_phase": phase,
-            }
+            },
+            tags=tags or {},
         )
     )
 
@@ -143,3 +144,55 @@ def test_submit_hides_missing_and_backend_failures_without_retrying(monkeypatch:
             content_enabled=True,
         )
     assert len(calls.feedback) == 1
+
+
+def test_submit_trusts_immutable_metadata_not_mutable_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = uuid4()
+    intruder = uuid4()
+    monkeypatch.setattr(feedback, "is_tracing_active", lambda: True)
+    spoofed = _trace(owner, tags={"fleet.session_id": str(intruder), "fleet.trace_phase": "execution"})
+    calls = _install_fake_mlflow(monkeypatch, trace=spoofed)
+
+    with pytest.raises(feedback.TraceFeedbackNotFoundError):
+        feedback.TraceFeedbackService().submit(
+            session_id=intruder,
+            trace_id="tr-spoofed",
+            value=True,
+            comment=None,
+            content_enabled=True,
+        )
+    assert calls.feedback == []
+
+    tag_only = SimpleNamespace(info=SimpleNamespace(trace_metadata={}, tags=spoofed.info.tags))
+    calls = _install_fake_mlflow(monkeypatch, trace=tag_only)
+    with pytest.raises(feedback.TraceFeedbackNotFoundError):
+        feedback.TraceFeedbackService().submit(
+            session_id=intruder,
+            trace_id="tr-tag-only",
+            value=True,
+            comment=None,
+            content_enabled=True,
+        )
+    assert calls.feedback == []
+
+
+@pytest.mark.parametrize(("comment", "content_enabled"), [(None, True), ("useful", False), ("   ", True)])
+def test_submit_passes_null_rationale_when_comment_is_absent_or_suppressed(
+    monkeypatch: pytest.MonkeyPatch,
+    comment: str | None,
+    content_enabled: bool,
+) -> None:
+    session_id = uuid4()
+    calls = _install_fake_mlflow(monkeypatch, trace=_trace(session_id))
+    monkeypatch.setattr(feedback, "is_tracing_active", lambda: True)
+
+    feedback.TraceFeedbackService().submit(
+        session_id=session_id,
+        trace_id="tr-no-comment",
+        value=False,
+        comment=comment,
+        content_enabled=content_enabled,
+    )
+
+    assert len(calls.feedback) == 1
+    assert calls.feedback[0]["rationale"] is None
