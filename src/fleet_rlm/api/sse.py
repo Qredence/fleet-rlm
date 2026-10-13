@@ -58,7 +58,6 @@ FLEET_STREAM_EVENT_TYPES = (
     "turn_cancelled",
     "turn_error",
 )
-FLEET_UI_CHUNK_TYPES = FLEET_STREAM_EVENT_TYPES
 
 
 def project_runtime_event(event: RuntimeEvent) -> list[dict[str, Any]]:
@@ -326,7 +325,6 @@ class AISDKUIProjector:
 
 __all__ = [
     "FLEET_STREAM_EVENT_TYPES",
-    "FLEET_UI_CHUNK_TYPES",
     "AISDKUIProjector",
     "project_runtime_event",
 ]

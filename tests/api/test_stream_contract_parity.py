@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
+from fleet_rlm.api.sse import FLEET_STREAM_EVENT_TYPES
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from tests.support.testing_app import create_testing_app
 
 _ASSISTANT_TYPES = {model.model_fields["type"].default for model in AssistantPartModelUnion}
-_TRANSPORT_SEMANTICS = set(FLEET_UI_CHUNK_TYPES)
+_TRANSPORT_SEMANTICS = set(FLEET_STREAM_EVENT_TYPES)
 
 
 def test_canonical_result_and_live_transport_have_separate_complete_vocabularies() -> None:
@@ -59,7 +59,7 @@ def test_canonical_result_and_live_transport_have_separate_complete_vocabularies
 def test_openapi_covers_the_typed_live_transport_vocabulary_once() -> None:
     schema = create_testing_app().openapi()["components"]["schemas"]["FleetUIMessageChunk"]
     variant_types = [variant["properties"]["type"]["const"] for variant in schema["oneOf"]]
-    assert variant_types == list(FLEET_UI_CHUNK_TYPES)
+    assert variant_types == list(FLEET_STREAM_EVENT_TYPES)
     assert len(variant_types) == len(set(variant_types))
     assert "$ref" not in json.dumps(schema)
 

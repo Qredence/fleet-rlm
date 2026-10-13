@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from fleet_rlm.api.json_util import to_plain_json
+from fleet_rlm.sessions.assistant_parts import validate_child_progress_details
 
 _JsonData = dict[str, Any]
 
@@ -63,8 +64,7 @@ class ChildProgressData(FleetUIDataModel):
     @field_validator("evidence", "gaps")
     @classmethod
     def _bounded_details(cls, value: list[str]) -> list[str]:
-        if any(len(item) > 200 for item in value):
-            raise ValueError("child progress detail exceeds 200 characters")
+        validate_child_progress_details(value)
         return value
 
 

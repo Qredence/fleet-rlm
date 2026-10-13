@@ -11,7 +11,7 @@ from uuid import UUID, uuid4, uuid5
 
 import pytest
 
-from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES, AISDKUIProjector
+from fleet_rlm.api.sse import FLEET_STREAM_EVENT_TYPES, AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter
 from fleet_rlm.rlm.event_types import (
     RUNTIME_DETAIL_TYPES,
@@ -78,7 +78,7 @@ _RUNTIME_TYPES = {
 
 def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
     assert {detail.kind for detail in RUNTIME_DETAIL_TYPES} == _RUNTIME_TYPES
-    assert tuple(FLEET_UI_CHUNK_TYPES) == (
+    assert tuple(FLEET_STREAM_EVENT_TYPES) == (
         "turn_start",
         "turn_status",
         "step_start",
@@ -274,4 +274,4 @@ def test_live_fixture_has_closed_wire_kinds_and_no_unbounded_values() -> None:
         chunk = json.loads(line)
         validated = FleetUIMessageChunkAdapter.validate_python(chunk, strict=False)
         assert validated is not None
-    assert {event["type"] for line in lines for event in [json.loads(line)]} == set(FLEET_UI_CHUNK_TYPES)
+    assert {event["type"] for line in lines for event in [json.loads(line)]} == set(FLEET_STREAM_EVENT_TYPES)

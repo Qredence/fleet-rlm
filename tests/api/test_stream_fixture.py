@@ -44,7 +44,7 @@ def test_contract_stream_dispatch_runs_the_check_lane() -> None:
 
 
 def test_emitted_chunks_are_fully_documented_by_openapi() -> None:
-    from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
+    from fleet_rlm.api.sse import FLEET_STREAM_EVENT_TYPES
     from tests.support.testing_app import create_testing_app
 
     variants = create_testing_app().openapi()["components"]["schemas"]["FleetUIMessageChunk"]["oneOf"]
@@ -53,7 +53,7 @@ def test_emitted_chunks_are_fully_documented_by_openapi() -> None:
     chunks = _chunks()
     assert chunks, "fixture must contain at least one chunk"
     for chunk in chunks:
-        assert chunk["type"] in FLEET_UI_CHUNK_TYPES, f"undocumented chunk type {chunk['type']!r}"
+        assert chunk["type"] in FLEET_STREAM_EVENT_TYPES, f"undocumented chunk type {chunk['type']!r}"
         variant = by_type[chunk["type"]]
         properties = variant["properties"]
         # Every emitted field must be declared by the OpenAPI hook, and every

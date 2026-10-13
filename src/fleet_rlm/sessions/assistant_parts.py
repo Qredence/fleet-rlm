@@ -7,7 +7,7 @@ wire-shape validation and serialization.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -49,6 +49,18 @@ def _require_nonblank(value: str, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} is required")
     return value
+
+
+CHILD_PROGRESS_DETAIL_MAX_CHARS = 200
+
+
+def validate_child_progress_details(details: Iterable[str]) -> None:
+    """Reject child progress evidence or gap entries longer than the shared bound.
+
+    Durable assistant parts and the live UI stream share this one bound.
+    """
+    if any(len(item) > CHILD_PROGRESS_DETAIL_MAX_CHARS for item in details):
+        raise ValueError(f"child progress detail exceeds {CHILD_PROGRESS_DETAIL_MAX_CHARS} characters")
 
 
 def _json_containers(value: Any) -> Any:
@@ -189,8 +201,7 @@ class ChildProgressPart(AssistantPartModel):
     @field_validator("evidence", "gaps")
     @classmethod
     def _bounded_details(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if any(len(item) > 200 for item in value):
-            raise ValueError("child progress detail exceeds 200 characters")
+        validate_child_progress_details(value)
         return value
 
 
@@ -264,22 +275,6 @@ class TextPart(AssistantPartModel):
         return value
 
 
-# Canonical vocabulary aliases
-StepAssistantPart = StepPart
-ReasoningAssistantPart = ReasoningPart
-CodeAssistantPart = CodePart
-OutputAssistantPart = OutputPart
-ToolCallAssistantPart = ToolCallPart
-SkillAssistantPart = SkillPart
-AttachmentAssistantPart = AttachmentPart
-WarningAssistantPart = WarningPart
-StatusAssistantPart = StatusPart
-ChildProgressAssistantPart = ChildProgressPart
-ArtifactAssistantPart = ArtifactPart
-UsageAssistantPart = UsagePart
-StructuredResultAssistantPart = StructuredResultPart
-TextAssistantPart = TextPart
-
 CommittedPart = (
     StepPart
     | ReasoningPart
@@ -300,20 +295,20 @@ CommittedPart = (
 AssistantPart = Annotated[CommittedPart, Field(discriminator="type")]
 
 AssistantPartModelUnion = (
-    StepAssistantPart,
-    ReasoningAssistantPart,
-    CodeAssistantPart,
-    OutputAssistantPart,
-    ToolCallAssistantPart,
-    SkillAssistantPart,
-    AttachmentAssistantPart,
-    WarningAssistantPart,
-    StatusAssistantPart,
-    ChildProgressAssistantPart,
-    ArtifactAssistantPart,
-    UsageAssistantPart,
-    StructuredResultAssistantPart,
-    TextAssistantPart,
+    StepPart,
+    ReasoningPart,
+    CodePart,
+    OutputPart,
+    ToolCallPart,
+    SkillPart,
+    AttachmentPart,
+    WarningPart,
+    StatusPart,
+    ChildProgressPart,
+    ArtifactPart,
+    UsagePart,
+    StructuredResultPart,
+    TextPart,
 )
 
 _ASSISTANT_PART_ADAPTER: TypeAdapter[AssistantPart] = TypeAdapter(AssistantPart)
@@ -346,41 +341,29 @@ def assistant_part_from_payload(payload: object) -> CommittedPart:
 
 
 __all__ = [
-    "ArtifactAssistantPart",
+    "CHILD_PROGRESS_DETAIL_MAX_CHARS",
     "ArtifactPart",
     "AssistantPart",
     "AssistantPartModel",
     "AssistantPartModelUnion",
-    "AttachmentAssistantPart",
     "AttachmentPart",
-    "ChildProgressAssistantPart",
     "ChildProgressPart",
-    "CodeAssistantPart",
     "CodePart",
     "CommittedPart",
     "CommittedTurnValidationError",
-    "OutputAssistantPart",
     "OutputPart",
-    "ReasoningAssistantPart",
     "ReasoningPart",
-    "SkillAssistantPart",
     "SkillPart",
-    "StatusAssistantPart",
     "StatusPart",
-    "StepAssistantPart",
     "StepPart",
-    "StructuredResultAssistantPart",
     "StructuredResultPart",
-    "TextAssistantPart",
     "TextPart",
-    "ToolCallAssistantPart",
     "ToolCallPart",
-    "UsageAssistantPart",
     "UsagePart",
-    "WarningAssistantPart",
     "WarningPart",
     "assistant_part_from_model",
     "assistant_part_from_payload",
     "assistant_part_payload",
     "assistant_part_to_model",
+    "validate_child_progress_details",
 ]

@@ -175,3 +175,23 @@ def test_start_omits_trace_id_when_absent() -> None:
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     payloads = AISDKUIProjector().project(recorder.record(RunStarted(delivery="live")))
     assert "traceId" not in payloads[0]
+
+
+@pytest.mark.parametrize("field", ["evidence", "gaps"])
+def test_live_and_durable_child_progress_share_one_detail_bound(field: str) -> None:
+    from fleet_rlm.api.ui_stream import ChildProgressData
+    from fleet_rlm.sessions.assistant_parts import (
+        CHILD_PROGRESS_DETAIL_MAX_CHARS,
+        ChildProgressPart,
+        CommittedTurnValidationError,
+    )
+
+    common = {"child_id": "child-1", "task_label": "task", "state": "running", "elapsed_ms": 0}
+    at_bound = "x" * CHILD_PROGRESS_DETAIL_MAX_CHARS
+    ChildProgressData(**common, cleanup_state="pending", **{field: [at_bound]})
+    ChildProgressPart(**common, **{field: (at_bound,)})
+
+    with pytest.raises(ValidationError, match="child progress detail exceeds 200 characters"):
+        ChildProgressData(**common, cleanup_state="pending", **{field: [at_bound + "x"]})
+    with pytest.raises(CommittedTurnValidationError, match="child progress detail exceeds 200 characters"):
+        ChildProgressPart(**common, **{field: (at_bound + "x",)})
