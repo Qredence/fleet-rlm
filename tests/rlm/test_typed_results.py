@@ -65,6 +65,19 @@ def test_observed_usage_prediction_usage_takes_precedence_over_nested_history() 
     assert usage["observed_lm_usage"] == {"test-model": {"total_tokens": 3}}
 
 
+def test_observed_usage_without_prediction_recovers_failed_turn_history() -> None:
+    """A failed or cancelled Turn has no Prediction; LM history is its only token evidence."""
+    from fleet_rlm.rlm.result import observed_usage
+
+    root = SimpleNamespace(model="root-model", history=[{"usage": {"prompt_tokens": 4, "completion_tokens": 2}}])
+    sub = SimpleNamespace(model="sub-model", history=[])
+
+    usage = observed_usage(None, duration_ms=2, lms=(root, sub))
+
+    assert usage["observed_lm_usage"] == {"root-model": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}
+    assert usage["iterations"] == 0
+
+
 def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
     from fleet_rlm.rlm.event_types import RLMReasoning
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome

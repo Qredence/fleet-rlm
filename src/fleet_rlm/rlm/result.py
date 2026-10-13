@@ -951,6 +951,9 @@ def observed_usage(
         with contextlib.suppress(ValueError):
             observed_lm_usage = _safe_observed_usage(raw_usage, filter_unknown=True)
     if not observed_lm_usage and lms:
+        # Fires when there is no tracked Prediction: a failed or cancelled Turn
+        # (``prediction`` is None) loses DSPy's usage tracker, so the Turn-owned
+        # LM histories are the only remaining token evidence.
         with contextlib.suppress(ValueError):
             observed_lm_usage = _history_token_usage(lms)
     payload: dict[str, object] = {
