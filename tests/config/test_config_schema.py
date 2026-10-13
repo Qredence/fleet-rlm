@@ -308,7 +308,7 @@ def test_secret_fields_are_never_operator_editable() -> None:
     editable = {spec.settings_field for spec in config.config_field_specs() if spec.group is not None}
     policies = config._field_policies()
     secret_fields = {name for name, meta in policies.items() if meta.secret}
-    assert secret_fields == {"daytona_api_key", "llm_api_key", "posthog_project_token", "tavily_api_key"}
+    assert secret_fields == {"daytona_api_key", "posthog_project_token", "tavily_api_key"}
     assert editable.isdisjoint(secret_fields)
 
 

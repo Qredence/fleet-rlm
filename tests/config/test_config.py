@@ -440,11 +440,11 @@ def test_redacted_policy_summary_never_includes_secret_values() -> None:
     from fleet_rlm.config.loader import redacted_policy_summary
 
     summary = redacted_policy_summary(
-        Settings(llm_api_key=SecretStr("private-llm-key")),
+        Settings(daytona_api_key=SecretStr("private-daytona-key")),
     )
 
     assert "environment=daytona" in summary
-    assert "private-llm-key" not in summary
+    assert "private-daytona-key" not in summary
 
 
 def test_startup_rejects_retired_environment_variables(monkeypatch: pytest.MonkeyPatch) -> None:

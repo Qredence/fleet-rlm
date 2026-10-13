@@ -40,19 +40,12 @@ def test_settings_exclude_secrets_from_serialization() -> None:
 
     settings = Settings(
         daytona_api_key="super-secret-daytona",
-        llm_api_key="super-secret-llm",
     )
     dumped = settings.model_dump(mode="json")
     dumped_str = str(dumped)
 
     assert "super-secret-daytona" not in dumped_str
-    assert "super-secret-llm" not in dumped_str
     assert "daytona_api_key" not in dumped or dumped.get("daytona_api_key") in {
-        None,
-        "",
-        "**********",
-    }
-    assert "llm_api_key" not in dumped or dumped.get("llm_api_key") in {
         None,
         "",
         "**********",

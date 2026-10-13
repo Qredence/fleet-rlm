@@ -23,6 +23,7 @@ from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.paths import volume_paths_from_settings
+from fleet_rlm.rlm.program import resolve_role_api_key
 from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 from tests.live._database import upgrade_to_head
 from tests.live._mvp_support import (
@@ -334,9 +335,10 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 phase = "secret_audit"
                 secret_values = tuple(
                     value
-                    for secret in (settings.daytona_api_key, settings.llm_api_key)
-                    if secret is not None
-                    for value in (secret.get_secret_value(),)
+                    for value in (
+                        *(secret.get_secret_value() for secret in (settings.daytona_api_key,) if secret is not None),
+                        *(resolve_role_api_key(settings, settings.llm_role(role)) or "" for role in ("root", "sub")),
+                    )
                     if value
                 )
                 _assert_secret_free(secret_values, first_chunks, second_chunks, final_text)

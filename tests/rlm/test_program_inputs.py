@@ -22,7 +22,7 @@ import pytest
 from pydantic import SecretStr
 
 import fleet_rlm.rlm.program as factory
-from fleet_rlm.config.settings import Settings
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.rlm.program import (
     TOOL_RLM_INSTRUCTIONS,
     WORKSPACE_MUTATION_RLM_INSTRUCTIONS,
@@ -1067,28 +1067,25 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
 
     settings = Settings()
 
-    assert settings.llm_api_key is None
     assert settings.root_model == "openai/gpt-4o-mini"
     with pytest.raises(RuntimeError, match="FLEET_OPENAI_API_KEY"):
         factory.build_model_bundle(settings)
 
 
-def test_whitespace_legacy_key_is_not_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FLEET_OPENAI_API_KEY", raising=False)
-    settings = Settings(llm_api_key=SecretStr("   "))
+def test_removed_llm_api_key_setting_is_rejected_without_echoing_the_secret() -> None:
+    with pytest.raises(FleetConfigurationError) as excinfo:
+        Settings(llm_api_key=SecretStr("legacy-key-value"))
 
-    assert factory.has_llm_credentials(settings) is False
+    assert "legacy-key-value" not in str(excinfo.value)
 
 
-def test_legacy_generic_key_does_not_cross_provider_role_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-    settings = Settings(
-        llm_api_key=SecretStr("legacy-key"),
-        root_llm_api_key_env="DATABRICKS_TOKEN",
-        sub_llm_api_key_env="DATABRICKS_TOKEN",
-    )
+def test_default_openai_key_name_resolves_both_provider_roles(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FLEET_OPENAI_API_KEY", "openai-role-key")
+    settings = Settings()
 
-    assert factory.resolve_role_api_key(settings, settings.llm_role("root")) is None
+    assert factory.resolve_role_api_key(settings, settings.llm_role("root")) == "openai-role-key"
+    assert factory.resolve_role_api_key(settings, settings.llm_role("sub")) == "openai-role-key"
+    assert factory.has_llm_credentials(settings) is True
 
 
 def test_explicit_role_environment_credentials_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1098,5 +1095,4 @@ def test_explicit_role_environment_credentials_are_detected(monkeypatch: pytest.
         sub_llm_api_key_env="DATABRICKS_TOKEN",
     )
 
-    assert settings.llm_api_key is None
     assert factory.has_llm_credentials(settings) is True

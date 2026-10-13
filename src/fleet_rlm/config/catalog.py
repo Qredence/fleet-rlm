@@ -11,15 +11,13 @@ class FleetFieldPolicy:
     """Authoritative policy declaration for one ``Settings`` field.
 
     The catalog contains exactly one declaration per ``Settings`` field so the supported
-    TOML location, operator grouping, editor affordances, and compatibility
-    disposition live in one catalog.  ``_TABLE_KEYS``, policy
-    flattening, and the ``config_policy`` editor inventory derive from these
-    declarations instead of mirroring field names by hand.
+    TOML location, operator grouping, and editor affordances live in one catalog.
+    ``_TABLE_KEYS``, policy flattening, and the ``config_policy`` editor inventory
+    derive from these declarations instead of mirroring field names by hand.
 
     ``toml_path=None`` marks fields that TOML cannot set: secrets resolved at
-    the runtime seam and programmatic-only compatibility inputs.  Operator-
-    editable fields must declare complete editor metadata plus a unique
-    ``rank`` that pins the policy inventory ordering.
+    the runtime seam.  Operator-editable fields must declare complete editor
+    metadata plus a unique ``rank`` that pins the policy inventory ordering.
     """
 
     toml_path: str | None
@@ -30,7 +28,6 @@ class FleetFieldPolicy:
     rank: int | None = None
     required_in_policy: bool = False
     secret: bool = False
-    compatibility: bool = False
     doc: str | None = None
 
 
@@ -56,12 +53,6 @@ FIELD_POLICIES: dict[str, FleetFieldPolicy] = {
     ),
     "daytona_org_id": FleetFieldPolicy(
         toml_path=None, doc="Daytona organization ID resolved at runtime from daytona.org_id_env"
-    ),
-    "llm_api_key": FleetFieldPolicy(
-        toml_path=None,
-        secret=True,
-        compatibility=True,
-        doc="Legacy programmatic fallback key for roles naming FLEET_OPENAI_API_KEY; never settable via TOML",
     ),
     "root_model": FleetFieldPolicy(
         toml_path="llm.root.model", group="Root LLM", label="Model id", editor="text", rank=7, required_in_policy=True

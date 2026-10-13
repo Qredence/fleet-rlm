@@ -141,7 +141,6 @@ class Settings(BaseModel):
     daytona_snapshot: str | None = Field(default=None)
     daytona_child_snapshot: str | None = Field(default=None)
     daytona_org_id: str | None = Field(default=None)
-    llm_api_key: SecretStr | None = Field(default=None)
     root_model: str = Field(
         default="openai/gpt-4o-mini",
         description="Root model id sent through the OpenAI-compatible Chat Completion provider",
@@ -490,10 +489,9 @@ def _build_field_specs() -> tuple[ConfigFieldSpec, ...]:
         if meta.toml_path is None:
             if meta.group is not None or meta.label is not None or meta.editor is not None or meta.rank is not None:
                 raise FleetConfigurationError(f"Settings.{name} declares editor metadata without a TOML mapping")
-            if not (meta.secret or meta.compatibility or name in env_targets):
+            if not (meta.secret or name in env_targets):
                 raise FleetConfigurationError(
-                    f"Settings.{name} has no TOML mapping and is neither secret, "
-                    "compatibility, nor environment-resolved"
+                    f"Settings.{name} has no TOML mapping and is neither secret nor environment-resolved"
                 )
             continue
         if meta.secret:

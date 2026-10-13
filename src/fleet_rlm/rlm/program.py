@@ -136,7 +136,6 @@ class AttachmentInput(FleetInputModel):
 
 
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
-_LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
 _MAX_REQUEST_CHARS = 100_000
 _MAX_CONTEXT_ATTACHMENT_COUNT = 32
 _MAX_PREVIEW_CHARS = 500
@@ -782,11 +781,7 @@ def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | Non
     if value is None:
         value = settings._dotenv_values.get(role.api_key_env)
     value = (value or "").strip()
-    if value:
-        return value
-    if role.api_key_env == _LEGACY_LLM_API_KEY_ENV and settings.llm_api_key is not None:
-        return settings.llm_api_key.get_secret_value().strip() or None
-    return None
+    return value or None
 
 
 def has_llm_credentials(settings: Settings) -> bool:

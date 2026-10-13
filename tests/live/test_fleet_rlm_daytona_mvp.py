@@ -34,6 +34,7 @@ from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.tracing import _local_tracking_server_available
 from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.program import resolve_role_api_key
 from fleet_rlm.rlm.result import truncate_public_text
 from fleet_rlm.sessions.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
@@ -744,9 +745,10 @@ def test_complete_daytona_mvp_through_fastapi(
 
     secret_values = tuple(
         value
-        for secret in (settings.daytona_api_key, settings.llm_api_key)
-        if secret is not None
-        for value in (secret.get_secret_value(),)
+        for value in (
+            *(secret.get_secret_value() for secret in (settings.daytona_api_key,) if secret is not None),
+            *(resolve_role_api_key(settings, settings.llm_role(role)) or "" for role in ("root", "sub")),
+        )
         if value
     )
 
