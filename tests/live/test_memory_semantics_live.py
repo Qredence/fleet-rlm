@@ -366,7 +366,7 @@ def test_live_old_relevant_memory_recovered_beyond_tail_window(tmp_path: Path) -
         assert len(old_memory_id) == 8
 
         store = run.memory_store()
-        remember_tool = WorkspaceMemoryToolHost(store).as_tools()[1]
+        remember_tool = next(tool for tool in WorkspaceMemoryToolHost(store).as_tools() if tool.name == "remember")
         filler_count = 0
         tail = store.read_tail(byte_budget=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES).content
         while old_memory_id in tail and filler_count < 48:
@@ -458,7 +458,7 @@ def test_live_provenance_and_supersession_through_promotion(tmp_path: Path) -> N
         assert replacement.supersedes_id == original_id
         assert _SUPERSEDE_REPLACEMENT in replacement.learning
 
-        search_tool = WorkspaceMemoryToolHost(store).as_tools()[4]
+        search_tool = next(tool for tool in WorkspaceMemoryToolHost(store).as_tools() if tool.name == "search_memories")
         searched = search_tool(query=_SUPERSEDE_QUERY, limit=8)
         searched_ids = [str(entry["id"]) for entry in searched["entries"]]
         assert replacement_id in searched_ids

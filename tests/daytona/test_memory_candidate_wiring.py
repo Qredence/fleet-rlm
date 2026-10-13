@@ -304,7 +304,9 @@ def test_promoted_agent_candidate_becomes_searchable_and_injectable_on_the_next_
     assert entries[0].source == "agent_candidate"
     assert entries[0].active is True
 
-    searched = WorkspaceMemoryToolHost(store).as_tools()[4](query="operator report evidence")
+    searched = next(tool for tool in WorkspaceMemoryToolHost(store).as_tools() if tool.name == "search_memories")(
+        query="operator report evidence"
+    )
     assert searched["count"] == 1
     assert searched["entries"][0]["source"] == "agent_candidate"
     digest = read_workspace_memory_injection_digest(store, request="Show operator report evidence")
@@ -344,7 +346,9 @@ def test_promotion_supersedes_only_an_active_target_and_updates_the_injection_vi
     assert replacement.active is True
     assert replacement.supersedes_id == "aaaa0001"
 
-    searched = WorkspaceMemoryToolHost(store).as_tools()[4](query="operator report")
+    searched = next(tool for tool in WorkspaceMemoryToolHost(store).as_tools() if tool.name == "search_memories")(
+        query="operator report"
+    )
     assert [entry["learning"] for entry in searched["entries"]] == ["operator report should stay compact"]
     digest = read_workspace_memory_injection_digest(store, request="operator report")
     assert "operator report should stay compact" in digest
@@ -359,7 +363,7 @@ def test_promotion_supersedes_only_an_active_target_and_updates_the_injection_vi
     assert replay.duplicate_count == 1
     assert len(store.list_entries(limit=16).entries) == 2
 
-    explicit = WorkspaceMemoryToolHost(store).as_tools()[1](
+    explicit = next(tool for tool in WorkspaceMemoryToolHost(store).as_tools() if tool.name == "remember")(
         key_learning="Author asked to keep report setup minimal",
         category="Preference",
     )
