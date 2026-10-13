@@ -12,7 +12,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 import dspy
@@ -20,6 +20,7 @@ import dspy
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.paths import VolumePaths, as_posix
 from fleet_rlm.tool_events import ToolEventView, bound_event_text
+from fleet_rlm.workspace.event_projection import project_event_fields
 from fleet_rlm.workspace.storage import VolumeBlobFs
 
 # ---------------------------------------------------------------------------
@@ -501,21 +502,6 @@ class AttachmentLifecycleService:
 # DSPy Tool Host
 # ---------------------------------------------------------------------------
 
-_EVENT_TEXT_MAX_CHARS = 256
-
-
-def _project_fields(result: object, fields: tuple[str, ...]) -> JsonValue:
-    if not isinstance(result, Mapping):
-        return {}
-    values = cast(Mapping[str, JsonValue], result)
-    return {
-        key: bound_event_text(values[key], max_chars=_EVENT_TEXT_MAX_CHARS)
-        if isinstance(values[key], str)
-        else values[key]
-        for key in fields
-        if key in values
-    }
-
 
 class AttachmentToolHost:
     """Bound Attachment reads for one Run; reauthorizes every call."""
@@ -636,7 +622,7 @@ class AttachmentToolHost:
             {
                 "read_attachment": ToolEventView(
                     input_projection=read_input,
-                    output_projection=lambda result: _project_fields(
+                    output_projection=lambda result: project_event_fields(
                         result,
                         ("ok", "error", "attachment_id", "filename", "content_type", "encoding"),
                     ),

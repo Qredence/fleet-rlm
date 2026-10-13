@@ -6,7 +6,7 @@ import hashlib
 import hmac
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 from uuid import UUID, uuid4
 
 import dspy
@@ -25,23 +25,9 @@ from fleet_rlm.workspace.artifacts import (
     sanitize_title,
     validate_content_size,
 )
+from fleet_rlm.workspace.event_projection import project_event_fields
 from fleet_rlm.workspace.paths import normalize_workspace_path
 from fleet_rlm.workspace.storage import VolumeBlobFs
-
-_EVENT_TEXT_MAX_CHARS = 256
-
-
-def _project_fields(result: object, fields: tuple[str, ...]) -> JsonValue:
-    if not isinstance(result, Mapping):
-        return {}
-    values = cast(Mapping[str, JsonValue], result)
-    return {
-        key: bound_event_text(values[key], max_chars=_EVENT_TEXT_MAX_CHARS)
-        if isinstance(values[key], str)
-        else values[key]
-        for key in fields
-        if key in values
-    }
 
 
 class ArtifactToolHost:
@@ -253,14 +239,14 @@ class ArtifactToolHost:
             {
                 "create_artifact": ToolEventView(
                     input_projection=artifact_input,
-                    output_projection=lambda result: _project_fields(
+                    output_projection=lambda result: project_event_fields(
                         result,
                         ("ok", "error", "kind", "title", "byte_size"),
                     ),
                 ),
                 "publish_workspace_artifact": ToolEventView(
                     input_projection=workspace_artifact_input,
-                    output_projection=lambda result: _project_fields(
+                    output_projection=lambda result: project_event_fields(
                         result,
                         ("ok", "error", "artifact_candidate_id", "kind", "title", "byte_size"),
                     ),
