@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import inspect
 import json
@@ -51,6 +52,9 @@ if TYPE_CHECKING:
 CERTIFIED_DSPY_VERSION = "3.4.0"
 _DATABRICKS_DEEPSEEK_SERVICE = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 _DATABRICKS_NATIVE_PROVIDER = "fleet-databricks"
+_ALIBABA_DEEPSEEK_MODEL = "deepseek-v4.1-flash"
+_ALIBABA_COMPATIBLE_PATH = "/compatible-mode/v1"
+_ALIBABA_NATIVE_PROVIDER = "fleet-alibaba"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -838,6 +842,10 @@ def build_lm(
             models={databricks_model: ModelSupport(response_schema=True)},
         )
         model_id = f"{_DATABRICKS_NATIVE_PROVIDER}/{databricks_model}"
+    elif model_id == f"openai/{_ALIBABA_DEEPSEEK_MODEL}" and (base_url or "").rstrip("/").endswith(
+        _ALIBABA_COMPATIBLE_PATH
+    ):
+        model_id = _register_alibaba_deepseek()
     kwargs: dict[str, Any] = {
         "model_type": "chat",
         "engine": "lm15",
@@ -857,6 +865,31 @@ def build_lm(
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
     return dspy.LM(model_id, **kwargs)
+
+
+def _register_alibaba_deepseek() -> str:
+    """Declare the DashScope compatible-mode DeepSeek route; return its model id.
+
+    A live provider probe showed this endpoint accepts ``json_object`` but
+    rejects ``json_schema``. Declaring schema support with a ``json_schema``
+    rejection makes stock ``JSONAdapter`` send only ``{"type": "json_object"}``
+    without claiming native function calling or reasoning. The declaration URL
+    is unreachable; callers reach this branch only with an explicit api_base.
+    """
+    register_provider(
+        ProviderDefinition.chat(
+            AccessPolicy(
+                provider=_ALIBABA_NATIVE_PROVIDER,
+                base_url="https://fleet.invalid",
+                supports=EndpointSupport(complete=True),
+                auth_modes=("bearer",),
+                auth_scheme=("bearer",),
+            ),
+            compat=dataclasses.replace(OpenAIChatCompat.preset("openai"), json_schema="reject"),
+        ),
+        models={_ALIBABA_DEEPSEEK_MODEL: ModelSupport(response_schema=True)},
+    )
+    return f"{_ALIBABA_NATIVE_PROVIDER}/{_ALIBABA_DEEPSEEK_MODEL}"
 
 
 @dataclass(frozen=True, slots=True)

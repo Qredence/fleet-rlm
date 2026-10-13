@@ -19,7 +19,6 @@ from fleet_rlm.rlm.submit_validation import is_finalization_action
 RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
-_ALIBABA_DEEPSEEK_MODEL = "openai/deepseek-v4.1-flash"
 _EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
 
 
@@ -132,16 +131,6 @@ def _action_code(response: object) -> object:
 
 class FleetJSONAdapter(dspy.JSONAdapter):
     """The pinned JSON action protocol plus a bounded corrective re-ask."""
-
-    def _prepare_response_format(self, lm: Any, lm_kwargs: dict[str, Any], signature: Signature) -> None:
-        # The selected DashScope endpoint accepted json_object in a live
-        # provider probe but rejected json_schema. DSPy's model catalog does
-        # not advertise either mode, so request only the proven wire format.
-        base_url = str(getattr(lm, "kwargs", {}).get("api_base", "")).rstrip("/")
-        if getattr(lm, "model", None) == _ALIBABA_DEEPSEEK_MODEL and base_url.endswith("/compatible-mode/v1"):
-            lm_kwargs["response_format"] = {"type": "json_object"}
-            return
-        super()._prepare_response_format(lm, lm_kwargs, signature)
 
     def __init__(
         self,

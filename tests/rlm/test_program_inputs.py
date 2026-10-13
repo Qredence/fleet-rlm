@@ -963,7 +963,12 @@ async def test_databricks_action_request_carries_json_schema(
 
 
 @pytest.mark.asyncio
-async def test_alibaba_action_request_uses_json_object_only(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("adapter_name", ["stock", "fleet"])
+@pytest.mark.parametrize("reasoning_effort", [None, "low"])
+async def test_alibaba_action_request_uses_json_object_only(
+    monkeypatch: pytest.MonkeyPatch, adapter_name: str, reasoning_effort: str | None
+) -> None:
+    """The declared provider alone makes stock JSONAdapter send json_object, never json_schema."""
     import dspy
     from dspy.clients.engines.lm15_engine import AsyncLM15Engine
     from dspy.lm15 import Request, Response, response_from_openai_chat
@@ -1004,14 +1009,34 @@ async def test_alibaba_action_request_uses_json_object_only(monkeypatch: pytest.
         "deepseek-v4.1-flash",
         api_key="token",
         base_url="https://dashscope.example/compatible-mode/v1",
+        max_tokens=900,
+        temperature=0.2,
+        reasoning_effort=reasoning_effort,
         cache=False,
     )
-    with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+    adapter = dspy.JSONAdapter() if adapter_name == "stock" else FleetJSONAdapter()
+    with dspy.context(lm=lm, adapter=adapter):
         result = await dspy.Predict(Action).acall(request="execute")
 
     assert result.code == "print(1)"
     assert len(seen) == 1
-    assert seen[0].config.response_format == {"type": "json_object"}
+    assert seen[0].model == "fleet-alibaba/deepseek-v4.1-flash"
+    assert not lm.supports_function_calling
+    config = seen[0].config
+    assert config.response_format == {"type": "json_object"}
+    assert (config.max_tokens, config.temperature, config.tool_choice) == (900, 0.2, None)
+    assert seen[0].tools == ()
+    if reasoning_effort is None:
+        assert config.reasoning is None
+    else:
+        assert config.reasoning is not None
+        assert config.reasoning.effort == reasoning_effort
+
+
+def test_other_compatible_mode_models_keep_the_generic_openai_route() -> None:
+    lm = factory.build_lm("qwen-max", api_key="token", base_url="https://dashscope.example/compatible-mode/v1")
+
+    assert lm.model == "openai/qwen-max"
 
 
 @pytest.mark.asyncio
