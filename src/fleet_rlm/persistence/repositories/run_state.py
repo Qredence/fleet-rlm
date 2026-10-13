@@ -203,10 +203,6 @@ def _decode_claim_code(value: str | None) -> ClaimFailureCode | None:
     raise RunStateError("persisted Run has an invalid failure code")
 
 
-def _claim_failure(failure: RunFailure) -> ClaimFailure:
-    return ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message)
-
-
 def _command_usage(command: ClaimCommand) -> RLMUsage | None:
     if isinstance(command, (FailClaim, BeginSettlement, RevokeClaim)):
         return cast(RLMUsage, command.usage)
@@ -1045,7 +1041,6 @@ __all__ = [
     "_cancel_tombstone_rows",
     "_cancelled_tombstone",
     "_claim_client_id",
-    "_claim_failure",
     "_claim_owner_matches",
     "_claim_recovery_owner",
     "_claim_snapshot_matches",
