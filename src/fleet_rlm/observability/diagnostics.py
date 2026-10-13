@@ -7,7 +7,7 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from dspy.utils.exceptions import AdapterParseError
+from dspy.utils.exceptions import AdapterParseError, LMRateLimitError
 
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -180,6 +180,11 @@ def trace_failure_category(exc: BaseException) -> str:
         return "prediction_output_too_large"
     if isinstance(exc, PredictionOutputError):
         return "prediction_output_invalid"
+    # DSPy wraps provider rate limits and may omit the HTTP status on its outer
+    # exception. Keep enclosing execution spans consistent with the LM span
+    # without changing public diagnostics or inspecting provider message text.
+    if any(isinstance(cause, LMRateLimitError) for cause in walk_cause_chain(exc)):
+        return "quota"
     return normalize_turn_failure(exc).cause_type
 
 
