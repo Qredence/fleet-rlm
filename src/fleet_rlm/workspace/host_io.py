@@ -165,9 +165,6 @@ class _WorkspaceMemoryStore:
     def read_injection_digest(self, *, request: str = "") -> str:
         return self._call("read_injection_digest", request=request)
 
-    def read_recent(self, *, limit: int = 50) -> Any:
-        return self._call("read_recent", limit=limit)
-
     def search(self, query: str, *, category: str | None = None, limit: int = 8) -> Any:
         return self._call("search", query, category=category, limit=limit)
 

@@ -41,7 +41,6 @@ from fleet_rlm.workspace.paths import (
 MAX_STORAGE_LIST_LIMIT = 100
 MAX_STORAGE_READ_CHARS = 10_000
 MAX_WORKSPACE_FILE_BYTES = 10_000_000
-MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES
 WORKSPACE_MEMORY_BYTE_BUDGET = 64_000
 
 
@@ -1270,16 +1269,6 @@ class WorkspaceMemoryStorage:
             "byte_size": byte_size,
         }
 
-    def replace_bytes(self, path: str, content: bytes, *, expected_sha256: str | None = None) -> WorkspaceEntry:
-        text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
-        return self._session.write_text(
-            normalize_workspace_path(path), text, overwrite=True, expected_sha256=expected_sha256
-        )
-
-    def append_bytes(self, path: str, content: bytes) -> WorkspaceEntry:
-        text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
-        return self._session.append_text(normalize_workspace_path(path), text)
-
     def read_tail(self, path: str, *, byte_budget: int | None = None) -> Mapping[str, object]:
         return self.read_bytes(path, byte_budget=byte_budget)
 
@@ -1614,7 +1603,6 @@ class AsyncDaytonaVolumeFS:
 
 
 __all__ = [
-    "MAX_FILE_BYTES",
     "MAX_STORAGE_LIST_LIMIT",
     "MAX_STORAGE_READ_CHARS",
     "MAX_WORKSPACE_FILE_BYTES",
