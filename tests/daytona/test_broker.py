@@ -466,9 +466,9 @@ def test_poll_returns_a_typed_error_when_a_tool_result_exceeds_the_envelope() ->
 
 
 def test_broker_runtime_allows_bounded_high_precision_integer_conversion() -> None:
-    from fleet_rlm.daytona.interpreter import _SandboxProcessBackend
+    from fleet_rlm.daytona.interpreter import _SDK_CONTEXT_PRELUDE
 
-    assert "sys.set_int_max_str_digits(200_000)" in __import__("inspect").getsource(_SandboxProcessBackend._execute_sdk)
+    assert "sys.set_int_max_str_digits(200_000)" in _SDK_CONTEXT_PRELUDE
 
 
 @pytest.mark.parametrize("error_type", [TypeError, RuntimeError])

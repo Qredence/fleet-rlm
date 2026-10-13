@@ -140,8 +140,9 @@ async def test_runtime_probe_checks_profile_dependencies_and_cleans_up(
     async def create(**_kwargs):
         return sandbox
 
-    async def delete(received):
+    async def delete(received, *, wait):
         assert received is sandbox
+        assert wait is False, "confirm_absence is the authoritative destruction check"
         operations.append("delete-sandbox")
 
     async def get(sandbox_id):

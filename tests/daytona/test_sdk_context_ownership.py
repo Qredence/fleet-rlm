@@ -467,3 +467,19 @@ def test_worker_scope_drops_its_client_even_when_a_close_step_fails():
     assert scope._client is None and scope._sandbox is None
     scope.close()
     client._subscription_manager.shutdown.assert_called_once()
+
+
+@pytest.mark.usefixtures("broker")
+def test_context_prelude_and_capture_helper_are_installed_once_per_context():
+    service = LocalSDKInterpreter()
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=service))
+    assert backend.run("value = 41").error is None
+    assert backend.run("print(value + 1)").stdout == "42\n"
+    setup, *actions = service.calls
+    assert "def _fleet_capture_action" in setup and "chdir('/workspace')" in setup
+    assert len(actions) == 2
+    for action in actions:
+        assert "def _fleet_capture_action" not in action
+        assert "chdir" not in action
+        assert "_fleet_capture_action(" in action
+    backend.close()

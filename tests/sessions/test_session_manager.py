@@ -1402,7 +1402,7 @@ async def test_lease_construction_failure_fences_persisted_replacement_before_cl
         del args, kwargs
         raise RuntimeError("interpreter construction interrupted")
 
-    monkeypatch.setattr("fleet_rlm.daytona.runtime._build_interpreter_factory", fail_construction)
+    monkeypatch.setattr("fleet_rlm.daytona.runtime.sandbox_interpreter_factory", fail_construction)
 
     with pytest.raises(RuntimeError, match="interpreter construction interrupted"):
         await _acquire(mgr, request)

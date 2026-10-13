@@ -22,9 +22,9 @@ from fleet_rlm.daytona.specs import (
     SandboxPlatform,
     VolumeClient,
     VolumeConfig,
-    _create_daytona_sandbox,
-    _expected_workspace_mount,
+    create_daytona_sandbox,
     ensure_shared_volume_layout,
+    expected_workspace_mount,
     get_or_create_volume_id,
     sandbox_state,
     verify_sandbox_spec,
@@ -199,7 +199,9 @@ class WorkspaceIO:
                     try:
                         await candidate.refresh_data()
                         if sandbox_state(candidate) == "stopped":
-                            await self._platform.start(candidate.id)
+                            await self._platform.start(
+                                candidate.id, timeout=max(1.0, deadline - asyncio.get_running_loop().time())
+                            )
                             await candidate.refresh_data()
                         if sandbox_state(candidate) == "running":
                             sandbox, lease = candidate, candidate_lease
@@ -217,13 +219,13 @@ class WorkspaceIO:
                             await asyncio.sleep(0.05)
                     volume_config = self._volume_config
                     volume_id = await get_or_create_volume_id(self._volume_client, volume_config)
-                    expected = _expected_workspace_mount(volume_config, volume_id, workspace_id)
+                    expected = expected_workspace_mount(volume_config, volume_id, workspace_id)
                     permit = await self._admission.acquire(deadline=deadline, host_io=True)
                     if not self.accepting:
                         permit.release()
                         raise RuntimeError("Daytona runtime closed during Workspace I/O admission")
                     create_task = asyncio.create_task(
-                        _create_daytona_sandbox(
+                        create_daytona_sandbox(
                             self._platform,
                             expected,
                             labels={
@@ -232,6 +234,7 @@ class WorkspaceIO:
                                 "workspace_id": str(workspace_id),
                             },
                             ephemeral=not retain_warm,
+                            timeout=max(1.0, deadline - asyncio.get_running_loop().time()),
                         ),
                         name="fleet-daytona-workspace-io-create",
                     )

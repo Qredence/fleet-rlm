@@ -173,9 +173,11 @@ limits remain separate. Recursive calls retain the existing 10-second delivery
 margin so results and cleanup can return within their caller's deadline.
 At turn expiry or cancellation, Fleet force-stops the affected Daytona sandbox
 through its runtime owner. The mounted Volume persists; temporary Python state
-is lost and partial file writes are not rolled back. Provider idle auto-stop is
-disabled during an active execution lease because preview traffic does not
-refresh Daytona's idle timer; healthy root release restores the previous policy.
+is lost and partial file writes are not rolled back. Preview traffic does not
+refresh Daytona's idle timer, so while a Turn holds the root lease Fleet
+refreshes the Sandbox's provider activity every 60 seconds and leaves the
+provider auto-stop interval unchanged. Three consecutive heartbeat failures
+taint the root and fail the Turn's release.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.

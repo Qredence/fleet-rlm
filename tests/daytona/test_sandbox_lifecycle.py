@@ -20,7 +20,6 @@ from fleet_rlm.daytona.errors import (
     ProviderRequestError,
     classify_provider_error,
     is_sandbox_not_found,
-    is_transient_provider_failure,
     map_provider_error,
     provider_status_category,
     sanitize_failure_text,
@@ -154,33 +153,6 @@ def test_sanitize_failure_text_caps_after_redaction() -> None:
 
     assert len(text) == 200
     assert "secret" not in text
-
-
-@pytest.mark.parametrize(
-    ("exc", "expected"),
-    [
-        (SimpleNamespace(status_code=503), True),
-        (TimeoutError("timed out"), True),
-        (ConnectionError("offline"), True),
-        (ProviderRequestError("502 Bad Gateway", cause_type="DaytonaError"), True),
-        (_AuthError(), False),
-        (SimpleNamespace(status_code=422), False),
-        (
-            ProviderRequestError(
-                "Total disk limit exceeded. Upgrade your organization's Tier.",
-                cause_type="DaytonaValidationError",
-                status_code=400,
-            ),
-            False,
-        ),
-        (ProviderRequestError("mount", cause_type="WorkspaceMountMismatch"), False),
-        (ProviderRequestError("404 sandbox missing", cause_type="DaytonaError"), False),
-        (ProviderRequestError("processed 15001 objects", cause_type="DaytonaError"), False),
-        (RuntimeError("other"), False),
-    ],
-)
-def test_is_transient_provider_failure(exc: object, expected: bool) -> None:
-    assert is_transient_provider_failure(exc) is expected
 
 
 @pytest.mark.asyncio
@@ -824,7 +796,7 @@ class _SandboxStub:
 
 class _FsStub:
     async def list_files(self, _root: str, *, depth: int | None) -> list[Any]:
-        assert depth is None
+        assert depth == 1
         return []
 
     async def delete_file(self, _path: str, *, recursive: bool = False) -> None:
@@ -1057,3 +1029,47 @@ async def test_child_confirmation_body_type_error_is_not_retried(failed_acquisit
     assert permit._released
     permit.release()
     assert admission._semaphore._value == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sandbox_id,expected_wait", [("child", False), (None, True)])
+async def test_child_deletion_waits_only_when_absence_cannot_be_polled(sandbox_id, expected_wait) -> None:
+    from fleet_rlm.daytona.leases import AbsenceConfirmation, DaytonaAdmission, cleanup_after_failed_acquire
+
+    admission = DaytonaAdmission(max_active_leases=1)
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    platform = SimpleNamespace(delete=AsyncMock(), get=AsyncMock(return_value=None))
+    sandbox = SimpleNamespace(id=sandbox_id)
+
+    async def confirm(**_kwargs: object):
+        return AbsenceConfirmation(sandbox_id="child", observations=("absent",), duration_s=0.0)
+
+    await cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit, confirm=confirm)
+    assert platform.delete.await_args.kwargs == {"wait": expected_wait}
+
+
+@pytest.mark.asyncio
+async def test_live_platform_passes_ttl_and_remaining_time_to_the_sdk() -> None:
+    calls: list[tuple[str, Any, dict[str, Any]]] = []
+
+    class Client:
+        async def create(self, params: Any, **kwargs: Any) -> Any:
+            calls.append(("create", params, kwargs))
+            return SimpleNamespace(id="child")
+
+        async def get(self, sandbox_id: str) -> Any:
+            return SimpleNamespace(id=sandbox_id)
+
+        async def start(self, sandbox: Any, **kwargs: Any) -> None:
+            calls.append(("start", sandbox.id, kwargs))
+
+    platform = LiveDaytonaPlatform(Client(), _SPEC)
+    await platform.create(with_volume=False, ephemeral=True, ttl_minutes=7, timeout=12.5)
+    await platform.create(with_volume=False)
+    await platform.start("root", timeout=0.2)
+    await platform.start("root")
+    (_, first, first_kwargs), (_, second, second_kwargs) = calls[:2]
+    assert (first.ttl_minutes, first_kwargs) == (7, {"timeout": 12.5})
+    assert (second.ttl_minutes, second_kwargs) == (None, {})
+    # The SDK treats 0 as unlimited, so a nearly expired deadline still waits one second.
+    assert calls[2:] == [("start", "root", {"timeout": 1.0}), ("start", "root", {})]

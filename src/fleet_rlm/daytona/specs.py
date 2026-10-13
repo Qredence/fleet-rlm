@@ -84,11 +84,13 @@ class SandboxPlatform(Protocol):
         domain_allow_list: str | None = None,
         auto_stop_interval: int | None = None,
         auto_delete_interval: int | None = None,
+        ttl_minutes: int | None = None,
+        timeout: float | None = None,
     ) -> Any: ...
 
     async def delete(self, sandbox_id: Any, *, wait: bool = True, timeout: float = 60) -> None: ...
 
-    async def start(self, sandbox_id: str) -> None: ...
+    async def start(self, sandbox_id: str, *, timeout: float | None = None) -> None: ...
 
     async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None: ...
 
@@ -491,11 +493,16 @@ def verify_sandbox_spec(sandbox: Any, spec: DaytonaSandboxSpec) -> None:
         )
 
 
+def state_text(raw: Any) -> str:
+    """Return a provider state (enum or string) as lower-case text."""
+    return str(getattr(raw, "value", raw) or "").strip().lower()
+
+
 def normalize_state(raw: Any) -> ProviderState:
     """Normalize provider-specific states at the provider adapter boundary."""
     if raw is None:
         return "missing"
-    text = str(getattr(raw, "value", raw)).strip().lower()
+    text = state_text(raw)
     if text in RUNNING_STATES:
         return "running"
     if text in STOPPED_STATES:
@@ -534,17 +541,16 @@ def expected_workspace_mount(
     )
 
 
-_expected_workspace_mount = expected_workspace_mount
-
-
 async def create_daytona_sandbox(
     platform: SandboxPlatform,
     expected: ExpectedWorkspaceMount,
     *,
     labels: dict[str, str],
     ephemeral: bool,
+    timeout: float | None = None,
 ) -> Any:
     """Create a sandbox from its already validated Volume binding."""
+    extra: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
     try:
         return await platform.create(
             volume_id=expected.volume_id,
@@ -563,9 +569,7 @@ async def create_daytona_sandbox(
             ),
             labels=labels,
             ephemeral=ephemeral,
+            **extra,
         )
     except Exception as exc:
         raise map_provider_error(exc) from exc
-
-
-_create_daytona_sandbox = create_daytona_sandbox

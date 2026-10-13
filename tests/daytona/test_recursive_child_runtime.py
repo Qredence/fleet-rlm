@@ -16,8 +16,8 @@ from fleet_rlm.daytona import children as children_module
 from fleet_rlm.daytona import errors as errors_module
 from fleet_rlm.daytona import leases as leases_module
 from fleet_rlm.daytona import runtime as recursive_child_runtime
-from fleet_rlm.daytona.children import ChildRuntimeLease, ChildRuntimeLeaseState
-from fleet_rlm.daytona.leases import DaytonaAdmission
+from fleet_rlm.daytona.children import ChildRuntimeLease
+from fleet_rlm.daytona.leases import DaytonaAdmission, LeaseState
 from fleet_rlm.daytona.specs import (
     DaytonaEnvironmentProfile,
     recursive_child_volume_subpath,
@@ -177,7 +177,7 @@ def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
     second = threading.Thread(target=run_second_close)
     first.start()
     assert started.wait(2)
-    assert lease.state is ChildRuntimeLeaseState.CLOSING
+    assert lease.state is LeaseState.CLOSING
     second.start()
     assert second_entered.wait(2)
     assert second.is_alive()
@@ -187,7 +187,7 @@ def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
 
     assert errors == []
     assert calls == ["close"]
-    assert lease.state is ChildRuntimeLeaseState.CLOSED
+    assert lease.state is LeaseState.CLOSED
     lease.close()
     assert calls == ["close"]
 
@@ -248,7 +248,7 @@ def test_child_runtime_lease_failure_is_failed_and_reobserved() -> None:
     lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
     with pytest.raises(RuntimeError, match="cleanup failed"):
         lease.close()
-    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert lease.state is LeaseState.FAILED
     assert isinstance(lease.close_error, RuntimeError)
 
     with pytest.raises(RuntimeError, match="cleanup failed"):
@@ -308,16 +308,23 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     assert lease.sandbox_id == child.id
     assert lease.volume_id == "shared-volume"
     assert lease.volume_subpath == f"workspaces/{workspace_id}/sessions/{session_id}/workspace"
+    assert 0 < platform.create_calls[0].pop("timeout") <= 30
     assert platform.create_calls == [
         {
             "profile": DaytonaEnvironmentProfile.WORKSPACE_CHILD,
             "volume_id": "shared-volume",
             "mount_path": "/workspace",
             "volume_subpath": lease.volume_subpath,
-            "labels": {"fleet.runtime": "recursive-child"},
+            "labels": {
+                "fleet.runtime": "recursive-child",
+                "fleet.session_id": str(session_id),
+                "fleet.run_id": str(run_id),
+            },
             "with_volume": True,
             "ephemeral": True,
             "auto_stop_interval": 0,
+            # ceil(30s remaining / 60) plus the provider-side cleanup margin.
+            "ttl_minutes": 1 + children_module._CHILD_TTL_MARGIN_MINUTES,
         }
     ]
 
@@ -370,19 +377,23 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
     assert lease.volume_id == ""
     assert lease.volume_subpath == ""
     assert lease.data_path == f"/tmp/fleet/child-data/{run_id}/1"
-    assert platform.create_calls == [
-        {
-            "profile": DaytonaEnvironmentProfile.SEMANTIC_CHILD,
-            "volume_id": None,
-            "mount_path": None,
-            "volume_subpath": None,
-            "labels": {"fleet.runtime": "recursive-child", "fleet.profile": "semantic-child"},
-            "with_volume": False,
-            "ephemeral": True,
-            "auto_stop_interval": 0,
-            "network_block_all": True,
-        }
-    ]
+    (call,) = platform.create_calls
+    labels = call.pop("labels")
+    assert 0 < call.pop("timeout") <= 30
+    assert labels["fleet.runtime"] == "recursive-child"
+    assert labels["fleet.profile"] == "semantic-child"
+    assert labels["fleet.run_id"] == str(run_id)
+    assert call == {
+        "profile": DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+        "volume_id": None,
+        "mount_path": None,
+        "volume_subpath": None,
+        "with_volume": False,
+        "ephemeral": True,
+        "auto_stop_interval": 0,
+        "ttl_minutes": 1 + children_module._CHILD_TTL_MARGIN_MINUTES,
+        "network_block_all": True,
+    }
 
     await asyncio.to_thread(lease.close)
     assert child_fs.files == {"/home/daytona/fleet/workspace-file.txt"}

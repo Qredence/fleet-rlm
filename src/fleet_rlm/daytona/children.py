@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import inspect
 import logging
+import math
 import time
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from concurrent.futures import Future, wait
@@ -40,10 +40,10 @@ from fleet_rlm.daytona.provider import list_files, read_file, write_file
 from fleet_rlm.daytona.specs import (
     DaytonaEnvironmentProfile,
     SandboxPlatform,
+    ensure_directories,
+    is_not_found,
+    sandbox_filesystem,
 )
-from fleet_rlm.daytona.specs import ensure_directories as _ensure_directories
-from fleet_rlm.daytona.specs import is_not_found as _is_not_found
-from fleet_rlm.daytona.specs import sandbox_filesystem as _sandbox_filesystem
 from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
 from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.sessions.bindings import (
@@ -65,7 +65,13 @@ _CHILD_RESULT_MAX_ENTRIES = 1024
 _PROVIDER_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 
 
-ChildRuntimeLeaseState = LeaseState
+_CHILD_TTL_MARGIN_MINUTES = 5
+
+
+def child_ttl_minutes(deadline: float) -> int:
+    """Provider TTL covering the invocation's remaining time plus a cleanup margin."""
+    remaining = max(0.0, deadline - time.monotonic())
+    return max(1, math.ceil(remaining / 60)) + _CHILD_TTL_MARGIN_MINUTES
 
 
 @dataclass(slots=True, eq=False)
@@ -82,13 +88,13 @@ class ChildRuntimeLease:
     _read_result_files: Callable[[Sequence[str]], Mapping[str, bytes]] | None = field(
         default=None, repr=False, kw_only=True
     )
-    _state: ChildRuntimeLeaseState = field(default=ChildRuntimeLeaseState.OPEN, init=False, repr=False)
+    _state: LeaseState = field(default=LeaseState.OPEN, init=False, repr=False)
     _close_error: BaseException | None = field(default=None, init=False, repr=False)
     _condition: Condition = field(default_factory=Condition, init=False, repr=False)
     _closing_thread_id: int | None = field(default=None, init=False, repr=False)
 
     @property
-    def state(self) -> ChildRuntimeLeaseState:
+    def state(self) -> LeaseState:
         with self._condition:
             return self._state
 
@@ -112,7 +118,7 @@ class ChildRuntimeLease:
         return self._read_result_files(paths)
 
     def _require_open(self) -> None:
-        if self.state is not ChildRuntimeLeaseState.OPEN:
+        if self.state is not LeaseState.OPEN:
             raise RuntimeError("child lease file operations require an open lease")
 
     @property
@@ -122,26 +128,26 @@ class ChildRuntimeLease:
 
     def close(self) -> None:
         with self._condition:
-            if self._state is ChildRuntimeLeaseState.CLOSED:
+            if self._state is LeaseState.CLOSED:
                 return
-            if self._state is ChildRuntimeLeaseState.CLOSING:
+            if self._state is LeaseState.CLOSING:
                 if self._closing_thread_id == get_ident():
                     raise RuntimeError("recursive child lease close is not reentrant")
-                while self._state is ChildRuntimeLeaseState.CLOSING:
+                while self._state is LeaseState.CLOSING:
                     self._condition.wait()
-                if self._state is ChildRuntimeLeaseState.CLOSED:
+                if self._state is LeaseState.CLOSED:
                     return
-                if self._state is ChildRuntimeLeaseState.FAILED:
+                if self._state is LeaseState.FAILED:
                     error = self._close_error
                     if error is None:
                         raise RuntimeError("recursive child lease close failed")
                     raise error
-            if self._state is ChildRuntimeLeaseState.FAILED:
+            if self._state is LeaseState.FAILED:
                 error = self._close_error
                 if error is None:
                     raise RuntimeError("recursive child lease close failed")
                 raise error
-            self._state = ChildRuntimeLeaseState.CLOSING
+            self._state = LeaseState.CLOSING
             self._closing_thread_id = get_ident()
 
         try:
@@ -149,13 +155,13 @@ class ChildRuntimeLease:
         except BaseException as exc:
             with self._condition:
                 self._close_error = exc
-                self._state = ChildRuntimeLeaseState.FAILED
+                self._state = LeaseState.FAILED
                 self._closing_thread_id = None
                 self._condition.notify_all()
             raise
         else:
             with self._condition:
-                self._state = ChildRuntimeLeaseState.CLOSED
+                self._state = LeaseState.CLOSED
                 self._closing_thread_id = None
                 self._condition.notify_all()
 
@@ -386,7 +392,7 @@ async def _assert_no_child_symlink(
         try:
             info = await get_info(path)
         except Exception as exc:
-            if allow_missing and _is_not_found(exc):
+            if allow_missing and is_not_found(exc):
                 continue
             raise
         if info is None:
@@ -400,19 +406,6 @@ async def _assert_no_child_symlink(
 def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
     if is_authorized is not None and not is_authorized():
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
-
-
-async def _close_child_lease(lease: Any) -> Any:
-    """Close a sync or async child lease."""
-    close = getattr(lease, "close", None)
-    if not callable(close):
-        raise TypeError("child lease does not expose close()")
-    if inspect.iscoroutinefunction(close):
-        return await close()
-    result = await asyncio.to_thread(close)
-    if inspect.isawaitable(result):
-        return await result
-    return result
 
 
 @dataclass(slots=True)
@@ -614,7 +607,9 @@ class ChildSandboxes:
         child_files_path = scratch_path
         try:
             require_authorized(is_authorized)
-            labels = {"fleet.runtime": "recursive-child"}
+            labels = {"fleet.runtime": "recursive-child", "fleet.run_id": str(run_id)}
+            if session_id is not None:
+                labels["fleet.session_id"] = str(session_id)
             if semantic:
                 labels["fleet.profile"] = profile.value
             create_kwargs: dict[str, Any] = {
@@ -626,6 +621,10 @@ class ChildSandboxes:
                 "with_volume": not semantic,
                 "ephemeral": True,
                 "auto_stop_interval": 0,
+                # A provider-side backstop: a child Fleet fails to delete is
+                # destroyed shortly after its invocation deadline.
+                "ttl_minutes": child_ttl_minutes(deadline),
+                "timeout": max(1.0, deadline - time.monotonic()),
             }
             if semantic:
                 create_kwargs["network_block_all"] = True
@@ -651,8 +650,8 @@ class ChildSandboxes:
             )
             require_authorized(is_authorized)
             if not semantic:
-                fs = _sandbox_filesystem(sandbox)
-                await _ensure_directories(
+                fs = sandbox_filesystem(sandbox)
+                await ensure_directories(
                     fs,
                     (
                         "/tmp/fleet",
@@ -682,9 +681,9 @@ class ChildSandboxes:
                 validated = _validate_child_file_mapping(files, max_bytes=_PROVIDER_CHILD_STAGE_MAX_BYTES)
 
                 async def stage() -> None:
-                    fs = _sandbox_filesystem(sandbox)
+                    fs = sandbox_filesystem(sandbox)
                     await _assert_no_child_symlink(fs, child_files_path, allow_missing=True)
-                    await _ensure_directories(
+                    await ensure_directories(
                         fs,
                         (
                             "/tmp/fleet",
@@ -702,7 +701,7 @@ class ChildSandboxes:
                         )
                         destination = f"{child_files_path}/{relative}"
                         parent = str(PurePosixPath(destination).parent)
-                        await _ensure_directories(fs, (parent,))
+                        await ensure_directories(fs, (parent,))
                         await write_file(sandbox, destination, content)
 
                 run_fs(stage())
@@ -711,7 +710,7 @@ class ChildSandboxes:
                 validated_paths = _validate_child_relative_paths(paths)
 
                 async def read() -> Mapping[str, bytes]:
-                    fs = _sandbox_filesystem(sandbox)
+                    fs = sandbox_filesystem(sandbox)
                     await _assert_no_child_symlink(fs, child_files_path)
                     # Daytona lists one level when no depth is sent, so a
                     # root-only listing never sees nested declared files.
@@ -725,7 +724,7 @@ class ChildSandboxes:
                         try:
                             entries = await list_files(sandbox, parent, depth=1)
                         except Exception as exc:
-                            if not _is_not_found(exc):
+                            if not is_not_found(exc):
                                 raise
                             entries = []
                         if len(entries) > _CHILD_RESULT_MAX_ENTRIES:

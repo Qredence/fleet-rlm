@@ -24,6 +24,7 @@ from fleet_rlm.daytona.specs import (
     PREWARM_RUN_ID,
     SandboxPlatform,
     sandbox_state,
+    state_text,
 )
 from fleet_rlm.rlm.ownership import OwnedEffect
 
@@ -32,9 +33,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_CLOSE_RESULT_TIMEOUT_S = 60.0
-
 
 CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
 
@@ -161,12 +159,12 @@ def _lifecycle_raw_state(target: Any) -> str:
     raw = getattr(target, "state", None)
     if raw is None:
         raw = getattr(target, "status", None)
-    return str(getattr(raw, "value", raw) or "").strip().lower()
+    return state_text(raw)
 
 
 def classify_deletion_phase(raw_state: Any) -> DeletionPhase:
     """Map one raw provider state string (or enum) onto the public phase model."""
-    text = str(getattr(raw_state, "value", raw_state) or "").strip().lower()
+    text = state_text(raw_state)
     if text in _ABSENT_STATES:
         return "absent"
     if text in _DELETING_STATES:
@@ -278,10 +276,6 @@ class ActiveLeaseConflictError(RuntimeError):
 
 
 class DaytonaLeaseAcquisitionTimeoutError(RuntimeError):
-    pass
-
-
-class LeaseCleanupError(RuntimeError):
     pass
 
 
@@ -526,8 +520,10 @@ def schedule_owned_close(
 
 
 async def purge_regular_files(sandbox: Any, mount_path: str) -> None:
+    """Delete the scope's top-level entries; directories are removed recursively."""
     root = PurePosixPath(mount_path)
-    entries = await sandbox.fs.list_files(str(root), depth=None)
+    # Only direct children are needed: each directory is deleted recursively.
+    entries = await sandbox.fs.list_files(str(root), depth=1)
     files: list[PurePosixPath] = []
     directories: list[PurePosixPath] = []
     for entry in entries:
@@ -548,7 +544,7 @@ async def purge_regular_files(sandbox: Any, mount_path: str) -> None:
 
     for path in files:
         await sandbox.fs.delete_file(str(path))
-    for path in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+    for path in directories:
         await sandbox.fs.delete_file(str(path), recursive=True)
 
 
@@ -564,7 +560,9 @@ async def _request_child_deletion(
     """Request deletion once, then independently establish provider absence."""
     delete_error: Exception | None = None
     try:
-        await platform.delete(sandbox_id if sandbox_id is not None else sandbox)
+        # An identified child's absence is confirmed by polling below, so the
+        # request does not also block on the SDK's own destroyed-state wait.
+        await platform.delete(sandbox_id if sandbox_id is not None else sandbox, wait=sandbox_id is None)
     except Exception as exc:
         delete_error = exc
     if sandbox_id is None:

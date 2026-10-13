@@ -27,7 +27,6 @@ def configured_invocation_factory(interpreter: Any):
     def create(**configuration: Any):
         bindings = {
             "turn_budget": "bind_turn_budget",
-            "turn_request": "bind_turn_request",
             "async_bridge": "bind_async_bridge",
             "context_capsule": "bind_context_capsule",
         }

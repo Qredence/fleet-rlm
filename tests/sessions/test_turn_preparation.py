@@ -1882,8 +1882,9 @@ def environment_case(monkeypatch: pytest.MonkeyPatch):
         begin_root_invocation=AsyncMock(return_value=lambda: events.append("gate-release")),
         acquire_root_session=AsyncMock(return_value=owner),
         track_sandbox=MagicMock(),
-        suspend_root_autostop=AsyncMock(),
-        restore_root_autostop=AsyncMock(side_effect=lambda *_a, **_k: events.append("autostop-restore")),
+        start_root_heartbeat=MagicMock(
+            return_value=SimpleNamespace(stop=AsyncMock(side_effect=lambda: events.append("heartbeat-stop")))
+        ),
         mark_root_tainted=MagicMock(side_effect=lambda *_a: events.append("tainted")),
         root_is_tainted=lambda *_args: False,
         close_root_session=AsyncMock(side_effect=lambda *_a, **_k: events.append("root-retired")),
@@ -1926,13 +1927,27 @@ async def test_run_environment_release_closes_storage_after_cleanup_and_before_g
     case = environment_case
     environment = await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
     await environment.release()
-    assert case.events == ["scratch-done", "autostop-restore", "storage-close", "gate-release"]
+    assert case.events == ["scratch-done", "heartbeat-stop", "storage-close", "gate-release"]
     case.preparation.dispatcher.sync_client_factory.assert_not_called()
     case.sandbox.close.assert_not_called()
     case.sinks[0].close()
     assert case.events.count("storage-close") == 1
     with pytest.raises(RuntimeError, match="Run storage is closed"):
         await environment.attachment_sink.read(environment.context_mount_path + "/late", max_bytes=10)
+
+
+@pytest.mark.asyncio
+async def test_failed_root_heartbeat_surfaces_at_release_and_taints_root(environment_case):
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    case = environment_case
+    failure = DaytonaAdapterError(message="Sandbox activity heartbeat failed", cause_type="SandboxHeartbeatError")
+    case.runtime.start_root_heartbeat.return_value = SimpleNamespace(stop=AsyncMock(return_value=failure))
+    environment = await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
+    with pytest.raises(DaytonaAdapterError, match="heartbeat failed"):
+        await environment.release()
+    case.runtime.mark_root_tainted.assert_called()
+    assert case.events[-2:] == ["storage-close", "gate-release"]
 
 
 @pytest.mark.asyncio
@@ -1998,7 +2013,7 @@ async def test_failed_environment_construction_retires_root_and_closes_created_s
     case.runtime.build_child_factory.side_effect = failure
     with pytest.raises(type(failure)):
         await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
-    assert case.events == ["tainted", "root-retired", "storage-close", "gate-release"]
+    assert case.events == ["tainted", "heartbeat-stop", "root-retired", "storage-close", "gate-release"]
     assert case.sinks[0]._closed
     case.preparation.dispatcher.sync_client_factory.assert_not_called()
 

@@ -304,7 +304,8 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
             await sandbox.code_interpreter.delete_context(context)
     finally:
         if sandbox is not None:
-            await platform.delete(sandbox)
+            # confirm_absence below is the authoritative destruction check.
+            await platform.delete(sandbox, wait=False)
             sandbox_id = str(getattr(sandbox, "id", ""))
             confirmation = await confirm_absence(
                 probe=platform.get,

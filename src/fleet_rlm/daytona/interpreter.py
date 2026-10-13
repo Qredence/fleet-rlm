@@ -128,6 +128,16 @@ def _fleet_capture_action(code, namespace, stream_limit, notice, final_limit, ma
 """
 
 
+# Installed once when a context runs its setup action: the working directory,
+# integer conversion bound and capture helper are process state that persists.
+_SDK_CONTEXT_PRELUDE = (
+    "import os as _fleet_os, sys as _fleet_sys\n"
+    "if _fleet_os.path.isdir('/workspace'): _fleet_os.chdir('/workspace')\n"
+    "if hasattr(_fleet_sys, 'set_int_max_str_digits'): _fleet_sys.set_int_max_str_digits(200_000)\n"
+    f"{_SDK_CAPTURE_SOURCE}\n"
+)
+
+
 def _bounded_sdk_output(value: str) -> str:
     """Retain the producer's truncation notice, including for non-streaming SDK doubles."""
     if len(value) > _MAX_CAPTURED_OUTPUT_CHARS and value[_MAX_CAPTURED_OUTPUT_CHARS:] != _OUTPUT_TRUNCATION_NOTICE:
@@ -136,6 +146,23 @@ def _bounded_sdk_output(value: str) -> str:
 
 
 OutputCallback = Callable[[str], None]
+
+
+def remove_run_scratch(sandbox: Any, path: str) -> None:
+    """Remove one Run or child scratch tree through a synchronous Sandbox view."""
+    fs = getattr(sandbox, "fs", None)
+    delete = getattr(fs, "delete_file", None)
+    if not callable(delete):
+        raise DaytonaAdapterError(
+            message="Sandbox filesystem cannot remove Run scratch",
+            cause_type="InterpreterConfigurationError",
+        )
+    # A Run that failed before its first action may never create its bound
+    # scratch directory; absence confirms this path is clean. Call once:
+    # retrying another shape after a body-level TypeError could replay the
+    # deletion and hide the original failure.
+    with contextlib.suppress(DaytonaFileNotFoundError):
+        delete(path, recursive=True)
 
 
 class _PublicStdoutProjector:
@@ -629,19 +656,7 @@ class _SandboxProcessBackend:
         path = self._run_scratch_path
         if path is None:
             return
-        fs = getattr(self._sandbox, "fs", None)
-        delete = getattr(fs, "delete_file", None)
-        if not callable(delete):
-            raise DaytonaAdapterError(
-                message="Sandbox filesystem cannot remove Run scratch",
-                cause_type="InterpreterConfigurationError",
-            )
-        # A Run that failed before its first action may never create its
-        # bound scratch directory; absence confirms this path is clean. Call
-        # once: retrying another shape after a body-level TypeError could
-        # replay the deletion and hide the original failure.
-        with contextlib.suppress(DaytonaFileNotFoundError):
-            delete(path, recursive=True)
+        remove_run_scratch(self._sandbox, path)
         self._run_scratch_path = None
 
     @property
@@ -786,13 +801,14 @@ class _SandboxProcessBackend:
         final_limit = (
             self._max_final_output_chars if self._max_final_output_chars is not None else _MAX_CAPTURED_OUTPUT_CHARS
         )
+        # The context prelude and capture helper persist in the SDK context, so
+        # only the setup action carries them; later actions send bindings and code.
+        prelude = "" if self._setup_installed else _SDK_CONTEXT_PRELUDE
         source = (
-            "import json as _fleet_binding_json, os as _fleet_os, sys as _fleet_sys\n"
-            "if _fleet_os.path.isdir('/workspace'): _fleet_os.chdir('/workspace')\n"
-            "if hasattr(_fleet_sys, 'set_int_max_str_digits'): _fleet_sys.set_int_max_str_digits(200_000)\n"
+            f"{prelude}"
+            "import json as _fleet_binding_json\n"
             f"globals().update(_fleet_binding_json.loads({bindings!r}))\n"
             f"_fleet_tool_timeout_s = {timeout!r}\n"
-            f"{_SDK_CAPTURE_SOURCE}\n"
             f"_fleet_capture_action({code!r}, globals(), {_MAX_CAPTURED_OUTPUT_CHARS!r}, "
             f"{_OUTPUT_TRUNCATION_NOTICE!r}, {final_limit!r}, {FINAL_OUTPUT_MARKER!r})"
         )
@@ -1012,7 +1028,6 @@ class DaytonaCodeInterpreter:
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
-        self._turn_request: str | None = None
         self._output_budget_exhausted = False
         self._output_budget_failure: TurnBudgetExhausted | None = None
         self._root_finalization = True
@@ -1029,7 +1044,9 @@ class DaytonaCodeInterpreter:
         self._observer = observer
         self._observation_max_chars = max(1, observation_max_chars)
         self._turn_budget = turn_budget
-        self._turn_request = turn_request
+        # rlm still supplies the Turn request with each invocation; this
+        # interpreter has never read it.
+        del turn_request
         self._async_bridge = async_bridge
         if backend is not None:
             bind_bridge = getattr(backend, "bind_async_bridge", None)
@@ -1133,10 +1150,6 @@ class DaytonaCodeInterpreter:
             self._turn_budget = budget
             self._output_budget_exhausted = False
             self._output_budget_failure = None
-
-    def bind_turn_request(self, request: str | None) -> None:
-        with self._binding_mutation():
-            self._turn_request = request
 
     def bind_async_bridge(self, async_bridge: Any | None) -> None:
         """Pass the composition-owned async bridge to a live tool broker."""

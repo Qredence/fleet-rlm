@@ -21,8 +21,9 @@ import pytest
 from pydantic import ValidationError
 
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.children import ChildRuntimeLease, ChildRuntimeLeaseState
+from fleet_rlm.daytona.children import ChildRuntimeLease
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.leases import LeaseState
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
 from fleet_rlm.rlm.event_types import ChildProgress, RunCompleted, Status, ToolCompleted, ToolFailed, ToolStarted
@@ -1338,7 +1339,7 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     outcomes = executor.batched_tool(tasks=[{"task": task} for task in ["A", "B", "C"]])
     assert [item["answer"] for item in outcomes] == ["A", "B", "C"]
     assert finish_order == ["B", "C", "A"]
-    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
+    assert all(lease.state is LeaseState.CLOSED for lease in created)
     assert executor.summary().recursive_children_completed == 3
 
 
@@ -1393,7 +1394,7 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
     outcomes = executor.batched_tool(tasks=[{"task": task} for task in ["fail", "ok"]])
     assert [item["status"] for item in outcomes] == ["failed", "completed"]
     executor.wait_owned()
-    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
+    assert all(lease.state is LeaseState.CLOSED for lease in created)
     # Only the successful child counts as completed; the failed one is failed.
     assert executor.summary().recursive_children_completed == 1
     assert executor.summary().recursive_children_failed == 1
@@ -1598,7 +1599,7 @@ def test_recursive_batch_ordinary_failure_waits_for_successful_sibling_cleanup(
     assert "error" not in result
     assert [item["status"] for item in result["outcomes"]] == ["failed", "completed"]
     executor.wait_owned()
-    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
+    assert all(lease.state is LeaseState.CLOSED for lease in created)
     executor.raise_if_cleanup_failed()
 
 
@@ -1777,7 +1778,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
         release.set()
         executor.wait_owned()
 
-    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
+    assert all(lease.state is LeaseState.CLOSED for lease in created)
     assert executor.summary().call_count == 3
     assert executor.summary().recursive_children_started == 1
     # The released straggler fails its batch-cancellation check: not completed.
@@ -1883,7 +1884,7 @@ def test_child_call_wait_is_fenced_by_the_absolute_deadline(
     release.set()
     executor.wait_owned()
     assert recorder.close_calls.get(1) == 1
-    assert recorder.leases[0].state is ChildRuntimeLeaseState.CLOSED
+    assert recorder.leases[0].state is LeaseState.CLOSED
     failed = [event for event in events if isinstance(event, Status) and event.status == "child_failed"]
     assert len(failed) == 1
     assert failed[0].message is not None
@@ -2143,7 +2144,7 @@ async def test_claim_loss_during_blocked_child_discards_result_and_fails_parent(
     assert recorder.call_indexes == [1]
     await asyncio.wait_for(stream.wait_owned(), timeout=10)
     assert recorder.close_calls.get(1) == 1
-    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in recorder.leases)
+    assert all(lease.state is LeaseState.CLOSED for lease in recorder.leases)
 
 
 # --- Policy surface and public composition contracts ---

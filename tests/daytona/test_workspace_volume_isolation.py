@@ -16,9 +16,8 @@ import pytest
 
 from fleet_rlm.daytona import children as children_module
 from fleet_rlm.daytona import errors as errors_module
-from fleet_rlm.daytona.children import ChildRuntimeLeaseState
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.leases import DaytonaAdmission, LeaseRequest
+from fleet_rlm.daytona.leases import DaytonaAdmission, LeaseRequest, LeaseState
 from fleet_rlm.daytona.provider import LiveDaytonaPlatform
 from fleet_rlm.daytona.runtime import SESSION_WORKSPACE_MOUNT_PATH, DaytonaRuntime
 from fleet_rlm.daytona.specs import (
@@ -134,8 +133,9 @@ class _FakePlatform:
         volume_subpath: str,
         labels: dict[str, str] | None = None,
         ephemeral: bool = False,
+        timeout: float | None = None,
     ) -> _FakeSandbox:
-        del ephemeral
+        del ephemeral, timeout
         if mount_path == "/workspace":
             assert volume_subpath.startswith("workspaces/") and volume_subpath.endswith("/workspace")
         else:
@@ -657,11 +657,16 @@ class _PreservedVolumeFs:
     deleted: list[str] = field(default_factory=list)
     directories: set[str] = field(default_factory=set)
 
-    async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
-        assert depth is None
+    async def list_files(self, root: str, *, depth: int | None) -> list[SimpleNamespace]:
+        # depth=1 lists only the root's direct children, like the provider.
+        assert depth == 1
+
+        def direct(path: str) -> bool:
+            return path.startswith(root.rstrip("/") + "/") and "/" not in path[len(root.rstrip("/")) + 1 :]
+
         return [
-            *[SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)],
-            *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories)],
+            *[SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files) if direct(path)],
+            *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories) if direct(path)],
         ]
 
     async def create_folder(self, path: str, _mode: str) -> None:
@@ -806,27 +811,23 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
         assert call["volume_id"] == "shared-volume"
         assert call["mount_path"] == _RECURSIVE_MOUNT
         assert call["ephemeral"] is True
-        assert call["labels"] == {"fleet.runtime": "recursive-child"}
+        assert call["labels"]["fleet.runtime"] == "recursive-child"
+        assert call["labels"]["fleet.run_id"] == str(run_id)
 
     root_manifest_before = _checksum_manifest(root_fs)
     sibling_manifest_before = _checksum_manifest(child_b_fs)
 
     await asyncio.to_thread(lease_a.close)
 
-    assert lease_a.state is ChildRuntimeLeaseState.CLOSED
+    assert lease_a.state is LeaseState.CLOSED
     assert child_a_fs.files == {}
     assert child_a_fs.directories == {
         "/tmp/fleet",
         "/tmp/fleet/child-data",
         f"/tmp/fleet/child-data/{run_id}",
     }
-    assert child_a_fs.deleted == [
-        f"{a_scope}/a-nested/deep/file.txt",
-        f"{a_scope}/a-top.txt",
-        f"{a_scope}/a-nested/deep",
-        f"{a_scope}/a-nested",
-        a_scope,
-    ]
+    assert child_a_fs.deleted == [f"{a_scope}/a-top.txt", f"{a_scope}/a-nested", a_scope]
+    assert not any(path.startswith(a_scope) for path in child_a_fs.files)
     assert platform.deleted == ["child-a-sandbox"]
     assert interpreter_box.instances and interpreter_box.instances[0].shutdown_calls == [True]
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
@@ -838,7 +839,7 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
     assert child_b_fs.deleted == []
 
     await asyncio.to_thread(lease_b.close)
-    assert lease_b.state is ChildRuntimeLeaseState.CLOSED
+    assert lease_b.state is LeaseState.CLOSED
     assert _checksum_manifest(root_fs) == root_manifest_before
 
 
@@ -879,7 +880,7 @@ async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
 
     with pytest.raises(errors_module.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         await asyncio.to_thread(lease_a.close)
-    assert lease_a.state is ChildRuntimeLeaseState.FAILED
+    assert lease_a.state is LeaseState.FAILED
     with pytest.raises(errors_module.ChildRuntimeCleanupError):
         await asyncio.to_thread(lease_a.close)
     assert interpreter_box.instances[0].shutdown_calls == [True]
@@ -896,7 +897,7 @@ async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
     assert child_b_fs.deleted == []
 
     await asyncio.to_thread(lease_b.close)
-    assert lease_b.state is ChildRuntimeLeaseState.CLOSED
+    assert lease_b.state is LeaseState.CLOSED
 
 
 @pytest.mark.asyncio
@@ -943,7 +944,7 @@ async def test_cancellation_preserves_volume_state_and_allocates_nothing_further
     assert sibling_fs.deleted == []
 
     await asyncio.to_thread(lease_a.close)
-    assert lease_a.state is ChildRuntimeLeaseState.CLOSED
+    assert lease_a.state is LeaseState.CLOSED
     assert child_a_fs.files == {}
     assert platform.deleted == ["child-a-sandbox"]
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)

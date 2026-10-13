@@ -16,8 +16,8 @@ import pytest
 from fleet_rlm.daytona import children as children_module
 from fleet_rlm.daytona import leases as leases_module
 from fleet_rlm.daytona import runtime as recursive_child_runtime
-from fleet_rlm.daytona.children import ChildRuntimeLease, ChildRuntimeLeaseState, LateCleanupOwner
-from fleet_rlm.daytona.leases import DaytonaAdmission
+from fleet_rlm.daytona.children import ChildRuntimeLease, LateCleanupOwner
+from fleet_rlm.daytona.leases import DaytonaAdmission, LeaseState
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 from tests.support.session_manager import make_daytona_child_factory
 
@@ -30,7 +30,7 @@ class _Fs:
     deleted: list[str] = field(default_factory=list)
 
     async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
-        assert depth is None
+        assert depth == 1
         return [SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)]
 
     async def create_folder(self, _path: str, _mode: str) -> None:
@@ -167,7 +167,7 @@ async def test_broker_shutdown_failure_fails_close_but_remaining_steps_still_run
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         await asyncio.to_thread(lease.close)
 
-    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert lease.state is LeaseState.FAILED
     assert interpreter.shutdown_calls == 1
     # Every remaining step was still attempted, in order.
     assert platform.steps == [
@@ -273,7 +273,7 @@ async def test_provider_delete_failure_still_confirms_absence_and_restores_admis
     assert interpreter.shutdown_calls == 1
     assert platform.deleted == ["child-sandbox"]
     assert platform.probes == ["child-sandbox"]
-    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert lease.state is LeaseState.FAILED
     assert await _full_capacity_restored(admission, capacity=1)
 
 
@@ -406,7 +406,7 @@ def test_failed_close_stores_and_re_surfaces_without_rerunning_cleanup() -> None
             lease.close()
         assert raised.value is original
     assert runs == 1
-    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert lease.state is LeaseState.FAILED
     assert lease.close_error is original
 
 
@@ -433,7 +433,7 @@ async def test_cleanup_failure_after_valid_child_result_fails_factory_observatio
         await asyncio.to_thread(lease.close)
     assert interpreter.shutdown_calls == 1
     assert platform.deleted == ["child-sandbox"]
-    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert lease.state is LeaseState.FAILED
 
 
 def test_barrier_race_joins_one_cleanup_execution() -> None:
@@ -451,7 +451,7 @@ def test_barrier_race_joins_one_cleanup_execution() -> None:
 
     lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
     barrier = threading.Barrier(2)
-    observed_states: list[ChildRuntimeLeaseState] = []
+    observed_states: list[LeaseState] = []
 
     def run_close() -> None:
         barrier.wait(2)
@@ -464,14 +464,14 @@ def test_barrier_race_joins_one_cleanup_execution() -> None:
     second.start()
     assert entered.wait(2)
     # While one close runs, the lease is observably CLOSING.
-    assert lease.state is ChildRuntimeLeaseState.CLOSING
+    assert lease.state is LeaseState.CLOSING
     assert second.is_alive()
     release.set()
     first.join(timeout=2)
     second.join(timeout=2)
 
     assert calls == 1
-    assert observed_states == [ChildRuntimeLeaseState.CLOSED, ChildRuntimeLeaseState.CLOSED]
+    assert observed_states == [LeaseState.CLOSED, LeaseState.CLOSED]
     lease.close()
     assert calls == 1
 
@@ -513,7 +513,7 @@ def test_barrier_race_on_failure_re_surfaces_stored_error() -> None:
 
     assert calls == 1
     assert errors == [original, original]
-    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert lease.state is LeaseState.FAILED
     assert lease.close_error is original
     with pytest.raises(RuntimeError) as raised:
         lease.close()
@@ -530,7 +530,7 @@ def test_reentrant_close_from_closing_thread_fails_closed() -> None:
     lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
     with pytest.raises(RuntimeError, match="not reentrant"):
         lease.close()
-    assert lease.state is not ChildRuntimeLeaseState.CLOSED
+    assert lease.state is not LeaseState.CLOSED
 
 
 @pytest.mark.asyncio

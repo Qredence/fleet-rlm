@@ -108,7 +108,6 @@ def test_invocation_installs_tools_output_and_context_once(monkeypatch: pytest.M
         lambda i: i.bind_context_capsule(None),
         lambda i: i.bind_observer(None),
         lambda i: i.bind_turn_budget(None),
-        lambda i: i.bind_turn_request("late"),
         lambda i: i.bind_async_bridge(None),
         lambda i: i.bind_tool_outcomes(tool_settled=None, tool_failed=None),
         lambda i: i.bind_run_scratch(None),

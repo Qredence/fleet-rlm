@@ -181,20 +181,6 @@ def is_safe_pre_creation_retry(exc: object) -> bool:
     return classify_provider_error(exc) in {"network", "timeout", "provider_5xx"}
 
 
-_TRANSIENT_STATUS_TEXT = re.compile(r"\b5\d{2}\b")
-
-
-def is_transient_provider_failure(exc: object) -> bool:
-    """True for transient provider failures: network, timeout, or 5xx.
-
-    The 5xx text-marker leg covers provider failures that arrive without
-    structured status metadata (e.g. preview-link resolution errors).
-    """
-    if is_safe_pre_creation_retry(exc):
-        return True
-    return _TRANSIENT_STATUS_TEXT.search(sanitize_provider_message(str(exc))) is not None
-
-
 def is_sandbox_not_found(exc: BaseException) -> bool:
     """True only for explicit provider not-found (404 / DaytonaNotFoundError)."""
     from daytona.common.errors import DaytonaFileNotFoundError, DaytonaProcessNotFoundError

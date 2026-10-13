@@ -15,11 +15,11 @@ from fleet_rlm.daytona.browser import RunBrowser
 from fleet_rlm.daytona.diagnostics import environment_manifest
 from fleet_rlm.daytona.interpreter import (
     SyncBridgeDispatcher,
+    remove_run_scratch,
     sandbox_interpreter_factory,
 )
 from fleet_rlm.daytona.leases import DaytonaAdmissionTimeoutError, DaytonaLeaseAcquisitionTimeoutError, InterpreterLease
-from fleet_rlm.daytona.provider import remove_run_scratch
-from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
+from fleet_rlm.daytona.runtime import DaytonaRuntime, RootActivityHeartbeat, RootSessionSpec
 from fleet_rlm.daytona.specs import DaytonaSandboxSpec, ensure_volume_layout
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, VolumePaths
@@ -99,6 +99,7 @@ class DaytonaRunPreparation:
         release_invocation: Callable[[], None] | None = None
         owner: InterpreterLease | None = None
         sink: DaytonaRunStorage | None = None
+        heartbeat: RootActivityHeartbeat | None = None
         try:
             try:
                 release_invocation = await self.runtime.begin_root_invocation(*key, deadline=deadline)
@@ -142,7 +143,7 @@ class DaytonaRunPreparation:
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
 
-            await self.runtime.suspend_root_autostop(owner, deadline=deadline)
+            heartbeat = active_heartbeat = self.runtime.start_root_heartbeat(owner)
 
             host_io = DaytonaHostIO(
                 run.access.workspace_id,
@@ -195,20 +196,23 @@ class DaytonaRunPreparation:
 
             async def release_preparation() -> None:
                 try:
-                    if browser_cleanup is not None:
-                        await browser_cleanup()
+                    try:
+                        if browser_cleanup is not None:
+                            await browser_cleanup()
 
-                    def cleanup_run_scratch() -> None:
-                        remove_run_scratch(sink.sandbox, sink.scratch_root)
+                        def cleanup_run_scratch() -> None:
+                            remove_run_scratch(sink.sandbox, sink.scratch_root)
 
-                    await _cleanup_scratch_before_releasing_invocation(
-                        cleanup_run_scratch if not self.runtime.root_is_tainted(*key) else None,
-                        None,
-                    )
-                    await self.runtime.restore_root_autostop(owner)
+                        await _cleanup_scratch_before_releasing_invocation(
+                            cleanup_run_scratch if not self.runtime.root_is_tainted(*key) else None,
+                            None,
+                        )
+                    finally:
+                        heartbeat_failure = await active_heartbeat.stop()
+                    if heartbeat_failure is not None:
+                        raise heartbeat_failure
                 except BaseException:
                     self.runtime.mark_root_tainted(*key)
-                    await self.runtime.restore_root_autostop(owner)
                     raise
                 finally:
                     try:
@@ -283,6 +287,8 @@ class DaytonaRunPreparation:
         except BaseException:
             self.runtime.mark_root_tainted(*key)
             try:
+                if heartbeat is not None:
+                    await heartbeat.stop()
                 if owner is not None:
                     try:
                         await asyncio.shield(self.runtime.close_root_session(*key, deadline=deadline))

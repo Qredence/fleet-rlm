@@ -3,50 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from uuid import UUID, uuid4
 
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     is_sandbox_not_found,
     map_provider_error,
 )
-from fleet_rlm.daytona.interpreter import (
-    DEFAULT_EXECUTION_OUTPUT_CHARS,
-    DaytonaCodeInterpreter,
-    SyncBridgeDispatcher,
-    sandbox_backend,
-    sandbox_interpreter_factory,
-)
 from fleet_rlm.daytona.specs import (
     VOLUME_FAILED_STATES,
     VOLUME_READY_RETRY_DELAYS,
     DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
-    _create_daytona_sandbox,
-    _expected_workspace_mount,
-    ensure_volume_layout,
-    get_or_create_volume_id,
     require_volume_mount_subpath,
-    sandbox_spec_from_settings,
-    sandbox_state,
-    verify_sandbox_spec,
-    verify_sandbox_workspace_mount,
-    volume_config_from_settings,
+    state_text,
 )
-from fleet_rlm.paths import VolumePaths
 
 if TYPE_CHECKING:
     from daytona import AsyncDaytona
 
     from fleet_rlm.config.settings import Settings
-
-
-_VOLUME_FAILED_STATES = VOLUME_FAILED_STATES
-
-_VOLUME_READY_RETRY_DELAYS = VOLUME_READY_RETRY_DELAYS
 
 
 class LiveDaytonaVolumeClient:
@@ -79,15 +55,15 @@ class LiveDaytonaVolumeClient:
         state = _volume_state(volume)
         if state is None or state == "ready":
             return volume
-        if state in _VOLUME_FAILED_STATES:
+        if state in VOLUME_FAILED_STATES:
             raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
-        for delay in _VOLUME_READY_RETRY_DELAYS:
+        for delay in VOLUME_READY_RETRY_DELAYS:
             await asyncio.sleep(delay)
             volume = await self._get_existing(name)
             state = _volume_state(volume)
             if state is None or state == "ready":
                 return volume
-            if state in _VOLUME_FAILED_STATES:
+            if state in VOLUME_FAILED_STATES:
                 break
         raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
 
@@ -98,11 +74,16 @@ class LiveDaytonaVolumeClient:
             raise map_provider_error(exc) from exc
 
 
+def _sdk_timeout(seconds: float) -> float:
+    """Map remaining caller time to an SDK timeout; the SDK treats 0 as unlimited."""
+    return max(1.0, float(seconds))
+
+
 def _volume_state(volume: Any) -> str | None:
     state = getattr(volume, "state", None)
     if state is None:
         return None
-    return str(getattr(state, "value", state)).lower()
+    return state_text(state)
 
 
 class LiveDaytonaPlatform:
@@ -153,7 +134,10 @@ class LiveDaytonaPlatform:
         domain_allow_list: str | None = None,
         auto_stop_interval: int | None = None,
         auto_delete_interval: int | None = None,
+        ttl_minutes: int | None = None,
+        timeout: float | None = None,
     ) -> Any:
+        """Create from the profile snapshot; ``timeout`` replaces the SDK's 60-second default."""
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
         spec = self.spec_for_profile(profile)
@@ -191,9 +175,12 @@ class LiveDaytonaPlatform:
             domain_allow_list=domain_allow_list,
             auto_stop_interval=auto_stop_interval,
             auto_delete_interval=auto_delete_interval,
+            ttl_minutes=ttl_minutes,
         )
         try:
-            return await self._client.create(params)
+            if timeout is None:
+                return await self._client.create(params)
+            return await self._client.create(params, timeout=_sdk_timeout(timeout))
         except Exception as exc:
             raise map_provider_error(exc) from exc
 
@@ -212,10 +199,13 @@ class LiveDaytonaPlatform:
                 return
             raise map_provider_error(exc) from exc
 
-    async def start(self, sandbox_id: str) -> None:
+    async def start(self, sandbox_id: str, *, timeout: float | None = None) -> None:
         try:
             sandbox = await self._client.get(sandbox_id)
-            await self._client.start(sandbox)
+            if timeout is None:
+                await self._client.start(sandbox)
+            else:
+                await self._client.start(sandbox, timeout=_sdk_timeout(timeout))
         except Exception as exc:
             if is_sandbox_not_found(exc):
                 return
@@ -234,107 +224,6 @@ class LiveDaytonaPlatform:
             if is_sandbox_not_found(exc):
                 return
             raise map_provider_error(exc) from exc
-
-
-@dataclass(frozen=True, slots=True)
-class EphemeralInterpreterLease:
-    """Caller-owned ephemeral volume sandbox and interpreter for operator scripts."""
-
-    interpreter: Any
-    sandbox: Any
-    platform: Any
-    session_id: UUID
-    run_id: UUID
-    workspace_id: UUID
-    context_mount_path: str
-    volume_paths: VolumePaths
-
-
-async def _retire_failed_ephemeral_sandbox(
-    platform: Any,
-    sandbox: Any,
-    *,
-    interpreter: Any | None = None,
-) -> None:
-    """Delete one ephemeral sandbox after lease construction fails."""
-    if interpreter is not None:
-        shutdown = getattr(interpreter, "shutdown", None)
-        if callable(shutdown):
-            with contextlib.suppress(BaseException):
-                await asyncio.to_thread(shutdown)
-    await platform.delete(sandbox)
-
-
-async def acquire_ephemeral_interpreter(
-    settings: Any,
-    *,
-    purpose: str,
-    workspace_id: UUID | None = None,
-) -> EphemeralInterpreterLease:
-    """Acquire one ephemeral volume-backed interpreter for an operator script."""
-    client = build_daytona_client(settings)
-    spec = sandbox_spec_from_settings(settings)
-    platform = LiveDaytonaPlatform(client, spec)
-    volume_client = LiveDaytonaVolumeClient(client)
-    volume_config = volume_config_from_settings(settings)
-    resolved_workspace = workspace_id or uuid4()
-    volume_id = await get_or_create_volume_id(volume_client, volume_config)
-    expected = _expected_workspace_mount(volume_config, volume_id, resolved_workspace)
-    sandbox = await _create_daytona_sandbox(
-        platform,
-        expected,
-        labels={
-            "fleet-package": "fleet_rlm",
-            "purpose": purpose,
-            "workspace_id": str(resolved_workspace),
-        },
-        ephemeral=True,
-    )
-    interpreter: Any | None = None
-    try:
-        if sandbox_state(sandbox) != "running":
-            await platform.start(str(sandbox.id))
-            refreshed = await platform.get(str(sandbox.id))
-            if refreshed is None or sandbox_state(refreshed) != "running":
-                raise DaytonaAdapterError(
-                    message="sandbox did not reach running state",
-                    cause_type="SandboxLifecycleError",
-                )
-            sandbox = refreshed
-        session_id = uuid4()
-        run_id = uuid4()
-        verify_sandbox_workspace_mount(sandbox, expected)
-        verify_sandbox_spec(sandbox, spec)
-        await ensure_volume_layout(
-            sandbox,
-            volume_config.paths(),
-            session_id=session_id,
-            run_id=run_id,
-        )
-        loop = asyncio.get_running_loop()
-        dispatcher = SyncBridgeDispatcher()
-        dispatcher.sync_client_factory = lambda: build_sync_daytona_client(settings)
-        interpreter = DaytonaCodeInterpreter(
-            backend=sandbox_backend(
-                sandbox,
-                loop=loop,
-                dispatcher=dispatcher,
-            )
-        )
-    except BaseException:
-        await _retire_failed_ephemeral_sandbox(platform, sandbox, interpreter=interpreter)
-        raise
-    volume_paths = volume_config.paths()
-    return EphemeralInterpreterLease(
-        interpreter=interpreter,
-        sandbox=sandbox,
-        platform=platform,
-        session_id=session_id,
-        run_id=run_id,
-        workspace_id=resolved_workspace,
-        context_mount_path=str(volume_paths.mount_path),
-        volume_paths=volume_paths,
-    )
 
 
 def daytona_config(settings: Settings) -> Any:
@@ -416,27 +305,4 @@ async def create_folder(sandbox: Any, path: str, mode: str = "755") -> None:
     await sandbox.fs.create_folder(path, mode=mode)
 
 
-def _build_interpreter_factory(
-    sandbox: Any,
-    *,
-    loop: asyncio.AbstractEventLoop,
-    dispatcher: SyncBridgeDispatcher | None = None,
-    execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
-) -> Any:
-    return sandbox_interpreter_factory(
-        sandbox,
-        loop=loop,
-        dispatcher=dispatcher,
-        execution_output_cap=execution_output_cap,
-    )
-
-
 _DAYTONA_CLOUD_API_URL = "https://app.daytona.io/api"
-
-
-def remove_run_scratch(sandbox: Any, path: str) -> None:
-    """Remove invocation scratch through the worker's synchronous storage bridge."""
-    from daytona.common.errors import DaytonaFileNotFoundError
-
-    with contextlib.suppress(DaytonaFileNotFoundError):
-        sandbox.fs.delete_file(path, recursive=True)

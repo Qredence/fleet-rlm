@@ -11,6 +11,7 @@ import logging
 import warnings
 from importlib.metadata import version
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -73,8 +74,8 @@ def workspace_runtime(monkeypatch: pytest.MonkeyPatch) -> tuple[runtime_module.D
     platform.get = get
     platform.start = AsyncMock()
     monkeypatch.setattr(host_io_module, "get_or_create_volume_id", AsyncMock(return_value="volume"))
-    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "create_daytona_sandbox", create)
     monkeypatch.setattr(host_io_module, "sandbox_state", lambda sandbox: sandbox.state)
     monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", AsyncMock())
     monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
@@ -368,7 +369,7 @@ async def test_workspace_preparation_timeout_retains_cleanup(workspace_runtime, 
 async def test_workspace_late_create_blocks_replacement(workspace_runtime, monkeypatch) -> None:
     runtime, platform = workspace_runtime
     runtime._host_io._workspace_io_acquisition_timeout_seconds = 0.03
-    original_create = host_io_module._create_daytona_sandbox
+    original_create = host_io_module.create_daytona_sandbox
     finish = asyncio.Event()
     creates = 0
 
@@ -378,7 +379,7 @@ async def test_workspace_late_create_blocks_replacement(workspace_runtime, monke
         await finish.wait()
         return await original_create(*args, **kwargs)
 
-    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", blocked_create)
+    monkeypatch.setattr(host_io_module, "create_daytona_sandbox", blocked_create)
     for _ in range(2):
         with pytest.raises(TimeoutError):
             async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
@@ -964,8 +965,8 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
     monkeypatch.setattr(host_io_module, "get_or_create_volume_id", volume_id)
     monkeypatch.setattr(host_io_module, "sandbox_state", lambda _sandbox: "running")
     monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", layout)
-    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "create_daytona_sandbox", create)
     monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
     monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
@@ -1016,11 +1017,11 @@ def _warm_workspace_io_harness(monkeypatch: pytest.MonkeyPatch, *, sandbox_id: s
     monkeypatch.setattr(leases_module, "confirm_absence", confirm)
     monkeypatch.setattr(host_io_module, "get_or_create_volume_id", volume_id)
     monkeypatch.setattr(
-        host_io_module, "_create_daytona_sandbox", lambda _platform, _expected, **_kwargs: platform.create(**_kwargs)
+        host_io_module, "create_daytona_sandbox", lambda _platform, _expected, **_kwargs: platform.create(**_kwargs)
     )
     monkeypatch.setattr(host_io_module, "sandbox_state", lambda _sandbox: "running")
     monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", layout)
-    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "expected_workspace_mount", lambda *_args: object())
     monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
     monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
@@ -1137,8 +1138,8 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
         volume_config=SimpleNamespace(paths=object),
         admission=admission,
     )
-    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "create_daytona_sandbox", create)
     monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
     monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
@@ -1185,8 +1186,8 @@ async def test_workspace_io_cancelled_create_is_settled_by_runtime(
         volume_config=SimpleNamespace(paths=lambda: object()),
         admission=admission,
     )
-    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "create_daytona_sandbox", create)
     monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
     monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
@@ -1252,7 +1253,7 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
             del recursive
 
         async def list_files(self, _path: str, *, depth: int | None) -> list[object]:
-            assert depth is None
+            assert depth == 1
             return []
 
     sandbox = SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), id="child-unconfirmed", fs=Fs())
@@ -1844,14 +1845,10 @@ def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
     assert resources._tracked_sandbox_ids == []
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("tainted", [False, True])
-async def test_active_root_suppresses_provider_autostop_and_restores_only_healthy_policy(tainted: bool) -> None:
-    runtime = make_daytona_runtime()
+def _heartbeat_lease(sandbox) -> tuple[leases_module.InterpreterLease, Any, Any]:
     workspace_id, session_id = uuid4(), uuid4()
-    sandbox = SimpleNamespace(id="active-root", auto_stop_interval=15, set_autostop_interval=AsyncMock())
     lease = leases_module.InterpreterLease(
-        sandbox_id=sandbox.id,
+        sandbox_id="active-root",
         interpreter_id="interp",
         volume_id="volume",
         mount_path="/workspace",
@@ -1860,15 +1857,53 @@ async def test_active_root_suppresses_provider_autostop_and_restores_only_health
         workspace_id=str(workspace_id),
         session_id=str(session_id),
     )
-    await runtime.suspend_root_autostop(lease, deadline=asyncio.get_running_loop().time() + 10)
-    sandbox.set_autostop_interval.assert_awaited_once_with(0)
-    if tainted:
-        runtime.mark_root_tainted(workspace_id, session_id)
-    await runtime.restore_root_autostop(lease)
-    assert [call.args for call in sandbox.set_autostop_interval.await_args_list] == (
-        [(0,)] if tainted else [(0,), (15,)]
-    )
-    assert not runtime._active_idle_policies
+    return lease, workspace_id, session_id
+
+
+async def _until(predicate, *, timeout: float = 5.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        assert asyncio.get_running_loop().time() < deadline, "condition not reached"
+        await asyncio.sleep(0.005)
+
+
+@pytest.mark.asyncio
+async def test_root_heartbeat_refreshes_activity_until_stopped(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_module, "_ROOT_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    runtime = make_daytona_runtime()
+    sandbox = SimpleNamespace(id="active-root", refresh_activity=AsyncMock())
+    lease, workspace_id, session_id = _heartbeat_lease(sandbox)
+    heartbeat = runtime.start_root_heartbeat(lease)
+    await _until(lambda: sandbox.refresh_activity.await_count >= 2)
+    assert await heartbeat.stop() is None
+    settled = sandbox.refresh_activity.await_count
+    await asyncio.sleep(0.05)
+    assert sandbox.refresh_activity.await_count == settled
+    assert not runtime.root_is_tainted(workspace_id, session_id)
+
+
+@pytest.mark.asyncio
+async def test_root_heartbeat_taints_after_consecutive_failures_only(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_module, "_ROOT_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    runtime = make_daytona_runtime()
+    outcomes = [RuntimeError("blip"), None, RuntimeError("a"), RuntimeError("b"), RuntimeError("c")]
+    sandbox = SimpleNamespace(id="active-root", refresh_activity=AsyncMock(side_effect=outcomes))
+    lease, workspace_id, session_id = _heartbeat_lease(sandbox)
+    heartbeat = runtime.start_root_heartbeat(lease)
+    await _until(lambda: sandbox.refresh_activity.await_count == len(outcomes))
+    await _until(lambda: runtime.root_is_tainted(workspace_id, session_id))
+    failure = await heartbeat.stop()
+    assert isinstance(failure, DaytonaAdapterError)
+    assert failure.cause_type == "SandboxHeartbeatError"
+
+
+@pytest.mark.asyncio
+async def test_root_heartbeat_is_a_noop_for_backends_without_provider_activity() -> None:
+    runtime = make_daytona_runtime()
+    lease, workspace_id, session_id = _heartbeat_lease(SimpleNamespace(id="fixture"))
+    assert await runtime.start_root_heartbeat(lease).stop() is None
+    assert not hasattr(runtime, "suspend_root_autostop")
+    assert not runtime.root_is_tainted(workspace_id, session_id)
 
 
 @pytest.mark.asyncio

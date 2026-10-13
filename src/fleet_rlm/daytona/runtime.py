@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import logging
 import re
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -19,10 +18,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID, uuid4
 
-from fleet_rlm.daytona.children import (
-    ChildRuntimeLeaseState,
-    ChildSandboxes,
-)
+from fleet_rlm.daytona.children import ChildSandboxes
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -34,8 +30,9 @@ from fleet_rlm.daytona.errors import (
 from fleet_rlm.daytona.host_io import WorkspaceIO
 from fleet_rlm.daytona.interpreter import (
     DEFAULT_EXECUTION_OUTPUT_CHARS,
-    DaytonaCodeInterpreter,
+    SandboxInvocationFactory,
     SyncBridgeDispatcher,
+    sandbox_interpreter_factory,
 )
 from fleet_rlm.daytona.leases import (
     ActiveLeaseConflictError,
@@ -56,7 +53,6 @@ from fleet_rlm.daytona.leases import (
 from fleet_rlm.daytona.provider import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
-    _build_interpreter_factory,
     build_daytona_client,
 )
 from fleet_rlm.daytona.specs import (
@@ -67,14 +63,10 @@ from fleet_rlm.daytona.specs import (
     SandboxPlatform,
     VolumeClient,
     VolumeConfig,
-    _create_daytona_sandbox,
-    _expected_workspace_mount,
-    ensure_directories,
+    create_daytona_sandbox,
     ensure_execution_layout,
     ensure_volume_layout,
     get_or_create_volume_id,
-    is_not_found,
-    sandbox_filesystem,
     sandbox_spec_from_settings,
     sandbox_state,
     verify_execution_mount,
@@ -100,14 +92,12 @@ if TYPE_CHECKING:
 
 _WORKSPACE_IO_DELETE_GRACE_SECONDS = 15.0
 _PREWARM_CLAIM_WAIT_SECONDS = 60.0
+# Refresh well inside the provider's minute-granular idle interval.
+_ROOT_HEARTBEAT_INTERVAL_SECONDS = 60.0
+_ROOT_HEARTBEAT_FAILURE_LIMIT = 3
 
 
 __all__ = ["DaytonaRuntime", "DaytonaRuntimeState", "RootSessionSpec"]
-
-
-_sandbox_filesystem = sandbox_filesystem
-_is_not_found = is_not_found
-_ensure_directories = ensure_directories
 
 
 # --- Process-local Daytona Admission ---
@@ -156,7 +146,34 @@ async def _claim_session_lease(
         await asyncio.sleep(min(0.2, remaining))
 
 
+class RootActivityHeartbeat:
+    """Host task that refreshes one leased root's provider activity."""
+
+    def __init__(self, task: asyncio.Task[None] | None) -> None:
+        self._task = task
+
+    async def stop(self) -> DaytonaAdapterError | None:
+        """Cancel the heartbeat and return its terminal failure, if any."""
+        task = self._task
+        if task is None:
+            return None
+        task.cancel()
+        (outcome,) = await asyncio.gather(task, return_exceptions=True)
+        if isinstance(outcome, DaytonaAdapterError):
+            return outcome
+        if isinstance(outcome, Exception):
+            return DaytonaAdapterError(message="Sandbox activity heartbeat failed", cause_type="SandboxHeartbeatError")
+        return None
+
+
 DaytonaRuntimeState = LeaseState
+
+
+def _remaining_timeout(deadline: float | None) -> dict[str, float]:
+    """Pass the caller's remaining time to SDK lifecycle waits instead of their fixed default."""
+    if deadline is None:
+        return {}
+    return {"timeout": max(1.0, deadline - asyncio.get_running_loop().time())}
 
 
 def _identity_text(value: UUID | str | None, name: str) -> str:
@@ -176,13 +193,6 @@ def _coerce_uuid(value: UUID | str, name: str) -> UUID:
         return UUID(text)
     except ValueError as exc:
         raise ValueError(f"{name} must be a valid UUID: {text}") from exc
-
-
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text if text else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,7 +347,6 @@ class DaytonaRuntime:
         dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         self._tainted: set[tuple[str, str]] = set()
-        self._active_idle_policies: dict[str, int] = {}
         self._sandbox_leases: set[SandboxResource] = set()
         self._records: dict[tuple[str, str], DaytonaSessionRecord] = {}
         self._lock = asyncio.Lock()
@@ -363,7 +372,6 @@ class DaytonaRuntime:
         self._active_leases = ActiveLeaseRegistry()
         self._admission = admission or DaytonaAdmission()
         self._dispatcher = dispatcher
-        self._application_loop: asyncio.AbstractEventLoop | None = None
         self._sandbox_spec = sandbox_spec
         self._cleanup = cleanup or RunCleanupSupervisor()
         self._execution_output_cap = execution_output_cap
@@ -638,42 +646,51 @@ class DaytonaRuntime:
                 record.root = None
             self._mark_record(key, SessionCleanupState.RETIRED)
 
-    async def suspend_root_autostop(self, lease: InterpreterLease, *, deadline: float) -> None:
-        """Preview traffic does not refresh Daytona's provider idle timer."""
-        sandbox = lease.sandbox
-        setter = getattr(sandbox, "set_autostop_interval", None)
-        if not callable(setter):
-            return  # Explicit fixture backends have no provider idle policy.
-        previous = getattr(sandbox, "auto_stop_interval", None)
-        if not isinstance(previous, int):
-            await _provider_call(
-                sandbox.refresh_data(),
-                deadline=deadline,
-                operation="Sandbox idle policy refresh",
-                owner=self._provider_tasks,
-            )
-            previous = sandbox.auto_stop_interval
-        if not isinstance(previous, int) or previous < 0:
-            raise DaytonaAdapterError(message="Sandbox idle policy unavailable", cause_type="SandboxLifecycleError")
-        self._active_idle_policies[lease.sandbox_id] = previous
-        await _provider_call(
-            setter(0), deadline=deadline, operation="Sandbox active idle policy", owner=self._provider_tasks
-        )
+    def start_root_heartbeat(self, lease: InterpreterLease) -> RootActivityHeartbeat:
+        """Keep a leased root's provider activity fresh while its Turn runs.
 
-    async def restore_root_autostop(self, lease: InterpreterLease) -> None:
-        """Restore idle policy only on a healthy, released invocation."""
-        previous = self._active_idle_policies.get(lease.sandbox_id)
-        if previous is None:
-            return
-        key = (lease.workspace_id, lease.session_id)
-        if key not in self._tainted:
-            await _provider_call(
-                lease.sandbox.set_autostop_interval(previous),
-                deadline=time.monotonic() + 30.0,
-                operation="Sandbox idle policy restoration",
-                owner=self._provider_tasks,
-            )
-        self._active_idle_policies.pop(lease.sandbox_id, None)
+        Preview and toolbox traffic do not reset Daytona's idle timer, so the
+        provider's own auto-stop interval stays untouched and this heartbeat
+        refreshes activity instead. Backends without provider activity get a
+        no-op heartbeat.
+        """
+        refresh = getattr(lease.sandbox, "refresh_activity", None)
+        if not callable(refresh):
+            return RootActivityHeartbeat(None)
+        task = asyncio.create_task(self._refresh_root_activity(lease, refresh), name="fleet-daytona-root-heartbeat")
+        return RootActivityHeartbeat(task)
+
+    async def _refresh_root_activity(self, lease: InterpreterLease, refresh: Callable[[], Awaitable[Any]]) -> None:
+        loop = asyncio.get_running_loop()
+        failures = 0
+        while True:
+            await asyncio.sleep(_ROOT_HEARTBEAT_INTERVAL_SECONDS)
+            try:
+                await _provider_call(
+                    refresh(),
+                    deadline=loop.time() + _ROOT_HEARTBEAT_INTERVAL_SECONDS,
+                    operation="Sandbox activity heartbeat",
+                    owner=self._provider_tasks,
+                )
+            except Exception as exc:
+                failures += 1
+                logger.warning(
+                    "Daytona root activity heartbeat failed",
+                    extra={"sandbox_id": lease.sandbox_id, "failures": failures, "error_type": type(exc).__name__},
+                )
+                if failures >= _ROOT_HEARTBEAT_FAILURE_LIMIT:
+                    if lease.workspace_id is not None and lease.session_id is not None:
+                        self.mark_root_tainted(lease.workspace_id, lease.session_id)
+                    logger.error(
+                        "Daytona root activity heartbeat exhausted; root tainted",
+                        extra={"sandbox_id": lease.sandbox_id},
+                    )
+                    raise DaytonaAdapterError(
+                        message="Sandbox activity heartbeat failed repeatedly; the root may auto-stop",
+                        cause_type="SandboxHeartbeatError",
+                    ) from exc
+            else:
+                failures = 0
 
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
         """Fence a root so the next acquisition rotates its generation."""
@@ -745,7 +762,7 @@ class DaytonaRuntime:
             if record.permit._released:
                 continue
             state = "active" if record.lease is not None else "draining"
-            if record.lease is not None and record.lease.state is ChildRuntimeLeaseState.FAILED:
+            if record.lease is not None and record.lease.state is LeaseState.FAILED:
                 state = "quarantined"
             elif record.close_task is not None:
                 state = "draining" if not record.close_task.done() else "quarantined"
@@ -912,7 +929,7 @@ class DaytonaRuntime:
             assert lease is not None
             task = record.close_task
             if task is None or task.done():
-                if lease.state is ChildRuntimeLeaseState.FAILED:
+                if lease.state is LeaseState.FAILED:
                     continue
                 task = asyncio.create_task(asyncio.to_thread(lease.close), name="fleet-daytona-child-lease-close")
                 record.close_task = task
@@ -994,7 +1011,6 @@ class DaytonaRuntime:
         semantic_child_available: bool = True,
     ) -> Callable[..., Any]:
         """Bind child acquisition to this runtime's owning event loop."""
-        self._application_loop = asyncio.get_running_loop()
         return self._children.build_child_factory(
             volume_id=volume_id,
             workspace_id=workspace_id,
@@ -1280,9 +1296,6 @@ class DaytonaRuntime:
         task = asyncio.create_task(run_prewarm(), name=f"fleet-session-prewarm-{session_id}")
         _retain_provider_task(task, self._provider_tasks)
         return task
-
-    def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
-        return _expected_workspace_mount(self._volume_config, volume_id, workspace_id)
 
     def _expected_execution_mount(
         self, *, volume_id: str, workspace_id: UUID, session_id: UUID
@@ -2086,9 +2099,9 @@ class DaytonaRuntime:
                 )
                 self._observe_binding(fenced)
 
-        interpreter: DaytonaCodeInterpreter | None = None
+        interpreter: SandboxInvocationFactory | None = None
         with contextlib.suppress(BaseException):
-            interpreter = _build_interpreter_factory(
+            interpreter = sandbox_interpreter_factory(
                 sandbox,
                 loop=asyncio.get_running_loop(),
                 dispatcher=self._dispatcher,
@@ -2170,7 +2183,7 @@ class DaytonaRuntime:
         if context is not None:
             context.persisted_binding = persisted
         binding_generation = persisted.generation
-        interpreter = _build_interpreter_factory(
+        interpreter = sandbox_interpreter_factory(
             sandbox,
             loop=asyncio.get_running_loop(),
             dispatcher=self._dispatcher,
@@ -2729,7 +2742,7 @@ class DaytonaRuntime:
         if state in {"stopped", "paused", "archived"}:
             try:
                 await _provider_call(
-                    self._platform.start(_sandbox_id(sandbox)),
+                    self._platform.start(_sandbox_id(sandbox), **_remaining_timeout(deadline)),
                     deadline=deadline,
                     operation="Sandbox start",
                     owner=self._provider_tasks,
@@ -2769,7 +2782,7 @@ class DaytonaRuntime:
         )
         try:
             return await _provider_call(
-                _create_daytona_sandbox(
+                create_daytona_sandbox(
                     self._platform,
                     expected,
                     labels={
@@ -2780,6 +2793,7 @@ class DaytonaRuntime:
                         "volume_subpath": expected.volume_subpath,
                     },
                     ephemeral=False,
+                    **_remaining_timeout(deadline),
                 ),
                 deadline=deadline,
                 operation="Sandbox creation",

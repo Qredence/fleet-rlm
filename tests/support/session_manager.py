@@ -154,8 +154,9 @@ class _FakePlatform:
         volume_subpath: str,
         labels: dict[str, str] | None = None,
         ephemeral: bool = False,
+        timeout: float | None = None,
     ) -> _FakeSandbox:
-        del ephemeral
+        del ephemeral, timeout
         if not volume_subpath:
             raise ValueError("VolumeMount without workspace subpath is rejected")
         self._n += 1
@@ -185,7 +186,8 @@ class _FakePlatform:
         self.deleted.append(sandbox_id)
         self.sandboxes.pop(sandbox_id, None)
 
-    async def start(self, sandbox_id: str) -> None:
+    async def start(self, sandbox_id: str, *, timeout: float | None = None) -> None:
+        del timeout
         self.sandboxes[sandbox_id].start()
 
     async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
