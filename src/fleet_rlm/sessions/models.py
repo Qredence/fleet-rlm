@@ -272,10 +272,6 @@ class SessionNotFoundError(SessionError):
     """Raised when a session id cannot be loaded."""
 
 
-class SessionAccessDeniedError(SessionError):
-    """Caller is not allowed to access the session (map publicly to not-found)."""
-
-
 class SessionRetirementPendingError(SessionError):
     """Raised when a Session is archived durably but provider retirement failed."""
 
