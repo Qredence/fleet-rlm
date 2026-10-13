@@ -319,10 +319,12 @@ def run_selection_case(
 
 
 def summarize(rows: Sequence[Mapping[str, Any]], cases: Sequence[SelectionCase]) -> dict[str, Any]:
-    required = sum(len(case.required) for case in cases)
+    required_by_case = {case.id: len(case.required) for case in cases}
     result: dict[str, Any] = {}
     for arm in ("root", "root_with_recommender"):
         selected = [row for row in rows if row["arm"] == arm]
+        # Recall is per arm: count only the cases this arm actually ran.
+        required = sum(required_by_case[row["case"]] for row in selected)
         missed = sum(len(row["missing_required"]) for row in selected)
         result[arm] = {
             "required_skill_recall": (required - missed) / required if required else 1.0,

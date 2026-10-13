@@ -288,3 +288,54 @@ def test_operator_plan_never_reads_keys_or_constructs_models(monkeypatch, capsys
     planned = json.loads(capsys.readouterr().out)
     assert planned["heldout_cases"] == planned["calibration_cases"] == 18
     assert planned["jev_model"] == "jev-latest"
+
+
+def test_noul_experimental_contract_used_by_the_recommender():
+    """Pin the dspy.experimental.Noul surface: constructor fields, truthiness, optional probability."""
+    from dspy.adapters.types.decision import Noul as DecisionNoul
+
+    assert Noul is DecisionNoul
+    assert set(Noul.model_fields) == {"value", "confidence", "probability"}
+    positive = Noul(value=True, confidence=0.8, probability=0.9)
+    assert bool(positive) is True
+    assert positive.probability == pytest.approx(0.9)
+    negative = Noul(value=False, confidence=0.2)
+    assert bool(negative) is False
+    assert negative.probability is None
+
+
+def test_recall_denominator_counts_only_cases_each_arm_ran():
+    first = case(id="first", required=("data-analysis",))
+    second = case(id="second", required=("data-analysis", "web-research"))
+
+    def row(case_id: str, arm: str, missing: list[str]) -> dict[str, object]:
+        return {
+            "case": case_id,
+            "arm": arm,
+            "success": True,
+            "missing_required": missing,
+            "unnecessary_loads": [],
+            "unnecessary_recommendations": [],
+            "interpreter_errors": 0,
+            "root_calls": 0,
+            "recommendation_calls": 0,
+            "elapsed_seconds": 0.0,
+        }
+
+    rows = [
+        row("first", "root", []),
+        row("second", "root", ["web-research"]),
+        row("second", "root_with_recommender", ["web-research"]),
+    ]
+    report = summarize(rows, [first, second])
+
+    assert report["root"]["required_skill_recall"] == pytest.approx(2 / 3)
+    # Only "second" ran under the recommender; "first" must not inflate its denominator.
+    assert report["root_with_recommender"]["required_skill_recall"] == pytest.approx(1 / 2)
+
+
+def test_recall_with_no_rows_for_an_arm_is_vacuously_complete():
+    report = summarize([], [case()])
+
+    assert report["root"]["required_skill_recall"] == 1.0
+    assert report["root_with_recommender"]["required_skill_recall"] == 1.0
