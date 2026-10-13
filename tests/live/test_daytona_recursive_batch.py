@@ -66,8 +66,12 @@ class _ProofCapabilityPreparer:
     tools: tuple[dspy.Tool, ...]
     event_views: MappingProxyType[str, ToolEventView]
 
-    async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
-        prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
+    async def prepare(
+        self, turn: Any, environment: Any, attachments: Any, *, deadline: float, task_checkpoint: Any = None
+    ) -> Any:
+        prepared = await self.delegate.prepare(
+            turn, environment, attachments, deadline=deadline, task_checkpoint=task_checkpoint
+        )
         prepared.spec = replace(
             prepared.spec,
             signature=BatchResult,
