@@ -127,6 +127,7 @@ def test_failed_evidence_write_removes_only_its_new_directory(helper, monkeypatc
 def test_http_body_deadline_stops_real_slow_trickle(helper, monkeypatch):
     pytest.importorskip("bs4", reason="snapshot-only dependency; run with --with beautifulsoup4==4.15.0")
     monkeypatch.setattr(helper, "public_url", lambda url: url)
+    monkeypatch.setattr(helper, "resolve_public", lambda *_address: "127.0.0.1")
     monkeypatch.setattr(helper, "TIMEOUT_S", 0.3)
     stopped = threading.Event()
 
@@ -183,6 +184,7 @@ def test_rendered_evidence_keeps_scope_and_is_never_a_full_site_claim(helper, mo
 def test_early_eof_never_saves_complete_evidence(helper, monkeypatch, tmp_path):
     monkeypatch.setenv("FLEET_RUN_SCRATCH", str(tmp_path))
     monkeypatch.setattr(helper, "public_url", lambda url: url)
+    monkeypatch.setattr(helper, "resolve_public", lambda *_address: "127.0.0.1")
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -241,3 +243,74 @@ def test_public_evidence_helper_refuses_binary_content(helper, monkeypatch):
     monkeypatch.setattr(helper, "build_opener", lambda *_args: SimpleNamespace(open=lambda *_args, **_kwargs: stream))
     with pytest.raises(ValueError, match="supported"):
         helper.http_text(stream.url)
+
+
+class _LocalPage(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"internal metadata"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_dns_rebinding_between_check_and_connect_is_refused(helper, monkeypatch):
+    pytest.importorskip("bs4", reason="snapshot-only dependency; run with --with beautifulsoup4==4.15.0")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _LocalPage)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    calls = []
+
+    def rebinding(host, port, *_args, **_kwargs):
+        # Only the lookup after the first check rebinds to loopback.
+        calls.append(host)
+        return [(2, 1, 6, "", ("127.0.0.1" if len(calls) == 2 else "93.184.216.34", port))]
+
+    monkeypatch.setattr(helper.socket, "getaddrinfo", rebinding)
+    try:
+        with pytest.raises(ValueError, match="non-public"):
+            helper.http_text(f"http://rebind.example:{server.server_port}/")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_pinned_https_connection_uses_the_checked_address_with_original_sni(helper, monkeypatch):
+    connected = []
+    monkeypatch.setattr(helper, "resolve_public", lambda *_address: "93.184.216.34")
+    monkeypatch.setattr(
+        helper.socket, "create_connection", lambda address, *_a, **_k: connected.append(address) or "raw-socket"
+    )
+    wrapped = []
+    context = SimpleNamespace(wrap_socket=lambda sock, server_hostname: wrapped.append((sock, server_hostname)))
+    connection = helper.PinnedHTTPSConnection("example.org", 443, context=context)
+    connection.connect()
+    assert connected == [("93.184.216.34", 443)]
+    assert wrapped == [("raw-socket", "example.org")]
+
+
+def _header_response(helper, monkeypatch, headers: dict[str, str], body: bytes):
+    monkeypatch.setattr(helper, "public_url", lambda url: url)
+    stream = io.BytesIO(body)
+    stream.url = "https://example.org/final"
+    stream.headers = Message()
+    for name, value in headers.items():
+        stream.headers[name] = value
+    monkeypatch.setattr(helper, "build_opener", lambda *_a: SimpleNamespace(open=lambda *_a, **_k: stream))
+
+
+def test_unknown_charset_falls_back_to_replacing_utf8(helper, monkeypatch):
+    _header_response(helper, monkeypatch, {"Content-Type": "text/plain; charset=x-unknown-9"}, "café".encode())
+    assert helper.http_text("https://example.org")[0] == "café"
+
+
+@pytest.mark.parametrize("declared", ["abc", "12, 12", ""])
+def test_malformed_content_length_is_a_clean_error(helper, monkeypatch, declared):
+    _header_response(helper, monkeypatch, {"Content-Type": "text/plain", "Content-Length": declared}, b"body")
+    with pytest.raises(ValueError, match="invalid Content-Length"):
+        helper.http_text("https://example.org")

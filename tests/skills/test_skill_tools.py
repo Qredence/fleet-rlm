@@ -1,5 +1,6 @@
 """Progressive catalog-bound Skill tools."""
 
+import contextlib
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -383,3 +384,59 @@ def test_legacy_lock_spanning_write_deadlocks_drains() -> None:
     thread.join(timeout=5)
     assert not thread.is_alive()
     assert workspace.written[marker] == "payload"
+
+
+@pytest.mark.asyncio
+async def test_preload_workspace_writes_are_bounded_by_the_turn_deadline() -> None:
+    import asyncio
+    from uuid import uuid4 as _uuid4
+
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import ClaimedRun, _RunClaimToken
+    from fleet_rlm.skills.models import SkillSelectionRef
+    from fleet_rlm.turns.preparation import RunPreparationTimeoutError, prepare_host_capabilities
+    from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
+
+    async def not_cancelled() -> bool:
+        return False
+
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    stalled = asyncio.Event()
+
+    class StalledWorkspace(_RecordingWorkspace):
+        def write_text(self, *_args, **_kwargs) -> None:
+            async def write() -> None:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stalled.wait(), timeout=1.5)
+
+            dispatcher.run(write())
+
+    turn = ClaimedRun(
+        _uuid4(),
+        _uuid4(),
+        TurnAccess(_uuid4(), _uuid4()),
+        TurnInput(
+            "analyze the corpus",
+            skill_selections=(SkillSelectionRef(id=skill.card.id, expected_version=skill.card.version),),
+        ),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(_uuid4()),
+    )
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    with pytest.raises(RunPreparationTimeoutError):
+        await prepare_host_capabilities(
+            turn=turn,
+            skill_catalog=catalog,
+            base_tools=(),
+            base_event_views={},
+            workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
+            workspace_fs=StalledWorkspace(),
+            deadline=started + 0.2,
+        )
+    assert loop.time() - started < 1.0

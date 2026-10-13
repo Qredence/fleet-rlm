@@ -158,7 +158,8 @@ async def test_primary_source_domains_restrict_search_and_filter_provider_result
         result = await host.web_search("official persistence docs", include_domains=["Daytona.IO", "github.com"])
         body = json.loads(calls[0].content)
         assert body["include_domains"] == ["daytona.io", "github.com"]
-        assert body["include_domains_mode"] == "restrict"
+        # Tavily documents include_domains only; restriction is enforced again on results.
+        assert "include_domains_mode" not in body
         assert [item["url"] for item in result["results"]] == [
             "https://www.daytona.io/docs/en/persistence/",
             "https://github.com/daytonaio/daytona",
@@ -212,5 +213,45 @@ async def test_general_search_without_domain_filter_keeps_unrestricted_results()
         result = await host.web_search("general research")
         assert result["results"][0]["url"] == "https://example.org"
         assert "include_domains" not in json.loads(calls[0].content)
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_credits_remaining_is_the_balance_at_this_calls_reservation() -> None:
+    first_sent = asyncio.Event()
+    release = asyncio.Event()
+
+    async def respond(request):
+        if json.loads(request.content)["query"] == "first":
+            first_sent.set()
+            await release.wait()
+        return httpx.Response(200, json={"results": []})
+
+    client = TavilySearch(SecretStr("secret"), transport=httpx.MockTransport(respond))
+    try:
+        host = WebSearchToolHost(client, time.monotonic() + 20, lambda: True, credit_limit=5)
+        first = asyncio.create_task(host.web_search("first"))
+        await asyncio.wait_for(first_sent.wait(), timeout=5)
+        second = await host.web_search("second", depth="advanced")
+        release.set()
+        assert (await first)["credits_remaining"] == 4
+        assert second["credits_remaining"] == 2
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_logs_only_its_type(caplog: pytest.LogCaptureFixture) -> None:
+    def respond(_request):
+        raise httpx.ConnectError("private provider host detail")
+
+    client = TavilySearch(SecretStr("secret"), transport=httpx.MockTransport(respond))
+    try:
+        with caplog.at_level("DEBUG", logger="fleet_rlm.web_search"):
+            result = await client.search("q", 1, "basic", deadline=time.monotonic() + 5)
+        assert result == {"ok": False, "error": "search_unavailable"}
+        assert "ConnectError" in caplog.text
+        assert "private provider host detail" not in caplog.text
     finally:
         await client.aclose()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -19,7 +20,7 @@ from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.paths import VolumePaths
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
-from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
+from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget, host_action_deadline
 from fleet_rlm.rlm.event_types import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.events import AsyncToolBridge, ToolEventView
 from fleet_rlm.rlm.execution import (
@@ -675,6 +676,13 @@ class PreparedHostCapabilities:
             raise first_error
 
 
+def _preload_within_deadline(skill_host: SkillToolHost, skill: Any, deadline: float) -> dict[str, Any]:
+    if not math.isfinite(deadline):
+        return skill_host.mark_preloaded(skill)
+    with host_action_deadline(deadline):
+        return skill_host.mark_preloaded(skill)
+
+
 async def prepare_host_capabilities(
     *,
     turn: ClaimedRun,
@@ -748,7 +756,9 @@ async def prepare_host_capabilities(
         # Workspace sync views post SDK work back to this event loop. Run the
         # install off-loop, retaining ownership until its writes settle even
         # when preparation is cancelled; cleanup must not race a late write.
-        effect = OwnedEffect.start(asyncio.to_thread(skill_host.mark_preloaded, skill))
+        # The bridged writes inherit the Turn deadline through the host action
+        # context, so a stalled Sandbox write cannot outlive preparation.
+        effect = OwnedEffect.start(asyncio.to_thread(_preload_within_deadline, skill_host, skill, deadline))
         settled = await effect.settle()
         if settled.caller_cancelled:
             raise asyncio.CancelledError

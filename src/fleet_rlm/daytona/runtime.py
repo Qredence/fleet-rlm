@@ -117,8 +117,19 @@ _ensure_directories = ensure_directories
 
 
 async def _claim_session_lease(
-    registry: ActiveLeaseRegistry, session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float
+    registry: ActiveLeaseRegistry,
+    session_id: UUID,
+    run_id: UUID,
+    *,
+    workspace_id: UUID,
+    deadline: float,
+    inflight_prewarm: Callable[[], asyncio.Future[None] | None] = lambda: None,
 ) -> None:
+    """Claim the Session lease, adopting an in-flight pre-warm rather than racing it.
+
+    A known in-flight pre-warm is awaited up to the caller's deadline; the
+    shorter claim cap only bounds a pre-warm claim without a live owner.
+    """
     loop = asyncio.get_running_loop()
     claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
     while True:
@@ -128,6 +139,17 @@ async def _claim_session_lease(
         except ActiveLeaseConflictError as exc:
             if run_id == PREWARM_RUN_ID or exc.holder_run_id != PREWARM_RUN_ID:
                 raise
+        prewarm = inflight_prewarm()
+        if prewarm is not None and not prewarm.done():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
+            try:
+                await asyncio.wait_for(asyncio.shield(prewarm), timeout=remaining)
+            except TimeoutError:
+                raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
+            claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
+            continue
         remaining = min(deadline, claim_wait_deadline) - loop.time()
         if remaining <= 0:
             raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
@@ -351,6 +373,7 @@ class DaytonaRuntime:
             raise ValueError("idle_stop_seconds must be positive")
         self._idle_stop_seconds = idle_stop_seconds
         self._idle_tasks: dict[tuple[UUID, UUID], asyncio.Task[None]] = {}
+        self._prewarms: dict[tuple[UUID, UUID], asyncio.Future[None]] = {}
         self._owned_sandbox_ids: set[str] = set()
         self._owned_sandbox_lock = Lock()
         self._late_owners: dict[int, _LateOwner] = {}
@@ -1202,21 +1225,39 @@ class DaytonaRuntime:
         workspace_id: UUID,
         deadline: float | None = None,
     ) -> bool:
-        effective_deadline = deadline if deadline is not None else asyncio.get_running_loop().time() + 120.0
-        try:
-            lease = await self.acquire(
-                LeaseRequest(
-                    session_id=session_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    run_id=PREWARM_RUN_ID,
-                ),
-                deadline=effective_deadline,
-            )
-        except ActiveLeaseConflictError:
+        """Warm the Session root once; repeated requests while warm or warming are no-ops."""
+        key = (workspace_id, session_id)
+        inflight = self._prewarms.get(key)
+        if inflight is not None and not inflight.done():
             return False
-        await self.release(lease)
-        return True
+        if (
+            self._active_leases.holder(session_id, workspace_id=workspace_id) is not None
+            or self._find_idle_task(session_id, workspace_id) is not None
+        ):
+            return False
+        loop = asyncio.get_running_loop()
+        settled: asyncio.Future[None] = loop.create_future()
+        self._prewarms[key] = settled
+        effective_deadline = deadline if deadline is not None else loop.time() + 120.0
+        try:
+            try:
+                lease = await self.acquire(
+                    LeaseRequest(
+                        session_id=session_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        run_id=PREWARM_RUN_ID,
+                    ),
+                    deadline=effective_deadline,
+                )
+            except ActiveLeaseConflictError:
+                return False
+            await self.release(lease)
+            return True
+        finally:
+            if self._prewarms.get(key) is settled:
+                del self._prewarms[key]
+            settled.set_result(None)
 
     def schedule_prewarm(
         self,
@@ -1289,7 +1330,12 @@ class DaytonaRuntime:
         session_id = request.session_id
         await self._cancel_idle_stop(session_id, workspace_id=request.workspace_id, deadline=deadline)
         await _claim_session_lease(
-            self._active_leases, session_id, run_id, workspace_id=request.workspace_id, deadline=deadline
+            self._active_leases,
+            session_id,
+            run_id,
+            workspace_id=request.workspace_id,
+            deadline=deadline,
+            inflight_prewarm=lambda: self._prewarms.get((request.workspace_id, session_id)),
         )
         claim_held = True
         permit: DaytonaAdmissionPermit | None = None

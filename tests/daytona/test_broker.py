@@ -798,3 +798,121 @@ def test_sdk_execution_preserves_host_error_category_and_recovers(embedded_serve
         assert calls == [1]
         assert backend.run("print('recovered')").stdout == "recovered\n"
         backend.close()
+
+
+def _serviced_broker(**kwargs) -> DaytonaHttpToolBroker:
+    broker = DaytonaHttpToolBroker(object(), port=1, **kwargs)
+    broker._client = MagicMock()
+    broker._url = "http://sandbox.invalid"
+    broker._poll_once = lambda: None
+    return broker
+
+
+def test_service_execution_abandons_a_worker_that_outlives_deadline_and_grace(monkeypatch) -> None:
+    monkeypatch.setattr(broker_module, "_EXECUTION_GRACE_S", 0.05)
+    tainted = MagicMock()
+    broker = _serviced_broker(mark_tainted=tainted)
+    release = threading.Event()
+    started = time.monotonic()
+    try:
+        with pytest.raises(DaytonaAdapterError) as error:
+            broker.service_execution(lambda: release.wait(10), timeout_s=0.05)
+    finally:
+        release.set()
+    assert error.value.cause_type == "BrokerExecutionTimeout"
+    assert time.monotonic() - started < 2
+    tainted.assert_called_once_with()
+    assert broker._client.post.call_args.kwargs["json"] == {"active": False}
+
+
+def test_service_execution_abandons_a_worker_once_the_broker_is_stopped() -> None:
+    tainted = MagicMock()
+    broker = _serviced_broker(mark_tainted=tainted)
+    release = threading.Event()
+    threading.Timer(0.05, lambda: setattr(broker, "_stopped", True)).start()
+    try:
+        with pytest.raises(DaytonaAdapterError) as error:
+            broker.service_execution(lambda: release.wait(10), timeout_s=None)
+    finally:
+        release.set()
+    assert error.value.cause_type == "InterpreterLifecycleError"
+    tainted.assert_called_once_with()
+
+
+def test_service_execution_keeps_the_outcome_when_deactivation_fails() -> None:
+    tainted = MagicMock()
+    broker = _serviced_broker(mark_tainted=tainted)
+    broker._client.post.side_effect = [MagicMock(), httpx.ConnectError("gone")]
+    assert broker.service_execution(lambda: "submitted", timeout_s=2) == "submitted"
+    tainted.assert_called_once_with()
+
+
+def test_service_execution_tolerates_a_concurrent_stop_clearing_the_client() -> None:
+    broker = _serviced_broker()
+
+    def execute() -> str:
+        broker._client = None
+        return "submitted"
+
+    assert broker.service_execution(execute, timeout_s=2) == "submitted"
+
+
+class _StartupSandbox:
+    def __init__(self) -> None:
+        self.fs = MagicMock()
+        self.process = MagicMock()
+
+    def get_preview_link(self, _port: int) -> SimpleNamespace:
+        return SimpleNamespace(url="http://sandbox.invalid/", token="")
+
+
+def _patch_health(monkeypatch, responses: list[object]) -> list[MagicMock]:
+    created: list[MagicMock] = []
+
+    def client(**_kwargs) -> MagicMock:
+        instance = MagicMock()
+
+        def get(_path: str) -> object:
+            item = responses.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            return SimpleNamespace(status_code=item)
+
+        instance.get.side_effect = get
+        created.append(instance)
+        return instance
+
+    monkeypatch.setattr(broker_module.httpx, "Client", client)
+    monkeypatch.setattr(broker_module.time, "sleep", lambda _seconds: None)
+    return created
+
+
+def test_unhealthy_startup_stops_the_broker_and_never_reuses_its_url(monkeypatch) -> None:
+    created = _patch_health(monkeypatch, [503] * 20)
+    sandbox = _StartupSandbox()
+    broker = DaytonaHttpToolBroker(sandbox, port=1)
+    with pytest.raises(DaytonaAdapterError, match="did not become healthy"):
+        broker.start()
+    assert broker._url is None
+    assert broker._client is None
+    created[0].close.assert_called_once_with()
+    sandbox.process.delete_session.assert_called_once()
+    with pytest.raises(DaytonaAdapterError, match="broker is stopped"):
+        broker.start()
+
+
+def test_health_probe_retries_transport_errors_until_healthy(monkeypatch) -> None:
+    _patch_health(monkeypatch, [httpx.ConnectError("refused"), httpx.ReadTimeout("slow"), 200])
+    broker = DaytonaHttpToolBroker(_StartupSandbox(), port=1)
+    broker.start()
+    assert broker._url == "http://sandbox.invalid"
+
+
+def test_failed_startup_clears_the_url_after_a_provider_error(monkeypatch) -> None:
+    created = _patch_health(monkeypatch, [RuntimeError("provider down")])
+    sandbox = _StartupSandbox()
+    broker = DaytonaHttpToolBroker(sandbox, port=1)
+    with pytest.raises(DaytonaAdapterError, match="failed to start"):
+        broker.start()
+    assert broker._url is None
+    created[0].close.assert_called_once_with()

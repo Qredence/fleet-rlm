@@ -1888,3 +1888,87 @@ async def test_session_fence_stops_only_its_children_and_retains_cleanup_ownersh
     assert admission._semaphore._value == 1
     for record in runtime._children._child_cleanup_records.values():
         record.permit.release()
+
+
+def _gated_platform() -> tuple[_FakePlatform, asyncio.Event, asyncio.Event]:
+    platform = _FakePlatform()
+    started, release = asyncio.Event(), asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        started.set()
+        await asyncio.wait_for(release.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+    return platform, started, release
+
+
+@pytest.mark.asyncio
+async def test_repeated_prewarm_requests_share_one_in_flight_prewarm() -> None:
+    platform, started, release = _gated_platform()
+    runtime = make_daytona_runtime(platform=platform)
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    acquire_calls = []
+    original_acquire = runtime.acquire
+
+    async def counting_acquire(request, **kwargs):
+        acquire_calls.append(request.run_id)
+        return await original_acquire(request, **kwargs)
+
+    runtime.acquire = counting_acquire  # type: ignore[method-assign]
+    first = asyncio.create_task(runtime.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    repeats = [await runtime.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id) for _ in range(3)]
+    assert repeats == [False, False, False]
+    assert len(acquire_calls) == 1
+    release.set()
+    assert await asyncio.wait_for(first, timeout=10) is True
+    assert len(platform.created) == 1
+    await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_prewarm_is_a_noop_while_a_turn_holds_the_session_lease() -> None:
+    runtime = make_daytona_runtime()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    loop = asyncio.get_running_loop()
+    lease = await runtime.acquire(
+        LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id, run_id=uuid4()),
+        deadline=loop.time() + 10,
+    )
+    acquire = AsyncMock()
+    original_acquire, runtime.acquire = runtime.acquire, acquire  # type: ignore[method-assign]
+    try:
+        assert await runtime.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id) is False
+        acquire.assert_not_awaited()
+    finally:
+        runtime.acquire = original_acquire  # type: ignore[method-assign]
+        await runtime.release(lease)
+    await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_turn_adopts_an_in_flight_prewarm_instead_of_failing_at_the_claim_cap(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_module, "_PREWARM_CLAIM_WAIT_SECONDS", 0.05)
+    platform, started, release = _gated_platform()
+    runtime = make_daytona_runtime(platform=platform)
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    loop = asyncio.get_running_loop()
+    prewarm = asyncio.create_task(runtime.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    turn = asyncio.create_task(
+        runtime.acquire(
+            LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id, run_id=uuid4()),
+            deadline=loop.time() + 10,
+        )
+    )
+    await asyncio.sleep(0.2)
+    assert not turn.done(), "the Turn must keep waiting for the in-flight pre-warm"
+    release.set()
+    lease = await asyncio.wait_for(turn, timeout=10)
+    assert await prewarm is True
+    assert lease.sandbox_id == platform.created[0]["id"]
+    assert len(platform.created) == 1
+    await runtime.release(lease)
+    await runtime.aclose()

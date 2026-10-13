@@ -379,3 +379,91 @@ async def test_slow_worker_lookup_keeps_application_loop_responsive():
         await asyncio.to_thread(backend.close)
         view.close()
     client._http_client.close.assert_called_once()
+
+
+@pytest.mark.usefixtures("broker")
+@pytest.mark.parametrize("failure", [ConnectionError("stream reset"), TimeoutError("client timed out")])
+def test_client_side_run_code_failure_poisons_the_backend(failure):
+    service = MagicMock()
+    actions = []
+
+    def run_code(code, **_kwargs):
+        if "def SUBMIT" in code:
+            return SimpleNamespace(stdout="", stderr="", error=None)
+        actions.append(code)
+        raise failure
+
+    service.run_code.side_effect = run_code
+    tainted = MagicMock()
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=service), mark_tainted=tainted)
+    with pytest.raises(Exception, match=str(failure)):
+        backend.run("value = 1")
+    tainted.assert_called_once_with()
+    with pytest.raises(DaytonaAdapterError) as poisoned:
+        backend.run("value = 2")
+    assert poisoned.value.cause_type == "InterpreterExecutionStateUnknown"
+    assert len(actions) == 1
+    backend.close()
+
+
+@pytest.mark.usefixtures("broker")
+def test_unbounded_action_sends_the_sdk_default_timeout():
+    service = LocalSDKInterpreter()
+    observed = []
+    run_code = service.run_code
+
+    def run(code, **kwargs):
+        observed.append(kwargs["timeout"])
+        return run_code(code, **kwargs)
+
+    service.run_code = run
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=service), timeout_s=None)
+    assert backend.run("value = 1").error is None
+    assert observed == [None, None]
+    backend.close()
+
+
+def _worker_backend(service):
+    client = MagicMock()
+    client.get.return_value = SimpleNamespace(code_interpreter=service)
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.sync_client_factory = lambda: client
+    return sandbox_backend(SimpleNamespace(id="root"), dispatcher=dispatcher), client
+
+
+def test_worker_scope_closes_even_when_context_delete_fails(broker):
+    service = LocalSDKInterpreter()
+    backend, client = _worker_backend(service)
+    backend.run("value = 1")
+    service.delete_context = MagicMock(side_effect=RuntimeError("delete failed"))
+    with pytest.raises(RuntimeError, match="delete failed"):
+        backend.close()
+    client._http_client.close.assert_called_once()
+    broker.stop.assert_called_once_with(strict=True)
+
+
+@pytest.mark.usefixtures("broker")
+def test_missing_context_on_delete_is_settled():
+    from daytona.common.errors import DaytonaNotFoundError
+
+    service = LocalSDKInterpreter()
+    backend, client = _worker_backend(service)
+    backend.run("value = 1")
+    service.delete_context = MagicMock(side_effect=DaytonaNotFoundError("context gone"))
+    backend.close()
+    assert backend._sdk_context is None
+    client._http_client.close.assert_called_once()
+
+
+def test_worker_scope_drops_its_client_even_when_a_close_step_fails():
+    from fleet_rlm.daytona.interpreter import _SDKWorkerSandbox
+
+    client = MagicMock()
+    client._http_client.close.side_effect = RuntimeError("close failed")
+    scope = _SDKWorkerSandbox("root", lambda: client)
+    assert scope.fs is client.get.return_value.fs
+    with pytest.raises(RuntimeError, match="close failed"):
+        scope.close()
+    assert scope._client is None and scope._sandbox is None
+    scope.close()
+    client._subscription_manager.shutdown.assert_called_once()

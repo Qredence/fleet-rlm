@@ -108,6 +108,18 @@ def close(scratch: str, *, groups: dict[int, str] | None = None) -> None:
         raise RuntimeError("Run browser cleanup remains unresolved")
 
 
+def _private_directory(path: Path) -> None:
+    """Create one owner-only directory level, refusing a symlink in its place."""
+    if path.is_symlink():
+        raise RuntimeError("browser directory must not be a symlink")
+    try:
+        path.mkdir(mode=0o700)
+    except FileExistsError:
+        if not path.is_dir():
+            raise RuntimeError("browser directory is not a directory") from None
+    path.chmod(0o700)
+
+
 def start(scratch: str) -> dict[str, object]:
     """Launch fresh Chrome with its sandbox enabled; return a direct CLI prefix."""
     run_id = _run_id(scratch)
@@ -123,10 +135,12 @@ def start(scratch: str) -> dict[str, object]:
     if _owned_processes(run_id):
         raise RuntimeError("a browser is already open for this Run; reuse its CLI prefix")
     # A previous stopped browser's profile is never recovered implicitly.
-    if profile.exists():
+    if profile.exists() or profile.is_symlink():
         raise RuntimeError("Run browser profile already exists")
-    profile.mkdir(parents=True, mode=0o700)
-    with (profile.parent / "browser.log").open("wb") as log:
+    _private_directory(profile.parent)
+    profile.mkdir(mode=0o700)
+    log_fd = os.open(profile.parent / "browser.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(log_fd, "wb") as log:
         browser = subprocess.Popen(
             [
                 executable,
@@ -167,9 +181,15 @@ def start(scratch: str) -> dict[str, object]:
                     }
             time.sleep(0.05)
         raise TimeoutError("sandboxed Chromium startup timed out")
-    except BaseException:
-        close(scratch, groups=groups)
-        browser.wait(timeout=5)
+    except BaseException as launch_error:
+        # Report the launch failure; a cleanup failure is attached, never substituted.
+        try:
+            close(scratch, groups=groups)
+        except Exception as cleanup_error:
+            launch_error.add_note(f"browser cleanup failed: {type(cleanup_error).__name__}")
+        finally:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                browser.wait(timeout=5)
         raise
 
 

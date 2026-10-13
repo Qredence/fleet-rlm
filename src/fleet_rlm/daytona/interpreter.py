@@ -20,7 +20,7 @@ from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
-from daytona.common.errors import DaytonaFileNotFoundError
+from daytona.common.errors import DaytonaFileNotFoundError, DaytonaNotFoundError
 from dspy import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.utils.callback import BaseCallback, with_callbacks
 
@@ -31,7 +31,7 @@ from fleet_rlm.daytona.errors import (
     sanitize_provider_message,
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
-from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
+from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted, current_host_action_deadline
 from fleet_rlm.rlm.event_types import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
 from fleet_rlm.rlm.events import ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.output_contract import FleetOutputContract
@@ -828,13 +828,21 @@ class _SandboxProcessBackend:
                     context=self._sdk_context,
                     on_stdout=lambda message: forward("stdout", message),
                     on_stderr=lambda message: forward("stderr", message),
-                    timeout=math.ceil(timeout) if timeout is not None else 0,
+                    timeout=math.ceil(timeout) if timeout is not None else None,
                 ),
                 timeout_s=timeout,
             )
         except BaseException:
             if self._transport_failure is not None:
                 raise self._transport_failure from None
+            # A client-side failure leaves the remote action's state unknown:
+            # orphaned code may still run in this context, so never reuse it.
+            self._transport_failure = DaytonaAdapterError(
+                message="Sandbox execution state is unknown after a client-side failure",
+                cause_type="InterpreterExecutionStateUnknown",
+            )
+            if self._mark_tainted is not None:
+                self._mark_tainted()
             raise
         # Some SDK bridges serialize callback exceptions as execution errors or
         # omit callbacks. Neither case can turn a transport refusal into success.
@@ -873,6 +881,7 @@ class _SandboxProcessBackend:
                 port=self._broker_port,
                 tool_settled=self._tool_settled,
                 tool_failed=self._tool_failed,
+                mark_tainted=self._mark_tainted,
             )
             bind_bridge = getattr(self._broker, "bind_async_bridge", None)
             if callable(bind_bridge):
@@ -934,24 +943,30 @@ class _SandboxProcessBackend:
     def close(self) -> None:
         self._closed = True
         failure: Exception | None = None
-        if self._sdk_context is not None:
-            try:
-                self._sandbox.code_interpreter.delete_context(self._sdk_context)
-            except Exception as exc:
-                failure = exc
-            else:
-                self._sdk_context = None
-        if self._broker is not None:
-            try:
-                self._broker.stop(strict=True)
-            except Exception as exc:
-                failure = failure or exc
-            else:
-                self._broker = None
+        try:
+            if self._sdk_context is not None:
+                try:
+                    self._sandbox.code_interpreter.delete_context(self._sdk_context)
+                except DaytonaNotFoundError:
+                    self._sdk_context = None  # Already gone: the context is settled.
+                except Exception as exc:
+                    failure = exc
+                else:
+                    self._sdk_context = None
+            if self._broker is not None:
+                try:
+                    self._broker.stop(strict=True)
+                except Exception as exc:
+                    failure = failure or exc
+                else:
+                    self._broker = None
+        finally:
+            # The worker scope owns a synchronous SDK client; never leak it
+            # behind a failed context or broker cleanup.
+            if isinstance(self._sandbox, _SDKWorkerSandbox):
+                self._sandbox.close()
         if failure is not None:
             raise failure
-        if isinstance(self._sandbox, _SDKWorkerSandbox):
-            self._sandbox.close()
 
 
 class DaytonaCodeInterpreter:
@@ -1764,6 +1779,9 @@ class _SyncBridgeLoop:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             raise self._bridge_error("synchronous Daytona bridge is closed")
+        if deadline is None:
+            # Work posted on behalf of a bounded host action inherits its deadline.
+            deadline = current_host_action_deadline()
         loop = self.service_loop()
         if loop is None or loop.is_closed():
             if inspect.iscoroutine(awaitable):
@@ -1895,10 +1913,10 @@ class _SDKWorkerSandbox:
         from fleet_rlm.daytona.provider import close_sync_daytona_client
 
         self._closed = True
-        if self._client is not None:
-            close_sync_daytona_client(self._client)
-            self._client = None
-            self._sandbox = None
+        client, self._client, self._sandbox = self._client, None, None
+        if client is not None:
+            # A failed close step is reported once; retrying cannot recover it.
+            close_sync_daytona_client(client)
 
 
 class _DSPySyncSandboxView:

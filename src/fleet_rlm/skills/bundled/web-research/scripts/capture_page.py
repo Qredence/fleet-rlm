@@ -1,28 +1,45 @@
 """Bounded HTTP capture and rendered-text evidence storage in the Root Sandbox.
 
-URL/DNS checks are best effort, not network containment (DNS rebinding and
-provider egress enforcement remain outside this helper's guarantees).
+Every connection resolves its host once, rejects any non-global answer and
+connects to that checked address (HTTPS keeps the original name for SNI and
+certificate checks), so a DNS answer cannot change between check and use.
+This is not network containment: provider egress enforcement stays outside
+this helper's guarantees.
 """
 
 from __future__ import annotations
 
 import argparse
+import codecs
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
 import shutil
 import socket
+import ssl
 import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_TEXT_BYTES = 1_000_000
 TIMEOUT_S = 20
+
+
+def resolve_public(host: str, port: int) -> str:
+    """Resolve ``host`` once and return the checked address to connect to."""
+    host = host.rstrip(".").lower()
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("local targets are not allowed")
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+        raise ValueError("non-public targets are not allowed")
+    return str(addresses[0][4][0])
 
 
 def public_url(url: str) -> str:
@@ -32,15 +49,55 @@ def public_url(url: str) -> str:
     parts = urlsplit(url)
     if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
         raise ValueError("one public HTTP(S) URL without credentials is required")
-    host = parts.hostname.rstrip(".").lower()
-    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
-        raise ValueError("local targets are not allowed")
-    addresses = socket.getaddrinfo(
-        host, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM
-    )
-    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
-        raise ValueError("non-public targets are not allowed")
+    resolve_public(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
     return url
+
+
+class PinnedHTTPConnection(http.client.HTTPConnection):
+    """Connect only to the address checked by this connection's own lookup."""
+
+    def connect(self) -> None:
+        address = resolve_public(self.host, self.port)
+        self.sock = socket.create_connection((address, self.port), self.timeout)
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Pinned HTTPS: TLS still verifies the certificate for the original host name."""
+
+    def __init__(self, host: str, port: int | None = None, *, context: ssl.SSLContext | None = None, **kwargs):
+        self._pinned_context = context or ssl.create_default_context()
+        super().__init__(host, port, context=self._pinned_context, **kwargs)
+
+    def connect(self) -> None:
+        address = resolve_public(self.host, self.port)
+        sock = socket.create_connection((address, self.port), self.timeout)
+        self.sock = self._pinned_context.wrap_socket(sock, server_hostname=self.host)
+
+
+class PinnedHTTPHandler(HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(PinnedHTTPConnection, req)
+
+
+class PinnedHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(PinnedHTTPSConnection, req, context=ssl.create_default_context())
+
+
+def _content_length(value: str | None) -> int | None:
+    if value is None:
+        return None
+    if not value.strip().isdecimal():
+        raise ValueError("invalid Content-Length; no complete evidence saved")
+    return int(value)
+
+
+def _decode(body: bytes, charset: str | None) -> str:
+    try:
+        codecs.lookup(charset or "utf-8")
+    except LookupError:
+        charset = "utf-8"
+    return body.decode(charset or "utf-8", errors="replace")
 
 
 class PublicRedirects(HTTPRedirectHandler):
@@ -55,7 +112,7 @@ def http_text(url: str) -> tuple[str, str, str, bool]:
     """Fetch bounded HTML or source text, checking redirects before requesting them."""
     from bs4 import BeautifulSoup
 
-    opener = build_opener(ProxyHandler({}), PublicRedirects())
+    opener = build_opener(ProxyHandler({}), PublicRedirects(), PinnedHTTPHandler(), PinnedHTTPSHandler())
     deadline = time.monotonic() + TIMEOUT_S
     request = Request(public_url(url), headers={"User-Agent": "Fleet-public-page/1"})
     with opener.open(request, timeout=TIMEOUT_S) as response:
@@ -66,9 +123,8 @@ def http_text(url: str) -> tuple[str, str, str, bool]:
         )
         if content_type not in {"text/html", "text/plain"} and not is_json:
             raise ValueError("only HTML, plain text, or JSON documents are supported")
-        declared = response.headers.get("Content-Length")
-        expected_size = int(declared) if declared is not None else None
-        if expected_size is not None and (expected_size < 0 or expected_size > MAX_RESPONSE_BYTES):
+        expected_size = _content_length(response.headers.get("Content-Length"))
+        if expected_size is not None and expected_size > MAX_RESPONSE_BYTES:
             raise ValueError("HTTP response exceeds limit; no complete evidence saved")
         chunks = []
         size = 0
@@ -88,7 +144,7 @@ def http_text(url: str) -> tuple[str, str, str, bool]:
             chunks.append(chunk)
         if expected_size is not None and size != expected_size:
             raise ValueError("incomplete HTTP response; no complete evidence saved")
-        body = b"".join(chunks).decode(response.headers.get_content_charset() or "utf-8", errors="replace")
+        body = _decode(b"".join(chunks), response.headers.get_content_charset())
         if content_type == "text/plain" or is_json:
             return body, final_url, "", False
     soup = BeautifulSoup(body, "html.parser")

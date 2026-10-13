@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _DEFAULT_TOOL_TIMEOUT_S = 120
+# How long the host keeps waiting for the SDK call after the action deadline.
+# The SDK's own run_code timeout ends the remote action first; this bounds a
+# client call that never returns (for example a stalled stream).
+_EXECUTION_GRACE_S = 15.0
+_HEALTH_PROBES = 20
 
 
 def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
@@ -138,8 +143,10 @@ class DaytonaHttpToolBroker:
         async_bridge: Any | None = None,
         tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None,
         tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
+        mark_tainted: Callable[[], None] | None = None,
     ) -> None:
         self._sandbox = sandbox
+        self._mark_tainted = mark_tainted
         self._port = port
         # Per-invocation header secret. It shows a request came from this Sandbox's own
         # tool stubs and keeps other local peers out. It is not a capability boundary:
@@ -191,11 +198,17 @@ class DaytonaHttpToolBroker:
         self._ensure_started()
 
     def service_execution(self, execute: Callable[[], Any], *, timeout_s: float | None) -> Any:
-        """Service host tools while one SDK execution runs; never replay it."""
+        """Service host tools while one SDK execution runs; never replay it.
+
+        The worker thread cannot be cancelled. When it outlives the action
+        deadline plus a grace period, or the broker stops, the host abandons it,
+        taints the Sandbox and raises: orphaned code may still be running.
+        """
         self._ensure_started()
-        assert self._client is not None
+        client = self._client
+        assert client is not None
         self._delivery_error = None
-        self._client.post("/action", json={"active": True, "timeout_s": timeout_s}).raise_for_status()
+        client.post("/action", json={"active": True, "timeout_s": timeout_s}).raise_for_status()
         outcome: list[Any] = []
 
         def run() -> None:
@@ -205,6 +218,7 @@ class DaytonaHttpToolBroker:
                 outcome.append(exc)
 
         worker = threading.Thread(target=run, daemon=True)
+        abandon_at = time.monotonic() + timeout_s + _EXECUTION_GRACE_S if timeout_s is not None else None
         try:
             with (
                 host_action_deadline(time.monotonic() + timeout_s)
@@ -213,6 +227,16 @@ class DaytonaHttpToolBroker:
             ):
                 worker.start()
                 while worker.is_alive():
+                    if self._stopped:
+                        self._taint()
+                        raise DaytonaAdapterError(
+                            message="broker stopped during sandbox execution", cause_type="InterpreterLifecycleError"
+                        )
+                    if abandon_at is not None and time.monotonic() >= abandon_at:
+                        self._taint()
+                        raise DaytonaAdapterError(
+                            message="sandbox execution exceeded its deadline", cause_type="BrokerExecutionTimeout"
+                        )
                     self._poll_once()
                     worker.join(0.02)
             if self._delivery_error is not None:
@@ -221,7 +245,26 @@ class DaytonaHttpToolBroker:
                 raise outcome[0]
             return outcome[0]
         finally:
-            self._client.post("/action", json={"active": False}).raise_for_status()
+            self._deactivate()
+
+    def _deactivate(self) -> None:
+        """Close the action window without ever replacing the execution outcome."""
+        client = self._client
+        if client is None:
+            return
+        try:
+            client.post("/action", json={"active": False}).raise_for_status()
+        except Exception as exc:
+            logger.warning("sandbox tool broker deactivation failed error_type=%s", type(exc).__name__)
+            self._taint()
+
+    def _taint(self) -> None:
+        mark = self._mark_tainted
+        if mark is not None:
+            try:
+                mark()
+            except Exception as exc:
+                logger.warning("sandbox taint callback failed error_type=%s", type(exc).__name__)
 
     def stop(self, *, strict: bool = False) -> None:
         """Disable execution and attempt to close the client and delete its session.
@@ -279,16 +322,33 @@ class DaytonaHttpToolBroker:
             if token:
                 headers["X-Daytona-Preview-Token"] = token
             self._client = httpx.Client(base_url=self._url, headers=headers, timeout=5)
-            for _ in range(20):
-                if self._client.get("/health").status_code == 200:
-                    return
-                time.sleep(0.1)
+            healthy = self._probe_health(self._client)
         except Exception as exc:
-            self.stop()
+            self._fail_startup()
             raise DaytonaAdapterError(
                 message="sandbox tool broker failed to start", cause_type="BrokerStartupError"
             ) from exc
-        raise DaytonaAdapterError(message="sandbox tool broker did not become healthy", cause_type="BrokerStartupError")
+        if not healthy:
+            self._fail_startup()
+            raise DaytonaAdapterError(
+                message="sandbox tool broker did not become healthy", cause_type="BrokerStartupError"
+            )
+
+    @staticmethod
+    def _probe_health(client: httpx.Client) -> bool:
+        for _ in range(_HEALTH_PROBES):
+            try:
+                if client.get("/health").status_code == 200:
+                    return True
+            except httpx.TransportError:
+                pass
+            time.sleep(0.1)
+        return False
+
+    def _fail_startup(self) -> None:
+        """A broker that never became healthy is stopped and keeps no URL."""
+        self._url = None
+        self.stop()
 
     def _poll_once(self) -> None:
         client = self._client

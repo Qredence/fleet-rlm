@@ -26,7 +26,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 
 
-_SECRET_NAMES = load_configuration_environment_contract().provider_environment_names
+_CONTRACT = load_configuration_environment_contract()
+# The optional Tavily key is not a required provider credential, but live
+# evidence must still redact it whenever it is configured.
+_SECRET_NAMES = (*_CONTRACT.provider_environment_names, *filter(None, (_CONTRACT.web_api_key_env,)))
 
 
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)

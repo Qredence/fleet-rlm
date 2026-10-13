@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -16,6 +17,8 @@ import httpx
 from pydantic import SecretStr
 
 from fleet_rlm.tool_events import ToolEventView
+
+logger = logging.getLogger(__name__)
 
 _SEARCH_URL = "https://api.tavily.com/search"
 _MAX_RESPONSE_BYTES = 200_000
@@ -83,7 +86,7 @@ class TavilySearch:
             "auto_parameters": False,
         }
         if include_domains:
-            parameters.update(include_domains=list(include_domains), include_domains_mode="restrict")
+            parameters["include_domains"] = list(include_domains)
         try:
             async with asyncio.timeout(remaining):
                 async with self._client.stream(
@@ -133,8 +136,9 @@ class TavilySearch:
                 return {"ok": True, "provider": "tavily", "coverage": "search_snippets", "results": results}
         except TimeoutError:
             return {"ok": False, "error": "search_timeout"}
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as exc:
             # Provider bodies, request headers and exception text are private.
+            logger.debug("Tavily search failed error_type=%s", type(exc).__name__)
             return {"ok": False, "error": "search_unavailable"}
 
 
@@ -176,6 +180,7 @@ class WebSearchToolHost:
             if self._reserved + charge > self.credit_limit:
                 return {"ok": False, "error": "search_budget_exhausted"}
             self._reserved += charge
+            remaining = self.credit_limit - self._reserved
         # Retain the reservation on failure: a disconnected request may have
         # reached the provider. No retries or secondary providers are implicit.
         result = await self.client.search(
@@ -183,7 +188,7 @@ class WebSearchToolHost:
         )
         if not self.is_authorized() or time.monotonic() >= self.deadline:
             return {"ok": False, "error": "search_no_longer_authorized"}
-        return {**result, "credits_reserved": charge, "credits_remaining": self.credit_limit - self._reserved}
+        return {**result, "credits_reserved": charge, "credits_remaining": remaining}
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
         return (
