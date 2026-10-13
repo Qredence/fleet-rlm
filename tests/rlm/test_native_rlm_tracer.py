@@ -546,3 +546,30 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
     reasoning_events = [event for event in events if isinstance(event.detail, RLMReasoning)]
     assert reasoning_events
     assert all(event.detail.text.strip() for event in reasoning_events)
+
+
+class _OpaqueActionModule(dspy.Module):
+    """A replaced action module that is not a ``dspy.Predict``."""
+
+    def forward(self, **_kwargs: Any) -> dspy.Prediction:
+        return dspy.Prediction(reasoning="", code="SUBMIT(answer='x')")
+
+
+def test_reasoning_observer_warns_when_generate_action_is_not_a_predictor(caplog: pytest.LogCaptureFixture) -> None:
+    rlm = build_native_rlm_for_test(signature="request -> answer", options=RLMOptions(max_iters=2))
+    rlm.generate_action = _OpaqueActionModule()
+
+    with caplog.at_level("WARNING", logger="fleet_rlm.rlm.events"):
+        bind_native_rlm_observer(rlm, lambda _detail: None)
+
+    assert any("reasoning observer not bound" in record.getMessage() for record in caplog.records)
+
+
+def test_clearing_reasoning_observer_on_replaced_predictor_is_silent(caplog: pytest.LogCaptureFixture) -> None:
+    rlm = build_native_rlm_for_test(signature="request -> answer", options=RLMOptions(max_iters=2))
+    rlm.generate_action = _OpaqueActionModule()
+
+    with caplog.at_level("WARNING", logger="fleet_rlm.rlm.events"):
+        bind_native_rlm_observer(rlm, None)
+
+    assert not caplog.records

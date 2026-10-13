@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -69,6 +70,8 @@ from fleet_rlm.tool_events import (
 if TYPE_CHECKING:
     from fleet_rlm.rlm.execution import RLMExecutionContext, RLMWorkerHandle, RunToolGuards
     from fleet_rlm.rlm.recursion import DelegationMetrics, RecursiveCallSummary, RecursiveRLMExecutor
+
+_LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -1824,12 +1827,6 @@ def _latest_lm_telemetry(instance: Any, history_length: int | None, outputs: obj
     return {}
 
 
-def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    from fleet_rlm.rlm.recursion import normalize_lm_token_usage
-
-    return cast(dict[str, JsonValue], normalize_lm_token_usage(usage))
-
-
 def _trace_failure_category(exc: BaseException) -> str:
     from fleet_rlm.observability.diagnostics import trace_failure_category
 
@@ -1878,6 +1875,11 @@ def bind_native_rlm_observer(
         raise RLMConfigError("reasoning observation requires native dspy.RLM")
     predictor = getattr(rlm, "generate_action", None)
     if not isinstance(predictor, dspy.Predict):
+        if observer is not None:
+            _LOGGER.warning(
+                "RLM reasoning observer not bound: generate_action is %s, not dspy.Predict",
+                type(predictor).__name__,
+            )
         return
     callbacks = getattr(predictor, "callbacks", None)
     predictor.callbacks = (
