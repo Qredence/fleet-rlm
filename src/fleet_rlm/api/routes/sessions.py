@@ -88,7 +88,6 @@ def _to_detail(record: SessionRecord) -> SessionDetailResponse:
 
 @router.post(
     "",
-    response_model=SessionDetailResponse,
     status_code=201,
     operation_id="create_session",
     responses={503: {"description": "Service is not ready"}},
@@ -128,7 +127,6 @@ async def create_session(
 
 @router.get(
     "",
-    response_model=SessionListResponse,
     operation_id="list_sessions",
     responses={503: {"description": "Service is not ready"}},
 )
@@ -159,7 +157,6 @@ async def list_sessions(
 
 @router.get(
     "/{session_id}",
-    response_model=SessionDetailResponse,
     operation_id="get_session",
     responses={
         404: {"description": "Session not found"},
@@ -189,7 +186,6 @@ async def get_session(
 
 @router.get(
     "/{session_id}/task",
-    response_model=SessionTaskResponse,
     operation_id="get_session_task",
     responses={
         404: {"description": "Session or task checkpoint not found"},
@@ -224,7 +220,6 @@ async def get_session_task(
 
 @router.patch(
     "/{session_id}",
-    response_model=SessionDetailResponse,
     operation_id="update_session",
     responses={
         404: {"description": "Session not found"},
@@ -293,7 +288,6 @@ async def patch_session(
 
 @router.get(
     "/{session_id}/turns",
-    response_model=SessionTurnPageResponse,
     operation_id="list_session_turns",
     responses={
         404: {"description": "Session not found"},
@@ -336,7 +330,6 @@ traces_router = APIRouter(prefix="/api/sessions", tags=["traces"])
 
 @traces_router.post(
     "/{session_id}/traces/feedback",
-    response_model=TraceFeedbackResponse,
     operation_id="submit_trace_feedback",
     responses={
         404: {"description": "Trace not found"},
@@ -399,7 +392,6 @@ class CancellationResponse(BaseModel):
 
 @runs_router.put(
     "/{run_id}/cancellation",
-    response_model=CancellationResponse,
     operation_id="request_run_cancellation",
     responses={
         404: {"description": "Run not found"},

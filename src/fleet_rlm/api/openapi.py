@@ -77,7 +77,17 @@ def install_openapi_contract(app: FastAPI) -> None:
     def custom_openapi() -> dict[str, Any]:
         if app.openapi_schema is not None:
             return app.openapi_schema
-        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            openapi_version=app.openapi_version,
+            summary=app.summary,
+            description=app.description,
+            routes=app.routes,
+            tags=app.openapi_tags,
+            servers=app.servers,
+            separate_input_output_schemas=app.separate_input_output_schemas,
+        )
         components = schema.setdefault("components", {}).setdefault("schemas", {})
         components.pop("HTTPValidationError", None)
         components.pop("ValidationError", None)

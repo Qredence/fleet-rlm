@@ -38,7 +38,6 @@ health_router = APIRouter(prefix="/health", tags=["health"])
 
 @health_router.get(
     "",
-    response_model=HealthLivenessResponse,
     operation_id="get_health",
 )
 def get_health(settings: SettingsDep) -> HealthLivenessResponse:
@@ -48,7 +47,6 @@ def get_health(settings: SettingsDep) -> HealthLivenessResponse:
 
 @health_router.get(
     "/ready",
-    response_model=HealthReadinessResponse,
     operation_id="get_readiness",
     responses={503: {"description": "Service is not ready"}},
 )
@@ -80,7 +78,6 @@ def _settings_response(snapshot) -> SettingsPolicyResponse:
 
 @settings_router.get(
     "",
-    response_model=SettingsPolicyResponse,
     operation_id="get_settings_policy",
     dependencies=[Depends(require_loopback_client)],
     responses={503: {"description": "Settings are unavailable, or the service is not ready"}},
@@ -94,7 +91,6 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
 
 @settings_router.patch(
     "",
-    response_model=SettingsPolicyResponse,
     operation_id="update_settings_policy",
     dependencies=[Depends(require_loopback_client)],
     responses={
@@ -155,7 +151,6 @@ def _rank_skills(cards: tuple[SkillCard, ...], query: str | None) -> tuple[Skill
 
 @skills_router.get(
     "/api/skills",
-    response_model=list[SkillCardResponse],
     operation_id="list_skills",
     responses={503: {"description": "Service is not ready"}},
 )
@@ -178,7 +173,6 @@ def list_skills(
 
 @skills_router.get(
     "/api/skills/{skill_id}",
-    response_model=SkillCardResponse,
     operation_id="get_skill",
     responses={
         404: {"description": "Skill not found"},

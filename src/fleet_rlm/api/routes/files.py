@@ -85,7 +85,6 @@ _WRITE_ERRORS: dict[int | str, dict[str, Any]] = {
 
 @workspace_files_router.get(
     "",
-    response_model=WorkspaceFileListResponse,
     operation_id="list_workspace_files_api",
     responses=_READ_ERRORS,
 )
@@ -114,7 +113,6 @@ async def list_workspace_files(
 
 @workspace_files_router.get(
     "/stat",
-    response_model=WorkspaceFileEntryResponse,
     operation_id="stat_workspace_file_api",
     responses=_READ_ERRORS,
 )
@@ -134,7 +132,6 @@ async def stat_workspace_file(
 
 @workspace_files_router.get(
     "/content",
-    response_model=WorkspaceFileReadResponse,
     operation_id="read_workspace_file_api",
     responses=_READ_ERRORS,
 )
@@ -165,7 +162,6 @@ async def read_workspace_file(
 
 @workspace_files_router.put(
     "/content",
-    response_model=WorkspaceFileEntryResponse,
     operation_id="write_workspace_file_api",
     responses=_WRITE_ERRORS,
 )
@@ -189,7 +185,6 @@ async def write_workspace_file(
 
 @workspace_files_router.post(
     "/append",
-    response_model=WorkspaceFileEntryResponse,
     operation_id="append_workspace_file_api",
     responses=_WRITE_ERRORS,
 )
@@ -212,7 +207,6 @@ async def append_workspace_file(
 
 @workspace_files_router.delete(
     "/content",
-    response_model=WorkspaceFileDeleteResponse,
     operation_id="delete_workspace_file_api",
     responses=_WRITE_ERRORS,
 )
@@ -234,7 +228,6 @@ async def delete_workspace_file(
 
 @workspace_files_router.patch(
     "/content",
-    response_model=WorkspaceFileEntryResponse,
     operation_id="patch_workspace_file_api",
     responses=_WRITE_ERRORS,
 )
@@ -265,7 +258,6 @@ volume_router = APIRouter(prefix="/api/volume", tags=["volume"])
 
 @volume_router.get(
     "/tree",
-    response_model=VolumeTreeResponse,
     operation_id="list_volume_tree_api",
     responses={
         400: {"description": "Volume tree request is invalid"},
@@ -351,7 +343,6 @@ def _to_artifact_response(ref: ArtifactRef) -> ArtifactResponse:
 
 @artifacts_router.get(
     "/{artifact_id}",
-    response_model=ArtifactResponse,
     operation_id="get_artifact",
     responses={
         404: {"description": "Artifact not found"},
@@ -445,7 +436,6 @@ attachments_router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
 @attachments_router.post(
     "",
-    response_model=AttachmentResponse,
     status_code=201,
     operation_id="create_attachment",
     responses={
@@ -478,7 +468,6 @@ async def upload_attachment(
 
 @attachments_router.get(
     "/{attachment_id}",
-    response_model=AttachmentResponse,
     operation_id="get_attachment",
     responses={
         404: {"description": "Attachment not found"},
