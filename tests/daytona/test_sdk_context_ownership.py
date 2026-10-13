@@ -81,6 +81,80 @@ def test_failed_context_delete_remains_owned_and_retries_without_execution(broke
     assert service.run_code.call_count == 2  # setup plus one action
 
 
+@pytest.mark.parametrize("remaining, expected_timeout", [(None, 30.0), (60.0, 30.0), (5.0, 5.0), (0.25, 1.0)])
+def test_context_lifecycle_passes_finite_timeouts_to_the_pinned_sdk(sdk_wire, monkeypatch, remaining, expected_timeout):
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: 100.0)
+    deadline = None if remaining is None else 100.0 + remaining
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=sdk_wire.service), deadline_monotonic=deadline)
+    assert backend.run("value = 1").error is None
+    assert sdk_wire.api.create_interpreter_context.call_args.kwargs["_request_timeout"] == expected_timeout
+    backend.close()
+    assert sdk_wire.api.delete_interpreter_context.call_args.kwargs["_request_timeout"] == 30.0
+
+
+def test_context_creation_consumes_the_remaining_action_time(broker, monkeypatch):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: clock.now)
+    service = MagicMock()
+
+    def create_context(*, request_timeout):
+        assert request_timeout == 10.0
+        clock.now += 6.0
+        return SimpleNamespace(id="context")
+
+    service.create_context.side_effect = create_context
+    service.run_code.return_value = SimpleNamespace(stdout="", stderr="", error=None)
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=service), deadline_monotonic=110.0)
+    assert backend.run("value = 1").error is None
+    assert [call.kwargs["timeout_s"] for call in broker.service_execution.call_args_list] == [4.0, 4.0]
+    assert [call.kwargs["timeout"] for call in service.run_code.call_args_list] == [4, 4]
+    backend.close()
+
+
+def test_context_creation_past_deadline_never_starts_code_and_retains_cleanup(broker, monkeypatch):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: clock.now)
+    service = MagicMock()
+    context = SimpleNamespace(id="context")
+
+    def create_context(*, request_timeout):
+        assert request_timeout == 0.25
+        clock.now += 1.0  # The SDK rounds positive sub-second request timeouts up to one second.
+        return context
+
+    service.create_context.side_effect = create_context
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=service), deadline_monotonic=100.25)
+    with pytest.raises(DaytonaAdapterError) as expired:
+        backend.run("value = 1")
+    assert expired.value.cause_type == "BrokerExecutionTimeout"
+    assert backend._sdk_context is context
+    service.run_code.assert_not_called()
+    broker.service_execution.assert_not_called()
+    backend.close()
+    service.delete_context.assert_called_once_with(context, request_timeout=30.0)
+
+
+@pytest.mark.parametrize("failure", [ConnectionError("create response lost"), TimeoutError("create timed out")])
+def test_uncertain_context_creation_taints_root_and_cannot_retry(broker, failure):
+    service = MagicMock()
+    service.create_context.side_effect = failure
+    tainted = MagicMock()
+    backend, client = _worker_backend(service)
+    backend._mark_tainted = tainted
+    with pytest.raises(Exception, match=str(failure)):
+        backend.run("value = 1")
+    tainted.assert_called_once_with()
+    with pytest.raises(DaytonaAdapterError) as poisoned:
+        backend.run("value = 2")
+    assert poisoned.value.cause_type == "InterpreterExecutionStateUnknown"
+    service.create_context.assert_called_once_with(request_timeout=30.0)
+    service.run_code.assert_not_called()
+    broker.service_execution.assert_not_called()
+    backend.close()
+    client._http_client.close.assert_called_once()
+    broker.stop.assert_called_once_with(strict=True)
+
+
 def test_stream_failure_never_repeats_execution_or_side_effect(broker):
     service = MagicMock()
     effects = []
@@ -431,13 +505,21 @@ def _worker_backend(service):
     return sandbox_backend(SimpleNamespace(id="root"), dispatcher=dispatcher), client
 
 
-def test_worker_scope_closes_even_when_context_delete_fails(broker):
+@pytest.mark.parametrize("failure", [RuntimeError("delete failed"), TimeoutError("delete timed out")])
+def test_worker_scope_closes_even_when_context_delete_fails(broker, failure):
     service = LocalSDKInterpreter()
     backend, client = _worker_backend(service)
     backend.run("value = 1")
-    service.delete_context = MagicMock(side_effect=RuntimeError("delete failed"))
-    with pytest.raises(RuntimeError, match="delete failed"):
+    context = backend._sdk_context
+    backend._deadline_monotonic = 0.0
+    tainted = MagicMock()
+    backend._mark_tainted = tainted
+    service.delete_context = MagicMock(side_effect=failure)
+    with pytest.raises(type(failure), match=str(failure)):
         backend.close()
+    service.delete_context.assert_called_once_with(context, request_timeout=30.0)
+    assert backend._sdk_context is context
+    tainted.assert_called_once_with()
     client._http_client.close.assert_called_once()
     broker.stop.assert_called_once_with(strict=True)
 

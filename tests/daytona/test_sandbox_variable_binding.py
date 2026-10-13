@@ -43,9 +43,9 @@ class _LocalBroker:
         self.closed = False
         self.instances.append(self)
         _sandbox.code_interpreter = SimpleNamespace(
-            create_context=lambda: self.namespace,
+            create_context=lambda **_kwargs: self.namespace,
             run_code=self.run_code,
-            delete_context=lambda context: context.clear(),
+            delete_context=lambda context, **_kwargs: context.clear(),
         )
 
     def start(self) -> None:

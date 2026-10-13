@@ -71,6 +71,7 @@ DAYTONA_EXECUTION_INSTRUCTIONS = (
 )
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
 _OUTPUT_TRUNCATION_NOTICE = "\n...[sandbox output truncated]\n"
+_SDK_CONTEXT_REQUEST_TIMEOUT_S = 30.0
 
 # Executed in the Sandbox, never in Fleet. Limit writes before the SDK receives
 # and accumulates them. The action's globals persist; its stream counters do not.
@@ -643,9 +644,29 @@ class _SandboxProcessBackend:
         timeout: float | None,
         on_stdout: OutputCallback | None = None,
     ) -> dict[str, Any]:
+        action_deadline = time.monotonic() + timeout if timeout is not None else None
         service = self._sandbox.code_interpreter
         if self._sdk_context is None:
-            self._sdk_context = service.create_context()
+            request_timeout = _SDK_CONTEXT_REQUEST_TIMEOUT_S
+            if action_deadline is not None:
+                request_timeout = min(request_timeout, action_deadline - time.monotonic())
+                if request_timeout <= 0:
+                    raise DaytonaAdapterError(
+                        message="execution deadline exceeded", cause_type="BrokerExecutionTimeout"
+                    )
+            try:
+                self._sdk_context = service.create_context(request_timeout=request_timeout)
+            except BaseException:
+                # The provider may have created a context without returning its
+                # identity. Retire the root rather than retry an uncertain create.
+                self._fence_unknown_execution()
+                raise
+            if action_deadline is not None:
+                timeout = action_deadline - time.monotonic()
+                if timeout <= 0:
+                    raise DaytonaAdapterError(
+                        message="execution deadline exceeded", cause_type="BrokerExecutionTimeout"
+                    )
         # JSON-only bindings are data, never interpolated as Python expressions.
         bindings = json.dumps(dict(variables), ensure_ascii=True, allow_nan=False)
         final_limit = (
@@ -703,12 +724,7 @@ class _SandboxProcessBackend:
                 raise self._transport_failure from None
             # A client-side failure leaves the remote action's state unknown:
             # orphaned code may still run in this context, so never reuse it.
-            self._transport_failure = DaytonaAdapterError(
-                message="Sandbox execution state is unknown after a client-side failure",
-                cause_type="InterpreterExecutionStateUnknown",
-            )
-            if self._mark_tainted is not None:
-                self._mark_tainted()
+            self._fence_unknown_execution()
             raise
         # Some SDK bridges serialize callback exceptions as execution errors or
         # omit callbacks. Neither case can turn a transport refusal into success.
@@ -739,6 +755,14 @@ class _SandboxProcessBackend:
             "error_category": error_category,
             "streamed_stdout": any(received.values()),
         }
+
+    def _fence_unknown_execution(self) -> None:
+        self._transport_failure = DaytonaAdapterError(
+            message="Sandbox execution state is unknown after a client-side failure",
+            cause_type="InterpreterExecutionStateUnknown",
+        )
+        if self._mark_tainted is not None:
+            self._mark_tainted()
 
     def _ensure_broker(self) -> DaytonaHttpToolBroker:
         if self._broker is None:
@@ -812,11 +836,17 @@ class _SandboxProcessBackend:
         try:
             if self._sdk_context is not None:
                 try:
-                    self._sandbox.code_interpreter.delete_context(self._sdk_context)
+                    # Cleanup still needs a finite window after the Turn's
+                    # execution deadline has expired.
+                    self._sandbox.code_interpreter.delete_context(
+                        self._sdk_context, request_timeout=_SDK_CONTEXT_REQUEST_TIMEOUT_S
+                    )
                 except DaytonaNotFoundError:
                     self._sdk_context = None  # Already gone: the context is settled.
                 except Exception as exc:
                     failure = exc
+                    if self._mark_tainted is not None:
+                        self._mark_tainted()
                 else:
                     self._sdk_context = None
             if self._broker is not None:

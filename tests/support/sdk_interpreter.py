@@ -14,12 +14,14 @@ class LocalSDKInterpreter:
         self.deleted: list[dict[str, Any]] = []
         self.calls: list[str] = []
 
-    def create_context(self) -> dict[str, Any]:
+    def create_context(self, *, request_timeout: float | None = None) -> dict[str, Any]:
+        del request_timeout
         context: dict[str, Any] = {}
         self.contexts.append(context)
         return context
 
-    def delete_context(self, context: dict[str, Any]) -> None:
+    def delete_context(self, context: dict[str, Any], *, request_timeout: float | None = None) -> None:
+        del request_timeout
         self.deleted.append(context)
         self.contexts.remove(context)
 

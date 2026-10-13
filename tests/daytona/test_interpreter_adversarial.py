@@ -96,6 +96,7 @@ class TestInterpreterTimeoutsAndLimits:
 
         from tests.support.sdk_interpreter import LocalSDKInterpreter
 
+        monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: 100.0)
         observed: list[int] = []
         service = LocalSDKInterpreter()
         run_code = service.run_code
