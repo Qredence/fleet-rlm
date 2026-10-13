@@ -523,3 +523,51 @@ def test_preflight_evidence_is_write_once(tmp_path: Path) -> None:
     assert (evidence / "manifest.json").is_file()
     with pytest.raises(Exception, match="already exists"):
         initialize_preflight_evidence(evidence_root=tmp_path, run_id="run-1", receipt=receipt)
+
+
+def _reflection_settings(**overrides: object):
+    from fleet_rlm.config.settings import Settings
+
+    values: dict[str, object] = {
+        "root_model": "openai/reflection-root",
+        "root_llm_api_key_env": "FLEET_TEST_REFLECTION_KEY",
+        "root_llm_max_tokens": 16384,
+        "root_llm_cache": True,
+        "sub_model": "openai/reflection-sub",
+        "sub_llm_api_key_env": "FLEET_TEST_REFLECTION_KEY",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def test_development_reflection_lm_comes_from_the_root_role_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.optimization.gepa_runner import _development_reflection_lm
+
+    monkeypatch.setenv("FLEET_TEST_REFLECTION_KEY", "token")
+
+    lm = _development_reflection_lm(_reflection_settings(root_llm_reasoning_effort="low"))
+
+    assert lm.model == "openai/reflection-root"
+    assert lm.kwargs["reasoning_effort"] == "low"
+    # The smoke tightens the call budget but never picks its own model.
+    assert lm.kwargs["max_tokens"] == 1024
+    assert lm.cache is False
+
+
+def test_development_reflection_lm_honors_the_root_role_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.optimization.gepa_runner import _development_reflection_lm
+
+    monkeypatch.setenv("FLEET_TEST_REFLECTION_KEY", "token")
+
+    lm = _development_reflection_lm(_reflection_settings(root_llm_base_url="https://gateway.example/v1"))
+
+    assert lm.kwargs["api_base"] == "https://gateway.example/v1"
+
+
+def test_development_reflection_lm_without_root_credentials_fails_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.optimization.gepa_runner import _development_reflection_lm
+
+    monkeypatch.delenv("FLEET_TEST_REFLECTION_KEY", raising=False)
+
+    with pytest.raises(OptimizationPreflightError, match="FLEET_TEST_REFLECTION_KEY"):
+        _development_reflection_lm(_reflection_settings())

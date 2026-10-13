@@ -26,6 +26,7 @@ from typing import Any
 
 import dspy
 
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.optimization.dataset import OptimizationDatasetError, load_export, split_records
 from fleet_rlm.optimization.evidence import (
     EvidenceStore,
@@ -35,7 +36,7 @@ from fleet_rlm.optimization.evidence import (
 )
 from fleet_rlm.optimization.metric import TrustedGEPAFeedbackMetric
 from fleet_rlm.optimization.mlflow_observability import development_gepa_trace
-from fleet_rlm.rlm.program import FleetRLMSignature, LMTier, build_lm_for_tier
+from fleet_rlm.rlm.program import FleetRLMSignature, build_role_lm
 
 _DEVELOPMENT_SCHEMA = "fleet.development-gepa-smoke/v1"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
@@ -551,7 +552,7 @@ class _DevelopmentInstructionAdapter:
 
     Candidate instruction text is scored in place and never executed as code.
     Evaluation makes no provider calls; GEPA reflection calls through the
-    host-owned FRONTIER LM remain the only paid calls.  ``propose_new_texts``
+    ``fleet.toml`` Root role LM remain the only paid calls.  ``propose_new_texts``
     stays ``None`` so the official default reflective proposer (driven by the
     reflection LM) generates new candidates.
     """
@@ -619,11 +620,13 @@ def run_development_smoke(
     max_metric_calls: int,
     evidence_root: Path,
     run_id: str,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
     """Run real GEPA only against synthetic deterministic development scoring.
 
     Candidate text is never executed.  The only paid calls are GEPA reflection
-    calls through the host-owned FRONTIER LM.  ``max_metric_calls`` is passed
+    calls through the ``fleet.toml`` Root role LM (``settings`` defaults to the
+    loaded runtime policy).  ``max_metric_calls`` is passed
     through the official ``gepa.optimize`` contract as the bounded metric-call
     budget; Fleet accepts the official documented bounded overshoot and records
     the requested cap together with the observed official counter.
@@ -643,17 +646,7 @@ def run_development_smoke(
             "GEPA optimization requires the optimize extra: install fleet-rlm[optimize]"
         ) from exc
 
-    workspace_url = os.environ.get("DATABRICKS_HOST", "").strip()
-    api_key = os.environ.get("DATABRICKS_TOKEN", "").strip()
-    if not workspace_url or not api_key:
-        raise OptimizationPreflightError("development GEPA smoke requires DATABRICKS_HOST and DATABRICKS_TOKEN")
-    reflection_lm = build_lm_for_tier(
-        LMTier.FRONTIER,
-        workspace_url=workspace_url,
-        api_key=api_key,
-        max_tokens=1024,
-        cache=False,
-    )
+    reflection_lm = _development_reflection_lm(settings)
 
     def _gepa_reflection_lm(prompt: str | list[dict[str, Any]]) -> str:
         """Adapt the host-owned DSPy LM to the official reflection callable."""
@@ -762,6 +755,21 @@ def require_live_execution_capability() -> None:
         "production GEPA execution is blocked: it requires a live strict Daytona proof "
         "for the host-polled broker boundary, trusted judges, and sealed evidence"
     )
+
+
+def _development_reflection_lm(settings: Settings | None) -> dspy.LM:
+    """Build the smoke's reflection LM from the ``fleet.toml`` Root role policy.
+
+    Root is the configured planning model; the smoke only tightens the call
+    budget (bounded output, no cache) and never chooses its own model.
+    """
+    from fleet_rlm.config.loader import load_runtime_settings
+
+    resolved = settings if settings is not None else load_runtime_settings()
+    try:
+        return build_role_lm(resolved, resolved.lm_roles.root, max_tokens=1024, cache=False)
+    except RuntimeError as exc:
+        raise OptimizationPreflightError(f"development GEPA smoke requires Root LM credentials: {exc}") from exc
 
 
 def _require_live() -> None:

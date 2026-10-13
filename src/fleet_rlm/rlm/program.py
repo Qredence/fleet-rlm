@@ -14,7 +14,6 @@ import re
 import textwrap
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urlsplit
@@ -138,7 +137,6 @@ class AttachmentInput(FleetInputModel):
 
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
-_AI_GATEWAY_PATH = "/ai-gateway/openai/v1"
 _MAX_REQUEST_CHARS = 100_000
 _MAX_CONTEXT_ATTACHMENT_COUNT = 32
 _MAX_PREVIEW_CHARS = 500
@@ -954,75 +952,37 @@ def _copy_turn_lm(lm: Any) -> Any:
     return copied
 
 
-def build_model_bundle(settings: Settings) -> RLMModelBundle:
-    def build(policy: LLMRoleSettings) -> dspy.LM:
-        api_key = resolve_role_api_key(settings, policy)
-        if not api_key:
-            raise RuntimeError(f"LLM API key not configured ({policy.api_key_env})")
-        return build_lm(
-            policy.model,
-            api_key=api_key,
-            base_url=sanitize_base_url(policy.base_url),
-            max_tokens=policy.max_tokens,
-            timeout_seconds=policy.timeout_seconds,
-            temperature=policy.temperature,
-            reasoning_effort=policy.reasoning_effort,
-            cache=policy.cache,
-            num_retries=policy.num_retries,
-        )
-
-    roles = settings.lm_roles
-    return RLMModelBundle(root_lm=build(roles.root), sub_lm=build(roles.sub))
-
-
-class LMTier(StrEnum):
-    FRONTIER = "frontier"
-    WORKER = "worker"
-    FAST = "fast"
-
-
-_TIER_MODELS: dict[LMTier, list[str]] = {
-    LMTier.FRONTIER: [
-        "system.ai.claude-opus-4-8",
-        "system.ai.gpt-5-6-sol",
-    ],
-    LMTier.WORKER: [
-        "system.ai.gpt-5-6-terra",
-        "system.ai.glm-5-2",
-        "system.ai.gpt-5-6-luna",
-    ],
-    LMTier.FAST: [
-        "uscentral.default.deepseek-v4-flash",
-        "system.ai.gpt-oss-120b",
-        "system.ai.gemini-3-1-flash-lite",
-        "uscentral.default.nemotron-3-ultra-free",
-        "uscentral.default.qwen3-7-max-2026-05-20",
-        "uscentral.default.glm-5-1",
-    ],
-}
-
-
-def build_lm_for_tier(
-    tier: LMTier,
+def build_role_lm(
+    settings: Settings,
+    policy: LLMRoleSettings,
     *,
-    workspace_url: str,
-    api_key: str,
-    preference: int = 0,
     max_tokens: int | None = None,
-    cache: bool = True,
-    num_retries: int = 3,
+    cache: bool | None = None,
 ) -> dspy.LM:
-    models = _TIER_MODELS[tier]
-    model_uc = models[preference % len(models)]
-    base = f"{workspace_url.rstrip('/')}{_AI_GATEWAY_PATH}"
+    """Build one LM from a ``fleet.toml`` role policy.
+
+    ``max_tokens`` and ``cache`` let a bounded caller (such as the GEPA
+    development smoke) tighten the call budget without changing the role.
+    """
+    api_key = resolve_role_api_key(settings, policy)
+    if not api_key:
+        raise RuntimeError(f"LLM API key not configured ({policy.api_key_env})")
     return build_lm(
-        model_uc,
+        policy.model,
         api_key=api_key,
-        base_url=base,
-        max_tokens=max_tokens,
-        cache=cache,
-        num_retries=num_retries,
+        base_url=sanitize_base_url(policy.base_url),
+        max_tokens=policy.max_tokens if max_tokens is None else max_tokens,
+        timeout_seconds=policy.timeout_seconds,
+        temperature=policy.temperature,
+        reasoning_effort=policy.reasoning_effort,
+        cache=policy.cache if cache is None else cache,
+        num_retries=policy.num_retries,
     )
+
+
+def build_model_bundle(settings: Settings) -> RLMModelBundle:
+    roles = settings.lm_roles
+    return RLMModelBundle(root_lm=build_role_lm(settings, roles.root), sub_lm=build_role_lm(settings, roles.sub))
 
 
 # ---------------------------------------------------------------------------
@@ -1129,7 +1089,6 @@ __all__ = [
     "FleetInputModel",
     "FleetRLMSignature",
     "InstructedInterpreterFactory",
-    "LMTier",
     "RLMInstructionFragments",
     "RLMModelBundle",
     "RLMOptions",
@@ -1139,10 +1098,10 @@ __all__ = [
     "WorkspaceCapabilityInput",
     "WorkspaceMemoryInput",
     "build_lm",
-    "build_lm_for_tier",
     "build_model_bundle",
     "build_native_rlm",
     "build_rlm_input_kwargs",
+    "build_role_lm",
     "build_session_context_payload",
     "compose_rlm_instructions",
     "fleet_rlm_instruction_fragments",
