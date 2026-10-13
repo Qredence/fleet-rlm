@@ -36,7 +36,7 @@ from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
 )
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
-from fleet_rlm.json_types import JsonValue
+from fleet_rlm.json_types import JsonValue, canonical_json_bytes
 from fleet_rlm.observability.diagnostics import trace_failure_category, trace_failure_details
 from fleet_rlm.observability.tracing import (
     dspy_turn_callbacks,
@@ -925,7 +925,7 @@ def _validate_recursive_prompt(prompt: object, *, max_chars: int) -> str:
 
 def _child_source_manifest(files: Mapping[str, bytes]) -> tuple[list[dict[str, str]], str]:
     manifest = [{"path": path, "sha256": sha256(content).hexdigest()} for path, content in sorted(files.items())]
-    encoded = json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded = canonical_json_bytes(manifest, ensure_ascii=True, allow_nan=True)
     if len(encoded) > _MAX_CHILD_MANIFEST_BYTES:
         raise ValueError("selected child source manifest exceeds its metadata bound")
     return manifest, sha256(encoded).hexdigest()

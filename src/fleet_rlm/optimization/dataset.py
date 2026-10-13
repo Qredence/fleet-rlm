@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import random
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from fleet_rlm.json_types import canonical_json_sha256
 from fleet_rlm.optimization.types import DatasetSplit, OptimizationRecord
 
 MINIMUM_RECORDS = 25
@@ -218,8 +217,7 @@ def _reject_unsafe(value: Any, *, path: str = "") -> None:
 
 
 def _digest(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_sha256(value, ensure_ascii=True, allow_nan=True)
 
 
 __all__ = [

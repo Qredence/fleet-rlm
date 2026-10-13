@@ -8,8 +8,6 @@ answer as an expectation.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import re
 from collections.abc import Callable, Mapping
@@ -17,6 +15,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import dspy
+
+from fleet_rlm.json_types import canonical_json_sha256
 
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _SENSITIVE_MARKERS = (
@@ -157,8 +157,7 @@ def expectation_score(
 
 def scorer_policy_sha256(policy: Mapping[str, Any]) -> str:
     """Hash a canonical non-secret scorer policy for promotion bundle identity."""
-    encoded = json.dumps(dict(policy), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_sha256(dict(policy), ensure_ascii=True, allow_nan=False)
 
 
 def _coerce_score_feedback(value: Any) -> ScoreFeedback:

@@ -27,6 +27,7 @@ from typing import Any
 import dspy
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.json_types import canonical_json_bytes, canonical_json_sha256
 from fleet_rlm.optimization.dataset import OptimizationDatasetError, load_export, split_records
 from fleet_rlm.optimization.evidence import (
     EvidenceStore,
@@ -299,8 +300,7 @@ def _is_sha256(value: object) -> bool:
 
 
 def _canonical_digest(value: Any) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_sha256(value, ensure_ascii=True, allow_nan=False)
 
 
 def _bounded_detailed_results(value: Any) -> dict[str, Any]:
@@ -379,7 +379,7 @@ def _module_state_sha256(program: Any) -> str:
         raise OptimizationPreflightError("optimized program contains no named predictor state")
     _reject_credential_state_keys(state)
     try:
-        encoded = json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        encoded = canonical_json_bytes(state, ensure_ascii=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise OptimizationPreflightError("optimized program state is not canonical JSON") from exc
     if len(encoded) > _CANDIDATE_STATE_MAX_BYTES:

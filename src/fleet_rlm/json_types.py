@@ -4,10 +4,15 @@ One invariant — the closed JSON value shape — is defined once here and impor
 wherever Runtime Events, committed Turn payloads, and RLM usage records need a
 canonical `JsonScalar`/`JsonValue` contract. Per-module freeze/thaw rationale
 stays in the owning modules; only the type contract centralizes.
+
+The canonical serialization behind persisted digests (idempotency keys, cache
+keys, optimization fingerprints) is centralized here too, so each digest site
+shares one encoder recipe and names only its byte-level flags.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from math import isfinite
@@ -48,3 +53,24 @@ def strict_json_dumps(value: object) -> str:
     """Serialize a validated JSON value with non-standard numbers disabled."""
     validate_json_value(value)
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+
+def canonical_json_bytes(value: object, *, ensure_ascii: bool, allow_nan: bool) -> bytes:
+    """Encode one JSON value with sorted keys and compact separators as UTF-8.
+
+    ``ensure_ascii`` and ``allow_nan`` are required keywords because they change
+    the persisted bytes. Each call site names the exact choice it has always made
+    instead of inheriting ``json.dumps`` defaults.
+    """
+    return json.dumps(
+        value,
+        ensure_ascii=ensure_ascii,
+        allow_nan=allow_nan,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def canonical_json_sha256(value: object, *, ensure_ascii: bool, allow_nan: bool) -> str:
+    """Return the lowercase SHA-256 hex digest of ``canonical_json_bytes(value)``."""
+    return hashlib.sha256(canonical_json_bytes(value, ensure_ascii=ensure_ascii, allow_nan=allow_nan)).hexdigest()

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(make:*)",
+      "Shell(cd:*)",
+      "Shell(grep:*)",
+      "Shell(echo:*)",
+      "Shell(cd /Volumes/SSD-T7/qredence-environnement/fleet-rlm && SP=.venv/lib/python3.13/site-packages && echo \"== safe_set_span_in_context importable from fluent? ==\" && grep -n \"safe_set_span_in_context\" $SP/mlflow/tracing/fluent.py | head -5; echo \"--- provider.py def ---\" && sed -n '360,372p' $SP/mlflow/tracing/provider.py && echo \"== mlflow.tracing.config.configure signature ==\" && sed -n '63,80p' $SP/mlflow/tracing/config.py && echo \"== mlflow.dspy.autolog call in fleet tracing.py ==\" && sed -n '800,812p' src/fleet_rlm/observability/tracing.py && echo \"== fastapi sse module ==\" && ls $SP/fastapi/sse* 2>/dev/null; grep -n \"^class EventSourceResponse\\|^class ServerSentEvent\" $SP/fastapi/sse.py 2>/dev/null | head -3)",
+      "Shell(cd /Volumes/SSD-T7/qredence-environnement/fleet-rlm && echo \"== adapter protocol members ==\" && grep -n \"^class \\| def tools\\| def start\\| def execute\\| def shutdown\\|^def sandbox_interpreter_factory\" src/fleet_rlm/daytona/interpreter.py | head -40 && echo \"== test target ==\" && grep -n \"^test:\\|^test-coverage:\" -A 3 Makefile && echo \"== ignored runtime stores ==\" && git check-ignore -v mlruns mlflow.db mlartifacts traces artifacts .scratch 2>/dev/null; echo \"exit=$?\")",
+      "Shell(sed:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

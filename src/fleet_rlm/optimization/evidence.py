@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from fleet_rlm.json_types import canonical_json_sha256
+
 _STRICT_PROOF_SCHEMA = "fleet.strict-daytona-proof/v1"
 _BLOCK_ALL_PROOF_SCHEMA = "fleet.strict-daytona-proof/v2"
 _STRICT_PROOF_PATH = "strict-daytona-proof.json"
@@ -348,8 +350,7 @@ class EvidenceStore:
 
 
 def _canonical_digest(payload: Mapping[str, Any]) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_sha256(payload, ensure_ascii=True, allow_nan=True)
 
 
 def _safe_identifier(value: str) -> bool:

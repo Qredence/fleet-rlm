@@ -37,6 +37,7 @@ from fleet_rlm.daytona.specs import (
     verify_sandbox_workspace_mount,
     volume_config_from_settings,
 )
+from fleet_rlm.json_types import canonical_json_sha256
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.sessions.bindings import workspace_volume_subpath
 
@@ -191,8 +192,7 @@ class DaytonaEnvironmentManifest:
     @property
     def digest(self) -> str:
         """Return the deterministic digest of the profile-independent image identity."""
-        encoded = json.dumps(self.image_identity(), sort_keys=True, separators=(",", ":")).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        return canonical_json_sha256(self.image_identity(), ensure_ascii=True, allow_nan=True)
 
 
 def _pinned_requirements(resource: str) -> tuple[str, ...]:

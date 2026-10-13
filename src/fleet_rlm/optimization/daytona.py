@@ -23,6 +23,7 @@ from fleet_rlm.daytona.interpreter import (
     sandbox_backend,
 )
 from fleet_rlm.daytona.specs import DaytonaSandboxSpec
+from fleet_rlm.json_types import canonical_json_sha256
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
@@ -154,8 +155,6 @@ class OptimizationSandboxPolicy:
     @property
     def policy_id(self) -> str:
         """Return a stable non-secret identifier for evidence and labels."""
-        import json
-
         identity = {
             "snapshot": self.snapshot,
             "domains": self.gateway_domains,
@@ -166,12 +165,7 @@ class OptimizationSandboxPolicy:
         # distinct policy and can never be inferred from a v1 gateway receipt.
         if self.network_block_all:
             identity["network_block_all"] = True
-        encoded = json.dumps(
-            identity,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
+        return canonical_json_sha256(identity, ensure_ascii=True, allow_nan=True)
 
 
 class DisposableOptimizationSandboxFactory:

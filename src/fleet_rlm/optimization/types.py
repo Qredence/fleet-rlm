@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from fleet_rlm.json_types import canonical_json_sha256
+
 
 @dataclass(frozen=True, slots=True)
 class OptimizationRecord:
@@ -58,11 +60,9 @@ class DatasetSplit:
 
 
 def _ids_digest(record_ids: Any) -> str:
-    import hashlib
-    import json
-
-    payload = json.dumps(list(record_ids), separators=(",", ":"), ensure_ascii=True).encode()
-    return hashlib.sha256(payload).hexdigest()
+    # ``sort_keys`` is a no-op for a flat list of identifier strings, so the
+    # digest bytes match the historical unsorted encoding exactly.
+    return canonical_json_sha256(list(record_ids), ensure_ascii=True, allow_nan=True)
 
 
 __all__ = ["DatasetSplit", "OptimizationRecord"]

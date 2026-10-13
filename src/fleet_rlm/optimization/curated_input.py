@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from fleet_rlm.json_types import canonical_json_bytes
 from fleet_rlm.optimization.types import OptimizationRecord
 
 _SCHEMA = "fleet.curated-evaluation-input/v1"
@@ -171,7 +172,7 @@ def canonical_curated_input(candidate: str, record: OptimizationRecord) -> Mappi
 
 
 def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return canonical_json_bytes(value, ensure_ascii=True, allow_nan=True)
 
 
 def _resolve_pointer(value: Any, pointer: str) -> Any:
