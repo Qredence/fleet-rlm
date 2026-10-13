@@ -172,6 +172,85 @@ def test_prediction_result_without_redacted_fields_still_rejects_evidence_paths(
         prediction_result(_child_prediction(), _ChildFindings)
 
 
+def test_top_level_contract_redacts_private_path_in_answer() -> None:
+    from fleet_rlm.rlm.result import ResultContract, validate_prediction
+
+    class _Answer(dspy.Signature):
+        answer: str = dspy.OutputField()
+
+    contract = ResultContract(signature=_Answer, path_redacted_fields=frozenset({"answer"}))
+
+    result = validate_prediction(
+        dspy.Prediction(answer="Read /home/daytona/fleet_rlm_tool_broker.py first."),
+        contract,
+    )
+
+    assert result.display_text == "Read [path] first."
+
+
+def test_top_level_contract_rejects_private_path_without_redaction() -> None:
+    from fleet_rlm.rlm.result import PredictionOutputError, ResultContract, validate_prediction
+
+    class _Answer(dspy.Signature):
+        answer: str = dspy.OutputField()
+
+    with pytest.raises(PredictionOutputError) as excinfo:
+        validate_prediction(
+            dspy.Prediction(answer="Read /home/daytona/fleet_rlm_tool_broker.py first."),
+            ResultContract(signature=_Answer),
+        )
+
+    assert excinfo.value.cause_type == "declared_output_rejected"
+
+
+def test_top_level_redaction_still_rejects_credential_near_path() -> None:
+    from fleet_rlm.rlm.result import PredictionOutputError, ResultContract, validate_prediction
+
+    class _Answer(dspy.Signature):
+        answer: str = dspy.OutputField()
+
+    contract = ResultContract(signature=_Answer, path_redacted_fields=frozenset({"answer"}))
+
+    with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
+        validate_prediction(
+            dspy.Prediction(answer="See /home/daytona/fleet_rlm_tool_broker.py, token=abc123secretvalue"),
+            contract,
+        )
+
+
+def test_top_level_contract_keeps_allowlisted_fleet_path_verbatim() -> None:
+    from fleet_rlm.rlm.result import ResultContract, validate_prediction
+
+    class _Answer(dspy.Signature):
+        answer: str = dspy.OutputField()
+
+    result = validate_prediction(
+        dspy.Prediction(answer="Notes at /home/daytona/fleet/notes.md"),
+        ResultContract(signature=_Answer),
+    )
+
+    assert result.display_text == "Notes at /home/daytona/fleet/notes.md"
+
+
+def test_project_outcome_prediction_records_rejection_cause() -> None:
+    from fleet_rlm.rlm.result import ResultContract, RLMOutcome, project_outcome_prediction
+
+    class _Answer(dspy.Signature):
+        answer: str = dspy.OutputField()
+
+    outcome = RLMOutcome(
+        terminal_status="completed",
+        prediction=dspy.Prediction(answer="token=abc123secretvalue"),
+        result_contract=ResultContract(signature=_Answer),
+    )
+
+    projected = project_outcome_prediction(outcome)
+
+    assert projected.terminal_status == "failed"
+    assert projected.public_error_message == "Turn output is invalid"
+    assert projected.failure_cause_type == "declared_output_rejected"
+
+
 def test_prediction_result_outputs_are_deeply_immutable() -> None:
 
     class Report(dspy.Signature):

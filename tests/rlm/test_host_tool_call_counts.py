@@ -159,6 +159,12 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         "skill_id": str(skill.card.id),
         "name": "repeatable",
         "version": "1.0.0",
+        "resource_install": {
+            "declared": 1,
+            "installed": 0,
+            "complete": False,
+            "error": "workspace_unavailable",
+        },
     }
     assert observed[7].output == {
         "ok": True,

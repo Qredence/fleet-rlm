@@ -555,6 +555,24 @@ def test_tool_instructions_require_sandbox_research_and_bounded_precision() -> N
     assert "request as unused text" in TOOL_RLM_INSTRUCTIONS
 
 
+def test_answer_is_user_facing_without_process_narration() -> None:
+    from fleet_rlm.rlm.program import compose_rlm_instructions
+
+    instructions = compose_rlm_instructions()
+
+    assert "user-facing" in instructions
+    assert "Do not mention iterations" in instructions
+
+
+def test_discovery_forbids_filesystem_scan_for_missing_codebase() -> None:
+    from fleet_rlm.rlm.program import compose_rlm_instructions
+
+    instructions = compose_rlm_instructions()
+
+    assert "no codebase is attached" in instructions
+    assert "outside ``/workspace``" in instructions
+
+
 def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     instructions = FleetRLMSignature.instructions
     ordered_markers = (

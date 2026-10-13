@@ -1341,6 +1341,7 @@ class RLMRunner:
                     schema_id=spec.output_schema_id,
                     schema_version=spec.output_schema_version,
                     max_output_chars=context.execution.options.max_final_output_chars,
+                    path_redacted_fields=frozenset({"answer"}),
                 ),
                 usage=observed_usage(
                     prediction[-1],

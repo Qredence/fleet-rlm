@@ -666,6 +666,7 @@ class ResultContract:
     schema_id: str = "fleet.default"
     schema_version: str = "1"
     max_output_chars: int = 10_000
+    path_redacted_fields: frozenset[str] = frozenset()
 
 
 def validate_prediction(prediction: Any, contract: ResultContract) -> PredictionResult:
@@ -675,6 +676,7 @@ def validate_prediction(prediction: Any, contract: ResultContract) -> Prediction
         schema_id=contract.schema_id,
         schema_version=contract.schema_version,
         max_output_chars=contract.max_output_chars,
+        path_redacted_fields=contract.path_redacted_fields,
     )
 
 
@@ -996,12 +998,15 @@ class RLMOutcome:
     execution_details: tuple[ExecutionDetail, ...] = ()
     public_error_message: str | None = None
     duration_ms: int | None = None
+    failure_cause_type: str | None = None
 
     def __post_init__(self) -> None:
         usage = validate_rlm_usage(self.usage)
         object.__setattr__(self, "usage", MappingProxyType(usage))
         if self.terminal_status == "completed" and self.public_error_message is not None:
             raise ValueError("a successful outcome cannot contain a public error")
+        if self.terminal_status == "completed" and self.failure_cause_type is not None:
+            raise ValueError("a successful outcome cannot carry a failure cause")
         if (self.terminal_status == "completed") != (self.prediction is not None):
             raise ValueError("only a successful outcome must contain a prediction")
         if self.terminal_status != "completed" and self.memory_candidates:
@@ -1025,6 +1030,7 @@ def project_outcome_prediction(outcome: RLMOutcome) -> RLMOutcome:
             usage=outcome.usage,
             public_error_message=str(getattr(exc, "public_message", "Turn output is invalid")),
             duration_ms=outcome.duration_ms,
+            failure_cause_type=exc.cause_type,
         )
     return replace(outcome, prediction=projected, result_contract=None)
 
