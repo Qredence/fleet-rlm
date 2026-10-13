@@ -1819,7 +1819,7 @@ def test_child_request_carries_small_task_and_relative_references() -> None:
     )
     assert request.inputs == ("projects/repo/src/parser.py", "projects/repo/tests")
     assert "error handling" in request.render()
-    assert request.serialized_bytes < 1_000
+    assert len(request.render().encode("utf-8")) < 1_000
 
 
 @pytest.mark.parametrize(

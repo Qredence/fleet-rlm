@@ -502,10 +502,6 @@ class ChildRequest(BaseModel):
             separators=(",", ":"),
         )
 
-    @property
-    def serialized_bytes(self) -> int:
-        return len(self.render().encode("utf-8"))
-
 
 def _validate_child_path(value: object) -> None:
     if (
@@ -979,7 +975,6 @@ class RecursiveRLMExecutor:
         self._loaded_skills = loaded_skills or (lambda: ())
         self._owns_scheduler = scheduler is None
         self._last_completion: Mapping[str, JsonValue] | None = None
-        self._last_child_outcomes: tuple[ChildOutcome, ...] = ()
         raw_tool = dspy.Tool(
             self._call_child,
             name="rlm_query",
@@ -1027,10 +1022,6 @@ class RecursiveRLMExecutor:
     @property
     def batched_tool(self) -> dspy.Tool:
         return self._batched_tool
-
-    @property
-    def last_child_outcomes(self) -> tuple[ChildOutcome, ...]:
-        return self._last_child_outcomes
 
     @property
     def metrics(self) -> DelegationMetrics:
@@ -1272,7 +1263,6 @@ class RecursiveRLMExecutor:
             **batch_options,
         )
         self._ensure_authorized()
-        self._last_child_outcomes = tuple(outcomes)
         self.raise_if_cleanup_failed(allow_pending=bound.action_bound)
         return [outcome.as_dict() for outcome in outcomes]
 

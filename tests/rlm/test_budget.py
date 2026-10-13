@@ -687,7 +687,7 @@ def test_request_ledger_charges_complete_normalized_serialization() -> None:
     tasks = [{"task": "  zzq  "}, {"task": "wwk", "context": "évidence"}]
     outcomes = executor.batched_tool(tasks=tasks)
     assert [item["answer"] for item in outcomes] == ["A", "B"]
-    sizes = [ChildRequest.from_mapping(item).serialized_bytes for item in tasks]
+    sizes = [len(ChildRequest.from_mapping(item).render()) for item in tasks]
     assert executor.summary().delegated_prompt_chars == sum(sizes)
     assert executor.summary().maximum_prompt_chars == max(sizes)
     assert sorted(recorder.close_calls.values()) == [1, 1]

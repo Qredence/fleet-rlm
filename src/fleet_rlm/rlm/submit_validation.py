@@ -170,25 +170,6 @@ def _is_safe_answer_binding(statement: ast.stmt) -> bool:
     return _is_safe_submit_value(statement.value)
 
 
-def is_submit_only_code(code: object) -> bool:
-    """
-    Determine whether code contains a syntactically valid, submit-only action.
-
-    Parameters:
-        code (object): Source code to validate.
-
-    Returns:
-        bool: `true` if the code consists of one direct `SUBMIT` call with
-            permitted keyword-value expressions, `false` otherwise.
-
-    This validates syntax only; it does not resolve names or evaluate operator
-    behavior. Use `is_finalization_action` to ask the wider question of whether
-    an action is an acceptable way to end a Turn.
-    """
-    module = _parse_action_module(code)
-    return module is not None and len(module.body) == 1 and _is_compliant_submit_call(module.body[0])
-
-
 def is_finalization_action(code: object) -> bool:
     """
     Determine whether code is an admissible wrap-up finalization action.

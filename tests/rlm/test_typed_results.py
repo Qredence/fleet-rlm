@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.rlm.submit_validation import is_finalization_action, is_submit_only_code
+from fleet_rlm.rlm.submit_validation import is_finalization_action
 
 
 @pytest.mark.parametrize(
@@ -152,7 +152,7 @@ def test_declared_output_validator_rejects_private_material(value: object) -> No
     ],
 )
 def test_accepts_finalization_expressions(code: str) -> None:
-    assert is_submit_only_code(code)
+    assert is_finalization_action(code)
 
 
 @pytest.mark.parametrize(
@@ -170,7 +170,7 @@ def test_accepts_finalization_expressions(code: str) -> None:
     ],
 )
 def test_rejects_non_finalization_syntax(code: object) -> None:
-    assert not is_submit_only_code(code)
+    assert not is_finalization_action(code)
 
 
 @pytest.mark.parametrize(
