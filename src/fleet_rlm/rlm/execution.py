@@ -62,6 +62,7 @@ from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
+    InstructedInterpreterFactory,
     RLMModelBundle,
     RLMOptions,
     build_lm,
@@ -1557,10 +1558,13 @@ class RLMRunner:
                 created_invocations.append(invocation)
                 return invocation
 
-            invocation_factory.__dict__["execution_instructions"] = (
-                f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
-                f"The final SUBMIT JSON must fit within {state_context.execution.options.max_final_output_chars} "
-                "characters; use a concise answer or a durable Artifact for longer results."
+            instructed_factory = InstructedInterpreterFactory(
+                invocation_factory,
+                execution_instructions=(
+                    f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
+                    f"The final SUBMIT JSON must fit within {state_context.execution.options.max_final_output_chars} "
+                    "characters; use a concise answer or a durable Artifact for longer results."
+                ),
             )
 
             rlm = self._program_builder(
@@ -1570,7 +1574,7 @@ class RLMRunner:
                 sub_lm=state_context.execution.models.sub_lm,
                 skill_instructions=spec.skill_instructions,
                 host_tool_dispatch=True,
-                interpreter_factory=invocation_factory,
+                interpreter_factory=instructed_factory,
                 verbose=self._verbose,
             )
             self._bind_observer(
@@ -1783,10 +1787,9 @@ async def probe_root_lm(
             requirements or produces an invalid response.
     """
 
-    def probe_interpreter_factory() -> Any:
-        return interpreter_factory()
-
-    probe_interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+    probe_interpreter_factory = InstructedInterpreterFactory(
+        interpreter_factory, execution_instructions=DAYTONA_EXECUTION_INSTRUCTIONS
+    )
     recursive = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=root_lm),
         options=RecursiveRLMOptions(max_calls=1, max_prompt_chars=2_000),

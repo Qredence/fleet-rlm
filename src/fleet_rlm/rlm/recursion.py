@@ -50,6 +50,7 @@ from fleet_rlm.rlm.event_types import ChildProgress, Status
 from fleet_rlm.rlm.events import ToolEventView, ToolObserver, _RLMTraceCallback, is_native_rlm, observe_tool
 from fleet_rlm.rlm.output_contract import FleetOutputContract
 from fleet_rlm.rlm.program import (
+    InstructedInterpreterFactory,
     RLMModelBundle,
     RLMOptions,
     build_native_rlm,
@@ -1579,9 +1580,12 @@ class RecursiveRLMExecutor:
                 ),
             )
 
-        invocation_factory.__dict__["execution_instructions"] = (
-            f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
-            f"Keep the final SUBMIT JSON within {self._options.child_max_output_chars} characters."
+        instructed_factory = InstructedInterpreterFactory(
+            invocation_factory,
+            execution_instructions=(
+                f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
+                f"Keep the final SUBMIT JSON within {self._options.child_max_output_chars} characters."
+            ),
         )
 
         child_prompt_payload = json.loads(request.render())
@@ -1604,7 +1608,7 @@ class RecursiveRLMExecutor:
             tools=[],
             sub_lm=child_models.sub_lm,
             skill_instructions=tuple(skill.instructions for skill in skills),
-            interpreter_factory=invocation_factory,
+            interpreter_factory=instructed_factory,
             verbose=False,
         )
         self._ensure_call_authorized(batch_cancelled, bound)

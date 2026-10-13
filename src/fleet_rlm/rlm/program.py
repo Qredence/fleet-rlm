@@ -1029,6 +1029,23 @@ def build_lm_for_tier(
 # Native program construction
 # ---------------------------------------------------------------------------
 
+
+@dataclass(frozen=True, slots=True)
+class InstructedInterpreterFactory:
+    """Zero-argument interpreter factory carrying DSPy's ``execution_instructions`` hint.
+
+    ``dspy.RLM`` reads ``getattr(interpreter_factory, "execution_instructions", "")``
+    into the action prompt; this names that attribute instead of patching a
+    function's ``__dict__``.
+    """
+
+    create: Callable[[], Any]
+    execution_instructions: str
+
+    def __call__(self) -> Any:
+        return self.create()
+
+
 _DSPY_BUILTIN_TOOLS = frozenset({"llm_query", "llm_query_batched", "print", "SUBMIT"})
 
 
@@ -1111,6 +1128,7 @@ __all__ = [
     "AttachmentInput",
     "FleetInputModel",
     "FleetRLMSignature",
+    "InstructedInterpreterFactory",
     "LMTier",
     "RLMInstructionFragments",
     "RLMModelBundle",

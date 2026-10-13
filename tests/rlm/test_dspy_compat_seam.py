@@ -20,9 +20,7 @@ from fleet_rlm.daytona.interpreter import (
     OutputCallback,
 )
 from fleet_rlm.rlm.execution import DelegationPolicy
-from fleet_rlm.rlm.program import (
-    RLMOptions,
-)
+from fleet_rlm.rlm.program import InstructedInterpreterFactory, RLMOptions
 from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 
@@ -36,14 +34,13 @@ def _rlm(*, tools: list[Callable[..., Any]] | None = None, signature: str = "req
     )
 
 
-def _tracked_interpreter_factory(created: list[DaytonaCodeInterpreter]) -> Callable[[], DaytonaCodeInterpreter]:
+def _tracked_interpreter_factory(created: list[DaytonaCodeInterpreter]) -> InstructedInterpreterFactory:
     def create() -> DaytonaCodeInterpreter:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         created.append(interpreter)
         return interpreter
 
-    create.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
-    return create
+    return InstructedInterpreterFactory(create, execution_instructions=DAYTONA_EXECUTION_INSTRUCTIONS)
 
 
 class _OneAction:

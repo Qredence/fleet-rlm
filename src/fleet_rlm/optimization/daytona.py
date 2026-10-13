@@ -26,7 +26,7 @@ from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
-from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import InstructedInterpreterFactory, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import (
     PredictionOutputError,
     PredictionResult,
@@ -419,7 +419,7 @@ class StrictDaytonaEvaluationLifecycle:
         try:
             loop = asyncio.get_running_loop()
 
-            def interpreter_factory() -> DaytonaCodeInterpreter:
+            def create_interpreter() -> DaytonaCodeInterpreter:
                 interpreter = DaytonaCodeInterpreter(
                     backend=sandbox_backend(
                         sandbox,
@@ -432,7 +432,9 @@ class StrictDaytonaEvaluationLifecycle:
                 record.interpreter = interpreter
                 return interpreter
 
-            interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+            interpreter_factory = InstructedInterpreterFactory(
+                create_interpreter, execution_instructions=DAYTONA_EXECUTION_INSTRUCTIONS
+            )
             signature = _strict_evaluator_signature()
             tool = dspy.Tool(
                 reader,

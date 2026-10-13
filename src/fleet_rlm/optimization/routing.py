@@ -8,6 +8,7 @@ answer output. It never requires private model prompts or chain-of-thought.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import inspect
 import time
@@ -22,7 +23,13 @@ from fleet_rlm.observability.tracing import dspy_turn_callbacks
 from fleet_rlm.rlm.event_types import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.events import _RLMTraceCallback
 from fleet_rlm.rlm.ownership import OwnedEffect
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
+from fleet_rlm.rlm.program import (
+    InstructedInterpreterFactory,
+    RLMModelBundle,
+    RLMOptions,
+    build_native_rlm,
+    root_signature_for_recursion,
+)
 from fleet_rlm.rlm.recursion import (
     RecursiveCallSummary,
     RecursiveRLMExecutor,
@@ -380,13 +387,10 @@ async def run_routing_scenario(
         tools = (recursive.tool, recursive.batched_tool)
         root_interpreter = await _maybe_await(root_interpreter_factory())
         try:
-
-            def interpreter_factory(
-                interpreter: Any = root_interpreter, observer: Callable[[Any], None] = captured.append
-            ) -> Any:
-                return interpreter(observer=observer, observation_max_chars=2_000)
-
-            interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+            interpreter_factory = InstructedInterpreterFactory(
+                functools.partial(root_interpreter, observer=captured.append, observation_max_chars=2_000),
+                execution_instructions=DAYTONA_EXECUTION_INSTRUCTIONS,
+            )
             rlm = build_native_rlm(
                 signature=signature,
                 options=RLMOptions(),

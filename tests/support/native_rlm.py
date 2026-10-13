@@ -7,15 +7,11 @@ from typing import Any
 import dspy
 
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
-from fleet_rlm.rlm.program import build_native_rlm
+from fleet_rlm.rlm.program import InstructedInterpreterFactory, build_native_rlm
 
-
-def local_interpreter_factory() -> dspy.LocalInterpreter:
-    """Return a fresh interpreter for tests that exercise native DSPy execution."""
-    return dspy.LocalInterpreter()
-
-
-local_interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+local_interpreter_factory = InstructedInterpreterFactory(
+    dspy.LocalInterpreter, execution_instructions=DAYTONA_EXECUTION_INSTRUCTIONS
+)
 
 
 def build_native_rlm_for_test(**kwargs: Any) -> Any:
