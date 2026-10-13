@@ -571,3 +571,48 @@ def test_development_reflection_lm_without_root_credentials_fails_preflight(monk
 
     with pytest.raises(OptimizationPreflightError, match="FLEET_TEST_REFLECTION_KEY"):
         _development_reflection_lm(_reflection_settings())
+
+
+def test_gepa_canonical_digests_are_pinned_for_campaign_identity() -> None:
+    from fleet_rlm.optimization.gepa_runner import _canonical_digest
+
+    assert _canonical_digest({"b": [1, 2.5, None, True], "a": "x"}) == (
+        "89e790eedaf1aca877a32e52dcc385d4a2ba80a1b1e54bed4bc0bf4a955b120d"
+    )
+    assert _canonical_digest({"name": "café ✓", "nested": {"z": 0, "y": []}}) == (
+        "6cf182f56d88e9516e96f14d12c7a87645a69a9f9df65040518307816c040a47"
+    )
+
+
+def test_gepa_module_state_and_instruction_digests_are_pinned_for_reload_identity() -> None:
+    from fleet_rlm.optimization.gepa_runner import _instruction_sha256, _module_state_sha256
+
+    class _StateProgram:
+        def __init__(self, state):
+            self._state = state
+
+        def dump_state(self):
+            return self._state
+
+    class _InstructionProgram:
+        def __init__(self, predictors):
+            self._predictors = predictors
+
+        def named_predictors(self):
+            return [
+                (name, SimpleNamespace(signature=SimpleNamespace(instructions=text))) for name, text in self._predictors
+            ]
+
+    tersely = {"predictor": {"demos": [], "signature": {"instructions": "Answer tersely."}}}
+    assert _module_state_sha256(_StateProgram(tersely)) == (
+        "d3364593b13a0fd314ce89518cd2ef526279a2645079700b34e198bb0129415e"
+    )
+    assert _module_state_sha256(_StateProgram({"b": {"x": 1.0}, "a": ["café"]})) == (
+        "b1c91155c607206d8ae384c35dcec164d85fa0945786a0b76bee46415e27c8b5"
+    )
+    assert _instruction_sha256(_InstructionProgram([("predict", "Answer in one word.")])) == (
+        "213e3a086b66eabef1ee02f24905d7da599340d92d8a75c08bd0d9356d9819b0"
+    )
+    assert _instruction_sha256(_InstructionProgram([("b", "Cite sources."), ("a", "Summarize.")])) == (
+        "669665d8778abb7a3f7d0b9a1ef2bdf618a240a07182aef8f51711b4cbcb0ce1"
+    )

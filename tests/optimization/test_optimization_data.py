@@ -256,3 +256,44 @@ def test_metric_requires_digest_and_policy_hash_is_stable() -> None:
     assert scorer_policy_sha256({"model": "judge-v1", "temperature": 0}) == scorer_policy_sha256(
         {"temperature": 0, "model": "judge-v1"}
     )
+
+
+# ==============================================================================
+# Canonical Digest Pins
+# ==============================================================================
+# Values were computed before the shared canonical JSON digest helper existed.
+# A change here means persisted handles, dataset manifests, and promotion
+# policy identities would silently change.
+
+
+def test_curated_input_digests_are_pinned_for_persisted_handles() -> None:
+    store = CuratedEvaluationStore(candidate="candidate", record=_curated_record())
+    unicode_store = CuratedEvaluationStore(candidate="candidate café ✓", record=_curated_record())
+    projection = store.read(
+        transaction_id=store.handle.transaction_id,
+        sha256=store.handle.sha256,
+        json_pointer="/candidate",
+    )
+
+    assert store.receipt.sha256 == "93c0ab476deee78dab4f5b1d8c13f5cffeb5d8001c67dc825c183678176e4c95"
+    assert unicode_store.receipt.sha256 == "89e50abb80ec7d20292db77be19d61e22967b78d0cff5a74d924b36f61fc6a2f"
+    assert projection["sha256"] == "6201e275c993fded1b6a1b7b64f106686c702d9fdff8af32b560aad5d781015c"
+
+
+def test_dataset_content_and_manifest_digests_are_pinned_for_leakage_audit() -> None:
+    records = validate_records([_dataset_record(index) for index in range(25)])
+    manifest = split_records(records, seed=7).public_manifest
+
+    assert records[0].content_sha256 == "2d566a2fde69819067efab6f542fd12b64db239f3f06392cf9bb8613a3e52425"
+    assert records[24].content_sha256 == "cc36c96f8bc1000c677f8895c3e4fd730aedfa023f3eae476a97b2b0e2ed740e"
+    assert manifest["dataset_sha256"] == "85975c3ca011aa3c9e3b24af179be4154bd7f98b5a5ccc0601063612a61fd884"
+    assert manifest["sealed_test"]["ids_sha256"] == "82a493b0678850a682e4686bc9df8f96638ed86015025b6d65af1583de00ea3d"
+
+
+def test_scorer_policy_digests_are_pinned_for_promotion_identity() -> None:
+    assert scorer_policy_sha256({"model": "judge-v1", "temperature": 0}) == (
+        "995ad4f738bd78709c0e0d6139b8e69d20f2dbf1acd63fb69d485472ea44948e"
+    )
+    assert scorer_policy_sha256({"model": "judge-ü", "threshold": 0.5, "rubric": ["a", "b"]}) == (
+        "8c4a310634f7770cf4ee7b14b3d8f164183cfe74f90498758620fef24be2229c"
+    )

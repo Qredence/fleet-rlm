@@ -162,3 +162,32 @@ def test_development_canary_report_cannot_issue_production_proof(tmp_path) -> No
     assert "proof_id" not in payload
     with pytest.raises(StrictDaytonaProofError, match="versioned receipt"):
         validate_strict_daytona_proof(cast(StrictDaytonaProofReceipt, report))
+
+
+def test_strict_proof_and_canary_identifiers_are_pinned_for_evidence_binding() -> None:
+    proof = StrictDaytonaProofReceipt(
+        policy_id="a" * 64,
+        snapshot="fleet-safe-v1",
+        gateway_domains=("gateway.example.test",),
+        controls={"no_volume_requested": True, "ephemeral_requested": True, "domain_allow_list_requested": True},
+        outcomes={"egress_allowed": "passed", "egress_denied": "passed"},
+    )
+    canary = DevelopmentDaytonaCanaryReport(
+        policy_id="b" * 64,
+        snapshot="fleet-café-v1",
+        controls={"ephemeral": True, "retries": 2},
+        outcomes={"egress": "blocked"},
+    )
+
+    assert proof.proof_id == "2b2e8a29427391b008212bdd77a31b6a4382909b09afa399d3b191203690efef"
+    assert canary.public_payload()["report_id"] == "ed6a498ba217731587bd9ef25e1671bbb75faa9fc5b3899f1ce9262051bb1d10"
+
+
+def test_strict_policy_identifiers_are_pinned_for_evidence_labels() -> None:
+    from fleet_rlm.optimization.daytona import OptimizationSandboxPolicy
+
+    allow_list = OptimizationSandboxPolicy("fleet-test-v1", ("gateway.example.test",))
+    block_all = OptimizationSandboxPolicy(snapshot="fleet-test-v1", gateway_domains=(), network_block_all=True)
+
+    assert allow_list.policy_id == "492d0c2697c7d11d556f451c12e7a38c5077a18b6ef0fd08be1de8508903cde7"
+    assert block_all.policy_id == "c486bd2a0d3aa1510401c7759a1a4842a629b7edcd98d274e7464fda67c8d33d"

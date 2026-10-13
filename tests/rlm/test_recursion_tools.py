@@ -2398,3 +2398,15 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
     assert "request" in root_invocations[0][2]
     prediction = stream.outcome.prediction
     assert prediction.answer == "child-native-ok"
+
+
+def test_child_source_manifest_digest_is_pinned_for_child_identity() -> None:
+    from fleet_rlm.rlm.recursion import _child_source_manifest
+
+    manifest, digest = _child_source_manifest({"src/b.py": b"print('b')\n", "src/a.py": b"print('a')\n"})
+    unicode_manifest, unicode_digest = _child_source_manifest({"notes/ü.txt": "naïve".encode()})
+
+    assert [entry["path"] for entry in manifest] == ["src/a.py", "src/b.py"]
+    assert digest == "86362d4ffb12633735fdcd55e08d5e35300523ef79201b573fbe1c077c51cd37"
+    assert unicode_manifest[0]["path"] == "notes/ü.txt"
+    assert unicode_digest == "8c5464bb40c8ad5a96b35564644f4cf6e71b526f294862d271ef4a24af99840d"
