@@ -53,15 +53,6 @@ class SkillCatalog:
         return value
 
 
-class UnavailableSkillCatalog(SkillCatalog):
-    """Explicit private-test degradation fixture."""
-
-    unavailable = True
-
-    def __init__(self) -> None:
-        super().__init__(())
-
-
 def load_bundled_skill_manifests() -> tuple[SkillManifest, ...]:
     """Parse all bundled manifests deterministically."""
 
@@ -112,18 +103,3 @@ def build_bundled_skill_catalog() -> SkillCatalog:
             )
         )
     return SkillCatalog(tuple(definitions))
-
-
-def bundled_skill_readme_diagnostics() -> tuple[str, ...]:
-    """Verify the human catalog table was generated from canonical manifests."""
-
-    root = files("fleet_rlm.skills").joinpath("bundled")
-    with as_file(root) as root_path:
-        readme = root_path.joinpath("README.md").read_text(encoding="utf-8")
-    expected_table = "| Skill | Version | Description |\n|---|---:|---|\n" + "".join(
-        f"| `{manifest.name}` | {manifest.version} | {manifest.description} |\n"
-        for manifest in load_bundled_skill_manifests()
-    ).rstrip("\n")
-    if f"Fleet ships these runtime Skills:\n\n{expected_table}" not in readme:
-        return (f"README table differs from canonical manifests:\n{expected_table}",)
-    return ()

@@ -15,10 +15,6 @@ class SkillValidationError(SkillError):
     """Rejected bundled Skill metadata."""
 
 
-class SkillPathError(SkillValidationError):
-    """Invalid skill-relative resource path."""
-
-
 class InvalidSkillSelectionError(SkillValidationError):
     """Generic exact-selection failure safe for API translation."""
 
