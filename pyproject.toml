@@ -57,7 +57,7 @@ dependencies = [
     # responses without inheriting ambient proxy configuration.
     # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
     "mlflow==3.16.1",
-    "opentelemetry-sdk==1.45.0",
+    "opentelemetry-sdk==1.45.1",
     "tomlkit>=0.15.1,<1",
     "posthog>=7.63.0,<8",
 ]
