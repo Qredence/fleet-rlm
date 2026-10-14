@@ -1,7 +1,7 @@
 [project]
 name = "fleet-rlm"
-version = "0.7.11"
-description = "RLM-native FastAPI backend with DSPy and Daytona"
+version = "0.8.0"
+description = "Lightweight session-isolated DSPy RLM runtime on Daytona with Postgres persistence, Skills, and MLflow evaluation"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = "MIT"
@@ -26,40 +26,19 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Exact published release: the certified Fleet contract is DSPy 3.4.0.
-    # assert_dspy_version() accepts only the literal final release and rejects
-    # patches, prereleases, post-releases, and local builds.
-    "dspy==3.4.0",
-    "packaging>=26.3,<27",
-    # Exact SDK pin: its resource and cleanup surface is verified by the
-    # Daytona contract and live lifecycle lanes.
+    "dspy[typesafe]==3.4.0",
     "daytona==0.220.0",
-    # Persistence and migrations.
-    "aiosqlite>=0.22.1",
-    "alembic>=1.20.0,<2",
-    "asyncpg>=0.31.0,<1",
-    "psycopg>=3.3.6,<4",
+    "mlflow==3.17.1",
+    "psycopg[binary]>=3.3.6,<4",
+    "fastapi[standard]==0.142.2",
+    "python-multipart>=0.0.12",
+    "uvicorn[standard]>=0.54.0,<1",
     "pydantic>=2.13.5,<3",
     "pydantic-settings>=2.15.0,<3",
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3,<7",
-    "sqlalchemy[asyncio]>=2.1.1,<3",
-    # Web API surface. Pinned exactly to the latest PyPI release at pin time
-    # for reproducible installs; bump deliberately when a newer release is
-    # validated against the runtime + test suite.
-    "fastapi[standard]==0.142.2",
-    "uvicorn>=0.54.0,<1",
-    # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
-    # connection reuse through the preview proxy. Transitive via the Daytona
-    # SDK; declared direct because daytona.broker imports it.
     "httpx>=0.28.1,<1",
-    # Host-side public URL Tools pin validated addresses and stream bounded
-    # responses without inheriting ambient proxy configuration.
-    # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
-    "mlflow==3.16.1",
-    "opentelemetry-sdk==1.45.0",
-    "tomlkit>=0.15.1,<1",
-    "posthog>=7.63.0,<8",
+    "rich>=13.9.0",
 ]
 
 [project.urls]
@@ -69,45 +48,22 @@ Issues = "https://github.com/qredence/fleet-rlm/issues"
 Documentation = "https://docs.qredence.ai/"
 
 [project.scripts]
-fleet = "fleet_rlm.cli.main:fleet_main"
-fleet-rlm = "fleet_rlm.cli.main:fleet_rlm_main"
-
-[project.optional-dependencies]
-server = [
-    "psycopg[binary]>=3.3.6,<4",
-    "uvicorn[standard]>=0.54.0,<1",
-]
-benchmark = [
-    "databricks-agents>=1.12.0",
-    "datasets>=5.0.1",
-]
-optimize = [
-    # Exact official published release; no Git override remains.
-    "gepa==0.1.4",
-]
+fleet = "fleet_rlm.cli:main"
+fleet-rlm = "fleet_rlm.cli:main"
 
 [build-system]
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.fastapi]
-entrypoint = "fleet_rlm.main:app"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 # The single dev dependency list (PEP 735). Local workflows install it via
 # `uv sync --dev`; there is deliberately no published `dev` extra.
 dev = [
-    "pre-commit>=4.6.2",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "pytest-cov>=7.1,<8",
-    "pytest-timeout>=2.4.0",
-    "pytest-xdist>=3.8.0",
-    # Starlette 1.6+ test clients use httpx2; keeping it installed avoids
-    # deprecated fallback behavior when the app's HTTPX transport stays on httpx.
-    "httpx2>=2.13.1",
-    "ruff>=0.16.10",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
     "ty>=0.0.84",
+    "pre-commit>=4.6.2",
 ]
 
 [tool.uv]
@@ -148,75 +104,20 @@ override-dependencies = [
     "sqlparse>=0.6.0",
 ]
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["fleet_rlm*"]
-namespaces = false
-
-[tool.setuptools.package-data]
-"fleet_rlm" = [
-    "py.typed",
-    "daytona/snapshot-requirements.txt",
-    "skills/bundled/README.md",
-    "skills/bundled/**/SKILL.md",
-    "skills/bundled/**/*.md",
-    "skills/bundled/**/*.py",
-    "skills/bundled/**/*.txt",
-    "skills/bundled/**/*.json",
-    "skills/bundled/**/*.yaml",
-    "skills/bundled/**/*.yml",
-    "skills/bundled/**/*.toml",
-    "skills/bundled/**/*.csv",
-]
+[tool.hatch.build.targets.wheel]
+packages = ["src/fleet_rlm"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-norecursedirs = ["tests/live"]
-junit_family = "xunit1"
-addopts = "-q --strict-markers --timeout=30 -n auto --dist=loadfile -m 'not live_llm and not live_daytona and not benchmark and not db and not packaging'"
-timeout_method = "thread"
+addopts = "-q --strict-markers"
 asyncio_mode = "strict"
 markers = [
     "unit: fast isolated tests",
     "integration: cross-boundary tests",
-    "contracts: stable behavioral invariants",
-    "db: requires live database",
-    "e2e: full stack smoke tests",
-    "benchmark: performance/throughput benchmark tests",
-    "packaging: release/install matrix tests that create isolated artifacts or environments",
-    "live_llm: tests that require a live configured LM / LiteLLM backend",
-    "live_daytona: tests that require a live Daytona backend and explicit opt-in",
+    "live_daytona: requires an explicitly configured Daytona account and Volume",
+    "live_llm: requires an explicitly configured model provider",
 ]
-# DSPy 3.4 deprecates the two legacy LM interfaces this repository migrated off;
-# both are removed in DSPy 3.5. Promote exactly those two to errors so a
-# reintroduced `dspy.BaseLM` subclass or an OpenAI-style `messages=` call fails
-# the lane instead of warning quietly. The filters are message-scoped (not a
-# blanket `error::DeprecationWarning`) because dspy attributes the warning to
-# the caller's frame via `stacklevel`, and because mlflow/pandas deprecations
-# must stay tolerated. A filter's message field is a regex matched at the start
-# of the warning text, and later entries take precedence.
-filterwarnings = [
-    "error:Implementing custom LMs through BaseLM.forward:DeprecationWarning",
-    "error:Passing OpenAI-style message dictionaries:DeprecationWarning",
-]
-
-[tool.coverage.run]
-branch = true
-# Project-wide scope: all backend modules are measured, not only daytona/.
-# The daytona subpackage remains visible per-file in the coverage report.
-source = ["src/fleet_rlm"]
-
-[tool.coverage.report]
-# Project-wide floor.  Raised from the legacy daytona-only 70% gate after
-# extending scope; current full-package coverage is ~82%.
-fail_under = 75
-precision = 1
-show_missing = true
 
 [tool.ruff]
 line-length = 120
@@ -259,10 +160,8 @@ select = [
 ]
 
 # Scripts bootstrap the repo root onto sys.path, then print CLI output.
-# Bundled Skill scripts are operator-facing helpers that write to stdout.
 [tool.ruff.lint.per-file-ignores]
-"scripts/**/*.py" = ["E402", "T201"]
-"src/fleet_rlm/skills/bundled/**/scripts/*.py" = ["T201"]
+"scripts/**/*.py" = ["T201"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -285,23 +184,4 @@ quote-style = "double"
 skip-magic-trailing-comma = false
 
 [tool.ty.src]
-exclude = [
-    # Tests and scripts are not the typed public package; they use doubles and
-    # assignment patches that are not worth a host type-check pass.
-    "tests/",
-    "scripts/",
-]
-
-[tool.deptry]
-# Exclude test directories and node_modules from import scanning
-extend_exclude = ["node_modules/"]
-# Ignore unused dependencies (DEP002) - many are transitive or used in optional extras
-# Ignore missing dependencies (DEP001) - many are transitive deps of installed packages
-ignore = ["DEP001", "DEP002"]
-# Known first-party modules
-known_first_party = ["fleet_rlm"]
-
-[tool.deptry.package_module_name_map]
-pydantic-settings = "pydantic_settings"
-python-dotenv = "dotenv"
-pyyaml = "yaml"
+exclude = ["tests/", "scripts/"]

@@ -1,35 +1,32 @@
-"""Fleet RLM package bootstrap.
+"""Fleet-RLM Lite: DSPy Flex/RLM, Daytona, Postgres, Agent Skills, and MLflow."""
 
-Importing the package does not open network connections or construct external
-clients; process-lifetime resources are owned by FastAPI lifespan.
-"""
+from fleet_rlm.config import FleetSettings, get_settings
+from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager
+from fleet_rlm.memory_and_eval import (
+    AdaptiveFleetEngine,
+    VolumePostgresHarness,
+    build_mlflow_scorer_suite,
+    compile_and_evaluate_fleet,
+    configure_mlflow_observability,
+    gepa_mlflow_metric,
+    jev_routing_efficiency,
+    rlm_trajectory_efficiency,
+)
+from fleet_rlm.skills import SkillManager, parse_and_validate_skill_md
 
-from __future__ import annotations
-
-import re
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as package_version
-from pathlib import Path
-
-_PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
-
-
-def _load_version_from_pyproject() -> str:
-    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    match = _PYPROJECT_VERSION_PATTERN.search(pyproject_path.read_text(encoding="utf-8"))
-    if match is None:
-        msg = "Could not locate [project].version in pyproject.toml"
-        raise RuntimeError(msg)
-    return match.group(1)
-
-
-def _resolve_version() -> str:
-    try:
-        return package_version("fleet-rlm")
-    except PackageNotFoundError:
-        return _load_version_from_pyproject()
-
-
-__version__ = _resolve_version()
-
-__all__ = ["__version__"]
+__all__ = [
+    "AdaptiveFleetEngine",
+    "DaytonaInterpreter",
+    "DaytonaSandboxManager",
+    "FleetSettings",
+    "SkillManager",
+    "VolumePostgresHarness",
+    "build_mlflow_scorer_suite",
+    "compile_and_evaluate_fleet",
+    "configure_mlflow_observability",
+    "gepa_mlflow_metric",
+    "get_settings",
+    "jev_routing_efficiency",
+    "parse_and_validate_skill_md",
+    "rlm_trajectory_efficiency",
+]

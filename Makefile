@@ -1,107 +1,17 @@
-PYTHON_SOURCES = src tests scripts migrations
-RELEASE_SOURCE_DATE_EPOCH ?= $(shell git -C "$(CURDIR)" show -s --format=%ct HEAD 2>/dev/null || echo 0)
-# Audit exceptions require explicit caller input; the default stays strict.
-PIP_AUDIT_ARGS ?=
-# Release/install matrix tests are intentionally opt-in: they create multiple
-# virtual environments and are covered by the dedicated package gate.
-PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not db and not packaging
-PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not db
-PYTEST_FAST_PATHS = tests/api tests/cli tests/config tests/daytona tests/e2e tests/freeze tests/observability tests/optimization tests/persistence tests/rlm tests/scripts tests/sessions tests/skills tests/workspace
-PYTEST_UNIT_PATHS = $(PYTEST_FAST_PATHS)
-PYTEST := uv run --no-sync pytest
-PYTEST_ISOLATED := env \
-	FLEET_DAYTONA_API_KEY= \
-	FLEET_OPENAI_API_KEY= \
-	FLEET_LLM_BASE_URL= \
-	FLEET_DATABASE_URL= \
-	$(PYTEST)
-# Two workers keep local gate runs fast on typical dev machines while xdist
-# `loadfile` scheduling keeps module-scoped fixtures together; override only
-# with verified local runner capacity.
-PYTEST_XDIST_MAX_WORKERS ?= 2
-PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loadfile
-PYTEST_FAST_ARGS = -q $(PYTEST_PARALLEL) $(PYTEST_FAST_PATHS) -m "$(PYTEST_FAST_MARKERS)"
-PYTEST_UNIT_ARGS = -q $(PYTEST_PARALLEL) $(PYTEST_UNIT_PATHS) -m "$(PYTEST_FAST_MARKERS)"
+PYTHON_SOURCES := src/fleet_rlm tests scripts
 
-TUI_DIR := tools/fleet-tui
-TUI_PNPM := cd $(TUI_DIR) && pnpm
-
-.PHONY: \
-	help \
-	install install-dev install-all \
-	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-packaging test-db test-coverage test-daytona-cov \
-	check quality-gate check-release check-docs check-instructions check-security check-deps check-codebase-tree check-dependency-boundaries \
-	api-check api-sync tui-check stream-check stream-sync \
-	build build-release release \
-	clean cli precommit-install precommit-run precommit \
-	cloud-preflight \
-	daytona-snapshot-create daytona-snapshot-check daytona-snapshot-plan daytona-snapshot-verify-runtime \
-	daytona-child-snapshot-create daytona-child-snapshot-check daytona-child-snapshot-plan daytona-child-snapshot-verify-runtime \
-	config-reference
+.PHONY: help install install-dev dev serve cli format format-check lint typecheck test api-check api-sync check-docs check build clean check-security precommit-run
 
 help:
-	@echo "Setup:"
-	@echo "  make install          - Install runtime dependencies only with uv"
-	@echo "  make install-dev      - Install runtime and dev dependencies with uv"
-	@echo "  make install-all      - Install runtime, dev, and all optional extras"
-	@echo ""
-	@echo "Development:"
-	@echo "  make dev              - Start the local app (fleet web)"
-	@echo "  make format           - Run ruff format (writes changes)"
-	@echo "  make format-check     - Run ruff format --check"
-	@echo "  make lint             - Run ruff check"
-	@echo "  make typecheck        - Run ty check"
-	@echo ""
-	@echo "Testing:"
-	@echo "  make test             - Run default fast non-live tests (packaging is separate)"
-	@echo "  make test-fast        - Alias for the default fast non-live tests"
-	@echo "  make test-unit        - Run unit tests (non-live; packaging separate)"
-	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
-	@echo "  make test-packaging   - Run serial artifact/install/release tests"
-	@echo "  make test-db          - Run explicit configured-database tests (db marker)"
-	@echo "  make test-coverage    - Run canonical non-live tests with project coverage"
-	@echo "  make test-daytona-cov - Alias for make test-coverage"
-	@echo "  (Credentialed live Daytona lanes run via FLEET_LIVE=1; see docs/how-to-guides/testing-strategy.md)"
-	@echo ""
-	@echo "Quality:"
-	@echo "  make check            - Run the primary repo quality gate"
-	@echo "  make quality-gate     - Alias for the primary repo quality gate"
-	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
-	@echo "  make check-docs       - Run instructions, docs quality, and harness hard gates"
-	@echo "                         (use scripts/check_repo_hygiene.py --editorial for additional doc hygiene)"
-	@echo "  make check-instructions - Validate agent guides and development-skill references"
-	@echo "  make check-security   - Run pip-audit + bandit"
-	@echo "  make check-deps       - Check Python dependencies with deptry"
-	@echo "  make check-codebase-tree - Enforce import boundaries documented in ARCHITECTURE.md"
-	@echo "  make check-dependency-boundaries - Enforce provider/domain dependency directions"
-	@echo "  make api-check        - Verify OpenAPI and generated TUI HTTP types"
-	@echo "  make api-sync         - Regenerate OpenAPI and generated TUI HTTP types"
-	@echo "  make stream-check     - Verify the TUI turn-stream fixture is current"
-	@echo "  make stream-sync      - Regenerate the TUI turn-stream fixture"
-	@echo ""
-	@echo "Build & release:"
-	@echo "  make build            - Build Python distributions"
-	@echo "  make build-release    - Build and verify the backend-only distribution"
-	@echo "  make release          - Validate quality/security/metadata, then build artifacts"
-	@echo ""
-	@echo "Cloud:"
-	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
-	@echo ""
-	@echo "Utility:"
-	@echo "  make daytona-snapshot-create - Create or validate the immutable Session Snapshot"
-	@echo "  make daytona-snapshot-check  - Check the immutable Session Snapshot contract"
-	@echo "  make daytona-snapshot-plan    - Print the non-secret Session Snapshot plan"
-	@echo "  make daytona-snapshot-verify-runtime - Verify the native Session runtime"
-	@echo "  make daytona-child-snapshot-create - Create or validate the lean SemanticChild Snapshot"
-	@echo "  make daytona-child-snapshot-check  - Check the lean SemanticChild Snapshot contract"
-	@echo "  make daytona-child-snapshot-plan   - Print the non-secret SemanticChild plan"
-	@echo "  make daytona-child-snapshot-verify-runtime - Verify the native SemanticChild runtime"
-	@echo "  make config-reference          - Regenerate the TOML-derived configuration environment reference"
-	@echo "  make clean            - Remove project caches/build artifacts; preserve local data and logs"
-	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
-	@echo "  make precommit-run    - Run pre-commit on all files"
-	@echo "  make cli              - Show fleet-rlm CLI help"
+	@echo "Fleet-RLM Lite development targets:"
+	@echo "  make install-dev  Install runtime and development dependencies"
+	@echo "  make serve        Start the local FastAPI SSE server"
+	@echo "  make cli          Show terminal client help"
+	@echo "  make test         Run non-live unit and boundary tests"
+	@echo "  make lint         Run Ruff"
+	@echo "  make typecheck    Run ty on the public package"
+	@echo "  make api-sync     Regenerate openapi.yaml from FastAPI"
+	@echo "  make check        Run tests, formatting, lint, type, docs, API, and build checks"
 
 install:
 	uv sync --no-dev
@@ -109,11 +19,13 @@ install:
 install-dev:
 	uv sync --dev
 
-install-all:
-	uv sync --all-extras --dev
+dev: serve
 
-dev:
-	uv run fleet web
+serve:
+	uv run fleet serve
+
+cli:
+	uv run fleet --help
 
 format:
 	uv run ruff format $(PYTHON_SOURCES)
@@ -125,158 +37,31 @@ lint:
 	uv run ruff check $(PYTHON_SOURCES)
 
 typecheck:
-	uv run ty check src tests/live
-	env -u FLEET_LIVE uv run pytest --collect-only -q tests/live > /dev/null
+	uv run ty check src/fleet_rlm
 
 test:
-	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS)
-
-test-fast: test
-
-test-unit:
-	$(PYTEST_ISOLATED) $(PYTEST_UNIT_ARGS)
-
-test-contract:
-	$(PYTEST_ISOLATED) -q tests/api tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
-
-test-packaging:
-	$(PYTEST_ISOLATED) -q tests/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
-
-test-db:
-	$(PYTEST) -q -m "db" -n 0
-
-test-coverage:
-	mkdir -p .scratch/coverage
-	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS) --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
-
-test-daytona-cov: test-coverage
-
-DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v7
-DAYTONA_SNAPSHOT_PROFILE ?= session
-DAYTONA_CHILD_SNAPSHOT_NAME ?= fleet-rlm-python313-child-v2
-
-daytona-snapshot-create:
-	uv run python scripts/daytona_snapshot.py create --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
-
-daytona-snapshot-check:
-	uv run python scripts/daytona_snapshot.py check --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
-
-daytona-snapshot-plan:
-	uv run python scripts/daytona_snapshot.py plan --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
-
-daytona-snapshot-verify-runtime:
-	uv run python scripts/daytona_snapshot.py verify-runtime --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
-
-daytona-child-snapshot-create:
-	uv run python scripts/daytona_snapshot.py create --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
-
-daytona-child-snapshot-check:
-	uv run python scripts/daytona_snapshot.py check --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
-
-daytona-child-snapshot-plan:
-	uv run python scripts/daytona_snapshot.py plan --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
-
-daytona-child-snapshot-verify-runtime:
-	uv run python scripts/daytona_snapshot.py verify-runtime --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
-
-config-reference:
-	uv run python scripts/contracts.py config generate
-
-tui-check: api-check stream-check
-	# Run pnpm from inside the workspace so corepack resolves the pinned
-	# packageManager version (pnpm --dir resolves from the invocation CWD and
-	# misses it when make runs from the repo root).
-	$(TUI_PNPM) run format:check
-	$(TUI_PNPM) run lint
-	$(TUI_PNPM) run typecheck
-	$(TUI_PNPM) run test
-
-check: lint format-check typecheck test-coverage tui-check check-codebase-tree check-dependency-boundaries check-docs
-
-quality-gate: check
-
-check-release: check-instructions
-	uv run python scripts/validate_release.py hygiene
-	uv run python scripts/validate_release.py metadata
-
-check-instructions:
-	uv run python scripts/check_repo_hygiene.py
-
-check-docs: check-instructions
-	uv run python scripts/contracts.py config check
-
-check-security:
-	uvx pip-audit $(PIP_AUDIT_ARGS)
-	uvx bandit -q -r src/fleet_rlm -x tests -lll
-
-check-deps:
-	uvx deptry . --config pyproject.toml
-
-check-codebase-tree:
-	uv run python scripts/check_architecture.py tree
-
-check-dependency-boundaries:
-	uv run python scripts/check_architecture.py dependencies
+	uv run pytest
 
 api-check:
-	uv run python scripts/contracts.py api check
+	uv run python scripts/openapi_contract.py check
 
 api-sync:
-	uv run python scripts/contracts.py api generate
+	uv run python scripts/openapi_contract.py generate
 
-stream-check:
-	uv run python scripts/contracts.py stream check
+check-docs:
+	uv run python scripts/check_docs.py
 
-stream-sync:
-	uv run python scripts/contracts.py stream generate
+check-security:
+	uvx pip-audit
 
 build:
-	rm -rf dist build
-	SOURCE_DATE_EPOCH=$(RELEASE_SOURCE_DATE_EPOCH) uv build
-	uv run python scripts/validate_release.py normalize --dist-dir dist --epoch $(RELEASE_SOURCE_DATE_EPOCH)
+	uv build
 
-build-release: build
-	uv run python scripts/validate_release.py wheel
-	uvx twine check --strict dist/*
-	uv run python scripts/validate_release.py artifacts
-
-# Keep phases ordered even when the caller enables parallel make. Build cleans
-# dist/build only after all validation phases have succeeded.
-release:
-	$(MAKE) check
-	$(MAKE) check-security
-	$(MAKE) check-release
-	$(MAKE) build-release
-
-clean:
-	@echo "Cleaning caches and local generated artifacts..."
-	@for path in $(PYTHON_SOURCES) $(TUI_DIR)/src; do \
-		if [ -d "$$path" ]; then \
-			find "$$path" -type d \( -name node_modules -o -name .venv -o -name .git \) -prune -o \
-				-type d \( -name .ruff_cache -o -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ty \) \
-			-prune -exec rm -rf {} + || exit $$?; \
-		fi; \
-	done
-	rm -rf .ruff_cache .pytest_cache .mypy_cache .ty __pycache__ build dist src/*.egg-info .coverage .scratch/coverage .venv-release-smoke
-	@echo "Cleanup complete"
-
-precommit-install:
-	uv run pre-commit install
-	uv run pre-commit install --hook-type pre-push
+check: test lint format-check typecheck check-docs api-check build
 
 precommit-run:
 	uv run pre-commit run --all-files
 
-precommit: precommit-install
-
-cli:
-	uv run fleet-rlm --help
-
-cloud-preflight:
-	@echo "Checking fastapi CLI is available in the locked env..."
-	uv run fastapi --help >/dev/null
-	@echo "Importing configured FastAPI entrypoint..."
-	uv run python -c "from fleet_rlm.main import app; print(f'{app.title} {app.version}')"
-	@echo "Enumerating routes from create_app()..."
-	uv run python -c "from fleet_rlm.app import create_app; a = create_app(); print('\n'.join(sorted({getattr(r, 'path', '<?>') for r in a.routes})))"
-	@echo "cloud-preflight OK"
+clean:
+	rm -rf .ruff_cache .pytest_cache .ty build dist
+	find src tests scripts -type d -name __pycache__ -prune -exec rm -rf {} +

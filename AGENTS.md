@@ -1,50 +1,50 @@
 # Repository Guidelines
 
-Fleet RLM combines a Python FastAPI backend, DSPy reasoning, Daytona execution, and a TypeScript terminal client.
+Fleet RLM Lite is a Python application with a Rich CLI, FastAPI SSE server,
+DSPy engine, Daytona execution, PostgreSQL VFS, and MLflow/GEPA evaluation.
 
-## Project Structure & Module Organization
+## Project layout
 
-- `src/fleet_rlm/` contains backend packages for sessions, turns, persistence, API, reasoning, workspace, and Daytona.
-  - `daytona/` splits concrete ownership: `provider.py` (SDK ops), `leases.py` (admission/cleanup), `children.py`, `host_io.py`, coordinated by `runtime.py`.
-  - `config/catalog.py` owns the field-policy inventory; `rlm/event_types.py` owns Runtime Event dataclasses; `app_preparation.py` prepares claimed Turns.
-- `tests/` groups backend tests by behavior owner; shared fixtures live in `tests/support/`.
-- `tools/fleet-tui/` contains the terminal client and its tests.
-- `config/fleet.toml` owns runtime policy; `migrations/` contains Alembic migrations.
-- `docs/` holds guides and references; `scripts/` contains repository helpers. Runtime skill resources live in `src/fleet_rlm/skills/bundled/`.
+- `src/fleet_rlm/` contains the active application: `config.py`, `skills.py`,
+  `interpreter.py`, `memory_and_eval.py`, `server.py`, and `cli.py`.
+- `tests/` contains the Lite test suite.
+- `docs/` contains product and developer documentation.
+- `.fleet/skills/` is for user Skills. `.agents/skills/` is reserved for
+  developer agent skills and must not be configured as user Skills sync.
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and [TUI guidance](tools/fleet-tui/AGENTS.md) before client changes. Child RLM tools are always available (bounded to depth one); operators do not toggle recursion in TOML.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries.
+Do not document removed API, TUI, migration, or configuration capabilities as
+current behavior.
 
-## Build, Test, and Development Commands
+## Build, test, and development
 
-Use Python 3.11–3.13, uv, Node 22.19+, and the TUI’s pinned pnpm version.
+Use Python 3.11–3.13 and uv. Common repository targets are defined in
+`Makefile`:
 
-- `uv sync --all-extras --dev`: install Python dependencies.
-- From `tools/fleet-tui/`, run `pnpm install --frozen-lockfile`.
-- `make dev`: start the backend; follow [README.md](README.md) for credentials and database initialization.
-- `make build`: build Python distributions.
-- `make test`: run default non-live backend tests.
-- `make tui-check`: check generated contracts, formatting, lint, types, and client tests.
-- `make check`: run the primary repository quality gate.
-- `make check-docs`: validate documentation links and structure after docs edits.
+- `make install-dev`: install development dependencies.
+- `make serve`: run the FastAPI server.
+- `make cli`: display CLI help.
+- `make test`: run pytest.
+- `make lint`, `make format-check`, `make typecheck`: static checks.
+- `make api-check`: verify the generated OpenAPI document.
+- `make check`: run the complete non-live quality gate and build.
 
-## Coding Style & Naming Conventions
+Use `uv run pytest <focused-test>` for focused backend validation. Live Daytona,
+model-provider, database, and evaluation runs require explicit authorization
+and appropriate external resources; ordinary CI must not depend on them.
 
-Python uses four-space indentation, double quotes, and 120-character lines. Use `snake_case` for modules/functions and `PascalCase` for classes. Ruff formats and lints; ty checks types.
+## Style and change practice
 
-TypeScript uses two-space indentation, 100-character lines, and Biome. Import directly from owning modules and respect package boundaries.
+Python uses four-space indentation and Ruff formatting/linting. Keep changes
+focused, add regression coverage for behavior changes, and update documentation
+when public behavior changes. Never commit credentials or `.env` files.
 
-## Testing Guidelines
+Use conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `test:`,
+`docs:`, `chore:`). Do not commit, push, publish, or deploy unless explicitly
+authorized.
 
-Backend tests use pytest and pytest-asyncio; client tests use Vitest. Name files `test_*.py` or `*.test.ts`. Add regressions to existing behavior-owning suites.
+## Validation
 
-Run focused tests with `uv run pytest tests/daytona/test_sandbox_lifecycle.py`. `make test-coverage` enforces 75% package-wide backend coverage.
-
-## Commit & Pull Request Guidelines
-
-Use focused conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, or `chore:`. Follow the PR template: explain resulting behavior, link applicable issues, identify contract/migration impacts, and report exact validation commands and outcomes.
-
-## Validate and Deliver Safely
-
-For documentation changes, run `make check-docs` and `git diff --check`. Keep secrets out of Git. Credentialed provider, Daytona, database, and benchmark runs require explicit operator authorization.
-
-Regenerate contracts with `make api-sync`, `make stream-sync`, or `make config-reference`; never hand-edit generated outputs. Preserve unrelated local changes.
+For docs changes, run `make check-docs` when available and always run
+`git diff --check`. `make check` is the primary code-quality gate. Do not run
+credentialed integrations without authorization.

@@ -3,9 +3,9 @@
 Issues, PRDs, and Wayfinder maps for this repository live as local Markdown under `.scratch/`.
 The directory is intentionally gitignored: it is a coordination surface for agents sharing this checkout, not a second canonical roadmap.
 
-Current runtime ownership and validation guidance lives in the architecture
-and testing-strategy pages linked from `docs/index.md`; scratch tickets must
-not override those sources.
+Current runtime ownership and validation guidance lives in the architecture,
+repository guidelines, and contribution pages linked from `docs/index.md`;
+scratch tickets must not override those sources.
 
 ## Conventions
 
