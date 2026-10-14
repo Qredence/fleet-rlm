@@ -39,7 +39,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert root_timeout["editor"] == "number"
 
     sub_timeout = _field(service.read(), "llm.sub.timeout_seconds")
-    assert sub_timeout["value"] == 90
+    assert sub_timeout["value"] == 180
     assert sub_timeout["editor"] == "number"
 
     tracking_uri = _field(service.read(), "mlflow.tracking_uri")

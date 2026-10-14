@@ -117,8 +117,13 @@ Root/child action iterations, `max_llm_calls` bounds prompts sent through native
 the next action; it is not a total-history limit, and reasoning/code text is
 still governed by the native trajectory. The generic `RLMOptions` and DSPy
 constructor fallback values for Root are `20`, `50`, and `10000`; the shipped
-configuration deliberately lowers the effective Root values to
-`12`, `32`, and `6000`. Its child values remain `8`, `12`, and `4000`.
+configuration sets the effective Root values to `16`, `32`, and `8000`.
+Its child values are `8`, `12`, and `8000`. Execution result projection also
+allows `8000` characters, and Root final output allows `24000` characters of
+serialized output JSON; larger complete reports belong in Artifacts.
+The shipped Root/Sub generation ceilings are `16384`/`8192` tokens per
+response, with explicit `high`/`low` reasoning effort and one provider retry
+per role. These generation ceilings do not set the model's input context window.
 `max_execution_output_chars`, `max_execution_output_bytes`, the Turn deadline,
 Tool-call, finalization, and recursive call/concurrency limits are separate
 Fleet controls. Fleet does not enforce an aggregate provider-attempt or spend
@@ -163,7 +168,7 @@ The `[rlm]` recursion settings bound the always-available Fleet
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs
-that Fleet may run concurrently; the committed default is `4` and it is not a
+that Fleet may run concurrently; the committed default is `2` and it is not a
 model-facing concurrency control.
 Root and child sandbox actions use the remaining `runtime.turn_timeout_seconds`
 budget. The former `rlm.execution_timeout_s` and `rlm.child_execution_timeout_s`
@@ -234,7 +239,7 @@ the preparation root, and disabled tracing records none. The execution root
 additionally carries the bounded one-way `fleet.preparation_trace_id` tag;
 preparation traces never reference the execution trace.
 
-The shipped Root and Sub LLM roles set `num_retries = 3`. The value is passed
+The shipped Root and Sub LLM roles set `num_retries = 1`. The value is passed
 through to stock `dspy.LM`, where it selects DSPy's own retry loop, so it is
 that LM's retry budget rather than a Fleet-owned retry layer; configurations
 that omit the field use the typed settings default of `3`.

@@ -7,7 +7,7 @@ name = "fleet-rlm"
 [runtime]
 environment = "daytona"
 live_enabled = true
-turn_timeout_seconds = 1800
+turn_timeout_seconds = 900
 max_active_daytona_leases = 8
 workspace_io_idle_seconds = 300
 workspace_io_acquisition_timeout_seconds = 120
@@ -20,30 +20,32 @@ model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
-# Prefer lower reasoning effort without reducing room for action JSON.
-reasoning_effort = "low"
+# Root plans and verifies; Sub keeps bounded semantic judgments economical.
+reasoning_effort = "high"
 timeout_seconds = 300
-num_retries = 3
+num_retries = 1
 cache = false
 
 [llm.sub]
 model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
-max_tokens = 16384
-timeout_seconds = 90
+max_tokens = 8192
+reasoning_effort = "low"
+timeout_seconds = 180
 temperature = 0
-num_retries = 3
+num_retries = 1
 cache = false
 
 # Bounded Fleet child execution is enabled; native llm_query remains available.
 [rlm]
-max_iters = 12
+max_iters = 16
 max_llm_calls = 32
 max_tool_calls = 256
-max_output_chars = 6000
-max_final_output_chars = 6000
-max_execution_output_chars = 4000
+# Match execution projection to native history so evidence survives both caps.
+max_output_chars = 8000
+max_final_output_chars = 24000
+max_execution_output_chars = 8000
 max_execution_output_bytes = 2000000
 wrap_up_seconds = 300
 finalization_attempts = 2
@@ -51,8 +53,8 @@ recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8
 recursion_child_max_llm_calls = 12
-recursion_child_max_output_chars = 4000
-recursion_max_parallel_children = 4
+recursion_child_max_output_chars = 8000
+recursion_max_parallel_children = 2
 autonomous_memory_categories = []
 verbose = true
 

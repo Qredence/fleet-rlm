@@ -154,11 +154,11 @@ Fleet's `RLMOptions` mirrors the pinned DSPy 3.4.0 constructor fields:
 
 The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 `50` semantic prompts, and `10,000` output characters. The shipped
-single configuration uses `12`, `32`, and `6,000` for the effective Root
-budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
+single configuration uses `16`, `32`, and `8,000` for the effective Root
+budget; the child policy uses `8`, `12`, and `8,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
 concurrency are separate controls. The shipped Root and Sub provider roles pass
-`num_retries = 3` to `dspy.LM`, so retries are DSPy's native retry loop with
+`num_retries = 1` to `dspy.LM`, so retries are DSPy's native retry loop with
 exponential backoff; omitted role values use the typed settings default of `3`.
 `rlm.verbose` controls host logging only;
 operator-visible reasoning, code, output, and recursive status use Fleet's

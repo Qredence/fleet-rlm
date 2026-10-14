@@ -66,19 +66,20 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
-            "reasoning_effort": "low",
+            "reasoning_effort": "high",
             "timeout_seconds": 300,
-            "num_retries": 3,
+            "num_retries": 1,
             "cache": False,
         },
         "sub": {
             "model": "uscentral.ai_gateway.deepseek-v4-1-flash-service",
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
-            "max_tokens": 16384,
-            "timeout_seconds": 90,
+            "max_tokens": 8192,
+            "reasoning_effort": "low",
+            "timeout_seconds": 180,
             "temperature": 0,
-            "num_retries": 3,
+            "num_retries": 1,
             "cache": False,
         },
     }
@@ -91,16 +92,29 @@ def test_committed_policy_uses_bounded_root_rlm_budget_and_provider_retries() ->
 
     assert {
         key: document["rlm"][key]
-        for key in ("max_iters", "max_llm_calls", "max_output_chars", "max_final_output_chars")
+        for key in (
+            "max_iters",
+            "max_llm_calls",
+            "max_output_chars",
+            "max_final_output_chars",
+            "max_execution_output_chars",
+            "recursion_child_max_output_chars",
+            "recursion_max_parallel_children",
+        )
     } == {
-        "max_iters": 12,
+        "max_iters": 16,
         "max_llm_calls": 32,
-        "max_output_chars": 6_000,
-        "max_final_output_chars": 6_000,
+        "max_output_chars": 8_000,
+        "max_final_output_chars": 24_000,
+        "max_execution_output_chars": 8_000,
+        "recursion_child_max_output_chars": 8_000,
+        "recursion_max_parallel_children": 2,
     }
-    # Preserve DSPy's native retry budget for both roles.
-    assert document["llm"]["root"]["num_retries"] == 3
-    assert document["llm"]["sub"]["num_retries"] == 3
+    assert document["runtime"]["turn_timeout_seconds"] == 900
+    assert document["rlm"]["wrap_up_seconds"] == 300
+    # Keep retries bounded within the shorter Turn deadline.
+    assert document["llm"]["root"]["num_retries"] == 1
+    assert document["llm"]["sub"]["num_retries"] == 1
 
 
 def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None:

@@ -9,7 +9,7 @@ Generated from `config/fleet.toml`, the source of truth for the single runtime c
 | Provider | OpenAI Chat Completion |
 | Root model | `uscentral.ai_gateway.deepseek-v4-1-flash-service` |
 | Sub model | `uscentral.ai_gateway.deepseek-v4-1-flash-service` |
-| Root / Sub max tokens | 16384 / 16384 |
+| Root / Sub max tokens | 16384 / 8192 |
 | Fleet child recursion | Always available; bounded to depth one |
 | MLflow | http://127.0.0.1:5001 |
 | Provider environment names | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` |
