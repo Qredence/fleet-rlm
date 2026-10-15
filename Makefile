@@ -50,7 +50,7 @@ eval:
 
 optimize:
 	@test -n "$(SESSION)" || (echo "SESSION=<id> is required" && exit 2)
-	uv run python scripts/optimize_and_evaluate_fleet.py --session $(SESSION)
+	uv run fleet optimize --session $(SESSION)
 
 test:
 	uv run pytest

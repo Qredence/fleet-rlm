@@ -1,4 +1,4 @@
-"""Deterministic dataset and artifact-promotion primitives for optimization."""
+"""Compiled-program artifacts: isolated rollouts, manifests, promotion gates, and the single loader."""
 
 from __future__ import annotations
 
@@ -37,48 +37,13 @@ class IsolatedFleetProgram(dspy.Module):
             )
         finally:
             engine.sandbox_mgr.shutdown()
-            artifact_path = getattr(engine, "_optimization_artifact_path", None)
+            artifact_path = getattr(engine, "optimization_artifact_path", None)
             if artifact_path:
                 Path(artifact_path).unlink(missing_ok=True)
 
 
 def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def grouped_split(
-    examples: list[Any], *, seed: int = 0, train_ratio: float = 0.6, dev_ratio: float = 0.2
-) -> dict[str, list[Any]]:
-    """Split by source lineage, never allowing a source across partitions.
-
-    Task text is deliberately not part of the grouping key: different tasks
-    from one originating source are still correlated data and must stay
-    together. Records without a source_group are treated as one conservative
-    unknown source rather than being split by task.
-    """
-    if not 0 < train_ratio < 1 or not 0 < dev_ratio < 1 or train_ratio + dev_ratio >= 1:
-        raise ValueError("train_ratio and dev_ratio must be positive and sum to less than one")
-    groups: dict[str, list[Any]] = {}
-    for example in examples:
-        inputs = getattr(example, "inputs", lambda: {})()
-        lineage = str(inputs.get("source_group", "")).strip()
-        if not lineage:
-            lineage = str(getattr(example, "source_group", "")).strip()
-        if not lineage:
-            raise ValueError("Every curated example must have a source_group lineage")
-        group = hashlib.sha256(lineage.encode()).hexdigest()
-        groups.setdefault(group, []).append(example)
-    ordered = sorted(groups.items(), key=lambda pair: hashlib.sha256(f"{seed}:{pair[0]}".encode()).hexdigest())
-    if len(ordered) < 3:
-        raise ValueError("At least three distinct task/source groups are required for train/dev/holdout")
-    count = len(ordered)
-    train_n = max(1, min(count - 2, int(count * train_ratio)))
-    dev_n = max(1, min(count - train_n - 1, int(count * dev_ratio)))
-    partitions = {"train": [], "dev": [], "holdout": []}
-    for index, (_, members) in enumerate(ordered):
-        key = "train" if index < train_n else "dev" if index < train_n + dev_n else "holdout"
-        partitions[key].extend(members)
-    return partitions
 
 
 def isolated_pair(baseline: Any, candidate: Any) -> tuple[Any, Any]:
@@ -198,3 +163,68 @@ def _atomic_write(path: Path, data: bytes) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+class CompiledProgramFile:
+    """The one path from a compiled-program file to a live engine: bounded, atomic, rolled back on failure.
+
+    Accepts artifacts saved from the engine itself and from the IsolatedFleetProgram wrapper
+    (whose state keys carry a ``program.`` prefix).
+    """
+
+    MAX_BYTES = 10_000_000
+
+    def __init__(self, path: str | None) -> None:
+        self.path = path
+        self.digest = ""
+        self._stat: tuple[int, int] | None = None
+
+    def load_initial(self, program: dspy.Module) -> None:
+        if self.path and os.path.lexists(self.path):
+            self._apply(program, self._read(), persist=False)
+
+    def reload_if_changed(self, program: dspy.Module) -> None:
+        if not self.path or not os.path.lexists(self.path):
+            return
+        stat = self._regular_stat(self.path)
+        if (stat.st_mtime_ns, stat.st_size) != self._stat:
+            self._apply(program, self._read(), persist=False)
+
+    def install(self, program: dspy.Module, content: bytes) -> bool:
+        if len(content) > self.MAX_BYTES:
+            raise ValueError("Compiled program exceeds the 10 MB size limit")
+        if hashlib.sha256(content).hexdigest() == self.digest:
+            return False
+        self._apply(program, content, persist=True)
+        return True
+
+    def _read(self) -> bytes:
+        assert self.path is not None
+        if self._regular_stat(self.path).st_size > self.MAX_BYTES:
+            raise ValueError("Compiled program exceeds the 10 MB size limit")
+        return Path(self.path).read_bytes()
+
+    @staticmethod
+    def _regular_stat(path: str) -> os.stat_result:
+        if os.path.islink(path) or not os.path.isfile(path):
+            raise ValueError("Compiled program path must be a regular file")
+        return os.stat(path)
+
+    def _apply(self, program: dspy.Module, content: bytes, *, persist: bool) -> None:
+        state = json.loads(content)
+        if not isinstance(state, dict):
+            raise ValueError("Compiled program must be a JSON object")
+        if state and all(key.startswith("program.") or key == "metadata" for key in state):
+            state = {key.removeprefix("program."): value for key, value in state.items()}
+        target = os.path.abspath(self.path) if persist and self.path else None
+        if target:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.path.islink(target):
+                raise ValueError("Compiled program path may not be a symbolic link")
+        program.load_state(state)  # DSPy trial-loads a copy first, so a bad artifact leaves `program` unchanged.
+        if target:
+            _atomic_write(Path(target), content)
+        if self.path and os.path.lexists(self.path):
+            stat = self._regular_stat(self.path)
+            self._stat = (stat.st_mtime_ns, stat.st_size)
+        self.digest = hashlib.sha256(content).hexdigest()

@@ -2,7 +2,7 @@ from collections import Counter
 
 import httpx
 
-from fleet_rlm import benchmarks
+from fleet_rlm.optimize import benchmarks
 
 
 def _events(case):

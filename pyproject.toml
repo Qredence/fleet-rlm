@@ -162,9 +162,11 @@ select = [
     "LOG",   # flake8-logging-usage
 ]
 
-# Scripts bootstrap the repo root onto sys.path, then print CLI output.
+# Scripts and the `fleet optimize` command print operator-facing CLI output.
 [tool.ruff.lint.per-file-ignores]
 "scripts/**/*.py" = ["T201"]
+"src/fleet_rlm/optimize/gepa.py" = ["T201"]
+"src/fleet_rlm/optimize/dataset.py" = ["T201"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"

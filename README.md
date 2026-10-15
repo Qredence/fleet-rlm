@@ -153,7 +153,7 @@ terminal captures, traces, and artifacts as potentially sensitive.
 
 ## Evaluation and optimization
 
-`/optimize` runs the source checkout's GEPA evaluation workflow against reviewed,
+`fleet optimize --session <id>` (or `/optimize` in the TUI) runs the GEPA evaluation workflow against reviewed,
 gold-labeled session examples. It requires configured external services and
 complete source lineage and input hashes. Source-grouped train/dev/holdout splits
 and fresh evaluation runtimes keep candidate evaluation separate from live

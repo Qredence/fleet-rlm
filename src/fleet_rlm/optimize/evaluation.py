@@ -253,7 +253,7 @@ def evaluate_cases(
     timeout: float = 600.0,
 ) -> Any:
     """Run cases against a live server, label the resulting traces, and score them with the suite."""
-    from fleet_rlm.memory_and_eval import build_mlflow_scorer_suite
+    from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite
 
     traces = []
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(timeout, connect=10.0)) as client:

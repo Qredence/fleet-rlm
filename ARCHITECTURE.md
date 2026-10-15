@@ -18,8 +18,10 @@ FastAPI endpoints, SSE streaming, and session runtime registry. A Session
 runtime combines a Daytona sandbox manager, PostgreSQL VFS harness, Skill
 manager, and DSPy engine. `interpreter.py` creates the per-session Daytona
 workspace and runs Python there. `memory_and_eval.py` handles PostgreSQL
-workspace/turn persistence, engine composition, MLflow observability and GEPA
-optimization. `skills.py` validates and synchronizes Skills. `config.py`
+workspace/turn persistence, engine composition and MLflow observability.
+`engine/` holds the route vocabulary and every DSPy signature; `optimize/` holds
+datasets, scorers, the GEPA metric and runner (`fleet optimize`), and the single
+compiled-program loader. `skills.py` validates and synchronizes Skills. `config.py`
 defines the typed `FleetSettings` configuration.
 
 ## State and workspace

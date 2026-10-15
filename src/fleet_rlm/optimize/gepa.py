@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Curate Session-scoped examples, evaluate, compile with GEPA, and persist safely."""
 
 from __future__ import annotations
@@ -7,7 +6,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import tempfile
 import time
 import uuid
@@ -24,232 +22,20 @@ from psycopg.rows import dict_row
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.signatures import AnswerJudge
 from fleet_rlm.interpreter import DaytonaSandboxManager, validate_session_id
-from fleet_rlm.memory_and_eval import (
-    AdaptiveFleetEngine,
-    configure_mlflow_observability,
-    gepa_mlflow_metric,
-)
-from fleet_rlm.optimization import (
+from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, configure_mlflow_observability
+from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
     IsolatedFleetProgram,
     digest_bytes,
-    grouped_split,
     promote_candidate,
     promotion_gate,
     write_manifest,
 )
-from fleet_rlm.skills import SkillManager
+from fleet_rlm.optimize.dataset import context_snapshot, curate_dataset
+from fleet_rlm.optimize.metric import gepa_mlflow_metric
+from fleet_rlm.skills import SkillManager, local_catalog_xml
 
-_MAX_EXAMPLES = 500
 _JUDGE_LABEL = "DSPy reflection LM (FLEET_REFLECTION_MODEL)"
-
-
-def load_examples_from_postgres(pg_dsn: str, session_id: str, default_catalog: str) -> list[dspy.Example]:
-    """Load only approved, explicitly gold-labeled turns with source lineage."""
-    session_id = validate_session_id(session_id)
-    query = """
-        SELECT s.memory_summary,
-               turn->>'task' AS task,
-               COALESCE(turn->>'workspace_manifest', '/workspace/files (empty)') AS workspace_manifest,
-               COALESCE(turn->>'skills_catalog', %s) AS skills_catalog,
-               turn->>'expected_answer' AS answer,
-               turn->>'source_group' AS source_group,
-               turn->'context_files' AS context_files
-        FROM fleet_lite_sessions AS s
-        CROSS JOIN LATERAL jsonb_array_elements(s.turns) AS turn
-        WHERE s.session_id = %s
-          AND turn->>'task' IS NOT NULL
-          AND turn->>'expected_answer' IS NOT NULL
-          AND turn->>'review_status' = 'approved'
-          AND turn->>'source_group' IS NOT NULL
-        ORDER BY s.updated_at DESC
-        LIMIT %s
-    """
-    with psycopg.connect(pg_dsn, row_factory=dict_row) as connection:
-        rows = connection.execute(query, (default_catalog, session_id, _MAX_EXAMPLES)).fetchall()
-    examples = []
-    for row in rows:
-        try:
-            contexts = _context_snapshot(row["workspace_manifest"], row["context_files"])
-        except ValueError:
-            continue
-        examples.append(
-            dspy.Example(
-                workspace_manifest=row["workspace_manifest"],
-                skills_catalog=row["skills_catalog"],
-                memory_summary=row["memory_summary"] or "",
-                task=row["task"],
-                answer=row["answer"],
-                context_files=contexts,
-                source_group=row["source_group"],
-                provenance=f"postgres-session:{session_id}",
-            ).with_inputs(
-                "workspace_manifest",
-                "skills_catalog",
-                "memory_summary",
-                "task",
-                "source_group",
-                "context_files",
-            )
-        )
-    return examples
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
-
-
-def _context_snapshot(manifest: str, value: Any) -> dict[str, str]:
-    """Require a digest for every path in Fleet's canonical workspace manifest."""
-    contexts = _mapping(value)
-    if any(
-        not isinstance(path, str) or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
-        for path, digest in contexts.items()
-    ):
-        raise ValueError("Curated context snapshot contains an invalid digest")
-    expected = ", ".join(f"/workspace/{path}" for path in sorted(contexts)) or "/workspace/files (empty)"
-    if manifest != expected:
-        raise ValueError("Curated context snapshot does not cover the complete workspace manifest")
-    return contexts
-
-
-def load_examples_from_mlflow(
-    experiment_name: str,
-    session_id: str,
-    default_catalog: str,
-    max_results: int = _MAX_EXAMPLES,
-) -> list[dspy.Example]:
-    """Read only this Session's successful traces with an explicit gold answer."""
-    session_id = validate_session_id(session_id)
-    if not 1 <= max_results <= _MAX_EXAMPLES:
-        raise ValueError(f"max_results must be between 1 and {_MAX_EXAMPLES}")
-    traces = mlflow.search_traces(
-        experiment_names=[experiment_name],
-        filter_string=f"status = 'OK' AND metadata.`mlflow.trace.session` = '{session_id}'",
-        max_results=max_results,
-    )
-    if traces is None or traces.empty:
-        return []
-    examples: list[dspy.Example] = []
-    for _, row in traces.iterrows():
-        request = _mapping(row.get("request")) or _mapping(row.get("inputs"))
-        expectations = _mapping(row.get("expectations"))
-        task = request.get("task")
-        answer = expectations.get("expected_answer")
-        approved = expectations.get("review_status") == "approved"
-        source_group = expectations.get("source_group") or request.get("source_group")
-        contexts = _mapping(expectations.get("context_files") or request.get("context_files"))
-        if not isinstance(task, str) or not task.strip() or not isinstance(answer, str) or not answer.strip():
-            continue
-        if not approved or not isinstance(source_group, str) or not source_group.strip():
-            continue
-        manifest = request.get("workspace_manifest", "/workspace/files (empty)")
-        try:
-            contexts = _context_snapshot(manifest, contexts)
-        except ValueError:
-            continue
-        examples.append(
-            dspy.Example(
-                workspace_manifest=manifest,
-                skills_catalog=request.get("skills_catalog", default_catalog),
-                memory_summary=request.get("memory_summary", ""),
-                task=task,
-                answer=answer,
-                context_files=contexts,
-                source_group=source_group,
-                provenance=f"mlflow-trace:{row.get('trace_id', '')}",
-            ).with_inputs(
-                "workspace_manifest",
-                "skills_catalog",
-                "memory_summary",
-                "task",
-                "source_group",
-                "context_files",
-            )
-        )
-    return examples
-
-
-def build_seed_fallback_examples(catalog: str) -> list[dspy.Example]:
-    """Provide a small generic starter set when a Session has no reviewed data."""
-    seeds = (
-        (
-            "/workspace/files (empty)",
-            "Prefer deterministic Python for exact calculations.",
-            "Compute the exact sum and mean of [1420.50, 8930.25, 310.75, 4490.00].",
-            "The exact sum is 15,151.50 and the arithmetic mean is 3,787.875.",
-        ),
-        (
-            "/workspace/files (empty)",
-            "Use Python to check every count.",
-            "Count 2xx, 4xx, and 5xx statuses in [200, 502, 503, 404, 200, 500].",
-            "2xx: 2; 4xx: 1; 5xx: 3.",
-        ),
-        (
-            "/workspace/files (empty)",
-            "Simple conceptual answers do not need sandbox execution.",
-            "What does a Daytona Volume provide Fleet-RLM Lite?",
-            "A Daytona Volume provides persistent workspace storage mounted into the Session's sandbox.",
-        ),
-        (
-            "/workspace/files (empty)",
-            "Use Python for financial calculations.",
-            "Calculate the three-year CAGR from 120.0 to 195.6.",
-            "The three-year CAGR is approximately 17.69%.",
-        ),
-    )
-    return [
-        dspy.Example(
-            workspace_manifest=manifest,
-            skills_catalog=catalog,
-            memory_summary=memory,
-            task=task,
-            answer=answer,
-        ).with_inputs("workspace_manifest", "skills_catalog", "memory_summary", "task")
-        for manifest, memory, task, answer in seeds
-    ]
-
-
-def curate_dataset(
-    pg_dsn: str,
-    experiment_name: str,
-    session_id: str,
-    catalog: str,
-    *,
-    validation_ratio: float = 0.35,
-    include_holdout: bool = False,
-) -> tuple[list[dspy.Example], list[dspy.Example]] | tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
-    """Compatibility API returning train/dev; seed data is never silently mixed."""
-    if not 0.1 <= validation_ratio <= 0.5:
-        raise ValueError("validation_ratio must be between 0.1 and 0.5")
-    examples = load_examples_from_postgres(pg_dsn, session_id, catalog)
-    try:
-        examples.extend(load_examples_from_mlflow(experiment_name, session_id, catalog))
-    except Exception as exc:
-        print(f"[dataset] Session-scoped MLflow trace query unavailable ({type(exc).__name__}).")
-    deduplicated: dict[str, dspy.Example] = {}
-    for example in examples:
-        key = hashlib.sha256(f"{example.task}::{example.workspace_manifest}".encode()).hexdigest()
-        deduplicated[key] = example
-    all_examples = list(deduplicated.values())
-    if len(all_examples) < 3:
-        raise ValueError("At least three reviewed examples are required; seed fallback is not production data")
-    splits = grouped_split(all_examples, train_ratio=1.0 - validation_ratio - 0.2, dev_ratio=validation_ratio)
-    print(
-        f"[dataset] Session {session_id}: {sum(map(len, splits.values()))} reviewed examples; "
-        f"{len(splits['train'])} train, {len(splits['dev'])} dev, {len(splits['holdout'])} holdout."
-    )
-    if include_holdout:
-        return splits["train"], splits["dev"], splits["holdout"]
-    return splits["train"], splits["dev"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,7 +89,7 @@ def run_stage_evaluation(
                 finally:
                     latencies.append(time.perf_counter() - started)
                     isolated_engine.sandbox_mgr.shutdown()
-                    artifact_path = getattr(isolated_engine, "_optimization_artifact_path", None)
+                    artifact_path = getattr(isolated_engine, "optimization_artifact_path", None)
                     if artifact_path:
                         Path(artifact_path).unlink(missing_ok=True)
         average_latency = sum(latencies) / max(1, len(latencies))
@@ -326,7 +112,7 @@ def build_isolated_engine_factory(settings: FleetSettings, source_session_id: st
     root_lm, sub_lm, _reflection_lm, jev_lm = settings.build_lms()
 
     def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
-        contexts = _context_snapshot(example.workspace_manifest, getattr(example, "context_files", {}))
+        contexts = context_snapshot(example.workspace_manifest, getattr(example, "context_files", {}))
         namespace = validate_session_id(f"opt-{uuid.uuid4().hex}")
         manager = DaytonaSandboxManager(
             api_key=settings.fleet_daytona_api_key,
@@ -346,7 +132,9 @@ def build_isolated_engine_factory(settings: FleetSettings, source_session_id: st
             program.save(program_path)
             if contexts:
                 paths = list(contexts)
-                with psycopg.connect(settings.fleet_database_url, row_factory=dict_row) as connection:
+                with psycopg.Connection[dict[str, Any]].connect(
+                    settings.fleet_database_url, row_factory=dict_row
+                ) as connection:
                     rows = connection.execute(
                         "SELECT rel_path, sha256, content FROM fleet_lite_vfs_files "
                         "WHERE session_id = %s AND rel_path = ANY(%s)",
@@ -370,7 +158,7 @@ def build_isolated_engine_factory(settings: FleetSettings, source_session_id: st
                 compiled_path=program_path,
                 execution_mode=settings.execution_mode,
             )
-            engine._optimization_artifact_path = program_path
+            engine.optimization_artifact_path = program_path
             return engine
         except BaseException:
             manager.shutdown()
@@ -407,9 +195,8 @@ def format_comparison_table(baseline: EvalSummary, optimized: EvalSummary) -> st
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> None:
-    settings = FleetSettings()
-    parser = argparse.ArgumentParser(description="Evaluate and optimize one Fleet-RLM Lite Session")
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Options for `fleet optimize`."""
     parser.add_argument(
         "--session", required=True, help="Session whose reviewed examples and private workspace to optimize"
     )
@@ -422,7 +209,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--approve", action="store_true", help="Explicitly authorize the local active-pointer update")
     parser.add_argument("--gate-evidence", type=Path, help="Reviewed JSON security/golden evidence")
     parser.add_argument("--latency-ceiling", type=float)
-    args = parser.parse_args(argv)
+
+
+def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: FleetSettings) -> None:
+    """Promote/rollback a candidate, or evaluate the baseline and compile a GEPA candidate (not promoted)."""
     session_id = validate_session_id(args.session)
     if not 1 <= args.threads <= 32:
         parser.error("--threads must be between 1 and 32")
@@ -459,17 +249,13 @@ def main(argv: list[str] | None = None) -> None:
     if experiment_id:
         mlflow.set_experiment(experiment_id=experiment_id)
 
-    catalog = SkillManager(
-        sandbox_mgr=None,
-        local_skills_dir=Path(settings.local_skills_dir),
-    ).build_local_catalog_xml()
+    catalog = local_catalog_xml(Path(settings.local_skills_dir))
     trainset, devset, holdout = curate_dataset(
         settings.fleet_database_url,
         target.experiment_name,
         session_id,
         catalog,
         validation_ratio=args.validation_ratio,
-        include_holdout=True,
     )
     root_lm, sub_lm, reflection_lm, jev_lm = settings.build_lms()
     # This manager is a serialization template only; no sandbox is provisioned.
@@ -524,7 +310,3 @@ def main(argv: list[str] | None = None) -> None:
         mlflow.log_text(report, artifact_file="comparison.md")
         print(report)
         print(f"Candidate saved at {destination}; not promoted. ReAnchor: skipped (no compatible client).")
-
-
-if __name__ == "__main__":
-    main()

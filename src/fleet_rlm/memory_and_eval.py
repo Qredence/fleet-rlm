@@ -8,9 +8,7 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,8 +17,7 @@ import mlflow
 import psycopg
 from dspy.primitives.facade import SandboxLM
 from dspy.utils.exceptions import AdapterParseError
-from mlflow.entities import Feedback, SpanStatusCode, SpanType
-from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, Safety, scorer
+from mlflow.entities import SpanType
 from psycopg.rows import dict_row
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence
@@ -28,7 +25,6 @@ from fleet_rlm.dspy_support import without_mlflow_dspy_callback as _without_mlfl
 from fleet_rlm.engine.routes import Route, parse_route
 from fleet_rlm.engine.signatures import (
     TRIAGE_CRITERIA,
-    AnswerJudge,
     ChildTask,
     ContextualChildTask,
     DirectAnswer,
@@ -37,6 +33,7 @@ from fleet_rlm.engine.signatures import (
 )
 from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.observability import activity_text
+from fleet_rlm.optimize.artifacts import CompiledProgramFile
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
@@ -532,8 +529,6 @@ class AdaptiveFleetEngine(dspy.Module):
         self.execution_mode = execution_mode
         self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
-        self._compiled_digest = ""
-        self._compiled_signature: tuple[int, int] | None = None
         self.triage = dspy.Predict(TurnTriage)
         self.triage.set_criteria("route", TRIAGE_CRITERIA)
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
@@ -682,89 +677,14 @@ class AdaptiveFleetEngine(dspy.Module):
             max_iters=16,
             max_llm_calls=sandbox_mgr.max_llm_calls,
         )
-        if compiled_path and os.path.lexists(compiled_path):
-            if os.path.islink(compiled_path) or not os.path.isfile(compiled_path):
-                raise ValueError("Compiled Flex program path must be a regular file")
-            if os.path.getsize(compiled_path) > 10_000_000:
-                raise ValueError("Compiled Flex program exceeds the 10 MB size limit")
-            with open(compiled_path, "rb") as handle:
-                self._load_compiled_bytes(handle.read(), persist=False)
+        self.compiled = CompiledProgramFile(compiled_path)
+        # Set by the optimizer's per-example factory; IsolatedFleetProgram deletes it after the rollout.
+        self.optimization_artifact_path: str | None = None
+        self.compiled.load_initial(self)
 
     def load_compiled_program(self, content: bytes) -> bool:
-        """Load one bounded, session-owned GEPA artifact, skipping an unchanged copy."""
-        if len(content) > 10_000_000:
-            raise ValueError("Compiled Flex program exceeds the 10 MB size limit")
-        digest = hashlib.sha256(content).hexdigest()
-        if digest == self._compiled_digest:
-            return False
-        self._load_compiled_bytes(content, persist=True)
-        return True
-
-    def _load_compiled_bytes(self, content: bytes, *, persist: bool) -> None:
-        payload = json.loads(content)
-        if not isinstance(payload, dict):
-            raise ValueError("Compiled Flex program must be a JSON object")
-        digest = hashlib.sha256(content).hexdigest()
-        target = os.path.abspath(self.compiled_path) if persist and self.compiled_path else None
-        temporary_directory = os.path.dirname(target) if target else None
-        if target is not None:
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            if os.path.islink(target):
-                raise ValueError("Compiled Flex program path may not be a symbolic link")
-
-        descriptor, candidate_path = tempfile.mkstemp(
-            prefix=".fleet-flex-candidate-",
-            suffix=".json",
-            dir=temporary_directory,
-        )
-        os.close(descriptor)
-        backup_descriptor, backup_path = tempfile.mkstemp(
-            prefix=".fleet-flex-backup-",
-            suffix=".json",
-            dir=temporary_directory,
-        )
-        os.close(backup_descriptor)
-        try:
-            self.save(backup_path)
-            with open(candidate_path, "wb") as handle:
-                handle.write(content)
-            try:
-                self.load(candidate_path)
-                candidate_stat = os.stat(candidate_path)
-                if target:
-                    os.replace(candidate_path, target)
-            except BaseException:
-                try:
-                    self.load(backup_path)
-                except Exception as restore_error:
-                    raise RuntimeError("Could not restore the previous compiled Flex program") from restore_error
-                raise
-            if target:
-                self._compiled_signature = (candidate_stat.st_mtime_ns, candidate_stat.st_size)
-            elif not persist and self.compiled_path:
-                if os.path.islink(self.compiled_path):
-                    raise ValueError("Compiled Flex program path may not be a symbolic link")
-                stat = os.stat(self.compiled_path)
-                self._compiled_signature = (stat.st_mtime_ns, stat.st_size)
-        finally:
-            for temporary_path in (candidate_path, backup_path):
-                with suppress(FileNotFoundError):
-                    os.unlink(temporary_path)
-        self._compiled_digest = digest
-
-    def _reload_changed_local_program(self) -> None:
-        if not self.compiled_path or not os.path.lexists(self.compiled_path):
-            return
-        if os.path.islink(self.compiled_path) or not os.path.isfile(self.compiled_path):
-            raise ValueError("Compiled Flex program path must be a regular file")
-        stat = os.stat(self.compiled_path)
-        if stat.st_size > 10_000_000:
-            raise ValueError("Compiled Flex program exceeds the 10 MB size limit")
-        signature = (stat.st_mtime_ns, stat.st_size)
-        if signature == self._compiled_signature:
-            return
-        with open(self.compiled_path, "rb") as handle:
-            self._load_compiled_bytes(handle.read(), persist=False)
+        """Install one session-owned GEPA artifact; False when it is already active."""
+        return self.compiled.install(self, content)
 
     def forward(
         self,
@@ -795,7 +715,7 @@ class AdaptiveFleetEngine(dspy.Module):
         context: Any,
         execution_mode: str | None,
     ) -> dspy.Prediction:
-        self._reload_changed_local_program()
+        self.compiled.reload_if_changed(self)
         if not self.sandbox_mgr.root._deadline:
             self.sandbox_mgr.reset_turn_budget()
         self.sandbox_mgr.check_turn()
@@ -926,163 +846,3 @@ def configure_mlflow_observability(
     mlflow.dspy.autolog(log_traces=True, log_traces_from_compile=False, log_traces_from_eval=False)
     experiment = mlflow.get_experiment_by_name(experiment_name)
     return experiment.experiment_id if experiment is not None else None
-
-
-def _lm_call_count(spans: list[Any]) -> int:
-    """Count model calls by MLflow span type, not by span-name substrings."""
-    return sum(1 for span in spans if getattr(span, "span_type", None) == SpanType.LLM)
-
-
-def _used_rlm_or_flex(spans: list[Any]) -> bool:
-    return any((span.name or "").startswith(("RLM", "Flex")) for span in spans)
-
-
-@scorer
-def rlm_trajectory_efficiency(trace: Any) -> Feedback:
-    """Penalize unnecessary LM calls and visible sandbox exceptions."""
-    if trace is None:
-        return Feedback(value=None, rationale="No trace captured; trajectory evidence is unavailable.")
-    spans = trace.search_spans()
-    lm_calls = _lm_call_count(spans)
-    error_spans = []
-    for span in spans:
-        outputs = getattr(span, "outputs", None)
-        attributes = getattr(span, "attributes", {}) or {}
-        remote_error = span.name == "sandbox.exec" and (
-            attributes.get("outcome") == "remote_code_error"
-            or getattr(getattr(span, "status", None), "status_code", None) == SpanStatusCode.ERROR
-            or (isinstance(outputs, dict) and bool(outputs.get("error")))
-        )
-        if remote_error or "Traceback" in str(outputs):
-            error_spans.append(span)
-    score = max(0.0, 1.0 - 0.015 * max(0, lm_calls - 3) - 0.15 * len(error_spans))
-    return Feedback(
-        value=round(score, 3),
-        rationale=f"Observed {lm_calls} LM calls and {len(error_spans)} sandbox exceptions.",
-    )
-
-
-@scorer
-def jev_routing_efficiency(trace: Any) -> Feedback:
-    """Score simple requests routed without starting a Flex/RLM execution."""
-    if trace is None:
-        return Feedback(value=None, rationale="No trace available; routing evidence is unavailable.")
-    spans = trace.search_spans()
-    used_rlm = _used_rlm_or_flex(spans)
-    lm_calls = _lm_call_count(spans)
-    if not used_rlm and lm_calls <= 2:
-        return Feedback(value=1.0, rationale=f"Fast path completed in {lm_calls} LM calls.")
-    if used_rlm and lm_calls <= 15:
-        return Feedback(value=0.95, rationale=f"Bounded RLM/Flex execution used {lm_calls} LM calls.")
-    score = max(0.2, 1.0 - 0.02 * max(0, lm_calls - 15))
-    return Feedback(value=round(score, 3), rationale=f"Heavy route used {lm_calls} LM calls.")
-
-
-@scorer
-def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback:
-    """Check that the turn took the labeled gold route (direct, flex, or rlm; legacy labels are read too)."""
-    expected = parse_route((expectations or {}).get("route"))
-    if expected is None:
-        return Feedback(value=None, rationale="No gold route labeled for this case.")
-    actual = parse_route(outputs.get("route")) if isinstance(outputs, dict) else None
-    if actual is None:
-        return Feedback(value=None, rationale="Turn output did not report a route.")
-    correct = str(actual) == str(expected)
-    return Feedback(value=correct, rationale=f"Expected route {expected!r}, observed {actual!r}.")
-
-
-def build_mlflow_scorer_suite(judge_model: str = "openai:/system.ai.deepseek-v4-1-flash") -> list[Any]:
-    """Construct the GenAI judge suite for explicit offline/online evaluation runs."""
-    return [
-        RelevanceToQuery(model=judge_model),
-        RetrievalGroundedness(model=judge_model),
-        Safety(model=judge_model),
-        Guidelines(
-            name="sandbox_verification_discipline",
-            guidelines=(
-                "For quantitative analysis, file inspection, or code logic, the answer must reflect results "
-                "verified in the sandbox, not unverified mental arithmetic or assumed file contents."
-            ),
-            model=judge_model,
-        ),
-        Guidelines(
-            name="agent_skills_progressive_disclosure",
-            guidelines=(
-                "Activate a matching Skill before using its workflow. Use Skill scripts when appropriate. "
-                "Created Skills must use a valid lowercase hyphenated name and describe their trigger conditions."
-            ),
-            model=judge_model,
-        ),
-        rlm_trajectory_efficiency,
-        jev_routing_efficiency,
-        route_correctness,
-    ]
-
-
-def gepa_mlflow_metric(
-    gold: dspy.Example,
-    pred: dspy.Prediction,
-    trace: Any = None,  # noqa: ARG001
-    pred_name: str | None = None,  # noqa: ARG001
-    pred_trace: Any = None,  # noqa: ARG001
-    program_trace: Any = None,
-    llm_call_penalty: float = 0.02,
-    *,
-    judge_lm: dspy.LM,
-) -> dspy.Prediction:
-    """Return correctness plus concise reflective guidance for GEPA."""
-    expected = str(getattr(gold, "answer", ""))
-    actual = str(getattr(pred, "answer", ""))
-    call_count = len(program_trace) if isinstance(program_trace, (list, tuple)) else 0
-    judge = dspy.ChainOfThought(AnswerJudge)
-    judge.set_lm(judge_lm)
-    assessment = judge(
-        task=str(getattr(gold, "task", "")),
-        expected_answer=expected,
-        candidate_answer=actual,
-    )
-    correct = bool(getattr(assessment, "is_correct", False))
-    score = max(0.0, (1.0 if correct else 0.0) - llm_call_penalty * max(0, call_count - 1))
-    critique = str(getattr(assessment, "critique", ""))[:1000]
-    feedback = (
-        f"Semantic correctness={correct}: {critique}. Execution used {call_count} predictor calls. "
-        "Prefer deterministic Python and existing Skill scripts for arithmetic and parsing."
-    )
-    return dspy.Prediction(score=score, feedback=feedback)
-
-
-def compile_and_evaluate_fleet(
-    engine: AdaptiveFleetEngine,
-    trainset: list[dspy.Example],
-    valset: list[dspy.Example],
-    reflection_lm: dspy.LM,
-    save_path: str = "compiled_flex_fleet.json",
-    *,
-    budget: str = "medium",
-    num_threads: int = 4,
-    engine_factory: Any = None,
-) -> dspy.Module:
-    """Compile the Flex program and log the result as a deliberate MLflow run."""
-    if budget not in {"light", "medium", "heavy"} or not 1 <= num_threads <= 32:
-        raise ValueError("Invalid GEPA budget or thread count")
-    if engine_factory is None:
-        raise ValueError("GEPA requires an isolated per-example engine_factory; use the optimization runner")
-    from functools import partial
-
-    from dspy.teleprompt.gepa import InstructionProposer
-
-    from fleet_rlm.optimization import IsolatedFleetProgram
-
-    with mlflow.start_run(run_name="fleet-flex-gepa-compile"):
-        optimizer = dspy.GEPA(
-            metric=partial(gepa_mlflow_metric, judge_lm=reflection_lm),
-            reflection_lm=reflection_lm,
-            instruction_proposer=InstructionProposer(adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)),
-            auto=budget,
-            num_threads=num_threads,
-        )
-        isolated = IsolatedFleetProgram(engine, engine_factory)
-        optimized = optimizer.compile(isolated, trainset=trainset, valset=valset).program
-        optimized.save(save_path)
-        mlflow.log_artifact(save_path)
-        return optimized

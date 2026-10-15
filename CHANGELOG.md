@@ -22,6 +22,11 @@ All notable changes to this project are documented in this file.
   Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
   labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
   be re-optimized.
+- Optimization code lives in `fleet_rlm.optimize` (artifacts, dataset, metric, scorers, evaluation,
+  benchmarks). The optimizer script is now `fleet optimize --session <id>` (`make optimize` and the
+  TUI `/optimize` use it). Compiled programs load through one `CompiledProgramFile`, which also
+  accepts artifacts saved from the `IsolatedFleetProgram` wrapper. `compile_and_evaluate_fleet`
+  (unused) is removed.
 - All DSPy signatures live in `fleet_rlm.engine.signatures`; the stopping rules have one source,
   shared by the task instructions and the sandbox execution instructions. The GEPA and
   evaluation judges share one `AnswerJudge` signature.

@@ -50,7 +50,7 @@ It is a containment check, not the official benchmark scoring.
 
 ## Stopping regression evaluation
 
-`fleet_rlm.evaluation.evaluate_stopping_traces(traces, judge_model=...)` is an
+`fleet_rlm.optimize.evaluation.evaluate_stopping_traces(traces, judge_model=...)` is an
 explicit offline evaluation entry point for captured MLflow traces. It combines
 answer completion, expected-value presence, and a Guidelines judge over bounded,
 chronological task code and observations. Bootstrap code and predictor reasoning

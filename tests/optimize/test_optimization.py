@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,24 +10,19 @@ import pytest
 from dspy.utils import DummyLM
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.memory_and_eval import gepa_mlflow_metric
-from fleet_rlm.optimization import (
+from fleet_rlm.optimize import dataset
+from fleet_rlm.optimize import gepa as workflow
+from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
     IsolatedFleetProgram,
     digest_bytes,
-    grouped_split,
     isolated_pair,
     promote_candidate,
     promotion_gate,
     verify_active,
 )
-
-_SCRIPT_PATH = Path(__file__).parents[2] / "scripts" / "optimize_and_evaluate_fleet.py"
-_SCRIPT_SPEC = importlib.util.spec_from_file_location("fleet_optimization_workflow", _SCRIPT_PATH)
-assert _SCRIPT_SPEC and _SCRIPT_SPEC.loader
-workflow = importlib.util.module_from_spec(_SCRIPT_SPEC)
-sys.modules[_SCRIPT_SPEC.name] = workflow
-_SCRIPT_SPEC.loader.exec_module(workflow)
+from fleet_rlm.optimize.dataset import grouped_split
+from fleet_rlm.optimize.metric import gepa_mlflow_metric
 
 
 class Example:
@@ -68,8 +61,10 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
     }
     if source == "postgres":
         connection = SimpleNamespace(execute=lambda *_args: SimpleNamespace(fetchall=lambda: [row]))
-        monkeypatch.setattr(workflow.psycopg, "connect", lambda *_args, **_kwargs: nullcontext(connection))
-        examples = workflow.load_examples_from_postgres("unused", "s1", "<available_skills />")
+        monkeypatch.setattr(
+            dataset.psycopg.Connection, "connect", classmethod(lambda *_args, **_kwargs: nullcontext(connection))
+        )
+        examples = dataset.load_examples_from_postgres("unused", "s1", "<available_skills />")
     else:
         traces = SimpleNamespace(
             empty=False,
@@ -90,8 +85,8 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
                 ]
             ),
         )
-        monkeypatch.setattr(workflow.mlflow, "search_traces", lambda **_kwargs: traces)
-        examples = workflow.load_examples_from_mlflow("unused", "s1", "<available_skills />")
+        monkeypatch.setattr(dataset.mlflow, "search_traces", lambda **_kwargs: traces)
+        examples = dataset.load_examples_from_mlflow("unused", "s1", "<available_skills />")
     if snapshot in {"complete", "empty"}:
         assert len(examples) == 1
         assert examples[0].context_files == contexts
@@ -114,7 +109,9 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             fetchall=lambda: [row for row in rows if row["rel_path"] in params[1]],
         )
     )
-    monkeypatch.setattr(workflow.psycopg, "connect", lambda *_args, **_kwargs: nullcontext(connection))
+    monkeypatch.setattr(
+        dataset.psycopg.Connection, "connect", classmethod(lambda *_args, **_kwargs: nullcontext(connection))
+    )
     monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (None, None, None, None))
 
     class Manager:
@@ -150,7 +147,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
         try:
             assert {path: (tmp_path / path).read_bytes() for path in files} == files
         finally:
-            Path(engine._optimization_artifact_path).unlink(missing_ok=True)
+            Path(engine.optimization_artifact_path).unlink(missing_ok=True)
 
 
 def test_grouped_split_is_stable_and_keeps_same_task_lineage_together() -> None:

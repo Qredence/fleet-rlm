@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from fleet_rlm.evaluation import EvalCase
+from fleet_rlm.optimize.evaluation import EvalCase
 
 _HF = "https://datasets-server.huggingface.co"
 OOLONG = "oolongbench/oolong-synth"

@@ -9,10 +9,18 @@ src/fleet_rlm/
 ├── skills.py          # User Skill validation, sync, and catalog
 ├── interpreter.py     # Daytona root/child allocation, bridge, and Python execution
 ├── workspace.py       # Sandbox file helpers and serializable dataset handles
-├── memory_and_eval.py # Postgres VFS, DSPy engine, MLflow, GEPA
-├── optimization.py    # Isolated rollouts, dataset splits, promotion gates
-├── evaluation.py      # Eval cases, gold labels, scorers, `fleet eval` runs
-├── benchmarks.py      # Long-context generators and Oolong/LongCoT adapters
+├── memory_and_eval.py # Postgres VFS, DSPy engine, MLflow setup
+├── engine/
+│   ├── routes.py      # Route enum: direct / flex / rlm (+ legacy-name reader)
+│   └── signatures.py  # Every DSPy signature and the stopping rules
+├── optimize/
+│   ├── artifacts.py   # Isolated rollouts, manifests, promotion gates, compiled-program loader
+│   ├── dataset.py     # Reviewed examples from Postgres/MLflow, grouped splits
+│   ├── metric.py      # GEPA metric
+│   ├── scorers.py     # MLflow scorers and judge suite
+│   ├── gepa.py        # `fleet optimize`
+│   ├── evaluation.py  # Eval cases, gold labels, `fleet eval` runs
+│   └── benchmarks.py  # Long-context generators and Oolong/LongCoT adapters
 ├── server.py          # FastAPI routes and SSE turn streaming
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli`
 └── cli.py             # Rich client and server command

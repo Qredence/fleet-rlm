@@ -300,15 +300,7 @@ def _handle_command(client: httpx.Client, command: str, session_id: str) -> bool
                     f"({item['turn_count']} turns; updated {item['updated_at']})"
                 )
         elif command == "/optimize":
-            script = Path(__file__).resolve().parents[2] / "scripts" / "optimize_and_evaluate_fleet.py"
-            if not script.is_file():
-                _CONSOLE.print("[red]Optimization script is only available in a source checkout.[/red]")
-            else:
-                subprocess.run(
-                    [sys.executable, str(script), "--session", session_id],
-                    cwd=script.parents[1],
-                    check=False,
-                )
+            subprocess.run([sys.executable, "-m", "fleet_rlm.cli", "optimize", "--session", session_id], check=False)
         else:
             _CONSOLE.print("[yellow]Unknown command. Use /help; submit a task without a leading slash.[/yellow]")
             return True
@@ -531,7 +523,7 @@ def _render_event(event: dict[str, Any]) -> None:
 
 
 def evaluation_statuses() -> tuple[str, ...]:
-    from fleet_rlm.evaluation import REVIEW_STATUSES
+    from fleet_rlm.optimize.evaluation import REVIEW_STATUSES
 
     return REVIEW_STATUSES
 
@@ -542,7 +534,7 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
 
     import mlflow
 
-    from fleet_rlm import evaluation
+    from fleet_rlm.optimize import evaluation
 
     target = settings.mlflow_target()
     mlflow.set_tracking_uri(target.tracking_uri)
@@ -570,7 +562,7 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
             if target.mode == "databricks"
             else "fleet_rlm_eval_cases"
         )
-        from fleet_rlm import benchmarks
+        from fleet_rlm.optimize import benchmarks
 
         if args.long_context:
             cases += benchmarks.long_context_cases()
@@ -629,6 +621,13 @@ def main(argv: list[str] | None = None) -> None:
     cli.add_argument("--mlflow-experiment", default=target.experiment_name)
     cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
 
+    from fleet_rlm.optimize import gepa
+
+    optimize = commands.add_parser(
+        "optimize", help="evaluate a Session's reviewed examples and compile a GEPA candidate (live)"
+    )
+    gepa.add_arguments(optimize)
+
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
     dataset = eval_commands.add_parser("dataset", help="create the synthetic evaluation dataset")
@@ -653,6 +652,9 @@ def main(argv: list[str] | None = None) -> None:
     label.add_argument("--reviewer", default="human")
 
     args = parser.parse_args(argv)
+    if args.command == "optimize":
+        gepa.run(args, optimize, settings)
+        return
     if args.command == "eval":
         _eval_command(args, settings)
         return

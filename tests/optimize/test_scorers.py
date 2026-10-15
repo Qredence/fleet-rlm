@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from mlflow.entities import SpanType
 
-from fleet_rlm.memory_and_eval import (
+from fleet_rlm.optimize.scorers import (
     build_mlflow_scorer_suite,
     jev_routing_efficiency,
     rlm_trajectory_efficiency,

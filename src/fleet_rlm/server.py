@@ -812,7 +812,7 @@ def create_app(
             async with runtime.turn_lock:
                 # Only operator-owned, integrity-checked artifacts may become
                 # executable programs; the model-writable VFS is not an approval boundary.
-                from fleet_rlm.optimization import verify_active
+                from fleet_rlm.optimize.artifacts import verify_active
 
                 directory = Path(resolved.compiled_program_dir)
                 artifact_path = verify_active(directory / f"{session_id}.active.json", directory / "candidates")

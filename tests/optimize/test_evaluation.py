@@ -5,8 +5,8 @@ import json
 import httpx
 import pytest
 
-from fleet_rlm import evaluation
-from fleet_rlm.evaluation import (
+from fleet_rlm.optimize import evaluation
+from fleet_rlm.optimize.evaluation import (
     EvalCase,
     expected_values_present,
     label_trace,
@@ -136,7 +136,7 @@ def test_scorer_uses_word_boundaries():
 def test_stopping_evidence_excludes_bootstrap_and_private_predictors():
     from types import SimpleNamespace
 
-    from fleet_rlm.evaluation import stopping_evidence
+    from fleet_rlm.optimize.evaluation import stopping_evidence
 
     def span(name, inputs=None, outputs=None, phase="task", start=0):
         return SimpleNamespace(
@@ -176,7 +176,7 @@ def test_stopping_regression_suite_projects_evidence_and_uses_explicit_judge(mon
     from mlflow.entities import Feedback
     from mlflow.genai.scorers import Guidelines
 
-    from fleet_rlm.evaluation import evaluate_stopping_traces
+    from fleet_rlm.optimize.evaluation import evaluate_stopping_traces
 
     tasks = {
         "supported_submit": ("compute", ["print(391)", "assert 391 == 17*23", "SUBMIT(answer='391')"]),

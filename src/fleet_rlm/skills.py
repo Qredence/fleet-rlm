@@ -438,12 +438,17 @@ class SkillManager:
 
     def build_local_catalog_xml(self) -> str:
         """Return a catalog without starting a remote sandbox."""
-        entries: list[dict[str, str]] = []
-        if self.local_skills_dir.is_dir():
-            for path in sorted(self.local_skills_dir.glob("*/SKILL.md")):
-                metadata, _ = parse_and_validate_skill_md(path.parent.name, path.read_text(encoding="utf-8"))
-                entries.append({"name": metadata["name"], "description": metadata["description"]})
-        return catalog_xml(entries)
+        return local_catalog_xml(self.local_skills_dir)
+
+
+def local_catalog_xml(skills_dir: Path) -> str:
+    """Catalog of the local Skill directory, for callers with no sandbox (e.g. the optimizer)."""
+    entries: list[dict[str, str]] = []
+    if skills_dir.is_dir():
+        for path in sorted(skills_dir.glob("*/SKILL.md")):
+            metadata, _ = parse_and_validate_skill_md(path.parent.name, path.read_text(encoding="utf-8"))
+            entries.append({"name": metadata["name"], "description": metadata["description"]})
+    return catalog_xml(entries)
 
 
 def catalog_xml(skills: list[dict[str, Any]]) -> str:

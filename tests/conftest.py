@@ -1,4 +1,4 @@
-"""Keep every test away from the developer's .env, live MLflow server, and shell overrides."""
+"""Keep every test away from the developer's .env, live MLflow and Postgres servers, and shell overrides."""
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
     monkeypatch.setenv("FLEET_MLFLOW_TRACKING_URI", mlflow_test_uri)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_test_uri)
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
+    # A test that forgets its database fake fails fast instead of reaching a real local Postgres.
+    monkeypatch.setenv("FLEET_DATABASE_URL", "postgresql://fleet-test@db.invalid:5432/fleet-test")
     get_settings.cache_clear()
     mlflow.set_tracking_uri(mlflow_test_uri)
     yield
