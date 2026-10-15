@@ -13,8 +13,10 @@ Rich CLI ──HTTP/SSE──> FastAPI server ──> DSPy engine
                               └── PostgreSQL VFS, MLflow traces/evaluation
 ```
 
-`cli.py` provides the Rich client and server command. `server.py` owns the
-FastAPI endpoints, SSE streaming, and session runtime registry. A Session
+`cli.py` provides the Rich client and server command. `api/` owns the FastAPI
+endpoints (sync `def` routes in FastAPI's threadpool; only the Turn stream is
+async) and SSE streaming; `session.py` owns the Session runtime registry, and
+`engine/turn.py` runs one Turn on a worker thread. A Session
 runtime combines a Daytona sandbox manager, PostgreSQL VFS harness, Skill
 manager, and DSPy engine. `sandbox/manager.py` creates the per-session Daytona
 workspace and runs Python there. `store/` holds every SQL statement over one
@@ -116,7 +118,10 @@ policy.
 - `store/`: PostgreSQL access and the workspace/Turn mirror.
 - `optimize/`: datasets, scorers, the GEPA metric and runner, compiled-program artifacts.
 - `observability.py`: redacted activity previews and MLflow tracing setup.
-- `server.py`: HTTP routes and streaming response.
+- `api/`: the FastAPI app (`app.py`), dependencies, request/response schemas,
+  one router per area, and the Turn event stream (`events.py`).
+- `session.py`: the per-Session runtime and its registry.
+- `engine/turn.py`: one Turn end to end (claim, prepare, run, persist, report).
 - `cli.py`: Rich terminal client and command-line entry point.
 
 Keep documentation aligned with implemented routes and settings. Avoid

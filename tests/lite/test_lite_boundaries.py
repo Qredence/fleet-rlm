@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import threading
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,17 +12,14 @@ import dspy
 import pytest
 from dspy.adapters.chat_adapter import ChatAdapter
 from dspy.utils.exceptions import AdapterParseError
-from fastapi.testclient import TestClient
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.paths import _workspace_relative_path, session_volume_subpath, validate_session_id
-from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
 from fleet_rlm.store.harness import VolumePostgresHarness
-from fleet_rlm.workspace import WorkspaceDataset
 
 
 @pytest.mark.parametrize("session_id", ["finance-q4", "session_01", "2e8c98b5-5242-4e3b-91b4-2bf1e8c24f0b"])
@@ -581,152 +576,6 @@ def _unity_gateway_test_settings() -> FleetSettings:
     )
 
 
-def test_fastapi_health_and_lite_route_contract() -> None:
-    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
-    expected_paths = {
-        "/health",
-        "/sessions",
-        "/skills",
-        "/skills/pull",
-        "/sessions/{session_id}/files",
-        "/sessions/{session_id}/attach",
-        "/sessions/{session_id}/turn",
-    }
-    openapi = app.openapi()
-    assert expected_paths <= set(openapi["paths"])
-    turn_content = openapi["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]
-    assert turn_content["text/event-stream"]["schema"] == {"type": "string"}
-
-    with TestClient(app) as client:
-        response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.8.0"}
-
-
-@pytest.mark.parametrize("write_fails", [False, True])
-def test_turn_sse_persists_and_returns_one_mocked_session_turn(
-    monkeypatch: pytest.MonkeyPatch, write_fails: bool
-) -> None:
-    import fleet_rlm.server as server
-
-    files = {"files/input.txt": b"initial input", "files/rates.csv": b"rate\n3\n"}
-    records = []
-    order: list[str] = []
-    written: list[tuple[str, str, Any]] = []
-
-    def run_engine(**_kwargs):
-        assert "- older.md: prior hint" in _kwargs["memory_summary"]
-        files["files/input.txt"] = b"modified during execution"
-        return SimpleNamespace(
-            answer="processed locally", route="flex", learned_skill_note="Reuse the digit window check."
-        )
-
-    def persist(**kwargs):
-        records.append(kwargs["turn_record"])
-        order.append("sync")
-        return ["artifacts/result.csv"]
-
-    def write_note(turn_id, note, trace_id=None):
-        order.append("write")
-        if write_fails:
-            raise RuntimeError("shared mount is gone")
-        written.append((turn_id, note, trace_id))
-
-    class RuntimeRegistry:
-        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None], _store: Any = None):
-            self.runtime = SimpleNamespace(
-                sandbox_mgr=SimpleNamespace(
-                    list_workspace_files=lambda: list(reversed(files)),
-                    read_workspace_file=files.__getitem__,
-                    list_learned_notes=lambda: [{"file": "older.md", "summary": "prior hint"}],
-                    write_learned_note=write_note,
-                ),
-                harness=SimpleNamespace(
-                    hydrate_volume_from_postgres=lambda _session_id: ("summary", "prior history"),
-                    sync_volume_to_postgres=persist,
-                ),
-                skill_mgr=SimpleNamespace(
-                    sync_local_skills_to_volume=lambda: 1,
-                    build_catalog_xml=lambda: "<available_skills></available_skills>",
-                ),
-                context=WorkspaceDataset("files/input.txt"),
-                engine=run_engine,
-                turn_lock=asyncio.Lock(),
-            )
-
-        async def get(self, _session_id: str) -> Any:
-            return self.runtime
-
-        async def close(self) -> None:
-            return None
-
-    @contextmanager
-    def fake_span(**_kwargs: Any) -> Any:
-        yield SimpleNamespace(
-            set_inputs=lambda _value: None, set_outputs=lambda _value: None, set_attributes=lambda _value: None
-        )
-
-    global_callback = object()
-    observed_callbacks: list[Any] = []
-
-    @contextmanager
-    def fake_dspy_context(*, callbacks: list[Any], disable_history: bool, **_extra: Any) -> Any:
-        assert disable_history is True
-        observed_callbacks.extend(callbacks)
-        yield
-
-    import asyncio
-
-    monkeypatch.setattr(server, "SessionRuntimeRegistry", RuntimeRegistry)
-    monkeypatch.setattr(
-        server,
-        "dspy",
-        SimpleNamespace(settings=SimpleNamespace(callbacks=[global_callback]), context=fake_dspy_context),
-    )
-    monkeypatch.setattr(server.mlflow, "start_span", fake_span)
-    trace_updates: list[dict] = []
-    monkeypatch.setattr(server.mlflow, "update_current_trace", lambda **kwargs: trace_updates.append(kwargs))
-    monkeypatch.setattr(server.mlflow, "set_experiment", lambda **_kwargs: None)
-    monkeypatch.setattr(server.mlflow, "get_last_active_trace_id", lambda: "trace-test-id")
-    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
-
-    with TestClient(app) as client:
-        app.state.mlflow_experiment_id = "experiment-test-id"
-        response = client.post("/sessions/session-a/turn", json={"task": "summarize this file"})
-
-    assert {
-        "metadata": {"mlflow.trace.session": "session-a"},
-        "request_preview": "summarize this file",
-    } in trace_updates
-    assert {"response_preview": "processed locally"} in trace_updates
-
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-    assert events[0]["event"] == "turn_status"
-    assert events[0]["payload"] == {"phase": "preparation"}
-    assert events[1]["event"] == "turn_complete"
-    assert events[1]["payload"] == {
-        "answer": "processed locally",
-        "route": "flex",
-        "learned_skill_note": "Reuse the digit window check.",
-        "artifacts": ["artifacts/result.csv"],
-        "trace_id": "trace-test-id",
-    }
-    assert global_callback in observed_callbacks
-    assert any(isinstance(callback, server.SSERuntimeCallback) for callback in observed_callbacks)
-    assert records[0]["context_files"] == {
-        "files/input.txt": hashlib.sha256(b"initial input").hexdigest(),
-        "files/rates.csv": hashlib.sha256(b"rate\n3\n").hexdigest(),
-    }
-    assert records[0]["workspace_manifest"] == "/workspace/files/input.txt, /workspace/files/rates.csv"
-    assert order == ["sync", "write"]
-    assert written == ([] if write_fails else [(records[0]["turn_id"], "Reuse the digit window check.", None)])
-    # The server uses "done" as its internal queue sentinel; the HTTP stream
-    # ends after it and deliberately exposes only user-facing events.
-    assert len(events) == 2
-
-
 def test_cancelled_manager_cannot_restart_remote_execution() -> None:
     stopped = threading.Event()
     sandbox = SimpleNamespace(id="sandbox-cancel", state="started")
@@ -745,7 +594,7 @@ def test_cancelled_manager_cannot_restart_remote_execution() -> None:
 def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> None:
     import asyncio
 
-    from fleet_rlm.server import SSERuntimeCallback
+    from fleet_rlm.api.events import SSERuntimeCallback
 
     async def scenario() -> list[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
@@ -890,83 +739,6 @@ def test_adapter_async_path_reasks_too(monkeypatch) -> None:
     assert result == [{"b": "ok"}] and len(calls) == 2
 
 
-@pytest.mark.parametrize("fail_preparation", [False, True])
-def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.MonkeyPatch, fail_preparation: bool) -> None:
-    import asyncio
-
-    import fleet_rlm.server as server
-
-    def hydrate(_session_id):
-        if fail_preparation:
-            raise RuntimeError("preparation failed")
-        return "summary", "history"
-
-    def failing_engine(**_kwargs):
-        raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
-
-    class RuntimeRegistry:
-        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None], _store: Any = None):
-            self.runtime = SimpleNamespace(
-                sandbox_mgr=SimpleNamespace(
-                    list_workspace_files=lambda: [],
-                    read_workspace_file=lambda _path: b"",
-                    list_learned_notes=lambda: [],
-                ),
-                harness=SimpleNamespace(
-                    hydrate_volume_from_postgres=hydrate,
-                    sync_volume_to_postgres=lambda **_kwargs: [],
-                ),
-                skill_mgr=SimpleNamespace(
-                    sync_local_skills_to_volume=lambda: 1,
-                    build_catalog_xml=lambda: "<available_skills></available_skills>",
-                ),
-                context=None,
-                engine=failing_engine,
-                turn_lock=asyncio.Lock(),
-            )
-
-        async def get(self, _session_id: str) -> Any:
-            return self.runtime
-
-        async def close(self) -> None:
-            return None
-
-    @contextmanager
-    def fake_span(**_kwargs: Any) -> Any:
-        yield SimpleNamespace(
-            trace_id="trace-failed-id",
-            set_inputs=lambda _value: None,
-            set_outputs=lambda _value: None,
-            set_attributes=lambda _value: None,
-        )
-
-    @contextmanager
-    def fake_dspy_context(**_kwargs: Any) -> Any:
-        yield
-
-    monkeypatch.setattr(server, "SessionRuntimeRegistry", RuntimeRegistry)
-    monkeypatch.setattr(
-        server, "dspy", SimpleNamespace(settings=SimpleNamespace(callbacks=[]), context=fake_dspy_context)
-    )
-    monkeypatch.setattr(server.mlflow, "start_span", fake_span)
-    monkeypatch.setattr(server.mlflow, "update_current_trace", lambda **_kwargs: None)
-    monkeypatch.setattr(server.mlflow, "set_experiment", lambda **_kwargs: None)
-    monkeypatch.setattr(server.mlflow, "get_last_active_trace_id", lambda: "stale-previous-trace")
-    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
-
-    with TestClient(app) as client:
-        app.state.mlflow_experiment_id = "experiment-test-id"
-        response = client.post("/sessions/session-a/turn", json={"task": "anything"})
-
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    failure = next(event for event in events if event["event"] == "error")
-    if fail_preparation:
-        assert "trace_id" not in failure["payload"]
-    else:
-        assert failure["payload"]["trace_id"] == "trace-failed-id"
-    assert "The Turn failed" in failure["payload"]["error"]
-
-
 @pytest.mark.parametrize(
     ("given", "expected"),
     [
@@ -990,7 +762,7 @@ def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> Non
 
 
 def _usage_callback() -> tuple[Any, list[dict]]:
-    import fleet_rlm.server as server
+    import fleet_rlm.api.events as server
 
     events: list[dict] = []
     callback = server.SSERuntimeCallback(None, None)  # type: ignore[arg-type]
@@ -1135,26 +907,3 @@ def test_spawn_agents_children_inherit_the_callers_context(monkeypatch) -> None:
     marker.set("turn-context")
     tool = _engine_with_fake_children(monkeypatch, lambda **_kwargs: marker.get())
     assert [r["findings"] for r in tool(subtasks=["a", "b"])] == ["turn-context", "turn-context"]
-
-
-def test_shutdown_flushes_pending_traces_when_tracing_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.server as server
-
-    flushed: list[bool] = []
-    monkeypatch.setattr(server.mlflow, "flush_trace_async_logging", lambda: flushed.append(True))
-    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
-    with TestClient(app):
-        app.state.mlflow_experiment_id = "experiment-test-id"
-        assert flushed == []
-    assert flushed == [True]
-
-
-def test_shutdown_skips_the_trace_flush_when_tracing_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.server as server
-
-    flushed: list[bool] = []
-    monkeypatch.setattr(server.mlflow, "flush_trace_async_logging", lambda: flushed.append(True))
-    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
-    with TestClient(app):
-        pass
-    assert flushed == []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import AliasChoices, ValidationError
@@ -240,3 +241,28 @@ def test_gateway_judge_environment_uses_gateway_credentials():
     assert FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint").judge_environment() == {}
     with pytest.raises(ValidationError, match="provider"):
         FleetSettings(_env_file=None, fleet_judge_model="deepseek")
+
+
+def test_gateway_discovery_filters_chat_services_and_converts_resource_names(monkeypatch) -> None:
+    from databricks import sdk
+    from databricks.sdk import core
+
+    monkeypatch.setattr(core, "Config", lambda **kwargs: SimpleNamespace(**kwargs))
+
+    def list_services(**kwargs):
+        assert kwargs == {"parent": "schemas/team.chat"}
+        return [
+            SimpleNamespace(name="model-services/team.chat.second", supported_api_types=["mlflow/v1/chat/completions"]),
+            SimpleNamespace(name="model-services/team.chat.embedding", supported_api_types=["mlflow/v1/embeddings"]),
+            SimpleNamespace(name="model-services/team.chat.first", supported_api_types=["mlflow/v1/chat/completions"]),
+        ]
+
+    monkeypatch.setattr(
+        sdk,
+        "WorkspaceClient",
+        lambda **_kwargs: SimpleNamespace(ai_gateway=SimpleNamespace(list_model_services=list_services)),
+    )
+    settings = FleetSettings(databricks_host="https://example.databricks.com", databricks_token="test-only")
+    assert settings.list_models("team.chat") == ["openai/team.chat.first", "openai/team.chat.second"]
+    with pytest.raises(ValueError, match=r"catalog\.schema"):
+        settings.list_models("../other")

@@ -22,6 +22,11 @@ All notable changes to this project are documented in this file.
   Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
   labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
   be re-optimized.
+- The API is a package: `fleet_rlm.api` (`create_app`, dependencies, schemas, one router per area,
+  the Turn event stream), `fleet_rlm.session` (Session runtime and registry) and
+  `fleet_rlm.engine.turn` (one Turn end to end). Routes are sync `def` handlers using `Depends`;
+  only the Turn stream is async. Every route declares a response model, so `openapi.yaml`
+  documents all 26 responses. `fleet_rlm.server` and its module-level `app` are removed.
 - Sandbox Python runs on Daytona's native `code_interpreter`: one context per namespace, one
   `run_code` per execution, host-tool calls and results as stdout marker lines, replies through
   `fs.upload_file`. The in-sandbox HTTP daemon, its bearer token, execution registry,

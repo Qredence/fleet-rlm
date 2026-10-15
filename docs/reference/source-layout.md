@@ -18,6 +18,7 @@ src/fleet_rlm/
 │   ├── routes.py      # Route enum: direct / flex / rlm (+ legacy-name reader)
 │   ├── signatures.py  # Every DSPy signature and the stopping rules
 │   ├── programs.py    # The Turn program: route selection, then direct / Flex / RLM
+│   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # spawn_agent, spawn_agents, sub_rlm
 ├── store/
 │   ├── db.py          # Store: every SQL statement over one connection pool
@@ -30,7 +31,14 @@ src/fleet_rlm/
 │   ├── gepa.py        # `fleet optimize`
 │   ├── evaluation.py  # Eval cases, gold labels, `fleet eval` runs
 │   └── benchmarks.py  # Long-context generators and Oolong/LongCoT adapters
-├── server.py          # FastAPI routes and SSE turn streaming
+├── api/
+│   ├── app.py         # create_app, lifespan, routers, health
+│   ├── deps.py        # Settings, Store, registry and runtime dependencies
+│   ├── errors.py      # Route-boundary error translation
+│   ├── schemas.py     # Request and response models
+│   ├── events.py      # DSPy activity callback and SSE envelope
+│   └── routes/        # sessions, workspace, memory, skills, turns
+├── session.py         # Per-Session runtime and registry
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli`
 └── cli.py             # Rich client and server command
 ```

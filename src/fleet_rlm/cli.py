@@ -661,7 +661,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "serve":
         if not settings.allow_non_loopback_bind and not _is_loopback(args.host):
             parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
-        from fleet_rlm.server import create_app
+        from fleet_rlm.api.app import create_app
 
         bound = settings.with_explicit_overrides(host=args.host, port=args.port)
         uvicorn.run(create_app(settings=bound), host=bound.host, port=bound.port, reload=False)

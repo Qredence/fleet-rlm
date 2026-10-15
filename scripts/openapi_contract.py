@@ -12,7 +12,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fleet_rlm.server import app  # noqa: E402
+from fleet_rlm.api.app import create_app  # noqa: E402
+from fleet_rlm.config import FleetSettings  # noqa: E402
+
+# The schema depends only on the routes; build it without .env, a database, or MLflow.
+app = create_app(settings=FleetSettings(_env_file=None), initialize_db=False, configure_observability=False)
 
 OPENAPI_PATH = ROOT / "openapi.yaml"
 
