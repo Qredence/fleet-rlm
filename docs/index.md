@@ -17,7 +17,8 @@ Current user and developer documentation for Fleet RLM Lite.
 ## Current behavior is the source of truth
 
 Runtime behavior is implemented under `src/fleet_rlm/`. This Lite runtime does
-not include the legacy terminal package, Alembic migrations, or `fleet.toml`
-configuration system. It creates its required tables at startup. Live Daytona
+not include the legacy terminal package or Alembic migrations.
+Non-secret process settings use schema-3 `config/fleet.toml` and validated
+environment overrides. It creates its required tables at startup. Live Daytona
 and model-provider behavior requires external credentials and resources and is
 not certified by local documentation or CI.

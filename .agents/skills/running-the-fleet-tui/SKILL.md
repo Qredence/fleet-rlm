@@ -1,124 +1,50 @@
 ---
 name: running-the-fleet-tui
-description: Drive a real Fleet Turn through the terminal TUI from an agent session, then verify it from the persisted MLflow traces.
-metadata:
-  compatibility: Fleet-RLM repository with its pinned DSPy and Daytona dependencies, a configured Daytona runtime, tmux, and operator authorization for the live provider run.
+description: Drive the current Fleet Lite interactive Rich CLI and verify its persisted MLflow traces.
 ---
 
-# Running the Fleet TUI
+# Running the Fleet Lite terminal client
 
-Use the maintained terminal client when a check needs a real end-to-end Turn —
-live provider calls, a real Sandbox, settlement, and a durable trace — rather
-than a pytest lane. The
-[terminal TUI guide](../../../docs/how-to-guides/terminal-tui.md) owns launch,
-`scripts/database.py upgrade`, configuration, Session resume, the backend/client split, and the
-full slash-command list; read it for those and do not restate them here.
+Read [the maintained CLI reference](../../../docs/reference/cli.md) first.
+Use `uv run fleet cli` in a real PTY. Live model, Daytona, and database runs
+require operator authorization. Check credential presence without printing values.
+Fleet Lite initializes additive PostgreSQL tables at API startup; do not run
+retired migration commands. Non-secret schema-3 defaults may be configured in
+`config/fleet.toml`; credentials stay in `.env`/environment. Environment overrides
+win over TOML, and file changes require a process restart.
 
-## Preconditions
+## Launch
 
-- Run `uv run python scripts/database.py upgrade` before the first launch. The supervisor
-  verifies Alembic head and never migrates, so a stale database fails the launch.
-- Inspect the single `config/fleet.toml` policy before launching. The shipped
-  configuration always supplies bounded children; edit `/settings` or TOML and restart
-  to change child limits.
-- A Turn consumes provider and Daytona quota. Confirm the run is authorized
-  before starting.
-
-## Drive the client in tmux
-
-Size the pane explicitly. A detached session otherwise gets 80x24, which
-truncates the trajectory and hides the footer evidence you are about to read.
+Choose an unused loopback API port and a unique session to ensure modified code
+is running. A healthy API on the chosen port is reused rather than replaced.
 
 ```bash
-tmux kill-session -t fleet 2>/dev/null || true
-tmux new-session -d -s fleet -x 200 -y 50 -c "$PWD" "uv run fleet cli --port 8000"
+FLEET_PORT=8001 uv run fleet cli --session verification-UNIQUE --mlflow-experiment fleet-verification
 ```
 
-Poll for readiness instead of sleeping. The pane renders **nothing for tens of
-seconds** while the supervisor starts the database preflight, MLflow, and the
-backend — its own readiness bound for the Daytona runtime is 150s, so poll at
-least that long before concluding the launch failed:
+The launcher starts API/MLflow services as needed. Existing services are left
+running. Logs are `.fleet/logs/server.log` and `.fleet/logs/mlflow.log`; local
+MLflow data is `.fleet/mlflow`. Wait for the `fleet>` prompt before input.
+Do not use retired Node-TUI headers, footers, or `cli --port` arguments.
 
-```bash
-timeout 150 bash -c 'until tmux capture-pane -t fleet -p | grep -qE "."; do sleep 2; done'
-tmux capture-pane -t fleet -p
-```
+## Exercise and verify
 
-Ready looks like the header `FLEET  /  RLM OPERATOR`, a `› Start a Turn` empty
-state, and the idle footer `Enter send · Shift+Enter newline · / commands`.
+Use `/config`, `/mode rlm`, `/mode flex`, and ordinary task text. Read Python
+code/output panels and the final answer. A successful turn prints its trace ID
+and `Turn persisted to Session history.` Use `/history` and `/trace` to verify.
+During a running turn, Ctrl+C closes the stream and requests remote cancellation;
+while editing, Ctrl+C clears input. Do not use Escape as a cancellation command.
+After cancellation, check durable state before retrying: disconnect is not rollback.
 
-If nothing appears, read `.fleet_rlm/logs/latest.log` (the supervised backend)
-and `.fleet_rlm/logs/mlflow-latest.log` rather than guessing.
+Fetch complete traces using MLflow CLI/API while the tracking server is available.
+Use their recorded session/trace IDs, not an assumed experiment ID or old database
+path. Inspect execution code/output, span status, daemon protocol, and effective
+Turn timeout. A corrected Python error should be a failed execution span inside
+a successful overall turn. Do not add overlapping outer and inner span durations.
 
-## Send a Turn
+## Finish
 
-Use `-l` so the text is sent literally — without it tmux interprets words as key
-names — and send `Enter` as a separate call:
-
-```bash
-tmux send-keys -t fleet -l 'Report the mean of 1, 2 and 3. Show the arithmetic.'
-tmux send-keys -t fleet Enter
-```
-
-## Wait for settlement
-
-`Ctrl-C` does **not** quit the client; `/exit` is the quit command. During a
-Turn, `Escape` cancels it. Do not reach for Ctrl-C when the pane looks stuck.
-
-Wait in two stages. First confirm the Turn is actually running — the footer
-switches from the idle hint to a cancel hint ending in `draft stays unsent` —
-then wait for an outcome token:
-
-```bash
-timeout 120 bash -c 'until tmux capture-pane -t fleet -p | grep -q "draft stays unsent"; do sleep 2; done'
-timeout 900 bash -c 'until tmux capture-pane -t fleet -p | grep -qE "[✓×!] (completed|failed|cancelled|interrupted)"; do sleep 5; done'
-```
-
-Do not grep for `completed` on its own. The dock keeps the **previous** Turn's
-`✓ completed` on screen, so a naive poll returns immediately with the old
-outcome before the new Turn has even started. Require the running hint first,
-and after the outcome token confirm `Preparing Turn` is gone.
-
-## Read the result
-
-The client shows two usage surfaces, and the assistant message is the informative
-one. Its `USAGE` line reports iterations, sub-LM calls, host calls, interpreter
-errors, tokens, and elapsed time:
-
-```text
-USAGE  2 iterations · 0 sub-LM · 0 host · 0 errors · ↑ input 11k · ↓ output 685 · 0:11
-```
-
-The dock footer carries the same counts in abbreviated form plus the outcome:
-`TOKENS ↑ 11k ↓ 685 · 2 iter · 0 sub-LM · 0 host · 0 errors · 0:11 · ✓ completed`.
-The final answer prints on its own line below the transcript.
-
-`capture-pane -p` returns only the visible screen; add `-S -2000` to include
-scrollback when a long Turn pushed the answer off the top.
-
-A Turn can finish with no semantic calls or children when they are unnecessary.
-Every Root invocation receives bounded child tools;
-usage counts alone do not prove a child ran.
-
-## Inspect the traces
-
-A TUI run is only verifiable from its trace. The MLflow tracking server is
-supervisor-managed on `127.0.0.1:5001` and **dies with the TUI**, so read the
-persisted store offline after exit:
-
-- [Reading traces offline](references/reading-traces-offline.md): the
-  `MlflowClient` recipe over `.fleet_rlm/mlflow/mlflow.db`, the expected span
-  set, and the checks that separate a healthy Turn from a retry storm.
-
-`/trace` prints the current Run's trace ID if you would rather grab the ID from
-the client than search the experiment.
-
-## Stop the client
-
-```bash
-tmux send-keys -t fleet -l '/exit'
-tmux send-keys -t fleet Enter
-tmux kill-session -t fleet 2>/dev/null || true
-```
-
-Read the traces before this: stopping the client stops the tracking server.
+Exit using `/exit`. The launcher stops only services it started, API first so
+traces flush before MLflow exits. Retain the transcript, trace IDs, and acceptance
+results in a task-owned scratch directory. Confirm cleanup of verification
+sandboxes without deleting unrelated resources.

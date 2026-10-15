@@ -29,6 +29,10 @@ creates the tables it needs at startup and synchronizes workspace data through
 the Daytona Volume. There are no Alembic migrations in this Lite runtime.
 Daytona uses per-session subpaths for its workspaces. The supported workspace
 areas include `files`, `artifacts`, `memory`, `skills`, `buffers`, and `sessions`.
+Root sandboxes also mount a shared notes subpath at `/learned`
+(`FLEET_SHARED_NOTES_SUBPATH`). Each committed Turn's learned note is written there as
+an unreviewed, redacted Markdown file. Later Sessions see the newest summaries as hints
+to verify. These notes are not Skills and are never synced to `.fleet/skills`.
 Additive Lite tables retain reviewed source-backed memories, idempotent turn
 intents/outcomes, and persisted mode/dataset settings without renaming old tables.
 A PostgreSQL session advisory lock gives one worker ownership of a runtime and
@@ -106,5 +110,50 @@ policy.
 - `cli.py`: Rich terminal client and command-line entry point.
 
 Keep documentation aligned with implemented routes and settings. Avoid
-reintroducing claims about removed migrations, `config/fleet.toml`, a Node TUI,
+reintroducing claims about removed migrations, a Node TUI,
 or retired API surfaces.
+
+## Execution transport and recovery
+
+The DSPy interpreter remains synchronous and stateful, but its private daemon
+protocol submits Python with an execution ID and polls for completion. Each
+control request has a finite transport timeout; computation and bridged calls
+share the existing Turn deadline. A bounded in-memory registry deduplicates
+identical submissions until namespace cleanup. Protocol version and daemon
+instance identity prevent resubmission into a replacement daemon. This registry
+is not durable recovery across process loss.
+
+After an ambiguous submission, the host checks the same ID before one permitted
+identical resubmission. An acknowledged execution that disappears, a changed
+daemon, or repeated status failures aborts the Turn and requests remote stop;
+code is never blindly replayed. Host and daemon changes require a runtime restart.
+
+Each `sandbox.exec` span covers submission through result interpretation, with
+bounded redacted code/output, identity, retry count, and outcome. Remote Python
+errors mark that span as failed even when DSPy corrects the error and completes
+the Turn. Overlapping outer Flex orchestration spans must not be added to child
+execution durations. Root spans record the resolved mode and Turn deadline.
+
+## Validated process configuration and decision evidence
+
+`config/fleet.toml` schema 3 supplies non-secret defaults to `FleetSettings`.
+Precedence is defaults, TOML, `.env`, environment, then explicit overrides.
+`FLEET_CONFIG` selects another file through process environment only. Credentials
+and the PostgreSQL DSN remain environment-only. The loader rejects legacy/unknown
+keys and invalid files rather than accepting inactive settings. Configuration is
+frozen at startup; persisted Session mode/model selections remain overrides.
+`/config` reports effective safe values, sources and digest. A general editor and
+hot reload are not implemented. Root traces record the effective configuration.
+
+Invocation-injected DSPy query tools retain their local budget; Fleet also meters
+the global Turn budget. Native predictor calls own their child lifecycle:
+namespace shutdown is not evidence of successful completion, and only successful
+invocations promote staged artifacts. Explicit Fleet spawn tools keep their own
+success-only promotion. Native sub-agents provide structured DSPy tasks; explicit
+spawn tools provide selected inputs, parallel investigations and artifact receipts.
+
+Routing and batched Jev results preserve available probabilities/confidence,
+backend and model. Routing traces distinguish raw choice, effective route and
+policy override. Missing evidence is unavailable, and generative confidence is
+self-reported, not demonstrated calibration. ReAnchor and reflection-adapter
+changes remain explicit future evaluation work.

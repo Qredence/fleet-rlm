@@ -4,7 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Shared learned notes: root sandboxes mount `FLEET_SHARED_NOTES_SUBPATH` (default
+  `shared/learned-notes`) at `/learned`. Each committed Turn's learned note is written there
+  as an unreviewed, redacted file, and later Sessions see the newest summaries in their memory
+  summary as hints to verify. Empty disables the mount.
+- `sandbox.exec` MLflow spans record `host_calls`, the bridged host calls made during that exec.
+  An exec that bridges host calls contains the host work it waits on, so sum sandbox compute
+  from root spans only.
+
 ### Changed
+
+- Lite Daytona execution now submits identified work and polls through bounded control
+  requests. Lost responses are reconciled without blindly replaying Python; changed
+  daemons and uncertain outcomes abort the Turn and request remote stop.
+- Execution traces include bounded code/results, runtime identity, retry counts, and
+  remote Python errors, including errors DSPy corrects before successfully submitting.
+- Stopping guidance asks DSPy to submit on the next action once supporting checks agree;
+  a focused offline trace evaluation checks unnecessary verification.
+
+- The RLM signature asks the model to stop once one independent check supports the answer, and
+  to copy figures from sandbox output instead of retyping them.
 
 - Remove the unenforced `rlm.max_provider_attempts` setting. Older configuration
   files containing it now fail with an actionable migration message. DSPy owns
@@ -1869,3 +1890,11 @@ in the corresponding runtime evidence.
 [0.4.2]: https://github.com/Qredence/fleet-rlm/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Qredence/fleet-rlm/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Qredence/fleet-rlm/releases/tag/v0.4.0
+
+
+### Validated configuration and DSPy integration
+
+- Load schema-3 non-secret TOML settings with explicit source precedence and safe provenance.
+- Retain decision probabilities/confidence for routing and batch decisions.
+- Honor DSPy invocation query budgets and promote native child artifacts only on successful completion.
+- Support role-specific generation options without changing the shared turn deadline.
