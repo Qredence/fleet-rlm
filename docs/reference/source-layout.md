@@ -11,7 +11,10 @@ src/fleet_rlm/
 ├── workspace.py       # Sandbox file helpers and serializable dataset handles
 ├── memory_and_eval.py # Postgres VFS, DSPy engine, MLflow, GEPA
 ├── optimization.py    # Isolated rollouts, dataset splits, promotion gates
+├── evaluation.py      # Eval cases, gold labels, scorers, `fleet eval` runs
+├── benchmarks.py      # Long-context generators and Oolong/LongCoT adapters
 ├── server.py          # FastAPI routes and SSE turn streaming
+├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli`
 └── cli.py             # Rich client and server command
 ```
 

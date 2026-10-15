@@ -94,23 +94,21 @@ creates its own PostgreSQL tables at startup, but does not create the database.
 Never commit `.env` or credentials. See the
 [configuration reference](docs/reference/configuration.md) for settings and limits.
 
-### 3. Start the server and terminal client
-
-In one terminal:
-
-```bash
-uv run fleet serve
-```
-
-In another terminal, from the same checkout:
+### 3. Start Fleet
 
 ```bash
 uv run fleet cli --session research-1
 ```
 
-The client connects to the default loopback listener on port 8000. For a different
-server, pass `--url` to `fleet cli`. Reuse a session ID to continue its saved work;
-omit `--session` to create a new short ID.
+One command starts a local MLflow server (data in `.fleet/mlflow`, UI at
+`http://127.0.0.1:5001`), starts the API server on the configured loopback port
+(default 8000, log in `.fleet/logs/server.log`), opens the terminal client, and
+stops both when you exit. Traces go to the local MLflow experiment `fleet-rlm-dev`
+instead of the tracking URI in `.env`; pass `--mlflow env` to keep the configured one.
+If an API server is already running on that port (for example from `uv run fleet
+serve`), the client connects to it and leaves it running; pass `--url` to connect to a
+specific server without starting anything. Reuse a session ID to continue its saved
+work; omit `--session` to create a new short ID.
 
 ### 4. Work with a file
 

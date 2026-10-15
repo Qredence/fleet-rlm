@@ -1,16 +1,32 @@
 # Fleet CLI
 
-The `fleet` command has two modes:
+The `fleet` command has these modes:
 
 ```bash
+uv run fleet cli [--session SESSION_ID] [--url URL] [--mlflow local|env]
+                 [--mlflow-port 5001] [--mlflow-experiment fleet-rlm-dev] [--startup-timeout 180]
 uv run fleet serve [--host 127.0.0.1] [--port 8000]
-uv run fleet cli [--url http://127.0.0.1:8000] [--session SESSION_ID]
+uv run fleet eval dataset|run|label
 ```
 
-`serve` starts the FastAPI server. `cli` connects the interactive Rich client
-to an already running server. If `--session` is omitted, the client generates
-a short session ID. If `--url` is omitted, it uses the configured host and
-port.
+`cli` is the one-command entry point. Unless `--url` is given, it starts what is not
+already running, waits for each service's `/health`, opens the interactive Rich
+client, and stops what it started when the client exits (the API server first, so it
+can flush traces, then MLflow):
+
+- **MLflow** (`--mlflow local`, the default for now): a local MLflow server on
+  `127.0.0.1:{--mlflow-port}` with SQLite storage under `.fleet/mlflow`. The API server it
+  starts traces to experiment `--mlflow-experiment` via environment overrides; `.env` is
+  not modified. `--mlflow env` starts no MLflow and leaves the configured tracking URI.
+- **API server**: `python -m fleet_rlm.cli serve` on the configured host and port, logging
+  to `.fleet/logs/server.log` (MLflow logs to `.fleet/logs/mlflow.log`).
+- A healthy API server already on that port is reused and left running, and a healthy
+  MLflow server on the MLflow port is reused. `--url` connects to that server only.
+- A service that exits or is not ready within `--startup-timeout` seconds aborts the
+  launch, prints the end of its log, and exits non-zero.
+
+`serve` starts only the FastAPI server. If `--session` is omitted, the client generates
+a short session ID.
 
 When MLflow tracing is configured, the Rich client prints a trace ID delivered
 with the completed Turn. `/trace` looks for an ID in the saved `/history`

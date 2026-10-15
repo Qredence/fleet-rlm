@@ -24,6 +24,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
+from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
 from fleet_rlm.interpreter import validate_session_id
 
@@ -414,9 +415,16 @@ def _render_event(event: dict[str, Any]) -> None:
     elif event_type in {"module_end", "lm_end", "tool_end"}:
         status = "completed" if event.get("ok", True) else f"failed ({event.get('error_type', 'unknown')})"
         name = event.get("tool") or event.get("module") or event.get("model") or "unknown"
+        usage = event.get("usage") or {}
+        tokens = (
+            f" · {usage.get('prompt_tokens', '?')}→{usage.get('completion_tokens', '?')} tok"
+            + (f" ({usage['reasoning_tokens']} reasoning)" if usage.get("reasoning_tokens") is not None else "")
+            if usage
+            else ""
+        )
         _CONSOLE.print(
             Text(
-                f"  {name}: {status} · {event.get('duration_ms', '?')} ms · {identity}",
+                f"  {name}: {status} · {event.get('duration_ms', '?')} ms{tokens} · {identity}",
                 style="dim" if event.get("ok", True) else "red",
             )
         )
@@ -576,9 +584,21 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--host", default=settings.host)
     serve.add_argument("--port", type=int, default=settings.port)
 
-    cli = commands.add_parser("cli", help="connect the interactive terminal client")
-    cli.add_argument("--url", default=f"http://{settings.host}:{settings.port}")
+    cli = commands.add_parser(
+        "cli",
+        help="start the API server (and local MLflow) if needed, then open the interactive terminal client",
+    )
+    cli.add_argument("--url", default=None, help="connect to this server only; do not start anything")
     cli.add_argument("--session", default=f"sess_{uuid.uuid4().hex[:8]}")
+    cli.add_argument(
+        "--mlflow",
+        choices=("local", "env"),
+        default="local",
+        help="local: run a local MLflow server and trace to it; env: use the configured tracking URI",
+    )
+    cli.add_argument("--mlflow-port", type=int, default=5001)
+    cli.add_argument("--mlflow-experiment", default="fleet-rlm-dev")
+    cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
 
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
@@ -612,8 +632,30 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     session_id = getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}")
-    base_url = getattr(args, "url", f"http://{settings.host}:{settings.port}")
-    run_interactive_cli(base_url=base_url, session_id=session_id)
+    url = getattr(args, "url", None)
+    if not url and not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
+        parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
+    plan = launcher.plan_launch(
+        url=url,
+        host=settings.host,
+        port=settings.port,
+        mlflow_mode=getattr(args, "mlflow", "local"),
+        mlflow_port=getattr(args, "mlflow_port", 5001),
+        mlflow_experiment=getattr(args, "mlflow_experiment", "fleet-rlm-dev"),
+    )
+    try:
+        with launcher.running_services(
+            plan,
+            host=settings.host,
+            port=settings.port,
+            mlflow_port=getattr(args, "mlflow_port", 5001),
+            startup_timeout=getattr(args, "startup_timeout", 180.0),
+            log=lambda message: _CONSOLE.print(f"[dim]{message}[/dim]"),
+        ):
+            run_interactive_cli(base_url=plan.api_url, session_id=session_id)
+    except launcher.LaunchError as exc:
+        _CONSOLE.print(f"[bold red]Could not start services:[/bold red] {exc}")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
