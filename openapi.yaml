@@ -635,6 +635,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/reload:
+    post:
+      summary: Reload Program
+      operationId: reload_program_sessions__session_id__reload_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: approved
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Approved
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Reload Program Sessions  Session Id  Reload Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /skills/push:
     post:
       summary: Push Skills

@@ -661,6 +661,27 @@ def create_app(
             )
         return {"status": "cleared"}
 
+    @app.post("/sessions/{session_id}/reload")
+    async def reload_program(session_id: str, request: Request, approved: bool = False) -> dict[str, str]:
+        if not approved:
+            raise HTTPException(status_code=409, detail="Explicit approval is required to reload the saved program")
+        try:
+            runtime = await registry_for(request).get(session_id)
+            async with runtime.turn_lock:
+                # Only operator-owned, integrity-checked artifacts may become
+                # executable programs; the model-writable VFS is not an approval boundary.
+                from fleet_rlm.optimization import verify_active
+
+                directory = Path(resolved.compiled_program_dir)
+                artifact_path = verify_active(directory / f"{session_id}.active.json", directory / "candidates")
+                artifact = await asyncio.to_thread(artifact_path.read_bytes)
+                runtime.engine.load_compiled_program(artifact)
+            return {"status": "reloaded"}
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Saved program is invalid") from None
+        except Exception:
+            raise HTTPException(status_code=404, detail="No approved saved program is available") from None
+
     @app.post("/skills/push")
     async def push_skills(request: Request, session_id: str = "default") -> dict[str, int]:
         try:

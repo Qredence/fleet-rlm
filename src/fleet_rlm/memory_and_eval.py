@@ -885,7 +885,7 @@ def configure_mlflow_observability(
 def rlm_trajectory_efficiency(trace: Any) -> Feedback:
     """Penalize unnecessary LM calls and visible sandbox exceptions."""
     if trace is None:
-        return Feedback(value=1.0, rationale="No trace captured; no trajectory penalty applied.")
+        return Feedback(value=None, rationale="No trace captured; trajectory evidence is unavailable.")
     spans = trace.search_spans()
     lm_spans = [span for span in spans if "LM" in (span.name or "") or "Predict" in (span.name or "")]
     error_spans = [span for span in spans if "Traceback" in str(getattr(span, "outputs", ""))]
@@ -900,7 +900,7 @@ def rlm_trajectory_efficiency(trace: Any) -> Feedback:
 def jev_routing_efficiency(trace: Any) -> Feedback:
     """Score simple requests routed without starting a Flex/RLM execution."""
     if trace is None:
-        return Feedback(value=1.0, rationale="No trace available.")
+        return Feedback(value=None, rationale="No trace available; routing evidence is unavailable.")
     names = [span.name or "" for span in trace.search_spans()]
     used_rlm = any("RLM" in name or "Flex" in name for name in names)
     lm_calls = sum(1 for name in names if "LM" in name or "Predict" in name)
@@ -947,12 +947,15 @@ def gepa_mlflow_metric(
     pred_trace: Any = None,  # noqa: ARG001
     program_trace: Any = None,
     llm_call_penalty: float = 0.02,
+    *,
+    judge_lm: dspy.LM,
 ) -> dspy.Prediction:
     """Return correctness plus concise reflective guidance for GEPA."""
     expected = str(getattr(gold, "answer", ""))
     actual = str(getattr(pred, "answer", ""))
     call_count = len(program_trace) if isinstance(program_trace, (list, tuple)) else 0
     judge = dspy.ChainOfThought("task, expected_answer, candidate_answer -> is_correct: bool, critique: str")
+    judge.set_lm(judge_lm)
     assessment = judge(
         task=str(getattr(gold, "task", "")),
         expected_answer=expected,
@@ -977,18 +980,29 @@ def compile_and_evaluate_fleet(
     *,
     budget: str = "medium",
     num_threads: int = 4,
+    engine_factory: Any = None,
 ) -> dspy.Module:
     """Compile the Flex program and log the result as a deliberate MLflow run."""
     if budget not in {"light", "medium", "heavy"} or not 1 <= num_threads <= 32:
         raise ValueError("Invalid GEPA budget or thread count")
+    if engine_factory is None:
+        raise ValueError("GEPA requires an isolated per-example engine_factory; use the optimization runner")
+    from functools import partial
+
+    from dspy.teleprompt.gepa import InstructionProposer
+
+    from fleet_rlm.optimization import IsolatedFleetProgram
+
     with mlflow.start_run(run_name="fleet-flex-gepa-compile"):
         optimizer = dspy.GEPA(
-            metric=gepa_mlflow_metric,
+            metric=partial(gepa_mlflow_metric, judge_lm=reflection_lm),
             reflection_lm=reflection_lm,
+            instruction_proposer=InstructionProposer(adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)),
             auto=budget,
             num_threads=num_threads,
         )
-        optimized = optimizer.compile(engine, trainset=trainset, valset=valset)
+        isolated = IsolatedFleetProgram(engine, engine_factory)
+        optimized = optimizer.compile(isolated, trainset=trainset, valset=valset).program
         optimized.save(save_path)
         mlflow.log_artifact(save_path)
         return optimized

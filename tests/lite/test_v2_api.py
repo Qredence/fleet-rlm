@@ -24,6 +24,7 @@ def test_v2_api_contract_documents_session_controls_and_sse_envelope() -> None:
     workspace = schema["paths"]["/sessions/{session_id}/workspace/files/{rel_path}"]
     assert {"get", "put", "delete"} <= set(workspace)
     assert "get" in schema["paths"]["/sessions/{session_id}/workspace/stat/{rel_path}"]
+    assert "post" in schema["paths"]["/sessions/{session_id}/reload"]
     assert "post" in schema["paths"]["/skills/push"]
     turn_response = schema["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]
     assert turn_response["text/event-stream"]["schema"] == {"type": "string"}
