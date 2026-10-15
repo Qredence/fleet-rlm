@@ -11,7 +11,7 @@ import tomllib
 from functools import lru_cache
 from itertools import islice
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import dspy
@@ -54,6 +54,7 @@ _TOML_FIELDS = {
         "local_skills_dir": "local_skills_dir",
     },
     "mlflow": {
+        "mode": "mlflow_mode",
         "tracking_uri": "mlflow_tracking_uri",
         "experiment_name": "mlflow_experiment_name",
         "eval_experiment_name": "mlflow_eval_experiment_name",
@@ -69,6 +70,20 @@ for _role in ("root", "sub", "reflection"):
     _TOML_FIELDS[f"llm.{_role}"] = {
         name: f"fleet_{_role}_{name}" for name in ("model", "max_tokens", "temperature", "num_retries", "cache")
     }
+LOCAL_MLFLOW_URI = "http://127.0.0.1:5001"
+LOCAL_MLFLOW_EXPERIMENT = "fleet-rlm-dev"
+LOCAL_MLFLOW_EVAL_EXPERIMENT = "fleet-rlm-eval"
+
+
+class MlflowTarget(NamedTuple):
+    """Where traces, eval runs, and optimizer runs go for the selected MLflow mode."""
+
+    mode: str
+    tracking_uri: str
+    experiment_name: str
+    eval_experiment_name: str
+
+
 _SETTINGS_SOURCES: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
     "fleet_settings_sources", default=None
 )
@@ -189,6 +204,7 @@ class FleetSettings(BaseSettings):
             "digest": digest,
             "values": values,
             "sources": sources,
+            "mlflow_target": self.mlflow_target()._asdict(),
             "file_changes_require_restart": True,
         }
 
@@ -234,7 +250,10 @@ class FleetSettings(BaseSettings):
     fleet_root_cache: bool = False
     fleet_sub_cache: bool = False
     fleet_reflection_cache: bool = False
-    fleet_judge_model: str = "databricks:/databricks-claude-haiku-5.5"
+    fleet_judge_model: str = Field(
+        default="openai:/system.ai.deepseek-v4-1-flash",
+        description="MLflow judge URI; 'openai:/<service-id>' routes through the AI Gateway.",
+    )
     typesafe_model: str = Field(default="jev-1.14.0", validation_alias="FLEET_TYPESAFE_MODEL")
     typesafe_api_key: str = Field(
         default="",
@@ -274,12 +293,17 @@ class FleetSettings(BaseSettings):
         validation_alias=AliasChoices("FLEET_LOCAL_SKILLS_DIR", "LOCAL_SKILLS_DIR"),
     )
 
+    mlflow_mode: Literal["local", "databricks"] = Field(
+        default="local",
+        validation_alias="FLEET_MLFLOW_MODE",
+        description="local: the 127.0.0.1 MLflow server; databricks: the configured workspace URI and UC storage.",
+    )
     mlflow_tracking_uri: str = Field(
-        default="sqlite:///mlflow.db",
+        default=LOCAL_MLFLOW_URI,
         validation_alias=AliasChoices("FLEET_MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_URI"),
     )
     mlflow_experiment_name: str = Field(
-        default="fleet-rlm-production",
+        default=LOCAL_MLFLOW_EXPERIMENT,
         validation_alias=AliasChoices("FLEET_MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_NAME"),
     )
     mlflow_eval_experiment_name: str = Field(default="", validation_alias="FLEET_MLFLOW_EVAL_EXPERIMENT_NAME")
@@ -355,9 +379,19 @@ class FleetSettings(BaseSettings):
     def shared_notes_subpath_is_relative(cls, value: str) -> str:
         return validate_shared_notes_subpath(value)
 
+    @field_validator("fleet_judge_model")
+    @classmethod
+    def judge_model_is_a_provider_uri(cls, value: str) -> str:
+        provider, _, name = value.strip().partition(":/")
+        if not provider or not name.strip():
+            raise ValueError("Judge model must be an MLflow '<provider>:/<model>' URI")
+        return value.strip()
+
     @model_validator(mode="after")
     def databricks_tracking_requires_governed_trace_storage(self) -> FleetSettings:
-        if self.mlflow_tracking_uri.startswith("databricks"):
+        if self.mlflow_mode == "databricks":
+            if not self.mlflow_tracking_uri.startswith("databricks"):
+                raise ValueError("FLEET_MLFLOW_MODE=databricks requires a databricks tracking URI")
             required = (
                 self.mlflow_trace_catalog,
                 self.mlflow_trace_schema,
@@ -372,6 +406,29 @@ class FleetSettings(BaseSettings):
             if not self.mlflow_experiment_name.startswith("/"):
                 raise ValueError("Databricks MLflow experiment names must be absolute workspace paths")
         return self
+
+    def mlflow_target(self) -> MlflowTarget:
+        """Resolve the MLflow destination. Local mode ignores Databricks-only URIs and workspace paths."""
+        if self.mlflow_mode == "databricks":
+            return MlflowTarget(
+                "databricks", self.mlflow_tracking_uri, self.mlflow_experiment_name, self.mlflow_eval_experiment_name
+            )
+        uri = self.mlflow_tracking_uri
+        experiment = self.mlflow_experiment_name
+        eval_experiment = self.mlflow_eval_experiment_name
+        local_eval = eval_experiment and not eval_experiment.startswith("/")
+        return MlflowTarget(
+            "local",
+            LOCAL_MLFLOW_URI if uri.startswith("databricks") else uri,
+            LOCAL_MLFLOW_EXPERIMENT if experiment.startswith("/") else experiment,
+            eval_experiment if local_eval else LOCAL_MLFLOW_EVAL_EXPERIMENT,
+        )
+
+    def judge_environment(self) -> dict[str, str]:
+        """Credentials MLflow's OpenAI judge provider reads from the environment for gateway judges."""
+        if not self.fleet_judge_model.startswith("openai:/"):
+            return {}
+        return {"OPENAI_API_KEY": self._gateway_api_key(), "OPENAI_API_BASE": self._gateway_base_url()}
 
     def build_lms(self) -> tuple[dspy.LM, dspy.LM, dspy.LM, Any | None]:
         """Create role-specific LMs without mutating process-global DSPy settings."""
@@ -426,6 +483,19 @@ class FleetSettings(BaseSettings):
                 "refusing to fall back to another inference backend"
             )
 
+        options = {
+            name: getattr(self, f"fleet_{role}_{name}")
+            for name in ("max_tokens", "temperature", "num_retries", "cache")
+        }
+        return dspy.LM(
+            model,
+            api_base=self._gateway_base_url(),
+            api_key=self._gateway_api_key(),
+            engine="lm15",
+            **{key: value for key, value in options.items() if value is not None},
+        )
+
+    def _gateway_base_url(self) -> str:
         base_url = self.fleet_llm_base_url.strip()
         if not base_url and self.databricks_host.strip():
             host = self.databricks_host.strip().rstrip("/")
@@ -439,22 +509,13 @@ class FleetSettings(BaseSettings):
                 "Databricks Unity Gateway models require FLEET_LLM_BASE_URL or DATABRICKS_HOST "
                 "with an HTTPS workspace URL"
             )
+        return base_url
 
+    def _gateway_api_key(self) -> str:
         api_key = self.databricks_token.get_secret_value()
         if not api_key:
             raise ValueError("Databricks Unity Gateway models require DATABRICKS_TOKEN")
-
-        options = {
-            name: getattr(self, f"fleet_{role}_{name}")
-            for name in ("max_tokens", "temperature", "num_retries", "cache")
-        }
-        return dspy.LM(
-            model,
-            api_base=base_url,
-            api_key=api_key,
-            engine="lm15",
-            **{key: value for key, value in options.items() if value is not None},
-        )
+        return api_key
 
 
 @lru_cache(maxsize=1)

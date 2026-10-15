@@ -16,6 +16,13 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- MLflow defaults to the local server: `FLEET_MLFLOW_MODE=local` (default) sends `fleet serve`,
+  `fleet eval` and optimizer traces to `http://127.0.0.1:5001` (`fleet-rlm-dev` / `fleet-rlm-eval`)
+  and ignores `databricks://` URIs and workspace experiment paths left in `.env`. Unity Catalog
+  trace settings are validated only with `FLEET_MLFLOW_MODE=databricks`. `fleet serve` warns and
+  runs untraced when the local server is unreachable. The config view reports `mlflow_target`.
+- The default MLflow judge is `openai:/system.ai.deepseek-v4-1-flash` through the AI Gateway.
+- Invalid configuration exits with a one-line `fleet: error: invalid configuration: …`.
 - Lite Daytona execution now submits identified work and polls through bounded control
   requests. Lost responses are reconciled without blindly replaying Python; changed
   daemons and uncertain outcomes abort the Turn and request remote stop.

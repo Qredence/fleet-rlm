@@ -50,13 +50,17 @@ compiled_program_dir = ".fleet/compiled"
 local_skills_dir = ".fleet/skills"
 
 [mlflow]
-tracking_uri = "sqlite:///mlflow.db"
-experiment_name = "fleet-rlm-production"
-# Keep evaluation traces separate; set eval_experiment_name when evaluating.
+# local: traces, eval and optimizer runs go to the 127.0.0.1 server `fleet cli` starts.
+# In local mode databricks:// URIs and /workspace experiment paths from .env are ignored.
+# databricks: use tracking_uri plus the Unity Catalog trace_* settings and warehouse ID.
+mode = "local"
+tracking_uri = "http://127.0.0.1:5001"
+experiment_name = "fleet-rlm-dev"
+eval_experiment_name = "fleet-rlm-eval"
 
 [evaluation]
-# Omitted judge_model uses the validated environment override or built-in default.
-# Verify an accessible judge endpoint before running judge-based evaluation.
+# openai:/<service-id> judges route through the AI Gateway with DATABRICKS_TOKEN.
+judge_model = "openai:/system.ai.deepseek-v4-1-flash"
 
 [server]
 host = "127.0.0.1"

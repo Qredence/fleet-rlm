@@ -446,9 +446,10 @@ def main(argv: list[str] | None = None) -> None:
         promote_candidate(candidate_path, directory / f"{session_id}.active.json", manifest, gate, authorized=True)
         print(f"Activated {version}. Reload at a session turn boundary; no remote runtime was changed.")
         return
+    target = settings.mlflow_target()
     experiment_id = configure_mlflow_observability(
-        settings.mlflow_experiment_name,
-        settings.mlflow_tracking_uri,
+        target.experiment_name,
+        target.tracking_uri,
         trace_catalog=settings.mlflow_trace_catalog,
         trace_schema=settings.mlflow_trace_schema,
         trace_table_prefix=settings.mlflow_trace_table_prefix,
@@ -463,7 +464,7 @@ def main(argv: list[str] | None = None) -> None:
     ).build_local_catalog_xml()
     trainset, devset, holdout = curate_dataset(
         settings.fleet_database_url,
-        settings.mlflow_experiment_name,
+        target.experiment_name,
         session_id,
         catalog,
         validation_ratio=args.validation_ratio,

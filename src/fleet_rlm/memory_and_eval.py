@@ -1063,7 +1063,7 @@ def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback:
     return Feedback(value=correct, rationale=f"Expected route {expected!r}, observed {actual!r}.")
 
 
-def build_mlflow_scorer_suite(judge_model: str = "databricks:/databricks-claude-sonnet-4") -> list[Any]:
+def build_mlflow_scorer_suite(judge_model: str = "openai:/system.ai.deepseek-v4-1-flash") -> list[Any]:
     """Construct the GenAI judge suite for explicit offline/online evaluation runs."""
     return [
         RelevanceToQuery(model=judge_model),

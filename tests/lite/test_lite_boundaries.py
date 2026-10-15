@@ -534,6 +534,7 @@ def test_history_is_bounded_and_keeps_the_newest_turns_in_order() -> None:
 def test_databricks_mlflow_configuration_requires_governed_trace_storage() -> None:
     with pytest.raises(ValueError, match="Unity Catalog"):
         FleetSettings(
+            mlflow_mode="databricks",
             mlflow_tracking_uri="databricks",
             mlflow_trace_catalog="",
             mlflow_trace_schema="",
@@ -541,6 +542,7 @@ def test_databricks_mlflow_configuration_requires_governed_trace_storage() -> No
         )
 
     configured = FleetSettings(
+        mlflow_mode="databricks",
         mlflow_tracking_uri="databricks",
         mlflow_experiment_name="/Shared/fleet-rlm",
         mlflow_trace_catalog="fleet",

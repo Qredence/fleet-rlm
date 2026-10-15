@@ -196,3 +196,45 @@ def test_cli_reports_invalid_configuration_without_traceback(monkeypatch, capsys
     assert err.startswith("fleet: error: invalid configuration: ")
     assert field in err
     assert "Traceback" not in err
+
+
+def test_local_mlflow_mode_ignores_databricks_targets(monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks://profile")
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "/Users/someone/fleet")
+    monkeypatch.setenv("FLEET_MLFLOW_EVAL_EXPERIMENT_NAME", "/Users/someone/fleet-eval")
+    target = FleetSettings(_env_file=None).mlflow_target()
+    assert target == ("local", "http://127.0.0.1:5001", "fleet-rlm-dev", "fleet-rlm-eval")
+
+
+def test_local_mlflow_mode_keeps_local_targets(monkeypatch):
+    monkeypatch.setenv("FLEET_MLFLOW_TRACKING_URI", "sqlite:///local.db")
+    monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "mine")
+    target = FleetSettings(_env_file=None).mlflow_target()
+    assert (target.tracking_uri, target.experiment_name) == ("sqlite:///local.db", "mine")
+
+
+def test_databricks_mlflow_mode_is_validated_only_when_selected(monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks://profile")
+    assert FleetSettings(_env_file=None).mlflow_target().mode == "local"
+    monkeypatch.setenv("FLEET_MLFLOW_MODE", "databricks")
+    with pytest.raises(ValidationError, match="Unity Catalog"):
+        FleetSettings(_env_file=None)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+    with pytest.raises(ValidationError, match="databricks tracking URI"):
+        FleetSettings(_env_file=None)
+
+
+def test_gateway_judge_environment_uses_gateway_credentials():
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_base_url="https://workspace.example/ai-gateway/mlflow/v1",
+        databricks_token="token",
+    )
+    assert settings.fleet_judge_model == "openai:/system.ai.deepseek-v4-1-flash"
+    assert settings.judge_environment() == {
+        "OPENAI_API_KEY": "token",
+        "OPENAI_API_BASE": "https://workspace.example/ai-gateway/mlflow/v1",
+    }
+    assert FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint").judge_environment() == {}
+    with pytest.raises(ValidationError, match="provider"):
+        FleetSettings(_env_file=None, fleet_judge_model="deepseek")

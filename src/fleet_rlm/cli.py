@@ -543,8 +543,10 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
 
     from fleet_rlm import evaluation
 
-    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
+    target = settings.mlflow_target()
+    mlflow.set_tracking_uri(target.tracking_uri)
+    if target.mode == "databricks":
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
     if args.eval_command == "label":
         evaluation.label_trace(
             args.trace_id,
@@ -557,12 +559,16 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         )
         _CONSOLE.print(f"Labeled {args.trace_id} as {args.status}")
         return
-    if not settings.mlflow_eval_experiment_name:
+    if not target.eval_experiment_name:
         raise SystemExit("set FLEET_MLFLOW_EVAL_EXPERIMENT_NAME to the evaluation experiment")
-    experiment = mlflow.set_experiment(settings.mlflow_eval_experiment_name)
+    experiment = mlflow.set_experiment(target.eval_experiment_name)
     cases = evaluation.synthetic_cases(seed=args.seed)
     if args.eval_command == "dataset":
-        name = args.name or f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.fleet_rlm_eval_cases"
+        name = args.name or (
+            f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.fleet_rlm_eval_cases"
+            if target.mode == "databricks"
+            else "fleet_rlm_eval_cases"
+        )
         from fleet_rlm import benchmarks
 
         if args.long_context:
@@ -576,6 +582,8 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
         _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
         return
+    for name, value in settings.judge_environment().items():
+        os.environ.setdefault(name, value)
     result = evaluation.evaluate_cases(
         cases[: args.limit] if args.limit else cases,
         base_url=args.url,
@@ -608,20 +616,24 @@ def main(argv: list[str] | None = None) -> None:
     )
     cli.add_argument("--url", default=None, help="connect to this server only; do not start anything")
     cli.add_argument("--session", default=f"sess_{uuid.uuid4().hex[:8]}")
+    target = settings.mlflow_target()
     cli.add_argument(
         "--mlflow",
         choices=("local", "env"),
-        default="local",
-        help="local: run a local MLflow server and trace to it; env: use the configured tracking URI",
+        default="local" if target.mode == "local" else "env",
+        help="local: run a local MLflow server and trace to it; env: use the configured tracking URI "
+        "(default follows FLEET_MLFLOW_MODE)",
     )
     cli.add_argument("--mlflow-port", type=int, default=5001)
-    cli.add_argument("--mlflow-experiment", default="fleet-rlm-dev")
+    cli.add_argument("--mlflow-experiment", default=target.experiment_name)
     cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
 
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
     dataset = eval_commands.add_parser("dataset", help="create the synthetic evaluation dataset")
-    dataset.add_argument("--name", default="", help="catalog.schema.table (default: trace catalog/schema)")
+    dataset.add_argument(
+        "--name", default="", help="dataset name (databricks mode: catalog.schema.table from the trace settings)"
+    )
     dataset.add_argument("--seed", type=int, default=7)
     dataset.add_argument("--long-context", action="store_true", help="add synthetic 20K-200K character log cases")
     dataset.add_argument("--oolong", type=int, default=0, metavar="N", help="add N Oolong-synth benchmark cases")

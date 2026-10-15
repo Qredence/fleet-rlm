@@ -20,7 +20,7 @@ source control.
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
 | `FLEET_SUB_MODEL` | `openai/system.ai.claude-haiku-5-5` | Sub-model identifier. |
 | `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Reflection model for optimization. |
-| `FLEET_JUDGE_MODEL` | `databricks:/databricks-claude-sonnet-4` | MLflow judge model. |
+| `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. |
 | `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |
 | `DATABRICKS_TOKEN` | empty | Databricks credential for Unity Gateway `openai/` models. |
 | `FLEET_LLM_BASE_URL` | derived from `DATABRICKS_HOST` | Optional Unity Gateway base URL override, normally `https://<workspace-host>/ai-gateway/mlflow/v1`. |
@@ -37,13 +37,14 @@ source control.
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
 | `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |
-| `FLEET_MLFLOW_TRACKING_URI` | `sqlite:///mlflow.db` | MLflow tracking destination. `MLFLOW_TRACKING_URI` is also accepted. |
-| `FLEET_MLFLOW_EXPERIMENT_NAME` | `fleet-rlm-production` | MLflow experiment name. `MLFLOW_EXPERIMENT_NAME` is also accepted. |
+| `FLEET_MLFLOW_MODE` | `local` | `local` sends traces, eval and optimizer runs to the local MLflow server; `databricks` uses the workspace URI and Unity Catalog trace storage. |
+| `FLEET_MLFLOW_TRACKING_URI` | `http://127.0.0.1:5001` | MLflow tracking destination. `MLFLOW_TRACKING_URI` is also accepted. In `local` mode a `databricks` URI is ignored. |
+| `FLEET_MLFLOW_EXPERIMENT_NAME` | `fleet-rlm-dev` | MLflow experiment name. `MLFLOW_EXPERIMENT_NAME` is also accepted. In `local` mode an absolute workspace path is ignored. |
 | `FLEET_MLFLOW_TRACE_CATALOG` | empty | Optional Unity Catalog trace catalog. |
 | `FLEET_MLFLOW_TRACE_SCHEMA` | empty | Optional Unity Catalog trace schema. |
 | `FLEET_MLFLOW_TRACE_TABLE_PREFIX` | empty | Optional trace table prefix. |
 | `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | empty | SQL warehouse ID for Databricks tracing. |
-| `FLEET_MLFLOW_EVAL_EXPERIMENT_NAME` | empty | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
+| `FLEET_MLFLOW_EVAL_EXPERIMENT_NAME` | `fleet-rlm-eval` (local mode) | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |
@@ -52,11 +53,23 @@ Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
 validation; it does not authenticate callers. The API has no authentication.
 
-Databricks MLflow requires all of `FLEET_MLFLOW_TRACE_CATALOG`,
-`FLEET_MLFLOW_TRACE_SCHEMA`, and
+`local` is the default MLflow mode. `fleet cli` starts (or reuses) the local
+server on `127.0.0.1:5001`, and `fleet serve`, `fleet eval` and the optimizer
+use the same target. `fleet serve` logs a warning and runs without tracing when
+the local server is not reachable. In `local` mode, Databricks values left in
+`.env` (`databricks://` URIs, `/Users/...` experiment paths) are ignored rather
+than rejected; `GET /sessions/{id}/config` reports the resolved destination as
+`mlflow_target`.
+
+`FLEET_MLFLOW_MODE=databricks` requires a `databricks` tracking URI and all of
+`FLEET_MLFLOW_TRACE_CATALOG`, `FLEET_MLFLOW_TRACE_SCHEMA`, and
 `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID`. The experiment name must be an
-absolute workspace path (for example, `/Shared/fleet-rlm`). Local SQLite is
-the default and does not require trace-destination settings.
+absolute workspace path (for example, `/Shared/fleet-rlm`).
+
+These MLflow-related names are not read by Fleet and have no effect:
+`MLFLOW_ENABLED`, `FLEET_MLFLOW_TRACING_ENABLED`, `FLEET_MLFLOW_EXPOSE_TRACE_ID`,
+`MLFLOW_DSPY_LOG_TRACES_FROM_COMPILE`, `MLFLOW_DSPY_LOG_TRACES_FROM_EVAL`,
+`MLFLOW_DSPY_LOG_COMPILES`, `MLFLOW_REGISTRY_URI`.
 
 Daytona-backed execution needs valid key, org, and Volume IDs as well as a
 reachable provider. A model identifier alone does not configure provider

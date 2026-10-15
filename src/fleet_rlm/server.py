@@ -33,6 +33,7 @@ from starlette.background import BackgroundTask
 
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.interpreter import _ACTIVE_MANAGER, _DAEMON_PROTOCOL, DaytonaSandboxManager, validate_session_id
+from fleet_rlm.launcher import mlflow_is_healthy
 from fleet_rlm.memory_and_eval import (
     AdaptiveFleetEngine,
     VolumePostgresHarness,
@@ -385,12 +386,25 @@ def create_app(
     async def lifespan(application: FastAPI):
         if initialize_db:
             await asyncio.to_thread(initialize_database, resolved.fleet_database_url)
-        if configure_observability:
+        target = resolved.mlflow_target()
+        local_server = target.mode == "local" and target.tracking_uri.startswith("http")
+        if (
+            configure_observability
+            and local_server
+            and not await asyncio.to_thread(mlflow_is_healthy, target.tracking_uri)
+        ):
+            _LOGGER.warning(
+                "Local MLflow is not reachable at %s; tracing is off. Start it with `fleet cli` "
+                "or set FLEET_MLFLOW_MODE=databricks.",
+                target.tracking_uri,
+            )
+            application.state.mlflow_experiment_id = None
+        elif configure_observability:
             try:
                 application.state.mlflow_experiment_id = await asyncio.to_thread(
                     configure_mlflow_observability,
-                    resolved.mlflow_experiment_name,
-                    resolved.mlflow_tracking_uri,
+                    target.experiment_name,
+                    target.tracking_uri,
                     trace_catalog=resolved.mlflow_trace_catalog,
                     trace_schema=resolved.mlflow_trace_schema,
                     trace_table_prefix=resolved.mlflow_trace_table_prefix,
