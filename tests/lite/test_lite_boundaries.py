@@ -799,6 +799,23 @@ def test_daemon_preserves_tool_bindings_and_completes_host_bridge_round_trip(
 ) -> None:
     base_url, token, _ = interpreter_daemon
     result: dict[str, object] = {}
+    # Accelerate any finite condition deadline so a slow reply regression takes
+    # milliseconds, not two minutes. An unbounded wait still awaits the reply.
+    _daemon_request(
+        base_url,
+        token,
+        "/exec",
+        {
+            "ns_id": "ns_00000003",
+            "code": (
+                "import threading\n"
+                "original_wait_for = threading.Condition.wait_for\n"
+                "def accelerated_wait_for(self, predicate, timeout=None):\n"
+                "    return original_wait_for(self, predicate, None if timeout is None else min(timeout, 0.05))\n"
+                "threading.Condition.wait_for = accelerated_wait_for"
+            ),
+        },
+    )
 
     def execute() -> None:
         result.update(
@@ -823,6 +840,7 @@ def test_daemon_preserves_tool_bindings_and_completes_host_bridge_round_trip(
     call = _poll_for_call(base_url, token)
     assert call["tool"] == "sample_tool"
     assert call["args"] == ["arg"]
+    time.sleep(0.15)
     _daemon_request(base_url, token, "/reply", {"id": call["id"], "value": "bridged result"})
     thread.join(timeout=3)
 

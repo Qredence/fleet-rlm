@@ -142,12 +142,9 @@ def _bridge_call(ns_id, tool_name, args, kwargs):
         CALL_NAMESPACES[call_id] = ns_id
         POLL_CONDITION.notify_all()
     with POLL_CONDITION:
-        if not POLL_CONDITION.wait_for(lambda: call_id in RESULTS, timeout=120.0):
-            PENDING_CALLS.pop(call_id, None)
-            IN_FLIGHT_CALLS.discard(call_id)
-            RESULTS.pop(call_id, None)
-            CALL_NAMESPACES.pop(call_id, None)
-            raise TimeoutError("Host tool call timed out")
+        # The turn watchdog / namespace closure owns cancellation, not an
+        # independent per-tool timer that can abandon still-running child work.
+        POLL_CONDITION.wait_for(lambda: call_id in RESULTS)
         result = RESULTS.pop(call_id)
         CALL_NAMESPACES.pop(call_id, None)
     if result.get("error"):
@@ -644,12 +641,12 @@ class DaytonaSandboxManager:
                 self._ensure_daemon(self._sandbox)
             return self._sandbox
 
-    def _remote_exec(self, sandbox: Any, code: str) -> str:
+    def _remote_exec(self, sandbox: Any, code: str, *, timeout: int | None = None) -> str:
         encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
         command = (
             "python3 -c 'import base64; exec(compile(base64.b64decode(\"" + encoded + '"), "<fleet-remote>", "exec"))\''
         )
-        result = sandbox.process.exec(command)
+        result = sandbox.process.exec(command, timeout=timeout)
         if getattr(result, "exit_code", 0) != 0:
             raise RuntimeError("Remote Daytona command failed")
         return getattr(result, "result", "") or ""
@@ -724,9 +721,16 @@ class DaytonaSandboxManager:
                 f"headers={{'Authorization':authorization,'Content-Type':'application/json'}}\n"
                 f"r=urllib.request.Request('http://127.0.0.1:8765{path}',data=body,headers=headers)\n"
             )
-        request_code += "print(urllib.request.urlopen(r,timeout=180).read().decode())"
+        # Long execution waits are bounded by the shared turn watchdog. Keep
+        # transport timeouts for short control RPCs, not an extra execution cap.
+        request_timeout = None if path == "/exec" else 180
+        request_code += f"print(urllib.request.urlopen(r,timeout={request_timeout!r}).read().decode())"
         try:
-            response = self._remote_exec(sandbox, request_code)
+            response = (
+                self._remote_exec(sandbox, request_code, timeout=0)
+                if path == "/exec"
+                else self._remote_exec(sandbox, request_code)
+            )
         except Exception:
             with self._lock:
                 self._daemon_ready = False
