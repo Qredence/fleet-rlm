@@ -22,6 +22,8 @@ def isolated_settings(tmp_path, monkeypatch):
             names.update(field.validation_alias.choices)
     for name in names:
         monkeypatch.delenv(name, raising=False)
+    # These tests exercise .env precedence from a private tmp_path working directory.
+    monkeypatch.setitem(FleetSettings.model_config, "env_file", ".env")
 
 
 def toml(text):

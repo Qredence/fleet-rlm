@@ -1,5 +1,10 @@
 """Fleet-RLM Lite: DSPy Flex/RLM, Daytona, Postgres, Agent Skills, and MLflow."""
 
+import os
+
+# MLflow prints a coding-agent hint on import (via DSPy); it is noise in the Fleet CLI and server logs.
+os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
+
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager
 from fleet_rlm.memory_and_eval import (
