@@ -17,7 +17,9 @@ from typing import Any
 
 import dspy
 import pytest
+from dspy.adapters.chat_adapter import ChatAdapter
 from dspy.primitives.code_interpreter import CodeExecutionError
+from dspy.utils.exceptions import AdapterParseError
 from fastapi.testclient import TestClient
 
 from fleet_rlm.config import FleetSettings
@@ -679,14 +681,14 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
         app.state.mlflow_experiment_id = "experiment-test-id"
         response = client.post("/sessions/session-a/turn", json={"task": "summarize this file"})
 
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert response.status_code == 200
     assert {
         "metadata": {"mlflow.trace.session": "session-a"},
         "request_preview": "summarize this file",
     } in trace_updates
     assert {"response_preview": "processed locally"} in trace_updates
 
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert events[0]["event"] == "turn_status"
     assert events[0]["payload"] == {"phase": "preparation"}
@@ -1100,3 +1102,195 @@ def test_bridge_and_execution_events_show_evidence_and_failures(monkeypatch: pyt
         assert any(e["event"] == "repl_code" and e["execution_id"] == output["execution_id"] for e in events)
         assert output["duration_ms"] >= 0
         assert output["agent_id"] == manager.agent_id
+
+
+def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_turn(monkeypatch) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+    )
+    tools = engine.primary_rlm._user_tools
+
+    class FailingChild:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.generate_action = dspy.Predict("a -> b")
+
+        def __call__(self, **_kwargs):
+            raise AdapterParseError(
+                adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[ ## reasoning ## ]]"
+            )
+
+    monkeypatch.setattr(dspy, "RLM", FailingChild)
+
+    result = tools["spawn_agent"](subtask="count refunds in files/a.log", input_paths=[])
+    assert result["findings"] == "" and result["artifacts"] == []
+    assert result["error"].startswith("child agent failed (AdapterParseError)")
+    assert tools["sub_rlm"](subtask="investigate").startswith("ERROR: child agent failed (AdapterParseError)")
+
+
+def test_child_budget_exhaustion_still_aborts_the_turn(monkeypatch) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+    )
+
+    class ExhaustedChild:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.generate_action = dspy.Predict("a -> b")
+
+        def __call__(self, **_kwargs):
+            raise RuntimeError("Shared RLM budget exhausted (32 calls)")
+
+    monkeypatch.setattr(dspy, "RLM", ExhaustedChild)
+
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        engine.primary_rlm._user_tools["spawn_agent"](subtask="subtask", input_paths=[])
+
+
+def _parse_error() -> AdapterParseError:
+    return AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
+
+
+def _call_adapter(adapter: FleetRLMChatAdapter):
+    return adapter(None, {}, dspy.Signature("a -> b"), [], {"a": "x"})
+
+
+def test_adapter_reasks_once_then_returns_the_valid_reply(monkeypatch) -> None:
+    calls = []
+
+    def flaky(_self, *_args, **_kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise _parse_error()
+        return [{"b": "ok"}]
+
+    monkeypatch.setattr(ChatAdapter, "__call__", flaky)
+    assert _call_adapter(FleetRLMChatAdapter()) == [{"b": "ok"}]
+    assert len(calls) == 2
+
+
+def test_adapter_gives_up_after_the_retry_budget(monkeypatch) -> None:
+    attempts = []
+
+    def always_bad(_self, *_args, **_kwargs):
+        attempts.append(1)
+        raise _parse_error()
+
+    monkeypatch.setattr(ChatAdapter, "__call__", always_bad)
+    with pytest.raises(AdapterParseError):
+        _call_adapter(FleetRLMChatAdapter(parse_retries=2))
+    assert len(attempts) == 3
+
+
+def test_adapter_does_not_retry_other_errors(monkeypatch) -> None:
+    attempts = []
+
+    def exhausted(_self, *_args, **_kwargs):
+        attempts.append(1)
+        raise RuntimeError("Shared RLM budget exhausted (32 calls)")
+
+    monkeypatch.setattr(ChatAdapter, "__call__", exhausted)
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        _call_adapter(FleetRLMChatAdapter())
+    assert len(attempts) == 1
+
+
+def test_adapter_async_path_reasks_too(monkeypatch) -> None:
+    import asyncio
+
+    calls = []
+
+    async def flaky(_self, *_args, **_kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise _parse_error()
+        return [{"b": "ok"}]
+
+    monkeypatch.setattr(ChatAdapter, "acall", flaky)
+    result = asyncio.run(FleetRLMChatAdapter().acall(None, {}, dspy.Signature("a -> b"), [], {"a": "x"}))
+    assert result == [{"b": "ok"}] and len(calls) == 2
+
+
+def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import fleet_rlm.server as server
+
+    def failing_engine(**_kwargs):
+        raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
+
+    class RuntimeRegistry:
+        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None]):
+            self.runtime = SimpleNamespace(
+                sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: [], read_workspace_file=lambda _path: b""),
+                harness=SimpleNamespace(
+                    hydrate_volume_from_postgres=lambda _session_id: ("summary", "history"),
+                    sync_volume_to_postgres=lambda **_kwargs: [],
+                ),
+                skill_mgr=SimpleNamespace(
+                    sync_local_skills_to_volume=lambda: 1,
+                    build_catalog_xml=lambda: "<available_skills></available_skills>",
+                ),
+                context=None,
+                engine=failing_engine,
+                turn_lock=asyncio.Lock(),
+            )
+
+        async def get(self, _session_id: str) -> Any:
+            return self.runtime
+
+        async def close(self) -> None:
+            return None
+
+    @contextmanager
+    def fake_span(**_kwargs: Any) -> Any:
+        yield SimpleNamespace(set_inputs=lambda _value: None, set_outputs=lambda _value: None)
+
+    @contextmanager
+    def fake_dspy_context(**_kwargs: Any) -> Any:
+        yield
+
+    monkeypatch.setattr(server, "SessionRuntimeRegistry", RuntimeRegistry)
+    monkeypatch.setattr(
+        server, "dspy", SimpleNamespace(settings=SimpleNamespace(callbacks=[]), context=fake_dspy_context)
+    )
+    monkeypatch.setattr(server.mlflow, "start_span", fake_span)
+    monkeypatch.setattr(server.mlflow, "update_current_trace", lambda **_kwargs: None)
+    monkeypatch.setattr(server.mlflow, "set_experiment", lambda **_kwargs: None)
+    monkeypatch.setattr(server.mlflow, "get_last_active_trace_id", lambda: "trace-failed-id")
+    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
+
+    with TestClient(app) as client:
+        app.state.mlflow_experiment_id = "experiment-test-id"
+        response = client.post("/sessions/session-a/turn", json={"task": "anything"})
+
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    failure = next(event for event in events if event["event"] == "error")
+    assert failure["payload"]["trace_id"] == "trace-failed-id"
+    assert "The Turn failed" in failure["payload"]["error"]
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("files/a.log", "files/a.log"),
+        ("/workspace/files/a.log", "files/a.log"),
+        ("skills/x/SKILL.md", "skills/x/SKILL.md"),
+    ],
+)
+def test_child_input_paths_accept_the_sandbox_absolute_form(given: str, expected: str) -> None:
+    from fleet_rlm.interpreter import _child_input_path
+
+    assert _child_input_path(given) == expected
+
+
+@pytest.mark.parametrize("bad", ["/workspace/artifacts/x", "/etc/passwd", "/workspace/files/../memory/x", "files/../x"])
+def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> None:
+    from fleet_rlm.interpreter import _child_input_path
+
+    with pytest.raises(ValueError):
+        _child_input_path(bad)

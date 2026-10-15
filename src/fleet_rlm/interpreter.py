@@ -50,6 +50,16 @@ def session_volume_subpath(session_id: str) -> str:
     return f"sessions/{validate_session_id(session_id)}"
 
 
+def _child_input_path(path: str) -> str:
+    """Validate a child input path, accepting the sandbox's absolute `/workspace/` form the model sees."""
+    if isinstance(path, str) and path.startswith("/workspace/"):
+        path = path[len("/workspace/") :]
+    clean_path = _workspace_relative_path(path)
+    if not clean_path.startswith(("files/", "skills/")):
+        raise ValueError("Child inputs must be files beneath files/ or skills/")
+    return clean_path
+
+
 def _workspace_relative_path(relative_path: str) -> str:
     if (
         not isinstance(relative_path, str)
@@ -449,10 +459,7 @@ class DaytonaSandboxManager:
                 raise ValueError("Child input file limit exceeded")
             selected_paths = []
             for path in input_paths:
-                clean_path = _workspace_relative_path(path)
-                if not clean_path.startswith(("files/", "skills/")):
-                    raise ValueError("Child inputs must be files beneath files/ or skills/")
-                selected_paths.append(clean_path)
+                selected_paths.append(_child_input_path(path))
             available_paths = set()
             for path in self.list_workspace_files():
                 try:

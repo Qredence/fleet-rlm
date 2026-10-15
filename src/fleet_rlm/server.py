@@ -918,6 +918,12 @@ def create_app(
                             "request_id": request_id,
                             "error": f"The Turn failed (request {request_id}).",
                         }
+                        failed_trace_id = None
+                        if mlflow_experiment_id:
+                            with suppress(Exception):
+                                failed_trace_id = mlflow.get_last_active_trace_id()
+                        if failed_trace_id:
+                            error_event["trace_id"] = failed_trace_id
                         if hasattr(runtime.harness, "finish_turn"):
                             with suppress(Exception):
                                 runtime.harness.finish_turn(
