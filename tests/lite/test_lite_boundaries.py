@@ -669,7 +669,8 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
         SimpleNamespace(settings=SimpleNamespace(callbacks=[global_callback]), context=fake_dspy_context),
     )
     monkeypatch.setattr(server.mlflow, "start_span", fake_span)
-    monkeypatch.setattr(server.mlflow, "update_current_trace", lambda **_kwargs: None)
+    trace_updates: list[dict] = []
+    monkeypatch.setattr(server.mlflow, "update_current_trace", lambda **kwargs: trace_updates.append(kwargs))
     monkeypatch.setattr(server.mlflow, "set_experiment", lambda **_kwargs: None)
     monkeypatch.setattr(server.mlflow, "get_last_active_trace_id", lambda: "trace-test-id")
     app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
@@ -680,6 +681,12 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
 
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     assert response.status_code == 200
+    assert {
+        "metadata": {"mlflow.trace.session": "session-a"},
+        "request_preview": "summarize this file",
+    } in trace_updates
+    assert {"response_preview": "processed locally"} in trace_updates
+
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert events[0]["event"] == "turn_status"
     assert events[0]["payload"] == {"phase": "preparation"}

@@ -17,6 +17,7 @@ import mlflow
 import psycopg
 from dspy.primitives.facade import SandboxLM
 from dspy.signatures.signature import make_signature
+from dspy.utils.exceptions import AdapterParseError
 from mlflow.entities import Feedback, SpanType
 from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, Safety, scorer
 from psycopg.rows import dict_row
@@ -42,6 +43,11 @@ def _safe_route_error(exc: Exception, route_lm: Any) -> str:
     if isinstance(api_key, str) and api_key:
         detail = detail.replace(api_key, "[redacted]")
     return detail[:500] or "no exception message"
+
+
+def _child_failure(exc: Exception) -> str:
+    """Bounded description of a failed child agent, returned to its parent instead of raised."""
+    return f"child agent failed ({type(exc).__name__}): {str(exc)[:500]}"
 
 
 def _without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
@@ -623,6 +629,11 @@ class AdaptiveFleetEngine(dspy.Module):
             try:
                 with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
                     result = child(subtask=subtask)
+            except AdapterParseError as exc:
+                # A child whose reply cannot be parsed must not abort the parent's Turn or promote its
+                # unverified files; the parent sees the failure and can retry or use other children.
+                return {"findings": "", "error": _child_failure(exc), "artifacts": []}
+            else:
                 return {
                     "findings": str(result.findings)[:20_000],
                     "artifacts": interpreters[0].manager.collect_child_artifacts() if interpreters else [],
@@ -641,8 +652,11 @@ class AdaptiveFleetEngine(dspy.Module):
                 max_iters=8,
                 max_llm_calls=25,
             )
-            with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
-                return str(child(context_hint=context_hint[:10000], subtask=subtask[:20000]).findings)[:20000]
+            try:
+                with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
+                    return str(child(context_hint=context_hint[:10000], subtask=subtask[:20000]).findings)[:20000]
+            except AdapterParseError as exc:
+                return f"ERROR: {_child_failure(exc)}"
 
         toolset = {"sub_rlm": sub_rlm, "spawn_agent": spawn_agent}
         self.flex_agent = dspy.Flex(
@@ -890,18 +904,27 @@ def configure_mlflow_observability(
     return experiment.experiment_id if experiment is not None else None
 
 
+def _lm_call_count(spans: list[Any]) -> int:
+    """Count model calls by MLflow span type, not by span-name substrings."""
+    return sum(1 for span in spans if getattr(span, "span_type", None) == SpanType.LLM)
+
+
+def _used_rlm_or_flex(spans: list[Any]) -> bool:
+    return any((span.name or "").startswith(("RLM", "Flex")) for span in spans)
+
+
 @scorer
 def rlm_trajectory_efficiency(trace: Any) -> Feedback:
     """Penalize unnecessary LM calls and visible sandbox exceptions."""
     if trace is None:
         return Feedback(value=None, rationale="No trace captured; trajectory evidence is unavailable.")
     spans = trace.search_spans()
-    lm_spans = [span for span in spans if "LM" in (span.name or "") or "Predict" in (span.name or "")]
+    lm_calls = _lm_call_count(spans)
     error_spans = [span for span in spans if "Traceback" in str(getattr(span, "outputs", ""))]
-    score = max(0.0, 1.0 - 0.015 * max(0, len(lm_spans) - 3) - 0.15 * len(error_spans))
+    score = max(0.0, 1.0 - 0.015 * max(0, lm_calls - 3) - 0.15 * len(error_spans))
     return Feedback(
         value=round(score, 3),
-        rationale=f"Observed {len(lm_spans)} LM calls and {len(error_spans)} sandbox exceptions.",
+        rationale=f"Observed {lm_calls} LM calls and {len(error_spans)} sandbox exceptions.",
     )
 
 
@@ -910,15 +933,28 @@ def jev_routing_efficiency(trace: Any) -> Feedback:
     """Score simple requests routed without starting a Flex/RLM execution."""
     if trace is None:
         return Feedback(value=None, rationale="No trace available; routing evidence is unavailable.")
-    names = [span.name or "" for span in trace.search_spans()]
-    used_rlm = any("RLM" in name or "Flex" in name for name in names)
-    lm_calls = sum(1 for name in names if "LM" in name or "Predict" in name)
+    spans = trace.search_spans()
+    used_rlm = _used_rlm_or_flex(spans)
+    lm_calls = _lm_call_count(spans)
     if not used_rlm and lm_calls <= 2:
         return Feedback(value=1.0, rationale=f"Fast path completed in {lm_calls} LM calls.")
     if used_rlm and lm_calls <= 15:
         return Feedback(value=0.95, rationale=f"Bounded RLM/Flex execution used {lm_calls} LM calls.")
     score = max(0.2, 1.0 - 0.02 * max(0, lm_calls - 15))
     return Feedback(value=round(score, 3), rationale=f"Heavy route used {lm_calls} LM calls.")
+
+
+@scorer
+def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback:
+    """Check that the turn took the labeled gold route (direct_cot, flex_pipeline, or deep_rlm)."""
+    expected = (expectations or {}).get("route")
+    if not expected:
+        return Feedback(value=None, rationale="No gold route labeled for this case.")
+    actual = outputs.get("route") if isinstance(outputs, dict) else None
+    if actual is None:
+        return Feedback(value=None, rationale="Turn output did not report a route.")
+    correct = str(actual) == str(expected)
+    return Feedback(value=correct, rationale=f"Expected route {expected!r}, observed {actual!r}.")
 
 
 def build_mlflow_scorer_suite(judge_model: str = "databricks:/databricks-claude-sonnet-4") -> list[Any]:
@@ -945,6 +981,7 @@ def build_mlflow_scorer_suite(judge_model: str = "databricks:/databricks-claude-
         ),
         rlm_trajectory_efficiency,
         jev_routing_efficiency,
+        route_correctness,
     ]
 
 

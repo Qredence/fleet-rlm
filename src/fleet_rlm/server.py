@@ -45,6 +45,7 @@ from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_TASK_CHARS = 100_000
+_TRACE_PREVIEW_CHARS = 200
 
 
 class TurnRequest(BaseModel):
@@ -856,7 +857,11 @@ def create_app(
                             memory_summary += "\n" + str(memories)[:12000]
                         with mlflow.start_span(name="fleet_turn", span_type=SpanType.CHAIN) as span:
                             span.set_inputs({"session_id": session_id, "task": req.task})
-                            mlflow.update_current_trace(metadata={"mlflow.trace.session": session_id})
+                            # Previews keep the trace list scannable; full task/answer stay on the span.
+                            mlflow.update_current_trace(
+                                metadata={"mlflow.trace.session": session_id},
+                                request_preview=req.task[:_TRACE_PREVIEW_CHARS],
+                            )
                             callbacks = [*dspy.settings.callbacks, callback]
                             with dspy.context(callbacks=callbacks, disable_history=True):
                                 prediction = runtime.engine(
@@ -890,6 +895,7 @@ def create_app(
                                 new_memory_note=learned_note,
                             )
                             span.set_outputs({"answer": answer, "route": route, "artifacts": artifacts})
+                            mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS])
                         trace_id = turn_record.get("trace_id") or (
                             mlflow.get_last_active_trace_id() if mlflow_experiment_id else None
                         )
