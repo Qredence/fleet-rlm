@@ -986,3 +986,75 @@ def test_cancelled_manager_cannot_restart_remote_execution() -> None:
     manager.end_turn()
     manager._daemon_ready = True
     assert manager.ensure_sandbox() is sandbox
+
+
+def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> None:
+    import asyncio
+
+    from fleet_rlm.server import SSERuntimeCallback
+
+    async def scenario() -> list[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
+        callback = SSERuntimeCallback(asyncio.get_running_loop(), queue)
+
+        def run() -> None:
+            def lookup(query: str, api_key: str) -> dict[str, str]:  # noqa: ARG001
+                return {"result": "found invoice", "access_token": "result-secret", "reasoning": "private-result"}
+
+            with dspy.context(callbacks=[callback], lm=dspy.utils.DummyLM([{"answer": "approved"}])):
+                dspy.Tool(lookup)(query="invoice 17", api_key="input-secret")
+                dspy.Predict("question -> answer")(question="private-prompt")
+
+        await asyncio.to_thread(run)
+        callback.close()
+        return [queue.get_nowait() for _ in range(queue.qsize())]
+
+    events = asyncio.run(scenario())
+    starts = {event["call_id"]: event for event in events if event["event"].endswith("_start")}
+    ends = [event for event in events if event["event"].endswith("_end")]
+    assert {event["event"] for event in events} >= {"tool_start", "tool_end", "module_start", "module_end"}
+    for end in ends:
+        assert end["call_id"] in starts
+        assert end["duration_ms"] >= 0
+        assert end["ok"] is True
+    serialized = json.dumps(events)
+    assert "invoice 17" in serialized and "found invoice" in serialized
+    assert all(
+        secret not in serialized for secret in ("input-secret", "result-secret", "private-result", "private-prompt")
+    )
+    assert "[redacted]" in serialized
+
+
+def test_bridge_and_execution_events_show_evidence_and_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dspy.primitives.facade import SHIM_SETUP
+
+    events: list[dict[str, Any]] = []
+    manager = DaytonaSandboxManager("key", "org", "volume", "activity-test", event_callback=events.append)
+    interpreter = DaytonaInterpreter(manager, tools={"lookup": lambda: {"value": 17, "password": "hidden"}})
+    monkeypatch.setattr(interpreter, "start", lambda: None)
+
+    def rpc(_manager: Any, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if path == "/exec" and payload["code"] == "timeout()":
+            raise TimeoutError("secret-detail")
+        return {"has_value": True, "value": 17, "stdout": "api_key=hidden\n"}
+
+    monkeypatch.setattr(DaytonaSandboxManager, "rpc", rpc)
+    interpreter._handle_host_call({"id": "bridge-17", "tool": "lookup", "args": [], "kwargs": {}})
+    interpreter._handle_host_call({"id": "bridge-18", "tool": "missing", "args": [], "kwargs": {}})
+    assert interpreter.execute(SHIM_SETUP) == 17
+    assert interpreter.execute("17") == 17
+    with pytest.raises(TimeoutError):
+        interpreter.execute("timeout()")
+    assert "hidden" not in json.dumps(events)
+    assert "secret-detail" not in json.dumps(events)
+    tool_ends = [e for e in events if e["event"] == "tool_end"]
+    assert [(e["call_id"], e["ok"]) for e in tool_ends] == [("bridge-17", True), ("bridge-18", False)]
+    assert '"value": 17' in tool_ends[0]["output"]
+    outputs = [e for e in events if e["event"] == "repl_output"]
+    assert [e["phase"] for e in outputs] == ["bootstrap", "task", "task"]
+    assert outputs[-1]["error_type"] == "TimeoutError"
+    assert outputs[-1]["error"] is True
+    for output in outputs:
+        assert any(e["event"] == "repl_code" and e["execution_id"] == output["execution_id"] for e in events)
+        assert output["duration_ms"] >= 0
+        assert output["agent_id"] == manager.agent_id

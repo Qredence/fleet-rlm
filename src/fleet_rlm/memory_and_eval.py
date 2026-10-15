@@ -789,9 +789,11 @@ class AdaptiveFleetEngine(dspy.Module):
             "workspace_manifest": workspace_manifest,
             "skills_catalog": skills_catalog,
         }
+        summary = "Hybrid router selected an execution route."
         try:
             if mode != "hybrid":
                 route = "deep_rlm" if mode == "rlm" else "flex_pipeline"
+                summary = f"Session mode {mode} selects this route without hybrid triage."
             elif self.jev_lm is None:
                 with dspy.context(lm=route_lm):
                     decision = self.triage(**triage_inputs).route
@@ -812,10 +814,17 @@ class AdaptiveFleetEngine(dspy.Module):
                 _safe_route_error(exc, self.jev_lm or self.sub_lm),
             )
             route = "deep_rlm"
+            summary = f"Route selection failed ({type(exc).__name__}); falling back to bounded RLM execution."
 
         if context is not None and route == "direct_cot":
             route = "deep_rlm"
-        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route)
+            summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
+        summary += {
+            "direct_cot": " Answer directly without code execution.",
+            "flex_pipeline": " Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
+            "deep_rlm": " Execute a bounded RLM with Daytona Python and optional child agents.",
+        }.get(route, "")
+        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route, summary=summary)
 
         if route == "direct_cot":
             with dspy.context(lm=self._metered_root):

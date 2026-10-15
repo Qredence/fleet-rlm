@@ -24,6 +24,7 @@ from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, Lis
 from dspy.signatures.signature import make_signature
 
 from fleet_rlm.dspy_support import make_choice_type
+from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE
 from fleet_rlm.workspace import WORKSPACE_CODE
 from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
@@ -1052,6 +1053,18 @@ class DaytonaInterpreter:
         tool_name = call.get("tool")
         args = call.get("args", [])
         kwargs = call.get("kwargs", {})
+        started = time.monotonic()
+        details = {"call_id": call_id, "tool": tool_name, "source": "sandbox_bridge", "namespace": self.ns_id}
+        # Facade calls and semantic LM queries return predictor internals, not tool evidence.
+        predictor_call = str(tool_name).startswith("__dspy_") or tool_name in {"llm_query", "llm_query_batched"}
+        if hasattr(self.manager, "emit"):
+            self.manager.emit(
+                "tool_start",
+                **details,
+                inputs="[predictor payload omitted]"
+                if predictor_call
+                else activity_preview({"args": args, "kwargs": kwargs}),
+            )
         active_token = _ACTIVE_MANAGER.set(self.manager)
         try:
             if not isinstance(args, list) or not isinstance(kwargs, dict):
@@ -1104,7 +1117,23 @@ class DaytonaInterpreter:
             else:
                 raise KeyError(f"Unknown bridged tool: {tool_name}")
             self.manager.rpc("/reply", {"id": call_id, "value": value})
+            if hasattr(self.manager, "emit"):
+                self.manager.emit(
+                    "tool_end",
+                    **details,
+                    ok=True,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                    output="[predictor payload omitted]" if predictor_call else activity_preview(value),
+                )
         except Exception as exc:
+            if hasattr(self.manager, "emit"):
+                self.manager.emit(
+                    "tool_end",
+                    **details,
+                    ok=False,
+                    error_type=type(exc).__name__,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
             try:
                 self.manager.rpc("/reply", {"id": call_id, "error": str(exc)[:2000]})
             except Exception:
@@ -1143,13 +1172,54 @@ class DaytonaInterpreter:
         if variables is not None and not isinstance(variables, dict):
             raise TypeError("Interpreter variables must be an object")
         self.start()
+        from dspy.primitives.facade import SHIM_SETUP
+
+        execution_id = uuid.uuid4().hex
+        phase = "bootstrap" if code == SHIM_SETUP else "task"
+        started = time.monotonic()
         if hasattr(self.manager, "check_turn"):
             self.manager.check_turn()
-        response = self.manager.rpc(
-            "/exec",
-            {"ns_id": self.ns_id, "code": code, "variables": variables or {}, "tools": list(self.tools)},
-        )
+        if hasattr(self.manager, "emit"):
+            self.manager.emit(
+                "repl_code",
+                code=activity_text(code),
+                namespace=self.ns_id,
+                execution_id=execution_id,
+                phase=phase,
+            )
+        try:
+            response = self.manager.rpc(
+                "/exec",
+                {"ns_id": self.ns_id, "code": code, "variables": variables or {}, "tools": list(self.tools)},
+            )
+        except Exception as exc:
+            if hasattr(self.manager, "emit"):
+                self.manager.emit(
+                    "repl_output",
+                    namespace=self.ns_id,
+                    execution_id=execution_id,
+                    phase=phase,
+                    error=True,
+                    error_type=type(exc).__name__,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
+            raise
         from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
+
+        if hasattr(self.manager, "emit"):
+            self.manager.emit(
+                "repl_output",
+                namespace=self.ns_id,
+                execution_id=execution_id,
+                phase=phase,
+                duration_ms=round((time.monotonic() - started) * 1000),
+                stdout=activity_text(str(response.get("stdout", ""))),
+                stderr=activity_text(str(response.get("stderr", ""))),
+                value=activity_preview(
+                    response.get("final") if response.get("final") is not None else response.get("value")
+                ),
+                error=bool(response.get("error")),
+            )
 
         if response.get("final") is not None:
             return FinalOutput(response["final"])

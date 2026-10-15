@@ -22,7 +22,7 @@ from typing import Any
 import dspy
 import mlflow
 import psycopg
-from dspy.utils.callback import BaseCallback
+from dspy.utils.callback import ACTIVE_CALL_ID, BaseCallback
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -32,13 +32,14 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from fleet_rlm.config import FleetSettings, get_settings
-from fleet_rlm.interpreter import DaytonaSandboxManager, validate_session_id
+from fleet_rlm.interpreter import _ACTIVE_MANAGER, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.memory_and_eval import (
     AdaptiveFleetEngine,
     VolumePostgresHarness,
     configure_mlflow_observability,
     initialize_database,
 )
+from fleet_rlm.observability import activity_preview
 from fleet_rlm.skills import SkillManager
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -208,6 +209,8 @@ class SSERuntimeCallback(BaseCallback):
         self._closed = threading.Event()
         self._pending: set[Future] = set()
         self._pending_lock = threading.Lock()
+        self._calls: dict[str, dict[str, Any]] = {}
+        self._calls_lock = threading.Lock()
 
     def close(self) -> None:
         self._closed.set()
@@ -236,25 +239,68 @@ class SSERuntimeCallback(BaseCallback):
             with self._pending_lock:
                 self._pending.discard(future)
 
-    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
-        self._emit({"event": "module_start", "module": instance.__class__.__name__})
+    def _start(self, kind: str, call_id: str, **details: Any) -> None:
+        manager = _ACTIVE_MANAGER.get() or self.manager
+        identity = (
+            {
+                "agent_id": manager.agent_id,
+                "parent_agent_id": manager.parent.agent_id if manager.parent else None,
+                "sandbox_id": getattr(manager._sandbox, "id", None),
+            }
+            if manager is not None
+            else {}
+        )
+        details["parent_call_id"] = ACTIVE_CALL_ID.get()
+        with self._calls_lock:
+            self._calls[call_id] = {"started": time.monotonic(), **identity, **details}
+        self._emit({"event": f"{kind}_start", "call_id": call_id, **identity, **details})
 
-    def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
-        self._emit({"event": "tool_start", "tool": str(getattr(instance, "name", instance.__class__.__name__))[:100]})
+    def _end(self, kind: str, call_id: str, exception: BaseException | None, **details: Any) -> None:
+        with self._calls_lock:
+            started = self._calls.pop(call_id, {})
+        timestamp = started.pop("started", None)
+        started.pop("inputs", None)
+        self._emit(
+            {
+                "event": f"{kind}_end",
+                "call_id": call_id,
+                **started,
+                "duration_ms": round((time.monotonic() - timestamp) * 1000) if timestamp is not None else None,
+                "ok": exception is None,
+                "error_type": type(exception).__name__ if exception else None,
+                **details,
+            }
+        )
+
+    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
+        self._start("module", call_id, module=instance.__class__.__name__)
+
+    def on_module_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
+        # Predictor outputs can contain private reasoning; report status, never harvest them.
+        self._end("module", call_id, exception)
+
+    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
+        self._start("lm", call_id, model=str(getattr(instance, "model", "unknown"))[:150])
+
+    def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
+        self._end("lm", call_id, exception)
+
+    def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
+        self._start(
+            "tool",
+            call_id,
+            tool=str(getattr(instance, "name", instance.__class__.__name__))[:100],
+            source="dspy",
+            inputs=activity_preview(inputs),
+        )
 
     def on_tool_end(
         self,
-        call_id: str,  # noqa: ARG002
-        outputs: dict[str, Any] | None,  # noqa: ARG002
+        call_id: str,
+        outputs: dict[str, Any] | None,
         exception: BaseException | None = None,
     ) -> None:
-        self._emit(
-            {
-                "event": "tool_end",
-                "ok": exception is None,
-                "error_type": type(exception).__name__ if exception else None,
-            }
-        )
+        self._end("tool", call_id, exception, output=activity_preview(outputs))
 
 
 def create_app(
