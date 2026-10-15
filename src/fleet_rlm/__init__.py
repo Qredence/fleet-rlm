@@ -1,4 +1,8 @@
-"""Fleet-RLM Lite: DSPy Flex/RLM, Daytona, Postgres, Agent Skills, and MLflow."""
+"""Fleet-RLM Lite: DSPy Flex/RLM, Daytona, Postgres, Agent Skills, and MLflow.
+
+Import from the subpackages: `api` (HTTP app), `engine` (routes, signatures, Turn program),
+`sandbox` (Daytona), `store` (PostgreSQL), `optimize` (evaluation and GEPA), `tui` (terminal client).
+"""
 
 import os
 
@@ -6,27 +10,6 @@ import os
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
 from fleet_rlm.config import FleetSettings, get_settings
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
-from fleet_rlm.observability import configure_mlflow_observability
-from fleet_rlm.optimize.metric import gepa_mlflow_metric
-from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite, jev_routing_efficiency, rlm_trajectory_efficiency
-from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
-from fleet_rlm.sandbox.manager import DaytonaSandboxManager
-from fleet_rlm.skills import SkillManager, parse_and_validate_skill_md
-from fleet_rlm.store.harness import VolumePostgresHarness
+from fleet_rlm.engine.routes import Route
 
-__all__ = [
-    "AdaptiveFleetEngine",
-    "DaytonaInterpreter",
-    "DaytonaSandboxManager",
-    "FleetSettings",
-    "SkillManager",
-    "VolumePostgresHarness",
-    "build_mlflow_scorer_suite",
-    "configure_mlflow_observability",
-    "gepa_mlflow_metric",
-    "get_settings",
-    "jev_routing_efficiency",
-    "parse_and_validate_skill_md",
-    "rlm_trajectory_efficiency",
-]
+__all__ = ["FleetSettings", "Route", "get_settings"]
