@@ -18,7 +18,6 @@ import psycopg
 from dspy.primitives.facade import SandboxLM
 from dspy.utils.exceptions import AdapterParseError
 from mlflow.entities import SpanType
-from psycopg.rows import dict_row
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence
 from fleet_rlm.dspy_support import without_mlflow_dspy_callback as _without_mlflow_dspy_callback
@@ -34,6 +33,7 @@ from fleet_rlm.engine.signatures import (
 from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.observability import activity_text
 from fleet_rlm.optimize.artifacts import CompiledProgramFile
+from fleet_rlm.store import Store
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,122 +65,30 @@ def _child_failure(exc: Exception) -> str:
     return f"child agent failed ({type(exc).__name__}): {str(exc)[:500]}"
 
 
-SCHEMA_STATEMENTS = (
-    """
-    CREATE TABLE IF NOT EXISTS fleet_lite_sessions (
-        session_id TEXT PRIMARY KEY,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        memory_summary TEXT NOT NULL DEFAULT '',
-        turns JSONB NOT NULL DEFAULT '[]'::jsonb
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS fleet_lite_vfs_files (
-        session_id TEXT NOT NULL REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        sha256 TEXT NOT NULL,
-        content BYTEA NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (session_id, rel_path)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS fleet_lite_memories (
-        session_id TEXT NOT NULL REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
-        memory_id TEXT NOT NULL,
-        content TEXT NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'observation',
-        sources JSONB NOT NULL DEFAULT '{}'::jsonb,
-        reviewed BOOLEAN NOT NULL DEFAULT FALSE,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (session_id, memory_id)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS fleet_lite_turns (
-        session_id TEXT NOT NULL REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
-        turn_id TEXT NOT NULL,
-        idempotency_key TEXT NOT NULL,
-        task_sha256 TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'running',
-        result JSONB NOT NULL DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY(session_id,turn_id),
-        UNIQUE(session_id,idempotency_key)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS fleet_lite_runtime_settings (
-        session_id TEXT PRIMARY KEY REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
-        settings JSONB NOT NULL DEFAULT '{}'::jsonb
-    )
-    """,
-)
-
-
-def initialize_database(pg_dsn: str) -> None:
-    """Create additive Lite persistence tables without a migration runner."""
-    with psycopg.connect(pg_dsn) as connection:
-        for statement in SCHEMA_STATEMENTS:
-            connection.execute(statement)
-
-
 @dataclass(slots=True)
 class VolumePostgresHarness:
-    """Mirror per-Session workspace files and committed Turns to Postgres."""
+    """Mirror per-Session workspace files and committed Turns to Postgres (SQL lives in the Store)."""
 
-    pg_dsn: str
+    store: Store
     sandbox_mgr: DaytonaSandboxManager
     _hydrated: bool = field(default=False, init=False)
 
-    def init_db(self) -> None:
-        initialize_database(self.pg_dsn)
+    @property
+    def session_id(self) -> str:
+        return self.sandbox_mgr.session_id
 
     def acquire_session_lease(self) -> psycopg.Connection:
         """Keep a PostgreSQL session lock until runtime close or process death."""
-        connection = psycopg.connect(self.pg_dsn, autocommit=True)
-        try:
-            locked = connection.execute(
-                "SELECT pg_try_advisory_lock(hashtextextended(%s,17))", (self.sandbox_mgr.session_id,)
-            ).fetchone()
-            if not locked or not locked[0]:
-                raise RuntimeError("Session is owned by another worker")
-            return connection
-        except BaseException:
-            connection.close()
-            raise
+        return self.store.acquire_session_lease(self.session_id)
 
     def runtime_settings(self) -> dict[str, Any]:
-        with psycopg.connect(self.pg_dsn) as connection:
-            row = connection.execute(
-                "SELECT settings FROM fleet_lite_runtime_settings WHERE session_id=%s", (self.sandbox_mgr.session_id,)
-            ).fetchone()
-        return row[0] if row else {}
+        return self.store.runtime_settings(self.session_id)
 
     def save_runtime_settings(self, settings: dict[str, Any]) -> None:
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_runtime_settings(session_id,settings) VALUES(%s,%s::jsonb) "
-                "ON CONFLICT(session_id) DO UPDATE "
-                "SET settings=fleet_lite_runtime_settings.settings || EXCLUDED.settings",
-                (self.sandbox_mgr.session_id, json.dumps(settings)),
-            )
+        self.store.save_runtime_settings(self.session_id, settings)
 
     def ensure_session(self, session_id: str) -> None:
-        validate_session_id(session_id)
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
-
-    def list_sessions(self) -> list[dict[str, Any]]:
-        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
-            rows = connection.execute(
-                "SELECT session_id, updated_at, jsonb_array_length(turns) AS turn_count "
-                "FROM fleet_lite_sessions ORDER BY updated_at DESC LIMIT 100"
-            ).fetchall()
-        return [dict(row) for row in rows]
+        self.store.ensure_session(validate_session_id(session_id))
 
     def save_memory(
         self,
@@ -201,101 +109,33 @@ class VolumePostgresHarness:
         sources = sources or {}
         if len(sources) > 100 or any(not self._valid_vfs_path(p) for p in sources):
             raise ValueError("Invalid memory sources")
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_memories(session_id,memory_id,content,kind,sources,reviewed) "
-                "VALUES (%s,%s,%s,%s,%s::jsonb,%s) ON CONFLICT(session_id,memory_id) DO UPDATE "
-                "SET content=EXCLUDED.content,kind=EXCLUDED.kind,sources=EXCLUDED.sources,"
-                "reviewed=EXCLUDED.reviewed,updated_at=NOW()",
-                (self.sandbox_mgr.session_id, memory_id, content, kind, json.dumps(sources), reviewed),
-            )
+        self.store.save_memory(self.session_id, memory_id, content, kind, sources, reviewed)
 
     def memories(self, query: str = "", *, reviewed_only: bool = False) -> list[dict[str, Any]]:
         search = " OR ".join(query[:2000].split()[:32])
-        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
-            rows = connection.execute(
-                "SELECT memory_id,content,kind,sources,reviewed,updated_at FROM fleet_lite_memories "
-                "WHERE session_id=%s AND (%s=FALSE OR reviewed=TRUE) "
-                "AND (%s='' OR to_tsvector('english',content) @@ websearch_to_tsquery('english',%s)) "
-                "ORDER BY ts_rank_cd(to_tsvector('english',content),websearch_to_tsquery('english',%s)) DESC, "
-                "updated_at DESC LIMIT 20",
-                (self.sandbox_mgr.session_id, reviewed_only, search, search, search),
-            ).fetchall()
-            hashes = {
-                row["rel_path"]: row["sha256"]
-                for row in connection.execute(
-                    "SELECT rel_path,sha256 FROM fleet_lite_vfs_files WHERE session_id=%s",
-                    (self.sandbox_mgr.session_id,),
-                ).fetchall()
-            }
-        for row in rows:
-            row["stale"] = any(hashes.get(path) != digest for path, digest in row["sources"].items())
-            row["updated_at"] = row["updated_at"].isoformat()
-        return rows
+        return self.store.memories(self.session_id, search, reviewed_only=reviewed_only)
 
     def delete_memory(self, memory_id: str) -> None:
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "DELETE FROM fleet_lite_memories WHERE session_id=%s AND memory_id=%s",
-                (self.sandbox_mgr.session_id, validate_session_id(memory_id)),
-            )
+        self.store.delete_memory(self.session_id, validate_session_id(memory_id))
 
     def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
         """Persist intent before side effects; an uncertain running turn is never replayed."""
         digest = hashlib.sha256(task.encode()).hexdigest()
-        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
-            inserted = connection.execute(
-                "INSERT INTO fleet_lite_turns(session_id,turn_id,idempotency_key,task_sha256) "
-                "VALUES (%s,%s,%s,%s) ON CONFLICT(session_id,idempotency_key) DO NOTHING RETURNING turn_id",
-                (self.sandbox_mgr.session_id, turn_id, key, digest),
-            ).fetchone()
-            if inserted:
-                return None
-            prior = connection.execute(
-                "SELECT turn_id,task_sha256,status,result FROM fleet_lite_turns "
-                "WHERE session_id=%s AND idempotency_key=%s",
-                (self.sandbox_mgr.session_id, key),
-            ).fetchone()
-            if prior is None:
-                raise RuntimeError("Turn intent disappeared during claim")
-            if prior["task_sha256"] != digest:
-                raise ValueError("Idempotency key already belongs to another task")
-            return prior
+        prior = self.store.claim_turn(self.session_id, turn_id, key, digest)
+        if prior is not None and prior["task_sha256"] != digest:
+            raise ValueError("Idempotency key already belongs to another task")
+        return prior
 
     def finish_turn(self, turn_id: str, status: str, result: dict[str, Any]) -> None:
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "UPDATE fleet_lite_turns SET status=%s,result=%s::jsonb,updated_at=NOW() "
-                "WHERE session_id=%s AND turn_id=%s AND status <> 'completed'",
-                (status, json.dumps(result), self.sandbox_mgr.session_id, turn_id),
-            )
+        self.store.finish_turn(self.session_id, turn_id, status, result)
 
     def turn_status(self, turn_id: str) -> dict[str, Any] | None:
-        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
-            row = connection.execute(
-                "SELECT turn_id,status,result,updated_at FROM fleet_lite_turns WHERE session_id=%s AND turn_id=%s",
-                (self.sandbox_mgr.session_id, validate_session_id(turn_id)),
-            ).fetchone()
-        if row:
-            row["updated_at"] = row["updated_at"].isoformat()
-        return row
+        return self.store.turn_status(self.session_id, validate_session_id(turn_id))
 
     def hydrate_volume_from_postgres(self, session_id: str) -> tuple[str, str]:
         """Restore only the requested Session's files, summary, and bounded history."""
         session_id = validate_session_id(session_id)
-        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
-            files = connection.execute(
-                "SELECT rel_path, sha256, content FROM fleet_lite_vfs_files WHERE session_id = %s ORDER BY rel_path",
-                (session_id,),
-            ).fetchall()
-            session = connection.execute(
-                "SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s",
-                (session_id,),
-            ).fetchone()
-
+        files, summary, turns = self.store.load_session(session_id)
         restored_bytes = 0
         for row in [] if self._hydrated else files:
             content = bytes(row["content"])
@@ -309,10 +149,7 @@ class VolumePostgresHarness:
                 raise ValueError("Persisted workspace file hash validation failed")
             self.sandbox_mgr.write_workspace_file(row["rel_path"], content)
         self._hydrated = True
-        summary = str((session or {}).get("memory_summary") or "")
-        turns = (session or {}).get("turns") or []
-        history = self._render_history(turns)
-        return summary, history
+        return summary, self._render_history(turns)
 
     @staticmethod
     def _render_history(turns: list[dict[str, Any]]) -> str:
@@ -358,122 +195,49 @@ class VolumePostgresHarness:
         record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
         if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:
             raise ValueError("Turn record exceeds the persistence size limit")
-        artifacts: list[str] = []
-
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
-            connection.execute(
-                "SELECT session_id FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE", (session_id,)
-            )
-            for item in files:
-                rel_path = str(item.get("rel", ""))
-                if not self._valid_vfs_path(rel_path):
-                    raise ValueError("Workspace scan returned an invalid relative path")
-                content = base64.b64decode(item["b64"], validate=True)
-                if len(content) > _MAX_VFS_FILE_BYTES or hashlib.sha256(content).hexdigest() != item.get("sha"):
-                    raise ValueError("Workspace file hash or size validation failed")
-                if rel_path.startswith("artifacts/"):
-                    artifacts.append(rel_path)
-                previous = connection.execute(
-                    "SELECT sha256 FROM fleet_lite_vfs_files WHERE session_id = %s AND rel_path = %s",
-                    (session_id, rel_path),
-                ).fetchone()
-                if previous and previous[0] == item["sha"]:
-                    continue
-                connection.execute(
-                    """
-                    INSERT INTO fleet_lite_vfs_files (session_id, rel_path, sha256, content, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT (session_id, rel_path) DO UPDATE
-                    SET sha256 = EXCLUDED.sha256, content = EXCLUDED.content, updated_at = NOW()
-                    """,
-                    (session_id, rel_path, item["sha"], content),
-                )
-            rel_paths = [str(item["rel"]) for item in files]
-            connection.execute(
-                "DELETE FROM fleet_lite_vfs_files WHERE session_id = %s AND NOT (rel_path = ANY(%s))",
-                (session_id, rel_paths),
-            )
-            connection.execute(
-                """
-                UPDATE fleet_lite_sessions
-                SET turns = (
-                        SELECT COALESCE(jsonb_agg(entry ORDER BY ordinal ASC), '[]'::jsonb)
-                        FROM (
-                            SELECT entry, ordinal
-                            FROM jsonb_array_elements(turns || %s::jsonb) WITH ORDINALITY AS history(entry, ordinal)
-                            ORDER BY ordinal DESC
-                            LIMIT %s
-                        ) AS bounded_history
-                    ),
-                    memory_summary = CASE WHEN %s <> '' THEN
-                        right(trim(both E'\\n' from (memory_summary || E'\\n' || %s)), 20000)
-                        ELSE memory_summary END,
-                    updated_at = NOW()
-                WHERE session_id = %s
-                """,
-                (
-                    record_json,
-                    _MAX_STORED_TURNS,
-                    new_memory_note[:10_000],
-                    new_memory_note[:10_000],
-                    session_id,
-                ),
-            )
-            if turn_record.get("turn_id"):
-                completion = {
-                    "event": "turn_complete",
-                    "answer": turn_record.get("answer", ""),
-                    "route": turn_record.get("route", ""),
-                    "learned_skill_note": turn_record.get("learned_skill_note", ""),
-                    "artifacts": sorted(set(artifacts)),
-                }
-                if turn_record.get("trace_id"):
-                    completion["trace_id"] = turn_record["trace_id"]
-                connection.execute(
-                    "UPDATE fleet_lite_turns SET status='completed',result=%s::jsonb,updated_at=NOW() "
-                    "WHERE session_id=%s AND turn_id=%s",
-                    (json.dumps(completion), session_id, turn_record["turn_id"]),
-                )
-        return sorted(set(artifacts))
+        verified = self._verified_files(files)
+        artifacts = sorted({rel_path for rel_path, _, _ in verified if rel_path.startswith("artifacts/")})
+        completion = None
+        if turn_record.get("turn_id"):
+            result = {
+                "event": "turn_complete",
+                "answer": turn_record.get("answer", ""),
+                "route": turn_record.get("route", ""),
+                "learned_skill_note": turn_record.get("learned_skill_note", ""),
+                "artifacts": artifacts,
+            }
+            if turn_record.get("trace_id"):
+                result["trace_id"] = turn_record["trace_id"]
+            completion = (turn_record["turn_id"], result)
+        self.store.mirror_files(
+            session_id,
+            verified,
+            turn_record_json=record_json,
+            max_turns=_MAX_STORED_TURNS,
+            memory_note=new_memory_note,
+            completion=completion,
+        )
+        return artifacts
 
     def persist_workspace_files(self, session_id: str) -> list[str]:
         """Mirror a Session's current files without recording a synthetic Turn."""
         session_id = validate_session_id(session_id)
-        files = self._scan_volume_files()
-        with psycopg.connect(self.pg_dsn) as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
-            connection.execute(
-                "SELECT session_id FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE", (session_id,)
-            )
-            for item in files:
-                rel_path = str(item.get("rel", ""))
-                if not self._valid_vfs_path(rel_path):
-                    raise ValueError("Workspace scan returned an invalid relative path")
-                content = base64.b64decode(item["b64"], validate=True)
-                if len(content) > _MAX_VFS_FILE_BYTES or hashlib.sha256(content).hexdigest() != item.get("sha"):
-                    raise ValueError("Workspace file hash or size validation failed")
-                connection.execute(
-                    """
-                    INSERT INTO fleet_lite_vfs_files (session_id, rel_path, sha256, content, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT (session_id, rel_path) DO UPDATE
-                    SET sha256 = EXCLUDED.sha256, content = EXCLUDED.content, updated_at = NOW()
-                    WHERE fleet_lite_vfs_files.sha256 IS DISTINCT FROM EXCLUDED.sha256
-                    """,
-                    (session_id, rel_path, item["sha"], content),
-                )
-            rel_paths = [str(item["rel"]) for item in files]
-            connection.execute(
-                "DELETE FROM fleet_lite_vfs_files WHERE session_id = %s AND NOT (rel_path = ANY(%s))",
-                (session_id, rel_paths),
-            )
-            connection.execute("UPDATE fleet_lite_sessions SET updated_at = NOW() WHERE session_id = %s", (session_id,))
-        return [str(item["rel"]) for item in files]
+        files = self._verified_files(self._scan_volume_files())
+        self.store.mirror_files(session_id, files)
+        return [rel_path for rel_path, _, _ in files]
+
+    def _verified_files(self, files: list[dict[str, Any]]) -> list[tuple[str, str, bytes]]:
+        """Decode a workspace scan into (rel_path, sha256, content), re-checking every path, size and digest."""
+        verified = []
+        for item in files:
+            rel_path = str(item.get("rel", ""))
+            if not self._valid_vfs_path(rel_path):
+                raise ValueError("Workspace scan returned an invalid relative path")
+            content = base64.b64decode(item["b64"], validate=True)
+            if len(content) > _MAX_VFS_FILE_BYTES or hashlib.sha256(content).hexdigest() != item.get("sha"):
+                raise ValueError("Workspace file hash or size validation failed")
+            verified.append((rel_path, str(item["sha"]), content))
+        return verified
 
     def _scan_volume_files(self) -> list[dict[str, Any]]:
         """Read a bounded, symlink-free manifest from the owning Session Volume."""

@@ -27,7 +27,6 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import SpanType
-from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
@@ -39,10 +38,10 @@ from fleet_rlm.memory_and_eval import (
     AdaptiveFleetEngine,
     VolumePostgresHarness,
     configure_mlflow_observability,
-    initialize_database,
 )
 from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.skills import SkillManager
+from fleet_rlm.store import Store
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,8 +114,11 @@ def _runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, A
 class SessionRuntimeRegistry:
     """Lazily build a separate sandbox, namespace, and engine per Session."""
 
-    def __init__(self, settings: FleetSettings, lms: tuple[Any, Any, Any, Any | None] | None):
+    def __init__(
+        self, settings: FleetSettings, lms: tuple[Any, Any, Any, Any | None] | None, store: Store | None = None
+    ):
         self.settings = settings
+        self.store = store
         self.root_lm, self.sub_lm, self.reflection_lm, self.jev_lm = lms or (None, None, None, None)
         self._sessions: dict[str, SessionRuntime] = {}
         self._lock = asyncio.Lock()
@@ -151,7 +153,9 @@ class SessionRuntimeRegistry:
                 turn_timeout_seconds=self.settings.turn_timeout_seconds,
                 linked_children=self.settings.linked_children,
             )
-            harness = VolumePostgresHarness(self.settings.fleet_database_url, sandbox_mgr)
+            if self.store is None:
+                raise RuntimeError("Session storage is not configured")
+            harness = VolumePostgresHarness(self.store, sandbox_mgr)
             compiled_path = Path(self.settings.compiled_program_dir) / f"{session_id}.json"
             runtime = SessionRuntime(
                 sandbox_mgr=sandbox_mgr,
@@ -379,14 +383,17 @@ def create_app(
     settings: FleetSettings | None = None,
     initialize_db: bool = True,
     configure_observability: bool = True,
+    store: Store | None = None,
 ) -> FastAPI:
     """Build the Lite API. External resources are acquired by application lifespan."""
     resolved = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        if initialize_db:
-            await asyncio.to_thread(initialize_database, resolved.fleet_database_url)
+        # The pool opens in the background so a cold Lakebase connect does not block startup.
+        application.state.store = store or (Store.open(resolved.fleet_database_url) if initialize_db else None)
+        if initialize_db and application.state.store is not None:
+            await asyncio.to_thread(application.state.store.initialize)
         target = resolved.mlflow_target()
         local_server = target.mode == "local" and target.tracking_uri.startswith("http")
         if (
@@ -418,11 +425,13 @@ def create_app(
             application.state.mlflow_experiment_id = None
         application.state.settings = resolved
         application.state.lms = None
-        application.state.session_registry = SessionRuntimeRegistry(resolved, None)
+        application.state.session_registry = SessionRuntimeRegistry(resolved, None, application.state.store)
         try:
             yield
         finally:
             await application.state.session_registry.close()
+            if application.state.store is not None and store is None:
+                await asyncio.to_thread(application.state.store.close)
             if application.state.mlflow_experiment_id:
                 # uvicorn re-raises SIGTERM after a graceful stop, which skips atexit and MLflow's exit-time flush.
                 with suppress(Exception):
@@ -445,16 +454,9 @@ def create_app(
         return {"status": "ok", "version": "0.8.0"}
 
     @app.get("/sessions")
-    async def list_sessions() -> dict[str, Any]:
+    def list_sessions(request: Request) -> dict[str, Any]:
         try:
-            with psycopg.Connection[dict[str, Any]].connect(
-                resolved.fleet_database_url, row_factory=dict_row
-            ) as connection:
-                rows = connection.execute(
-                    "SELECT session_id, updated_at, jsonb_array_length(turns) AS turn_count "
-                    "FROM fleet_lite_sessions ORDER BY updated_at DESC LIMIT 100"
-                ).fetchall()
-            return {"sessions": [dict(row) for row in rows]}
+            return {"sessions": request.app.state.store.list_sessions()}
         except Exception as exc:
             _LOGGER.warning("Session listing failed (%s)", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Session storage is unavailable") from None
@@ -606,14 +608,9 @@ def create_app(
     @app.get("/sessions/{session_id}/history")
     async def get_history(session_id: str, request: Request) -> dict[str, Any]:
         try:
-            await registry_for(request).get(session_id)
-            with psycopg.Connection[dict[str, Any]].connect(
-                resolved.fleet_database_url, row_factory=dict_row
-            ) as connection:
-                row = connection.execute(
-                    "SELECT turns FROM fleet_lite_sessions WHERE session_id = %s", (session_id,)
-                ).fetchone()
-            return {"session_id": session_id, "turns": (row or {}).get("turns", [])}
+            runtime = await registry_for(request).get(session_id)
+            turns = await asyncio.to_thread(runtime.harness.store.history, session_id)
+            return {"session_id": session_id, "turns": turns}
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid Session ID") from None
         except Exception:

@@ -42,6 +42,7 @@ dependencies = [
     "rich>=13.9.0",
     "prompt-toolkit>=3.0.50,<4",
     "databricks-agents>=1.12.0",
+    "psycopg-pool>=3.2.6,<4",
 ]
 
 [project.urls]

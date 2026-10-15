@@ -15,9 +15,7 @@ from typing import Any
 
 import dspy
 import mlflow
-import psycopg
 from dspy.teleprompt.gepa import InstructionProposer
-from psycopg.rows import dict_row
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.signatures import AnswerJudge
@@ -34,6 +32,7 @@ from fleet_rlm.optimize.artifacts import (
 from fleet_rlm.optimize.dataset import context_snapshot, curate_dataset
 from fleet_rlm.optimize.metric import gepa_mlflow_metric
 from fleet_rlm.skills import SkillManager, local_catalog_xml
+from fleet_rlm.store import Store
 
 _JUDGE_LABEL = "DSPy reflection LM (FLEET_REFLECTION_MODEL)"
 
@@ -106,7 +105,7 @@ def run_stage_evaluation(
         return EvalSummary(stage, run.info.run_id, metrics, average_latency)
 
 
-def build_isolated_engine_factory(settings: FleetSettings, source_session_id: str) -> Any:
+def build_isolated_engine_factory(settings: FleetSettings, store: Store, source_session_id: str) -> Any:
     """Create a fresh Daytona namespace containing only digest-verified DB snapshots."""
     source_session_id = validate_session_id(source_session_id)
     root_lm, sub_lm, _reflection_lm, jev_lm = settings.build_lms()
@@ -131,16 +130,7 @@ def build_isolated_engine_factory(settings: FleetSettings, source_session_id: st
         try:
             program.save(program_path)
             if contexts:
-                paths = list(contexts)
-                with psycopg.Connection[dict[str, Any]].connect(
-                    settings.fleet_database_url, row_factory=dict_row
-                ) as connection:
-                    rows = connection.execute(
-                        "SELECT rel_path, sha256, content FROM fleet_lite_vfs_files "
-                        "WHERE session_id = %s AND rel_path = ANY(%s)",
-                        (source_session_id, paths),
-                    ).fetchall()
-                files = {row["rel_path"]: row for row in rows}
+                files = store.vfs_files(source_session_id, list(contexts))
                 if set(files) != set(contexts):
                     raise ValueError("Curated context snapshot is missing from PostgreSQL")
                 for path, expected_digest in contexts.items():
@@ -250,8 +240,18 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         mlflow.set_experiment(experiment_id=experiment_id)
 
     catalog = local_catalog_xml(Path(settings.local_skills_dir))
+    store = Store.open(settings.fleet_database_url, wait=True, max_size=max(2, args.threads))
+    try:
+        _compile(args, settings, store, session_id, target, catalog)
+    finally:
+        store.close()
+
+
+def _compile(
+    args: argparse.Namespace, settings: FleetSettings, store: Store, session_id: str, target: Any, catalog: str
+) -> None:
     trainset, devset, holdout = curate_dataset(
-        settings.fleet_database_url,
+        store,
         target.experiment_name,
         session_id,
         catalog,
@@ -268,7 +268,7 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         max_llm_calls=settings.max_llm_calls_per_turn,
     )
     template = AdaptiveFleetEngine(template_manager, root_lm, sub_lm, jev_lm, execution_mode=settings.execution_mode)
-    factory = build_isolated_engine_factory(settings, session_id)
+    factory = build_isolated_engine_factory(settings, store, session_id)
     program = IsolatedFleetProgram(template, factory)
 
     def metric(*metric_args: Any, **metric_kwargs: Any) -> Any:

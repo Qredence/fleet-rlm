@@ -22,6 +22,12 @@ All notable changes to this project are documented in this file.
   Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
   labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
   be re-optimized.
+- PostgreSQL access goes through one `fleet_rlm.store.Store` over a `psycopg_pool` connection pool
+  (new dependency `psycopg-pool`), opened in the background at startup. Every SQL statement,
+  including the raw SQL that was in the `/sessions` and `/history` routes, lives in the Store.
+  Pooled connections are autocommit, so a read is one round trip: `GET /sessions` on Lakebase
+  went from about 1.2 s (a fresh connection per call) to about 0.12 s. A connection that Lakebase
+  closed while idle is retried once.
 - Optimization code lives in `fleet_rlm.optimize` (artifacts, dataset, metric, scorers, evaluation,
   benchmarks). The optimizer script is now `fleet optimize --session <id>` (`make optimize` and the
   TUI `/optimize` use it). Compiled programs load through one `CompiledProgramFile`, which also

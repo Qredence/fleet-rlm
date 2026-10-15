@@ -9,10 +9,9 @@ from typing import Any
 
 import dspy
 import mlflow
-import psycopg
-from psycopg.rows import dict_row
 
 from fleet_rlm.interpreter import validate_session_id
+from fleet_rlm.store import Store
 
 _MAX_EXAMPLES = 500
 
@@ -52,29 +51,10 @@ def grouped_split(
     return partitions
 
 
-def load_examples_from_postgres(pg_dsn: str, session_id: str, default_catalog: str) -> list[dspy.Example]:
+def load_examples_from_postgres(store: Store, session_id: str, default_catalog: str) -> list[dspy.Example]:
     """Load only approved, explicitly gold-labeled turns with source lineage."""
     session_id = validate_session_id(session_id)
-    query = """
-        SELECT s.memory_summary,
-               turn->>'task' AS task,
-               COALESCE(turn->>'workspace_manifest', '/workspace/files (empty)') AS workspace_manifest,
-               COALESCE(turn->>'skills_catalog', %s) AS skills_catalog,
-               turn->>'expected_answer' AS answer,
-               turn->>'source_group' AS source_group,
-               turn->'context_files' AS context_files
-        FROM fleet_lite_sessions AS s
-        CROSS JOIN LATERAL jsonb_array_elements(s.turns) AS turn
-        WHERE s.session_id = %s
-          AND turn->>'task' IS NOT NULL
-          AND turn->>'expected_answer' IS NOT NULL
-          AND turn->>'review_status' = 'approved'
-          AND turn->>'source_group' IS NOT NULL
-        ORDER BY s.updated_at DESC
-        LIMIT %s
-    """
-    with psycopg.Connection[dict[str, Any]].connect(pg_dsn, row_factory=dict_row) as connection:
-        rows = connection.execute(query, (default_catalog, session_id, _MAX_EXAMPLES)).fetchall()
+    rows = store.reviewed_examples(session_id, default_catalog, _MAX_EXAMPLES)
     examples = []
     for row in rows:
         try:
@@ -227,7 +207,7 @@ def build_seed_fallback_examples(catalog: str) -> list[dspy.Example]:
 
 
 def curate_dataset(
-    pg_dsn: str,
+    store: Store,
     experiment_name: str,
     session_id: str,
     catalog: str,
@@ -237,7 +217,7 @@ def curate_dataset(
     """Return train/dev/holdout from reviewed examples; seed data is never silently mixed."""
     if not 0.1 <= validation_ratio <= 0.5:
         raise ValueError("validation_ratio must be between 0.1 and 0.5")
-    examples = load_examples_from_postgres(pg_dsn, session_id, catalog)
+    examples = load_examples_from_postgres(store, session_id, catalog)
     try:
         examples.extend(load_examples_from_mlflow(experiment_name, session_id, catalog))
     except Exception as exc:

@@ -60,11 +60,8 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         "context_files": contexts,
     }
     if source == "postgres":
-        connection = SimpleNamespace(execute=lambda *_args: SimpleNamespace(fetchall=lambda: [row]))
-        monkeypatch.setattr(
-            dataset.psycopg.Connection, "connect", classmethod(lambda *_args, **_kwargs: nullcontext(connection))
-        )
-        examples = dataset.load_examples_from_postgres("unused", "s1", "<available_skills />")
+        store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
+        examples = dataset.load_examples_from_postgres(store, "s1", "<available_skills />")
     else:
         traces = SimpleNamespace(
             empty=False,
@@ -104,13 +101,8 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     rows = [{"rel_path": path, "sha256": contexts.get(path), "content": raw} for path, raw in files.items()]
     if snapshot == "changed":
         rows[1]["content"] = b"rate\n99\n"
-    connection = SimpleNamespace(
-        execute=lambda _query, params: SimpleNamespace(
-            fetchall=lambda: [row for row in rows if row["rel_path"] in params[1]],
-        )
-    )
-    monkeypatch.setattr(
-        dataset.psycopg.Connection, "connect", classmethod(lambda *_args, **_kwargs: nullcontext(connection))
+    store = SimpleNamespace(
+        vfs_files=lambda _session, paths: {row["rel_path"]: row for row in rows if row["rel_path"] in paths}
     )
     monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (None, None, None, None))
 
@@ -131,7 +123,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
         workflow, "SkillManager", lambda *_args: SimpleNamespace(sync_local_skills_to_volume=lambda: None)
     )
     monkeypatch.setattr(workflow, "AdaptiveFleetEngine", lambda **kwargs: SimpleNamespace(**kwargs))
-    factory = workflow.build_isolated_engine_factory(FleetSettings(_env_file=None), "s1")
+    factory = workflow.build_isolated_engine_factory(FleetSettings(_env_file=None), store, "s1")
     example = dspy.Example(
         workspace_manifest="/workspace/files/input.csv, /workspace/files/rates.csv",
         context_files=contexts,

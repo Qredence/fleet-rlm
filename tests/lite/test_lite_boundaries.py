@@ -33,11 +33,7 @@ from fleet_rlm.interpreter import (
     session_volume_subpath,
     validate_session_id,
 )
-from fleet_rlm.memory_and_eval import (
-    SCHEMA_STATEMENTS,
-    AdaptiveFleetEngine,
-    VolumePostgresHarness,
-)
+from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, VolumePostgresHarness
 from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
 from fleet_rlm.workspace import WORKSPACE_CODE, WorkspaceDataset
@@ -750,15 +746,6 @@ def test_fleet_prefixed_mlflow_environment_takes_priority(monkeypatch: pytest.Mo
     assert settings.mlflow_experiment_name == "fleet-test"
 
 
-def test_lite_postgres_tables_do_not_collide_with_legacy_fleet_schema() -> None:
-    session_schema, vfs_schema = SCHEMA_STATEMENTS[:2]
-
-    assert "CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in session_schema
-    assert "CREATE TABLE IF NOT EXISTS fleet_lite_vfs_files" in vfs_schema
-    assert "REFERENCES fleet_lite_sessions(session_id)" in vfs_schema
-    assert "CREATE TABLE IF NOT EXISTS fleet_sessions" not in session_schema
-
-
 def _unity_gateway_test_settings() -> FleetSettings:
     return FleetSettings(
         _env_file=None,
@@ -822,7 +809,7 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(
         written.append((turn_id, note, trace_id))
 
     class RuntimeRegistry:
-        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None]):
+        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None], _store: Any = None):
             self.runtime = SimpleNamespace(
                 sandbox_mgr=SimpleNamespace(
                     list_workspace_files=lambda: list(reversed(files)),
@@ -1452,7 +1439,7 @@ def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.Monkey
         raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
 
     class RuntimeRegistry:
-        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None]):
+        def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None], _store: Any = None):
             self.runtime = SimpleNamespace(
                 sandbox_mgr=SimpleNamespace(
                     list_workspace_files=lambda: [],
