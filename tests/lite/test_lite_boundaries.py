@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import socket
@@ -38,7 +39,7 @@ from fleet_rlm.memory_and_eval import (
 )
 from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
-from fleet_rlm.workspace import WORKSPACE_CODE
+from fleet_rlm.workspace import WORKSPACE_CODE, WorkspaceDataset
 
 
 @pytest.mark.parametrize("session_id", ["finance-q4", "session_01", "2e8c98b5-5242-4e3b-91b4-2bf1e8c24f0b"])
@@ -609,23 +610,34 @@ def test_triage_signature_retains_typed_choice_criteria() -> None:
 def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     import fleet_rlm.server as server
 
+    files = {"files/input.txt": b"initial input", "files/rates.csv": b"rate\n3\n"}
+    records = []
+
+    def run_engine(**_kwargs):
+        files["files/input.txt"] = b"modified during execution"
+        return SimpleNamespace(answer="processed locally", route="single_rlm", learned_skill_note="")
+
+    def persist(**kwargs):
+        records.append(kwargs["turn_record"])
+        return ["artifacts/result.csv"]
+
     class RuntimeRegistry:
         def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None]):
             self.runtime = SimpleNamespace(
-                sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: ["files/input.txt"]),
+                sandbox_mgr=SimpleNamespace(
+                    list_workspace_files=lambda: list(reversed(files)),
+                    read_workspace_file=files.__getitem__,
+                ),
                 harness=SimpleNamespace(
                     hydrate_volume_from_postgres=lambda _session_id: ("summary", "prior history"),
-                    sync_volume_to_postgres=lambda **_kwargs: ["artifacts/result.csv"],
+                    sync_volume_to_postgres=persist,
                 ),
                 skill_mgr=SimpleNamespace(
                     sync_local_skills_to_volume=lambda: 1,
                     build_catalog_xml=lambda: "<available_skills></available_skills>",
                 ),
-                engine=lambda **_kwargs: SimpleNamespace(
-                    answer="processed locally",
-                    route="single_rlm",
-                    learned_skill_note="",
-                ),
+                context=WorkspaceDataset("files/input.txt"),
+                engine=run_engine,
                 turn_lock=asyncio.Lock(),
             )
 
@@ -681,6 +693,11 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
     }
     assert global_callback in observed_callbacks
     assert any(isinstance(callback, server.SSERuntimeCallback) for callback in observed_callbacks)
+    assert records[0]["context_files"] == {
+        "files/input.txt": hashlib.sha256(b"initial input").hexdigest(),
+        "files/rates.csv": hashlib.sha256(b"rate\n3\n").hexdigest(),
+    }
+    assert records[0]["workspace_manifest"] == "/workspace/files/input.txt, /workspace/files/rates.csv"
     # The server uses "done" as its internal queue sentinel; the HTTP stream
     # ends after it and deliberately exposes only user-facing events.
     assert len(events) == 2

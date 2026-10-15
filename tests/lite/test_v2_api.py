@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.interpreter import DaytonaSandboxManager
 from fleet_rlm.server import create_app
+from fleet_rlm.workspace import WorkspaceDataset
 
 
 def test_v2_api_contract_documents_session_controls_and_sse_envelope() -> None:
@@ -35,6 +37,119 @@ def test_mode_request_rejects_unknown_execution_modes() -> None:
     schema = create_app(initialize_db=False, configure_observability=False).openapi()
     mode_schema = schema["components"]["schemas"]["ModeRequest"]["properties"]["mode"]
     assert mode_schema["pattern"] == "^(rlm|flex|hybrid)$"
+
+
+@pytest.mark.parametrize("status", ["completed", "running", "failed"])
+def test_replayed_turn_identifies_the_original_durable_outcome(monkeypatch, status) -> None:
+    import fleet_rlm.server as server
+
+    prior = {
+        "turn_id": "original-turn",
+        "status": status,
+        "result": {"event": "turn_complete", "answer": "Verified result", "route": "rlm"},
+    }
+
+    class Registry:
+        def __init__(self, *_args):
+            self.runtime = SimpleNamespace(
+                turn_lock=asyncio.Lock(),
+                sandbox_mgr=SimpleNamespace(),
+                harness=SimpleNamespace(
+                    claim_turn=lambda *_args: prior,
+                    turn_status=lambda turn_id: prior if turn_id == "original-turn" else None,
+                ),
+            )
+
+        async def get(self, _session):
+            return self.runtime
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(server, "SessionRuntimeRegistry", Registry)
+    app = create_app(initialize_db=False, configure_observability=False)
+    with TestClient(app) as client:
+        response = client.post("/sessions/s1/turn", json={"task": "same task", "idempotency_key": "same-key"})
+        events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+        outcomes = [event for event in events if event["event"] in {"turn_complete", "error"}]
+        assert len(outcomes) == 1
+        outcome = outcomes[0]
+        assert outcome["turn_id"] == "original-turn"
+        recovered = client.get(f"/sessions/s1/turns/{outcome['turn_id']}")
+        assert recovered.status_code == 200
+        assert recovered.json()["status"] == status
+        if status == "completed":
+            assert outcome["answer"] == recovered.json()["result"]["answer"]
+        else:
+            assert outcome["event"] == "error"
+
+
+@pytest.mark.parametrize("operation", ["mode", "select", "clear"])
+@pytest.mark.parametrize("fail_save", [False, True])
+def test_session_settings_only_change_after_successful_persistence(monkeypatch, operation, fail_save) -> None:
+    import fleet_rlm.server as server
+
+    saved = {}
+
+    def save(data):
+        if fail_save:
+            raise RuntimeError("private database detail")
+        saved.update(data)
+
+    class Registry:
+        def __init__(self, *_args):
+            self.runtime = SimpleNamespace(
+                turn_lock=asyncio.Lock(),
+                harness=SimpleNamespace(save_runtime_settings=save, hydrate_volume_from_postgres=lambda _session: None),
+                execution_mode="hybrid",
+                context=WorkspaceDataset("files/old.csv", sha256="a" * 64),
+                engine=SimpleNamespace(
+                    execution_mode="hybrid",
+                    root_lm=SimpleNamespace(model="root-model"),
+                    sub_lm=SimpleNamespace(model="sub-model"),
+                ),
+                sandbox_mgr=SimpleNamespace(
+                    read_workspace_file=lambda _path: b"new data",
+                    max_llm_calls=150,
+                    max_depth=3,
+                    max_children=8,
+                    max_active_children=4,
+                    turn_timeout_seconds=900,
+                ),
+            )
+
+        async def get(self, _session):
+            return self.runtime
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(server, "SessionRuntimeRegistry", Registry)
+    app = create_app(initialize_db=False, configure_observability=False)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        before = client.get("/sessions/s1/config").json()
+        if operation == "mode":
+            response = client.put("/sessions/s1/mode", json={"mode": "rlm"})
+        elif operation == "select":
+            response = client.put("/sessions/s1/context", json={"path": "files/new.csv"})
+        else:
+            response = client.delete("/sessions/s1/context")
+        after = client.get("/sessions/s1/config").json()
+        if fail_save:
+            assert response.status_code >= 500
+            assert after == before
+            assert saved == {}
+            assert "private database detail" not in response.text
+        else:
+            assert response.status_code == 200
+            assert after["mode"] == saved["mode"] == ("rlm" if operation == "mode" else "hybrid")
+            assert after["context"] == saved["context"]
+            if operation == "select":
+                assert after["context"]["workspace_path"] == "files/new.csv"
+            elif operation == "clear":
+                assert after["context"] is None
+            else:
+                assert after["context"] == before["context"]
 
 
 def test_attach_streams_to_provider_path_and_cleans_temp_files(monkeypatch) -> None:

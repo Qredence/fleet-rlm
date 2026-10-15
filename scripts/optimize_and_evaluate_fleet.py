@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -67,13 +68,9 @@ def load_examples_from_postgres(pg_dsn: str, session_id: str, default_catalog: s
         rows = connection.execute(query, (default_catalog, session_id, _MAX_EXAMPLES)).fetchall()
     examples = []
     for row in rows:
-        contexts = _mapping(row["context_files"])
-        if row["workspace_manifest"] != "/workspace/files (empty)" and not contexts:
-            continue
-        if any(
-            not isinstance(path, str) or not isinstance(digest, str) or len(digest) != 64
-            for path, digest in contexts.items()
-        ):
+        try:
+            contexts = _context_snapshot(row["workspace_manifest"], row["context_files"])
+        except ValueError:
             continue
         examples.append(
             dspy.Example(
@@ -109,6 +106,20 @@ def _mapping(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _context_snapshot(manifest: str, value: Any) -> dict[str, str]:
+    """Require a digest for every path in Fleet's canonical workspace manifest."""
+    contexts = _mapping(value)
+    if any(
+        not isinstance(path, str) or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        for path, digest in contexts.items()
+    ):
+        raise ValueError("Curated context snapshot contains an invalid digest")
+    expected = ", ".join(f"/workspace/{path}" for path in sorted(contexts)) or "/workspace/files (empty)"
+    if manifest != expected:
+        raise ValueError("Curated context snapshot does not cover the complete workspace manifest")
+    return contexts
+
+
 def load_examples_from_mlflow(
     experiment_name: str,
     session_id: str,
@@ -140,12 +151,9 @@ def load_examples_from_mlflow(
         if not approved or not isinstance(source_group, str) or not source_group.strip():
             continue
         manifest = request.get("workspace_manifest", "/workspace/files (empty)")
-        if manifest != "/workspace/files (empty)" and not contexts:
-            continue
-        if any(
-            not isinstance(path, str) or not isinstance(digest, str) or len(digest) != 64
-            for path, digest in contexts.items()
-        ):
+        try:
+            contexts = _context_snapshot(manifest, contexts)
+        except ValueError:
             continue
         examples.append(
             dspy.Example(
@@ -317,6 +325,7 @@ def build_isolated_engine_factory(settings: FleetSettings, source_session_id: st
     root_lm, sub_lm, _reflection_lm, jev_lm = settings.build_lms()
 
     def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
+        contexts = _context_snapshot(example.workspace_manifest, getattr(example, "context_files", {}))
         namespace = validate_session_id(f"opt-{uuid.uuid4().hex}")
         manager = DaytonaSandboxManager(
             api_key=settings.fleet_daytona_api_key,
@@ -334,7 +343,6 @@ def build_isolated_engine_factory(settings: FleetSettings, source_session_id: st
         os.close(descriptor)
         try:
             program.save(program_path)
-            contexts = _mapping(getattr(example, "context_files", {}))
             if contexts:
                 paths = list(contexts)
                 with psycopg.connect(settings.fleet_database_url, row_factory=dict_row) as connection:

@@ -11,6 +11,7 @@ import dspy
 import pytest
 from dspy.utils import DummyLM
 
+from fleet_rlm.config import FleetSettings
 from fleet_rlm.memory_and_eval import gepa_mlflow_metric
 from fleet_rlm.optimization import (
     ArtifactManifest,
@@ -39,6 +40,117 @@ class Example:
 
     def inputs(self) -> dict[str, str]:
         return {"task": self.task, "source_group": self.source_group}
+
+
+@pytest.mark.parametrize("source", ["postgres", "mlflow"])
+@pytest.mark.parametrize("snapshot", ["complete", "missing", "extra", "invalid", "empty"])
+def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source, snapshot) -> None:
+    # A comma in a filename must not be treated as a manifest separator.
+    manifest = "/workspace/files/input, old.csv, /workspace/files/rates.csv"
+    contexts = {"files/rates.csv": "b" * 64, "files/input, old.csv": "a" * 64}
+    if snapshot == "missing":
+        del contexts["files/rates.csv"]
+    elif snapshot == "extra":
+        contexts["files/other.csv"] = "c" * 64
+    elif snapshot == "invalid":
+        contexts["files/rates.csv"] = "z" * 64
+    elif snapshot == "empty":
+        contexts = {}
+        manifest = "/workspace/files (empty)"
+    row = {
+        "task": "Apply the rates to the input",
+        "answer": "17",
+        "workspace_manifest": manifest,
+        "skills_catalog": "<available_skills />",
+        "memory_summary": "",
+        "source_group": "reviewed-source",
+        "context_files": contexts,
+    }
+    if source == "postgres":
+        connection = SimpleNamespace(execute=lambda *_args: SimpleNamespace(fetchall=lambda: [row]))
+        monkeypatch.setattr(workflow.psycopg, "connect", lambda *_args, **_kwargs: nullcontext(connection))
+        examples = workflow.load_examples_from_postgres("unused", "s1", "<available_skills />")
+    else:
+        traces = SimpleNamespace(
+            empty=False,
+            iterrows=lambda: iter(
+                [
+                    (
+                        0,
+                        {
+                            "trace_id": "reviewed-trace",
+                            "request": row,
+                            "expectations": {
+                                "expected_answer": "17",
+                                "review_status": "approved",
+                                "source_group": "reviewed-source",
+                            },
+                        },
+                    )
+                ]
+            ),
+        )
+        monkeypatch.setattr(workflow.mlflow, "search_traces", lambda **_kwargs: traces)
+        examples = workflow.load_examples_from_mlflow("unused", "s1", "<available_skills />")
+    if snapshot in {"complete", "empty"}:
+        assert len(examples) == 1
+        assert examples[0].context_files == contexts
+        assert examples[0].workspace_manifest == manifest
+    else:
+        assert examples == []
+
+
+@pytest.mark.parametrize("snapshot", ["complete", "missing", "changed"])
+def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatch, tmp_path, snapshot) -> None:
+    files = {"files/input.csv": b"id,value\n1,17\n", "files/rates.csv": b"rate\n3\n"}
+    contexts = {path: digest_bytes(raw) for path, raw in files.items()}
+    if snapshot == "missing":
+        del contexts["files/rates.csv"]
+    rows = [{"rel_path": path, "sha256": contexts.get(path), "content": raw} for path, raw in files.items()]
+    if snapshot == "changed":
+        rows[1]["content"] = b"rate\n99\n"
+    connection = SimpleNamespace(
+        execute=lambda _query, params: SimpleNamespace(
+            fetchall=lambda: [row for row in rows if row["rel_path"] in params[1]],
+        )
+    )
+    monkeypatch.setattr(workflow.psycopg, "connect", lambda *_args, **_kwargs: nullcontext(connection))
+    monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (None, None, None, None))
+
+    class Manager:
+        def __init__(self, **_kwargs):
+            pass
+
+        def write_workspace_file(self, path, raw):
+            destination = tmp_path / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(raw)
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(workflow, "DaytonaSandboxManager", Manager)
+    monkeypatch.setattr(
+        workflow, "SkillManager", lambda *_args: SimpleNamespace(sync_local_skills_to_volume=lambda: None)
+    )
+    monkeypatch.setattr(workflow, "AdaptiveFleetEngine", lambda **kwargs: SimpleNamespace(**kwargs))
+    factory = workflow.build_isolated_engine_factory(FleetSettings(_env_file=None), "s1")
+    example = dspy.Example(
+        workspace_manifest="/workspace/files/input.csv, /workspace/files/rates.csv",
+        context_files=contexts,
+    )
+    program = SimpleNamespace(save=lambda path: Path(path).write_text("{}"))
+    if snapshot != "complete":
+        with pytest.raises(
+            ValueError, match="complete workspace manifest" if snapshot == "missing" else "digest mismatch"
+        ):
+            factory(example, program)
+    else:
+        engine = factory(example, program)
+        try:
+            assert {path: (tmp_path / path).read_bytes() for path in files} == files
+        finally:
+            Path(engine._optimization_artifact_path).unlink(missing_ok=True)
 
 
 def test_grouped_split_is_stable_and_keeps_same_task_lineage_together() -> None:

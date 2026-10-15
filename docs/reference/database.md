@@ -28,6 +28,14 @@ intents retain idempotency keys and terminal outcomes; uncertain running turns
 are not automatically replayed. Runtime settings retain selected mode and
 dataset revision. A session advisory lock prevents two workers from owning
 one session runtime at once and holds one database connection until close.
+Mode and context changes take effect in the live runtime only after their
+settings have been saved successfully.
+
+Turn records retain pre-execution SHA-256 values in `context_files` for every
+advertised workspace path, not only the selected dataset. Optimization requires
+this complete manifest and verifies the corresponding VFS bytes before staging
+an isolated rollout. Older partial records are excluded; changed or missing file
+revisions are rejected rather than evaluated without the original inputs.
 
 Daytona Volume bytes are a working copy, not a database transaction. Recovery
 restores files and metadata; it does not restore Python process memory.

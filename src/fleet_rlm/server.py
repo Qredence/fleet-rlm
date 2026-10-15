@@ -492,9 +492,6 @@ def create_app(
         try:
             runtime = await registry_for(request).get(session_id)
             async with runtime.turn_lock:
-                runtime.execution_mode = body.mode
-                if hasattr(runtime.engine, "execution_mode"):
-                    runtime.engine.execution_mode = body.mode
                 await asyncio.to_thread(
                     runtime.harness.save_runtime_settings,
                     {
@@ -502,6 +499,9 @@ def create_app(
                         "context": asdict(runtime.context) if runtime.context else None,
                     },
                 )
+                runtime.execution_mode = body.mode
+                if hasattr(runtime.engine, "execution_mode"):
+                    runtime.engine.execution_mode = body.mode
             return {"mode": body.mode}
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid Session ID or mode") from None
@@ -672,7 +672,7 @@ def create_app(
             async with runtime.turn_lock:
                 await asyncio.to_thread(runtime.harness.hydrate_volume_from_postgres, session_id)
                 content = await asyncio.to_thread(runtime.sandbox_mgr.read_workspace_file, body.path)
-                runtime.context = WorkspaceDataset(
+                context = WorkspaceDataset(
                     workspace_path=body.path,
                     description=body.description,
                     size_bytes=len(content),
@@ -682,10 +682,11 @@ def create_app(
                     runtime.harness.save_runtime_settings,
                     {
                         "mode": runtime.execution_mode,
-                        "context": asdict(runtime.context),
+                        "context": asdict(context),
                     },
                 )
-            return {"path": body.path, "size_bytes": len(content), "sha256": runtime.context.sha256}
+                runtime.context = context
+            return {"path": body.path, "size_bytes": len(content), "sha256": context.sha256}
         except HTTPException:
             raise
         except ValueError:
@@ -697,7 +698,6 @@ def create_app(
     async def clear_context(session_id: str, request: Request) -> dict[str, str]:
         runtime = await registry_for(request).get(session_id)
         async with runtime.turn_lock:
-            runtime.context = None
             await asyncio.to_thread(
                 runtime.harness.save_runtime_settings,
                 {
@@ -705,6 +705,7 @@ def create_app(
                     "context": None,
                 },
             )
+            runtime.context = None
         return {"status": "cleared"}
 
     @app.post("/sessions/{session_id}/reload")
@@ -825,7 +826,7 @@ def create_app(
                         if hasattr(runtime.harness, "claim_turn"):
                             prior = runtime.harness.claim_turn(request_id, req.idempotency_key or request_id, req.task)
                             if prior is not None:
-                                enqueue(
+                                result = (
                                     prior["result"]
                                     if prior["status"] == "completed"
                                     else {
@@ -834,6 +835,7 @@ def create_app(
                                         "error": "Prior turn has an uncertain or failed outcome; it was not replayed.",
                                     }
                                 )
+                                enqueue({**result, "turn_id": prior["turn_id"]})
                                 return
                         if mlflow_experiment_id:
                             mlflow.set_experiment(experiment_id=mlflow_experiment_id)
@@ -841,7 +843,13 @@ def create_app(
                         runtime.skill_mgr.sync_local_skills_to_volume()
                         files = runtime.sandbox_mgr.list_workspace_files()
                         # Workspace files are model-writable, so they cannot approve executable programs.
-                        manifest = ", ".join(f"/workspace/{path}" for path in files) or "/workspace/files (empty)"
+                        manifest = (
+                            ", ".join(f"/workspace/{path}" for path in sorted(files)) or "/workspace/files (empty)"
+                        )
+                        context_files = {
+                            path: hashlib.sha256(runtime.sandbox_mgr.read_workspace_file(path)).hexdigest()
+                            for path in files
+                        }
                         skills_catalog = runtime.skill_mgr.build_catalog_xml()
                         if hasattr(runtime.harness, "memories"):
                             memories = runtime.harness.memories(req.task, reviewed_only=True)
@@ -874,11 +882,7 @@ def create_app(
                                 "idempotency_key": req.idempotency_key,
                                 "execution_mode": getattr(runtime, "execution_mode", "hybrid"),
                                 "trace_id": getattr(span, "trace_id", None) if mlflow_experiment_id else None,
-                                "context_files": {
-                                    runtime.context.workspace_path: runtime.context.sha256,
-                                }
-                                if isinstance(getattr(runtime, "context", None), WorkspaceDataset)
-                                else {},
+                                "context_files": context_files,
                             }
                             artifacts = runtime.harness.sync_volume_to_postgres(
                                 session_id=session_id,

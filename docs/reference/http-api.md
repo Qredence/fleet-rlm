@@ -66,6 +66,8 @@ Sessions serialize their own Turns while a run is in progress. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.
 An optional idempotency key persists intent before execution. Completed requests
 replay their recorded outcome; failed/uncertain requests do not replay side effects.
+Replay outcome events carry the original persisted `turn_id`, so the status route
+can recover that same outcome rather than looking up the retry's preparation ID.
 A completed outcome commits in the same transaction as files and turn history;
 a lost response or later delivery failure cannot downgrade that durable completion.
 A PostgreSQL advisory lease rejects a second worker owning the same session.
