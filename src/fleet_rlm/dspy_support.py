@@ -10,7 +10,8 @@ from dspy.signatures.signature import Signature
 from pydantic import BaseModel
 
 _RAW_PYTHON_FENCE = re.compile(
-    r"\s*```(?:python|py|python3|py3)?[ \t]*\r?\n(?P<code>.*?)\r?\n```[ \t]*\s*",
+    r"\s*(?P<reasoning>.*?)```(?:python|py|python3|py3)?[ \t]*\r?\n(?P<code>.*?)\r?\n```[ \t]*\s*"
+    r"(?:\[\[ ## completed ## \]\]\s*)?",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -24,8 +25,8 @@ class FleetRLMChatAdapter(ChatAdapter):
             field.annotation is str for field in output_fields.values()
         ):
             match = _RAW_PYTHON_FENCE.fullmatch(completion)
-            if match and match.group("code").strip():
-                return {"reasoning": "", "code": match.group("code").strip()}
+            if match and match.group("code").strip() and "```" not in match.group("reasoning") + match.group("code"):
+                return {"reasoning": match.group("reasoning").strip(), "code": match.group("code").strip()}
         return super().parse(signature, completion)
 
 

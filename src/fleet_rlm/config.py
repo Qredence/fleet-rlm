@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
-from typing import Any
+from itertools import islice
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import dspy
@@ -53,6 +55,12 @@ class FleetSettings(BaseSettings):
         le=10_000,
         validation_alias=AliasChoices("FLEET_MAX_LLM_CALLS_PER_TURN", "MAX_LLM_CALLS_PER_TURN"),
     )
+    execution_mode: Literal["rlm", "flex", "hybrid"] = Field(default="hybrid", validation_alias="FLEET_EXECUTION_MODE")
+    max_agent_depth: int = Field(default=3, ge=0, le=8, validation_alias="FLEET_MAX_AGENT_DEPTH")
+    max_child_sandboxes: int = Field(default=8, ge=0, le=64, validation_alias="FLEET_MAX_CHILD_SANDBOXES")
+    max_active_children: int = Field(default=4, ge=1, le=16, validation_alias="FLEET_MAX_ACTIVE_CHILDREN")
+    turn_timeout_seconds: int = Field(default=900, ge=10, le=3600, validation_alias="FLEET_TURN_TIMEOUT_SECONDS")
+    linked_children: bool = Field(default=True, validation_alias="FLEET_LINKED_CHILDREN")
     max_active_sessions: int = Field(
         default=64,
         ge=1,
@@ -60,9 +68,9 @@ class FleetSettings(BaseSettings):
         validation_alias=AliasChoices("FLEET_MAX_ACTIVE_SESSIONS", "MAX_ACTIVE_SESSIONS"),
     )
     max_upload_bytes: int = Field(
-        default=5_000_000,
+        default=25_000_000,
         ge=1,
-        le=5_000_000,
+        le=25_000_000,
         validation_alias=AliasChoices("FLEET_MAX_UPLOAD_BYTES", "MAX_UPLOAD_BYTES"),
     )
     compiled_program_dir: str = Field(
@@ -156,6 +164,36 @@ class FleetSettings(BaseSettings):
                 raise RuntimeError("TypeSafe routing requires the DSPy 'typesafe' extra") from exc
             jev_lm = TypeSafe(self.typesafe_model, api_key=self.typesafe_api_key)
         return root_lm, sub_lm, reflection_lm, jev_lm
+
+    def list_models(self, scope: str = "system.ai") -> list[str]:
+        """Discover authorized chat-capable Unity Gateway services, not inference /models."""
+        from databricks.sdk import WorkspaceClient
+        from databricks.sdk.core import Config
+
+        if not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", scope):
+            raise ValueError("Model scope must be catalog.schema")
+        host = self.databricks_host.strip().rstrip("/")
+        if not host:
+            parsed = urlsplit(self.fleet_llm_base_url)
+            host = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
+        if not host or not self.databricks_token.get_secret_value():
+            raise ValueError("Model discovery requires a workspace host and token")
+        client = WorkspaceClient(
+            config=Config(
+                host=host,
+                token=self.databricks_token.get_secret_value(),
+                auth_type="pat",
+                http_timeout_seconds=20,
+                retry_timeout_seconds=20,
+            )
+        )
+        return sorted(
+            {
+                "openai/" + service.name.removeprefix("model-services/")
+                for service in islice(client.ai_gateway.list_model_services(parent=f"schemas/{scope}"), 1000)
+                if service.name and "mlflow/v1/chat/completions" in (service.supported_api_types or [])
+            }
+        )
 
     def _build_lm(self, model: str) -> dspy.LM:
         """Use native DSPy routing only; never fall back to LiteLLM."""

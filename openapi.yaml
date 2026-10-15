@@ -114,6 +114,555 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /models:
+    get:
+      summary: List Models
+      operationId: list_models_models_get
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+          default: system.ai
+          title: Scope
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Models Models Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/config:
+    get:
+      summary: Session Config
+      operationId: session_config_sessions__session_id__config_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Session Config Sessions  Session Id  Config Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/model:
+    put:
+      summary: Select Model
+      operationId: select_model_sessions__session_id__model_put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Select Model Sessions  Session Id  Model Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/mode:
+    get:
+      summary: Get Mode
+      operationId: get_mode_sessions__session_id__mode_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Get Mode Sessions  Session Id  Mode Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      summary: Set Mode
+      operationId: set_mode_sessions__session_id__mode_put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModeRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Set Mode Sessions  Session Id  Mode Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/history:
+    get:
+      summary: Get History
+      operationId: get_history_sessions__session_id__history_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get History Sessions  Session Id  History Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/tree:
+    get:
+      summary: Workspace Tree
+      operationId: workspace_tree_sessions__session_id__workspace_tree_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Workspace Tree Sessions  Session Id  Workspace Tree Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/turns/{turn_id}:
+    get:
+      summary: Turn Status
+      operationId: turn_status_sessions__session_id__turns__turn_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: turn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Turn Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Turn Status Sessions  Session Id  Turns  Turn Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/memory:
+    get:
+      summary: List Memory
+      operationId: list_memory_sessions__session_id__memory_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Q
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Memory Sessions  Session Id  Memory Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/memory/{memory_id}:
+    put:
+      summary: Put Memory
+      operationId: put_memory_sessions__session_id__memory__memory_id__put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Put Memory Sessions  Session Id  Memory  Memory Id  Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Remove Memory
+      operationId: remove_memory_sessions__session_id__memory__memory_id__delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Remove Memory Sessions  Session Id  Memory  Memory Id  Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/stat/{rel_path}:
+    get:
+      summary: Workspace Stat
+      operationId: workspace_stat_sessions__session_id__workspace_stat__rel_path__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Workspace Stat Sessions  Session Id  Workspace Stat  Rel Path  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/files/{rel_path}:
+    get:
+      summary: Read Workspace File
+      operationId: read_workspace_file_sessions__session_id__workspace_files__rel_path__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      summary: Write Workspace File
+      operationId: write_workspace_file_sessions__session_id__workspace_files__rel_path__put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceWriteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Write Workspace File Sessions  Session Id  Workspace Files  Rel Path  Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Delete Workspace File
+      operationId: delete_workspace_file_sessions__session_id__workspace_files__rel_path__delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Delete Workspace File Sessions  Session Id  Workspace Files  Rel Path  Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/context:
+    put:
+      summary: Select Context
+      operationId: select_context_sessions__session_id__context_put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContextRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Select Context Sessions  Session Id  Context Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Clear Context
+      operationId: clear_context_sessions__session_id__context_delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Clear Context Sessions  Session Id  Context Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /skills/push:
+    post:
+      summary: Push Skills
+      operationId: push_skills_skills_push_post
+      parameters:
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: default
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+                title: Response Push Skills Skills Push Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /sessions/{session_id}/attach:
     post:
       summary: Attach File
@@ -169,6 +718,18 @@ paths:
           description: Server-Sent Events for Turn status, activity, completion, or failure.
           content:
             text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  data:
+                    type: string
+                  event:
+                    type: string
+                  id:
+                    type: string
+                  retry:
+                    type: integer
+                    minimum: 0
               schema:
                 type: string
         '422':
@@ -189,6 +750,22 @@ components:
       required:
       - file
       title: Body_attach_file_sessions__session_id__attach_post
+    ContextRequest:
+      properties:
+        path:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Path
+        description:
+          type: string
+          maxLength: 2000
+          title: Description
+          default: ''
+      type: object
+      required:
+      - path
+      title: ContextRequest
     HTTPValidationError:
       properties:
         detail:
@@ -198,6 +775,59 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    MemoryRequest:
+      properties:
+        content:
+          type: string
+          maxLength: 10000
+          minLength: 1
+          title: Content
+        kind:
+          type: string
+          pattern: ^(observation|preference|hypothesis|procedure)$
+          title: Kind
+          default: observation
+        sources:
+          additionalProperties:
+            type: string
+          type: object
+          maxProperties: 100
+          title: Sources
+        reviewed:
+          type: boolean
+          title: Reviewed
+          default: false
+      type: object
+      required:
+      - content
+      title: MemoryRequest
+    ModeRequest:
+      properties:
+        mode:
+          type: string
+          pattern: ^(rlm|flex|hybrid)$
+          title: Mode
+      type: object
+      required:
+      - mode
+      title: ModeRequest
+    ModelRequest:
+      properties:
+        role:
+          type: string
+          pattern: ^(root|sub)$
+          title: Role
+          default: root
+        model:
+          type: string
+          maxLength: 300
+          minLength: 1
+          pattern: ^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$
+          title: Model
+      type: object
+      required:
+      - model
+      title: ModelRequest
     TurnRequest:
       properties:
         task:
@@ -205,6 +835,12 @@ components:
           maxLength: 100000
           minLength: 1
           title: Task
+        idempotency_key:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Idempotency Key
       type: object
       required:
       - task
@@ -236,3 +872,19 @@ components:
       - msg
       - type
       title: ValidationError
+    WorkspaceWriteRequest:
+      properties:
+        content:
+          anyOf:
+          - type: string
+            maxLength: 25000000
+          - type: 'null'
+          title: Content
+        content_base64:
+          anyOf:
+          - type: string
+            maxLength: 34000000
+          - type: 'null'
+          title: Content Base64
+      type: object
+      title: WorkspaceWriteRequest

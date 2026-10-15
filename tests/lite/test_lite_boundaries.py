@@ -38,6 +38,7 @@ from fleet_rlm.memory_and_eval import (
 )
 from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
+from fleet_rlm.workspace import WORKSPACE_CODE
 
 
 @pytest.mark.parametrize("session_id", ["finance-q4", "session_01", "2e8c98b5-5242-4e3b-91b4-2bf1e8c24f0b"])
@@ -122,7 +123,7 @@ def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypa
 
 def test_daytona_manager_builds_syntax_valid_health_and_rpc_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    sandbox = SimpleNamespace(state=None)
+    sandbox = SimpleNamespace(state=None, fs=SimpleNamespace(upload_file=lambda _content, _path: None))
     manager._client = object()
     manager._sandbox = sandbox
     remote_requests: list[str] = []
@@ -210,12 +211,14 @@ def test_dspy_history_is_disabled_for_session_turn_contexts() -> None:
     assert lm.history == []
 
 
-def test_fleet_rlm_adapter_accepts_code_only_python_fences() -> None:
+@pytest.mark.parametrize("reasoning", ["", "The header is `id,value`. I'll stream the full file.\n\n"])
+@pytest.mark.parametrize("suffix", ["", "\n\n[[ ## completed ## ]]\n"])
+def test_fleet_rlm_adapter_accepts_code_only_python_fences(reasoning: str, suffix: str) -> None:
     signature = dspy.Signature("task -> reasoning, code")
     adapter = FleetRLMChatAdapter()
 
-    assert adapter.parse(signature, "```python\nprint(17 + 23 + 41)\n```") == {
-        "reasoning": "",
+    assert adapter.parse(signature, reasoning + "```python\nprint(17 + 23 + 41)\n```" + suffix) == {
+        "reasoning": reasoning.strip(),
         "code": "print(17 + 23 + 41)",
     }
 
@@ -473,7 +476,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
             raise RuntimeError("403: invalid token typesafe-test-token")
 
     engine.triage = FailingTriage()  # type: ignore[assignment]
-    engine.flex_agent = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
         answer="bounded fallback",
         learned_skill_note="",
     )
@@ -485,7 +488,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
             task="test fallback",
         )
 
-    assert prediction.route == "single_rlm"
+    assert prediction.route == "deep_rlm"
     assert prediction.answer == "bounded fallback"
     assert "RuntimeError" in caplog.text
     assert "403: invalid token" in caplog.text
@@ -547,7 +550,7 @@ def test_fleet_prefixed_mlflow_environment_takes_priority(monkeypatch: pytest.Mo
 
 
 def test_lite_postgres_tables_do_not_collide_with_legacy_fleet_schema() -> None:
-    session_schema, vfs_schema = SCHEMA_STATEMENTS
+    session_schema, vfs_schema = SCHEMA_STATEMENTS[:2]
 
     assert "CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in session_schema
     assert "CREATE TABLE IF NOT EXISTS fleet_lite_vfs_files" in vfs_schema
@@ -578,9 +581,9 @@ def test_fastapi_health_and_lite_route_contract() -> None:
         "/sessions/{session_id}/turn",
     }
     openapi = app.openapi()
-    assert set(openapi["paths"]) == expected_paths
+    assert expected_paths <= set(openapi["paths"])
     turn_content = openapi["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]
-    assert turn_content == {"text/event-stream": {"schema": {"type": "string"}}}
+    assert turn_content["text/event-stream"]["schema"] == {"type": "string"}
 
     with TestClient(app) as client:
         response = client.get("/health")
@@ -666,9 +669,10 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-    assert events[0] == {"event": "turn_status", "phase": "preparation"}
-    assert events[1] == {
-        "event": "turn_complete",
+    assert events[0]["event"] == "turn_status"
+    assert events[0]["payload"] == {"phase": "preparation"}
+    assert events[1]["event"] == "turn_complete"
+    assert events[1]["payload"] == {
         "answer": "processed locally",
         "route": "single_rlm",
         "learned_skill_note": "",
@@ -691,11 +695,15 @@ def interpreter_daemon(tmp_path: Path) -> tuple[str, str, subprocess.Popen[bytes
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     code = (
-        SANDBOX_SKILL_HELPERS_CODE
-        + "\nTOKEN = "
-        + repr(token)
-        + "\n"
-        + _DAEMON_CODE.replace("TOKEN = __FLEET_TOKEN__\n", "")
+        (
+            SANDBOX_SKILL_HELPERS_CODE
+            + "\n"
+            + WORKSPACE_CODE
+            + "\nTOKEN = "
+            + repr(token)
+            + "\n"
+            + _DAEMON_CODE.replace("TOKEN = __FLEET_TOKEN__\n", "")
+        )
         .replace("8765", str(port))
         .replace("/workspace", str(workspace_root))
     )
@@ -896,3 +904,85 @@ def test_daemon_drop_namespace_cancels_inflight_host_calls_and_bounds_output(
     )
     assert output["truncated"] is True
     assert len(output["stdout"]) == 100_000
+
+
+def test_workspace_dataset_preserves_revisions_and_rejects_symlink_escape(interpreter_daemon) -> None:
+    base_url, token, _ = interpreter_daemon
+    setup = _daemon_request(
+        base_url,
+        token,
+        "/exec",
+        {
+            "ns_id": "ns_00000006",
+            "code": "workspace.write('files/data.csv', 'id,value\\n1,-7\\n2,11\\n3,5\\n')\n"
+            "view = WorkspaceDatasetView(workspace.stat('files/data.csv'))\n"
+            "[len(list(view.lines())), view.search('-7'), len(view.preview(4))]",
+        },
+    )
+    assert not setup.get("error")
+    assert setup["value"] == [4, [[2, "1,-7\n"]], 4]
+    updated = _daemon_request(
+        base_url,
+        token,
+        "/exec",
+        {
+            "ns_id": "ns_00000006",
+            "variables": {"replacement": "changed"},
+            "code": "metadata = workspace.stat('files/data.csv')\n"
+            "workspace.write('files/data.csv', replacement)\nWorkspaceDatasetView(metadata)",
+        },
+    )
+    assert updated["error"] is True and "dataset source changed" in updated["stderr"]
+    rejected = _daemon_request(
+        base_url,
+        token,
+        "/exec",
+        {
+            "ns_id": "ns_00000006",
+            "code": "import os\nos.symlink('/etc/hostname', workspace.resolve('files/link'))\n"
+            "workspace.read_text('files/link')",
+        },
+    )
+    assert rejected["error"] is True and "symbolic links" in rejected["stderr"]
+
+
+def test_namespace_imports_do_not_switch_to_another_agents_facade(interpreter_daemon) -> None:
+    base_url, token, _ = interpreter_daemon
+    for namespace, marker in [("ns_00000007", "left"), ("ns_00000008", "right")]:
+        response = _daemon_request(
+            base_url,
+            token,
+            "/exec",
+            {
+                "ns_id": namespace,
+                "code": "import sys, types\ndspy = types.ModuleType('dspy')\n"
+                f"dspy.marker = {marker!r}\nsys.modules['dspy'] = dspy",
+            },
+        )
+        assert not response.get("error")
+    response = _daemon_request(
+        base_url,
+        token,
+        "/exec",
+        {
+            "ns_id": "ns_00000007",
+            "code": "import dspy\ndspy.marker",
+        },
+    )
+    assert response["value"] == "left"
+
+
+def test_cancelled_manager_cannot_restart_remote_execution() -> None:
+    stopped = threading.Event()
+    sandbox = SimpleNamespace(id="sandbox-cancel", state="started")
+    manager = DaytonaSandboxManager("key", "org", "volume", "cancel-test")
+    manager._sandbox = sandbox
+    manager._client = SimpleNamespace(stop=lambda *_args, **_kwargs: stopped.set())
+    manager.cancel_turn()
+    assert stopped.is_set()
+    with pytest.raises(RuntimeError, match="cancelled"):
+        manager.ensure_sandbox()
+    manager.reset_turn_budget()
+    manager.end_turn()
+    manager._daemon_ready = True
+    assert manager.ensure_sandbox() is sandbox

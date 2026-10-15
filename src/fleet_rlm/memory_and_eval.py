@@ -9,23 +9,25 @@ import logging
 import os
 import tempfile
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import dspy
 import mlflow
 import psycopg
+from dspy.primitives.facade import SandboxLM
 from dspy.signatures.signature import make_signature
 from mlflow.entities import Feedback, SpanType
 from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, Safety, scorer
 from psycopg.rows import dict_row
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter, make_choice_type
-from fleet_rlm.interpreter import DaytonaSandboxManager, validate_session_id
+from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, validate_session_id
+from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
-_MAX_VFS_FILE_BYTES = 10_000_000
-_MAX_VFS_SYNC_BYTES = 20_000_000
+_MAX_VFS_FILE_BYTES = 25_000_000
+_MAX_VFS_SYNC_BYTES = 100_000_000
 _MAX_VFS_FILES = 5_000
 _MAX_TURN_RECORD_BYTES = 1_000_000
 _SESSION_HISTORY_TURNS = 8
@@ -56,7 +58,9 @@ def _without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
 def _normalize_route(decision: Any) -> str:
     """Return one of the supported routes, falling back to the bounded path."""
     route = str(getattr(decision, "value", decision))
-    return route if route in {"direct_cot", "single_rlm", "delegated_rlm"} else "single_rlm"
+    return {"direct_cot": "direct_cot", "single_rlm": "flex_pipeline", "delegated_rlm": "deep_rlm"}.get(
+        route, "deep_rlm"
+    )
 
 
 SCHEMA_STATEMENTS = (
@@ -79,11 +83,42 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (session_id, rel_path)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS fleet_lite_memories (
+        session_id TEXT NOT NULL REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
+        memory_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'observation',
+        sources JSONB NOT NULL DEFAULT '{}'::jsonb,
+        reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, memory_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS fleet_lite_turns (
+        session_id TEXT NOT NULL REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
+        turn_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        task_sha256 TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        result JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(session_id,turn_id),
+        UNIQUE(session_id,idempotency_key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS fleet_lite_runtime_settings (
+        session_id TEXT PRIMARY KEY REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+    """,
 )
 
 
 def initialize_database(pg_dsn: str) -> None:
-    """Create the two Lite persistence tables without a migration runner."""
+    """Create additive Lite persistence tables without a migration runner."""
     with psycopg.connect(pg_dsn) as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
@@ -95,9 +130,40 @@ class VolumePostgresHarness:
 
     pg_dsn: str
     sandbox_mgr: DaytonaSandboxManager
+    _hydrated: bool = field(default=False, init=False)
 
     def init_db(self) -> None:
         initialize_database(self.pg_dsn)
+
+    def acquire_session_lease(self) -> psycopg.Connection:
+        """Keep a PostgreSQL session lock until runtime close or process death."""
+        connection = psycopg.connect(self.pg_dsn, autocommit=True)
+        try:
+            locked = connection.execute(
+                "SELECT pg_try_advisory_lock(hashtextextended(%s,17))", (self.sandbox_mgr.session_id,)
+            ).fetchone()
+            if not locked or not locked[0]:
+                raise RuntimeError("Session is owned by another worker")
+            return connection
+        except BaseException:
+            connection.close()
+            raise
+
+    def runtime_settings(self) -> dict[str, Any]:
+        with psycopg.connect(self.pg_dsn) as connection:
+            row = connection.execute(
+                "SELECT settings FROM fleet_lite_runtime_settings WHERE session_id=%s", (self.sandbox_mgr.session_id,)
+            ).fetchone()
+        return row[0] if row else {}
+
+    def save_runtime_settings(self, settings: dict[str, Any]) -> None:
+        with psycopg.connect(self.pg_dsn) as connection:
+            connection.execute(
+                "INSERT INTO fleet_lite_runtime_settings(session_id,settings) VALUES(%s,%s::jsonb) "
+                "ON CONFLICT(session_id) DO UPDATE "
+                "SET settings=fleet_lite_runtime_settings.settings || EXCLUDED.settings",
+                (self.sandbox_mgr.session_id, json.dumps(settings)),
+            )
 
     def ensure_session(self, session_id: str) -> None:
         validate_session_id(session_id)
@@ -113,6 +179,104 @@ class VolumePostgresHarness:
                 "FROM fleet_lite_sessions ORDER BY updated_at DESC LIMIT 100"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def save_memory(
+        self,
+        memory_id: str,
+        content: str,
+        *,
+        sources: dict[str, str] | None = None,
+        kind: str = "observation",
+        reviewed: bool = False,
+    ) -> None:
+        validate_session_id(memory_id)
+        if (
+            not content.strip()
+            or len(content) > 10000
+            or kind not in {"observation", "preference", "hypothesis", "procedure"}
+        ):
+            raise ValueError("Invalid memory content or kind")
+        sources = sources or {}
+        if len(sources) > 100 or any(not self._valid_vfs_path(p) for p in sources):
+            raise ValueError("Invalid memory sources")
+        with psycopg.connect(self.pg_dsn) as connection:
+            connection.execute(
+                "INSERT INTO fleet_lite_memories(session_id,memory_id,content,kind,sources,reviewed) "
+                "VALUES (%s,%s,%s,%s,%s::jsonb,%s) ON CONFLICT(session_id,memory_id) DO UPDATE "
+                "SET content=EXCLUDED.content,kind=EXCLUDED.kind,sources=EXCLUDED.sources,"
+                "reviewed=EXCLUDED.reviewed,updated_at=NOW()",
+                (self.sandbox_mgr.session_id, memory_id, content, kind, json.dumps(sources), reviewed),
+            )
+
+    def memories(self, query: str = "", *, reviewed_only: bool = False) -> list[dict[str, Any]]:
+        search = " OR ".join(query[:2000].split()[:32])
+        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                "SELECT memory_id,content,kind,sources,reviewed,updated_at FROM fleet_lite_memories "
+                "WHERE session_id=%s AND (%s=FALSE OR reviewed=TRUE) "
+                "AND (%s='' OR to_tsvector('english',content) @@ websearch_to_tsquery('english',%s)) "
+                "ORDER BY ts_rank_cd(to_tsvector('english',content),websearch_to_tsquery('english',%s)) DESC, "
+                "updated_at DESC LIMIT 20",
+                (self.sandbox_mgr.session_id, reviewed_only, search, search, search),
+            ).fetchall()
+            hashes = {
+                row["rel_path"]: row["sha256"]
+                for row in connection.execute(
+                    "SELECT rel_path,sha256 FROM fleet_lite_vfs_files WHERE session_id=%s",
+                    (self.sandbox_mgr.session_id,),
+                ).fetchall()
+            }
+        for row in rows:
+            row["stale"] = any(hashes.get(path) != digest for path, digest in row["sources"].items())
+            row["updated_at"] = row["updated_at"].isoformat()
+        return rows
+
+    def delete_memory(self, memory_id: str) -> None:
+        with psycopg.connect(self.pg_dsn) as connection:
+            connection.execute(
+                "DELETE FROM fleet_lite_memories WHERE session_id=%s AND memory_id=%s",
+                (self.sandbox_mgr.session_id, validate_session_id(memory_id)),
+            )
+
+    def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
+        """Persist intent before side effects; an uncertain running turn is never replayed."""
+        digest = hashlib.sha256(task.encode()).hexdigest()
+        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
+            inserted = connection.execute(
+                "INSERT INTO fleet_lite_turns(session_id,turn_id,idempotency_key,task_sha256) "
+                "VALUES (%s,%s,%s,%s) ON CONFLICT(session_id,idempotency_key) DO NOTHING RETURNING turn_id",
+                (self.sandbox_mgr.session_id, turn_id, key, digest),
+            ).fetchone()
+            if inserted:
+                return None
+            prior = connection.execute(
+                "SELECT turn_id,task_sha256,status,result FROM fleet_lite_turns "
+                "WHERE session_id=%s AND idempotency_key=%s",
+                (self.sandbox_mgr.session_id, key),
+            ).fetchone()
+            if prior is None:
+                raise RuntimeError("Turn intent disappeared during claim")
+            if prior["task_sha256"] != digest:
+                raise ValueError("Idempotency key already belongs to another task")
+            return prior
+
+    def finish_turn(self, turn_id: str, status: str, result: dict[str, Any]) -> None:
+        with psycopg.connect(self.pg_dsn) as connection:
+            connection.execute(
+                "UPDATE fleet_lite_turns SET status=%s,result=%s::jsonb,updated_at=NOW() "
+                "WHERE session_id=%s AND turn_id=%s AND status <> 'completed'",
+                (status, json.dumps(result), self.sandbox_mgr.session_id, turn_id),
+            )
+
+    def turn_status(self, turn_id: str) -> dict[str, Any] | None:
+        with psycopg.Connection[dict[str, Any]].connect(self.pg_dsn, row_factory=dict_row) as connection:
+            row = connection.execute(
+                "SELECT turn_id,status,result,updated_at FROM fleet_lite_turns WHERE session_id=%s AND turn_id=%s",
+                (self.sandbox_mgr.session_id, validate_session_id(turn_id)),
+            ).fetchone()
+        if row:
+            row["updated_at"] = row["updated_at"].isoformat()
+        return row
 
     def hydrate_volume_from_postgres(self, session_id: str) -> tuple[str, str]:
         """Restore only the requested Session's files, summary, and bounded history."""
@@ -131,7 +295,7 @@ class VolumePostgresHarness:
             ).fetchone()
 
         restored_bytes = 0
-        for row in files:
+        for row in [] if self._hydrated else files:
             content = bytes(row["content"])
             restored_bytes += len(content)
             if (
@@ -142,6 +306,7 @@ class VolumePostgresHarness:
             ):
                 raise ValueError("Persisted workspace file hash validation failed")
             self.sandbox_mgr.write_workspace_file(row["rel_path"], content)
+        self._hydrated = True
         summary = str((session or {}).get("memory_summary") or "")
         turns = (session or {}).get("turns") or []
         history = self._render_history(turns)
@@ -255,6 +420,21 @@ class VolumePostgresHarness:
                     session_id,
                 ),
             )
+            if turn_record.get("turn_id"):
+                completion = {
+                    "event": "turn_complete",
+                    "answer": turn_record.get("answer", ""),
+                    "route": turn_record.get("route", ""),
+                    "learned_skill_note": turn_record.get("learned_skill_note", ""),
+                    "artifacts": sorted(set(artifacts)),
+                }
+                if turn_record.get("trace_id"):
+                    completion["trace_id"] = turn_record["trace_id"]
+                connection.execute(
+                    "UPDATE fleet_lite_turns SET status='completed',result=%s::jsonb,updated_at=NOW() "
+                    "WHERE session_id=%s AND turn_id=%s",
+                    (json.dumps(completion), session_id, turn_record["turn_id"]),
+                )
         return sorted(set(artifacts))
 
     def persist_workspace_files(self, session_id: str) -> list[str]:
@@ -295,33 +475,19 @@ class VolumePostgresHarness:
 
     def _scan_volume_files(self) -> list[dict[str, Any]]:
         """Read a bounded, symlink-free manifest from the owning Session Volume."""
-        scan_script = (
-            "import base64,hashlib,json,os\n"
-            "root='/workspace'\n"
-            "out=[]\n"
-            "total=0\n"
-            "count=0\n"
-            "for sub in ('files','memory','skills','artifacts'):\n"
-            " for base,dirs,names in os.walk(os.path.join(root,sub),followlinks=False):\n"
-            "  dirs[:]=[name for name in dirs if not os.path.islink(os.path.join(base,name))]\n"
-            "  for name in names:\n"
-            "   path=os.path.join(base,name)\n"
-            "   if os.path.islink(path) or not os.path.isfile(path): continue\n"
-            "   size=os.path.getsize(path)\n"
-            f"   if size>{_MAX_VFS_FILE_BYTES}: raise ValueError('workspace file exceeds per-file size limit')\n"
-            "   with open(path,'rb') as handle: raw=handle.read(size+1)\n"
-            "   if len(raw)!=size: raise ValueError('workspace changed during sync')\n"
-            "   total+=len(raw)\n"
-            f"   if total>{_MAX_VFS_SYNC_BYTES}: raise ValueError('workspace sync exceeds size limit')\n"
-            "   count+=1\n"
-            f"   if count>{_MAX_VFS_FILES}: raise ValueError('workspace contains too many files to sync')\n"
-            "   rel=os.path.relpath(path,root)\n"
-            "   out.append({'rel':rel,'sha':hashlib.sha256(raw).hexdigest(),'b64':base64.b64encode(raw).decode()})\n"
-            "print(json.dumps(out,separators=(',',':')))"
-        )
-        files = json.loads(self.sandbox_mgr.exec_remote_python(scan_script) or "[]")
-        if not isinstance(files, list) or any(not isinstance(item, dict) for item in files):
-            raise RuntimeError("Invalid workspace scan result")
+        paths = self.sandbox_mgr.list_workspace_files()
+        if len(paths) > _MAX_VFS_FILES:
+            raise ValueError("Workspace contains too many files")
+        files = []
+        total = 0
+        for path in paths:
+            if not self._valid_vfs_path(path):
+                raise ValueError("Invalid workspace scan path")
+            raw = self.sandbox_mgr.read_workspace_file(path, max_bytes=_MAX_VFS_FILE_BYTES)
+            total += len(raw)
+            if total > _MAX_VFS_SYNC_BYTES:
+                raise ValueError("Workspace exceeds sync quota")
+            files.append({"rel": path, "sha": hashlib.sha256(raw).hexdigest(), "b64": base64.b64encode(raw).decode()})
         return files
 
     @staticmethod
@@ -329,7 +495,7 @@ class VolumePostgresHarness:
         parts = rel_path.split("/")
         return (
             bool(parts)
-            and parts[0] in {"files", "memory", "skills", "artifacts"}
+            and parts[0] in {"files", "memory", "skills", "artifacts", "buffers", "sessions"}
             and len(rel_path) <= 1024
             and all(part not in {"", ".", ".."} for part in parts)
             and "\\" not in rel_path
@@ -374,6 +540,7 @@ class FleetTaskSignature(dspy.Signature):
     session_history: str = dspy.InputField(desc="Recent committed Turns from this Session")
     execution_route: str = dspy.InputField(desc="The triage-selected route: single_rlm or delegated_rlm")
     task: str = dspy.InputField(desc="User request")
+    context: Any = dspy.InputField(desc="Dataset handle or bounded context; inspect data in Python, not by guessing")
     answer: str = dspy.OutputField(desc="Answer grounded in verified sandbox work")
     learned_skill_note: str = dspy.OutputField(desc="Short note about reusable learning or Skills created")
 
@@ -388,6 +555,7 @@ class AdaptiveFleetEngine(dspy.Module):
         sub_lm: dspy.LM,
         jev_lm: Any | None = None,
         compiled_path: str | None = None,
+        execution_mode: str = "hybrid",
     ) -> None:
         super().__init__()
         self.sandbox_mgr = sandbox_mgr
@@ -395,28 +563,100 @@ class AdaptiveFleetEngine(dspy.Module):
         self.sub_lm = sub_lm
         self.jev_lm = jev_lm
         self.compiled_path = compiled_path
+        if execution_mode not in {"rlm", "flex", "hybrid"}:
+            raise ValueError("Invalid execution mode")
+        self.execution_mode = execution_mode
+        self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
+        self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self._compiled_digest = ""
         self._compiled_signature: tuple[int, int] | None = None
         self.triage = dspy.Predict(TurnTriageSignature)
         self.direct_cot = dspy.ChainOfThought("memory_summary, session_history, task -> answer")
 
+        def spawn_agent(
+            subtask: str,
+            input_paths: list[str] | None = None,
+            allowed_tools: list[str] | None = None,
+            max_iters: int = 8,
+            max_llm_calls: int = 25,
+        ) -> dict[str, Any]:
+            """Run a child with selected files; return findings and digest-verified promoted artifacts.
+
+            No inputs are copied unless listed. The only optional Fleet tool is
+            spawn_agent, allowing bounded further delegation. max_llm_calls is
+            DSPy's query/facade limit; the shared turn ledger also meters actions.
+            """
+            if (
+                not subtask.strip()
+                or len(subtask) > 20_000
+                or type(max_iters) is not int
+                or not 1 <= max_iters <= 8
+                or type(max_llm_calls) is not int
+                or not 1 <= max_llm_calls <= 25
+            ):
+                raise ValueError("Invalid child task or resource slice")
+            names = ["spawn_agent"] if allowed_tools is None else allowed_tools
+            if not isinstance(names, list) or any(name != "spawn_agent" for name in names):
+                raise ValueError("Only the approved spawn_agent Fleet tool may be delegated")
+            tools = {"spawn_agent": spawn_agent} if names else {}
+            factory = self.sandbox_mgr.interpreter_factory(tools=tools, input_paths=input_paths or [])
+            interpreters: list[DaytonaInterpreter] = []
+
+            def create() -> DaytonaInterpreter:
+                interpreter = factory()
+                if not interpreters:
+                    # The explicit task owns promotion: failure must not publish
+                    # the child's unverified staging files into its parent.
+                    interpreter.owns_manager = False
+                interpreters.append(interpreter)
+                return interpreter
+
+            create.execution_instructions = getattr(factory, "execution_instructions", "")  # ty: ignore[unresolved-attribute]
+            child = dspy.RLM(
+                "subtask: str -> findings: str",
+                tools=list(tools.values()),
+                interpreter_factory=create,
+                sub_lm=self._metered_sub,
+                max_iters=max_iters,
+                max_llm_calls=max_llm_calls,
+            )
+            try:
+                with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
+                    result = child(subtask=subtask)
+                return {
+                    "findings": str(result.findings)[:20_000],
+                    "artifacts": interpreters[0].manager.collect_child_artifacts() if interpreters else [],
+                }
+            finally:
+                if interpreters:
+                    interpreters[0].manager.shutdown()
+
         def sub_rlm(subtask: str, context_hint: str = "") -> str:
-            """Investigate one independent subtask with no recursive child tools."""
+            """Spawn an isolated recursive investigation; input files and Skills are copied, not parent memory."""
             child = dspy.RLM(
                 signature="context_hint: str, subtask: str -> findings: str",
-                interpreter_factory=self.sandbox_mgr.interpreter_factory(),
-                sub_lm=self.sub_lm,
+                tools=[sub_rlm],
+                interpreter_factory=self.sandbox_mgr.interpreter_factory(tools={"sub_rlm": sub_rlm}),
+                sub_lm=self._metered_sub,
                 max_iters=8,
                 max_llm_calls=25,
             )
-            with dspy.context(lm=self.sub_lm, disable_history=True, adapter=FleetRLMChatAdapter()):
-                return child(context_hint=context_hint, subtask=subtask).findings
+            with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
+                return str(child(context_hint=context_hint[:10000], subtask=subtask[:20000]).findings)[:20000]
 
-        toolset = {"sub_rlm": sub_rlm}
+        toolset = {"sub_rlm": sub_rlm, "spawn_agent": spawn_agent}
         self.flex_agent = dspy.Flex(
             FleetTaskSignature,
-            tools=[sub_rlm],
+            tools=[sub_rlm, spawn_agent],
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
+        )
+        self.primary_rlm = dspy.RLM(
+            FleetTaskSignature,
+            tools=[sub_rlm, spawn_agent],
+            sub_lm=self._metered_sub,
+            interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
+            max_iters=16,
+            max_llm_calls=sandbox_mgr.max_llm_calls,
         )
         if compiled_path and os.path.lexists(compiled_path):
             if os.path.islink(compiled_path) or not os.path.isfile(compiled_path):
@@ -509,22 +749,55 @@ class AdaptiveFleetEngine(dspy.Module):
         task: str,
         skills_catalog: str = "<available_skills></available_skills>",
         session_history: str = "",
+        context: Any = None,
+        execution_mode: str | None = None,
+    ) -> dspy.Prediction:
+        owns_turn = not self.sandbox_mgr.root._deadline
+        try:
+            return self._run_turn(
+                workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
+            )
+        finally:
+            if owns_turn:
+                self.sandbox_mgr.end_turn()
+
+    def _run_turn(
+        self,
+        workspace_manifest: str,
+        memory_summary: str,
+        task: str,
+        skills_catalog: str,
+        session_history: str,
+        context: Any,
+        execution_mode: str | None,
     ) -> dspy.Prediction:
         self._reload_changed_local_program()
-        self.sandbox_mgr.reset_turn_budget()
+        if not self.sandbox_mgr.root._deadline:
+            self.sandbox_mgr.reset_turn_budget()
+        self.sandbox_mgr.check_turn()
+        mode = execution_mode or self.execution_mode
+        if mode not in {"rlm", "flex", "hybrid"}:
+            raise ValueError("Invalid execution mode")
+        if isinstance(context, WorkspaceDataset):
+            raw = self.sandbox_mgr.read_workspace_file(context.workspace_path)
+            if context.sha256 and hashlib.sha256(raw).hexdigest() != context.sha256:
+                raise ValueError("Dataset source changed; select the new revision")
         route = "single_rlm"
-        route_lm = self.jev_lm or self.sub_lm
+        route_lm = self.jev_lm or self._metered_sub
         triage_inputs = {
             "task": task,
             "workspace_manifest": workspace_manifest,
             "skills_catalog": skills_catalog,
         }
         try:
-            if self.jev_lm is None:
+            if mode != "hybrid":
+                route = "deep_rlm" if mode == "rlm" else "flex_pipeline"
+            elif self.jev_lm is None:
                 with dspy.context(lm=route_lm):
                     decision = self.triage(**triage_inputs).route
                 route = _normalize_route(decision)
             else:
+                self.sandbox_mgr.consume_budget()
                 callbacks = _without_mlflow_dspy_callback(list(dspy.settings.callbacks))
                 with mlflow.start_span(name="typesafe_route_selection", span_type=SpanType.LLM) as span:
                     span.set_inputs({"task": task})
@@ -536,12 +809,16 @@ class AdaptiveFleetEngine(dspy.Module):
             _LOGGER.warning(
                 "Optional route selection failed (%s: %s); continuing with bounded RLM execution",
                 type(exc).__name__,
-                _safe_route_error(exc, route_lm),
+                _safe_route_error(exc, self.jev_lm or self.sub_lm),
             )
-            route = "single_rlm"
+            route = "deep_rlm"
+
+        if context is not None and route == "direct_cot":
+            route = "deep_rlm"
+        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route)
 
         if route == "direct_cot":
-            with dspy.context(lm=self.root_lm):
+            with dspy.context(lm=self._metered_root):
                 answer = self.direct_cot(
                     memory_summary=memory_summary,
                     session_history=session_history,
@@ -549,15 +826,22 @@ class AdaptiveFleetEngine(dspy.Module):
                 ).answer
             return dspy.Prediction(answer=answer, learned_skill_note="", route=route)
 
-        with dspy.context(lm=self.root_lm, adapter=FleetRLMChatAdapter()):
-            prediction = self.flex_agent(
+        agent = (
+            self.primary_rlm
+            if mode == "rlm" or route in {"deep_rlm", "single_rlm", "delegated_rlm"}
+            else self.flex_agent
+        )
+        with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
+            prediction = agent(
                 workspace_manifest=workspace_manifest,
                 skills_catalog=skills_catalog,
                 memory_summary=memory_summary,
                 session_history=session_history,
                 execution_route=route,
                 task=task,
+                context=context if context is not None else "",
             )
+        self.sandbox_mgr.check_turn()
         return dspy.Prediction(
             answer=prediction.answer,
             learned_skill_note=getattr(prediction, "learned_skill_note", ""),

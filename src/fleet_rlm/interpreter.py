@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextvars
+import hashlib
 import json
 import keyword
 import logging
@@ -15,19 +16,23 @@ import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import dspy
-from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, VolumeMount
+from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, ListSandboxesQuery, VolumeMount
 from dspy.signatures.signature import make_signature
 
 from fleet_rlm.dspy_support import make_choice_type
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE
+from fleet_rlm.workspace import WORKSPACE_CODE
+from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NAMESPACE_RE = re.compile(r"^ns_[a-f0-9]{8}$")
-_ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills"})
+_ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
+_ACTIVE_MANAGER: contextvars.ContextVar[Any] = contextvars.ContextVar("fleet_active_manager", default=None)
 
 
 def validate_session_id(session_id: str) -> str:
@@ -171,6 +176,15 @@ def _make_namespace(ns_id, tool_names):
         "save_skill": save_skill,
         "SUBMIT": lambda **kwargs: (_ for _ in ()).throw(FinalOutput(kwargs)),
     }
+    if 'workspace' in globals():
+        namespace.update(workspace=workspace, WorkspaceDatasetView=WorkspaceDatasetView)
+    # DSPy's remote facade registers a process-global import. Keep each
+    # namespace's import bound to its own facade and authenticated host tools.
+    def namespace_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level == 0 and name == 'dspy' and 'dspy' in namespace:
+            return namespace['dspy']
+        return builtins.__import__(name, globals, locals, fromlist, level)
+    namespace['__builtins__'] = dict(vars(builtins), __import__=namespace_import)
     for name in tool_names:
         if isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name) and name not in namespace:
             namespace[name] = _make_tool(ns_id, name)
@@ -298,6 +312,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"error": "execution variable names must be strings"}, 400)
             output, errors = BoundedBuffer(), BoundedBuffer()
             with execution_lock:
+                for name in tools:
+                    if name not in reserved_names:
+                        namespace[name] = _make_tool(ns_id, name)
                 namespace.update({
                     key: value
                     for key, value in variables.items()
@@ -341,7 +358,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(result)
         return self._send({"error": "not found"}, 404)
 
-for directory in ("files", "artifacts", "memory", "skills"):
+for directory in ("files", "artifacts", "memory", "skills", "buffers", "sessions"):
     os.makedirs(os.path.join("/workspace", directory), exist_ok=True)
 sys.path.insert(0, "/workspace")
 ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
@@ -361,6 +378,20 @@ class DaytonaSandboxManager:
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
     max_llm_calls: int = 150
+    max_depth: int = 3
+    max_children: int = 8
+    max_active_children: int = 4
+    turn_timeout_seconds: int = 900
+    linked_children: bool = True
+    disposable: bool = False
+    event_callback: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
+    parent: DaytonaSandboxManager | None = field(default=None, repr=False)
+    agent_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    _children: dict[str, DaytonaSandboxManager] = field(default_factory=dict, init=False, repr=False)
+    _allocations: int = field(default=0, init=False, repr=False)
+    _cancelled: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _deadline: float = field(default=0, init=False, repr=False)
+    _watchdog: threading.Timer | None = field(default=None, init=False, repr=False)
     _sandbox: Any = field(default=None, init=False, repr=False)
     _client: Daytona | None = field(default=None, init=False, repr=False)
     _token: str = field(default_factory=lambda: secrets.token_urlsafe(32), init=False, repr=False)
@@ -371,6 +402,7 @@ class DaytonaSandboxManager:
     _poller: threading.Thread | None = field(default=None, init=False, repr=False)
     _stop_poller: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     _daemon_ready: bool = field(default=False, init=False, repr=False)
+    _creation_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         validate_session_id(self.session_id)
@@ -379,11 +411,198 @@ class DaytonaSandboxManager:
         if self.max_llm_calls < 1:
             raise ValueError("max_llm_calls must be positive")
 
+    @property
+    def root(self) -> DaytonaSandboxManager:
+        return self.parent.root if self.parent is not None else self
+
+    @property
+    def depth(self) -> int:
+        return self.parent.depth + 1 if self.parent is not None else 0
+
+    def emit(self, event: str, **payload: Any) -> None:
+        callback = self.root.event_callback
+        if callback:
+            callback(
+                {
+                    "event": event,
+                    "agent_id": self.agent_id,
+                    "parent_agent_id": self.parent.agent_id if self.parent else None,
+                    "sandbox_id": getattr(self._sandbox, "id", None),
+                    **payload,
+                }
+            )
+
+    def check_turn(self) -> None:
+        root = self.root
+        if root._cancelled.is_set():
+            raise RuntimeError("Turn cancelled")
+        if root._deadline and time.monotonic() >= root._deadline:
+            root._cancelled.set()
+            raise TimeoutError("Turn deadline exceeded")
+
+    def allocate_child(self, *, input_paths: list[str] | None = None) -> DaytonaSandboxManager:
+        root = self.root
+        self.check_turn()
+        selected_paths: list[str] | None = None
+        if input_paths is not None:
+            if not isinstance(input_paths, list):
+                raise TypeError("input_paths must be a list of workspace paths")
+            if len(input_paths) > 100:
+                raise ValueError("Child input file limit exceeded")
+            selected_paths = []
+            for path in input_paths:
+                clean_path = _workspace_relative_path(path)
+                if not clean_path.startswith(("files/", "skills/")):
+                    raise ValueError("Child inputs must be files beneath files/ or skills/")
+                selected_paths.append(clean_path)
+            available_paths = set()
+            for path in self.list_workspace_files():
+                try:
+                    available_paths.add(_workspace_relative_path(path))
+                except ValueError:
+                    continue
+            missing_paths = [path for path in selected_paths if path not in available_paths]
+            if missing_paths:
+                raise ValueError(f"Child input file is unavailable: {missing_paths[0]}")
+
+        with root._budget_lock:
+            if self.depth >= root.max_depth:
+                raise RuntimeError("Agent recursion depth exhausted")
+            if root._allocations >= root.max_children or len(root._children) >= root.max_active_children:
+                raise RuntimeError("Child sandbox capacity exhausted; spawn refused to avoid a wait cycle")
+            child = DaytonaSandboxManager(
+                self.api_key,
+                self.org_id,
+                self.volume_id,
+                self.session_id,
+                snapshot=self.snapshot,
+                auto_stop_minutes=self.auto_stop_minutes,
+                sub_lm=self.sub_lm,
+                jev_lm=self.jev_lm,
+                max_llm_calls=root.max_llm_calls,
+                parent=self,
+                linked_children=root.linked_children,
+            )
+            root._children[child.agent_id] = child
+            root._allocations += 1
+        child.emit("agent_spawn", depth=child.depth)
+        try:
+            child.ensure_sandbox()
+            total = 0
+            paths_to_copy = selected_paths
+            if paths_to_copy is None:
+                paths_to_copy = [path for path in self.list_workspace_files() if path.startswith(("files/", "skills/"))]
+            for path in paths_to_copy:
+                data = self.read_workspace_file(path)
+                total += len(data)
+                if total > 100_000_000:
+                    raise ValueError("Child input transfer quota exceeded")
+                child.write_workspace_file(path, data)
+            return child
+        except BaseException:
+            child.shutdown()
+            raise
+
+    def collect_child_artifacts(self) -> list[dict[str, Any]]:
+        if self.parent is None:
+            return []
+        self.check_turn()
+        results = []
+        total = 0
+        for path in self.list_workspace_files():
+            if not path.startswith("artifacts/"):
+                continue
+            raw = self.read_workspace_file(path)
+            total += len(raw)
+            if total > 25_000_000 or len(results) >= 100:
+                raise ValueError("Child output promotion quota exceeded")
+            target = f"artifacts/{self.agent_id}/{path.removeprefix('artifacts/')}"
+            self.parent.write_workspace_file(target, raw)
+            results.append({"path": target, "sha256": hashlib.sha256(raw).hexdigest(), "agent_id": self.agent_id})
+        self.emit("agent_result", artifacts=results)
+        return results
+
+    def cancel_turn(self) -> None:
+        root = self.root
+        root._cancelled.set()
+        root._stop_poller.set()
+        root.emit("cancellation_requested")
+        for child in tuple(root._children.values()):
+            child.shutdown()
+        # Stopping the root interrupts remote Python, including a running infinite loop.
+        with root._lock:
+            if root._sandbox is not None and root._client is not None:
+                root._client.stop(root._sandbox, timeout=60)
+                root._daemon_ready = False
+
+    def _record_allocation(self, status: str) -> None:
+        directory = Path(".fleet/allocations")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{self.agent_id}.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "agent_id": self.agent_id,
+                    "session_id": self.session_id,
+                    "sandbox_id": getattr(self._sandbox, "id", None),
+                    "status": status,
+                    "expires_at": time.time() + self.root.turn_timeout_seconds + 120,
+                }
+            )
+        )
+        temporary.replace(path)
+
+    def reconcile_allocations(self) -> None:
+        """Delete expired, journaled allocations in this session, never unknown resources."""
+        if self._client is None:
+            return
+        for path in Path(".fleet/allocations").glob("*.json"):
+            record = json.loads(path.read_text())
+            if record["session_id"] != self.session_id or record["expires_at"] > time.time():
+                continue
+            if record["agent_id"] == self.agent_id:
+                continue
+            for sandbox in self._client.list(
+                ListSandboxesQuery(
+                    labels={
+                        "fleet_session": self.session_id,
+                        "fleet_agent": record["agent_id"],
+                    }
+                )
+            ):
+                self._client.delete(sandbox, wait=True, timeout=60)
+                self.emit("orphan_deleted", sandbox_id=sandbox.id, agent_id=record["agent_id"])
+            path.unlink()
+
     def ensure_sandbox(self) -> Any:
+        self.check_turn()
         with self._lock:
             if self._client is None:
                 self._client = Daytona(DaytonaConfig(api_key=self.api_key, organization_id=self.org_id))
             if self._sandbox is None:
+                self.check_turn()
+                if self._creation_pending:
+                    matches = list(
+                        self._client.list(
+                            ListSandboxesQuery(
+                                labels={
+                                    "fleet_session": self.session_id,
+                                    "fleet_agent": self.agent_id,
+                                }
+                            )
+                        )
+                    )
+                    if len(matches) != 1:
+                        raise RuntimeError("Sandbox allocation outcome is uncertain; refusing a duplicate create")
+                    self._sandbox = matches[0]
+                    self._record_allocation("ready")
+                    self._creation_pending = False
+                    return self.ensure_sandbox()
+                if self.parent is None:
+                    self.reconcile_allocations()
+                child = self.parent is not None
+                root_sandbox = self.root.ensure_sandbox() if child else None
                 params = CreateSandboxFromSnapshotParams(
                     snapshot=self.snapshot,
                     language="python",
@@ -391,12 +610,30 @@ class DaytonaSandboxManager:
                         VolumeMount(
                             volume_id=self.volume_id,
                             mount_path="/workspace",
-                            subpath=session_volume_subpath(self.session_id),
+                            subpath=f"agents/{self.session_id}/{self.agent_id}"
+                            if child
+                            else session_volume_subpath(self.session_id),
                         )
                     ],
                     auto_stop_interval=self.auto_stop_minutes,
+                    linked_sandbox=root_sandbox.id if root_sandbox is not None and self.linked_children else None,
+                    ephemeral=child or self.disposable,
+                    auto_delete_interval=0 if child or self.disposable else -1,
+                    ttl_minutes=30 if child else 120,
+                    labels={
+                        "fleet_session": self.session_id,
+                        "fleet_agent": self.agent_id,
+                        "fleet_parent": self.parent.agent_id if child else "root",
+                    },
                 )
+                self.emit("sandbox_provisioning")
+                self._record_allocation("requested")
+                self._creation_pending = True
                 self._sandbox = self._client.create(params)
+                self._creation_pending = False
+                self._record_allocation("ready")
+                self.check_turn()
+                self.emit("sandbox_ready", depth=self.depth)
             state = getattr(self._sandbox, "state", None)
             normalized_state = str(getattr(state, "value", state) or "").lower()
             if normalized_state in {"stopped", "archived", "archiving", "stopping"}:
@@ -433,7 +670,12 @@ class DaytonaSandboxManager:
 
         token_source = "TOKEN = " + repr(self._token) + "\n"
         daemon_code = (
-            SANDBOX_SKILL_HELPERS_CODE + "\n" + token_source + _DAEMON_CODE.replace("TOKEN = __FLEET_TOKEN__\n", "")
+            SANDBOX_SKILL_HELPERS_CODE
+            + "\n"
+            + WORKSPACE_CODE
+            + "\n"
+            + token_source
+            + _DAEMON_CODE.replace("TOKEN = __FLEET_TOKEN__\n", "")
         )
         daemon_b64 = base64.b64encode(daemon_code.encode("utf-8")).decode("ascii")
         start_code = (
@@ -468,10 +710,15 @@ class DaytonaSandboxManager:
                 f"r=urllib.request.Request('http://127.0.0.1:8765{path}',headers={{'Authorization':authorization}})\n"
             )
         else:
-            encoded = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+            # Never embed task inputs in shell arguments: Linux ARG_MAX is much
+            # smaller than the supported RPC payload size.
+            request_path = f"/tmp/fleet-rpc-{uuid.uuid4().hex}.json"
+            sandbox.fs.upload_file(json.dumps(payload, separators=(",", ":")).encode("utf-8"), request_path)
             request_code = (
-                "import base64,json,urllib.request\n"
-                f"body=base64.b64decode('{encoded}')\n"
+                "import base64,json,pathlib,urllib.request\n"
+                f"source=pathlib.Path({request_path!r})\n"
+                "body=source.read_bytes()\n"
+                "source.unlink()\n"
                 f"authorization='Bearer '+base64.b64decode('{token_b64}').decode()\n"
                 f"headers={{'Authorization':authorization,'Content-Type':'application/json'}}\n"
                 f"r=urllib.request.Request('http://127.0.0.1:8765{path}',data=body,headers=headers)\n"
@@ -495,16 +742,40 @@ class DaytonaSandboxManager:
         return self._remote_exec(self.ensure_sandbox(), code)
 
     def reset_turn_budget(self) -> None:
-        with self._budget_lock:
-            self._llm_calls_used = 0
+        root = self.root
+        root.end_turn()
+        with root._budget_lock:
+            root._llm_calls_used = 0
+            root._allocations = 0
+            root._cancelled.clear()
+            root._deadline = time.monotonic() + root.turn_timeout_seconds
+            root._watchdog = threading.Timer(root.turn_timeout_seconds, root.cancel_turn)
+            root._watchdog.daemon = True
+            root._watchdog.start()
+
+    def end_turn(self) -> None:
+        root = self.root
+        if root._watchdog is not None:
+            root._watchdog.cancel()
+            root._watchdog = None
+        root._deadline = 0
 
     def consume_budget(self, count: int = 1) -> None:
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             raise ValueError("budget consumption must be a positive integer")
-        with self._budget_lock:
-            if self._llm_calls_used + count > self.max_llm_calls:
-                raise RuntimeError(f"Shared RLM budget exhausted ({self.max_llm_calls} calls)")
-            self._llm_calls_used += count
+        self.check_turn()
+        root = self.root
+        with root._budget_lock:
+            if root._llm_calls_used + count > root.max_llm_calls:
+                raise RuntimeError(f"Shared RLM budget exhausted ({root.max_llm_calls} calls)")
+            root._llm_calls_used += count
+        self.emit(
+            "budget_update",
+            lm_calls=root._llm_calls_used,
+            max_llm_calls=root.max_llm_calls,
+            tokens=None,
+            estimated_cost=None,
+        )
 
     def list_workspace_files(self) -> list[str]:
         code = (
@@ -532,6 +803,18 @@ class DaytonaSandboxManager:
         sandbox.fs.upload_file(content, f"/workspace/{clean_path}", timeout=1800)
         return f"/workspace/{clean_path}"
 
+    def write_workspace_file_from_path(self, rel_path: str, local_path: str | Path) -> str:
+        """Upload a local file through Daytona without loading it into memory."""
+        clean_path = _workspace_relative_path(rel_path)
+        source = Path(local_path)
+        size = source.stat().st_size
+        if size > 25_000_000:
+            raise ValueError("Workspace file exceeds the 25 MB limit")
+        sandbox = self.ensure_sandbox()
+        self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
+        sandbox.fs.upload_file(str(source), f"/workspace/{clean_path}", timeout=1800)
+        return f"/workspace/{clean_path}"
+
     def read_workspace_file(self, rel_path: str, *, max_bytes: int = 25_000_000) -> bytes:
         if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 25_000_000:
             raise ValueError("max_bytes must be an integer between 0 and 25000000")
@@ -542,6 +825,19 @@ class DaytonaSandboxManager:
         if not isinstance(content, bytes) or len(content) != metadata["size"]:
             raise RuntimeError("Workspace file changed or could not be downloaded")
         return content
+
+    def read_workspace_file_to_path(self, rel_path: str, local_path: str | Path, *, max_bytes: int = 25_000_000) -> int:
+        """Download a workspace file to disk through Daytona's path overload."""
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 25_000_000:
+            raise ValueError("max_bytes must be an integer between 0 and 25000000")
+        clean_path = _workspace_relative_path(rel_path)
+        sandbox = self.ensure_sandbox()
+        metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
+        destination = Path(local_path)
+        sandbox.fs.download_file(f"/workspace/{clean_path}", str(destination), 1800)
+        if not destination.is_file() or destination.stat().st_size != metadata["size"]:
+            raise RuntimeError("Workspace file changed or could not be downloaded")
+        return metadata["size"]
 
     def _workspace_file_metadata(
         self,
@@ -590,10 +886,37 @@ class DaytonaSandboxManager:
         return metadata
 
     def interpreter_factory(
-        self, tools: Mapping[str, Callable[..., Any]] | None = None
+        self,
+        tools: Mapping[str, Callable[..., Any]] | None = None,
+        *,
+        input_paths: list[str] | None = None,
     ) -> Callable[[], DaytonaInterpreter]:
         """Return the zero-argument fresh interpreter factory required by DSPy 3.4."""
-        return lambda: DaytonaInterpreter(manager=self, tools=dict(tools or {}))
+        captured_input_paths = tuple(input_paths) if input_paths is not None else None
+
+        def create() -> DaytonaInterpreter:
+            active = _ACTIVE_MANAGER.get()
+            if active is not None:
+                if captured_input_paths is None:
+                    manager = active.allocate_child()
+                else:
+                    manager = active.allocate_child(input_paths=list(captured_input_paths))
+            else:
+                manager = self
+            return DaytonaInterpreter(manager=manager, tools=dict(tools or {}), owns_manager=active is not None)
+
+        create.execution_instructions = (  # ty: ignore[unresolved-attribute]
+            "Python runs in Daytona with /workspace and workspace helper. "
+            "context datasets expose .path/.lines()/.chunks()/.search(). "
+            "Use workspace.write_artifact(name, content) for results. "
+            "Nested DSPy code agents allocate fresh child sandboxes; only files/ and skills/ inputs are copied."
+        )
+        return create
+
+    def delete_workspace_file(self, rel_path: str) -> None:
+        clean = _workspace_relative_path(rel_path)
+        self._workspace_file_metadata(self.ensure_sandbox(), clean, create_parents=False)
+        self.exec_remote_python(f"import os; os.unlink({('/workspace/' + clean)!r})")
 
     def _register_interpreter(self, interpreter: DaytonaInterpreter) -> None:
         with self._lock:
@@ -629,6 +952,10 @@ class DaytonaSandboxManager:
                     time.sleep(0.2)
 
     def shutdown(self) -> None:
+        if self.parent is None:
+            self.end_turn()
+            for child in tuple(self._children.values()):
+                child.shutdown()
         self._stop_poller.set()
         poller = self._poller
         if poller is not None and poller is not threading.current_thread():
@@ -643,16 +970,52 @@ class DaytonaSandboxManager:
                 interpreter._closed = True
         if sandbox is not None and client is not None:
             try:
-                client.stop(sandbox, timeout=60)
+                if self.parent is not None or self.disposable:
+                    self.emit("sandbox_deleting", sandbox_id=sandbox.id)
+                    try:
+                        self._remote_exec(
+                            sandbox,
+                            "import os,shutil\n"
+                            "for name in os.listdir('/workspace'):\n"
+                            " p=os.path.join('/workspace',name)\n"
+                            " try:\n"
+                            "  if os.path.islink(p) or not os.path.isdir(p): os.unlink(p)\n"
+                            "  else: shutil.rmtree(p)\n"
+                            " except FileNotFoundError: pass\n",
+                        )
+                    except Exception:
+                        self.emit("workspace_cleanup_failed", sandbox_id=sandbox.id)
+                    # A stopped or failed sandbox cannot run workspace cleanup,
+                    # but must still be deleted and confirmed by the provider.
+                    client.delete(sandbox, timeout=60, wait=True)
+                    (Path(".fleet/allocations") / f"{self.agent_id}.json").unlink(missing_ok=True)
+                    with self.root._budget_lock:
+                        self.root._children.pop(self.agent_id, None)
+                    self.emit("sandbox_deleted", sandbox_id=sandbox.id)
+                else:
+                    client.stop(sandbox, timeout=60)
             except Exception:
                 _LOGGER.warning("Daytona Session sandbox stop failed")
+                if self.parent is not None:
+                    # Retain the handle so a later shutdown can retry deletion.
+                    self._sandbox = sandbox
+                    self.emit("sandbox_cleanup_failed", sandbox_id=sandbox.id)
+        elif self.parent is not None:
+            with self.root._budget_lock:
+                self.root._children.pop(self.agent_id, None)
 
 
 class DaytonaInterpreter:
     """DSPy CodeInterpreter backed by a namespace in a Session-isolated sandbox."""
 
-    def __init__(self, manager: DaytonaSandboxManager, tools: dict[str, Callable[..., Any]] | None = None):
+    def __init__(
+        self,
+        manager: DaytonaSandboxManager,
+        tools: dict[str, Callable[..., Any]] | None = None,
+        owns_manager: bool = False,
+    ):
         self.manager = manager
+        self.owns_manager = owns_manager
         self.tools = dict(tools or {})
         reserved = {
             "__builtins__",
@@ -689,6 +1052,7 @@ class DaytonaInterpreter:
         tool_name = call.get("tool")
         args = call.get("args", [])
         kwargs = call.get("kwargs", {})
+        active_token = _ACTIVE_MANAGER.set(self.manager)
         try:
             if not isinstance(args, list) or not isinstance(kwargs, dict):
                 raise ValueError("Invalid host tool arguments")
@@ -745,6 +1109,8 @@ class DaytonaInterpreter:
                 self.manager.rpc("/reply", {"id": call_id, "error": str(exc)[:2000]})
             except Exception:
                 _LOGGER.warning("Could not return a host tool result to a Daytona Session sandbox")
+        finally:
+            _ACTIVE_MANAGER.reset(active_token)
 
     def _run_jev_batch(self, items: list[str], question: str, choices: list[str]) -> list[dict[str, Any]]:
         if not items or not choices or len(items) > 100 or len(choices) > 20:
@@ -777,6 +1143,8 @@ class DaytonaInterpreter:
         if variables is not None and not isinstance(variables, dict):
             raise TypeError("Interpreter variables must be an object")
         self.start()
+        if hasattr(self.manager, "check_turn"):
+            self.manager.check_turn()
         response = self.manager.rpc(
             "/exec",
             {"ns_id": self.ns_id, "code": code, "variables": variables or {}, "tools": list(self.tools)},
@@ -804,3 +1172,9 @@ class DaytonaInterpreter:
                 _LOGGER.debug("Daytona interpreter namespace cleanup did not complete")
             finally:
                 self.manager._unregister_interpreter(self)
+        if self.owns_manager:
+            try:
+                if not self.manager.root._cancelled.is_set():
+                    self.manager.collect_child_artifacts()
+            finally:
+                self.manager.shutdown()
