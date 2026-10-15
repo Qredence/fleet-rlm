@@ -56,11 +56,13 @@ The JSON request has one required `task` string:
 The response uses `text/event-stream`. Each data event is JSON prefixed by
 `data: ` and separated by a blank line. The server initially emits a
 `turn_status` preparation event, then DSPy callback events such as
-`module_start`, `tool_start`, and `tool_end`. Completion is reported as
+`module_start`, `lm_end`, `tool_start`, and `tool_end`. An `lm_end` event carries a `usage` object with
+numeric `prompt_tokens`, `completion_tokens`, `total_tokens`, and, when the provider reports them,
+`reasoning_tokens`; it is omitted when the provider reports no usage. Completion is reported as
 `turn_complete` with `answer`, `route`, optional `learned_skill_note`, and an
 `artifacts` list. When MLflow tracing is configured, the completion event also
 includes the recorded `trace_id`. Failures produce a sanitized `error` event
-followed by stream completion. The connection may emit SSE comment keep-alives.
+(which also carries the `trace_id` when tracing is configured) followed by stream completion. The connection may emit SSE comment keep-alives.
 
 Sessions serialize their own Turns while a run is in progress. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.

@@ -195,6 +195,23 @@ class SessionRuntimeRegistry:
                     await asyncio.to_thread(runtime.lease.close)
 
 
+def _usage_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    """Numeric token counts for one LM call, including reasoning tokens when the provider reports them."""
+    details = entry.get("completion_tokens_details")
+    reasoning = (
+        details.get("reasoning_tokens") if isinstance(details, dict) else getattr(details, "reasoning_tokens", None)
+    )
+    found = {
+        "prompt_tokens": entry.get("prompt_tokens"),
+        "completion_tokens": entry.get("completion_tokens"),
+        "total_tokens": entry.get("total_tokens"),
+        "reasoning_tokens": reasoning,
+    }
+    return {
+        key: value for key, value in found.items() if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+
 class SSERuntimeCallback(BaseCallback):
     """Send bounded activity metadata to the active SSE stream."""
 
@@ -212,6 +229,7 @@ class SSERuntimeCallback(BaseCallback):
         self._pending_lock = threading.Lock()
         self._calls: dict[str, dict[str, Any]] = {}
         self._calls_lock = threading.Lock()
+        self._usage_starts: dict[str, tuple[Any, str, int]] = {}
 
     def close(self) -> None:
         self._closed.set()
@@ -281,10 +299,26 @@ class SSERuntimeCallback(BaseCallback):
         self._end("module", call_id, exception)
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
-        self._start("lm", call_id, model=str(getattr(instance, "model", "unknown"))[:150])
+        model = str(getattr(instance, "model", "unknown"))
+        # DSPy's own tracker (set up per module call) receives this call's usage; remember where it stood.
+        tracker = dspy.settings.usage_tracker
+        if tracker is not None:
+            with self._calls_lock:
+                self._usage_starts[call_id] = (tracker, model, len(tracker.usage_data.get(model, [])))
+        self._start("lm", call_id, model=model[:150])
 
     def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
-        self._end("lm", call_id, exception)
+        usage: dict[str, Any] = {}
+        with self._calls_lock:
+            start = self._usage_starts.pop(call_id, None)
+        if start is not None and exception is None:
+            tracker, model, index = start
+            new_entries = tracker.usage_data.get(model, [])[index:]
+            # Exactly one new entry is this call's; more means a concurrent call shared the tracker, so say nothing
+            # rather than attribute another call's tokens.
+            if len(new_entries) == 1:
+                usage = _usage_summary(new_entries[0])
+        self._end("lm", call_id, exception, **({"usage": usage} if usage else {}))
 
     def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         self._start(
@@ -340,6 +374,10 @@ def create_app(
             yield
         finally:
             await application.state.session_registry.close()
+            if application.state.mlflow_experiment_id:
+                # uvicorn re-raises SIGTERM after a graceful stop, which skips atexit and MLflow's exit-time flush.
+                with suppress(Exception):
+                    await asyncio.to_thread(mlflow.flush_trace_async_logging)
 
     app = FastAPI(title="Fleet-RLM Lite API", version="0.8.0", lifespan=lifespan)
     app.state.settings = resolved

@@ -657,7 +657,7 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
     observed_callbacks: list[Any] = []
 
     @contextmanager
-    def fake_dspy_context(*, callbacks: list[Any], disable_history: bool) -> Any:
+    def fake_dspy_context(*, callbacks: list[Any], disable_history: bool, **_extra: Any) -> Any:
         assert disable_history is True
         observed_callbacks.extend(callbacks)
         yield
@@ -1294,3 +1294,165 @@ def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> Non
 
     with pytest.raises(ValueError):
         _child_input_path(bad)
+
+
+def _usage_callback() -> tuple[Any, list[dict]]:
+    import fleet_rlm.server as server
+
+    events: list[dict] = []
+    callback = server.SSERuntimeCallback(None, None)  # type: ignore[arg-type]
+    callback._emit = events.append  # type: ignore[method-assign]
+    return callback, events
+
+
+def test_lm_end_event_reports_usage_from_dspys_tracker() -> None:
+    from dspy.utils.usage_tracker import UsageTracker
+
+    callback, events = _usage_callback()
+    tracker = UsageTracker()
+    lm = SimpleNamespace(model="openai/m")
+    with dspy.context(usage_tracker=tracker):
+        callback.on_lm_start("c1", lm, {})
+        tracker.add_usage(
+            "openai/m",
+            {
+                "prompt_tokens": 40,
+                "completion_tokens": 900,
+                "total_tokens": 940,
+                "completion_tokens_details": {"reasoning_tokens": 850},
+            },
+        )
+        callback.on_lm_end("c1", ["answer"], None)
+    assert events[-1]["usage"] == {
+        "prompt_tokens": 40,
+        "completion_tokens": 900,
+        "total_tokens": 940,
+        "reasoning_tokens": 850,
+    }
+
+
+def test_lm_end_event_skips_usage_when_a_concurrent_call_shared_the_tracker() -> None:
+    from dspy.utils.usage_tracker import UsageTracker
+
+    callback, events = _usage_callback()
+    tracker = UsageTracker()
+    lm = SimpleNamespace(model="openai/m")
+    with dspy.context(usage_tracker=tracker):
+        callback.on_lm_start("c1", lm, {})
+        callback.on_lm_start("c2", lm, {})
+        tracker.add_usage("openai/m", {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
+        tracker.add_usage("openai/m", {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10})
+        callback.on_lm_end("c1", ["a"], None)
+        callback.on_lm_end("c2", ["b"], None)
+    assert all("usage" not in event for event in events if event["event"] == "lm_end")
+
+
+def test_lm_end_event_omits_usage_without_a_tracker_or_on_failure() -> None:
+    callback, events = _usage_callback()
+    callback.on_lm_start("c1", SimpleNamespace(model="openai/m"), {})
+    callback.on_lm_end("c1", ["x"], None)
+    callback.on_lm_start("c2", SimpleNamespace(model="openai/m"), {})
+    callback.on_lm_end("c2", None, RuntimeError("boom"))
+    assert all("usage" not in event for event in events if event["event"] == "lm_end")
+
+
+def _engine_with_fake_children(monkeypatch, child_call):
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+    )
+
+    class FakeChild:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def __call__(self, **kwargs):
+            return SimpleNamespace(findings=child_call(**kwargs))
+
+    monkeypatch.setattr(dspy, "RLM", FakeChild)
+    return engine.primary_rlm._user_tools["spawn_agents"]
+
+
+def test_spawn_agents_runs_children_concurrently_and_keeps_order(monkeypatch) -> None:
+    import threading
+    import time
+
+    barrier = threading.Barrier(3, timeout=10)  # all three must be in flight at once, or this raises
+
+    def child(subtask: str) -> str:
+        barrier.wait()
+        time.sleep({"a": 0.3, "b": 0.0, "c": 0.15}[subtask])  # finish out of order
+        return f"done:{subtask}"
+
+    tool = _engine_with_fake_children(monkeypatch, child)
+    results = tool(subtasks=["a", "b", "c"])
+    assert [r["findings"] for r in results] == ["done:a", "done:b", "done:c"]
+    assert all(r["artifacts"] == [] for r in results)
+
+
+def test_spawn_agents_returns_a_failing_child_as_a_value(monkeypatch) -> None:
+    def child(subtask: str) -> str:
+        if subtask == "bad":
+            raise ValueError("Child input file is unavailable: files/x")
+        return f"done:{subtask}"
+
+    results = _engine_with_fake_children(monkeypatch, child)(subtasks=["ok", "bad", "ok2"])
+    assert [r["findings"] for r in results] == ["done:ok", "", "done:ok2"]
+    assert "unavailable" in results[1]["error"] and "error" not in results[0]
+
+
+def test_spawn_agents_aborts_when_the_turn_budget_is_exhausted(monkeypatch) -> None:
+    def child(**_kwargs) -> str:
+        raise RuntimeError("Shared RLM budget exhausted (32 calls)")
+
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        _engine_with_fake_children(monkeypatch, child)(subtasks=["a", "b"])
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"subtasks": []},
+        {"subtasks": ["a"] * 9},
+        {"subtasks": ["a", 1]},
+        {"subtasks": ["a", "b"], "input_paths": [["files/x"]]},
+    ],
+)
+def test_spawn_agents_rejects_invalid_batches(monkeypatch, kwargs) -> None:
+    tool = _engine_with_fake_children(monkeypatch, lambda subtask: subtask)
+    with pytest.raises(ValueError):
+        tool(**kwargs)
+
+
+def test_spawn_agents_children_inherit_the_callers_context(monkeypatch) -> None:
+    import contextvars
+
+    marker: contextvars.ContextVar[str] = contextvars.ContextVar("marker", default="unset")
+    marker.set("turn-context")
+    tool = _engine_with_fake_children(monkeypatch, lambda **_kwargs: marker.get())
+    assert [r["findings"] for r in tool(subtasks=["a", "b"])] == ["turn-context", "turn-context"]
+
+
+def test_shutdown_flushes_pending_traces_when_tracing_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.server as server
+
+    flushed: list[bool] = []
+    monkeypatch.setattr(server.mlflow, "flush_trace_async_logging", lambda: flushed.append(True))
+    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
+    with TestClient(app):
+        app.state.mlflow_experiment_id = "experiment-test-id"
+        assert flushed == []
+    assert flushed == [True]
+
+
+def test_shutdown_skips_the_trace_flush_when_tracing_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.server as server
+
+    flushed: list[bool] = []
+    monkeypatch.setattr(server.mlflow, "flush_trace_async_logging", lambda: flushed.append(True))
+    app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
+    with TestClient(app):
+        pass
+    assert flushed == []

@@ -64,6 +64,12 @@ The explicit `spawn_agent` host tool accepts a subtask, selected `files/` or
 `skills/` input paths, approved delegation tools, and bounded DSPy iteration/query
 limits. It copies no input files by default, stages child outputs until success,
 and returns bounded findings plus promoted paths, digests, and agent IDs.
+`spawn_agents` runs several independent `spawn_agent` children concurrently on a bounded
+thread pool (at most the active-child capacity), each with a copy of the caller's context,
+and returns one result per subtask in order. A child that fails for ordinary reasons comes
+back as `{findings: "", error, artifacts: []}`; deadline, cancellation, and shared-budget
+exhaustion still abort the Turn. A child whose reply cannot be parsed is re-asked once by
+`FleetRLMChatAdapter` before it fails.
 `allowed_tools=[]` disables further Fleet tool delegation; it is not a Python
 or network sandbox policy. All generated Python still runs under Daytona's
 deployment policy. Native facade-created RLMs retain the compatibility policy

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import json
 import logging
 import os
 import tempfile
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,6 +45,11 @@ def _safe_route_error(exc: Exception, route_lm: Any) -> str:
     if isinstance(api_key, str) and api_key:
         detail = detail.replace(api_key, "[redacted]")
     return detail[:500] or "no exception message"
+
+
+def _turn_is_over(exc: BaseException) -> bool:
+    """Deadline, cancellation, and shared-budget exhaustion end the Turn; ordinary child failures do not."""
+    return isinstance(exc, TimeoutError) or str(exc).startswith(("Turn cancelled", "Shared RLM budget exhausted"))
 
 
 def _child_failure(exc: Exception) -> str:
@@ -538,7 +545,12 @@ TurnTriageSignature = make_signature(
 
 
 class FleetTaskSignature(dspy.Signature):
-    """Solve a task with Session-scoped workspace files and progressive Skills."""
+    """Solve a task with Session-scoped workspace files and progressive Skills.
+
+    Delegate independent subtasks together with spawn_agents (they run concurrently) instead of calling
+    spawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:
+    SUBMIT(answer=..., learned_skill_note=...).
+    """
 
     workspace_manifest: str = dspy.InputField(desc="Files available in this Session's /workspace")
     skills_catalog: str = dspy.InputField(desc="Stage-1 available Skills catalog")
@@ -642,6 +654,57 @@ class AdaptiveFleetEngine(dspy.Module):
                 if interpreters:
                     interpreters[0].manager.shutdown()
 
+        def spawn_agents(
+            subtasks: list[str],
+            input_paths: list[list[str]] | None = None,
+            max_iters: int = 8,
+            max_llm_calls: int = 25,
+        ) -> list[dict[str, Any]]:
+            """Run several independent children concurrently; return one result per subtask, in order.
+
+            Prefer this over calling spawn_agent one after another when the subtasks do not depend on each
+            other. input_paths, when given, holds one list of `files/` paths per subtask. Each result is
+            spawn_agent's {findings, artifacts}, or {findings: "", error, artifacts: []} if that child failed.
+            At most the active-child capacity run at once; the shared Turn budget and deadline still apply.
+            """
+            if (
+                not isinstance(subtasks, list)
+                or not 1 <= len(subtasks) <= 8
+                or not all(isinstance(t, str) for t in subtasks)
+            ):
+                raise ValueError("subtasks must be a list of 1-8 strings")
+            if input_paths is not None and (not isinstance(input_paths, list) or len(input_paths) != len(subtasks)):
+                raise ValueError("input_paths must be omitted or hold one path list per subtask")
+
+            def run_child(index: int) -> dict[str, Any]:
+                try:
+                    return spawn_agent(
+                        subtask=subtasks[index],
+                        input_paths=input_paths[index] if input_paths else None,
+                        max_iters=max_iters,
+                        max_llm_calls=max_llm_calls,
+                    )
+                except Exception as exc:
+                    if _turn_is_over(exc):
+                        raise
+                    return {"findings": "", "error": _child_failure(exc), "artifacts": []}
+
+            workers = min(len(subtasks), sandbox_mgr.root.max_active_children)
+
+            def submit(pool: ThreadPoolExecutor, index: int) -> Future[dict[str, Any]]:
+                # One context copy per child keeps the DSPy callbacks, active manager, and MLflow parent span.
+                context = contextvars.copy_context()
+                return pool.submit(lambda: context.run(run_child, index))
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [submit(pool, index) for index in range(len(subtasks))]
+                try:
+                    return [future.result() for future in futures]
+                except BaseException:
+                    for future in futures:
+                        future.cancel()
+                    raise
+
         def sub_rlm(subtask: str, context_hint: str = "") -> str:
             """Spawn an isolated recursive investigation; input files and Skills are copied, not parent memory."""
             child = dspy.RLM(
@@ -658,15 +721,15 @@ class AdaptiveFleetEngine(dspy.Module):
             except AdapterParseError as exc:
                 return f"ERROR: {_child_failure(exc)}"
 
-        toolset = {"sub_rlm": sub_rlm, "spawn_agent": spawn_agent}
+        toolset = {"sub_rlm": sub_rlm, "spawn_agent": spawn_agent, "spawn_agents": spawn_agents}
         self.flex_agent = dspy.Flex(
             FleetTaskSignature,
-            tools=[sub_rlm, spawn_agent],
+            tools=[sub_rlm, spawn_agent, spawn_agents],
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
         )
         self.primary_rlm = dspy.RLM(
             FleetTaskSignature,
-            tools=[sub_rlm, spawn_agent],
+            tools=[sub_rlm, spawn_agent, spawn_agents],
             sub_lm=self._metered_sub,
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
             max_iters=16,
