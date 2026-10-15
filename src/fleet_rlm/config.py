@@ -2,15 +2,119 @@
 
 from __future__ import annotations
 
+import contextvars
+import hashlib
+import json
+import os
 import re
+import tomllib
 from functools import lru_cache
 from itertools import islice
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import dspy
-from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    PrivateAttr,
+    SecretStr,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_SECRET_FIELDS = {"fleet_database_url", "fleet_daytona_api_key", "databricks_token", "typesafe_api_key"}
+_TOML_FIELDS = {
+    "runtime": {
+        "execution_mode": "execution_mode",
+        "turn_timeout_seconds": "turn_timeout_seconds",
+        "max_llm_calls_per_turn": "max_llm_calls_per_turn",
+        "max_agent_depth": "max_agent_depth",
+        "max_child_sandboxes": "max_child_sandboxes",
+        "max_active_children": "max_active_children",
+        "max_active_sessions": "max_active_sessions",
+        "linked_children": "linked_children",
+    },
+    "gateway": {"host": "databricks_host", "base_url": "fleet_llm_base_url"},
+    "decision": {"model": "typesafe_model"},
+    "daytona": {
+        "snapshot": "fleet_daytona_snapshot",
+        "org_id": "fleet_daytona_org_id",
+        "volume_id": "fleet_daytona_volume_id",
+        "auto_stop_minutes": "daytona_auto_stop_minutes",
+        "shared_notes_subpath": "fleet_shared_notes_subpath",
+    },
+    "storage": {
+        "max_upload_bytes": "max_upload_bytes",
+        "compiled_program_dir": "compiled_program_dir",
+        "local_skills_dir": "local_skills_dir",
+    },
+    "mlflow": {
+        "tracking_uri": "mlflow_tracking_uri",
+        "experiment_name": "mlflow_experiment_name",
+        "eval_experiment_name": "mlflow_eval_experiment_name",
+        "trace_catalog": "mlflow_trace_catalog",
+        "trace_schema": "mlflow_trace_schema",
+        "trace_table_prefix": "mlflow_trace_table_prefix",
+        "tracing_sql_warehouse_id": "mlflow_tracing_sql_warehouse_id",
+    },
+    "evaluation": {"judge_model": "fleet_judge_model"},
+    "server": {"host": "host", "port": "port", "allow_non_loopback_bind": "allow_non_loopback_bind"},
+}
+for _role in ("root", "sub", "reflection"):
+    _TOML_FIELDS[f"llm.{_role}"] = {
+        name: f"fleet_{_role}_{name}" for name in ("model", "max_tokens", "temperature", "num_retries", "cache")
+    }
+_SETTINGS_SOURCES: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "fleet_settings_sources", default=None
+)
+
+
+def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
+    explicit = "FLEET_CONFIG" in os.environ
+    path = Path(os.environ.get("FLEET_CONFIG", "config/fleet.toml"))
+    if not path.is_file():
+        if explicit or path.exists():
+            raise ValueError("Selected Fleet configuration must be an existing TOML file")
+        return {}
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        raise ValueError("Fleet configuration could not be read as valid TOML") from None
+    schema = data.pop("config", None)
+    if schema != {"schema_version": 3} or type(schema.get("schema_version")) is not int:
+        raise ValueError("Fleet TOML requires [config] schema_version = 3")
+    tables = dict(data)
+    if "llm" in tables:
+        roles = tables.pop("llm")
+        if not isinstance(roles, dict):
+            raise ValueError("Fleet TOML llm must be a table")
+        tables.update({f"llm.{role}": values for role, values in roles.items()})
+    result = {}
+    for table, values in tables.items():
+        if table not in _TOML_FIELDS or not isinstance(values, dict):
+            raise ValueError(f"Unsupported Fleet TOML table: {table}")
+        for key, value in values.items():
+            field = _TOML_FIELDS[table].get(key)
+            if field is None:
+                raise ValueError(f"Unsupported or environment-only Fleet TOML setting: {table}.{key}")
+            try:
+                TypeAdapter(settings_cls.model_fields[field].rebuild_annotation()).validate_python(value, strict=True)
+            except ValidationError:
+                raise ValueError(f"Invalid Fleet TOML setting: {table}.{key}") from None
+            result[field] = value
+    return result
+
+
+def validate_shared_notes_subpath(value: str) -> str:
+    """Accept '' (disabled) or a relative Daytona Volume subpath, mirroring the provider's subpath rules."""
+    if value and (value.startswith("/") or value.endswith("/") or ".." in value or "//" in value):
+        raise ValueError("shared notes subpath must be relative, without '..', '//', or a trailing '/'")
+    return value
 
 
 class FleetSettings(BaseSettings):
@@ -21,13 +125,89 @@ class FleetSettings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         validate_by_name=True,
+        hide_input_in_errors=True,
     )
+
+    _configuration_sources: dict[str, str] = PrivateAttr(default_factory=dict)
+
+    def __init__(self, **values: Any) -> None:
+        sources: dict[str, str] = {}
+        token = _SETTINGS_SOURCES.set(sources)
+        try:
+            super().__init__(**values)
+            self._configuration_sources = sources
+        finally:
+            _SETTINGS_SOURCES.reset(token)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: Any,
+        env_settings: Any,
+        dotenv_settings: Any,
+        file_secret_settings: Any,
+    ) -> tuple[Any, ...]:
+        del file_secret_settings  # Credentials intentionally use environment/.env only.
+        aliases = {name: name for name in cls.model_fields}
+        for name, field in cls.model_fields.items():
+            alias = field.validation_alias
+            if isinstance(alias, str):
+                aliases[alias] = name
+            elif isinstance(alias, AliasChoices):
+                aliases.update({choice: name for choice in alias.choices if isinstance(choice, str)})
+
+        def capture(source: Any, label: str) -> Any:
+            def read() -> dict[str, Any]:
+                values = {aliases.get(key, key): value for key, value in source().items()}
+                sources = _SETTINGS_SOURCES.get()
+                if sources is not None:
+                    for key in values:
+                        sources.setdefault(key, label)
+                return values
+
+            return read
+
+        return (
+            capture(init_settings, "explicit"),
+            capture(env_settings, "environment"),
+            capture(dotenv_settings, "dotenv"),
+            capture(lambda: _toml_settings(settings_cls), "toml"),
+        )
+
+    def configuration(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Non-secret resolved settings and provenance, safe for CLI/API/trace inspection."""
+        values = self.model_dump(mode="json", exclude=_SECRET_FIELDS)
+        sources = {name: self._configuration_sources.get(name, "default") for name in values}
+        for name, value in (overrides or {}).items():
+            if name in values:
+                values[name] = value
+                sources[name] = "session"
+        digest = hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return {
+            "schema_version": 3,
+            "digest": digest,
+            "values": values,
+            "sources": sources,
+            "file_changes_require_restart": True,
+        }
+
+    def with_explicit_overrides(self, **values: Any) -> FleetSettings:
+        """Validate CLI overrides while retaining the provenance of unchanged settings."""
+        updated = type(self)(**{**self.model_dump(), **values})
+        updated._configuration_sources = {**self._configuration_sources, **dict.fromkeys(values, "explicit")}
+        return updated
 
     fleet_database_url: str = "postgresql://postgres:postgres@localhost:5432/fleet"
 
     fleet_daytona_api_key: str = ""
     fleet_daytona_org_id: str = ""
     fleet_daytona_volume_id: str = ""
+    fleet_shared_notes_subpath: str = Field(
+        default="shared/learned-notes",
+        validation_alias="FLEET_SHARED_NOTES_SUBPATH",
+        description="Volume subpath mounted at /learned on root sandboxes; empty disables shared notes.",
+    )
     fleet_daytona_snapshot: str = "fleet-rlm-base"
     databricks_host: str = Field(default="", validation_alias="DATABRICKS_HOST")
     databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
@@ -42,7 +222,19 @@ class FleetSettings(BaseSettings):
     fleet_root_model: str = "openai/system.ai.deepseek-v4-1-flash"
     fleet_sub_model: str = "openai/system.ai.claude-haiku-5-5"
     fleet_reflection_model: str = "openai/system.ai.claude-sonnet-5-5"
-    fleet_judge_model: str = "databricks:/databricks-claude-sonnet-4"
+    fleet_root_max_tokens: int | None = Field(default=None, ge=1)
+    fleet_sub_max_tokens: int | None = Field(default=None, ge=1)
+    fleet_reflection_max_tokens: int | None = Field(default=None, ge=1)
+    fleet_root_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    fleet_sub_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    fleet_reflection_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    fleet_root_num_retries: int = Field(default=3, ge=0, le=10)
+    fleet_sub_num_retries: int = Field(default=3, ge=0, le=10)
+    fleet_reflection_num_retries: int = Field(default=3, ge=0, le=10)
+    fleet_root_cache: bool = False
+    fleet_sub_cache: bool = False
+    fleet_reflection_cache: bool = False
+    fleet_judge_model: str = "databricks:/databricks-claude-haiku-5.5"
     typesafe_model: str = Field(default="jev-1.14.0", validation_alias="FLEET_TYPESAFE_MODEL")
     typesafe_api_key: str = Field(
         default="",
@@ -125,6 +317,21 @@ class FleetSettings(BaseSettings):
             raise ValueError("value must not be empty")
         return normalized
 
+    @field_validator("fleet_root_model", "fleet_sub_model", "fleet_reflection_model")
+    @classmethod
+    def model_routes_use_native_gateway(cls, value: str) -> str:
+        if not value.startswith("openai/") or not value.removeprefix("openai/").strip():
+            raise ValueError("Runtime models require an OpenAI-compatible 'openai/<service-id>' route")
+        return value
+
+    @field_validator("fleet_llm_base_url")
+    @classmethod
+    def gateway_override_uses_https(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if value and (parsed.scheme != "https" or not parsed.netloc):
+            raise ValueError("Gateway base URL must be an HTTPS workspace URL")
+        return value
+
     @field_validator("typesafe_model")
     @classmethod
     def typesafe_model_is_nonempty(cls, value: str) -> str:
@@ -132,6 +339,21 @@ class FleetSettings(BaseSettings):
         if not normalized:
             raise ValueError("TypeSafe route model must not be empty")
         return normalized
+
+    @field_validator("databricks_host", "fleet_llm_base_url", "mlflow_tracking_uri")
+    @classmethod
+    def public_urls_do_not_contain_credentials(cls, value: str) -> str:
+        parsed = urlsplit(value if "://" in value else "https://" + value)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("Configuration URLs cannot contain credentials; use environment credentials")
+        if parsed.scheme in {"http", "https"} and (parsed.query or parsed.fragment):
+            raise ValueError("Configuration HTTP URLs cannot contain query credentials or fragments")
+        return value
+
+    @field_validator("fleet_shared_notes_subpath")
+    @classmethod
+    def shared_notes_subpath_is_relative(cls, value: str) -> str:
+        return validate_shared_notes_subpath(value)
 
     @model_validator(mode="after")
     def databricks_tracking_requires_governed_trace_storage(self) -> FleetSettings:
@@ -153,9 +375,9 @@ class FleetSettings(BaseSettings):
 
     def build_lms(self) -> tuple[dspy.LM, dspy.LM, dspy.LM, Any | None]:
         """Create role-specific LMs without mutating process-global DSPy settings."""
-        root_lm = self._build_lm(self.fleet_root_model)
-        sub_lm = self._build_lm(self.fleet_sub_model)
-        reflection_lm = self._build_lm(self.fleet_reflection_model)
+        root_lm = self._build_lm(self.fleet_root_model, "root")
+        sub_lm = self._build_lm(self.fleet_sub_model, "sub")
+        reflection_lm = self._build_lm(self.fleet_reflection_model, "reflection")
 
         jev_lm = None
         if self.typesafe_api_key:
@@ -196,7 +418,7 @@ class FleetSettings(BaseSettings):
             }
         )
 
-    def _build_lm(self, model: str) -> dspy.LM:
+    def _build_lm(self, model: str, role: str = "root") -> dspy.LM:
         """Use native DSPy routing only; never fall back to LiteLLM."""
         if not model.startswith("openai/") or not model.removeprefix("openai/").strip():
             raise ValueError(
@@ -222,7 +444,17 @@ class FleetSettings(BaseSettings):
         if not api_key:
             raise ValueError("Databricks Unity Gateway models require DATABRICKS_TOKEN")
 
-        return dspy.LM(model, api_base=base_url, api_key=api_key, engine="lm15", cache=False)
+        options = {
+            name: getattr(self, f"fleet_{role}_{name}")
+            for name in ("max_tokens", "temperature", "num_retries", "cache")
+        }
+        return dspy.LM(
+            model,
+            api_base=base_url,
+            api_key=api_key,
+            engine="lm15",
+            **{key: value for key, value in options.items() if value is not None},
+        )
 
 
 @lru_cache(maxsize=1)

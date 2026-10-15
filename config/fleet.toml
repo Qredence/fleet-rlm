@@ -1,101 +1,64 @@
+# Fleet non-secret process defaults. Environment/.env override this file.
+# Values are a provisional baseline, not performance-tuned defaults.
+# Credentials: DATABRICKS_TOKEN, FLEET_DAYTONA_API_KEY,
+# FLEET_TYPESAFE_API_KEY and FLEET_DATABASE_URL belong in .env/environment.
 [config]
-schema_version = 2
-
-[application]
-name = "fleet-rlm"
+schema_version = 3
 
 [runtime]
-environment = "daytona"
-live_enabled = true
-turn_timeout_seconds = 1800
-max_active_daytona_leases = 8
-workspace_io_idle_seconds = 300
-workspace_io_acquisition_timeout_seconds = 30
-heartbeat_seconds = 10
-stale_after_seconds = 60
+execution_mode = "hybrid"
+turn_timeout_seconds = 900
+max_llm_calls_per_turn = 150
+max_agent_depth = 3
+max_child_sandboxes = 8
+max_active_children = 4
+max_active_sessions = 64
+linked_children = true
 
-# Root and Sub use the Databricks Unity AI Gateway Chat Completion endpoint.
+# Native lm15 is fixed. Omitted max_tokens/temperature remain provider-controlled.
 [llm.root]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-max_tokens = 16384
-timeout_seconds = 300
+model = "openai/system.ai.deepseek-v4-1-flash"
 num_retries = 3
 cache = false
 
 [llm.sub]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-max_tokens = 16384
-timeout_seconds = 90
-temperature = 0
+model = "openai/system.ai.deepseek-v4-1-flash"
 num_retries = 3
 cache = false
 
-# Bounded Fleet child execution is enabled; native llm_query remains available.
-[rlm]
-max_iters = 12
-max_llm_calls = 32
-max_tool_calls = 256
-max_output_chars = 6000
-max_final_output_chars = 6000
-max_execution_output_chars = 4000
-max_execution_output_bytes = 2000000
-wrap_up_seconds = 300
-finalization_attempts = 2
-recursion_max_calls = 4
-recursion_max_prompt_chars = 50000
-recursion_child_max_iters = 8
-recursion_child_max_llm_calls = 12
-recursion_child_max_output_chars = 4000
-recursion_max_parallel_children = 4
-autonomous_memory_categories = []
-verbose = true
+[llm.reflection]
+model = "openai/system.ai.deepseek-v4-1-flash"
+num_retries = 3
+cache = false
 
-[storage]
-data_root = ".fleet_rlm"
-max_upload_bytes = 10485760
-max_artifact_bytes = 10485760
-database_url_env = "FLEET_DATABASE_URL"
+[gateway]
+# host/base_url may be set here or via DATABRICKS_HOST/FLEET_LLM_BASE_URL.
+
+[decision]
+model = "jev-1.14.0"
 
 [daytona]
-api_key_env = "FLEET_DAYTONA_API_KEY"
-snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
-child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
-org_id_env = "FLEET_DAYTONA_ORG_ID"
-volume_name = "fleet-volume"
-volume_mount_path = "/home/daytona/fleet"
+snapshot = "fleet-rlm-base"
+auto_stop_minutes = 30
+shared_notes_subpath = "shared/learned-notes"
+# Set org_id/volume_id here or FLEET_DAYTONA_ORG_ID/FLEET_DAYTONA_VOLUME_ID.
+# The historical volume_name = "fleet-rlm-architecture" was NOT a Volume ID.
 
-[logging]
-level = "INFO"
+[storage]
+max_upload_bytes = 25000000
+compiled_program_dir = ".fleet/compiled"
+local_skills_dir = ".fleet/skills"
 
 [mlflow]
-tracing_enabled = true
-tracking_uri = "http://127.0.0.1:5001"
-experiment_name = "fleet-rlm"
-experiment_purpose = "runtime"
-expose_trace_id = true
-async_logging = true
-trace_sampling_ratio = 1.0
-trace_content_max_chars = 10000
-trace_content_enabled = true
-trace_export_queue_size = 128
-trace_export_workers = 2
-trace_export_retry_seconds = 10
-http_request_timeout_seconds = 10
-trace_shutdown_seconds = 5.0
+tracking_uri = "sqlite:///mlflow.db"
+experiment_name = "fleet-rlm-production"
+# Keep evaluation traces separate; set eval_experiment_name when evaluating.
 
-[posthog]
-enabled = true
-project_token_env = "POSTHOG_PROJECT_TOKEN"
-host = "https://eu.i.posthog.com"
+[evaluation]
+# Omitted judge_model uses the validated environment override or built-in default.
+# Verify an accessible judge endpoint before running judge-based evaluation.
 
-# One durable local Runtime Event capture file per Run, so a Turn's streamed
-# events survive a client disconnect. Capture is observation, never execution
-# authority; its size and event bounds are module constants, not policy.
-[capture]
-enabled = true
-retention_days = 14
-max_captures = 500
+[server]
+host = "127.0.0.1"
+port = 8000
+allow_non_loopback_bind = false

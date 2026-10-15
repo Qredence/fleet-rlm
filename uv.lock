@@ -1074,7 +1074,7 @@ requires-dist = [
     { name = "databricks-agents", specifier = ">=1.12.0" },
     { name = "databricks-sdk", specifier = ">=0.139.0,<1" },
     { name = "daytona", specifier = "==0.224.0" },
-    { name = "dspy", extras = ["typesafe"], specifier = "==3.4.1" },
+    { name = "dspy", extras = ["typesafe"], specifier = ">=3.4.1" },
     { name = "fastapi", extras = ["standard"], specifier = "==0.142.2" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "mlflow", specifier = "==3.17.1" },
