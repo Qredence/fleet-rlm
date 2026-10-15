@@ -133,7 +133,7 @@ class WorkspaceDataset(SandboxSerializable):
     sha256: str = ""
 
     def __post_init__(self) -> None:
-        from fleet_rlm.interpreter import _workspace_relative_path
+        from fleet_rlm.sandbox.paths import _workspace_relative_path
 
         path = self.workspace_path.removeprefix("/workspace/")
         object.__setattr__(self, "workspace_path", _workspace_relative_path(path))

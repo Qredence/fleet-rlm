@@ -28,7 +28,7 @@ from rich.text import Text
 from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
 from fleet_rlm.engine.routes import Route
-from fleet_rlm.interpreter import validate_session_id
+from fleet_rlm.sandbox.paths import validate_session_id
 
 _CONSOLE = Console()
 _COMMAND_ARGUMENTS = NestedCompleter.from_nested_dict(

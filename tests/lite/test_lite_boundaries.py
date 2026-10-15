@@ -18,13 +18,9 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
-from fleet_rlm.interpreter import (
-    DaytonaSandboxManager,
-    _workspace_relative_path,
-    session_volume_subpath,
-    validate_session_id,
-)
 from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, VolumePostgresHarness
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.paths import _workspace_relative_path, session_volume_subpath, validate_session_id
 from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
 from fleet_rlm.workspace import WorkspaceDataset
@@ -979,14 +975,14 @@ def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.Monkey
     ],
 )
 def test_child_input_paths_accept_the_sandbox_absolute_form(given: str, expected: str) -> None:
-    from fleet_rlm.interpreter import _child_input_path
+    from fleet_rlm.sandbox.paths import _child_input_path
 
     assert _child_input_path(given) == expected
 
 
 @pytest.mark.parametrize("bad", ["/workspace/artifacts/x", "/etc/passwd", "/workspace/files/../memory/x", "files/../x"])
 def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> None:
-    from fleet_rlm.interpreter import _child_input_path
+    from fleet_rlm.sandbox.paths import _child_input_path
 
     with pytest.raises(ValueError):
         _child_input_path(bad)

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.interpreter import DaytonaSandboxManager
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
 def _manager() -> DaytonaSandboxManager:
@@ -76,7 +76,7 @@ def test_allocate_child_default_still_copies_all_files_and_skills(monkeypatch: p
 
 
 def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.interpreter as interpreter
+    import fleet_rlm.sandbox.manager as interpreter
 
     root = _manager()
     active = _manager()
@@ -88,8 +88,7 @@ def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypat
 
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_selected)
     monkeypatch.setattr(
-        interpreter,
-        "DaytonaInterpreter",
+        "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
         lambda *, manager, tools, owns_manager: (manager, tools, owns_manager),
     )
     captured = ["files/first.txt"]
@@ -107,7 +106,7 @@ def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypat
 
 
 def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.interpreter as interpreter
+    import fleet_rlm.sandbox.manager as interpreter
 
     root = _manager()
     active = _manager()
@@ -119,8 +118,7 @@ def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pyte
 
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_default)
     monkeypatch.setattr(
-        interpreter,
-        "DaytonaInterpreter",
+        "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
         lambda *, manager, tools, owns_manager: (manager, tools, owns_manager),
     )
     factory = root.interpreter_factory()
@@ -134,12 +132,10 @@ def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pyte
 
 
 def test_factory_without_active_root_keeps_existing_manager(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.interpreter as interpreter
 
     root = _manager()
     monkeypatch.setattr(
-        interpreter,
-        "DaytonaInterpreter",
+        "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
         lambda *, manager, tools, owns_manager: (manager, tools, owns_manager),
     )
 

@@ -19,7 +19,6 @@ from dspy.teleprompt.gepa import InstructionProposer
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.signatures import AnswerJudge
-from fleet_rlm.interpreter import DaytonaSandboxManager, validate_session_id
 from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, configure_mlflow_observability
 from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
@@ -31,6 +30,8 @@ from fleet_rlm.optimize.artifacts import (
 )
 from fleet_rlm.optimize.dataset import context_snapshot, curate_dataset
 from fleet_rlm.optimize.metric import gepa_mlflow_metric
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.skills import SkillManager, local_catalog_xml
 from fleet_rlm.store import Store
 

@@ -31,7 +31,7 @@ def test_fleet_task_fields_are_stable_for_compiled_programs():
 
 
 def test_stopping_rules_have_one_source():
-    from fleet_rlm.interpreter import DaytonaSandboxManager
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     factory = DaytonaSandboxManager("key", "org", "volume", "sess_sig").interpreter_factory()
     assert STOPPING_RULES in FleetTask.instructions

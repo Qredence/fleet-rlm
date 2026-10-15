@@ -10,8 +10,9 @@ from dspy.primitives.facade import SandboxLM
 
 from fleet_rlm.dspy_support import decision_evidence, make_choice_type
 from fleet_rlm.engine.signatures import TRIAGE_ROUTE
-from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager
 from fleet_rlm.memory_and_eval import AdaptiveFleetEngine
+from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
 def manager():
@@ -133,7 +134,7 @@ def test_decision_evidence_and_missing_evidence():
 
 
 def test_batch_decisions_keep_alignment_and_evidence(monkeypatch):
-    import fleet_rlm.interpreter as module
+    import fleet_rlm.sandbox.interpreter as module
 
     choice = make_choice_type((("a", "a"), ("b", "b")))
     predictions = [

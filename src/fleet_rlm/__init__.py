@@ -6,10 +6,11 @@ import os
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
 from fleet_rlm.config import FleetSettings, get_settings
-from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager
 from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, VolumePostgresHarness, configure_mlflow_observability
 from fleet_rlm.optimize.metric import gepa_mlflow_metric
 from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite, jev_routing_efficiency, rlm_trajectory_efficiency
+from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.skills import SkillManager, parse_and_validate_skill_md
 
 __all__ = [

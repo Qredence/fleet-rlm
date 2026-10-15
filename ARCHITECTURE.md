@@ -16,7 +16,7 @@ Rich CLI ──HTTP/SSE──> FastAPI server ──> DSPy engine
 `cli.py` provides the Rich client and server command. `server.py` owns the
 FastAPI endpoints, SSE streaming, and session runtime registry. A Session
 runtime combines a Daytona sandbox manager, PostgreSQL VFS harness, Skill
-manager, and DSPy engine. `interpreter.py` creates the per-session Daytona
+manager, and DSPy engine. `sandbox/manager.py` creates the per-session Daytona
 workspace and runs Python there. `memory_and_eval.py` handles PostgreSQL
 workspace/turn persistence, engine composition and MLflow observability.
 `engine/` holds the route vocabulary and every DSPy signature; `optimize/` holds
@@ -108,7 +108,9 @@ policy.
 
 - `config.py`: settings, defaults, validation, and model construction.
 - `skills.py`: Skill validation and `.fleet/skills/` synchronization.
-- `interpreter.py`: Daytona sandbox and remote Python execution.
+- `sandbox/`: Daytona sandbox lifecycle (`manager.py`), the DSPy interpreter
+  (`interpreter.py`), the `run_code` transport (`repl.py`) and the sandbox-side
+  runtime (`runtime/repl.py`).
 - `memory_and_eval.py`: persistence, DSPy engine, MLflow, and GEPA behavior.
 - `server.py`: HTTP routes and streaming response.
 - `cli.py`: Rich terminal client and command-line entry point.

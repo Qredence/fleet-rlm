@@ -1,4 +1,4 @@
-"""Session-scoped Daytona sandbox and DSPy interpreter integration."""
+"""DaytonaSandboxManager: one Session sandbox (and its child sandboxes), budgets, workspace files, and notes."""
 
 from __future__ import annotations
 
@@ -6,81 +6,42 @@ import base64
 import contextvars
 import hashlib
 import json
-import keyword
 import logging
 import re
 import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import dspy
-import mlflow
 from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, ListSandboxesQuery, VolumeMount
-from mlflow.entities import SpanType
 
 from fleet_rlm.config import validate_shared_notes_subpath
-from fleet_rlm.dspy_support import decision_evidence, without_mlflow_dspy_callback
-from fleet_rlm.engine.signatures import STOPPING_RULES, item_decision
-from fleet_rlm.observability import activity_preview, activity_text
+from fleet_rlm.engine.signatures import STOPPING_RULES
+from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
+from fleet_rlm.sandbox.paths import (
+    _child_input_path,
+    _workspace_relative_path,
+    session_volume_subpath,
+    validate_session_id,
+)
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError as ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
+
+if TYPE_CHECKING:
+    from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 
 _LOGGER = logging.getLogger(__name__)
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
 
-_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-_NAMESPACE_RE = re.compile(r"^ns_[a-f0-9]{8}$")
-_ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
 _ACTIVE_MANAGER: contextvars.ContextVar[Any] = contextvars.ContextVar("fleet_active_manager", default=None)
 _NATIVE_CHILDREN: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
     "fleet_native_children", default=None
 )
-
-
-def validate_session_id(session_id: str) -> str:
-    """Validate a session key before it is used as a Daytona Volume subpath."""
-    if not isinstance(session_id, str) or not _SESSION_ID_RE.fullmatch(session_id):
-        raise ValueError("session_id must be 1-64 letters, digits, dots, underscores, or hyphens")
-    if session_id in {".", ".."} or ".." in session_id:
-        raise ValueError("session_id must not contain parent path syntax")
-    return session_id
-
-
-def session_volume_subpath(session_id: str) -> str:
-    """Return the provider-enforced private subtree for one Session."""
-    return f"sessions/{validate_session_id(session_id)}"
-
-
-def _child_input_path(path: str) -> str:
-    """Validate a child input path, accepting the sandbox's absolute `/workspace/` form the model sees."""
-    if isinstance(path, str) and path.startswith("/workspace/"):
-        path = path[len("/workspace/") :]
-    clean_path = _workspace_relative_path(path)
-    if not clean_path.startswith(("files/", "skills/")):
-        raise ValueError("Child inputs must be files beneath files/ or skills/")
-    return clean_path
-
-
-def _workspace_relative_path(relative_path: str) -> str:
-    if (
-        not isinstance(relative_path, str)
-        or not relative_path
-        or len(relative_path) > 1024
-        or "\\" in relative_path
-        or "\x00" in relative_path
-        or any(ord(character) < 32 for character in relative_path)
-    ):
-        raise ValueError("Workspace path must be a non-empty POSIX-relative path")
-    parts = relative_path.split("/")
-    if parts[0] not in _ALLOWED_WORKSPACE_ROOTS or any(part in {"", ".", ".."} for part in parts):
-        raise ValueError("Workspace path is outside the allowed files, artifacts, memory, and skills roots")
-    return "/".join(parts)
 
 
 @dataclass(slots=True)
@@ -618,6 +579,8 @@ class DaytonaSandboxManager:
         captured_input_paths = tuple(input_paths) if input_paths is not None else None
 
         def create() -> DaytonaInterpreter:
+            from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
+
             active = _ACTIVE_MANAGER.get()
             if active is not None:
                 if captured_input_paths is None:
@@ -700,306 +663,3 @@ class DaytonaSandboxManager:
         elif self.parent is not None:
             with self.root._budget_lock:
                 self.root._children.pop(self.agent_id, None)
-
-
-class DaytonaInterpreter:
-    """DSPy CodeInterpreter backed by a namespace in a Session-isolated sandbox."""
-
-    def __init__(
-        self,
-        manager: DaytonaSandboxManager,
-        tools: dict[str, Callable[..., Any]] | None = None,
-        owns_manager: bool = False,
-    ):
-        self.manager = manager
-        self.owns_manager = owns_manager
-        self.tools = dict(tools or {})
-        reserved = {
-            "__builtins__",
-            "llm_query",
-            "llm_query_batched",
-            "jev_decide_batched",
-            "SUBMIT",
-            "list_skills",
-            "use_skill",
-            "read_skill_reference",
-            "run_skill_script",
-            "save_skill",
-        }
-        if any(
-            not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name) or name in reserved
-            for name in self.tools
-        ):
-            raise ValueError("Bridged tool names must be unreserved Python identifiers")
-        self.ns_id = f"ns_{uuid.uuid4().hex[:8]}"
-        self._context = contextvars.copy_context()
-        self._started = False
-        self._closed = False
-        self._host_calls = 0
-        self._host_call_lock = threading.Lock()
-
-    def start(self) -> None:
-        if self._closed:
-            raise RuntimeError("Interpreter has already been shut down")
-        self.manager.ensure_sandbox()
-        if not self._started:
-            self.manager._register_interpreter(self)
-            self._started = True
-
-    def _invoke_tool(self, tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        """The host invocation, not interpreter shutdown, owns child success."""
-        children: list[Any] = []
-        token = _NATIVE_CHILDREN.set(children)
-        try:
-            value = self.tools[tool_name](*args, **kwargs)
-            if hasattr(self.manager, "check_turn"):
-                self.manager.check_turn()
-            for child in children:
-                child.collect_child_artifacts()
-            return value
-        finally:
-            _NATIVE_CHILDREN.reset(token)
-            for child in children:
-                child.shutdown()
-
-    def answer_host_call(self, call: dict[str, Any]) -> dict[str, Any]:
-        """Run one bridged call in this interpreter's DSPy context; the reply the sandbox is waiting for."""
-        return self._context.copy().run(self._handle_host_call, call)
-
-    def _handle_host_call(self, call: dict[str, Any]) -> dict[str, Any]:
-        with self._host_call_lock:
-            self._host_calls += 1
-        call_id = call.get("id")
-        tool_name = call.get("tool")
-        args = call.get("args", [])
-        kwargs = call.get("kwargs", {})
-        started = time.monotonic()
-        details = {"call_id": call_id, "tool": tool_name, "source": "sandbox_bridge", "namespace": self.ns_id}
-        # Facade calls and semantic LM queries return predictor internals, not tool evidence.
-        predictor_call = str(tool_name).startswith("__dspy_") or tool_name in {"llm_query", "llm_query_batched"}
-        if hasattr(self.manager, "emit"):
-            self.manager.emit(
-                "tool_start",
-                **details,
-                inputs="[predictor payload omitted]"
-                if predictor_call
-                else activity_preview({"args": args, "kwargs": kwargs}),
-            )
-        active_token = _ACTIVE_MANAGER.set(self.manager)
-        try:
-            if not isinstance(args, list) or not isinstance(kwargs, dict):
-                raise ValueError("Invalid host tool arguments")
-            if tool_name == "llm_query":
-                if len(args) != 1 or not isinstance(args[0], str) or len(args[0]) > 100_000:
-                    raise ValueError("llm_query requires one prompt of at most 100000 characters")
-                if tool_name in self.tools:
-                    value = self._invoke_tool(tool_name, args, kwargs)
-                else:
-                    self.manager.consume_budget()
-                    active_lm = self.manager.sub_lm or dspy.settings.lm
-                    with dspy.context(lm=active_lm, disable_history=True):
-                        value = active_lm(args[0])[0]
-            elif tool_name == "llm_query_batched":
-                if len(args) != 1:
-                    raise ValueError("llm_query_batched requires one prompt list")
-                prompts = args[0]
-                if (
-                    not isinstance(prompts, list)
-                    or not prompts
-                    or len(prompts) > 100
-                    or any(not isinstance(prompt, str) or len(prompt) > 100_000 for prompt in prompts)
-                ):
-                    raise ValueError("llm_query_batched requires 1-100 bounded string prompts")
-                if tool_name in self.tools:
-                    value = self._invoke_tool(tool_name, args, kwargs)
-                else:
-                    self.manager.consume_budget(len(prompts))
-                    active_lm = self.manager.sub_lm or dspy.settings.lm
-
-                    def complete(prompt: str) -> Any:
-                        with dspy.context(lm=active_lm, disable_history=True):
-                            return active_lm(prompt)[0]
-
-                    with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
-                        value = list(pool.map(complete, prompts))
-            elif tool_name == "jev_decide_batched":
-                if len(args) != 3:
-                    raise ValueError("jev_decide_batched requires items, question, and choices")
-                items, question, choices = args
-                if (
-                    not isinstance(items, list)
-                    or any(not isinstance(item, str) or len(item) > 100_000 for item in items)
-                    or not isinstance(question, str)
-                    or len(question) > 10_000
-                    or not isinstance(choices, list)
-                    or any(not isinstance(choice, str) or not choice or len(choice) > 256 for choice in choices)
-                    or len(set(choices)) != len(choices)
-                ):
-                    raise ValueError("Invalid Jev batch inputs")
-                self.manager.consume_budget(len(items))
-                value = self._run_jev_batch(items, question, choices)
-            elif tool_name in self.tools:
-                value = self._invoke_tool(tool_name, args, kwargs)
-            else:
-                raise KeyError(f"Unknown bridged tool: {tool_name}")
-            if hasattr(self.manager, "emit"):
-                self.manager.emit(
-                    "tool_end",
-                    **details,
-                    ok=True,
-                    duration_ms=round((time.monotonic() - started) * 1000),
-                    output="[predictor payload omitted]" if predictor_call else activity_preview(value),
-                )
-            return {"value": value}
-        except Exception as exc:
-            if hasattr(self.manager, "emit"):
-                self.manager.emit(
-                    "tool_end",
-                    **details,
-                    ok=False,
-                    error_type=type(exc).__name__,
-                    duration_ms=round((time.monotonic() - started) * 1000),
-                )
-            return {"error": str(exc)[:2000]}
-        finally:
-            _ACTIVE_MANAGER.reset(active_token)
-
-    def _run_jev_batch(self, items: list[str], question: str, choices: list[str]) -> list[dict[str, Any]]:
-        if not items or not choices or len(items) > 100 or len(choices) > 20:
-            raise ValueError("Jev batch inputs exceed the supported bounds")
-        from pydantic import BaseModel
-
-        predictor = dspy.Predict(item_decision(choices))
-        active_lm = self.manager.jev_lm or self.manager.sub_lm or dspy.settings.lm
-        examples = [dspy.Example(item=item, question=question).with_inputs("item", "question") for item in items]
-        callbacks = list(dspy.settings.callbacks)
-        if active_lm is self.manager.jev_lm and self.manager.jev_lm is not None:
-            callbacks = without_mlflow_dspy_callback(callbacks)
-        with mlflow.start_span(name="jev_batch_decisions", span_type=SpanType.LLM) as span:
-            span.set_inputs({"item_count": len(items), "question": activity_text(question), "choices": choices})
-            with dspy.context(lm=active_lm, disable_history=True, callbacks=callbacks):
-                predictions = predictor.batch(examples, num_threads=min(8, len(items)))
-            results: list[dict[str, Any]] = []
-            for item, prediction in zip(items, predictions, strict=True):
-                decision = getattr(prediction, "decision", None)
-                choice_value = getattr(decision, "value", None) if isinstance(decision, BaseModel) else None
-                if not isinstance(choice_value, str):
-                    raise RuntimeError("Jev returned an invalid decision")
-                results.append({"item": item, "decision": choice_value, **decision_evidence(decision, active_lm)})
-            span.set_outputs({"decisions": [{k: v for k, v in row.items() if k != "item"} for row in results]})
-            return results
-
-    def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
-        if not isinstance(code, str) or len(code.encode("utf-8")) > 1_000_000:
-            raise ValueError("Interpreter code exceeds the 1 MB size limit")
-        if variables is not None and not isinstance(variables, dict):
-            raise TypeError("Interpreter variables must be an object")
-        self.start()
-        from dspy.primitives.facade import SHIM_SETUP
-
-        execution_id = uuid.uuid4().hex
-        phase = "bootstrap" if code == SHIM_SETUP else "task"
-        started = time.monotonic()
-        if hasattr(self.manager, "check_turn"):
-            self.manager.check_turn()
-        if hasattr(self.manager, "emit"):
-            self.manager.emit(
-                "repl_code",
-                code=activity_text(code),
-                namespace=self.ns_id,
-                execution_id=execution_id,
-                phase=phase,
-            )
-        from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
-
-        response: dict[str, Any] = {}
-        with mlflow.start_span(name="sandbox.exec", span_type=SpanType.TOOL) as span:
-            span.set_attributes(
-                {
-                    "phase": phase,
-                    "namespace": self.ns_id,
-                    "execution_id": execution_id,
-                    "agent_id": getattr(self.manager, "agent_id", None),
-                    "parent_agent_id": getattr(getattr(self.manager, "parent", None), "agent_id", None),
-                    "sandbox_id": getattr(getattr(self.manager, "_sandbox", None), "id", None),
-                }
-            )
-            span.set_inputs({"code": activity_text(code)})
-            host_calls_before = self._host_calls
-            try:
-                response = self.manager.run_namespace(
-                    self, {"code": code, "variables": variables or {}, "tools": list(self.tools)}
-                )
-                span.set_outputs(
-                    {
-                        "stdout": activity_text(str(response.get("stdout", ""))),
-                        "stderr": activity_text(str(response.get("stderr", ""))),
-                        "value": activity_preview(
-                            response.get("final") if response.get("final") is not None else response.get("value")
-                        ),
-                        "error": bool(response.get("error")),
-                    }
-                )
-                span.set_attribute("transport_retries", response.get("transport_retries", 0))
-                if response.get("error"):
-                    span.set_attribute("outcome", "remote_code_error")
-                    span.set_attribute("remote_error_type", response.get("error_type", "PythonError"))
-                    output = str(response.get("stdout", "")) + str(response.get("stderr", ""))
-                    raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")
-                span.set_attribute("outcome", "completed")
-                if response.get("final") is not None:
-                    return FinalOutput(response["final"])
-                if response.get("has_value") and response.get("value") is not None:
-                    return response["value"]
-                return (str(response.get("stdout", "")) + str(response.get("stderr", "")))[-20_000:].strip() or None
-            except Exception as exc:
-                response.update(error=True, error_type=response.get("error_type") or type(exc).__name__)
-                span.set_attribute("transport_retries", getattr(exc, "transport_retries", 0))
-                if not isinstance(exc, CodeExecutionError):
-                    outcome = (
-                        "transport_uncertain"
-                        if isinstance(exc, ExecutionOutcomeUnknownError)
-                        else (
-                            "deadline"
-                            if isinstance(exc, TimeoutError)
-                            else "cancelled"
-                            if getattr(getattr(self.manager, "root", None), "_cancelled", threading.Event()).is_set()
-                            else "transport_error"
-                        )
-                    )
-                    span.set_attribute("outcome", outcome)
-                raise
-            finally:
-                span.set_attribute("host_calls", self._host_calls - host_calls_before)
-                if hasattr(self.manager, "emit"):
-                    self.manager.emit(
-                        "repl_output",
-                        namespace=self.ns_id,
-                        execution_id=execution_id,
-                        phase=phase,
-                        duration_ms=round((time.monotonic() - started) * 1000),
-                        stdout=activity_text(str(response.get("stdout", ""))),
-                        stderr=activity_text(str(response.get("stderr", ""))),
-                        value=activity_preview(
-                            response.get("final") if response.get("final") is not None else response.get("value")
-                        ),
-                        error=bool(response.get("error")) or not response,
-                        error_type=response.get("error_type"),
-                    )
-
-    def shutdown(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        if self._started:
-            try:
-                self.manager.drop_namespace(self.ns_id)
-            finally:
-                self.manager._unregister_interpreter(self)
-        if self.owns_manager:
-            children = _NATIVE_CHILDREN.get()
-            if children is not None:
-                children.append(self.manager)
-            else:
-                # No invocation can attest success; cleanup must not publish outputs.
-                self.manager.shutdown()

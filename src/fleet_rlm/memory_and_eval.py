@@ -30,9 +30,11 @@ from fleet_rlm.engine.signatures import (
     FleetTask,
     TurnTriage,
 )
-from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.observability import activity_text
 from fleet_rlm.optimize.artifacts import CompiledProgramFile
+from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.store import Store
 from fleet_rlm.workspace import WorkspaceDataset
 

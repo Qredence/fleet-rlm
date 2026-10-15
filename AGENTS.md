@@ -6,7 +6,9 @@ DSPy engine, Daytona execution, PostgreSQL VFS, and MLflow/GEPA evaluation.
 ## Project layout
 
 - `src/fleet_rlm/` contains the active application: `config.py`, `skills.py`,
-  `interpreter.py`, `memory_and_eval.py`, `server.py`, and `cli.py`.
+  `memory_and_eval.py`, `server.py`, `cli.py`, and the `engine/` (routes,
+  signatures), `sandbox/` (Daytona), `store/` (PostgreSQL), and `optimize/`
+  (datasets, scorers, GEPA) packages.
 - `tests/` contains the Lite test suite.
 - `docs/` contains product and developer documentation.
 - `.fleet/skills/` is for user Skills. `.agents/skills/` is reserved for

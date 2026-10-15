@@ -7,7 +7,12 @@ src/fleet_rlm/
 ├── config.py          # FleetSettings and model construction
 ├── dspy_support.py    # Pinned DSPy adapter and typed routing compatibility
 ├── skills.py          # User Skill validation, sync, and catalog
-├── interpreter.py     # Daytona root/child allocation, bridge, and Python execution
+├── sandbox/
+│   ├── manager.py     # Daytona root/child sandboxes, budgets, workspace files, learned notes
+│   ├── interpreter.py # DSPy CodeInterpreter and host-tool dispatch
+│   ├── repl.py        # run_code transport and stdout bridge protocol
+│   ├── paths.py       # Session ID and workspace path validation
+│   └── runtime/repl.py # Sandbox-side namespace, output capture, and bridge
 ├── workspace.py       # Sandbox file helpers and serializable dataset handles
 ├── memory_and_eval.py # Postgres VFS, DSPy engine, MLflow setup
 ├── engine/

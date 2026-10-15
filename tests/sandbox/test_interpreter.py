@@ -16,8 +16,10 @@ import dspy
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
 
-import fleet_rlm.interpreter as interpreter_module
-from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, ExecutionOutcomeUnknownError
+import fleet_rlm.sandbox.interpreter as interpreter_module
+from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 
 STOPPED: list[str] = []
 
@@ -171,7 +173,7 @@ def test_a_remote_code_error_marks_the_real_mlflow_span(tmp_path):
     code = """
 import mlflow
 from types import SimpleNamespace
-from fleet_rlm.interpreter import DaytonaInterpreter
+from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from dspy.primitives.code_interpreter import CodeExecutionError
 mlflow.set_experiment('execution-test')
 manager = SimpleNamespace(run_namespace=lambda *_a: {

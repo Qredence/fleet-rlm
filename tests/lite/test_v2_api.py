@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.interpreter import DaytonaSandboxManager
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.server import create_app
 from fleet_rlm.workspace import WorkspaceDataset
 
