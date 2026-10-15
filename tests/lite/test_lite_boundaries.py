@@ -35,9 +35,7 @@ from fleet_rlm.interpreter import (
 )
 from fleet_rlm.memory_and_eval import (
     SCHEMA_STATEMENTS,
-    TRIAGE_ROUTE,
     AdaptiveFleetEngine,
-    TurnTriageSignature,
     VolumePostgresHarness,
 )
 from fleet_rlm.server import create_app
@@ -694,7 +692,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
             task="test fallback",
         )
 
-    assert prediction.route == "deep_rlm"
+    assert prediction.route == "rlm"
     assert prediction.answer == "bounded fallback"
     assert "RuntimeError" in caplog.text
     assert "403: invalid token" in caplog.text
@@ -794,21 +792,6 @@ def test_fastapi_health_and_lite_route_contract() -> None:
     assert response.json() == {"status": "ok", "version": "0.8.0"}
 
 
-def test_triage_signature_retains_typed_choice_criteria() -> None:
-    route_field = TurnTriageSignature.model_fields["route"]
-    decision = TRIAGE_ROUTE(value="delegated_rlm", confidence=0.91)
-
-    assert route_field.annotation is TRIAGE_ROUTE
-    assert route_field.json_schema_extra is not None
-    assert "direct_cot" in route_field.json_schema_extra["desc"]
-    assert decision.value == "delegated_rlm"
-    assert TRIAGE_ROUTE.criteria() == {
-        "direct_cot": "Simple response requiring no code, files, or Skills",
-        "single_rlm": "A task needing one bounded Python or Skill workflow",
-        "delegated_rlm": "A multi-part task requiring an independent child investigation",
-    }
-
-
 @pytest.mark.parametrize("write_fails", [False, True])
 def test_turn_sse_persists_and_returns_one_mocked_session_turn(
     monkeypatch: pytest.MonkeyPatch, write_fails: bool
@@ -824,7 +807,7 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(
         assert "- older.md: prior hint" in _kwargs["memory_summary"]
         files["files/input.txt"] = b"modified during execution"
         return SimpleNamespace(
-            answer="processed locally", route="single_rlm", learned_skill_note="Reuse the digit window check."
+            answer="processed locally", route="flex", learned_skill_note="Reuse the digit window check."
         )
 
     def persist(**kwargs):
@@ -914,7 +897,7 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(
     assert events[1]["event"] == "turn_complete"
     assert events[1]["payload"] == {
         "answer": "processed locally",
-        "route": "single_rlm",
+        "route": "flex",
         "learned_skill_note": "Reuse the digit window check.",
         "artifacts": ["artifacts/result.csv"],
         "trace_id": "trace-test-id",

@@ -358,8 +358,12 @@ def test_isolated_rollouts_retain_candidate_instructions_without_sharing_runtime
 
 
 def test_metric_binds_the_explicit_judge_instead_of_serving_lm() -> None:
-    serving = DummyLM([{"reasoning": "incorrect", "is_correct": False, "critique": "wrong model role"}])
-    judge = DummyLM([{"reasoning": "verified", "is_correct": True, "critique": "Matches expected result"}])
+    serving = DummyLM(
+        [{"reasoning": "incorrect", "is_correct": False, "is_safe": True, "critique": "wrong model role"}]
+    )
+    judge = DummyLM(
+        [{"reasoning": "verified", "is_correct": True, "is_safe": True, "critique": "Matches expected result"}]
+    )
     with dspy.context(lm=serving):
         result = gepa_mlflow_metric(
             dspy.Example(task="13*17", answer="221"),

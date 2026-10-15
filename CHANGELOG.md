@@ -16,6 +16,15 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Breaking:** one route vocabulary, `direct` / `flex` / `rlm`, replaces the triage labels
+  (`direct_cot`, `single_rlm`, `delegated_rlm`) and the effective routes (`direct_cot`,
+  `flex_pipeline`, `deep_rlm`) in triage, `triage_decision` and `turn_complete` events, stored
+  Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
+  labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
+  be re-optimized.
+- All DSPy signatures live in `fleet_rlm.engine.signatures`; the stopping rules have one source,
+  shared by the task instructions and the sandbox execution instructions. The GEPA and
+  evaluation judges share one `AnswerJudge` signature.
 - MLflow defaults to the local server: `FLEET_MLFLOW_MODE=local` (default) sends `fleet serve`,
   `fleet eval` and optimizer traces to `http://127.0.0.1:5001` (`fleet-rlm-dev` / `fleet-rlm-eval`)
   and ignores `databricks://` URIs and workspace experiment paths left in `.env`. Unity Catalog

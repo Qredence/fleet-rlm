@@ -27,6 +27,7 @@ from rich.text import Text
 
 from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
+from fleet_rlm.engine.routes import Route
 from fleet_rlm.interpreter import validate_session_id
 
 _CONSOLE = Console()
@@ -648,7 +649,7 @@ def main(argv: list[str] | None = None) -> None:
     label.add_argument("--group", required=True, help="source_group used for grouped train/dev/holdout splits")
     label.add_argument("--answer")
     label.add_argument("--value", action="append", help="expected value that must appear in the answer (repeatable)")
-    label.add_argument("--route", choices=("direct_cot", "flex_pipeline", "deep_rlm"))
+    label.add_argument("--route", choices=[route.value for route in Route])
     label.add_argument("--reviewer", default="human")
 
     args = parser.parse_args(argv)

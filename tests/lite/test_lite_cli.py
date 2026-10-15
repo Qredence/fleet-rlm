@@ -19,7 +19,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
         {
             "event": "turn_complete",
             "answer": "# Summary\n\nThe file contains three records.",
-            "route": "single_rlm",
+            "route": "flex",
             "learned_skill_note": "Use the ledger-audit Skill for reconciliation.",
             "artifacts": ["artifacts/summary.csv"],
             "trace_id": "trace-123",
@@ -63,7 +63,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
     assert "Session: session-1" in rendered
     assert "→ Module: AdaptiveFleetEngine" in rendered
     assert "⚙ Tool: read_file" in rendered
-    assert "Answer (route=single_rlm)" in rendered
+    assert "Answer (route=flex)" in rendered
     assert "The file contains three records." in rendered
     assert "Use the ledger-audit Skill for reconciliation." in rendered
     assert "artifacts/summary.csv" in rendered
@@ -253,7 +253,7 @@ def test_activity_and_literal_multiline_answer_are_separate(monkeypatch: pytest.
     output = io.StringIO()
     monkeypatch.setattr(cli, "_CONSOLE", Console(file=output, width=120))
     for event in (
-        {"event": "triage_decision", "mode": "hybrid", "route": "deep_rlm", "summary": "Context requires code."},
+        {"event": "triage_decision", "mode": "hybrid", "route": "rlm", "summary": "Context requires code."},
         {"event": "lm_start", "model": "test-model", "call_id": "lm-17", "agent_id": "child-2"},
         {"event": "tool_start", "tool": "lookup", "inputs": '{"path": "files/a.csv"}'},
         {"event": "tool_end", "tool": "lookup", "call_id": "tool-3", "ok": True, "output": "323", "duration_ms": 17},

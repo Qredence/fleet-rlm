@@ -48,18 +48,18 @@ def test_gold_values_match_independent_recomputation():
 
 def test_only_confident_routes_are_labeled():
     routes = {c.category: c.route for c in synthetic_cases()}
-    assert routes == {"direct": "direct_cot", "aggregate": "flex_pipeline", "filter_count": None, "join": None}
+    assert routes == {"direct": "direct", "aggregate": "flex", "filter_count": None, "join": None}
 
 
 def test_label_trace_writes_each_expectation(monkeypatch):
     calls = []
     monkeypatch.setattr(evaluation.mlflow, "log_expectation", lambda **kw: calls.append(kw))
-    label_trace("tr-1", review_status="approved", source_group="g1", expected_answer="42", route="deep_rlm")
+    label_trace("tr-1", review_status="approved", source_group="g1", expected_answer="42", route="rlm")
     assert {c["name"]: c["value"] for c in calls} == {
         "review_status": "approved",
         "source_group": "g1",
         "expected_answer": "42",
-        "route": "deep_rlm",
+        "route": "rlm",
     }
     assert all(c["trace_id"] == "tr-1" and c["source"].source_type == "HUMAN" for c in calls)
 
@@ -98,7 +98,7 @@ def test_run_case_attaches_files_then_parses_turn_complete():
                 {"event": "turn_status", "payload": {}},
                 {
                     "event": "turn_complete",
-                    "payload": {"answer": "ok 200", "route": "flex_pipeline", "trace_id": "tr-9"},
+                    "payload": {"answer": "ok 200", "route": "flex", "trace_id": "tr-9"},
                 },
             ),
         )
@@ -107,7 +107,7 @@ def test_run_case_attaches_files_then_parses_turn_complete():
     with httpx.Client(base_url="http://test", transport=httpx.MockTransport(handler)) as client:
         out = run_case(client, case, "s1")
     assert seen == [("POST", "/sessions/s1/attach"), ("POST", "/sessions/s1/turn")]
-    assert out == {"answer": "ok 200", "route": "flex_pipeline", "trace_id": "tr-9", "error": None}
+    assert out == {"answer": "ok 200", "route": "flex", "trace_id": "tr-9", "error": None}
 
 
 def test_run_case_reports_failed_turn_without_trace():

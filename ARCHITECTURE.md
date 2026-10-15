@@ -50,7 +50,9 @@ boundary for generated Python. TypeSafe routing is optional and configured via
 an explicit operation rather than an automatic CI or release action.
 
 Strict `rlm` enters a primary DSPy 3.4.1 RLM; `flex` enters Flex. Hybrid triage
-selects direct CoT, Flex, or deep RLM, with primary RLM fallback on routing errors.
+selects one route from the single vocabulary `direct` / `flex` / `rlm`
+(`engine/routes.py`), with `rlm` as the fallback on routing errors or unknown
+labels. The triage label is the route that runs; there is no mapping step.
 Dataset tasks cannot take a context-free direct answer path. Dataset handles
 carry source digests and bounded previews; files stay in the sandbox.
 

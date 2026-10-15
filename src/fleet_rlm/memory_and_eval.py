@@ -18,14 +18,23 @@ import dspy
 import mlflow
 import psycopg
 from dspy.primitives.facade import SandboxLM
-from dspy.signatures.signature import make_signature
 from dspy.utils.exceptions import AdapterParseError
 from mlflow.entities import Feedback, SpanStatusCode, SpanType
 from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, Safety, scorer
 from psycopg.rows import dict_row
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence, make_choice_type
+from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence
 from fleet_rlm.dspy_support import without_mlflow_dspy_callback as _without_mlflow_dspy_callback
+from fleet_rlm.engine.routes import Route, parse_route
+from fleet_rlm.engine.signatures import (
+    TRIAGE_CRITERIA,
+    AnswerJudge,
+    ChildTask,
+    ContextualChildTask,
+    DirectAnswer,
+    FleetTask,
+    TurnTriage,
+)
 from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.observability import activity_text
 from fleet_rlm.workspace import WorkspaceDataset
@@ -57,14 +66,6 @@ def _turn_is_over(exc: BaseException) -> bool:
 def _child_failure(exc: Exception) -> str:
     """Bounded description of a failed child agent, returned to its parent instead of raised."""
     return f"child agent failed ({type(exc).__name__}): {str(exc)[:500]}"
-
-
-def _normalize_route(decision: Any) -> str:
-    """Return one of the supported routes, falling back to the bounded path."""
-    route = str(getattr(decision, "value", decision))
-    return {"direct_cot": "direct_cot", "single_rlm": "flex_pipeline", "delegated_rlm": "deep_rlm"}.get(
-        route, "deep_rlm"
-    )
 
 
 SCHEMA_STATEMENTS = (
@@ -508,76 +509,6 @@ class VolumePostgresHarness:
         )
 
 
-TRIAGE_ROUTE = make_choice_type(
-    (
-        ("direct_cot", "Simple response requiring no code, files, or Skills"),
-        ("single_rlm", "A task needing one bounded Python or Skill workflow"),
-        ("delegated_rlm", "A multi-part task requiring an independent child investigation"),
-    )
-)
-TRIAGE_CRITERIA = {
-    "direct_cot": {
-        "definition": "A self-contained answer needing no execution or workspace inspection",
-        "examples": ["Greeting", "Explain a familiar concept"],
-        "not": "Computed results, file analysis, Skills, or independent investigation",
-    },
-    "single_rlm": {
-        "definition": "A programmable Flex workflow with known inputs and verifiable outputs",
-        "examples": ["Compute a specified digit", "Summarize an attached table"],
-        "not": "Open-ended exploration where the next step depends on discoveries",
-    },
-    "delegated_rlm": {
-        "definition": "Primary RLM for iterative exploration or decomposition",
-        "examples": ["Investigate conflicting evidence", "Explore unfamiliar files and test hypotheses"],
-        "not": "A route that guarantees delegation; both execution routes can delegate",
-    },
-}
-TurnTriageSignature = make_signature(
-    {
-        "task": (str, dspy.InputField(desc="User request to route.")),
-        "workspace_manifest": (str, dspy.InputField(desc="Files available in the Session workspace.")),
-        "skills_catalog": (str, dspy.InputField(desc="Skills available to this Session.")),
-        "route": (
-            TRIAGE_ROUTE,
-            dspy.OutputField(
-                desc=(
-                    "Choose direct_cot for a simple response, single_rlm for one bounded Python or Skill workflow, "
-                    "or delegated_rlm for a multi-part task needing independent investigation."
-                )
-            ),
-        ),
-    },
-    "Choose the least expensive route that can satisfy the request.",
-    signature_name="TurnTriageSignature",
-)
-
-
-class FleetTaskSignature(dspy.Signature):
-    """Solve a task with Session-scoped workspace files and progressive Skills.
-
-    Delegate independent subtasks together with spawn_agents (they run concurrently) instead of calling
-    spawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:
-    SUBMIT(answer=..., learned_skill_note=...).
-
-    Once the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include
-    a known reference value, a self-consistency test, or a second computation you already ran.
-    Reuse computed variables instead of recomputing results. Run another method only if a check failed,
-    results disagree, or the Task asks for verification. Copy figures and strings from sandbox output.
-    """
-
-    workspace_manifest: str = dspy.InputField(desc="Files available in this Session's /workspace")
-    skills_catalog: str = dspy.InputField(desc="Stage-1 available Skills catalog")
-    memory_summary: str = dspy.InputField(
-        desc="Bounded learned notes for this Session; shared notes are unverified hints to confirm in the sandbox"
-    )
-    session_history: str = dspy.InputField(desc="Recent committed Turns from this Session")
-    execution_route: str = dspy.InputField(desc="The triage-selected route: single_rlm or delegated_rlm")
-    task: str = dspy.InputField(desc="User request")
-    context: Any = dspy.InputField(desc="Dataset handle or bounded context; inspect data in Python, not by guessing")
-    answer: str = dspy.OutputField(desc="Answer grounded in verified sandbox work")
-    learned_skill_note: str = dspy.OutputField(desc="Short note about reusable learning or Skills created")
-
-
 class AdaptiveFleetEngine(dspy.Module):
     """Optional Jev triage with a GEPA-optimizable Flex/RLM execution core."""
 
@@ -603,9 +534,9 @@ class AdaptiveFleetEngine(dspy.Module):
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self._compiled_digest = ""
         self._compiled_signature: tuple[int, int] | None = None
-        self.triage = dspy.Predict(TurnTriageSignature)
+        self.triage = dspy.Predict(TurnTriage)
         self.triage.set_criteria("route", TRIAGE_CRITERIA)
-        self.direct_cot = dspy.ChainOfThought("memory_summary, session_history, task -> answer")
+        self.direct_cot = dspy.ChainOfThought(DirectAnswer)
 
         def spawn_agent(
             subtask: str,
@@ -647,7 +578,7 @@ class AdaptiveFleetEngine(dspy.Module):
 
             create.execution_instructions = getattr(factory, "execution_instructions", "")  # ty: ignore[unresolved-attribute]
             child = dspy.RLM(
-                "subtask: str -> findings: str",
+                ChildTask,
                 tools=list(tools.values()),
                 interpreter_factory=create,
                 sub_lm=self._metered_sub,
@@ -724,7 +655,7 @@ class AdaptiveFleetEngine(dspy.Module):
         def sub_rlm(subtask: str, context_hint: str = "") -> str:
             """Spawn an isolated recursive investigation; input files and Skills are copied, not parent memory."""
             child = dspy.RLM(
-                signature="context_hint: str, subtask: str -> findings: str",
+                signature=ContextualChildTask,
                 tools=[sub_rlm],
                 interpreter_factory=self.sandbox_mgr.interpreter_factory(tools={"sub_rlm": sub_rlm}),
                 sub_lm=self._metered_sub,
@@ -739,12 +670,12 @@ class AdaptiveFleetEngine(dspy.Module):
 
         toolset = {"sub_rlm": sub_rlm, "spawn_agent": spawn_agent, "spawn_agents": spawn_agents}
         self.flex_agent = dspy.Flex(
-            FleetTaskSignature,
+            FleetTask,
             tools=[sub_rlm, spawn_agent, spawn_agents],
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
         )
         self.primary_rlm = dspy.RLM(
-            FleetTaskSignature,
+            FleetTask,
             tools=[sub_rlm, spawn_agent, spawn_agents],
             sub_lm=self._metered_sub,
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
@@ -875,7 +806,7 @@ class AdaptiveFleetEngine(dspy.Module):
             raw = self.sandbox_mgr.read_workspace_file(context.workspace_path)
             if context.sha256 and hashlib.sha256(raw).hexdigest() != context.sha256:
                 raise ValueError("Dataset source changed; select the new revision")
-        route = "single_rlm"
+        route = Route.FLEX
         route_lm = self.jev_lm or self._metered_sub
         triage_inputs = {
             "task": task,
@@ -888,7 +819,7 @@ class AdaptiveFleetEngine(dspy.Module):
         try:
             if mode != "hybrid":
                 reason = "session_mode"
-                route = "deep_rlm" if mode == "rlm" else "flex_pipeline"
+                route = Route.RLM if mode == "rlm" else Route.FLEX
                 summary = f"Session mode {mode} selects this route without hybrid triage."
             else:
                 if self.jev_lm is not None:
@@ -907,8 +838,9 @@ class AdaptiveFleetEngine(dspy.Module):
                     with dspy.context(lm=route_lm, callbacks=callbacks):
                         decision = self.triage(**triage_inputs).route
                     evidence = decision_evidence(decision, route_lm)
-                    route = _normalize_route(decision)
-                    span.set_outputs({"route": route, **evidence})
+                    # An unknown or missing label takes the bounded RLM path.
+                    route = parse_route(decision) or Route.RLM
+                    span.set_outputs({"route": route.value, **evidence})
         except Exception as exc:
             if _turn_is_over(exc):
                 raise
@@ -917,46 +849,42 @@ class AdaptiveFleetEngine(dspy.Module):
                 type(exc).__name__,
                 _safe_route_error(exc, self.jev_lm or self.sub_lm),
             )
-            route = "deep_rlm"
+            route = Route.RLM
             reason = "routing_error"
             summary = f"Route selection failed ({type(exc).__name__}); falling back to bounded RLM execution."
 
-        if context is not None and route == "direct_cot":
+        if context is not None and route is Route.DIRECT:
             reason = "selected_context"
-            route = "deep_rlm"
+            route = Route.RLM
             summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
         summary += {
-            "direct_cot": " Answer directly without code execution.",
-            "flex_pipeline": " Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
-            "deep_rlm": " Execute a bounded RLM with Daytona Python and optional child agents.",
-        }.get(route, "")
-        routing = {**evidence, "effective_route": route, "override_reason": reason}
+            Route.DIRECT: " Answer directly without code execution.",
+            Route.FLEX: " Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
+            Route.RLM: " Execute a bounded RLM with Daytona Python and optional child agents.",
+        }[route]
+        routing = {**evidence, "effective_route": route.value, "override_reason": reason}
         active_span = mlflow.get_current_active_span()
         if active_span is not None:
             active_span.set_attribute("fleet.routing", routing)
-        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route, summary=summary, evidence=routing)
+        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route.value, summary=summary, evidence=routing)
 
-        if route == "direct_cot":
+        if route is Route.DIRECT:
             with dspy.context(lm=self._metered_root):
                 answer = self.direct_cot(
                     memory_summary=memory_summary,
                     session_history=session_history,
                     task=task,
                 ).answer
-            return dspy.Prediction(answer=answer, learned_skill_note="", route=route)
+            return dspy.Prediction(answer=answer, learned_skill_note="", route=route.value)
 
-        agent = (
-            self.primary_rlm
-            if mode == "rlm" or route in {"deep_rlm", "single_rlm", "delegated_rlm"}
-            else self.flex_agent
-        )
+        agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
         with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
             prediction = agent(
                 workspace_manifest=workspace_manifest,
                 skills_catalog=skills_catalog,
                 memory_summary=memory_summary,
                 session_history=session_history,
-                execution_route=route,
+                execution_route=route.value,
                 task=task,
                 context=context if context is not None else "",
             )
@@ -964,7 +892,7 @@ class AdaptiveFleetEngine(dspy.Module):
         return dspy.Prediction(
             answer=prediction.answer,
             learned_skill_note=getattr(prediction, "learned_skill_note", ""),
-            route=route,
+            route=route.value,
         )
 
 
@@ -1052,11 +980,11 @@ def jev_routing_efficiency(trace: Any) -> Feedback:
 
 @scorer
 def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback:
-    """Check that the turn took the labeled gold route (direct_cot, flex_pipeline, or deep_rlm)."""
-    expected = (expectations or {}).get("route")
-    if not expected:
+    """Check that the turn took the labeled gold route (direct, flex, or rlm; legacy labels are read too)."""
+    expected = parse_route((expectations or {}).get("route"))
+    if expected is None:
         return Feedback(value=None, rationale="No gold route labeled for this case.")
-    actual = outputs.get("route") if isinstance(outputs, dict) else None
+    actual = parse_route(outputs.get("route")) if isinstance(outputs, dict) else None
     if actual is None:
         return Feedback(value=None, rationale="Turn output did not report a route.")
     correct = str(actual) == str(expected)
@@ -1106,7 +1034,7 @@ def gepa_mlflow_metric(
     expected = str(getattr(gold, "answer", ""))
     actual = str(getattr(pred, "answer", ""))
     call_count = len(program_trace) if isinstance(program_trace, (list, tuple)) else 0
-    judge = dspy.ChainOfThought("task, expected_answer, candidate_answer -> is_correct: bool, critique: str")
+    judge = dspy.ChainOfThought(AnswerJudge)
     judge.set_lm(judge_lm)
     assessment = judge(
         task=str(getattr(gold, "task", "")),

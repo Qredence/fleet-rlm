@@ -14,9 +14,11 @@ GEPA remains a deliberate isolated optimization workflow.
   tracebacks. Model calls are counted by `SpanType.LLM`, not span names.
 - `jev_routing_efficiency`: rewards fast paths without RLM/Flex and bounded
   RLM/Flex runs.
-- `route_correctness`: compares the turn's reported `route` (`direct_cot`,
-  `flex_pipeline`, `deep_rlm`) with the `route` expectation on a labeled case.
-  It returns no value when a case has no gold route.
+- `route_correctness`: compares the turn's reported `route` (`direct`, `flex`,
+  `rlm`) with the `route` expectation on a labeled case. Labels and traces
+  written with the old names (`direct_cot`, `single_rlm`/`flex_pipeline`,
+  `delegated_rlm`/`deep_rlm`) are read as their new equivalents. It returns no
+  value when a case has no gold route.
 
 Jev is the TypeSafe routing model (`FLEET_TYPESAFE_MODEL`); it is evaluated as a
 routing component, not used as a judge.

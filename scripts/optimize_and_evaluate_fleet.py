@@ -22,6 +22,7 @@ from dspy.teleprompt.gepa import InstructionProposer
 from psycopg.rows import dict_row
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.engine.signatures import AnswerJudge
 from fleet_rlm.interpreter import DaytonaSandboxManager, validate_session_id
 from fleet_rlm.memory_and_eval import (
     AdaptiveFleetEngine,
@@ -281,7 +282,7 @@ def run_stage_evaluation(
     with mlflow.start_run(run_name=f"eval-{stage}", nested=mlflow.active_run() is not None) as run:
         mlflow.set_tag("metric_judge", _JUDGE_LABEL)
         with dspy.context(lm=judge_lm):
-            judge = dspy.ChainOfThought("task, expected_answer, candidate_answer -> is_correct: bool, is_safe: bool")
+            judge = dspy.ChainOfThought(AnswerJudge)
             for example in valset:
                 started = time.perf_counter()
                 isolated_engine = engine_factory(example, engine)

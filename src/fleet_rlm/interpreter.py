@@ -22,11 +22,11 @@ from typing import Any
 import dspy
 import mlflow
 from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, ListSandboxesQuery, VolumeMount
-from dspy.signatures.signature import make_signature
 from mlflow.entities import SpanType
 
 from fleet_rlm.config import validate_shared_notes_subpath
-from fleet_rlm.dspy_support import decision_evidence, make_choice_type, without_mlflow_dspy_callback
+from fleet_rlm.dspy_support import decision_evidence, without_mlflow_dspy_callback
+from fleet_rlm.engine.signatures import STOPPING_RULES, item_decision
 from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE
 from fleet_rlm.workspace import WORKSPACE_CODE
@@ -1126,9 +1126,7 @@ class DaytonaSandboxManager:
             "Artifact names are relative to artifacts/ (e.g. 'result.txt'); use the helper's returned path. "
             "Nested DSPy code agents allocate fresh child sandboxes; only files/ and skills/ inputs are copied. "
             "Successful child artifacts appear under artifacts/<agent-id>/; inspect workspace.tree() for their paths. "
-            "Observe computed results, perform the required supporting check, then SUBMIT on your next action "
-            "when they agree. Reuse existing results. Start another verification method only for a failed check, "
-            "disagreement, or an explicit user request for independent verification."
+            + STOPPING_RULES
         )
         return create
 
@@ -1390,19 +1388,7 @@ class DaytonaInterpreter:
             raise ValueError("Jev batch inputs exceed the supported bounds")
         from pydantic import BaseModel
 
-        choice_type = make_choice_type(tuple((choice, choice) for choice in choices))
-        item_decision_signature = make_signature(
-            {
-                "item": (str, dspy.InputField()),
-                "question": (str, dspy.InputField()),
-                "decision": (
-                    choice_type,
-                    dspy.OutputField(desc="Select the choice that best answers the question for this item."),
-                ),
-            },
-        )
-
-        predictor = dspy.Predict(item_decision_signature)
+        predictor = dspy.Predict(item_decision(choices))
         active_lm = self.manager.jev_lm or self.manager.sub_lm or dspy.settings.lm
         examples = [dspy.Example(item=item, question=question).with_inputs("item", "question") for item in items]
         callbacks = list(dspy.settings.callbacks)

@@ -9,8 +9,9 @@ import pytest
 from dspy.primitives.facade import SandboxLM
 
 from fleet_rlm.dspy_support import decision_evidence, make_choice_type
+from fleet_rlm.engine.signatures import TRIAGE_ROUTE
 from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager
-from fleet_rlm.memory_and_eval import TRIAGE_ROUTE, AdaptiveFleetEngine
+from fleet_rlm.memory_and_eval import AdaptiveFleetEngine
 
 
 def manager():
@@ -152,9 +153,9 @@ def test_batch_decisions_keep_alignment_and_evidence(monkeypatch):
 @pytest.mark.parametrize(
     "context,mode,expected,reason",
     [
-        (None, "hybrid", "direct_cot", None),
-        ("selected", "hybrid", "deep_rlm", "selected_context"),
-        (None, "rlm", "deep_rlm", "session_mode"),
+        (None, "hybrid", "direct", None),
+        ("selected", "hybrid", "rlm", "selected_context"),
+        (None, "rlm", "rlm", "session_mode"),
     ],
 )
 def test_routing_evidence_distinguishes_backend_and_override(backend, context, mode, expected, reason):
@@ -166,9 +167,9 @@ def test_routing_evidence_distinguishes_backend_and_override(backend, context, m
     engine = AdaptiveFleetEngine(m, root, root, jev_lm=lm)
     engine.triage = lambda **_kwargs: SimpleNamespace(
         route=TRIAGE_ROUTE(
-            value="direct_cot",
+            value="direct",
             confidence=0.8,
-            probabilities={"direct_cot": 0.8, "single_rlm": 0.1, "delegated_rlm": 0.1},
+            probabilities={"direct": 0.8, "flex": 0.1, "rlm": 0.1},
         )
     )
     engine.direct_cot = lambda **_kwargs: SimpleNamespace(answer="ok")
@@ -190,7 +191,7 @@ def test_routing_regression_cases_cover_each_effective_route():
     from pathlib import Path
 
     cases = json.loads((Path(__file__).parents[1] / "fixtures/triage_cases.json").read_text())
-    assert Counter(case["route"] for case in cases) == {"direct_cot": 6, "flex_pipeline": 6, "deep_rlm": 6}
+    assert Counter(case["route"] for case in cases) == {"direct": 6, "flex": 6, "rlm": 6}
     assert len({case["id"] for case in cases}) == 18
     assert all(case["review_status"] == "developer_reviewed" and case["rationale"] for case in cases)
 

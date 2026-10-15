@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from fleet_rlm.config import FleetSettings, get_settings
+from fleet_rlm.engine.routes import Route
 from fleet_rlm.interpreter import _ACTIVE_MANAGER, _DAEMON_PROTOCOL, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.launcher import mlflow_is_healthy
 from fleet_rlm.memory_and_eval import (
@@ -992,7 +993,7 @@ def create_app(
                                 )
                             answer = str(prediction.answer)
                             learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
-                            route = str(getattr(prediction, "route", "single_rlm"))
+                            route = str(getattr(prediction, "route", Route.RLM.value))
                             turn_record = {
                                 "task": req.task,
                                 "workspace_manifest": manifest,

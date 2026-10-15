@@ -21,6 +21,8 @@ import mlflow
 from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
 from mlflow.genai.scorers import scorer
 
+from fleet_rlm.engine.routes import Route
+
 REVIEW_STATUSES = ("approved", "benchmark", "synthetic", "rejected")
 _REGIONS = ("north", "south", "east", "west", "central")
 _STATUSES = ("on_time", "late", "cancelled")
@@ -91,7 +93,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
             expected_values=(answer,),
             category="direct",
             source_group=f"direct-{index:02d}",
-            route="direct_cot",
+            route=Route.DIRECT.value,
         )
         for index, (task, answer) in enumerate(_DIRECT)
     ]
@@ -112,7 +114,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
                 category="aggregate",
                 source_group=f"aggregate-{index:02d}",
                 files={"files/sales.csv": _csv(["region", "revenue"], sales)},
-                route="flex_pipeline",
+                route=Route.FLEX.value,
             )
         )
     for index in range(per_category):
