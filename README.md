@@ -8,8 +8,17 @@ PostgreSQL-backed virtual filesystem (VFS).
 > **Operational status:** live execution needs working Daytona credentials and
 > resources, a PostgreSQL database, and credentials for the selected model
 > provider. This documentation does not claim those external integrations have
-> been verified. The server has no caller authentication and binds to loopback
+> been verified in your deployment. The server has no caller authentication and binds to loopback
 > by default; use only in a trusted environment.
+
+The v2 runtime pins DSPy 3.4.1 and supports strict RLM, Flex, and hybrid modes;
+file-backed large context; in-REPL DSPy sub-agents with fresh recursive Daytona
+child sandboxes; source-backed reviewed memory; and explicit versioned program
+optimization/promotion. Call, depth, sandbox, transfer, and wall-time limits
+bound execution. These are not guarantees of correctness or quality improvement.
+See [architecture](ARCHITECTURE.md) and the
+[implementation and acceptance plan](fleet_rlm_v2_0_architecture_full_implementation_plan_feature_fleet_rlm_lite.md)
+for trust boundaries and required validation.
 
 ## Install and configure
 

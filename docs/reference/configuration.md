@@ -25,8 +25,14 @@ source control.
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
+| `FLEET_EXECUTION_MODE` | `hybrid` | Strict `rlm`, strict `flex`, or routed `hybrid`; sessions can override and persist the selection. |
+| `FLEET_MAX_AGENT_DEPTH` | `3` | Maximum recursive child depth (root is zero). |
+| `FLEET_MAX_CHILD_SANDBOXES` | `8` | Total child allocations per turn. |
+| `FLEET_MAX_ACTIVE_CHILDREN` | `4` | Active child capacity; exhaustion fails immediately, avoiding a spawn/join wait cycle. |
+| `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Turn deadline enforced by a remote-stop watchdog. |
+| `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
-| `FLEET_MAX_UPLOAD_BYTES` | `5000000` | Maximum attachment upload size (maximum 5 MB). |
+| `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
 | `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |
 | `FLEET_MLFLOW_TRACKING_URI` | `sqlite:///mlflow.db` | MLflow tracking destination. `MLFLOW_TRACKING_URI` is also accepted. |
@@ -63,3 +69,11 @@ must use HTTPS.
 Fleet uses DSPy's native `lm15` engine for all runtime model roles and disables
 DSPy's response cache for those calls. Unsupported model prefixes are rejected
 instead of falling back to LiteLLM.
+
+Workspace synchronization is bounded to 25 MB per file, 100 MB total, and
+5,000 files; failures do not silently omit oversized files. Dataset handles
+contain paths, sizes, descriptions, and hashes, not the full file content.
+Child input copying is bounded to 100 MB; artifact promotion to 25 MB and 100 files.
+Local allocation journals live in `.fleet/allocations/`; expired entries are
+reconciled when the owning session next provisions a root. Provider TTL remains
+the fallback if local state is lost. This is not a distributed global reaper.

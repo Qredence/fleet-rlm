@@ -28,7 +28,11 @@ PostgreSQL holds Session turn history and file content. The `VolumePostgresHarne
 creates the tables it needs at startup and synchronizes workspace data through
 the Daytona Volume. There are no Alembic migrations in this Lite runtime.
 Daytona uses per-session subpaths for its workspaces. The supported workspace
-areas include `files`, `artifacts`, `memory`, and `skills`.
+areas include `files`, `artifacts`, `memory`, `skills`, `buffers`, and `sessions`.
+Additive Lite tables retain reviewed source-backed memories, idempotent turn
+intents/outcomes, and persisted mode/dataset settings without renaming old tables.
+A PostgreSQL session advisory lock gives one worker ownership of a runtime and
+is released on close or database disconnect. One connection is held per runtime.
 
 User Skills are stored locally under `.fleet/skills/` and synchronized to the
 session workspace. `.agents/skills/` is reserved for developer-facing agent
@@ -41,9 +45,37 @@ boundary for generated Python. TypeSafe routing is optional and configured via
 `FLEET_TYPESAFE_API_KEY`. MLflow is used for tracing/evaluation; GEPA optimization is
 an explicit operation rather than an automatic CI or release action.
 
-The engine includes a child investigation tool. Do not infer or promise a
-particular child-path depth or isolation guarantee from this document; consult
-the implementation and provider configuration for the exact behavior.
+Strict `rlm` enters a primary DSPy 3.4.1 RLM; `flex` enters Flex. Hybrid triage
+selects direct CoT, Flex, or deep RLM, with primary RLM fallback on routing errors.
+Dataset tasks cannot take a context-free direct answer path. Dataset handles
+carry source digests and bounded previews; files stay in the sandbox.
+
+DSPy's in-REPL facade constructs host-mediated predictors and agents. Fresh
+nested RLM interpreters allocate real child sandboxes, linked to the session
+root by default but mounted to distinct `agents/{session}/{agent}` Volume
+subpaths. Only input files and Skills are copied; artifacts are promoted with
+agent provenance. Namespaces alone are not filesystem isolation. The host
+enforces depth, active/total children, call budget, and a remote-stop deadline.
+Deletion waits for provider confirmation; ambiguous creation is not blindly retried.
+Local allocation journals support expired-allocation reconciliation on the next
+root provisioning for that session; provider TTL covers loss of local journals.
+
+The explicit `spawn_agent` host tool accepts a subtask, selected `files/` or
+`skills/` input paths, approved delegation tools, and bounded DSPy iteration/query
+limits. It copies no input files by default, stages child outputs until success,
+and returns bounded findings plus promoted paths, digests, and agent IDs.
+`allowed_tools=[]` disables further Fleet tool delegation; it is not a Python
+or network sandbox policy. All generated Python still runs under Daytona's
+deployment policy. Native facade-created RLMs retain the compatibility policy
+of copying the current parent's `files/` and `skills/`, not its artifacts/memory.
+
+The optimization runner curates approved gold answers, groups by source lineage,
+and uses fresh disposable runtimes for each GEPA/evaluation example. Candidate
+programs and manifests are separate from operator-approved active pointers.
+The reflection LM is explicitly labeled when used as the metric judge; MLflow
+judge URIs are never passed as DSPy model IDs. ReAnchor is currently reported
+as skipped without a compatible calibration client. Passing unit tests is not
+evidence of provider compatibility or a measured quality improvement.
 
 ## Deployment and trust boundaries
 
