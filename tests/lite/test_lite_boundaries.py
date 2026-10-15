@@ -10,6 +10,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -126,17 +127,17 @@ def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypa
 
 def test_daytona_manager_builds_syntax_valid_health_and_rpc_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    sandbox = SimpleNamespace(state=None, fs=SimpleNamespace(upload_file=lambda _content, _path: None))
+    sandbox = SimpleNamespace(state=None, fs=SimpleNamespace(upload_file=lambda _content, _path, **_kwargs: None))
     manager._client = object()
     manager._sandbox = sandbox
     remote_requests: list[str] = []
 
-    def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str) -> str:
+    def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str, **_kwargs) -> str:
         assert sandbox_arg is sandbox
         compile(code, "<fleet-remote-rpc>", "exec")
         remote_requests.append(code)
         if "/health" in code:
-            return json.dumps({"ok": True})
+            return json.dumps({"ok": True, "protocol": 2, "instance": "test-daemon"})
         if "/poll" in code:
             return json.dumps({"calls": []})
         return json.dumps({"ok": True})
@@ -147,7 +148,7 @@ def test_daytona_manager_builds_syntax_valid_health_and_rpc_requests(monkeypatch
     assert manager.rpc("/reply", {"id": "call-1", "value": "result"}) == {"ok": True}
     assert len(remote_requests) == 3
     assert "authorization='Bearer '+base64.b64decode(" in remote_requests[0]
-    assert "data=body,headers=headers" in remote_requests[2]
+    assert "data=body,headers=" in remote_requests[2]
 
 
 def test_daytona_interpreter_returns_expression_results_and_execution_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,6 +173,193 @@ def test_daytona_interpreter_returns_expression_results_and_execution_errors(mon
     assert interpreter.execute("json.dumps({'answer': 42})") == '{"answer": 42}'
     with pytest.raises(CodeExecutionError, match="ValueError: broken"):
         interpreter.execute("raise ValueError('broken')")
+
+
+@contextmanager
+def _recording_span(recorded: list[dict[str, Any]], name: str, span_type: str):
+    span: dict[str, Any] = {"name": name, "span_type": span_type, "attributes": {}, "open": True}
+    recorded.append(span)
+    try:
+        yield SimpleNamespace(
+            set_inputs=lambda value: span.__setitem__("inputs", value),
+            set_outputs=lambda value: span.__setitem__("outputs", value),
+            set_attributes=span["attributes"].update,
+            set_attribute=lambda key, value: span["attributes"].__setitem__(key, value),
+        )
+    finally:
+        span["open"] = False
+
+
+def test_daytona_exec_is_recorded_as_a_sandbox_tool_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mlflow.entities import SpanType
+
+    import fleet_rlm.interpreter as interpreter_module
+
+    spans: list[dict[str, Any]] = []
+    open_during_rpc: list[bool] = []
+    outcomes: list[Any] = [
+        {"stdout": "", "stderr": "", "final": None, "value": "17", "error": False},
+        RuntimeError("sandbox dropped"),
+    ]
+
+    def rpc(path: str, _payload: dict[str, Any]) -> dict[str, Any]:
+        assert path == "/exec"
+        open_during_rpc.append(spans[-1]["open"])
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    interpreter = DaytonaInterpreter(SimpleNamespace(rpc=rpc))
+    monkeypatch.setattr(interpreter, "start", lambda: None)
+    monkeypatch.setattr(
+        interpreter_module.mlflow, "start_span", lambda name, span_type: _recording_span(spans, name, span_type)
+    )
+
+    interpreter.execute("17")
+    with pytest.raises(RuntimeError, match="sandbox dropped"):
+        interpreter.execute("17")
+
+    assert [(span["name"], span["span_type"], span["open"]) for span in spans] == [
+        ("sandbox.exec", SpanType.TOOL, False),
+        ("sandbox.exec", SpanType.TOOL, False),
+    ]
+    assert open_during_rpc == [True, True]
+    assert {"phase", "namespace", "execution_id", "host_calls"} <= set(spans[0]["attributes"])
+    assert spans[0]["attributes"]["host_calls"] == 0
+    assert spans[0]["attributes"]["phase"] == "task"
+    assert spans[0]["attributes"]["namespace"] == interpreter.ns_id
+
+
+def test_daytona_exec_span_counts_host_calls_made_during_the_exec(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.interpreter as interpreter_module
+
+    spans: list[dict[str, Any]] = []
+    replies: list[dict[str, Any]] = []
+
+    def rpc(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if path == "/reply":
+            replies.append(payload)
+            return {"ok": True}
+        assert path == "/exec"
+        interpreter._handle_host_call({"id": "call-1", "tool": "lookup", "args": [], "kwargs": {}})
+        interpreter._handle_host_call({"id": "call-2", "tool": "lookup", "args": [], "kwargs": {}})
+        return {"stdout": "", "stderr": "", "final": None, "value": "17", "error": False}
+
+    interpreter = DaytonaInterpreter(SimpleNamespace(rpc=rpc), tools={"lookup": lambda: 17})
+    monkeypatch.setattr(interpreter, "start", lambda: None)
+    monkeypatch.setattr(
+        interpreter_module.mlflow, "start_span", lambda name, span_type: _recording_span(spans, name, span_type)
+    )
+
+    interpreter.execute("lookup()")
+
+    assert len(replies) == 2
+    assert spans[0]["attributes"]["host_calls"] == 2
+
+
+@pytest.mark.parametrize("subpath", ["/shared", "shared/../x", "shared//x", "shared/"])
+def test_shared_notes_subpath_must_be_a_relative_volume_prefix(subpath: str) -> None:
+    with pytest.raises(ValueError):
+        FleetSettings(fleet_shared_notes_subpath=subpath)
+
+
+def test_shared_notes_subpath_defaults_and_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FLEET_SHARED_NOTES_SUBPATH", raising=False)
+    assert FleetSettings().fleet_shared_notes_subpath == "shared/learned-notes"
+    assert FleetSettings(fleet_shared_notes_subpath="").fleet_shared_notes_subpath == ""
+
+
+def test_root_sandbox_mounts_shared_notes_beside_its_session_subtree() -> None:
+    root = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
+
+    mounts = root.volume_mounts(child=False)
+    assert [(mount.mount_path, mount.subpath) for mount in mounts] == [
+        ("/workspace", "sessions/session-a"),
+        ("/learned", "shared/learned-notes"),
+    ]
+    assert {mount.volume_id for mount in mounts} == {"volume"}
+    child_mounts = root.volume_mounts(child=True)
+    assert [(mount.mount_path, mount.subpath) for mount in child_mounts] == [
+        ("/workspace", f"agents/session-a/{root.agent_id}")
+    ]
+
+
+def test_shared_notes_mount_is_optional_and_never_reaches_child_sandboxes() -> None:
+    plain = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    assert [mount.mount_path for mount in plain.volume_mounts(child=False)] == ["/workspace"]
+    shared = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
+    assert [mount.mount_path for mount in shared.volume_mounts(child=True)] == ["/workspace"]
+
+
+def test_learned_note_lands_as_an_unreviewed_redacted_file_on_the_shared_mount(monkeypatch) -> None:
+    uploads: list[tuple[bytes, str]] = []
+    commands: list[str] = []
+    sandbox = SimpleNamespace(
+        fs=SimpleNamespace(upload_file=lambda content, path, **_kwargs: uploads.append((content, path)))
+    )
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "exec_remote_python", lambda _self, code: commands.append(code) or "True\n"
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: sandbox)
+
+    path = manager.write_learned_note("turn-0123456789", "Use api_key=hidden\n\nAlways verify digits.", "tr-1")
+
+    assert path == "/learned/session-a-turn0123.md"
+    assert uploads[0][1] == path
+    assert uploads[0][0].decode("utf-8") == (
+        "---\nsession: session-a\nturn: turn0123\ntrace_id: tr-1\nstatus: unreviewed\n"
+        "summary: Use api_key=[redacted]\n---\nUse api_key=[redacted]\n\nAlways verify digits.\n"
+    )
+    assert "/learned" in commands[0]
+
+
+def test_learned_note_is_skipped_when_the_sandbox_predates_the_mount(monkeypatch) -> None:
+    requested: list[bool] = []
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: "False\n")
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: requested.append(True))
+
+    assert manager.write_learned_note("turn-1", "A note.") is None
+    assert requested == []
+
+
+def test_learned_note_write_is_skipped_for_empty_notes_and_disabled_mounts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: pytest.fail("no sandbox call expected")
+    )
+    enabled = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
+    disabled = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    assert enabled.write_learned_note("turn-1", "  \n") is None
+    assert disabled.write_learned_note("turn-1", "A note.") is None
+
+
+def test_shared_notes_listing_is_sandbox_safe_bounded_and_degrades_to_empty(monkeypatch) -> None:
+    codes: list[str] = []
+    rows = json.dumps([{"file": "session-a-turn0123.md", "summary": "Use Chudnovsky"}])
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda _self, code: codes.append(code) or rows)
+
+    assert manager.list_learned_notes() == [{"file": "session-a-turn0123.md", "summary": "Use Chudnovsky"}]
+    # Generated sandbox source must not contain JSON literals: they raise NameError there.
+    compile(codes[0], "<learned-notes>", "exec")
+    for literal in ("true", "false", "null"):
+        assert literal not in codes[0]
+
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: "not json")
+    assert manager.list_learned_notes() == []
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: '{"file": "x"}')
+    assert manager.list_learned_notes() == []
+
+    def unreachable(_self, _code):
+        raise RuntimeError("sandbox dropped")
+
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", unreachable)
+    assert manager.list_learned_notes() == []
+    assert manager.list_learned_notes(limit=99) == []
+    assert DaytonaSandboxManager("key", "org", "volume", "session-a").list_learned_notes() == []
 
 
 def test_daytona_host_calls_preserve_the_interpreter_dspy_context() -> None:
@@ -231,6 +419,18 @@ def test_fleet_rlm_adapter_leaves_other_outputs_to_the_standard_parser() -> None
     adapter = FleetRLMChatAdapter()
 
     assert adapter.parse(signature, "[[ ## answer ## ]]\n42\n[[ ## completed ## ]]") == {"answer": "42"}
+
+
+def test_fleet_rlm_adapter_drops_leaked_thinking_before_the_answer() -> None:
+    # Some providers leak the model's thinking into content, closed by </think>, before the real answer.
+    leaked_code = "Draft:\n```python\nprint('draft')\n```\nWait, rewrite it.</think>```python\nprint(3.14)\n```"
+    leaked_fields = "Hmm, use the typed field.</think>[[ ## answer ## ]]\n42\n[[ ## completed ## ]]"
+
+    assert FleetRLMChatAdapter().parse(dspy.Signature("task -> reasoning, code"), leaked_code) == {
+        "reasoning": "",
+        "code": "print(3.14)",
+    }
+    assert FleetRLMChatAdapter().parse(dspy.Signature("task -> answer"), leaked_fields) == {"answer": "42"}
 
 
 def test_invalid_compiled_program_does_not_replace_the_last_good_session_artifact(tmp_path: Path) -> None:
@@ -422,6 +622,7 @@ def test_unity_gateway_models_use_native_dspy_engine_and_credentials(monkeypatch
         "api_key": "test-token",
         "engine": "lm15",
         "cache": False,
+        "num_retries": 3,
     }
     assert root_lm.kwargs == gateway_options
     assert sub_lm.kwargs == gateway_options
@@ -506,17 +707,15 @@ def test_non_unity_gateway_models_are_rejected_without_backend_fallback(monkeypa
         return SimpleNamespace(model=model)
 
     monkeypatch.setattr(dspy, "LM", fake_lm)
-    settings = FleetSettings(
-        _env_file=None,
-        fleet_root_model="databricks/databricks-claude-sonnet-5.5",
-        fleet_sub_model="openai/system.ai.claude-haiku-5-5",
-        fleet_reflection_model="openai/system.ai.claude-sonnet-5-5",
-        databricks_host="workspace.example.com",
-        databricks_token="test-token",
-    )
-
-    with pytest.raises(ValueError, match="refusing to fall back"):
-        settings.build_lms()
+    with pytest.raises(ValueError, match="OpenAI-compatible"):
+        FleetSettings(
+            _env_file=None,
+            fleet_root_model="databricks/databricks-claude-sonnet-5.5",
+            fleet_sub_model="openai/system.ai.claude-haiku-5-5",
+            fleet_reflection_model="openai/system.ai.claude-sonnet-5-5",
+            databricks_host="workspace.example.com",
+            databricks_token="test-token",
+        )
 
     assert calls == []
 
@@ -532,14 +731,13 @@ def test_unity_gateway_models_require_token_and_https_base_url() -> None:
     with pytest.raises(ValueError, match="HTTPS workspace URL"):
         settings.build_lms()
 
-    settings = FleetSettings(
-        _env_file=None,
-        fleet_root_model="openai/system.ai.claude-haiku-5-5",
-        fleet_llm_base_url="http://gateway.example.com/ai-gateway/mlflow/v1",
-        databricks_token="test-token",
-    )
     with pytest.raises(ValueError, match="HTTPS workspace URL"):
-        settings.build_lms()
+        FleetSettings(
+            _env_file=None,
+            fleet_root_model="openai/system.ai.claude-haiku-5-5",
+            fleet_llm_base_url="http://gateway.example.com/ai-gateway/mlflow/v1",
+            databricks_token="test-token",
+        )
 
 
 def test_fleet_prefixed_mlflow_environment_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -609,19 +807,34 @@ def test_triage_signature_retains_typed_choice_criteria() -> None:
     }
 
 
-def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("write_fails", [False, True])
+def test_turn_sse_persists_and_returns_one_mocked_session_turn(
+    monkeypatch: pytest.MonkeyPatch, write_fails: bool
+) -> None:
     import fleet_rlm.server as server
 
     files = {"files/input.txt": b"initial input", "files/rates.csv": b"rate\n3\n"}
     records = []
+    order: list[str] = []
+    written: list[tuple[str, str, Any]] = []
 
     def run_engine(**_kwargs):
+        assert "- older.md: prior hint" in _kwargs["memory_summary"]
         files["files/input.txt"] = b"modified during execution"
-        return SimpleNamespace(answer="processed locally", route="single_rlm", learned_skill_note="")
+        return SimpleNamespace(
+            answer="processed locally", route="single_rlm", learned_skill_note="Reuse the digit window check."
+        )
 
     def persist(**kwargs):
         records.append(kwargs["turn_record"])
+        order.append("sync")
         return ["artifacts/result.csv"]
+
+    def write_note(turn_id, note, trace_id=None):
+        order.append("write")
+        if write_fails:
+            raise RuntimeError("shared mount is gone")
+        written.append((turn_id, note, trace_id))
 
     class RuntimeRegistry:
         def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None]):
@@ -629,6 +842,8 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
                 sandbox_mgr=SimpleNamespace(
                     list_workspace_files=lambda: list(reversed(files)),
                     read_workspace_file=files.__getitem__,
+                    list_learned_notes=lambda: [{"file": "older.md", "summary": "prior hint"}],
+                    write_learned_note=write_note,
                 ),
                 harness=SimpleNamespace(
                     hydrate_volume_from_postgres=lambda _session_id: ("summary", "prior history"),
@@ -651,7 +866,9 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
 
     @contextmanager
     def fake_span(**_kwargs: Any) -> Any:
-        yield SimpleNamespace(set_inputs=lambda _value: None, set_outputs=lambda _value: None)
+        yield SimpleNamespace(
+            set_inputs=lambda _value: None, set_outputs=lambda _value: None, set_attributes=lambda _value: None
+        )
 
     global_callback = object()
     observed_callbacks: list[Any] = []
@@ -696,7 +913,7 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
     assert events[1]["payload"] == {
         "answer": "processed locally",
         "route": "single_rlm",
-        "learned_skill_note": "",
+        "learned_skill_note": "Reuse the digit window check.",
         "artifacts": ["artifacts/result.csv"],
         "trace_id": "trace-test-id",
     }
@@ -707,6 +924,8 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(monkeypatch: pyte
         "files/rates.csv": hashlib.sha256(b"rate\n3\n").hexdigest(),
     }
     assert records[0]["workspace_manifest"] == "/workspace/files/input.txt, /workspace/files/rates.csv"
+    assert order == ["sync", "write"]
+    assert written == ([] if write_fails else [(records[0]["turn_id"], "Reuse the digit window check.", None)])
     # The server uses "done" as its internal queue sentinel; the HTTP stream
     # ends after it and deliberately exposes only user-facing events.
     assert len(events) == 2
@@ -765,6 +984,24 @@ def _daemon_request(
     path: str,
     payload: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    if path == "/exec":
+        identity = {
+            "execution_id": uuid.uuid4().hex,
+            "ns_id": payload["ns_id"],
+            "instance": _daemon_request(base_url, token, "/health")["instance"],
+        }
+        _daemon_request(base_url, token, "/exec/submit", {**payload, **identity})
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            result = _daemon_request(base_url, token, "/exec/status", identity)
+            if result["state"] == "completed":
+                return result["result"]
+            if result["state"] == "missing":
+                return {"error": True, "stderr": "Interpreter namespace was closed"}
+            time.sleep(0.005)
+        raise TimeoutError("test execution did not finish")
+    if path == "/exec/submit":
+        path = "/exec"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = urllib.request.Request(
         base_url + path,
@@ -1215,10 +1452,16 @@ def test_adapter_async_path_reasks_too(monkeypatch) -> None:
     assert result == [{"b": "ok"}] and len(calls) == 2
 
 
-def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("fail_preparation", [False, True])
+def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.MonkeyPatch, fail_preparation: bool) -> None:
     import asyncio
 
     import fleet_rlm.server as server
+
+    def hydrate(_session_id):
+        if fail_preparation:
+            raise RuntimeError("preparation failed")
+        return "summary", "history"
 
     def failing_engine(**_kwargs):
         raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
@@ -1226,9 +1469,13 @@ def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.Monkey
     class RuntimeRegistry:
         def __init__(self, _settings: FleetSettings, _lms: tuple[Any, Any, Any, Any | None]):
             self.runtime = SimpleNamespace(
-                sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: [], read_workspace_file=lambda _path: b""),
+                sandbox_mgr=SimpleNamespace(
+                    list_workspace_files=lambda: [],
+                    read_workspace_file=lambda _path: b"",
+                    list_learned_notes=lambda: [],
+                ),
                 harness=SimpleNamespace(
-                    hydrate_volume_from_postgres=lambda _session_id: ("summary", "history"),
+                    hydrate_volume_from_postgres=hydrate,
                     sync_volume_to_postgres=lambda **_kwargs: [],
                 ),
                 skill_mgr=SimpleNamespace(
@@ -1248,7 +1495,12 @@ def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.Monkey
 
     @contextmanager
     def fake_span(**_kwargs: Any) -> Any:
-        yield SimpleNamespace(set_inputs=lambda _value: None, set_outputs=lambda _value: None)
+        yield SimpleNamespace(
+            trace_id="trace-failed-id",
+            set_inputs=lambda _value: None,
+            set_outputs=lambda _value: None,
+            set_attributes=lambda _value: None,
+        )
 
     @contextmanager
     def fake_dspy_context(**_kwargs: Any) -> Any:
@@ -1261,7 +1513,7 @@ def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.Monkey
     monkeypatch.setattr(server.mlflow, "start_span", fake_span)
     monkeypatch.setattr(server.mlflow, "update_current_trace", lambda **_kwargs: None)
     monkeypatch.setattr(server.mlflow, "set_experiment", lambda **_kwargs: None)
-    monkeypatch.setattr(server.mlflow, "get_last_active_trace_id", lambda: "trace-failed-id")
+    monkeypatch.setattr(server.mlflow, "get_last_active_trace_id", lambda: "stale-previous-trace")
     app = create_app(settings=_unity_gateway_test_settings(), initialize_db=False, configure_observability=False)
 
     with TestClient(app) as client:
@@ -1270,7 +1522,10 @@ def test_failed_turn_error_event_carries_the_trace_id(monkeypatch: pytest.Monkey
 
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     failure = next(event for event in events if event["event"] == "error")
-    assert failure["payload"]["trace_id"] == "trace-failed-id"
+    if fail_preparation:
+        assert "trace_id" not in failure["payload"]
+    else:
+        assert failure["payload"]["trace_id"] == "trace-failed-id"
     assert "The Turn failed" in failure["payload"]["error"]
 
 
@@ -1329,6 +1584,16 @@ def test_lm_end_event_reports_usage_from_dspys_tracker() -> None:
         "total_tokens": 940,
         "reasoning_tokens": 850,
     }
+
+
+def test_lm_end_event_streams_provider_reasoning_redacted() -> None:
+    callback, events = _usage_callback()
+
+    callback.on_lm_end("c2", [{"text": "42", "reasoning_content": "Plan: use api_key=hidden"}], None)
+    assert events[-1]["reasoning"] == "Plan: use api_key=[redacted]"
+
+    callback.on_lm_end("c3", ["42"], None)
+    assert "reasoning" not in events[-1]
 
 
 def test_lm_end_event_skips_usage_when_a_concurrent_call_shared_the_tracker() -> None:
@@ -1456,3 +1721,198 @@ def test_shutdown_skips_the_trace_flush_when_tracing_is_not_configured(monkeypat
     with TestClient(app):
         pass
     assert flushed == []
+
+
+def test_execution_submission_deduplicates_and_rejects_conflicts(interpreter_daemon):
+    base, token, _ = interpreter_daemon
+    identity = {
+        "execution_id": uuid.uuid4().hex,
+        "ns_id": "ns_00000001",
+        "instance": _daemon_request(base, token, "/health")["instance"],
+    }
+    payload = {**identity, "code": "import time\ntime.sleep(.05)\ncounter = globals().get('counter', 0) + 1\ncounter"}
+    for _ in range(2):
+        _daemon_request(base, token, "/exec/submit", payload)
+    with pytest.raises(urllib.error.HTTPError) as conflict:
+        _daemon_request(base, token, "/exec/submit", {**payload, "code": "counter += 1"})
+    assert conflict.value.code == 409
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        result = _daemon_request(base, token, "/exec/status", identity)
+        if result["state"] == "completed":
+            break
+        time.sleep(0.01)
+    assert result["result"]["value"] == 1
+    _daemon_request(base, token, "/drop_ns", {"ns_id": identity["ns_id"]})
+    assert _daemon_request(base, token, "/exec/status", identity)["state"] == "missing"
+
+
+def test_lost_submission_response_recovers_one_side_effect(interpreter_daemon, monkeypatch):
+    base, token, _ = interpreter_daemon
+    manager = DaytonaSandboxManager("key", "org", "volume", "reconcile")
+    manager._daemon_instance = _daemon_request(base, token, "/health")["instance"]
+    calls = []
+
+    def control(_self, path, payload):
+        calls.append(path)
+        result = _daemon_request(base, token, "/exec/submit" if path == "/exec" else path, payload)
+        if path == "/exec":
+            raise OSError("submission accepted but response lost")
+        return result
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
+    result = manager.execute_remote(
+        {
+            "execution_id": uuid.uuid4().hex,
+            "ns_id": "ns_00000001",
+            "code": "counter = globals().get('counter', 0) + 1\ncounter",
+        }
+    )
+    assert result["value"] == 1
+    assert result["transport_retries"] == 1
+    assert calls.count("/exec") == 1
+    assert not manager._cancelled.is_set()
+
+
+@pytest.mark.parametrize("failure", ["missing", "changed", "unavailable", "invalid"])
+def test_uncertain_execution_stops_turn_without_replay(monkeypatch, failure):
+    from fleet_rlm.interpreter import ExecutionOutcomeUnknownError
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "uncertain")
+    manager._daemon_instance = "original"
+    calls = []
+
+    def control(_self, path, _payload):
+        calls.append(path)
+        if path == "/exec":
+            return {"state": "running", "instance": "original"}
+        if failure == "unavailable":
+            raise OSError("gateway unavailable")
+        return {
+            "state": "missing" if failure == "missing" else "running" if failure == "changed" else "invalid",
+            "instance": "changed" if failure == "changed" else "original",
+        }
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
+    monkeypatch.setattr("fleet_rlm.interpreter._EXEC_POLL_INITIAL", 0.001)
+    with pytest.raises(ExecutionOutcomeUnknownError):
+        manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})
+    assert manager._cancelled.is_set()
+    assert calls.count("/exec") == 1
+
+
+def test_unaccepted_submission_can_retry_same_identity_once(monkeypatch):
+    manager = DaytonaSandboxManager("key", "org", "volume", "resubmit")
+    manager._daemon_instance = "original"
+    submitted = []
+    status_calls = 0
+
+    def control(_self, path, payload):
+        nonlocal status_calls
+        if path == "/exec":
+            submitted.append(payload.copy())
+            if len(submitted) == 1:
+                raise OSError("not accepted")
+            return {"state": "running", "instance": "original"}
+        status_calls += 1
+        return {
+            "instance": "original",
+            "state": "missing" if status_calls == 1 else "completed",
+            "result": {"value": 42},
+        }
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
+    monkeypatch.setattr("fleet_rlm.interpreter._EXEC_POLL_INITIAL", 0.001)
+    assert (
+        manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})["value"] == 42
+    )
+    assert len(submitted) == 2 and submitted[0] == submitted[1]
+
+
+def test_actual_execution_span_marks_remote_code_error(tmp_path):
+    # Run with a fresh MLflow exporter: earlier tests intentionally configure global callbacks.
+    import os
+
+    code = """
+import mlflow
+from types import SimpleNamespace
+from fleet_rlm.interpreter import DaytonaInterpreter
+from dspy.primitives.code_interpreter import CodeExecutionError
+mlflow.set_experiment('execution-test')
+interpreter = DaytonaInterpreter(SimpleNamespace(rpc=lambda *a: {
+    'error': True, 'error_type': 'ValueError', 'stderr': 'ValueError: verification_probe'}))
+interpreter.start = lambda: None
+with mlflow.start_span(name='execution-test') as root:
+    try:
+        interpreter.execute("raise ValueError('verification_probe')")
+    except CodeExecutionError:
+        pass
+    else:
+        raise AssertionError('remote exception was not raised')
+    trace_id = root.trace_id
+mlflow.flush_trace_async_logging()
+trace = mlflow.get_trace(trace_id)
+execution = next(s for s in trace.data.spans if s.name == 'sandbox.exec')
+assert execution.status.status_code.name == 'ERROR'
+assert execution.outputs['error'] is True
+assert execution.attributes['remote_error_type'] == 'ValueError'
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "MLFLOW_TRACKING_URI": f"sqlite:///{tmp_path / 'traces.db'}",
+            "MLFLOW_DISABLE_AGENT_HINT": "1",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_transient_status_failure_recovers_without_submission_retry(monkeypatch):
+    manager = DaytonaSandboxManager("key", "org", "volume", "status-recovery")
+    manager._daemon_instance = "original"
+    paths = []
+
+    def control(_self, path, _payload):
+        paths.append(path)
+        if path == "/exec":
+            return {"instance": "original", "state": "running"}
+        if paths.count("/exec/status") == 1:
+            raise OSError("temporary gateway failure")
+        return {"instance": "original", "state": "completed", "result": {"value": 42}}
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
+    monkeypatch.setattr("fleet_rlm.interpreter._EXEC_POLL_INITIAL", 0.001)
+    result = manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})
+    assert result["value"] == 42 and result["transport_retries"] == 1
+    assert paths.count("/exec") == 1
+
+
+def test_daemon_rejects_wrong_instance_and_bounds_registry(interpreter_daemon):
+    base, token, _ = interpreter_daemon
+    instance = _daemon_request(base, token, "/health")["instance"]
+    payload = {"instance": "wrong", "execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"}
+    with pytest.raises(urllib.error.HTTPError) as mismatch:
+        _daemon_request(base, token, "/exec/submit", payload)
+    assert mismatch.value.code == 409
+    # Shrink only the test daemon's private limit rather than creating 64 workers.
+    _daemon_request(
+        base, token, "/exec", {"ns_id": "ns_00000001", "code": "import __main__\n__main__.MAX_EXECUTIONS = 1"}
+    )
+    with pytest.raises(urllib.error.HTTPError) as full:
+        _daemon_request(base, token, "/exec/submit", {**payload, "instance": instance})
+    assert full.value.code == 429
+
+
+def test_execution_deadline_prevents_submission(monkeypatch):
+    manager = DaytonaSandboxManager("key", "org", "volume", "expired")
+    manager._deadline = time.monotonic() - 1
+    calls = []
+    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", lambda _self, *args: calls.append(args))
+    with pytest.raises(TimeoutError, match="deadline"):
+        manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})
+    assert calls == []
+    assert manager._cancelled.is_set()

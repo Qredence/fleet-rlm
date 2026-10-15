@@ -20,20 +20,40 @@ from pathlib import Path
 from typing import Any
 
 import dspy
+import mlflow
 from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, ListSandboxesQuery, VolumeMount
 from dspy.signatures.signature import make_signature
+from mlflow.entities import SpanType
 
-from fleet_rlm.dspy_support import make_choice_type
+from fleet_rlm.config import validate_shared_notes_subpath
+from fleet_rlm.dspy_support import decision_evidence, make_choice_type, without_mlflow_dspy_callback
 from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE
 from fleet_rlm.workspace import WORKSPACE_CODE
 from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
+_DAEMON_PROTOCOL = 2
+_RPC_HTTP_TIMEOUT = 5
+_RPC_COMMAND_TIMEOUT = 10
+_EXEC_POLL_INITIAL = 0.25
+_EXEC_POLL_MAX = 2.0
+_STATUS_FAILURE_LIMIT = 3
+
+
+class ExecutionOutcomeUnknownError(RuntimeError):
+    """Remote work may have executed; the Turn must not replay it."""
+
+    transport_retries: int = 0
+
+
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NAMESPACE_RE = re.compile(r"^ns_[a-f0-9]{8}$")
 _ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
 _ACTIVE_MANAGER: contextvars.ContextVar[Any] = contextvars.ContextVar("fleet_active_manager", default=None)
+_NATIVE_CHILDREN: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
+    "fleet_native_children", default=None
+)
 
 
 def validate_session_id(session_id: str) -> str:
@@ -77,9 +97,18 @@ def _workspace_relative_path(relative_path: str) -> str:
 
 
 _DAEMON_CODE = r"""
-import ast, builtins, hmac, io, json, keyword, os, re, sys, threading, traceback
+import ast, builtins, hashlib, hmac, io, json, keyword, os, re, sys, threading, traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+PROTOCOL = 2
+INSTANCE = os.urandom(16).hex()
+EXECUTIONS = {}
+EXECUTION_GUARD = threading.Lock()
+MAX_EXECUTIONS = 64
+RESERVED_NAMES = {
+    "__builtins__", "llm_query", "llm_query_batched", "jev_decide_batched", "SUBMIT",
+    "list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill",
+}
 NAMESPACES = {}
 NS_LOCKS = {}
 NAMESPACE_GUARD = threading.Lock()
@@ -198,6 +227,66 @@ def _make_namespace(ns_id, tool_names):
             namespace[name] = _make_tool(ns_id, name)
     return namespace
 
+
+def _execute(execution_id, ns_id, code, variables, tools):
+    with NAMESPACE_GUARD:
+        namespace = NAMESPACES.setdefault(ns_id, _make_namespace(ns_id, tools))
+        execution_lock = NS_LOCKS.setdefault(ns_id, threading.Lock())
+    protected = RESERVED_NAMES | set(tools)
+    if any(not isinstance(key, str) for key in variables):
+        raise ValueError("execution variable names must be strings")
+    output, errors = BoundedBuffer(), BoundedBuffer()
+    with execution_lock:
+        for name in tools:
+            if name not in RESERVED_NAMES:
+                namespace[name] = _make_tool(ns_id, name)
+        namespace.update({
+            key: value
+            for key, value in variables.items()
+            if key.isidentifier() and not keyword.iskeyword(key) and key not in protected
+        })
+        try:
+            OUTPUT_CONTEXT.stdout = output
+            OUTPUT_CONTEXT.stderr = errors
+            tree = ast.parse(code, mode="exec")
+            last_statement = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
+            exec(compile(tree, "<fleet_rlm>", "exec"), namespace, namespace)
+            value = (
+                eval(compile(ast.Expression(last_statement.value), "<fleet_rlm>", "eval"), namespace)
+                if last_statement
+                else None
+            )
+            result = {
+                "stdout": output.getvalue(),
+                "stderr": errors.getvalue(),
+                "final": None,
+                "has_value": last_statement is not None,
+                "value": _jsonable(value),
+            }
+        except FinalOutput as final:
+            try:
+                final_json = json.dumps(final.payload, separators=(",", ":"))
+                if len(final_json.encode("utf-8")) > MAX_BODY:
+                    raise ValueError("final output exceeds the size limit")
+                result = {"stdout": output.getvalue(), "stderr": errors.getvalue(), "final": final.payload}
+            except (TypeError, ValueError) as exc:
+                errors.write(str(exc))
+                result = {"stdout": output.getvalue(), "stderr": errors.getvalue(), "error": True}
+        except BaseException as exc:
+            errors.write(traceback.format_exc())
+            result = {"stdout": output.getvalue(), "stderr": errors.getvalue(),
+                      "error": True, "error_type": type(exc).__name__}
+        finally:
+            del OUTPUT_CONTEXT.stdout
+            del OUTPUT_CONTEXT.stderr
+        if output.truncated or errors.truncated:
+            result["truncated"] = True
+    if len(json.dumps(result, separators=(",", ":")).encode("utf-8")) > MAX_BODY - 1024:
+        result = {"error": True, "error_type": "ValueError", "stderr": "Execution result exceeds response limit"}
+    with EXECUTION_GUARD:
+        if execution_id in EXECUTIONS:
+            EXECUTIONS[execution_id].update(state="completed", result=result)
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format_string, *args):
         return
@@ -226,7 +315,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return self._send({"error": "unauthorized"}, 401)
         if self.path == "/health":
-            return self._send({"ok": True})
+            return self._send({"ok": True, "protocol": PROTOCOL, "instance": INSTANCE})
         if self.path == "/poll":
             with POLL_CONDITION:
                 if not PENDING_CALLS:
@@ -252,6 +341,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send({"error": "invalid JSON"}, 400)
         if not isinstance(body, dict):
             return self._send({"error": "request must be an object"}, 400)
+        if self.path in {"/exec", "/exec/status"} and body.get("instance") != INSTANCE:
+            return self._send({"error": "daemon instance changed", "instance": INSTANCE}, 409)
+        if self.path == "/exec/status":
+            with EXECUTION_GUARD:
+                record = EXECUTIONS.get(body.get("execution_id"))
+                if record is None or record["ns_id"] != body.get("ns_id"):
+                    return self._send({"state": "missing", "instance": INSTANCE})
+                return self._send({"instance": INSTANCE, "state": record["state"], "result": record.get("result")})
         if self.path == "/reply":
             call_id = body.get("id")
             with POLL_CONDITION:
@@ -266,6 +363,10 @@ class Handler(BaseHTTPRequestHandler):
             ns_id = body.get("ns_id")
             if not isinstance(ns_id, str) or not re.fullmatch(r"ns_[a-f0-9]{8}", ns_id):
                 return self._send({"error": "invalid namespace"}, 400)
+            with EXECUTION_GUARD:
+                for execution_id, record in list(EXECUTIONS.items()):
+                    if record["ns_id"] == ns_id:
+                        EXECUTIONS.pop(execution_id)
             with NAMESPACE_GUARD:
                 NAMESPACES.pop(ns_id, None)
                 NS_LOCKS.pop(ns_id, None)
@@ -290,10 +391,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"error": "invalid or oversized code"}, 413)
             variables = body.get("variables") or {}
             tools = body.get("tools") or []
-            reserved_names = {
-                "__builtins__", "llm_query", "llm_query_batched", "jev_decide_batched", "SUBMIT",
-                "list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill",
-            }
+            reserved_names = RESERVED_NAMES
             # DSPy Flex lists these existing interpreter APIs as registered tools.
             registered_builtin_tools = {"llm_query", "llm_query_batched", "jev_decide_batched"}
             reserved_tool_names = reserved_names - registered_builtin_tools
@@ -312,58 +410,28 @@ class Handler(BaseHTTPRequestHandler):
                 )
             ):
                 return self._send({"error": "invalid execution bindings"}, 400)
-            with NAMESPACE_GUARD:
-                namespace = NAMESPACES.setdefault(ns_id, _make_namespace(ns_id, tools))
-                execution_lock = NS_LOCKS.setdefault(ns_id, threading.Lock())
-            protected = reserved_names | set(tools)
+            execution_id = body.get("execution_id")
+            if not isinstance(execution_id, str) or not re.fullmatch(r"[a-f0-9]{32}", execution_id):
+                return self._send({"error": "invalid execution id"}, 400)
             if any(not isinstance(key, str) for key in variables):
                 return self._send({"error": "execution variable names must be strings"}, 400)
-            output, errors = BoundedBuffer(), BoundedBuffer()
-            with execution_lock:
-                for name in tools:
-                    if name not in reserved_names:
-                        namespace[name] = _make_tool(ns_id, name)
-                namespace.update({
-                    key: value
-                    for key, value in variables.items()
-                    if key.isidentifier() and not keyword.iskeyword(key) and key not in protected
-                })
-                try:
-                    OUTPUT_CONTEXT.stdout = output
-                    OUTPUT_CONTEXT.stderr = errors
-                    tree = ast.parse(code, mode="exec")
-                    last_statement = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
-                    exec(compile(tree, "<fleet_rlm>", "exec"), namespace, namespace)
-                    value = (
-                        eval(compile(ast.Expression(last_statement.value), "<fleet_rlm>", "eval"), namespace)
-                        if last_statement
-                        else None
-                    )
-                    result = {
-                        "stdout": output.getvalue(),
-                        "stderr": errors.getvalue(),
-                        "final": None,
-                        "has_value": last_statement is not None,
-                        "value": _jsonable(value),
-                    }
-                except FinalOutput as final:
-                    try:
-                        final_json = json.dumps(final.payload, separators=(",", ":"))
-                        if len(final_json.encode("utf-8")) > MAX_BODY:
-                            raise ValueError("final output exceeds the size limit")
-                        result = {"stdout": output.getvalue(), "stderr": errors.getvalue(), "final": final.payload}
-                    except (TypeError, ValueError) as exc:
-                        errors.write(str(exc))
-                        result = {"stdout": output.getvalue(), "stderr": errors.getvalue(), "error": True}
-                except Exception:
-                    errors.write(traceback.format_exc())
-                    result = {"stdout": output.getvalue(), "stderr": errors.getvalue(), "error": True}
-                finally:
-                    del OUTPUT_CONTEXT.stdout
-                    del OUTPUT_CONTEXT.stderr
-                if output.truncated or errors.truncated:
-                    result["truncated"] = True
-            return self._send(result)
+            digest = hashlib.sha256(json.dumps(
+                [ns_id, code, variables, tools], sort_keys=True, separators=(",", ":")
+            ).encode()).hexdigest()
+            with EXECUTION_GUARD:
+                prior = EXECUTIONS.get(execution_id)
+                if prior is not None:
+                    if prior["digest"] != digest:
+                        return self._send({"error": "execution id conflict"}, 409)
+                    return self._send({"state": prior["state"], "instance": INSTANCE})
+                if len(EXECUTIONS) >= MAX_EXECUTIONS:
+                    return self._send({"error": "execution registry full"}, 429)
+                EXECUTIONS[execution_id] = {"ns_id": ns_id, "digest": digest, "state": "running"}
+                worker = threading.Thread(
+                    target=_execute, args=(execution_id, ns_id, code, variables, tools), daemon=True
+                )
+                worker.start()
+            return self._send({"state": "running", "instance": INSTANCE})
         return self._send({"error": "not found"}, 404)
 
 for directory in ("files", "artifacts", "memory", "skills", "buffers", "sessions"):
@@ -392,6 +460,7 @@ class DaytonaSandboxManager:
     turn_timeout_seconds: int = 900
     linked_children: bool = True
     disposable: bool = False
+    shared_notes_subpath: str = ""
     event_callback: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     parent: DaytonaSandboxManager | None = field(default=None, repr=False)
     agent_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
@@ -410,6 +479,7 @@ class DaytonaSandboxManager:
     _poller: threading.Thread | None = field(default=None, init=False, repr=False)
     _stop_poller: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     _daemon_ready: bool = field(default=False, init=False, repr=False)
+    _daemon_instance: str = field(default="", init=False, repr=False)
     _creation_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -418,6 +488,7 @@ class DaytonaSandboxManager:
             raise ValueError("Daytona API key, organization ID, and Volume ID are required")
         if self.max_llm_calls < 1:
             raise ValueError("max_llm_calls must be positive")
+        validate_shared_notes_subpath(self.shared_notes_subpath)
 
     @property
     def root(self) -> DaytonaSandboxManager:
@@ -539,6 +610,7 @@ class DaytonaSandboxManager:
             if root._sandbox is not None and root._client is not None:
                 root._client.stop(root._sandbox, timeout=60)
                 root._daemon_ready = False
+                root._daemon_instance = ""
 
     def _record_allocation(self, status: str) -> None:
         directory = Path(".fleet/allocations")
@@ -580,6 +652,23 @@ class DaytonaSandboxManager:
                 self.emit("orphan_deleted", sandbox_id=sandbox.id, agent_id=record["agent_id"])
             path.unlink()
 
+    def volume_mounts(self, *, child: bool) -> list[VolumeMount]:
+        """Session subtree at /workspace; a root sandbox also gets the shared notes subtree at /learned."""
+        mounts = [
+            VolumeMount(
+                volume_id=self.volume_id,
+                mount_path="/workspace",
+                subpath=f"agents/{self.session_id}/{self.agent_id}"
+                if child
+                else session_volume_subpath(self.session_id),
+            )
+        ]
+        if not child and self.shared_notes_subpath:
+            mounts.append(
+                VolumeMount(volume_id=self.volume_id, mount_path="/learned", subpath=self.shared_notes_subpath)
+            )
+        return mounts
+
     def ensure_sandbox(self) -> Any:
         self.check_turn()
         with self._lock:
@@ -611,15 +700,7 @@ class DaytonaSandboxManager:
                 params = CreateSandboxFromSnapshotParams(
                     snapshot=self.snapshot,
                     language="python",
-                    volumes=[
-                        VolumeMount(
-                            volume_id=self.volume_id,
-                            mount_path="/workspace",
-                            subpath=f"agents/{self.session_id}/{self.agent_id}"
-                            if child
-                            else session_volume_subpath(self.session_id),
-                        )
-                    ],
+                    volumes=self.volume_mounts(child=child),
                     auto_stop_interval=self.auto_stop_minutes,
                     linked_sandbox=root_sandbox.id if root_sandbox is not None and self.linked_children else None,
                     ephemeral=child or self.disposable,
@@ -644,6 +725,7 @@ class DaytonaSandboxManager:
             if normalized_state in {"stopped", "archived", "archiving", "stopping"}:
                 self._client.start(self._sandbox)
                 self._daemon_ready = False
+                self._daemon_instance = ""
             if not self._daemon_ready:
                 self._ensure_daemon(self._sandbox)
             return self._sandbox
@@ -667,9 +749,12 @@ class DaytonaSandboxManager:
             "print(urllib.request.urlopen(r,timeout=2).read().decode())"
         )
         try:
-            if json.loads(self._remote_exec(sandbox, health_code)).get("ok") is True:
-                self._daemon_ready = True
+            health = json.loads(self._remote_exec(sandbox, health_code, timeout=_RPC_COMMAND_TIMEOUT))
+            if health.get("ok") is True:
+                self._accept_daemon(health)
                 return
+        except (ValueError, ExecutionOutcomeUnknownError):
+            raise
         except Exception:
             pass
 
@@ -691,67 +776,184 @@ class DaytonaSandboxManager:
         sandbox.process.exec("nohup python3 /tmp/fleet_rlm_daemon.py >/tmp/fleet_rlm_daemon.log 2>&1 </dev/null &")
         for _ in range(40):
             try:
-                if json.loads(self._remote_exec(sandbox, health_code)).get("ok") is True:
-                    self._daemon_ready = True
+                health = json.loads(self._remote_exec(sandbox, health_code, timeout=_RPC_COMMAND_TIMEOUT))
+                if health.get("ok") is True:
+                    self._accept_daemon(health)
                     return
             except Exception:
                 time.sleep(0.25)
         raise RuntimeError("Daytona interpreter daemon failed to become ready")
 
+    def _accept_daemon(self, health: dict[str, Any]) -> None:
+        if health.get("protocol") != _DAEMON_PROTOCOL or not isinstance(health.get("instance"), str):
+            raise ValueError("Incompatible interpreter daemon; restart the Session runtime")
+        if self._daemon_instance and health["instance"] != self._daemon_instance:
+            raise ExecutionOutcomeUnknownError("Interpreter daemon changed during this runtime")
+        self._daemon_instance = health["instance"]
+        self._daemon_ready = True
+
     def rpc(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        if path not in {"/health", "/poll", "/reply", "/drop_ns", "/exec"}:
+        if path == "/exec":
+            self.ensure_sandbox()
+            if payload is None:
+                raise ValueError("Execution payload is required")
+            return self.execute_remote(payload)
+        return self._rpc(path, payload)
+
+    def _rpc(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Send a short control request; execution itself uses submit/status."""
+        if path not in {"/health", "/poll", "/reply", "/drop_ns", "/exec", "/exec/status"}:
             raise ValueError("Unsupported Daytona interpreter RPC")
-        if payload is not None:
-            if not isinstance(payload, dict):
-                raise TypeError("Daytona interpreter RPC payload must be an object")
-            if len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > 1_500_000:
-                raise ValueError("Daytona interpreter RPC payload exceeds the size limit")
+        self.check_turn()
         sandbox = self.ensure_sandbox()
-        token_b64 = base64.b64encode(self._token.encode("utf-8")).decode("ascii")
-        if payload is None:
-            request_code = (
-                "import base64,json,urllib.request\n"
-                f"authorization='Bearer '+base64.b64decode('{token_b64}').decode()\n"
-                f"r=urllib.request.Request('http://127.0.0.1:8765{path}',headers={{'Authorization':authorization}})\n"
+        remaining = self.root._deadline - time.monotonic() if self.root._deadline else _RPC_COMMAND_TIMEOUT
+        command_timeout = max(1, min(_RPC_COMMAND_TIMEOUT, int(remaining)))
+        http_timeout = min(_RPC_HTTP_TIMEOUT, command_timeout)
+        token_b64 = base64.b64encode(self._token.encode()).decode("ascii")
+        request_code = "import base64,json,pathlib,urllib.request\n"
+        request_code += f"authorization='Bearer '+base64.b64decode('{token_b64}').decode()\n"
+        if payload is not None:
+            raw = json.dumps(payload, separators=(",", ":")).encode()
+            if len(raw) > 1_500_000:
+                raise ValueError("Daytona interpreter RPC payload exceeds the size limit")
+            request_path = f"/tmp/fleet-rpc-{uuid.uuid4().hex}.json"
+            sandbox.fs.upload_file(raw, request_path, timeout=command_timeout)
+            request_code += (
+                f"source=pathlib.Path({request_path!r})\nbody=source.read_bytes()\nsource.unlink()\n"
+                f"r=urllib.request.Request('http://127.0.0.1:8765{path}',data=body,"
+                "headers={'Authorization':authorization,'Content-Type':'application/json'})\n"
             )
         else:
-            # Never embed task inputs in shell arguments: Linux ARG_MAX is much
-            # smaller than the supported RPC payload size.
-            request_path = f"/tmp/fleet-rpc-{uuid.uuid4().hex}.json"
-            sandbox.fs.upload_file(json.dumps(payload, separators=(",", ":")).encode("utf-8"), request_path)
-            request_code = (
-                "import base64,json,pathlib,urllib.request\n"
-                f"source=pathlib.Path({request_path!r})\n"
-                "body=source.read_bytes()\n"
-                "source.unlink()\n"
-                f"authorization='Bearer '+base64.b64decode('{token_b64}').decode()\n"
-                f"headers={{'Authorization':authorization,'Content-Type':'application/json'}}\n"
-                f"r=urllib.request.Request('http://127.0.0.1:8765{path}',data=body,headers=headers)\n"
+            request_code += (
+                f"r=urllib.request.Request('http://127.0.0.1:8765{path}',headers={{'Authorization':authorization}})\n"
             )
-        # Long execution waits are bounded by the shared turn watchdog. Keep
-        # transport timeouts for short control RPCs, not an extra execution cap.
-        request_timeout = None if path == "/exec" else 180
-        request_code += f"print(urllib.request.urlopen(r,timeout={request_timeout!r}).read().decode())"
-        try:
-            response = (
-                self._remote_exec(sandbox, request_code, timeout=0)
-                if path == "/exec"
-                else self._remote_exec(sandbox, request_code)
-            )
-        except Exception:
-            with self._lock:
-                self._daemon_ready = False
-            raise
+        request_code += f"print(urllib.request.urlopen(r,timeout={http_timeout}).read().decode())"
+        response = self._remote_exec(sandbox, request_code, timeout=command_timeout)
         result = json.loads(response)
         if not isinstance(result, dict):
             raise RuntimeError("Invalid response from Daytona interpreter daemon")
         return result
+
+    def execute_remote(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Reconcile one execution without replaying work in another daemon."""
+        payload = {**payload, "instance": self._daemon_instance}
+        identity = {key: payload[key] for key in ("execution_id", "ns_id", "instance")}
+        acknowledged = False
+        resubmitted = False
+        failures = 0
+        retries = 0
+        delay = _EXEC_POLL_INITIAL
+        try:
+            self.check_turn()
+            try:
+                self._rpc("/exec", payload)
+                acknowledged = True
+            except Exception:
+                self.check_turn()
+                retries += 1
+            while True:
+                self.check_turn()
+                try:
+                    status = self._rpc("/exec/status", identity)
+                except Exception:
+                    self.check_turn()
+                    failures += 1
+                    retries += 1
+                    if failures >= _STATUS_FAILURE_LIMIT:
+                        raise ExecutionOutcomeUnknownError("Execution status is unavailable") from None
+                else:
+                    failures = 0
+                    if status.get("instance") != self._daemon_instance:
+                        raise ExecutionOutcomeUnknownError("Interpreter daemon changed")
+                    state = status.get("state")
+                    if state == "completed":
+                        self.check_turn()
+                        result = status.get("result")
+                        if not isinstance(result, dict):
+                            raise ExecutionOutcomeUnknownError("Invalid execution result")
+                        return {**result, "transport_retries": retries}
+                    if state == "missing":
+                        if acknowledged or resubmitted:
+                            raise ExecutionOutcomeUnknownError("Acknowledged execution record is missing")
+                        resubmitted = True
+                        retries += 1
+                        try:
+                            self._rpc("/exec", payload)
+                            acknowledged = True
+                        except Exception:
+                            self.check_turn()
+                    elif state == "running":
+                        acknowledged = True
+                    else:
+                        raise ExecutionOutcomeUnknownError("Invalid execution status")
+                self.root._cancelled.wait(delay)
+                delay = min(_EXEC_POLL_MAX, delay * 2)
+        except BaseException as exc:
+            if isinstance(exc, ExecutionOutcomeUnknownError):
+                exc.transport_retries = retries
+            # A dead transport cannot establish rollback. Stop remote work before
+            # allowing another Turn or promoting child artifacts.
+            try:
+                self.cancel_turn()
+            except Exception:
+                _LOGGER.warning("Could not confirm remote stop after execution failure")
+            raise
 
     def exec_remote_python(self, code: str) -> str:
         """Run bounded maintenance Python in this Session's sandbox."""
         if len(code.encode("utf-8")) > 1_000_000:
             raise ValueError("Remote maintenance code exceeds the size limit")
         return self._remote_exec(self.ensure_sandbox(), code)
+
+    def write_learned_note(self, turn_id: str, note: str, trace_id: str | None = None) -> str | None:
+        """Write one Turn's note as an unreviewed file on the shared mount; None when skipped."""
+        if not self.shared_notes_subpath or not note.strip():
+            return None
+        if self.exec_remote_python("import os\nprint(os.path.ismount('/learned'))").strip() != "True":
+            return None  # Sandbox predates the mount; the note still reaches the Session memory summary.
+        turn = re.sub(r"[^A-Za-z0-9]", "", turn_id)[:8] or "turn"
+        path = f"/learned/{self.session_id}-{turn}.md"
+        body = activity_text(note, limit=10_000)
+        summary = next((line.strip() for line in body.splitlines() if line.strip()), "")[:120]
+        header = [
+            "---",
+            f"session: {self.session_id}",
+            f"turn: {turn}",
+            f"trace_id: {trace_id or ''}",
+            "status: unreviewed",
+            f"summary: {summary}",
+            "---",
+        ]
+        self.ensure_sandbox().fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60)
+        return path
+
+    def list_learned_notes(self, limit: int = 20) -> list[dict[str, str]]:
+        """Newest-first `{file, summary}` rows from the shared mount; empty when unavailable."""
+        if not self.shared_notes_subpath or not 1 <= limit <= 50:
+            return []
+        code = (
+            "import json, os\n"
+            "root = '/learned'\n"
+            "rows = []\n"
+            "if os.path.ismount(root):\n"
+            "    names = [name for name in os.listdir(root) if name.endswith('.md')]\n"
+            "    names.sort(key=lambda name: os.stat(os.path.join(root, name)).st_mtime, reverse=True)\n"
+            f"    for name in names[:{limit}]:\n"
+            "        with open(os.path.join(root, name), encoding='utf-8', errors='replace') as handle:\n"
+            "            head = [handle.readline() for _ in range(8)]\n"
+            "        lines = [line[len('summary: '):].strip() for line in head if line.startswith('summary: ')]\n"
+            "        summary = lines[0] if lines else ''\n"
+            "        rows.append({'file': name, 'summary': summary[:120]})\n"
+            "print(json.dumps(rows))\n"
+        )
+        try:
+            rows = json.loads(self.exec_remote_python(code) or "[]")
+        except Exception:
+            _LOGGER.warning("Shared learned notes were unavailable for Session %s", self.session_id)
+            return []
+        if not isinstance(rows, list):
+            return []
+        return [row for row in rows if isinstance(row, dict)]
 
     def reset_turn_budget(self) -> None:
         root = self.root
@@ -921,7 +1123,12 @@ class DaytonaSandboxManager:
             "Python runs in Daytona with /workspace and workspace helper. "
             "context datasets expose .path/.lines()/.chunks()/.search(). "
             "Use workspace.write_artifact(name, content) for results. "
-            "Nested DSPy code agents allocate fresh child sandboxes; only files/ and skills/ inputs are copied."
+            "Artifact names are relative to artifacts/ (e.g. 'result.txt'); use the helper's returned path. "
+            "Nested DSPy code agents allocate fresh child sandboxes; only files/ and skills/ inputs are copied. "
+            "Successful child artifacts appear under artifacts/<agent-id>/; inspect workspace.tree() for their paths. "
+            "Observe computed results, perform the required supporting check, then SUBMIT on your next action "
+            "when they agree. Reuse existing results. Start another verification method only for a failed check, "
+            "disagreement, or an explicit user request for independent verification."
         )
         return create
 
@@ -1050,6 +1257,8 @@ class DaytonaInterpreter:
         self._context = contextvars.copy_context()
         self._started = False
         self._closed = False
+        self._host_calls = 0
+        self._host_call_lock = threading.Lock()
 
     def start(self) -> None:
         if self._closed:
@@ -1059,7 +1268,25 @@ class DaytonaInterpreter:
             self.manager._register_interpreter(self)
             self._started = True
 
+    def _invoke_tool(self, tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        """The host invocation, not interpreter shutdown, owns child success."""
+        children: list[Any] = []
+        token = _NATIVE_CHILDREN.set(children)
+        try:
+            value = self.tools[tool_name](*args, **kwargs)
+            if hasattr(self.manager, "check_turn"):
+                self.manager.check_turn()
+            for child in children:
+                child.collect_child_artifacts()
+            return value
+        finally:
+            _NATIVE_CHILDREN.reset(token)
+            for child in children:
+                child.shutdown()
+
     def _handle_host_call(self, call: dict[str, Any]) -> None:
+        with self._host_call_lock:
+            self._host_calls += 1
         call_id = call.get("id")
         tool_name = call.get("tool")
         args = call.get("args", [])
@@ -1083,10 +1310,13 @@ class DaytonaInterpreter:
             if tool_name == "llm_query":
                 if len(args) != 1 or not isinstance(args[0], str) or len(args[0]) > 100_000:
                     raise ValueError("llm_query requires one prompt of at most 100000 characters")
-                self.manager.consume_budget()
-                active_lm = self.manager.sub_lm or dspy.settings.lm
-                with dspy.context(lm=active_lm, disable_history=True):
-                    value = active_lm(args[0])[0]
+                if tool_name in self.tools:
+                    value = self._invoke_tool(tool_name, args, kwargs)
+                else:
+                    self.manager.consume_budget()
+                    active_lm = self.manager.sub_lm or dspy.settings.lm
+                    with dspy.context(lm=active_lm, disable_history=True):
+                        value = active_lm(args[0])[0]
             elif tool_name == "llm_query_batched":
                 if len(args) != 1:
                     raise ValueError("llm_query_batched requires one prompt list")
@@ -1098,15 +1328,18 @@ class DaytonaInterpreter:
                     or any(not isinstance(prompt, str) or len(prompt) > 100_000 for prompt in prompts)
                 ):
                     raise ValueError("llm_query_batched requires 1-100 bounded string prompts")
-                self.manager.consume_budget(len(prompts))
-                active_lm = self.manager.sub_lm or dspy.settings.lm
+                if tool_name in self.tools:
+                    value = self._invoke_tool(tool_name, args, kwargs)
+                else:
+                    self.manager.consume_budget(len(prompts))
+                    active_lm = self.manager.sub_lm or dspy.settings.lm
 
-                def complete(prompt: str) -> Any:
-                    with dspy.context(lm=active_lm, disable_history=True):
-                        return active_lm(prompt)[0]
+                    def complete(prompt: str) -> Any:
+                        with dspy.context(lm=active_lm, disable_history=True):
+                            return active_lm(prompt)[0]
 
-                with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
-                    value = list(pool.map(complete, prompts))
+                    with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
+                        value = list(pool.map(complete, prompts))
             elif tool_name == "jev_decide_batched":
                 if len(args) != 3:
                     raise ValueError("jev_decide_batched requires items, question, and choices")
@@ -1124,7 +1357,7 @@ class DaytonaInterpreter:
                 self.manager.consume_budget(len(items))
                 value = self._run_jev_batch(items, question, choices)
             elif tool_name in self.tools:
-                value = self.tools[tool_name](*args, **kwargs)
+                value = self._invoke_tool(tool_name, args, kwargs)
             else:
                 raise KeyError(f"Unknown bridged tool: {tool_name}")
             self.manager.rpc("/reply", {"id": call_id, "value": value})
@@ -1159,23 +1392,35 @@ class DaytonaInterpreter:
 
         choice_type = make_choice_type(tuple((choice, choice) for choice in choices))
         item_decision_signature = make_signature(
-            "item: str, question: str -> decision: FleetChoice",
-            custom_types={"FleetChoice": choice_type},
+            {
+                "item": (str, dspy.InputField()),
+                "question": (str, dspy.InputField()),
+                "decision": (
+                    choice_type,
+                    dspy.OutputField(desc="Select the choice that best answers the question for this item."),
+                ),
+            },
         )
 
         predictor = dspy.Predict(item_decision_signature)
         active_lm = self.manager.jev_lm or self.manager.sub_lm or dspy.settings.lm
         examples = [dspy.Example(item=item, question=question).with_inputs("item", "question") for item in items]
-        with dspy.context(lm=active_lm, disable_history=True):
-            predictions = predictor.batch(examples, num_threads=min(8, len(items)))
-        results: list[dict[str, Any]] = []
-        for item, prediction in zip(items, predictions, strict=True):
-            decision = getattr(prediction, "decision", None)
-            choice_value = getattr(decision, "value", None) if isinstance(decision, BaseModel) else None
-            if not isinstance(choice_value, str):
-                raise RuntimeError("Jev returned an invalid decision")
-            results.append({"item": item, "decision": choice_value})
-        return results
+        callbacks = list(dspy.settings.callbacks)
+        if active_lm is self.manager.jev_lm and self.manager.jev_lm is not None:
+            callbacks = without_mlflow_dspy_callback(callbacks)
+        with mlflow.start_span(name="jev_batch_decisions", span_type=SpanType.LLM) as span:
+            span.set_inputs({"item_count": len(items), "question": activity_text(question), "choices": choices})
+            with dspy.context(lm=active_lm, disable_history=True, callbacks=callbacks):
+                predictions = predictor.batch(examples, num_threads=min(8, len(items)))
+            results: list[dict[str, Any]] = []
+            for item, prediction in zip(items, predictions, strict=True):
+                decision = getattr(prediction, "decision", None)
+                choice_value = getattr(decision, "value", None) if isinstance(decision, BaseModel) else None
+                if not isinstance(choice_value, str):
+                    raise RuntimeError("Jev returned an invalid decision")
+                results.append({"item": item, "decision": choice_value, **decision_evidence(decision, active_lm)})
+            span.set_outputs({"decisions": [{k: v for k, v in row.items() if k != "item"} for row in results]})
+            return results
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if not isinstance(code, str) or len(code.encode("utf-8")) > 1_000_000:
@@ -1198,49 +1443,89 @@ class DaytonaInterpreter:
                 execution_id=execution_id,
                 phase=phase,
             )
-        try:
-            response = self.manager.rpc(
-                "/exec",
-                {"ns_id": self.ns_id, "code": code, "variables": variables or {}, "tools": list(self.tools)},
-            )
-        except Exception as exc:
-            if hasattr(self.manager, "emit"):
-                self.manager.emit(
-                    "repl_output",
-                    namespace=self.ns_id,
-                    execution_id=execution_id,
-                    phase=phase,
-                    error=True,
-                    error_type=type(exc).__name__,
-                    duration_ms=round((time.monotonic() - started) * 1000),
-                )
-            raise
         from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
 
-        if hasattr(self.manager, "emit"):
-            self.manager.emit(
-                "repl_output",
-                namespace=self.ns_id,
-                execution_id=execution_id,
-                phase=phase,
-                duration_ms=round((time.monotonic() - started) * 1000),
-                stdout=activity_text(str(response.get("stdout", ""))),
-                stderr=activity_text(str(response.get("stderr", ""))),
-                value=activity_preview(
-                    response.get("final") if response.get("final") is not None else response.get("value")
-                ),
-                error=bool(response.get("error")),
+        response: dict[str, Any] = {}
+        with mlflow.start_span(name="sandbox.exec", span_type=SpanType.TOOL) as span:
+            span.set_attributes(
+                {
+                    "phase": phase,
+                    "namespace": self.ns_id,
+                    "execution_id": execution_id,
+                    "agent_id": getattr(self.manager, "agent_id", None),
+                    "parent_agent_id": getattr(getattr(self.manager, "parent", None), "agent_id", None),
+                    "sandbox_id": getattr(getattr(self.manager, "_sandbox", None), "id", None),
+                }
             )
-
-        if response.get("final") is not None:
-            return FinalOutput(response["final"])
-        output = (response.get("stdout") or "") + (response.get("stderr") or "")
-        if response.get("error"):
-            message = output.strip() or "Remote Python execution failed"
-            raise CodeExecutionError(message[-20_000:])
-        if response.get("has_value") and response.get("value") is not None:
-            return response["value"]
-        return output[-20_000:].strip() or None
+            span.set_inputs({"code": activity_text(code)})
+            host_calls_before = self._host_calls
+            try:
+                response = self.manager.rpc(
+                    "/exec",
+                    {
+                        "execution_id": execution_id,
+                        "ns_id": self.ns_id,
+                        "code": code,
+                        "variables": variables or {},
+                        "tools": list(self.tools),
+                    },
+                )
+                span.set_outputs(
+                    {
+                        "stdout": activity_text(str(response.get("stdout", ""))),
+                        "stderr": activity_text(str(response.get("stderr", ""))),
+                        "value": activity_preview(
+                            response.get("final") if response.get("final") is not None else response.get("value")
+                        ),
+                        "error": bool(response.get("error")),
+                    }
+                )
+                span.set_attribute("transport_retries", response.get("transport_retries", 0))
+                if response.get("error"):
+                    span.set_attribute("outcome", "remote_code_error")
+                    span.set_attribute("remote_error_type", response.get("error_type", "PythonError"))
+                    output = str(response.get("stdout", "")) + str(response.get("stderr", ""))
+                    raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")
+                span.set_attribute("outcome", "completed")
+                if response.get("final") is not None:
+                    return FinalOutput(response["final"])
+                if response.get("has_value") and response.get("value") is not None:
+                    return response["value"]
+                return (str(response.get("stdout", "")) + str(response.get("stderr", "")))[-20_000:].strip() or None
+            except Exception as exc:
+                response.update(error=True, error_type=response.get("error_type") or type(exc).__name__)
+                span.set_attribute("transport_retries", getattr(exc, "transport_retries", 0))
+                if not isinstance(exc, CodeExecutionError):
+                    outcome = (
+                        "transport_uncertain"
+                        if isinstance(exc, ExecutionOutcomeUnknownError)
+                        else (
+                            "deadline"
+                            if isinstance(exc, TimeoutError)
+                            else "cancelled"
+                            if getattr(getattr(self.manager, "root", None), "_cancelled", threading.Event()).is_set()
+                            else "transport_error"
+                        )
+                    )
+                    span.set_attribute("outcome", outcome)
+                raise
+            finally:
+                span.set_attribute("host_calls", self._host_calls - host_calls_before)
+                if hasattr(self.manager, "emit"):
+                    self.manager.emit(
+                        "repl_output",
+                        namespace=self.ns_id,
+                        execution_id=execution_id,
+                        phase=phase,
+                        duration_ms=round((time.monotonic() - started) * 1000),
+                        stdout=activity_text(str(response.get("stdout", ""))),
+                        stderr=activity_text(str(response.get("stderr", ""))),
+                        value=activity_preview(
+                            response.get("final") if response.get("final") is not None else response.get("value")
+                        ),
+                        error=bool(response.get("error")) or not response,
+                        error_type=response.get("error_type"),
+                    )
 
     def shutdown(self) -> None:
         if self._closed:
@@ -1254,8 +1539,9 @@ class DaytonaInterpreter:
             finally:
                 self.manager._unregister_interpreter(self)
         if self.owns_manager:
-            try:
-                if not self.manager.root._cancelled.is_set():
-                    self.manager.collect_child_artifacts()
-            finally:
+            children = _NATIVE_CHILDREN.get()
+            if children is not None:
+                children.append(self.manager)
+            else:
+                # No invocation can attest success; cleanup must not publish outputs.
                 self.manager.shutdown()
