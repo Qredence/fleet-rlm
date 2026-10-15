@@ -340,7 +340,10 @@ def test_session_model_selection_is_validated_atomic_and_secret_free(monkeypatch
         assert after["models"] == (saved["models"] if failure is None else before["models"])
         assert after["limits"]["lm_calls"] == 7
         assert "private" not in response.text
-        assert set(after) == {"models", "mode", "context", "limits"}
+        assert set(after) == {"models", "mode", "context", "limits", "configuration"}
+        assert "fleet_database_url" not in after["configuration"]["values"]
+        assert "databricks_token" not in after["configuration"]["values"]
+        assert after["configuration"]["sources"]["fleet_root_model"] == "session"
     if failure is not None:
         assert runtime.engine is old_engine
         assert saved == {}

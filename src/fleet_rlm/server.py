@@ -15,7 +15,7 @@ import uuid
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 from contextlib import asynccontextmanager, suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -32,14 +32,14 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from fleet_rlm.config import FleetSettings, get_settings
-from fleet_rlm.interpreter import _ACTIVE_MANAGER, DaytonaSandboxManager, validate_session_id
+from fleet_rlm.interpreter import _ACTIVE_MANAGER, _DAEMON_PROTOCOL, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.memory_and_eval import (
     AdaptiveFleetEngine,
     VolumePostgresHarness,
     configure_mlflow_observability,
     initialize_database,
 )
-from fleet_rlm.observability import activity_preview
+from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.skills import SkillManager
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -95,6 +95,19 @@ class SessionRuntime:
     execution_mode: str = "hybrid"
     context: Any | None = None
     lease: psycopg.Connection | None = None
+    configuration_overrides: dict[str, Any] = field(default_factory=dict)
+
+
+def _runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, Any]:
+    overrides = dict(getattr(runtime, "configuration_overrides", {}))
+    for role in ("root", "sub"):
+        model = getattr(getattr(runtime.engine, f"{role}_lm", None), "model", None)
+        if model is not None and model != getattr(settings, f"fleet_{role}_model"):
+            overrides[f"fleet_{role}_model"] = model
+    mode = getattr(runtime, "execution_mode", settings.execution_mode)
+    if mode != settings.execution_mode:
+        overrides["execution_mode"] = mode
+    return settings.configuration(overrides)
 
 
 class SessionRuntimeRegistry:
@@ -123,6 +136,7 @@ class SessionRuntimeRegistry:
                 api_key=self.settings.fleet_daytona_api_key,
                 org_id=self.settings.fleet_daytona_org_id,
                 volume_id=self.settings.fleet_daytona_volume_id,
+                shared_notes_subpath=self.settings.fleet_shared_notes_subpath,
                 session_id=session_id,
                 snapshot=self.settings.fleet_daytona_snapshot,
                 auto_stop_minutes=self.settings.daytona_auto_stop_minutes,
@@ -157,8 +171,13 @@ class SessionRuntimeRegistry:
             try:
                 saved = await asyncio.to_thread(harness.runtime_settings)
                 runtime.execution_mode = saved.get("mode", runtime.execution_mode)
+                if "mode" in saved:
+                    runtime.configuration_overrides["execution_mode"] = runtime.execution_mode
                 runtime.engine.execution_mode = runtime.execution_mode
                 if saved.get("models"):
+                    runtime.configuration_overrides.update(
+                        {f"fleet_{role}_model": model for role, model in saved["models"].items()}
+                    )
                     runtime.engine = await asyncio.to_thread(self.engine_for_models, runtime, saved["models"])
                     runtime.sandbox_mgr.sub_lm = runtime.engine.sub_lm
                 if saved.get("context"):
@@ -210,6 +229,13 @@ def _usage_summary(entry: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value for key, value in found.items() if isinstance(value, (int, float)) and not isinstance(value, bool)
     }
+
+
+def _reasoning_text(outputs: Any) -> str:
+    """The provider's reasoning_content for the first completion, redacted and capped for streaming."""
+    first = outputs[0] if isinstance(outputs, list) and outputs else None
+    reasoning = first.get("reasoning_content") if isinstance(first, dict) else None
+    return activity_text(reasoning) if isinstance(reasoning, str) else ""
 
 
 class SSERuntimeCallback(BaseCallback):
@@ -307,7 +333,7 @@ class SSERuntimeCallback(BaseCallback):
                 self._usage_starts[call_id] = (tracker, model, len(tracker.usage_data.get(model, [])))
         self._start("lm", call_id, model=model[:150])
 
-    def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
+    def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:
         usage: dict[str, Any] = {}
         with self._calls_lock:
             start = self._usage_starts.pop(call_id, None)
@@ -318,7 +344,15 @@ class SSERuntimeCallback(BaseCallback):
             # rather than attribute another call's tokens.
             if len(new_entries) == 1:
                 usage = _usage_summary(new_entries[0])
-        self._end("lm", call_id, exception, **({"usage": usage} if usage else {}))
+        # Reasoning is streamed on purpose (operator decision). Module outputs are still never harvested.
+        reasoning = _reasoning_text(outputs)
+        self._end(
+            "lm",
+            call_id,
+            exception,
+            **({"usage": usage} if usage else {}),
+            **({"reasoning": reasoning} if reasoning else {}),
+        )
 
     def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         self._start(
@@ -475,6 +509,7 @@ def create_app(
                 "mode": runtime.execution_mode,
                 "models": {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model},
                 "context": asdict(runtime.context) if runtime.context else None,
+                "configuration": _runtime_configuration(resolved, runtime),
                 "limits": {
                     "lm_calls": runtime.sandbox_mgr.max_llm_calls,
                     "depth": runtime.sandbox_mgr.max_depth,
@@ -505,6 +540,10 @@ def create_app(
                 engine = await asyncio.to_thread(registry.engine_for_models, runtime, models)
                 await asyncio.to_thread(runtime.harness.save_runtime_settings, {"models": models})
                 runtime.engine = engine
+                if hasattr(runtime, "configuration_overrides"):
+                    runtime.configuration_overrides.update(
+                        {f"fleet_{role}_model": model for role, model in models.items()}
+                    )
                 runtime.sandbox_mgr.sub_lm = engine.sub_lm
             return {"role": body.role, "model": body.model}
         except HTTPException:
@@ -539,6 +578,8 @@ def create_app(
                     },
                 )
                 runtime.execution_mode = body.mode
+                if hasattr(runtime, "configuration_overrides"):
+                    runtime.configuration_overrides["execution_mode"] = body.mode
                 if hasattr(runtime.engine, "execution_mode"):
                     runtime.engine.execution_mode = body.mode
             return {"mode": body.mode}
@@ -857,6 +898,7 @@ def create_app(
                 def run_turn() -> None:
                     callback_manager = runtime.sandbox_mgr
                     previous_event_callback = getattr(callback_manager, "event_callback", None)
+                    turn_trace_id = None
                     try:
                         if hasattr(callback_manager, "event_callback"):
                             callback_manager.event_callback = enqueue
@@ -879,6 +921,15 @@ def create_app(
                         if mlflow_experiment_id:
                             mlflow.set_experiment(experiment_id=mlflow_experiment_id)
                         memory_summary, session_history = runtime.harness.hydrate_volume_from_postgres(session_id)
+                        shared_notes = runtime.sandbox_mgr.list_learned_notes()
+                        if shared_notes:
+                            memory_summary = "\n".join(
+                                [
+                                    *([memory_summary] if memory_summary else []),
+                                    "Shared learned notes (unreviewed hints; read /learned/<file> if relevant):",
+                                    *(f"- {note['file']}: {note['summary']}" for note in shared_notes),
+                                ]
+                            )
                         runtime.skill_mgr.sync_local_skills_to_volume()
                         files = runtime.sandbox_mgr.list_workspace_files()
                         # Workspace files are model-writable, so they cannot approve executable programs.
@@ -894,7 +945,21 @@ def create_app(
                             memories = runtime.harness.memories(req.task, reviewed_only=True)
                             memory_summary += "\n" + str(memories)[:12000]
                         with mlflow.start_span(name="fleet_turn", span_type=SpanType.CHAIN) as span:
+                            turn_trace_id = getattr(span, "trace_id", None) if mlflow_experiment_id else None
                             span.set_inputs({"session_id": session_id, "task": req.task})
+                            span.set_attributes(
+                                {
+                                    "execution_mode": getattr(runtime, "execution_mode", "hybrid"),
+                                    "turn_timeout_seconds": getattr(runtime.sandbox_mgr, "turn_timeout_seconds", None),
+                                    "daemon_protocol": _DAEMON_PROTOCOL,
+                                    "configuration_digest": _runtime_configuration(resolved, runtime)["digest"],
+                                    "model_settings": {
+                                        name: value
+                                        for name, value in _runtime_configuration(resolved, runtime)["values"].items()
+                                        if name.startswith(("fleet_root_", "fleet_sub_"))
+                                    },
+                                }
+                            )
                             # Previews keep the trace list scannable; full task/answer stay on the span.
                             mlflow.update_current_trace(
                                 metadata={"mlflow.trace.session": session_id},
@@ -932,6 +997,16 @@ def create_app(
                                 turn_record=turn_record,
                                 new_memory_note=learned_note,
                             )
+                            try:
+                                runtime.sandbox_mgr.write_learned_note(
+                                    request_id,
+                                    learned_note,
+                                    trace_id=str(turn_record["trace_id"]) if turn_record.get("trace_id") else None,
+                                )
+                            except Exception as exc:
+                                _LOGGER.warning(
+                                    "Learned note was not written to the shared mount (%s)", type(exc).__name__
+                                )
                             span.set_outputs({"answer": answer, "route": route, "artifacts": artifacts})
                             mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS])
                         trace_id = turn_record.get("trace_id") or (
@@ -956,10 +1031,7 @@ def create_app(
                             "request_id": request_id,
                             "error": f"The Turn failed (request {request_id}).",
                         }
-                        failed_trace_id = None
-                        if mlflow_experiment_id:
-                            with suppress(Exception):
-                                failed_trace_id = mlflow.get_last_active_trace_id()
+                        failed_trace_id = turn_trace_id
                         if failed_trace_id:
                             error_event["trace_id"] = failed_trace_id
                         if hasattr(runtime.harness, "finish_turn"):

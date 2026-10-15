@@ -19,6 +19,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import NestedCompleter, WordCompleter, merge_completers
 from prompt_toolkit.history import FileHistory
+from pydantic import ValidationError
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -428,6 +429,15 @@ def _render_event(event: dict[str, Any]) -> None:
                 style="dim" if event.get("ok", True) else "red",
             )
         )
+        if event_type == "lm_end" and event.get("reasoning"):
+            _CONSOLE.print(
+                Panel(
+                    Text(str(event["reasoning"]), style="dim"),
+                    title="Thinking",
+                    subtitle=Text(identity),
+                    border_style="dim",
+                )
+            )
         if event.get("output") not in (None, "null"):
             _CONSOLE.print(
                 Panel(Text(str(event["output"])), title="Tool result", subtitle=Text(identity), border_style="blue")
@@ -576,7 +586,15 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     """Run the backend or the interactive Rich client."""
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {str(error['msg']).removeprefix('Value error, ')}"
+            for error in exc.errors(include_url=False, include_input=False)
+        )
+        sys.stderr.write(f"fleet: error: invalid configuration: {details}\n")
+        raise SystemExit(2) from None
     parser = argparse.ArgumentParser(prog="fleet", description="Fleet-RLM Lite server and terminal client")
     commands = parser.add_subparsers(dest="command")
 
@@ -628,7 +646,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "serve":
         if not settings.allow_non_loopback_bind and not _is_loopback(args.host):
             parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
-        uvicorn.run("fleet_rlm.server:app", host=args.host, port=args.port, reload=False)
+        from fleet_rlm.server import create_app
+
+        bound = settings.with_explicit_overrides(host=args.host, port=args.port)
+        uvicorn.run(create_app(settings=bound), host=bound.host, port=bound.port, reload=False)
         return
 
     session_id = getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}")
