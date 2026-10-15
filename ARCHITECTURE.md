@@ -13,7 +13,7 @@ Rich CLI ──HTTP/SSE──> FastAPI server ──> DSPy engine
                               └── PostgreSQL VFS, MLflow traces/evaluation
 ```
 
-`cli.py` provides the Rich client and server command. `api/` owns the FastAPI
+`cli.py` is the `fleet` entry point; `tui/` is the terminal client. `api/` owns the FastAPI
 endpoints (sync `def` routes in FastAPI's threadpool; only the Turn stream is
 async) and SSE streaming; `session.py` owns the Session runtime registry, and
 `engine/turn.py` runs one Turn on a worker thread. A Session
@@ -122,7 +122,8 @@ policy.
   one router per area, and the Turn event stream (`events.py`).
 - `session.py`: the per-Session runtime and its registry.
 - `engine/turn.py`: one Turn end to end (claim, prepare, run, persist, report).
-- `cli.py`: Rich terminal client and command-line entry point.
+- `tui/`: terminal client (prompt loop, slash-command table, event rendering).
+- `cli.py`: the `fleet` command-line entry point.
 
 Keep documentation aligned with implemented routes and settings. Avoid
 reintroducing claims about removed migrations, a Node TUI,

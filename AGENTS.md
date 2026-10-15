@@ -6,7 +6,7 @@ DSPy engine, Daytona execution, PostgreSQL VFS, and MLflow/GEPA evaluation.
 ## Project layout
 
 - `src/fleet_rlm/` contains the active application: `config.py`, `skills.py`,
-  `session.py`, `cli.py`, and the `api/` (FastAPI routers), `engine/` (routes,
+  `session.py`, `cli.py`, and the `api/` (FastAPI routers), `tui/` (terminal client), `engine/` (routes,
   signatures, Turn program),
   `sandbox/` (Daytona), `store/` (PostgreSQL), and `optimize/`
   (datasets, scorers, GEPA) packages.

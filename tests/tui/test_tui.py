@@ -8,7 +8,14 @@ import httpx
 import pytest
 from rich.console import Console
 
-import fleet_rlm.cli as cli
+import fleet_rlm.tui.app as app
+import fleet_rlm.tui.commands as commands
+import fleet_rlm.tui.render as render
+
+
+def use_console(monkeypatch, console):
+    for module in (render, commands, app):
+        monkeypatch.setattr(module, "CONSOLE", console)
 
 
 def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,7 +47,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
     def create_client(*args: Any, **kwargs: Any) -> httpx.Client:
         return real_client(*args, transport=transport, **kwargs)
 
-    monkeypatch.setattr(cli.httpx, "Client", create_client)
+    monkeypatch.setattr(app.httpx, "Client", create_client)
 
     output = io.StringIO()
     console = Console(file=output, width=100)
@@ -51,9 +58,9 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
         return next(user_inputs)
 
     monkeypatch.setattr(console, "input", read_input)
-    monkeypatch.setattr(cli, "_CONSOLE", console)
+    use_console(monkeypatch, console)
 
-    cli.run_interactive_cli("http://fleet.test", "session-1")
+    app.run_interactive_cli("http://fleet.test", "session-1")
 
     rendered = output.getvalue()
     assert len(submitted_tasks) == 1
@@ -68,14 +75,14 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
     assert "Use the ledger-audit Skill for reconciliation." in rendered
     assert "artifacts/summary.csv" in rendered
     assert "MLflow trace ID: trace-123" in rendered
-    assert "`/skills pull`" in rendered
+    assert "`/skills [pull|push]`" in rendered and "`/exit`" in rendered
 
 
 def test_rich_cli_renders_versioned_event_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     output = io.StringIO()
-    monkeypatch.setattr(cli, "_CONSOLE", Console(file=output, width=100))
+    use_console(monkeypatch, Console(file=output, width=100))
 
-    cli._render_event(
+    render.render_event(
         {
             "version": 1,
             "event": "turn_complete",
@@ -99,10 +106,10 @@ def test_memory_and_trace_commands_use_session_history_contract(monkeypatch: pyt
         return httpx.Response(200, json={"turns": [{"task": "prior", "answer": "ok"}]})
 
     output = io.StringIO()
-    monkeypatch.setattr(cli, "_CONSOLE", Console(file=output, width=100))
+    use_console(monkeypatch, Console(file=output, width=100))
     client = httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle_request))
-    cli._handle_command(client, "/memory invoice", "session-1")
-    cli._handle_command(client, "/trace", "session-1")
+    commands.handle_command(client, "/memory invoice", "session-1")
+    commands.handle_command(client, "/trace", "session-1")
 
     assert requests[0].url.path == "/sessions/session-1/memory"
     assert requests[0].url.params["q"] == "invoice"
@@ -114,7 +121,7 @@ def test_memory_and_trace_commands_use_session_history_contract(monkeypatch: pyt
 
 def test_trace_command_shows_trace_id_when_saved_turn_has_one(monkeypatch: pytest.MonkeyPatch) -> None:
     output = io.StringIO()
-    monkeypatch.setattr(cli, "_CONSOLE", Console(file=output, width=100))
+    use_console(monkeypatch, Console(file=output, width=100))
     client = httpx.Client(
         base_url="http://fleet.test",
         transport=httpx.MockTransport(
@@ -122,7 +129,7 @@ def test_trace_command_shows_trace_id_when_saved_turn_has_one(monkeypatch: pytes
         ),
     )
 
-    cli._handle_command(client, "/trace", "session-1")
+    commands.handle_command(client, "/trace", "session-1")
 
     assert "trace-7" in output.getvalue()
     client.close()
@@ -140,9 +147,9 @@ def test_terminal_statuses_are_rendered_truthfully(
     monkeypatch: pytest.MonkeyPatch, event: dict[str, Any], expected: str
 ) -> None:
     output = io.StringIO()
-    monkeypatch.setattr(cli, "_CONSOLE", Console(file=output, width=100))
+    use_console(monkeypatch, Console(file=output, width=100))
 
-    cli._render_event(event)
+    render.render_event(event)
 
     assert expected in output.getvalue()
 
@@ -163,7 +170,7 @@ def test_command_and_argument_completion(text: str, expected: str) -> None:
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
 
-    completions = cli._COMMAND_COMPLETER.get_completions(Document(text), CompleteEvent())
+    completions = app._completer().get_completions(Document(text), CompleteEvent())
     assert expected in [item.text for item in completions]
 
 
@@ -171,7 +178,7 @@ def test_command_and_argument_completion(text: str, expected: str) -> None:
 def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selected: bool) -> None:
     output = io.StringIO()
     console = Console(file=output, width=100)
-    monkeypatch.setattr(cli, "_CONSOLE", console)
+    use_console(monkeypatch, console)
     monkeypatch.setattr(console, "input", lambda _prompt: choice)
     writes = []
 
@@ -185,8 +192,8 @@ def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selecte
         return httpx.Response(200, json={"mode": "rlm", "models": {"root": "openai/system.ai.alpha"}})
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
-        cli._handle_command(client, "/settings", "s1")
-        cli._handle_command(client, "/model sub", "s1")
+        commands.handle_command(client, "/settings", "s1")
+        commands.handle_command(client, "/model sub", "s1")
     assert writes == ([{"role": "sub", "model": "openai/system.ai.beta"}] if selected else [])
     assert "Session configuration" in output.getvalue()
     assert "openai/system.ai.beta" in output.getvalue()
@@ -196,7 +203,7 @@ def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selecte
 def test_free_form_tasks_stream_live_and_recover_from_errors(monkeypatch, outcome: str) -> None:
     output = io.StringIO()
     console = Console(file=output, width=120)
-    monkeypatch.setattr(cli, "_CONSOLE", console)
+    use_console(monkeypatch, console)
     inputs = iter(["Analyze '分析' and explain why 17 * 19 differs from 17 + 19?", "/exit"])
     monkeypatch.setattr(console, "input", lambda _prompt: next(inputs))
     submitted = []
@@ -230,9 +237,9 @@ def test_free_form_tasks_stream_live_and_recover_from_errors(monkeypatch, outcom
 
     real_client = httpx.Client
     monkeypatch.setattr(
-        cli.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handle), **kwargs)
+        app.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handle), **kwargs)
     )
-    cli.run_interactive_cli("http://fleet.test", "s1")
+    app.run_interactive_cli("http://fleet.test", "s1")
     assert submitted[0]["task"].startswith("Analyze '分析'")
     assert stream.closed
     expected = {
@@ -251,7 +258,7 @@ def test_free_form_tasks_stream_live_and_recover_from_errors(monkeypatch, outcom
 
 def test_activity_and_literal_multiline_answer_are_separate(monkeypatch: pytest.MonkeyPatch) -> None:
     output = io.StringIO()
-    monkeypatch.setattr(cli, "_CONSOLE", Console(file=output, width=120))
+    use_console(monkeypatch, Console(file=output, width=120))
     for event in (
         {"event": "triage_decision", "mode": "hybrid", "route": "rlm", "summary": "Context requires code."},
         {"event": "lm_start", "model": "test-model", "call_id": "lm-17", "agent_id": "child-2"},
@@ -260,7 +267,7 @@ def test_activity_and_literal_multiline_answer_are_separate(monkeypatch: pytest.
         {"event": "repl_output", "error": True, "error_type": "TimeoutError", "duration_ms": 23},
         {"event": "turn_complete", "answer": "A=7 [literal]\n6\nD", "learned_skill_note": "Separate note."},
     ):
-        cli._render_event(event)
+        render.render_event(event)
     text = output.getvalue()
     assert "Decision summary · not private reasoning" in text
     assert "Context requires code." in text
@@ -272,3 +279,18 @@ def test_activity_and_literal_multiline_answer_are_separate(monkeypatch: pytest.
     start = rows.index("A=7 [literal]")
     assert rows[start : start + 3] == ["A=7 [literal]", "6", "D"]
     assert "Learned note · not part of answer" in text
+
+
+def test_every_command_has_help_and_completion():
+    text = commands.help_text()
+    for name, command in commands.COMMANDS.items():
+        assert command.usage.startswith(name) and f"`{command.usage}`" in text
+    assert set(commands.COMMANDS) | {"/help", "/exit", "/quit"} == set(commands.completion_options())
+
+
+def test_unknown_and_exit_commands(monkeypatch):
+    output = io.StringIO()
+    use_console(monkeypatch, Console(file=output, width=100))
+    assert commands.handle_command(None, "/nope", "s1") is True
+    assert "Unknown command" in output.getvalue()
+    assert commands.handle_command(None, "/exit", "s1") is False

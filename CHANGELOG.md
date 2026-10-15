@@ -22,6 +22,10 @@ All notable changes to this project are documented in this file.
   Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
   labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
   be re-optimized.
+- The terminal client is `fleet_rlm.tui` (prompt loop, a slash-command table that also drives
+  `/help` and completion, and event rendering); `cli.py` keeps only the `fleet` entry point.
+  `/help` now shows command arguments, which Rich markup used to strip (`/mode [rlm|flex|hybrid]`
+  rendered as `/mode `).
 - The API is a package: `fleet_rlm.api` (`create_app`, dependencies, schemas, one router per area,
   the Turn event stream), `fleet_rlm.session` (Session runtime and registry) and
   `fleet_rlm.engine.turn` (one Turn end to end). Routes are sync `def` handlers using `Depends`;

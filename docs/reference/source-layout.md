@@ -40,7 +40,11 @@ src/fleet_rlm/
 │   └── routes/        # sessions, workspace, memory, skills, turns
 ├── session.py         # Per-Session runtime and registry
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli`
-└── cli.py             # Rich client and server command
+├── tui/
+│   ├── app.py         # Prompt loop and Turn stream reader
+│   ├── commands.py    # Slash-command table (dispatch, /help, completion)
+│   └── render.py      # Event rendering
+└── cli.py             # `fleet` entry point: serve, cli, optimize, eval
 ```
 
 The corresponding implementation areas are covered by `tests/`. Repository
