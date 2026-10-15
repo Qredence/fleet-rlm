@@ -18,7 +18,6 @@ def manager():
     replies = []
     counts = []
     return SimpleNamespace(
-        rpc=lambda path, payload: replies.append((path, payload)),
         consume_budget=lambda n=1: counts.append(n),
         check_turn=lambda: None,
         sub_lm=lambda prompt: [prompt.upper()],
@@ -35,29 +34,31 @@ def test_injected_query_enforces_local_budget_and_charges_global_once(batched):
     rlm._inject_execution_context(interpreter, rlm._prepare_execution_tools())
     name = "llm_query_batched" if batched else "llm_query"
     args = [["first", "second"]] if batched else ["first"]
-    interpreter._handle_host_call({"id": "first", "tool": name, "args": args})
+    m.replies.append(interpreter._handle_host_call({"id": "first", "tool": name, "args": args}))
     if not batched:
-        interpreter._handle_host_call({"id": "second", "tool": name, "args": ["second"]})
+        m.replies.append(interpreter._handle_host_call({"id": "second", "tool": name, "args": ["second"]}))
     assert sum(m.counts) == 2
-    interpreter._handle_host_call({"id": "exhausted", "tool": name, "args": args})
-    assert "error" in m.replies[-1][1]
+    m.replies.append(interpreter._handle_host_call({"id": "exhausted", "tool": name, "args": args}))
+    assert "error" in m.replies[-1]
     assert sum(m.counts) == 2
-    assert m.replies[0][1]["value"] == (["FIRST", "SECOND"] if batched else "FIRST")
+    assert m.replies[0]["value"] == (["FIRST", "SECOND"] if batched else "FIRST")
 
 
 @pytest.mark.parametrize("batched", [False, True])
 def test_query_fallback_keeps_global_accounting(batched):
     m = manager()
     interpreter = DaytonaInterpreter(m)
-    interpreter._handle_host_call(
-        {
-            "id": "one",
-            "tool": "llm_query_batched" if batched else "llm_query",
-            "args": [["a", "b"]] if batched else ["a"],
-        }
+    m.replies.append(
+        interpreter._handle_host_call(
+            {
+                "id": "one",
+                "tool": "llm_query_batched" if batched else "llm_query",
+                "args": [["a", "b"]] if batched else ["a"],
+            }
+        )
     )
     assert sum(m.counts) == (2 if batched else 1)
-    assert "error" not in m.replies[-1][1]
+    assert "error" not in m.replies[-1]
 
 
 def test_multiple_completions_reserve_each_distinct_budget_once():
@@ -99,13 +100,13 @@ def test_native_child_promotion_belongs_to_successful_host_invocation(outcome):
 
         m.check_turn = cancelled
     interpreter = DaytonaInterpreter(m, tools={"predictor": call})
-    interpreter._handle_host_call({"id": "call", "tool": "predictor", "args": []})
+    m.replies.append(interpreter._handle_host_call({"id": "call", "tool": "predictor", "args": []}))
     if outcome in {"failed", "cancelled"}:
         assert events == ["closed"]
-        assert "error" in m.replies[-1][1]
+        assert "error" in m.replies[-1]
     else:
         assert events == ["promoted", "closed"]
-        assert "value" in m.replies[-1][1]
+        assert "value" in m.replies[-1]
 
 
 def test_unowned_explicit_child_keeps_promotion_with_its_caller():

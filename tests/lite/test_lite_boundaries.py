@@ -3,14 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import socket
-import subprocess
-import sys
 import threading
 import time
-import urllib.error
-import urllib.request
-import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,15 +13,12 @@ from typing import Any
 import dspy
 import pytest
 from dspy.adapters.chat_adapter import ChatAdapter
-from dspy.primitives.code_interpreter import CodeExecutionError
 from dspy.utils.exceptions import AdapterParseError
 from fastapi.testclient import TestClient
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
 from fleet_rlm.interpreter import (
-    _DAEMON_CODE,
-    DaytonaInterpreter,
     DaytonaSandboxManager,
     _workspace_relative_path,
     session_volume_subpath,
@@ -36,7 +27,7 @@ from fleet_rlm.interpreter import (
 from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, VolumePostgresHarness
 from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
-from fleet_rlm.workspace import WORKSPACE_CODE, WorkspaceDataset
+from fleet_rlm.workspace import WorkspaceDataset
 
 
 @pytest.mark.parametrize("session_id", ["finance-q4", "session_01", "2e8c98b5-5242-4e3b-91b4-2bf1e8c24f0b"])
@@ -103,7 +94,6 @@ def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypa
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     manager._client = object()
     manager._sandbox = sandbox
-    manager._daemon_ready = True
 
     def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str) -> str:
         assert sandbox_arg is sandbox
@@ -117,139 +107,6 @@ def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypa
     assert manager.write_workspace_file("files/large.csv", content) == "/workspace/files/large.csv"
     assert filesystem.uploaded == (content, "/workspace/files/large.csv", 1800)
     assert manager.read_workspace_file("files/large.csv", max_bytes=len(content)) == content
-
-
-def test_daytona_manager_builds_syntax_valid_health_and_rpc_requests(monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    sandbox = SimpleNamespace(state=None, fs=SimpleNamespace(upload_file=lambda _content, _path, **_kwargs: None))
-    manager._client = object()
-    manager._sandbox = sandbox
-    remote_requests: list[str] = []
-
-    def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str, **_kwargs) -> str:
-        assert sandbox_arg is sandbox
-        compile(code, "<fleet-remote-rpc>", "exec")
-        remote_requests.append(code)
-        if "/health" in code:
-            return json.dumps({"ok": True, "protocol": 2, "instance": "test-daemon"})
-        if "/poll" in code:
-            return json.dumps({"calls": []})
-        return json.dumps({"ok": True})
-
-    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", remote_exec)
-
-    assert manager.rpc("/poll") == {"calls": []}
-    assert manager.rpc("/reply", {"id": "call-1", "value": "result"}) == {"ok": True}
-    assert len(remote_requests) == 3
-    assert "authorization='Bearer '+base64.b64decode(" in remote_requests[0]
-    assert "data=body,headers=" in remote_requests[2]
-
-
-def test_daytona_interpreter_returns_expression_results_and_execution_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    responses = [
-        {
-            "stdout": "diagnostic output\n",
-            "stderr": "",
-            "final": None,
-            "has_value": True,
-            "value": '{"answer": 42}',
-        },
-        {"stdout": "", "stderr": "ValueError: broken", "final": None, "error": True},
-    ]
-
-    def rpc(path: str, _payload: dict[str, Any]) -> dict[str, Any]:
-        assert path == "/exec"
-        return responses.pop(0)
-
-    interpreter = DaytonaInterpreter(SimpleNamespace(rpc=rpc))
-    monkeypatch.setattr(interpreter, "start", lambda: None)
-
-    assert interpreter.execute("json.dumps({'answer': 42})") == '{"answer": 42}'
-    with pytest.raises(CodeExecutionError, match="ValueError: broken"):
-        interpreter.execute("raise ValueError('broken')")
-
-
-@contextmanager
-def _recording_span(recorded: list[dict[str, Any]], name: str, span_type: str):
-    span: dict[str, Any] = {"name": name, "span_type": span_type, "attributes": {}, "open": True}
-    recorded.append(span)
-    try:
-        yield SimpleNamespace(
-            set_inputs=lambda value: span.__setitem__("inputs", value),
-            set_outputs=lambda value: span.__setitem__("outputs", value),
-            set_attributes=span["attributes"].update,
-            set_attribute=lambda key, value: span["attributes"].__setitem__(key, value),
-        )
-    finally:
-        span["open"] = False
-
-
-def test_daytona_exec_is_recorded_as_a_sandbox_tool_span(monkeypatch: pytest.MonkeyPatch) -> None:
-    from mlflow.entities import SpanType
-
-    import fleet_rlm.interpreter as interpreter_module
-
-    spans: list[dict[str, Any]] = []
-    open_during_rpc: list[bool] = []
-    outcomes: list[Any] = [
-        {"stdout": "", "stderr": "", "final": None, "value": "17", "error": False},
-        RuntimeError("sandbox dropped"),
-    ]
-
-    def rpc(path: str, _payload: dict[str, Any]) -> dict[str, Any]:
-        assert path == "/exec"
-        open_during_rpc.append(spans[-1]["open"])
-        outcome = outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    interpreter = DaytonaInterpreter(SimpleNamespace(rpc=rpc))
-    monkeypatch.setattr(interpreter, "start", lambda: None)
-    monkeypatch.setattr(
-        interpreter_module.mlflow, "start_span", lambda name, span_type: _recording_span(spans, name, span_type)
-    )
-
-    interpreter.execute("17")
-    with pytest.raises(RuntimeError, match="sandbox dropped"):
-        interpreter.execute("17")
-
-    assert [(span["name"], span["span_type"], span["open"]) for span in spans] == [
-        ("sandbox.exec", SpanType.TOOL, False),
-        ("sandbox.exec", SpanType.TOOL, False),
-    ]
-    assert open_during_rpc == [True, True]
-    assert {"phase", "namespace", "execution_id", "host_calls"} <= set(spans[0]["attributes"])
-    assert spans[0]["attributes"]["host_calls"] == 0
-    assert spans[0]["attributes"]["phase"] == "task"
-    assert spans[0]["attributes"]["namespace"] == interpreter.ns_id
-
-
-def test_daytona_exec_span_counts_host_calls_made_during_the_exec(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.interpreter as interpreter_module
-
-    spans: list[dict[str, Any]] = []
-    replies: list[dict[str, Any]] = []
-
-    def rpc(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if path == "/reply":
-            replies.append(payload)
-            return {"ok": True}
-        assert path == "/exec"
-        interpreter._handle_host_call({"id": "call-1", "tool": "lookup", "args": [], "kwargs": {}})
-        interpreter._handle_host_call({"id": "call-2", "tool": "lookup", "args": [], "kwargs": {}})
-        return {"stdout": "", "stderr": "", "final": None, "value": "17", "error": False}
-
-    interpreter = DaytonaInterpreter(SimpleNamespace(rpc=rpc), tools={"lookup": lambda: 17})
-    monkeypatch.setattr(interpreter, "start", lambda: None)
-    monkeypatch.setattr(
-        interpreter_module.mlflow, "start_span", lambda name, span_type: _recording_span(spans, name, span_type)
-    )
-
-    interpreter.execute("lookup()")
-
-    assert len(replies) == 2
-    assert spans[0]["attributes"]["host_calls"] == 2
 
 
 @pytest.mark.parametrize("subpath", ["/shared", "shared/../x", "shared//x", "shared/"])
@@ -354,36 +211,6 @@ def test_shared_notes_listing_is_sandbox_safe_bounded_and_degrades_to_empty(monk
     assert manager.list_learned_notes() == []
     assert manager.list_learned_notes(limit=99) == []
     assert DaytonaSandboxManager("key", "org", "volume", "session-a").list_learned_notes() == []
-
-
-def test_daytona_host_calls_preserve_the_interpreter_dspy_context() -> None:
-    lm = dspy.utils.DummyLM([])
-    replies: list[dict[str, Any]] = []
-
-    def rpc(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        assert path == "/reply"
-        replies.append(payload)
-        return {"ok": True}
-
-    with dspy.context(lm=lm):
-        interpreter = DaytonaInterpreter(
-            SimpleNamespace(rpc=rpc),
-            tools={"check_active_lm": lambda: dspy.settings.lm is lm},
-        )
-
-    context = interpreter._context.copy()
-    thread = threading.Thread(
-        target=context.run,
-        args=(
-            interpreter._handle_host_call,
-            {"id": "call-1", "tool": "check_active_lm", "args": [], "kwargs": {}},
-        ),
-    )
-    thread.start()
-    thread.join(timeout=3)
-
-    assert not thread.is_alive()
-    assert replies == [{"id": "call-1", "value": True}]
 
 
 def test_dspy_history_is_disabled_for_session_turn_contexts() -> None:
@@ -903,328 +730,6 @@ def test_turn_sse_persists_and_returns_one_mocked_session_turn(
     assert len(events) == 2
 
 
-@pytest.fixture
-def interpreter_daemon(tmp_path: Path) -> tuple[str, str, subprocess.Popen[bytes]]:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    token = "test-interpreter-token"
-    workspace_root = tmp_path / "workspace"
-    workspace_root.mkdir()
-    code = (
-        (
-            SANDBOX_SKILL_HELPERS_CODE
-            + "\n"
-            + WORKSPACE_CODE
-            + "\nTOKEN = "
-            + repr(token)
-            + "\n"
-            + _DAEMON_CODE.replace("TOKEN = __FLEET_TOKEN__\n", "")
-        )
-        .replace("8765", str(port))
-        .replace("/workspace", str(workspace_root))
-    )
-    process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    base_url = f"http://127.0.0.1:{port}"
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            pytest.fail("Interpreter daemon exited during startup")
-        try:
-            _daemon_request(base_url, token, "/health")
-            break
-        except (OSError, urllib.error.URLError):
-            time.sleep(0.025)
-    else:
-        process.terminate()
-        process.wait(timeout=5)
-        pytest.fail("Interpreter daemon did not become ready")
-    try:
-        yield base_url, token, process
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-
-
-def _daemon_request(
-    base_url: str,
-    token: str,
-    path: str,
-    payload: dict[str, object] | None = None,
-) -> dict[str, object]:
-    if path == "/exec":
-        identity = {
-            "execution_id": uuid.uuid4().hex,
-            "ns_id": payload["ns_id"],
-            "instance": _daemon_request(base_url, token, "/health")["instance"],
-        }
-        _daemon_request(base_url, token, "/exec/submit", {**payload, **identity})
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline:
-            result = _daemon_request(base_url, token, "/exec/status", identity)
-            if result["state"] == "completed":
-                return result["result"]
-            if result["state"] == "missing":
-                return {"error": True, "stderr": "Interpreter namespace was closed"}
-            time.sleep(0.005)
-        raise TimeoutError("test execution did not finish")
-    if path == "/exec/submit":
-        path = "/exec"
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request = urllib.request.Request(
-        base_url + path,
-        data=data,
-        headers={
-            "Authorization": "Bearer " + token,
-            **({"Content-Type": "application/json"} if data is not None else {}),
-        },
-    )
-    with urllib.request.urlopen(request, timeout=3) as response:
-        return json.loads(response.read())
-
-
-def _poll_for_call(base_url: str, token: str) -> dict[str, object]:
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        calls = _daemon_request(base_url, token, "/poll")["calls"]
-        if calls:
-            return calls[0]
-    raise AssertionError("Interpreter did not publish a host call")
-
-
-def test_daemon_is_auth_guarded_and_isolates_parallel_namespace_output(
-    interpreter_daemon: tuple[str, str, subprocess.Popen[bytes]],
-) -> None:
-    base_url, token, _ = interpreter_daemon
-    request = urllib.request.Request(base_url + "/health")
-    with pytest.raises(urllib.error.HTTPError) as unauthorized:
-        urllib.request.urlopen(request, timeout=3)
-    assert unauthorized.value.code == 401
-
-    responses: dict[str, dict[str, object]] = {}
-
-    def execute(ns_id: str, marker: str) -> None:
-        responses[marker] = _daemon_request(
-            base_url,
-            token,
-            "/exec",
-            {"ns_id": ns_id, "code": f"import time\ntime.sleep(0.1)\nprint({marker!r})"},
-        )
-
-    threads = [
-        threading.Thread(target=execute, args=("ns_00000001", "alpha")),
-        threading.Thread(target=execute, args=("ns_00000002", "beta")),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=3)
-
-    assert all(not thread.is_alive() for thread in threads)
-    assert responses["alpha"]["stdout"] == "alpha\n"
-    assert responses["beta"]["stdout"] == "beta\n"
-
-
-def test_daemon_preserves_tool_bindings_and_completes_host_bridge_round_trip(
-    interpreter_daemon: tuple[str, str, subprocess.Popen[bytes]],
-) -> None:
-    base_url, token, _ = interpreter_daemon
-    result: dict[str, object] = {}
-    # Accelerate any finite condition deadline so a slow reply regression takes
-    # milliseconds, not two minutes. An unbounded wait still awaits the reply.
-    _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000003",
-            "code": (
-                "import threading\n"
-                "original_wait_for = threading.Condition.wait_for\n"
-                "def accelerated_wait_for(self, predicate, timeout=None):\n"
-                "    return original_wait_for(self, predicate, None if timeout is None else min(timeout, 0.05))\n"
-                "threading.Condition.wait_for = accelerated_wait_for"
-            ),
-        },
-    )
-
-    def execute() -> None:
-        result.update(
-            _daemon_request(
-                base_url,
-                token,
-                "/exec",
-                {
-                    "ns_id": "ns_00000003",
-                    "tools": ["sample_tool"],
-                    "variables": {"sample_tool": "overwritten", "SUBMIT": "overwritten"},
-                    "code": (
-                        "print(callable(sample_tool))\nprint(SUBMIT is not None)\n"
-                        "print(sample_tool.__name__)\nprint(sample_tool('arg'))"
-                    ),
-                },
-            )
-        )
-
-    thread = threading.Thread(target=execute)
-    thread.start()
-    call = _poll_for_call(base_url, token)
-    assert call["tool"] == "sample_tool"
-    assert call["args"] == ["arg"]
-    time.sleep(0.15)
-    _daemon_request(base_url, token, "/reply", {"id": call["id"], "value": "bridged result"})
-    thread.join(timeout=3)
-
-    assert not thread.is_alive()
-    assert result["stdout"] == "True\nTrue\nsample_tool\nbridged result\n"
-
-
-def test_daemon_accepts_registered_dspy_builtin_tools_without_overwriting_them(
-    interpreter_daemon: tuple[str, str, subprocess.Popen[bytes]],
-) -> None:
-    base_url, token, _ = interpreter_daemon
-    result = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000007",
-            "tools": ["sub_rlm", "llm_query", "llm_query_batched"],
-            "code": ("all(callable(tool) for tool in (sub_rlm, llm_query, llm_query_batched))"),
-        },
-    )
-
-    assert result["has_value"] is True
-    assert result["value"] is True
-
-
-def test_daemon_returns_the_value_of_the_last_expression_for_flex_bridge(
-    interpreter_daemon: tuple[str, str, subprocess.Popen[bytes]],
-) -> None:
-    base_url, token, _ = interpreter_daemon
-    result = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000006",
-            "variables": {"value": 42},
-            "code": "import json\nprint('captured')\njson.dumps({'answer': value})",
-        },
-    )
-
-    assert result["stdout"] == "captured\n"
-    assert result["has_value"] is True
-    assert result["value"] == '{"answer": 42}'
-
-
-def test_daemon_drop_namespace_cancels_inflight_host_calls_and_bounds_output(
-    interpreter_daemon: tuple[str, str, subprocess.Popen[bytes]],
-) -> None:
-    base_url, token, _ = interpreter_daemon
-    result: dict[str, object] = {}
-
-    def execute() -> None:
-        result.update(
-            _daemon_request(
-                base_url,
-                token,
-                "/exec",
-                {"ns_id": "ns_00000004", "code": "llm_query('pending')"},
-            )
-        )
-
-    thread = threading.Thread(target=execute)
-    thread.start()
-    call = _poll_for_call(base_url, token)
-    assert call["tool"] == "llm_query"
-    _daemon_request(base_url, token, "/drop_ns", {"ns_id": "ns_00000004"})
-    thread.join(timeout=3)
-
-    assert not thread.is_alive()
-    assert result["error"] is True
-    assert "namespace was closed" in str(result["stderr"])
-
-    output = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {"ns_id": "ns_00000005", "code": "print('x' * 150000)"},
-    )
-    assert output["truncated"] is True
-    assert len(output["stdout"]) == 100_000
-
-
-def test_workspace_dataset_preserves_revisions_and_rejects_symlink_escape(interpreter_daemon) -> None:
-    base_url, token, _ = interpreter_daemon
-    setup = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000006",
-            "code": "workspace.write('files/data.csv', 'id,value\\n1,-7\\n2,11\\n3,5\\n')\n"
-            "view = WorkspaceDatasetView(workspace.stat('files/data.csv'))\n"
-            "[len(list(view.lines())), view.search('-7'), len(view.preview(4))]",
-        },
-    )
-    assert not setup.get("error")
-    assert setup["value"] == [4, [[2, "1,-7\n"]], 4]
-    updated = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000006",
-            "variables": {"replacement": "changed"},
-            "code": "metadata = workspace.stat('files/data.csv')\n"
-            "workspace.write('files/data.csv', replacement)\nWorkspaceDatasetView(metadata)",
-        },
-    )
-    assert updated["error"] is True and "dataset source changed" in updated["stderr"]
-    rejected = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000006",
-            "code": "import os\nos.symlink('/etc/hostname', workspace.resolve('files/link'))\n"
-            "workspace.read_text('files/link')",
-        },
-    )
-    assert rejected["error"] is True and "symbolic links" in rejected["stderr"]
-
-
-def test_namespace_imports_do_not_switch_to_another_agents_facade(interpreter_daemon) -> None:
-    base_url, token, _ = interpreter_daemon
-    for namespace, marker in [("ns_00000007", "left"), ("ns_00000008", "right")]:
-        response = _daemon_request(
-            base_url,
-            token,
-            "/exec",
-            {
-                "ns_id": namespace,
-                "code": "import sys, types\ndspy = types.ModuleType('dspy')\n"
-                f"dspy.marker = {marker!r}\nsys.modules['dspy'] = dspy",
-            },
-        )
-        assert not response.get("error")
-    response = _daemon_request(
-        base_url,
-        token,
-        "/exec",
-        {
-            "ns_id": "ns_00000007",
-            "code": "import dspy\ndspy.marker",
-        },
-    )
-    assert response["value"] == "left"
-
-
 def test_cancelled_manager_cannot_restart_remote_execution() -> None:
     stopped = threading.Event()
     sandbox = SimpleNamespace(id="sandbox-cancel", state="started")
@@ -1237,7 +742,6 @@ def test_cancelled_manager_cannot_restart_remote_execution() -> None:
         manager.ensure_sandbox()
     manager.reset_turn_budget()
     manager.end_turn()
-    manager._daemon_ready = True
     assert manager.ensure_sandbox() is sandbox
 
 
@@ -1276,41 +780,6 @@ def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> N
         secret not in serialized for secret in ("input-secret", "result-secret", "private-result", "private-prompt")
     )
     assert "[redacted]" in serialized
-
-
-def test_bridge_and_execution_events_show_evidence_and_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    from dspy.primitives.facade import SHIM_SETUP
-
-    events: list[dict[str, Any]] = []
-    manager = DaytonaSandboxManager("key", "org", "volume", "activity-test", event_callback=events.append)
-    interpreter = DaytonaInterpreter(manager, tools={"lookup": lambda: {"value": 17, "password": "hidden"}})
-    monkeypatch.setattr(interpreter, "start", lambda: None)
-
-    def rpc(_manager: Any, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if path == "/exec" and payload["code"] == "timeout()":
-            raise TimeoutError("secret-detail")
-        return {"has_value": True, "value": 17, "stdout": "api_key=hidden\n"}
-
-    monkeypatch.setattr(DaytonaSandboxManager, "rpc", rpc)
-    interpreter._handle_host_call({"id": "bridge-17", "tool": "lookup", "args": [], "kwargs": {}})
-    interpreter._handle_host_call({"id": "bridge-18", "tool": "missing", "args": [], "kwargs": {}})
-    assert interpreter.execute(SHIM_SETUP) == 17
-    assert interpreter.execute("17") == 17
-    with pytest.raises(TimeoutError):
-        interpreter.execute("timeout()")
-    assert "hidden" not in json.dumps(events)
-    assert "secret-detail" not in json.dumps(events)
-    tool_ends = [e for e in events if e["event"] == "tool_end"]
-    assert [(e["call_id"], e["ok"]) for e in tool_ends] == [("bridge-17", True), ("bridge-18", False)]
-    assert '"value": 17' in tool_ends[0]["output"]
-    outputs = [e for e in events if e["event"] == "repl_output"]
-    assert [e["phase"] for e in outputs] == ["bootstrap", "task", "task"]
-    assert outputs[-1]["error_type"] == "TimeoutError"
-    assert outputs[-1]["error"] is True
-    for output in outputs:
-        assert any(e["event"] == "repl_code" and e["execution_id"] == output["execution_id"] for e in events)
-        assert output["duration_ms"] >= 0
-        assert output["agent_id"] == manager.agent_id
 
 
 def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_turn(monkeypatch) -> None:
@@ -1614,7 +1083,6 @@ def _engine_with_fake_children(monkeypatch, child_call):
 
 def test_spawn_agents_runs_children_concurrently_and_keeps_order(monkeypatch) -> None:
     import threading
-    import time
 
     barrier = threading.Barrier(3, timeout=10)  # all three must be in flight at once, or this raises
 
@@ -1693,198 +1161,3 @@ def test_shutdown_skips_the_trace_flush_when_tracing_is_not_configured(monkeypat
     with TestClient(app):
         pass
     assert flushed == []
-
-
-def test_execution_submission_deduplicates_and_rejects_conflicts(interpreter_daemon):
-    base, token, _ = interpreter_daemon
-    identity = {
-        "execution_id": uuid.uuid4().hex,
-        "ns_id": "ns_00000001",
-        "instance": _daemon_request(base, token, "/health")["instance"],
-    }
-    payload = {**identity, "code": "import time\ntime.sleep(.05)\ncounter = globals().get('counter', 0) + 1\ncounter"}
-    for _ in range(2):
-        _daemon_request(base, token, "/exec/submit", payload)
-    with pytest.raises(urllib.error.HTTPError) as conflict:
-        _daemon_request(base, token, "/exec/submit", {**payload, "code": "counter += 1"})
-    assert conflict.value.code == 409
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        result = _daemon_request(base, token, "/exec/status", identity)
-        if result["state"] == "completed":
-            break
-        time.sleep(0.01)
-    assert result["result"]["value"] == 1
-    _daemon_request(base, token, "/drop_ns", {"ns_id": identity["ns_id"]})
-    assert _daemon_request(base, token, "/exec/status", identity)["state"] == "missing"
-
-
-def test_lost_submission_response_recovers_one_side_effect(interpreter_daemon, monkeypatch):
-    base, token, _ = interpreter_daemon
-    manager = DaytonaSandboxManager("key", "org", "volume", "reconcile")
-    manager._daemon_instance = _daemon_request(base, token, "/health")["instance"]
-    calls = []
-
-    def control(_self, path, payload):
-        calls.append(path)
-        result = _daemon_request(base, token, "/exec/submit" if path == "/exec" else path, payload)
-        if path == "/exec":
-            raise OSError("submission accepted but response lost")
-        return result
-
-    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
-    result = manager.execute_remote(
-        {
-            "execution_id": uuid.uuid4().hex,
-            "ns_id": "ns_00000001",
-            "code": "counter = globals().get('counter', 0) + 1\ncounter",
-        }
-    )
-    assert result["value"] == 1
-    assert result["transport_retries"] == 1
-    assert calls.count("/exec") == 1
-    assert not manager._cancelled.is_set()
-
-
-@pytest.mark.parametrize("failure", ["missing", "changed", "unavailable", "invalid"])
-def test_uncertain_execution_stops_turn_without_replay(monkeypatch, failure):
-    from fleet_rlm.interpreter import ExecutionOutcomeUnknownError
-
-    manager = DaytonaSandboxManager("key", "org", "volume", "uncertain")
-    manager._daemon_instance = "original"
-    calls = []
-
-    def control(_self, path, _payload):
-        calls.append(path)
-        if path == "/exec":
-            return {"state": "running", "instance": "original"}
-        if failure == "unavailable":
-            raise OSError("gateway unavailable")
-        return {
-            "state": "missing" if failure == "missing" else "running" if failure == "changed" else "invalid",
-            "instance": "changed" if failure == "changed" else "original",
-        }
-
-    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
-    monkeypatch.setattr("fleet_rlm.interpreter._EXEC_POLL_INITIAL", 0.001)
-    with pytest.raises(ExecutionOutcomeUnknownError):
-        manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})
-    assert manager._cancelled.is_set()
-    assert calls.count("/exec") == 1
-
-
-def test_unaccepted_submission_can_retry_same_identity_once(monkeypatch):
-    manager = DaytonaSandboxManager("key", "org", "volume", "resubmit")
-    manager._daemon_instance = "original"
-    submitted = []
-    status_calls = 0
-
-    def control(_self, path, payload):
-        nonlocal status_calls
-        if path == "/exec":
-            submitted.append(payload.copy())
-            if len(submitted) == 1:
-                raise OSError("not accepted")
-            return {"state": "running", "instance": "original"}
-        status_calls += 1
-        return {
-            "instance": "original",
-            "state": "missing" if status_calls == 1 else "completed",
-            "result": {"value": 42},
-        }
-
-    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
-    monkeypatch.setattr("fleet_rlm.interpreter._EXEC_POLL_INITIAL", 0.001)
-    assert (
-        manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})["value"] == 42
-    )
-    assert len(submitted) == 2 and submitted[0] == submitted[1]
-
-
-def test_actual_execution_span_marks_remote_code_error(tmp_path):
-    # Run with a fresh MLflow exporter: earlier tests intentionally configure global callbacks.
-    import os
-
-    code = """
-import mlflow
-from types import SimpleNamespace
-from fleet_rlm.interpreter import DaytonaInterpreter
-from dspy.primitives.code_interpreter import CodeExecutionError
-mlflow.set_experiment('execution-test')
-interpreter = DaytonaInterpreter(SimpleNamespace(rpc=lambda *a: {
-    'error': True, 'error_type': 'ValueError', 'stderr': 'ValueError: verification_probe'}))
-interpreter.start = lambda: None
-with mlflow.start_span(name='execution-test') as root:
-    try:
-        interpreter.execute("raise ValueError('verification_probe')")
-    except CodeExecutionError:
-        pass
-    else:
-        raise AssertionError('remote exception was not raised')
-    trace_id = root.trace_id
-mlflow.flush_trace_async_logging()
-trace = mlflow.get_trace(trace_id)
-execution = next(s for s in trace.data.spans if s.name == 'sandbox.exec')
-assert execution.status.status_code.name == 'ERROR'
-assert execution.outputs['error'] is True
-assert execution.attributes['remote_error_type'] == 'ValueError'
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={
-            **os.environ,
-            "MLFLOW_TRACKING_URI": f"sqlite:///{tmp_path / 'traces.db'}",
-            "MLFLOW_DISABLE_AGENT_HINT": "1",
-        },
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def test_transient_status_failure_recovers_without_submission_retry(monkeypatch):
-    manager = DaytonaSandboxManager("key", "org", "volume", "status-recovery")
-    manager._daemon_instance = "original"
-    paths = []
-
-    def control(_self, path, _payload):
-        paths.append(path)
-        if path == "/exec":
-            return {"instance": "original", "state": "running"}
-        if paths.count("/exec/status") == 1:
-            raise OSError("temporary gateway failure")
-        return {"instance": "original", "state": "completed", "result": {"value": 42}}
-
-    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", control)
-    monkeypatch.setattr("fleet_rlm.interpreter._EXEC_POLL_INITIAL", 0.001)
-    result = manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})
-    assert result["value"] == 42 and result["transport_retries"] == 1
-    assert paths.count("/exec") == 1
-
-
-def test_daemon_rejects_wrong_instance_and_bounds_registry(interpreter_daemon):
-    base, token, _ = interpreter_daemon
-    instance = _daemon_request(base, token, "/health")["instance"]
-    payload = {"instance": "wrong", "execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"}
-    with pytest.raises(urllib.error.HTTPError) as mismatch:
-        _daemon_request(base, token, "/exec/submit", payload)
-    assert mismatch.value.code == 409
-    # Shrink only the test daemon's private limit rather than creating 64 workers.
-    _daemon_request(
-        base, token, "/exec", {"ns_id": "ns_00000001", "code": "import __main__\n__main__.MAX_EXECUTIONS = 1"}
-    )
-    with pytest.raises(urllib.error.HTTPError) as full:
-        _daemon_request(base, token, "/exec/submit", {**payload, "instance": instance})
-    assert full.value.code == 429
-
-
-def test_execution_deadline_prevents_submission(monkeypatch):
-    manager = DaytonaSandboxManager("key", "org", "volume", "expired")
-    manager._deadline = time.monotonic() - 1
-    calls = []
-    monkeypatch.setattr(DaytonaSandboxManager, "_rpc", lambda _self, *args: calls.append(args))
-    with pytest.raises(TimeoutError, match="deadline"):
-        manager.execute_remote({"execution_id": uuid.uuid4().hex, "ns_id": "ns_00000001", "code": "42"})
-    assert calls == []
-    assert manager._cancelled.is_set()

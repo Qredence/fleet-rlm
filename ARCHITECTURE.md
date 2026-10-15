@@ -119,21 +119,26 @@ or retired API surfaces.
 
 ## Execution transport and recovery
 
-The DSPy interpreter remains synchronous and stateful, but its private daemon
-protocol submits Python with an execution ID and polls for completion. Each
-control request has a finite transport timeout; computation and bridged calls
-share the existing Turn deadline. A bounded in-memory registry deduplicates
-identical submissions until namespace cleanup. Protocol version and daemon
-instance identity prevent resubmission into a replacement daemon. This registry
-is not durable recovery across process loss.
+The DSPy interpreter remains synchronous and stateful. Each Fleet namespace is
+one Daytona `code_interpreter` context (its own worker process), prepared once
+with the Skill and workspace helpers and `sandbox/runtime/repl.py`. An execution
+is one `run_code` call, bounded by the remaining Turn deadline. There is no
+in-sandbox server, token, or execution registry.
 
-After an ambiguous submission, the host checks the same ID before one permitted
-identical resubmission. An acknowledged execution that disappears, a changed
-daemon, or repeated status failures aborts the Turn and requests remote stop;
-code is never blindly replayed. Host and daemon changes require a runtime restart.
+The sandbox reports results and host-tool calls as marker lines on stdout.
+Daytona sends every stdout write as its own websocket message and drops the
+connection on bursts (about 2,000 writes per second), so user output is captured
+per execution, bounded, and returned in one `FLEET_RESULT` line. Each host call
+is one locked `FLEET_CALL` line; the host runs it on its own thread, so the
+websocket keeps reading, and replies with `fs.upload_file`, which the sandbox
+polls for.
 
-Each `sandbox.exec` span covers submission through result interpretation, with
-bounded redacted code/output, identity, retry count, and outcome. Remote Python
+A failed transport makes the outcome unknown: the Turn aborts, the root sandbox
+is stopped, and code is never replayed. A deadline interrupts the running cell
+and leaves the context usable; deleting a context ends anything it was running.
+
+Each `sandbox.exec` span covers one `run_code` call through result interpretation,
+with bounded redacted code/output, identity, host-call count, and outcome. Remote Python
 errors mark that span as failed even when DSPy corrects the error and completes
 the Turn. Overlapping outer Flex orchestration spans must not be added to child
 execution durations. Root spans record the resolved mode and Turn deadline.

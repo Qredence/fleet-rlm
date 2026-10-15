@@ -22,6 +22,12 @@ All notable changes to this project are documented in this file.
   Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
   labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
   be re-optimized.
+- Sandbox Python runs on Daytona's native `code_interpreter`: one context per namespace, one
+  `run_code` per execution, host-tool calls and results as stdout marker lines, replies through
+  `fs.upload_file`. The in-sandbox HTTP daemon, its bearer token, execution registry,
+  `/exec/status` polling and the host poll thread are removed (`interpreter.py` 1,547 → 1,005
+  lines). Output is captured per execution because Daytona drops the websocket on bursts of
+  small writes. `fleet_turn` spans record `sandbox_transport` instead of `daemon_protocol`.
 - PostgreSQL access goes through one `fleet_rlm.store.Store` over a `psycopg_pool` connection pool
   (new dependency `psycopg-pool`), opened in the background at startup. Every SQL statement,
   including the raw SQL that was in the `/sessions` and `/history` routes, lives in the Store.
@@ -43,9 +49,6 @@ All notable changes to this project are documented in this file.
   runs untraced when the local server is unreachable. The config view reports `mlflow_target`.
 - The default MLflow judge is `openai:/system.ai.deepseek-v4-1-flash` through the AI Gateway.
 - Invalid configuration exits with a one-line `fleet: error: invalid configuration: …`.
-- Lite Daytona execution now submits identified work and polls through bounded control
-  requests. Lost responses are reconciled without blindly replaying Python; changed
-  daemons and uncertain outcomes abort the Turn and request remote stop.
 - Execution traces include bounded code/results, runtime identity, retry counts, and
   remote Python errors, including errors DSPy corrects before successfully submitting.
 - Stopping guidance asks DSPy to submit on the next action once supporting checks agree;

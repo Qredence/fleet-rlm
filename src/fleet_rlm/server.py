@@ -32,7 +32,7 @@ from starlette.background import BackgroundTask
 
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.engine.routes import Route
-from fleet_rlm.interpreter import _ACTIVE_MANAGER, _DAEMON_PROTOCOL, DaytonaSandboxManager, validate_session_id
+from fleet_rlm.interpreter import _ACTIVE_MANAGER, SANDBOX_TRANSPORT, DaytonaSandboxManager, validate_session_id
 from fleet_rlm.launcher import mlflow_is_healthy
 from fleet_rlm.memory_and_eval import (
     AdaptiveFleetEngine,
@@ -963,7 +963,7 @@ def create_app(
                                 {
                                     "execution_mode": getattr(runtime, "execution_mode", "hybrid"),
                                     "turn_timeout_seconds": getattr(runtime.sandbox_mgr, "turn_timeout_seconds", None),
-                                    "daemon_protocol": _DAEMON_PROTOCOL,
+                                    "sandbox_transport": SANDBOX_TRANSPORT,
                                     "configuration_digest": _runtime_configuration(resolved, runtime)["digest"],
                                     "model_settings": {
                                         name: value
