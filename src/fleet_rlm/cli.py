@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import ipaddress
 import json
 import subprocess
@@ -14,13 +15,55 @@ from urllib.parse import quote
 
 import httpx
 import uvicorn
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import NestedCompleter, WordCompleter, merge_completers
+from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
 
 from fleet_rlm.config import get_settings
+from fleet_rlm.interpreter import validate_session_id
 
 _CONSOLE = Console()
+_COMMAND_ARGUMENTS = NestedCompleter.from_nested_dict(
+    {
+        **dict.fromkeys(
+            [
+                "/help",
+                "/attach",
+                "/files",
+                "/artifacts",
+                "/tree",
+                "/cat",
+                "/stat",
+                "/put",
+                "/get",
+                "/rm",
+                "/memory",
+                "/history",
+                "/trace",
+                "/reload",
+                "/sessions",
+                "/optimize",
+                "/exit",
+                "/quit",
+                "/models",
+            ]
+        ),
+        "/skills": {"push": None, "pull": None},
+        "/context": {"clear": None},
+        "/mode": dict.fromkeys(["rlm", "flex", "hybrid"]),
+        "/model": {"root": None, "sub": None},
+        "/config": {"mode": dict.fromkeys(["rlm", "flex", "hybrid"])},
+        "/settings": {"mode": dict.fromkeys(["rlm", "flex", "hybrid"])},
+    }
+)
+_COMMAND_COMPLETER = merge_completers(
+    [WordCompleter(list(_COMMAND_ARGUMENTS.options), sentence=True), _COMMAND_ARGUMENTS], deduplicate=True
+)
 
 
 def _is_loopback(host: str) -> bool:
@@ -33,12 +76,7 @@ def _is_loopback(host: str) -> bool:
 
 
 def _print_http_error(error: httpx.HTTPStatusError) -> None:
-    response = error.response
-    try:
-        detail = response.json().get("detail", response.text)
-    except ValueError:
-        detail = response.text
-    _CONSOLE.print(f"[bold red]HTTP {response.status_code}:[/bold red] {str(detail)[:1000]}")
+    _CONSOLE.print(f"[bold red]HTTP {error.response.status_code}:[/bold red] Request was not completed.")
 
 
 def _handle_command(client: httpx.Client, command: str, session_id: str) -> bool:
@@ -52,13 +90,72 @@ def _handle_command(client: httpx.Client, command: str, session_id: str) -> bool
             "- `/artifacts` — list generated artifacts\n"
             "- `/skills` — show this Session's Agent Skills catalog\n"
             "- `/skills pull` — export this Session's Skills into `.fleet/skills/`\n"
+            "- `/skills push` — sync local Skills into this Session\n"
+            "- `/tree` — show workspace files\n"
+            "- `/cat <path>` — read a workspace file\n"
+            "- `/stat <path>` — show size and SHA-256 for a workspace file\n"
+            "- `/put <local-path> [workspace-path]` — upload a workspace file\n"
+            "- `/get <workspace-path> [local-path]` — download a workspace file\n"
+            "- `/rm <path>` — delete a workspace file\n"
+            "- `/context <workspace-path>` — select an input file; `/context clear` clears it\n"
+            "- `/mode [rlm|flex|hybrid]` — inspect or change execution mode\n"
+            "- `/config` or `/settings` — inspect non-secret Session settings and limits\n"
+            "- `/config mode <mode>` — change Session execution mode\n"
+            "- `/models [catalog.schema]` — discover accessible Gateway chat services\n"
+            "- `/model [root|sub] [model-id|catalog.schema]` — choose interactively or set a model\n"
+            "- `/memory [query]` — show saved memories, optionally filtered by query\n"
+            "- `/history` — show saved turns\n"
+            "- `/trace` — show the most recent persisted turn trace ID, if available\n"
+            "- `/reload` — approve reloading the saved Flex program at a turn boundary\n"
             "- `/sessions` — list saved Sessions\n"
-            "- `/optimize` — collect traces, evaluate, and compile with GEPA\n"
+            "- `/optimize` — evaluate reviewed, gold-labeled Session examples and compile with GEPA\n"
             "- `/exit` — quit the CLI"
         )
         return True
     try:
-        if command.startswith("/attach "):
+        if command in {"/config", "/settings"}:
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/config")
+            response.raise_for_status()
+            _CONSOLE.print(Panel(json.dumps(response.json(), indent=2), title="Session configuration"))
+        elif command.startswith(("/config mode ", "/settings mode ")):
+            return _handle_command(client, "/mode " + command.split(maxsplit=2)[2], session_id)
+        elif command == "/models" or command.startswith("/models "):
+            scope = command.partition(" ")[2].strip() or "system.ai"
+            response = client.get("/models", params={"scope": scope})
+            response.raise_for_status()
+            models = response.json()["models"]
+            _CONSOLE.print(Panel("\n".join(models) or "(no accessible chat services)", title=f"Models · {scope}"))
+        elif command == "/model" or command.startswith("/model "):
+            args = command.split()
+            role = args[1] if len(args) > 1 else "root"
+            if role not in {"root", "sub"} or len(args) > 3:
+                _CONSOLE.print("[red]Usage: /model [root|sub] [model-id|catalog.schema][/red]")
+                return True
+            selected = args[2] if len(args) > 2 else ""
+            if not selected.startswith("openai/"):
+                scope = selected or "system.ai"
+                response = client.get("/models", params={"scope": scope})
+                response.raise_for_status()
+                models = response.json()["models"]
+                if not models:
+                    _CONSOLE.print("[yellow]No accessible chat services. Model unchanged.[/yellow]")
+                    return True
+                for index, name in enumerate(models, 1):
+                    _CONSOLE.print(f"{index}. {name}")
+                choice = _CONSOLE.input(f"Select {role} model [1-{len(models)}; Enter cancels]: ").strip()
+                if not choice:
+                    _CONSOLE.print("[dim]Model selection cancelled; unchanged.[/dim]")
+                    return True
+                if not choice.isdigit() or not 1 <= int(choice) <= len(models):
+                    _CONSOLE.print("[red]Invalid model selection; unchanged.[/red]")
+                    return True
+                selected = models[int(choice) - 1]
+            response = client.put(
+                f"/sessions/{quote(session_id, safe='')}/model", json={"role": role, "model": selected}
+            )
+            response.raise_for_status()
+            _CONSOLE.print(f"[green]{role.title()} model:[/green] {response.json()['model']}")
+        elif command.startswith("/attach "):
             path = Path(command.split(" ", 1)[1].strip()).expanduser()
             if not path.is_file():
                 _CONSOLE.print(f"[red]File not found:[/red] {path}")
@@ -84,6 +181,113 @@ def _handle_command(client: httpx.Client, command: str, session_id: str) -> bool
             response = client.post("/skills/pull", params={"session_id": session_id})
             response.raise_for_status()
             _CONSOLE.print(f"[green]Exported:[/green] {response.json()['exported']}")
+        elif command == "/skills push":
+            response = client.post("/skills/push", params={"session_id": session_id})
+            response.raise_for_status()
+            _CONSOLE.print(f"[green]Pushed:[/green] {response.json()['pushed']} Skills")
+        elif command == "/tree":
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/workspace/tree")
+            response.raise_for_status()
+            _CONSOLE.print(Panel("\n".join(response.json().get("files", [])) or "(empty)", title="Workspace tree"))
+        elif command.startswith("/cat "):
+            path = command.split(" ", 1)[1].strip()
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/workspace/files/{quote(path, safe='/')}")
+            response.raise_for_status()
+            _CONSOLE.print(Panel(response.content.decode("utf-8", errors="replace"), title=path))
+        elif command.startswith("/stat "):
+            path = command.split(" ", 1)[1].strip()
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/workspace/stat/{quote(path, safe='/')}")
+            response.raise_for_status()
+            item = response.json()
+            _CONSOLE.print(f"{item['path']}: {item['size_bytes']} bytes, sha256={item['sha256']}")
+        elif command.startswith("/put "):
+            args = command.split()
+            source = Path(args[1]).expanduser()
+            destination = args[2] if len(args) > 2 else f"files/{source.name}"
+            with source.open("rb") as handle:
+                content = handle.read()
+            response = client.put(
+                f"/sessions/{quote(session_id, safe='')}/workspace/files/{quote(destination, safe='/')}",
+                json={"content_base64": base64.b64encode(content).decode("ascii")},
+            )
+            response.raise_for_status()
+            _CONSOLE.print(f"[green]Written:[/green] {destination}")
+        elif command.startswith("/get "):
+            args = command.split()
+            source = args[1]
+            download_path = Path(args[2]).expanduser() if len(args) > 2 else Path(Path(source).name)
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/workspace/files/{quote(source, safe='/')}")
+            response.raise_for_status()
+            download_path.write_bytes(response.content)
+            _CONSOLE.print(f"[green]Downloaded:[/green] {download_path}")
+        elif command.startswith("/rm "):
+            path = command.split(" ", 1)[1].strip()
+            response = client.delete(f"/sessions/{quote(session_id, safe='')}/workspace/files/{quote(path, safe='/')}")
+            response.raise_for_status()
+            _CONSOLE.print(f"[green]Deleted:[/green] {path}")
+        elif command == "/mode" or command.startswith("/mode "):
+            path = f"/sessions/{quote(session_id, safe='')}/mode"
+            mode = command.partition(" ")[2].strip()
+            response = client.put(path, json={"mode": mode}) if mode else client.get(path)
+            response.raise_for_status()
+            _CONSOLE.print(f"[cyan]Execution mode:[/cyan] {response.json()['mode']}")
+        elif command == "/history":
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/history")
+            response.raise_for_status()
+            turns = response.json().get("turns", [])
+            _CONSOLE.print(
+                Panel(
+                    "\n\n".join(str(item.get("task", "")) + "\n" + str(item.get("answer", "")) for item in turns)
+                    or "(empty)",
+                    title="Session history",
+                )
+            )
+        elif command == "/memory" or command.startswith("/memory "):
+            query = command.partition(" ")[2].strip()
+            response = client.get(
+                f"/sessions/{quote(session_id, safe='')}/memory",
+                params={"q": query} if query else None,
+            )
+            response.raise_for_status()
+            memories = response.json().get("memories", [])
+            if memories:
+                entries = []
+                for item in memories:
+                    status = "reviewed" if item.get("reviewed") else "unreviewed"
+                    if item.get("stale"):
+                        status += ", stale sources"
+                    entries.append(
+                        f"[{item.get('kind', 'memory')}] {item.get('content', '')}\n"
+                        f"ID: {item.get('memory_id', 'unknown')} · {status}"
+                    )
+                _CONSOLE.print(Panel("\n\n".join(entries), title="Saved memories"))
+            else:
+                _CONSOLE.print(Panel("(no saved memories)", title="Saved memories"))
+        elif command == "/trace":
+            response = client.get(f"/sessions/{quote(session_id, safe='')}/history")
+            response.raise_for_status()
+            turns = response.json().get("turns", [])
+            traced = [item for item in turns if item.get("trace_id") or item.get("mlflow_trace_id")]
+            if traced:
+                item = traced[-1]
+                trace_id = item.get("trace_id") or item.get("mlflow_trace_id")
+                _CONSOLE.print(f"[dim]Persisted MLflow trace ID:[/dim] {trace_id}")
+            else:
+                _CONSOLE.print("[yellow]Trace unavailable:[/yellow] saved turn history contains no trace ID.")
+        elif command == "/context clear":
+            response = client.delete(f"/sessions/{quote(session_id, safe='')}/context")
+            response.raise_for_status()
+            _CONSOLE.print("[green]Context selection cleared.[/green]")
+        elif command.startswith("/context "):
+            path = command.split(" ", 1)[1].strip()
+            response = client.put(f"/sessions/{quote(session_id, safe='')}/context", json={"path": path})
+            response.raise_for_status()
+            _CONSOLE.print(f"[green]Context selected:[/green] {path}")
+        elif command == "/reload":
+            if _CONSOLE.input("Reload the saved Flex program? [y/N] ").strip().lower() == "y":
+                response = client.post(f"/sessions/{quote(session_id, safe='')}/reload", params={"approved": "true"})
+                response.raise_for_status()
+                _CONSOLE.print("[green]Saved program reloaded.[/green]")
         elif command == "/sessions":
             response = client.get("/sessions")
             response.raise_for_status()
@@ -103,18 +307,31 @@ def _handle_command(client: httpx.Client, command: str, session_id: str) -> bool
                     check=False,
                 )
         else:
+            _CONSOLE.print("[yellow]Unknown command. Use /help; submit a task without a leading slash.[/yellow]")
             return True
     except httpx.HTTPStatusError as exc:
         _print_http_error(exc)
     except httpx.HTTPError as exc:
         _CONSOLE.print(f"[red]Fleet API is unavailable:[/red] {type(exc).__name__}")
     except (OSError, ValueError, KeyError) as exc:
-        _CONSOLE.print(f"[red]Command failed:[/red] {str(exc)[:500]}")
+        _CONSOLE.print(f"[red]Command failed:[/red] {type(exc).__name__}")
+    except (KeyboardInterrupt, EOFError):
+        _CONSOLE.print("[dim]Command cancelled; no further changes requested.[/dim]")
     return True
 
 
 def run_interactive_cli(base_url: str, session_id: str) -> None:
     """Connect to the API and stream one Session's Turns until exit."""
+    validate_session_id(session_id)
+    prompt = None
+    if sys.stdin.isatty() and _CONSOLE.is_terminal:
+        history_path = Path(".fleet/history") / f"{session_id}.txt"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt = PromptSession(
+            history=FileHistory(str(history_path)),
+            auto_suggest=AutoSuggestFromHistory(),
+            completer=_COMMAND_COMPLETER,
+        )
     _CONSOLE.print(
         Panel.fit(
             f"[bold cyan]Fleet-RLM Lite[/bold cyan] | Session: [yellow]{session_id}[/yellow]\n"
@@ -124,8 +341,13 @@ def run_interactive_cli(base_url: str, session_id: str) -> None:
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
         while True:
             try:
-                user_input = _CONSOLE.input("\n[bold green]fleet>[/bold green] ").strip()
-            except (EOFError, KeyboardInterrupt):
+                user_input = (
+                    prompt.prompt("fleet> ") if prompt else _CONSOLE.input("\n[bold green]fleet>[/bold green] ")
+                ).strip()
+            except KeyboardInterrupt:
+                _CONSOLE.print("[dim]Input cleared. Use /exit to quit.[/dim]")
+                continue
+            except EOFError:
                 _CONSOLE.print()
                 break
             if not user_input:
@@ -135,51 +357,156 @@ def run_interactive_cli(base_url: str, session_id: str) -> None:
                     break
                 continue
             try:
+                terminal_event = False
                 with client.stream(
                     "POST",
                     f"/sessions/{quote(session_id, safe='')}/turn",
-                    json={"task": user_input},
+                    json={"task": user_input, "idempotency_key": uuid.uuid4().hex},
                 ) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
-                        if not line.startswith("data: "):
+                        if not line.startswith("data:"):
                             continue
                         try:
-                            event = json.loads(line[6:])
+                            event = json.loads(line[5:].lstrip())
                         except json.JSONDecodeError:
                             _CONSOLE.print("[yellow]Ignoring malformed SSE event.[/yellow]")
                             continue
+                        if not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict):
+                            _CONSOLE.print("[yellow]Ignoring malformed SSE event.[/yellow]")
+                            continue
+                        terminal_event |= event.get("event") in {"turn_complete", "turn_cancelled", "error"}
                         _render_event(event)
+                if not terminal_event:
+                    _CONSOLE.print(
+                        "[yellow]Stream ended without a final outcome. Check /history before retrying.[/yellow]"
+                    )
             except httpx.HTTPStatusError as exc:
                 _print_http_error(exc)
             except httpx.HTTPError as exc:
                 _CONSOLE.print(f"[red]Turn stream failed:[/red] {type(exc).__name__}")
+            except KeyboardInterrupt:
+                _CONSOLE.print(
+                    "[yellow]Turn stream closed; server cancels on disconnect. Check /history for outcome.[/yellow]"
+                )
 
 
 def _render_event(event: dict[str, Any]) -> None:
+    event = {**event.get("payload", {}), **event}
     event_type = event.get("event")
-    if event_type == "module_start":
-        _CONSOLE.print(f"  [dim]→ Module:[/dim] [cyan]{event.get('module', 'unknown')}[/cyan]")
+    identity = " · ".join(
+        f"{label}={event[key]}"
+        for key, label in (("agent_id", "agent"), ("call_id", "call"), ("execution_id", "exec"))
+        if event.get(key)
+    )
+    if event_type == "turn_status":
+        _CONSOLE.print(f"[dim]Turn: {event.get('phase', 'running')}[/dim]")
+    elif event_type == "module_start":
+        _CONSOLE.print(Text(f"  → Module: {event.get('module', 'unknown')} · {identity}", style="cyan"))
+    elif event_type == "lm_start":
+        _CONSOLE.print(Text(f"  Model running: {event.get('model', 'unknown')} · {identity}", style="yellow"))
     elif event_type == "tool_start":
-        _CONSOLE.print(f"  [dim]⚙ Tool:[/dim] {str(event.get('tool', 'unknown'))[:100]}")
-    elif event_type == "tool_end" and not event.get("ok", True):
-        _CONSOLE.print(f"  [red]Tool error:[/red] {event.get('error_type', 'unknown')}")
+        _CONSOLE.print(Text(f"  ⚙ Tool: {event.get('tool', 'unknown')} · {event.get('source', 'dspy')} · {identity}"))
+        if event.get("inputs"):
+            _CONSOLE.print(
+                Panel(Text(str(event["inputs"])), title="Tool arguments", subtitle=Text(identity), border_style="cyan")
+            )
+    elif event_type in {"module_end", "lm_end", "tool_end"}:
+        status = "completed" if event.get("ok", True) else f"failed ({event.get('error_type', 'unknown')})"
+        name = event.get("tool") or event.get("module") or event.get("model") or "unknown"
+        _CONSOLE.print(
+            Text(
+                f"  {name}: {status} · {event.get('duration_ms', '?')} ms · {identity}",
+                style="dim" if event.get("ok", True) else "red",
+            )
+        )
+        if event.get("output") not in (None, "null"):
+            _CONSOLE.print(
+                Panel(Text(str(event["output"])), title="Tool result", subtitle=Text(identity), border_style="blue")
+            )
     elif event_type == "turn_complete":
         _CONSOLE.print(
             Panel(
-                Markdown(str(event.get("answer", ""))),
+                Text(str(event.get("answer", ""))),
                 title=f"Answer (route={event.get('route', 'unknown')})",
                 border_style="green",
             )
         )
         if event.get("learned_skill_note"):
-            _CONSOLE.print(f"[magenta]Learned note:[/magenta] {event['learned_skill_note']}")
+            _CONSOLE.print(
+                Panel(
+                    Text(str(event["learned_skill_note"])),
+                    title="Learned note · not part of answer",
+                    border_style="magenta",
+                )
+            )
         if event.get("artifacts"):
             _CONSOLE.print(f"[yellow]Artifacts:[/yellow] {event['artifacts']}")
         if event.get("trace_id"):
             _CONSOLE.print(f"[dim]MLflow trace ID:[/dim] {event['trace_id']}")
+        _CONSOLE.print("[green]Turn persisted to Session history.[/green]")
+    elif event_type == "turn_cancelled":
+        _CONSOLE.print(f"[yellow]Turn cancelled:[/yellow] {event.get('error', 'Cancellation confirmed by server.')}")
     elif event_type == "error":
         _CONSOLE.print(f"[bold red]Turn failed:[/bold red] {event.get('error', 'Unknown error')}")
+    elif event_type == "repl_code":
+        _CONSOLE.print(
+            Panel(
+                Syntax(str(event.get("code", ""))[:20000], "python", word_wrap=True),
+                title=f"Python · Daytona · {event.get('phase', 'task')}",
+                subtitle=Text(identity),
+            )
+        )
+    elif event_type == "repl_output":
+        text = str(event.get("stdout", "")) + str(event.get("stderr", ""))
+        if event.get("value") not in (None, "null"):
+            text += f"\nReturn value: {event['value']}"
+        status = f"failed ({event.get('error_type') or 'Python error'})" if event.get("error") else "completed"
+        _CONSOLE.print(
+            Panel(
+                Text(text[-20000:] or "(no output)"),
+                title=f"Execution {status} · {event.get('duration_ms', '?')} ms",
+                subtitle=Text(identity),
+                border_style="red" if event.get("error") else "blue",
+            )
+        )
+    elif event_type == "triage_decision":
+        _CONSOLE.print(f"[cyan]Mode: {event.get('mode')} · Route: {event.get('route')}[/cyan]")
+        if event.get("summary"):
+            _CONSOLE.print(
+                Panel(
+                    Text(str(event["summary"])), title="Decision summary · not private reasoning", border_style="cyan"
+                )
+            )
+    elif event_type == "budget_update":
+        calls = event.get("lm_calls")
+        maximum = event.get("max_llm_calls")
+        if isinstance(calls, int) and isinstance(maximum, int) and calls >= maximum:
+            _CONSOLE.print(f"[yellow]Model-call budget full; no calls remain:[/yellow] {calls}/{maximum}")
+        else:
+            _CONSOLE.print(f"[dim]LM calls: {calls}/{maximum}[/dim]")
+    elif event_type in {
+        "agent_spawn",
+        "agent_result",
+        "sandbox_provisioning",
+        "sandbox_ready",
+        "sandbox_deleting",
+        "sandbox_deleted",
+        "sandbox_cleanup_failed",
+        "workspace_cleanup_failed",
+        "cancellation_requested",
+    }:
+        _CONSOLE.print(
+            Panel(
+                Text(
+                    f"Agent {event.get('agent_id')} ← {event.get('parent_agent_id') or 'root'}\n"
+                    f"Sandbox: {event.get('sandbox_id') or 'pending'}"
+                    + (f"\nArtifacts: {event['artifacts']}" if event.get("artifacts") else "")
+                ),
+                title=str(event_type),
+                border_style="cyan",
+            )
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
