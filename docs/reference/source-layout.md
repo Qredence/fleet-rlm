@@ -14,10 +14,14 @@ src/fleet_rlm/
 │   ├── paths.py       # Session ID and workspace path validation
 │   └── runtime/repl.py # Sandbox-side namespace, output capture, and bridge
 ├── workspace.py       # Sandbox file helpers and serializable dataset handles
-├── memory_and_eval.py # Postgres VFS, DSPy engine, MLflow setup
 ├── engine/
 │   ├── routes.py      # Route enum: direct / flex / rlm (+ legacy-name reader)
-│   └── signatures.py  # Every DSPy signature and the stopping rules
+│   ├── signatures.py  # Every DSPy signature and the stopping rules
+│   ├── programs.py    # The Turn program: route selection, then direct / Flex / RLM
+│   └── children.py    # spawn_agent, spawn_agents, sub_rlm
+├── store/
+│   ├── db.py          # Store: every SQL statement over one connection pool
+│   └── harness.py     # Mirror of the sandbox workspace and committed Turns
 ├── optimize/
 │   ├── artifacts.py   # Isolated rollouts, manifests, promotion gates, compiled-program loader
 │   ├── dataset.py     # Reviewed examples from Postgres/MLflow, grouped splits

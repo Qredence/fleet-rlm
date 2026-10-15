@@ -17,9 +17,10 @@ Rich CLI ──HTTP/SSE──> FastAPI server ──> DSPy engine
 FastAPI endpoints, SSE streaming, and session runtime registry. A Session
 runtime combines a Daytona sandbox manager, PostgreSQL VFS harness, Skill
 manager, and DSPy engine. `sandbox/manager.py` creates the per-session Daytona
-workspace and runs Python there. `memory_and_eval.py` handles PostgreSQL
-workspace/turn persistence, engine composition and MLflow observability.
-`engine/` holds the route vocabulary and every DSPy signature; `optimize/` holds
+workspace and runs Python there. `store/` holds every SQL statement over one
+connection pool, plus the harness that mirrors the workspace and committed Turns.
+`engine/` holds the route vocabulary, every DSPy signature, the Turn program
+(`programs.py`) and the child-agent tools (`children.py`); `optimize/` holds
 datasets, scorers, the GEPA metric and runner (`fleet optimize`), and the single
 compiled-program loader. `skills.py` validates and synchronizes Skills. `config.py`
 defines the typed `FleetSettings` configuration.
@@ -111,7 +112,10 @@ policy.
 - `sandbox/`: Daytona sandbox lifecycle (`manager.py`), the DSPy interpreter
   (`interpreter.py`), the `run_code` transport (`repl.py`) and the sandbox-side
   runtime (`runtime/repl.py`).
-- `memory_and_eval.py`: persistence, DSPy engine, MLflow, and GEPA behavior.
+- `engine/`: routes, signatures, the Turn program, and child agents.
+- `store/`: PostgreSQL access and the workspace/Turn mirror.
+- `optimize/`: datasets, scorers, the GEPA metric and runner, compiled-program artifacts.
+- `observability.py`: redacted activity previews and MLflow tracing setup.
 - `server.py`: HTTP routes and streaming response.
 - `cli.py`: Rich terminal client and command-line entry point.
 

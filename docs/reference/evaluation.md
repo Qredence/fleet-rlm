@@ -1,6 +1,6 @@
 # Evaluation
 
-Evaluation scorers live in `src/fleet_rlm/memory_and_eval.py`. This page describes
+Evaluation scorers live in `src/fleet_rlm/optimize/scorers.py`. This page describes
 the explicit evaluation workflows. `fleet eval` exposes dataset/run/label commands;
 GEPA remains a deliberate isolated optimization workflow.
 

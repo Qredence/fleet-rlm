@@ -8,7 +8,7 @@ import os
 import dspy
 import pytest
 
-from fleet_rlm.memory_and_eval import AdaptiveFleetEngine
+from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.optimize.artifacts import IsolatedFleetProgram
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 

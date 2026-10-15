@@ -18,8 +18,9 @@ import mlflow
 from dspy.teleprompt.gepa import InstructionProposer
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.engine.signatures import AnswerJudge
-from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, configure_mlflow_observability
+from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
     IsolatedFleetProgram,

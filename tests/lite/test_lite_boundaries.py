@@ -18,11 +18,12 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
-from fleet_rlm.memory_and_eval import AdaptiveFleetEngine, VolumePostgresHarness
+from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.paths import _workspace_relative_path, session_volume_subpath, validate_session_id
 from fleet_rlm.server import create_app
 from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
+from fleet_rlm.store.harness import VolumePostgresHarness
 from fleet_rlm.workspace import WorkspaceDataset
 
 
@@ -370,7 +371,7 @@ def test_databricks_mlflow_configuration_requires_governed_trace_storage() -> No
 
 
 def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.memory_and_eval as memory_and_eval
+    import fleet_rlm.observability as memory_and_eval
 
     calls: dict[str, Any] = {}
     monkeypatch.setattr(memory_and_eval.mlflow, "set_tracking_uri", lambda uri: calls.setdefault("uri", uri))
@@ -408,7 +409,7 @@ def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.Monkey
 
 
 def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
-    import fleet_rlm.memory_and_eval as memory_and_eval
+    import fleet_rlm.engine.programs as memory_and_eval
 
     mlflow_callback = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
     sse_callback = object()
@@ -504,7 +505,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
         learned_skill_note="",
     )
 
-    with caplog.at_level(logging.WARNING, logger="fleet_rlm.memory_and_eval"):
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.programs"):
         prediction = engine(
             workspace_manifest="",
             memory_summary="",

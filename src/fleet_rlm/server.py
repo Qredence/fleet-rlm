@@ -31,18 +31,15 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from fleet_rlm.config import FleetSettings, get_settings
+from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.engine.routes import Route
 from fleet_rlm.launcher import mlflow_is_healthy
-from fleet_rlm.memory_and_eval import (
-    AdaptiveFleetEngine,
-    VolumePostgresHarness,
-    configure_mlflow_observability,
-)
-from fleet_rlm.observability import activity_preview, activity_text
+from fleet_rlm.observability import activity_preview, activity_text, configure_mlflow_observability
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, SANDBOX_TRANSPORT, DaytonaSandboxManager
 from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.skills import SkillManager
 from fleet_rlm.store import Store
+from fleet_rlm.store.harness import VolumePostgresHarness
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)

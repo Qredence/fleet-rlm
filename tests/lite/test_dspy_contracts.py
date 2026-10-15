@@ -9,8 +9,8 @@ import pytest
 from dspy.primitives.facade import SandboxLM
 
 from fleet_rlm.dspy_support import decision_evidence, make_choice_type
+from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.engine.signatures import TRIAGE_ROUTE
-from fleet_rlm.memory_and_eval import AdaptiveFleetEngine
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
