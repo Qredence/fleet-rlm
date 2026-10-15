@@ -310,8 +310,40 @@ class SkillManager:
             count += 1
             if count > MAX_SKILL_FILES:
                 raise ValueError("Too many local Skills to synchronize")
+
+        remote_manifest = json.dumps([relative for relative, _ in staged_files])
+        inspection_code = (
+            "import base64,json,os\n"
+            "root='/workspace'\n"
+            f"paths=json.loads({remote_manifest!r})\n"
+            "result={}\n"
+            "for rel in paths:\n"
+            " path=os.path.join(root,rel)\n"
+            " current=root\n"
+            " for part in rel.split('/'):\n"
+            "  current=os.path.join(current,part)\n"
+            "  if os.path.islink(current): raise ValueError('Existing Skill path traverses a symbolic link: '+rel)\n"
+            " if os.path.isfile(path) and not os.path.islink(path):\n"
+            "  with open(path,'rb') as handle: result[rel]=base64.b64encode(handle.read()).decode()\n"
+            " elif os.path.lexists(path): raise ValueError('Existing Skill path is not a regular file: '+rel)\n"
+            "print(json.dumps(result))"
+        )
+        try:
+            existing = json.loads(self.sandbox_mgr.exec_remote_python(inspection_code) or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("Could not inspect existing session Skills before synchronization") from exc
+        if not isinstance(existing, dict):
+            raise ValueError("Existing session Skill manifest is invalid")
+        conflicts = [
+            relative
+            for relative, content in staged_files
+            if relative in existing and base64.b64decode(existing[relative], validate=True) != content
+        ]
+        if conflicts:
+            raise ValueError("Skill sync conflicts with existing session files: " + ", ".join(conflicts))
         for relative, content in staged_files:
-            self.sandbox_mgr.write_workspace_file(relative, content)
+            if relative not in existing:
+                self.sandbox_mgr.write_workspace_file(relative, content)
         return count
 
     def export_volume_skills_to_local(self) -> list[str]:
@@ -373,6 +405,7 @@ class SkillManager:
         if self.local_skills_dir.is_symlink():
             raise ValueError("The local Skills directory may not be a symbolic link")
         root = self.local_skills_dir.resolve()
+        destinations: list[tuple[str, Path, bytes]] = []
         for relative, content in validated:
             lexical_destination = root / Path(*relative.parts)
             if lexical_destination.is_symlink() or any(
@@ -382,9 +415,17 @@ class SkillManager:
             destination = lexical_destination.resolve()
             if destination != root and root not in destination.parents:
                 raise ValueError("Exported Skill path escapes the local Skills directory")
+            if destination.exists() and (not destination.is_file() or destination.read_bytes() != content):
+                raise ValueError(f"Skill export conflicts with existing local file: {relative.as_posix()}")
+            destinations.append((relative.parts[0], destination, content))
+
+        for name, destination, content in destinations:
+            if destination.exists():
+                continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
-            exported.add(relative.parts[0])
+            exported.add(name)
+        exported.update(name for name, _, _ in destinations)
         return sorted(exported)
 
     def build_catalog_xml(self) -> str:
