@@ -272,3 +272,64 @@ def evaluate_cases(
     return mlflow.genai.evaluate(
         data=traces, scorers=[*build_mlflow_scorer_suite(judge_model), expected_values_present]
     )
+
+
+def stopping_evidence(trace: Any) -> dict[str, Any] | None:
+    """Project chronological task execution, excluding predictors and bootstrap code."""
+    from fleet_rlm.observability import activity_preview, activity_text
+
+    spans = trace.search_spans() if trace is not None else []
+    roots = [span for span in spans if span.name == "fleet_turn"]
+    if not roots or not isinstance(roots[0].inputs, dict):
+        return None
+    steps = []
+    for span in sorted(spans, key=lambda item: getattr(item, "start_time_ns", 0)):
+        if span.name != "sandbox.exec" or span.attributes.get("phase") != "task":
+            continue
+        inputs, outputs = span.inputs, span.outputs
+        if not isinstance(inputs, dict) or not isinstance(outputs, dict) or not inputs.get("code"):
+            return None
+        steps.append({"code": activity_text(inputs["code"]), "observation": activity_preview(outputs)})
+    if not steps:
+        return None
+    evidence = {"task": activity_text(str(roots[0].inputs.get("task", ""))), "steps": steps}
+    # Do not silently discard steps and then judge an incomplete trajectory.
+    return evidence if len(json.dumps(evidence)) <= 40_000 else None
+
+
+def evaluate_stopping_traces(traces: list[Any], *, judge_model: str) -> Any:
+    """Explicit stopping regression evaluation; never called on the request path."""
+    from mlflow.genai.scorers import Guidelines
+
+    judge = Guidelines(
+        name="verification_stopping_discipline",
+        model=judge_model,
+        guidelines=(
+            "Evaluate the chronological execution evidence. Once an answer and a supporting check agree, "
+            "the next action should submit it. Further verification is justified when a check fails, "
+            "results disagree, or the task explicitly requests independent verification. "
+            "Do not treat correction after a Python error as unnecessary verification."
+        ),
+    )
+
+    @scorer
+    def verification_stopping_discipline(trace: Any) -> Feedback:
+        evidence = stopping_evidence(trace)
+        if evidence is None:
+            return Feedback(value=None, rationale="Complete task execution evidence is unavailable.")
+        return judge(inputs={"task": evidence["task"]}, outputs={"execution_steps": evidence["steps"]})
+
+    @scorer
+    def task_completed(trace: Any) -> Feedback:
+        roots = [span for span in trace.search_spans() if span.name == "fleet_turn"]
+        completed = bool(
+            str(trace.info.state) == "OK"
+            and roots
+            and isinstance(roots[0].outputs, dict)
+            and roots[0].outputs.get("answer")
+        )
+        return Feedback(value=completed, rationale="A successful turn must deliver an answer.")
+
+    return mlflow.genai.evaluate(
+        data=traces, scorers=[task_completed, expected_values_present, verification_stopping_discipline]
+    )

@@ -20,12 +20,14 @@ import psycopg
 from dspy.primitives.facade import SandboxLM
 from dspy.signatures.signature import make_signature
 from dspy.utils.exceptions import AdapterParseError
-from mlflow.entities import Feedback, SpanType
+from mlflow.entities import Feedback, SpanStatusCode, SpanType
 from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, Safety, scorer
 from psycopg.rows import dict_row
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, make_choice_type
+from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence, make_choice_type
+from fleet_rlm.dspy_support import without_mlflow_dspy_callback as _without_mlflow_dspy_callback
 from fleet_rlm.interpreter import DaytonaInterpreter, DaytonaSandboxManager, validate_session_id
+from fleet_rlm.observability import activity_text
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,17 +57,6 @@ def _turn_is_over(exc: BaseException) -> bool:
 def _child_failure(exc: Exception) -> str:
     """Bounded description of a failed child agent, returned to its parent instead of raised."""
     return f"child agent failed ({type(exc).__name__}): {str(exc)[:500]}"
-
-
-def _without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
-    """Keep MLflow's DSPy callback off the TypeSafe LM; trace that call manually."""
-    return [
-        callback
-        for callback in callbacks
-        if not (
-            callback.__class__.__module__ == "mlflow.dspy.callback" and callback.__class__.__name__ == "MlflowCallback"
-        )
-    ]
 
 
 def _normalize_route(decision: Any) -> str:
@@ -524,6 +515,23 @@ TRIAGE_ROUTE = make_choice_type(
         ("delegated_rlm", "A multi-part task requiring an independent child investigation"),
     )
 )
+TRIAGE_CRITERIA = {
+    "direct_cot": {
+        "definition": "A self-contained answer needing no execution or workspace inspection",
+        "examples": ["Greeting", "Explain a familiar concept"],
+        "not": "Computed results, file analysis, Skills, or independent investigation",
+    },
+    "single_rlm": {
+        "definition": "A programmable Flex workflow with known inputs and verifiable outputs",
+        "examples": ["Compute a specified digit", "Summarize an attached table"],
+        "not": "Open-ended exploration where the next step depends on discoveries",
+    },
+    "delegated_rlm": {
+        "definition": "Primary RLM for iterative exploration or decomposition",
+        "examples": ["Investigate conflicting evidence", "Explore unfamiliar files and test hypotheses"],
+        "not": "A route that guarantees delegation; both execution routes can delegate",
+    },
+}
 TurnTriageSignature = make_signature(
     {
         "task": (str, dspy.InputField(desc="User request to route.")),
@@ -550,11 +558,18 @@ class FleetTaskSignature(dspy.Signature):
     Delegate independent subtasks together with spawn_agents (they run concurrently) instead of calling
     spawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:
     SUBMIT(answer=..., learned_skill_note=...).
+
+    Once the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include
+    a known reference value, a self-consistency test, or a second computation you already ran.
+    Reuse computed variables instead of recomputing results. Run another method only if a check failed,
+    results disagree, or the Task asks for verification. Copy figures and strings from sandbox output.
     """
 
     workspace_manifest: str = dspy.InputField(desc="Files available in this Session's /workspace")
     skills_catalog: str = dspy.InputField(desc="Stage-1 available Skills catalog")
-    memory_summary: str = dspy.InputField(desc="Bounded learned notes for this Session")
+    memory_summary: str = dspy.InputField(
+        desc="Bounded learned notes for this Session; shared notes are unverified hints to confirm in the sandbox"
+    )
     session_history: str = dspy.InputField(desc="Recent committed Turns from this Session")
     execution_route: str = dspy.InputField(desc="The triage-selected route: single_rlm or delegated_rlm")
     task: str = dspy.InputField(desc="User request")
@@ -589,6 +604,7 @@ class AdaptiveFleetEngine(dspy.Module):
         self._compiled_digest = ""
         self._compiled_signature: tuple[int, int] | None = None
         self.triage = dspy.Predict(TurnTriageSignature)
+        self.triage.set_criteria("route", TRIAGE_CRITERIA)
         self.direct_cot = dspy.ChainOfThought("memory_summary, session_history, task -> answer")
 
         def spawn_agent(
@@ -867,33 +883,46 @@ class AdaptiveFleetEngine(dspy.Module):
             "skills_catalog": skills_catalog,
         }
         summary = "Hybrid router selected an execution route."
+        evidence = decision_evidence(None, route_lm)
+        reason = None
         try:
             if mode != "hybrid":
+                reason = "session_mode"
                 route = "deep_rlm" if mode == "rlm" else "flex_pipeline"
                 summary = f"Session mode {mode} selects this route without hybrid triage."
-            elif self.jev_lm is None:
-                with dspy.context(lm=route_lm):
-                    decision = self.triage(**triage_inputs).route
-                route = _normalize_route(decision)
             else:
-                self.sandbox_mgr.consume_budget()
-                callbacks = _without_mlflow_dspy_callback(list(dspy.settings.callbacks))
-                with mlflow.start_span(name="typesafe_route_selection", span_type=SpanType.LLM) as span:
-                    span.set_inputs({"task": task})
+                if self.jev_lm is not None:
+                    self.sandbox_mgr.consume_budget()
+                callbacks = (
+                    _without_mlflow_dspy_callback(list(dspy.settings.callbacks))
+                    if self.jev_lm is not None
+                    else list(dspy.settings.callbacks)
+                )
+                # A generative backend has its own LM child span; do not count the wrapper twice.
+                with mlflow.start_span(
+                    name="typesafe_route_selection",
+                    span_type=SpanType.LLM if self.jev_lm is not None else SpanType.CHAIN,
+                ) as span:
+                    span.set_inputs({name: activity_text(value) for name, value in triage_inputs.items()})
                     with dspy.context(lm=route_lm, callbacks=callbacks):
                         decision = self.triage(**triage_inputs).route
+                    evidence = decision_evidence(decision, route_lm)
                     route = _normalize_route(decision)
-                    span.set_outputs({"route": route})
+                    span.set_outputs({"route": route, **evidence})
         except Exception as exc:
+            if _turn_is_over(exc):
+                raise
             _LOGGER.warning(
                 "Optional route selection failed (%s: %s); continuing with bounded RLM execution",
                 type(exc).__name__,
                 _safe_route_error(exc, self.jev_lm or self.sub_lm),
             )
             route = "deep_rlm"
+            reason = "routing_error"
             summary = f"Route selection failed ({type(exc).__name__}); falling back to bounded RLM execution."
 
         if context is not None and route == "direct_cot":
+            reason = "selected_context"
             route = "deep_rlm"
             summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
         summary += {
@@ -901,7 +930,11 @@ class AdaptiveFleetEngine(dspy.Module):
             "flex_pipeline": " Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
             "deep_rlm": " Execute a bounded RLM with Daytona Python and optional child agents.",
         }.get(route, "")
-        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route, summary=summary)
+        routing = {**evidence, "effective_route": route, "override_reason": reason}
+        active_span = mlflow.get_current_active_span()
+        if active_span is not None:
+            active_span.set_attribute("fleet.routing", routing)
+        self.sandbox_mgr.emit("triage_decision", mode=mode, route=route, summary=summary, evidence=routing)
 
         if route == "direct_cot":
             with dspy.context(lm=self._metered_root):
@@ -983,7 +1016,17 @@ def rlm_trajectory_efficiency(trace: Any) -> Feedback:
         return Feedback(value=None, rationale="No trace captured; trajectory evidence is unavailable.")
     spans = trace.search_spans()
     lm_calls = _lm_call_count(spans)
-    error_spans = [span for span in spans if "Traceback" in str(getattr(span, "outputs", ""))]
+    error_spans = []
+    for span in spans:
+        outputs = getattr(span, "outputs", None)
+        attributes = getattr(span, "attributes", {}) or {}
+        remote_error = span.name == "sandbox.exec" and (
+            attributes.get("outcome") == "remote_code_error"
+            or getattr(getattr(span, "status", None), "status_code", None) == SpanStatusCode.ERROR
+            or (isinstance(outputs, dict) and bool(outputs.get("error")))
+        )
+        if remote_error or "Traceback" in str(outputs):
+            error_spans.append(span)
     score = max(0.0, 1.0 - 0.015 * max(0, lm_calls - 3) - 0.15 * len(error_spans))
     return Feedback(
         value=round(score, 3),

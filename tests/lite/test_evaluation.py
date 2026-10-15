@@ -131,3 +131,90 @@ def test_scorer_uses_word_boundaries():
     for answer, expected in cases.items():
         result = expected_values_present(outputs={"answer": answer}, expectations={"expected_values": ["12"]})
         assert result.value is expected
+
+
+def test_stopping_evidence_excludes_bootstrap_and_private_predictors():
+    from types import SimpleNamespace
+
+    from fleet_rlm.evaluation import stopping_evidence
+
+    def span(name, inputs=None, outputs=None, phase="task", start=0):
+        return SimpleNamespace(
+            name=name, inputs=inputs, outputs=outputs, attributes={"phase": phase}, start_time_ns=start
+        )
+
+    root = span("fleet_turn", {"task": "compute"})
+    task = span("sandbox.exec", {"code": "print(391)"}, {"stdout": "391"}, start=2)
+    trace = SimpleNamespace(
+        search_spans=lambda: [
+            task,
+            root,
+            span("sandbox.exec", {"code": "private bootstrap"}, {}, phase="bootstrap"),
+            span("Predict.forward", {"reasoning": "private thoughts"}),
+        ]
+    )
+    assert stopping_evidence(trace) == {
+        "task": "compute",
+        "steps": [{"code": "print(391)", "observation": '{"stdout": "391"}'}],
+    }
+    task.outputs = None
+    assert stopping_evidence(trace) is None
+
+
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("supported_submit", True),
+        ("unnecessary_recompute", False),
+        ("failed_check_corrected", True),
+        ("requested_independent_check", True),
+    ],
+)
+def test_stopping_regression_suite_projects_evidence_and_uses_explicit_judge(monkeypatch, case, expected):
+    from types import SimpleNamespace
+
+    from mlflow.entities import Feedback
+    from mlflow.genai.scorers import Guidelines
+
+    from fleet_rlm.evaluation import evaluate_stopping_traces
+
+    tasks = {
+        "supported_submit": ("compute", ["print(391)", "assert 391 == 17*23", "SUBMIT(answer='391')"]),
+        "unnecessary_recompute": ("compute", ["print(391)", "assert 391 == 17*23", "print(sum([391]))"]),
+        "failed_check_corrected": ("compute", ["assert 390 == 17*23", "print(391)", "SUBMIT(answer='391')"]),
+        "requested_independent_check": ("compute and independently verify", ["print(391)", "print(sum([391]))"]),
+    }
+    task, codes = tasks[case]
+    spans = [
+        SimpleNamespace(
+            name="fleet_turn", inputs={"task": task}, outputs={"answer": "391"}, attributes={}, start_time_ns=0
+        )
+    ]
+    spans.extend(
+        SimpleNamespace(
+            name="sandbox.exec",
+            inputs={"code": code},
+            outputs={"stdout": "391"},
+            attributes={"phase": "task"},
+            start_time_ns=i + 1,
+        )
+        for i, code in enumerate(codes)
+    )
+    trace = SimpleNamespace(search_spans=lambda: spans, info=SimpleNamespace(state="OK"))
+    captured = []
+
+    def judge(_self, *, inputs, outputs):
+        captured.append((inputs, outputs))
+        # Mocking verifies plumbing, not live semantic agreement with the labels.
+        return Feedback(value=expected, rationale=case)
+
+    def evaluate(*, data, scorers):
+        assert data == [trace]
+        assert scorers[0](trace=trace).value is True
+        return scorers[-1](trace=trace)
+
+    monkeypatch.setattr(Guidelines, "__call__", judge)
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", evaluate)
+    assert evaluate_stopping_traces([trace], judge_model="databricks:/test-judge").value is expected
+    assert captured[0][0]["task"] == task
+    assert [step["code"] for step in captured[0][1]["execution_steps"]] == codes

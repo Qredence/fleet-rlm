@@ -51,3 +51,14 @@ def test_route_correctness_matches_gold_label():
 def test_scorer_suite_includes_route_correctness():
     suite = build_mlflow_scorer_suite("databricks:/test-judge")
     assert route_correctness in suite
+
+
+def test_structured_execution_error_is_counted_once():
+    from mlflow.entities import SpanStatusCode
+
+    execution = _span("sandbox.exec", SpanType.TOOL, {"error": True, "stderr": "Traceback"})
+    execution.attributes = {"outcome": "remote_code_error"}
+    execution.status = SimpleNamespace(status_code=SpanStatusCode.ERROR)
+    feedback = rlm_trajectory_efficiency(trace=_trace(execution))
+    assert feedback.value == 0.85
+    assert "1 sandbox exceptions" in feedback.rationale
