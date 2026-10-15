@@ -5,6 +5,7 @@
 - [HTTP API](reference/http-api.md)
 - [CLI](reference/cli.md)
 - [Database](reference/database.md)
+- [Evaluation](reference/evaluation.md)
 - [Source layout](reference/source-layout.md)
 - [Architecture](../ARCHITECTURE.md)
 - [Contributing](../CONTRIBUTING.md)

@@ -90,6 +90,7 @@ class FleetSettings(BaseSettings):
         default="fleet-rlm-production",
         validation_alias=AliasChoices("FLEET_MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_NAME"),
     )
+    mlflow_eval_experiment_name: str = Field(default="", validation_alias="FLEET_MLFLOW_EVAL_EXPERIMENT_NAME")
     mlflow_trace_catalog: str = Field(default="", validation_alias="FLEET_MLFLOW_TRACE_CATALOG")
     mlflow_trace_schema: str = Field(default="", validation_alias="FLEET_MLFLOW_TRACE_SCHEMA")
     mlflow_trace_table_prefix: str = Field(default="", validation_alias="FLEET_MLFLOW_TRACE_TABLE_PREFIX")

@@ -1,12 +1,15 @@
 PYTHON_SOURCES := src/fleet_rlm tests scripts
 
-.PHONY: help install install-dev dev serve cli format format-check lint typecheck test api-check api-sync check-docs check build clean check-security precommit-run
+.PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security precommit-run
 
 help:
 	@echo "Fleet-RLM Lite development targets:"
 	@echo "  make install-dev  Install runtime and development dependencies"
 	@echo "  make serve        Start the local FastAPI SSE server"
 	@echo "  make cli          Show terminal client help"
+	@echo "  make eval-dataset Create the synthetic evaluation dataset (writes to Unity Catalog)"
+	@echo "  make eval         Run synthetic cases against a live server (live model and sandbox cost)"
+	@echo "  make optimize SESSION=<id>  Run GEPA compile and gated evaluation (live, explicit approval only)"
 	@echo "  make test         Run non-live unit and boundary tests"
 	@echo "  make lint         Run Ruff"
 	@echo "  make typecheck    Run ty on the public package"
@@ -38,6 +41,16 @@ lint:
 
 typecheck:
 	uv run ty check src/fleet_rlm
+
+eval-dataset:
+	uv run fleet eval dataset
+
+eval:
+	uv run fleet eval run
+
+optimize:
+	@test -n "$(SESSION)" || (echo "SESSION=<id> is required" && exit 2)
+	uv run python scripts/optimize_and_evaluate_fleet.py --session $(SESSION)
 
 test:
 	uv run pytest

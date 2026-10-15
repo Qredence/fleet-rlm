@@ -41,6 +41,7 @@ source control.
 | `FLEET_MLFLOW_TRACE_SCHEMA` | empty | Optional Unity Catalog trace schema. |
 | `FLEET_MLFLOW_TRACE_TABLE_PREFIX` | empty | Optional trace table prefix. |
 | `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | empty | SQL warehouse ID for Databricks tracing. |
+| `FLEET_MLFLOW_EVAL_EXPERIMENT_NAME` | empty | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |

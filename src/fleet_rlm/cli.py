@@ -449,6 +449,8 @@ def _render_event(event: dict[str, Any]) -> None:
         _CONSOLE.print(f"[yellow]Turn cancelled:[/yellow] {event.get('error', 'Cancellation confirmed by server.')}")
     elif event_type == "error":
         _CONSOLE.print(f"[bold red]Turn failed:[/bold red] {event.get('error', 'Unknown error')}")
+        if event.get("trace_id"):
+            _CONSOLE.print(f"MLflow trace ID: {event['trace_id']}")
     elif event_type == "repl_code":
         _CONSOLE.print(
             Panel(
@@ -509,6 +511,61 @@ def _render_event(event: dict[str, Any]) -> None:
         )
 
 
+def evaluation_statuses() -> tuple[str, ...]:
+    from fleet_rlm.evaluation import REVIEW_STATUSES
+
+    return REVIEW_STATUSES
+
+
+def _eval_command(args: argparse.Namespace, settings: Any) -> None:
+    """Build the eval dataset, label a trace, or run the synthetic cases against a live server."""
+    import os
+
+    import mlflow
+
+    from fleet_rlm import evaluation
+
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
+    if args.eval_command == "label":
+        evaluation.label_trace(
+            args.trace_id,
+            review_status=args.status,
+            source_group=args.group,
+            expected_answer=args.answer,
+            expected_values=args.value,
+            route=args.route,
+            reviewer=args.reviewer,
+        )
+        _CONSOLE.print(f"Labeled {args.trace_id} as {args.status}")
+        return
+    if not settings.mlflow_eval_experiment_name:
+        raise SystemExit("set FLEET_MLFLOW_EVAL_EXPERIMENT_NAME to the evaluation experiment")
+    experiment = mlflow.set_experiment(settings.mlflow_eval_experiment_name)
+    cases = evaluation.synthetic_cases(seed=args.seed)
+    if args.eval_command == "dataset":
+        name = args.name or f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.fleet_rlm_eval_cases"
+        from fleet_rlm import benchmarks
+
+        if args.long_context:
+            cases += benchmarks.long_context_cases()
+        if args.oolong or args.longcot:
+            with httpx.Client(follow_redirects=True) as hf:
+                if args.oolong:
+                    cases += benchmarks.oolong_cases(hf, limit=args.oolong)
+                if args.longcot:
+                    cases += benchmarks.longcot_cases(hf, per_domain=args.longcot)
+        dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
+        _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
+        return
+    result = evaluation.evaluate_cases(
+        cases[: args.limit] if args.limit else cases,
+        base_url=args.url,
+        judge_model=settings.fleet_judge_model,
+    )
+    _CONSOLE.print(result.metrics)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Run the backend or the interactive Rich client."""
     settings = get_settings()
@@ -523,7 +580,31 @@ def main(argv: list[str] | None = None) -> None:
     cli.add_argument("--url", default=f"http://{settings.host}:{settings.port}")
     cli.add_argument("--session", default=f"sess_{uuid.uuid4().hex[:8]}")
 
+    evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
+    eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
+    dataset = eval_commands.add_parser("dataset", help="create the synthetic evaluation dataset")
+    dataset.add_argument("--name", default="", help="catalog.schema.table (default: trace catalog/schema)")
+    dataset.add_argument("--seed", type=int, default=7)
+    dataset.add_argument("--long-context", action="store_true", help="add synthetic 20K-200K character log cases")
+    dataset.add_argument("--oolong", type=int, default=0, metavar="N", help="add N Oolong-synth benchmark cases")
+    dataset.add_argument("--longcot", type=int, default=0, metavar="N", help="add N LongCoT cases per domain")
+    run = eval_commands.add_parser("run", help="run synthetic cases against a live server and score them")
+    run.add_argument("--url", default=f"http://{settings.host}:{settings.port}")
+    run.add_argument("--seed", type=int, default=7)
+    run.add_argument("--limit", type=int, default=0, help="only run the first N cases")
+    label = eval_commands.add_parser("label", help="write gold labels onto a trace")
+    label.add_argument("trace_id")
+    label.add_argument("--status", required=True, choices=evaluation_statuses())
+    label.add_argument("--group", required=True, help="source_group used for grouped train/dev/holdout splits")
+    label.add_argument("--answer")
+    label.add_argument("--value", action="append", help="expected value that must appear in the answer (repeatable)")
+    label.add_argument("--route", choices=("direct_cot", "flex_pipeline", "deep_rlm"))
+    label.add_argument("--reviewer", default="human")
+
     args = parser.parse_args(argv)
+    if args.command == "eval":
+        _eval_command(args, settings)
+        return
     if args.command == "serve":
         if not settings.allow_non_loopback_bind and not _is_loopback(args.host):
             parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
