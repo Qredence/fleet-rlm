@@ -804,6 +804,7 @@ components:
           maxLength: 2000
           title: Description
           default: ''
+      additionalProperties: false
       type: object
       required:
       - path
@@ -1001,6 +1002,7 @@ components:
           type: boolean
           title: Reviewed
           default: false
+      additionalProperties: false
       type: object
       required:
       - content
@@ -1029,6 +1031,7 @@ components:
           type: string
           pattern: ^(rlm|flex|hybrid)$
           title: Mode
+      additionalProperties: false
       type: object
       required:
       - mode
@@ -1046,6 +1049,7 @@ components:
           minLength: 1
           pattern: ^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$
           title: Model
+      additionalProperties: false
       type: object
       required:
       - model
@@ -1168,6 +1172,7 @@ components:
             maxLength: 128
           - type: 'null'
           title: Idempotency Key
+      additionalProperties: false
       type: object
       required:
       - task
@@ -1235,5 +1240,6 @@ components:
             maxLength: 34000000
           - type: 'null'
           title: Content Base64
+      additionalProperties: false
       type: object
       title: WorkspaceWriteRequest

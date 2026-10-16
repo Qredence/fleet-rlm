@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 MAX_TASK_CHARS = 100_000
 
@@ -13,35 +13,41 @@ MAX_TASK_CHARS = 100_000
 # Requests
 
 
-class TurnRequest(BaseModel):
+class _Request(BaseModel):
+    """Request bodies reject unknown fields, so a typo is a 422 rather than a silently ignored option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TurnRequest(_Request):
     """User prompt sent to one Session's Fleet engine."""
 
     task: str = Field(min_length=1, max_length=MAX_TASK_CHARS)
     idempotency_key: str | None = Field(default=None, max_length=128)
 
 
-class ModeRequest(BaseModel):
+class ModeRequest(_Request):
     mode: str = Field(pattern="^(rlm|flex|hybrid)$")
 
 
-class WorkspaceWriteRequest(BaseModel):
+class WorkspaceWriteRequest(_Request):
     content: str | None = Field(default=None, max_length=25_000_000)
     content_base64: str | None = Field(default=None, max_length=34_000_000)
 
 
-class ContextRequest(BaseModel):
+class ContextRequest(_Request):
     path: str = Field(min_length=1, max_length=1024)
     description: str = Field(default="", max_length=2000)
 
 
-class MemoryRequest(BaseModel):
+class MemoryRequest(_Request):
     content: str = Field(min_length=1, max_length=10000)
     kind: str = Field(default="observation", pattern="^(observation|preference|hypothesis|procedure)$")
     sources: dict[str, str] = Field(default_factory=dict, max_length=100)
     reviewed: bool = False
 
 
-class ModelRequest(BaseModel):
+class ModelRequest(_Request):
     role: str = Field(default="root", pattern="^(root|sub)$")
     model: str = Field(
         min_length=1, max_length=300, pattern=r"^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$"

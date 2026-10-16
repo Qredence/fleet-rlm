@@ -230,3 +230,22 @@ def test_skills_use_the_default_session_and_report_counts():
     with client:
         assert client.post("/skills/push").json() == {"pushed": 3}
         assert client.get("/skills").json() == {"catalog_xml": "<skills />"}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("put", "/sessions/s1/memory/m1", {"content": "x"}),
+        ("put", "/sessions/s1/mode", {"mode": "rlm"}),
+        ("put", "/sessions/s1/model", {"role": "root", "model": "openai/a.b.c"}),
+        ("put", "/sessions/s1/context", {"path": "files/a.csv"}),
+        ("post", "/sessions/s1/turn", {"task": "hi"}),
+    ],
+)
+def test_request_bodies_reject_unknown_fields(method: str, path: str, body: dict) -> None:
+    client, _ = client_for(runtime_with())
+
+    response = getattr(client, method)(path, json={**body, "unexpected": 1})
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "extra_forbidden"
