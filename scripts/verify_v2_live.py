@@ -112,8 +112,8 @@ def main() -> None:
             persisted = client.get(f"/sessions/{session}/turns/{turn_id}").json()
             assert persisted["status"] == "completed"
             assert persisted["result"]["answer"] == outcomes[0]["answer"]
-            app.state.session_registry._sessions[session].harness.finish_turn(
-                turn_id, "failed", {"event": "error", "error": "simulated lost delivery"}
+            app.state.session_registry._sessions[session].harness.store.finish_turn(
+                session, turn_id, "failed", {"event": "error", "error": "simulated lost delivery"}
             )
             assert client.get(f"/sessions/{session}/turns/{turn_id}").json()["status"] == "completed"
             report["cases"]["durable_completion_survives_delivery_failure"] = "passed"

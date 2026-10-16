@@ -38,18 +38,25 @@ class FakeManager(SimpleNamespace):
         super().__init__(**{**defaults, **overrides})
 
 
+def store_with(**overrides: Any) -> SimpleNamespace:
+    defaults: dict[str, Any] = {
+        "history": lambda _session: [],
+        "save_runtime_settings": lambda *_args: None,
+        "finish_turn": lambda *_args: None,
+    }
+    return SimpleNamespace(**{**defaults, **overrides})
+
+
 class FakeHarness(SimpleNamespace):
     def __init__(self, **overrides: Any) -> None:
         defaults: dict[str, Any] = {
             "claim_turn": lambda *_args: None,
-            "finish_turn": lambda *_args: None,
             "memories": lambda *_args, **_kwargs: [],
             "hydrate_volume_from_postgres": lambda _session: ("", ""),
             "sync_volume_to_postgres": lambda **_kwargs: [],
             "persist_workspace_files": lambda _session: [],
-            "save_runtime_settings": lambda _data: None,
             "turn_status": lambda _turn_id: None,
-            "store": SimpleNamespace(history=lambda _session: []),
+            "store": store_with(),
         }
         super().__init__(**{**defaults, **overrides})
 

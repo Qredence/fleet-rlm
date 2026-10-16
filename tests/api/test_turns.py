@@ -11,7 +11,7 @@ from typing import Any
 import dspy
 import pytest
 from dspy.utils.exceptions import AdapterParseError
-from fakes import FakeHarness, FakeManager, client_for, runtime_with
+from fakes import FakeHarness, FakeManager, client_for, runtime_with, store_with
 
 import fleet_rlm.api.app as api_app
 import fleet_rlm.engine.turn as turn_module
@@ -144,7 +144,10 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
         raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
 
     runtime = runtime_with(
-        harness=FakeHarness(hydrate_volume_from_postgres=hydrate, finish_turn=lambda *args: finished.append(args)),
+        harness=FakeHarness(
+            hydrate_volume_from_postgres=hydrate,
+            store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
+        ),
         engine=failing_engine,
     )
     client, app = client_for(runtime)

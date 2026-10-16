@@ -443,16 +443,6 @@ class VolumePostgresHarness:
     def session_id(self) -> str:
         return self.sandbox_mgr.session_id
 
-    def acquire_session_lease(self) -> psycopg.Connection:
-        """Keep a PostgreSQL session lock until runtime close or process death."""
-        return self.store.acquire_session_lease(self.session_id)
-
-    def runtime_settings(self) -> dict[str, Any]:
-        return self.store.runtime_settings(self.session_id)
-
-    def save_runtime_settings(self, settings: dict[str, Any]) -> None:
-        self.store.save_runtime_settings(self.session_id, settings)
-
     def ensure_session(self, session_id: str) -> None:
         self.store.ensure_session(validate_session_id(session_id))
 
@@ -491,9 +481,6 @@ class VolumePostgresHarness:
         if prior is not None and prior["task_sha256"] != digest:
             raise IdempotencyConflictError("Idempotency key already belongs to another task")
         return prior
-
-    def finish_turn(self, turn_id: str, status: str, result: dict[str, Any]) -> None:
-        self.store.finish_turn(self.session_id, turn_id, status, result)
 
     def turn_status(self, turn_id: str) -> dict[str, Any] | None:
         return self.store.turn_status(self.session_id, validate_session_id(turn_id))

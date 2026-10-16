@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fakes import FakeHarness, FakeManager, api_settings, client_for, engine_with, runtime_with
+from fakes import FakeHarness, FakeManager, api_settings, client_for, engine_with, runtime_with, store_with
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.workspace import WorkspaceDataset
@@ -52,7 +52,7 @@ def test_session_settings_only_change_after_successful_persistence(operation, fa
         saved.update(data)
 
     runtime = runtime_with(
-        harness=FakeHarness(save_runtime_settings=save),
+        harness=FakeHarness(store=store_with(save_runtime_settings=lambda _session, data: save(data))),
         sandbox_mgr=FakeManager(read_workspace_file=lambda _path: b"new data"),
         context=WorkspaceDataset("files/old.csv", sha256="a" * 64),
     )
@@ -99,7 +99,7 @@ def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failur
 
     runtime = runtime_with(
         engine=old_engine,
-        harness=FakeHarness(save_runtime_settings=save),
+        harness=FakeHarness(store=store_with(save_runtime_settings=lambda _session, data: save(data))),
         execution_mode="rlm",
         sandbox_mgr=FakeManager(
             sub_lm=old_engine.sub_lm, max_llm_calls=7, max_depth=2, max_children=3, max_active_children=1

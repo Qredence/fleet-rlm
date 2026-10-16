@@ -72,7 +72,7 @@ def session_config(runtime: Runtime, settings: Settings) -> dict:
 
 
 @router.put("/sessions/{session_id}/model", response_model=ModelSelection)
-def select_model(body: ModelRequest, runtime: Runtime, registry: Registry, settings: Settings) -> dict:
+def select_model(session_id: str, body: ModelRequest, runtime: Runtime, registry: Registry, settings: Settings) -> dict:
     unavailable = "Model selection is unavailable; configuration unchanged"
     with translate(unavailable, invalid="Invalid session or model configuration"):
         scope = ".".join(body.model.removeprefix("openai/").split(".")[:2])
@@ -83,7 +83,7 @@ def select_model(body: ModelRequest, runtime: Runtime, registry: Registry, setti
         try:
             models = {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model, body.role: body.model}
             engine = registry.engine_for_models(runtime, models)
-            runtime.harness.save_runtime_settings({"models": models})
+            runtime.harness.store.save_runtime_settings(session_id, {"models": models})
             runtime.set_engine(engine)
         finally:
             runtime.turn_lock.release()
@@ -96,10 +96,10 @@ def get_mode(runtime: Runtime) -> dict:
 
 
 @router.put("/sessions/{session_id}/mode", response_model=Mode)
-def set_mode(body: ModeRequest, runtime: Runtime) -> dict:
+def set_mode(session_id: str, body: ModeRequest, runtime: Runtime) -> dict:
     with translate("Session runtime is unavailable", invalid="Invalid Session ID or mode"), runtime.turn_lock:
         context = asdict(runtime.context) if runtime.context else None
-        runtime.harness.save_runtime_settings({"mode": body.mode, "context": context})
+        runtime.harness.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
         runtime.set_mode(body.mode)
     return {"mode": body.mode}
 
@@ -130,15 +130,17 @@ def select_context(session_id: str, body: ContextRequest, runtime: Runtime) -> d
             size_bytes=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
         )
-        runtime.harness.save_runtime_settings({"mode": runtime.execution_mode, "context": asdict(context)})
+        runtime.harness.store.save_runtime_settings(
+            session_id, {"mode": runtime.execution_mode, "context": asdict(context)}
+        )
         runtime.context = context
     return {"path": body.path, "size_bytes": len(content), "sha256": context.sha256}
 
 
 @router.delete("/sessions/{session_id}/context", response_model=Status)
-def clear_context(runtime: Runtime) -> dict:
+def clear_context(session_id: str, runtime: Runtime) -> dict:
     with translate("Context selection is unavailable"), runtime.turn_lock:
-        runtime.harness.save_runtime_settings({"mode": runtime.execution_mode, "context": None})
+        runtime.harness.store.save_runtime_settings(session_id, {"mode": runtime.execution_mode, "context": None})
         runtime.context = None
     return {"status": "cleared"}
 

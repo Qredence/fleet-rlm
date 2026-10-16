@@ -127,9 +127,9 @@ class SessionRuntimeRegistry:
             execution_mode=settings.execution_mode,
         )
         harness.ensure_session(session_id)
-        runtime.lease = harness.acquire_session_lease()
+        runtime.lease = self.store.acquire_session_lease(session_id)
         try:
-            saved = harness.runtime_settings()
+            saved = self.store.runtime_settings(session_id)
             if "mode" in saved:
                 runtime.set_mode(saved["mode"])
             if saved.get("models"):

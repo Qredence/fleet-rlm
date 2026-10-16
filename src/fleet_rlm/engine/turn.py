@@ -112,7 +112,7 @@ def run_turn(
         if trace_id:
             failure["trace_id"] = trace_id
         with suppress(Exception):
-            runtime.harness.finish_turn(turn_id, "cancelled" if cancelled else "failed", failure)
+            runtime.harness.store.finish_turn(session_id, turn_id, "cancelled" if cancelled else "failed", failure)
         emit(failure)
     finally:
         manager.end_turn()
