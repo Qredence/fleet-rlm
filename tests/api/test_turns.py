@@ -16,6 +16,7 @@ from fakes import FakeHarness, FakeManager, client_for, runtime_with
 import fleet_rlm.api.app as api_app
 import fleet_rlm.engine.turn as turn_module
 from fleet_rlm.api.events import SSERuntimeCallback
+from fleet_rlm.store import IdempotencyConflictError
 from fleet_rlm.workspace import WorkspaceDataset
 
 
@@ -203,3 +204,16 @@ def test_shutdown_flushes_pending_traces_only_when_tracing_is_configured(monkeyp
             app.state.mlflow_experiment_id = "experiment-test-id"
         assert flushed == []
     assert flushed == ([True] if configured else [])
+
+
+def test_reusing_an_idempotency_key_for_another_task_names_the_conflict() -> None:
+    def conflict(*_args):
+        raise IdempotencyConflictError("Idempotency key already belongs to another task")
+
+    client, _ = client_for(runtime_with(harness=FakeHarness(claim_turn=conflict)))
+    with client:
+        response = client.post("/sessions/session-a/turn", json={"task": "other", "idempotency_key": "k"})
+
+    events = events_of(response)
+    assert [event["event"] for event in events] == ["turn_status", "error"]
+    assert events[1]["payload"]["error"] == "Idempotency key already belongs to another task"

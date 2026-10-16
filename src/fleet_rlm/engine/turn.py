@@ -18,6 +18,7 @@ from mlflow.entities import SpanType
 
 from fleet_rlm.engine.signatures import Route
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT
+from fleet_rlm.store import IdempotencyConflictError
 
 if TYPE_CHECKING:
     from fleet_rlm.config import FleetSettings
@@ -106,7 +107,7 @@ def run_turn(
         failure: dict[str, Any] = {
             "event": "turn_cancelled" if cancelled else "error",
             "request_id": turn_id,
-            "error": f"The Turn failed (request {turn_id}).",
+            "error": str(exc) if isinstance(exc, IdempotencyConflictError) else f"The Turn failed (request {turn_id}).",
         }
         if trace_id:
             failure["trace_id"] = trace_id

@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.store import Store
+from fleet_rlm.store import IdempotencyConflictError, Store
 from fleet_rlm.store.db import SCHEMA_STATEMENTS, VolumePostgresHarness
 
 
@@ -151,7 +151,7 @@ def test_harness_reports_artifacts_and_records_the_completion():
 def test_claim_turn_refuses_a_key_reused_for_another_task():
     prior = {"turn_id": "t0", "task_sha256": "other", "status": "running", "result": {}}
     store = SimpleNamespace(claim_turn=lambda *_args: prior)
-    with pytest.raises(ValueError, match="another task"):
+    with pytest.raises(IdempotencyConflictError, match="another task"):
         _harness(store, {}).claim_turn("t1", "key", "task")
 
 

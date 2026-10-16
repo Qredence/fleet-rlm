@@ -22,6 +22,11 @@ from psycopg_pool import ConnectionPool
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.workspace import validate_session_id
 
+
+class IdempotencyConflictError(ValueError):
+    """An idempotency key was reused for a different task; safe to show the caller."""
+
+
 SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS fleet_lite_sessions (
@@ -484,7 +489,7 @@ class VolumePostgresHarness:
         digest = hashlib.sha256(task.encode()).hexdigest()
         prior = self.store.claim_turn(self.session_id, turn_id, key, digest)
         if prior is not None and prior["task_sha256"] != digest:
-            raise ValueError("Idempotency key already belongs to another task")
+            raise IdempotencyConflictError("Idempotency key already belongs to another task")
         return prior
 
     def finish_turn(self, turn_id: str, status: str, result: dict[str, Any]) -> None:
