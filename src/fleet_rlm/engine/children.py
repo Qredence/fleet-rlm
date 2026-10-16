@@ -157,16 +157,35 @@ class ChildAgents:
 
     def sub_rlm(self, subtask: str, context_hint: str = "") -> str:
         """Spawn an isolated recursive investigation; input files and Skills are copied, not parent memory."""
+        factory = self.sandbox_mgr.interpreter_factory(tools={"sub_rlm": self.sub_rlm})
+        interpreters: list[DaytonaInterpreter] = []
+
+        def create() -> DaytonaInterpreter:
+            interpreter = factory()
+            if not interpreters:
+                # Promotion is decided here: a failed child must not publish its unverified staging files.
+                interpreter.owns_manager = False
+            interpreters.append(interpreter)
+            return interpreter
+
+        create.execution_instructions = getattr(factory, "execution_instructions", "")  # ty: ignore[unresolved-attribute]
         child = dspy.RLM(
             signature=ContextualChildTask,
             tools=[self.sub_rlm],
-            interpreter_factory=self.sandbox_mgr.interpreter_factory(tools={"sub_rlm": self.sub_rlm}),
+            interpreter_factory=create,
             sub_lm=self._metered_sub,
             max_iters=8,
             max_llm_calls=25,
         )
         try:
             with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
-                return str(child(context_hint=context_hint[:10000], subtask=subtask[:20000]).findings)[:20000]
+                findings = str(child(context_hint=context_hint[:10000], subtask=subtask[:20000]).findings)[:20000]
         except AdapterParseError as exc:
             return f"ERROR: {child_failure(exc)}"
+        else:
+            if interpreters:
+                interpreters[0].manager.collect_child_artifacts()
+            return findings
+        finally:
+            if interpreters:
+                interpreters[0].manager.shutdown()

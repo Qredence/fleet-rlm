@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fleet_rlm.store.harness import VolumePostgresHarness
+from fleet_rlm.store.db import VolumePostgresHarness
 
 
 def test_history_is_bounded_and_keeps_the_newest_turns_in_order() -> None:

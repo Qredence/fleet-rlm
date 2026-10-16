@@ -1,11 +1,57 @@
-"""Bounded dataset handles and the workspace API installed in remote Python."""
+"""Session IDs, workspace-relative paths, bounded dataset handles, and the workspace API installed in remote Python."""
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from dspy.primitives.sandbox_serializable import SandboxSerializable
+
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_NAMESPACE_RE = re.compile(r"^ns_[a-f0-9]{8}$")
+_ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
+
+
+def validate_session_id(session_id: str) -> str:
+    """Validate a session key before it is used as a Daytona Volume subpath."""
+    if not isinstance(session_id, str) or not _SESSION_ID_RE.fullmatch(session_id):
+        raise ValueError("session_id must be 1-64 letters, digits, dots, underscores, or hyphens")
+    if session_id in {".", ".."} or ".." in session_id:
+        raise ValueError("session_id must not contain parent path syntax")
+    return session_id
+
+
+def session_volume_subpath(session_id: str) -> str:
+    """Return the provider-enforced private subtree for one Session."""
+    return f"sessions/{validate_session_id(session_id)}"
+
+
+def _child_input_path(path: str) -> str:
+    """Validate a child input path, accepting the sandbox's absolute `/workspace/` form the model sees."""
+    if isinstance(path, str) and path.startswith("/workspace/"):
+        path = path[len("/workspace/") :]
+    clean_path = _workspace_relative_path(path)
+    if not clean_path.startswith(("files/", "skills/")):
+        raise ValueError("Child inputs must be files beneath files/ or skills/")
+    return clean_path
+
+
+def _workspace_relative_path(relative_path: str) -> str:
+    if (
+        not isinstance(relative_path, str)
+        or not relative_path
+        or len(relative_path) > 1024
+        or "\\" in relative_path
+        or "\x00" in relative_path
+        or any(ord(character) < 32 for character in relative_path)
+    ):
+        raise ValueError("Workspace path must be a non-empty POSIX-relative path")
+    parts = relative_path.split("/")
+    if parts[0] not in _ALLOWED_WORKSPACE_ROOTS or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("Workspace path is outside the allowed files, artifacts, memory, and skills roots")
+    return "/".join(parts)
+
 
 # This source is installed in the remote daemon, never executed on the host.
 WORKSPACE_CODE = r"""
@@ -133,8 +179,6 @@ class WorkspaceDataset(SandboxSerializable):
     sha256: str = ""
 
     def __post_init__(self) -> None:
-        from fleet_rlm.sandbox.paths import _workspace_relative_path
-
         path = self.workspace_path.removeprefix("/workspace/")
         object.__setattr__(self, "workspace_path", _workspace_relative_path(path))
         if self.size_bytes < 0 or len(self.description) > 2000:

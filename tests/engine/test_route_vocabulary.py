@@ -4,8 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.engine.routes import Route, parse_route
-from fleet_rlm.engine.signatures import TRIAGE_CRITERIA, TRIAGE_ROUTE
+from fleet_rlm.engine.signatures import TRIAGE_CRITERIA, TRIAGE_ROUTE, Route, parse_route
 
 
 @pytest.mark.parametrize(

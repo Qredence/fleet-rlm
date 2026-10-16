@@ -11,7 +11,7 @@ from importlib.metadata import version
 import mlflow
 from fastapi import FastAPI
 
-from fleet_rlm.api.routes import memory, sessions, skills, turns, workspace
+from fleet_rlm.api.routes import sessions, turns, workspace
 from fleet_rlm.api.schemas import Health
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.launcher import mlflow_is_healthy
@@ -64,8 +64,14 @@ def create_app(
     def health() -> dict:
         return {"status": "ok", "version": VERSION}
 
-    for module in (sessions, workspace, memory, skills, turns):
-        app.include_router(module.router)
+    for router in (
+        sessions.router,
+        workspace.router,
+        sessions.memory_router,
+        sessions.skills_router,
+        turns.router,
+    ):
+        app.include_router(router)
     return app
 
 

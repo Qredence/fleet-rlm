@@ -21,7 +21,7 @@ import mlflow
 from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
 from mlflow.genai.scorers import scorer
 
-from fleet_rlm.engine.routes import Route
+from fleet_rlm.engine.signatures import Route
 
 REVIEW_STATUSES = ("approved", "benchmark", "synthetic", "rejected")
 _REGIONS = ("north", "south", "east", "west", "central")

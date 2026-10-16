@@ -13,11 +13,10 @@ import psycopg
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
-from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.skills import SkillManager
 from fleet_rlm.store import Store
-from fleet_rlm.store.harness import VolumePostgresHarness
-from fleet_rlm.workspace import WorkspaceDataset
+from fleet_rlm.store.db import VolumePostgresHarness
+from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 
 @dataclass(slots=True)

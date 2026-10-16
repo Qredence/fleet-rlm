@@ -30,11 +30,11 @@ from fleet_rlm.optimize.artifacts import (
     write_manifest,
 )
 from fleet_rlm.optimize.dataset import context_snapshot, curate_dataset
-from fleet_rlm.optimize.metric import gepa_mlflow_metric
+from fleet_rlm.optimize.scorers import gepa_mlflow_metric
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
-from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.skills import SkillManager, local_catalog_xml
 from fleet_rlm.store import Store
+from fleet_rlm.workspace import validate_session_id
 
 _JUDGE_LABEL = "DSPy reflection LM (FLEET_REFLECTION_MODEL)"
 

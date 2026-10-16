@@ -1,12 +1,46 @@
-"""Every DSPy signature Fleet uses, in one place. GEPA tunes these instructions; keep field names stable."""
+"""Every DSPy signature Fleet uses, in one place, plus the route vocabulary they share.
 
+GEPA tunes these instructions; keep field names stable.
+"""
+
+from enum import StrEnum
 from typing import Any
 
 import dspy
 from dspy.signatures.signature import make_signature
 
 from fleet_rlm.dspy_support import make_choice_type
-from fleet_rlm.engine.routes import Route
+
+
+class Route(StrEnum):
+    """How a Turn is executed. Values are the wire, trace, and label names."""
+
+    DIRECT = "direct"  # ChainOfThought, no code execution
+    FLEX = "flex"  # dspy.Flex pipeline with Daytona Python
+    RLM = "rlm"  # dspy.RLM with Daytona Python and child agents
+
+
+# Names written by releases before the single vocabulary; read-side only, never emitted.
+_LEGACY = {
+    "direct_cot": Route.DIRECT,
+    "single_rlm": Route.FLEX,
+    "flex_pipeline": Route.FLEX,
+    "delegated_rlm": Route.RLM,
+    "deep_rlm": Route.RLM,
+}
+
+
+def parse_route(value: Any) -> Route | None:
+    """Read a route from a decision, stored turn, trace, or gold label; None when absent or unknown."""
+    raw = getattr(value, "value", value)
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    try:
+        return Route(text)
+    except ValueError:
+        return _LEGACY.get(text)
+
 
 # One copy of the stopping rules: FleetTask instructions and the sandbox execution instructions both use it.
 STOPPING_RULES = (

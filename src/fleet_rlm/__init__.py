@@ -10,6 +10,6 @@ import os
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
 from fleet_rlm.config import FleetSettings, get_settings
-from fleet_rlm.engine.routes import Route
+from fleet_rlm.engine.signatures import Route
 
 __all__ = ["FleetSettings", "Route", "get_settings"]

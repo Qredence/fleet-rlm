@@ -12,8 +12,7 @@ from typing import Any
 import pytest
 
 from fleet_rlm.store import Store
-from fleet_rlm.store.db import SCHEMA_STATEMENTS
-from fleet_rlm.store.harness import VolumePostgresHarness
+from fleet_rlm.store.db import SCHEMA_STATEMENTS, VolumePostgresHarness
 
 
 class FakeCursor:

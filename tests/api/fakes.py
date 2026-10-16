@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.app import create_app
 from fleet_rlm.api.deps import get_registry
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.session import SessionRuntime
+from fleet_rlm.workspace import validate_session_id
 
 
 class FakeManager(SimpleNamespace):

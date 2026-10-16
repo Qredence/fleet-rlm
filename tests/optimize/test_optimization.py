@@ -22,7 +22,7 @@ from fleet_rlm.optimize.artifacts import (
     verify_active,
 )
 from fleet_rlm.optimize.dataset import grouped_split
-from fleet_rlm.optimize.metric import gepa_mlflow_metric
+from fleet_rlm.optimize.scorers import gepa_mlflow_metric
 
 
 class Example:

@@ -1,34 +1,43 @@
-"""Sessions: listing, configuration, models, mode, history, Turn status, context, and program reload."""
+"""Sessions (configuration, models, mode, history, Turn status, context, reload), memory, and Skills."""
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from fleet_rlm.api.deps import Registry, Runtime, Settings, StoreDep
-from fleet_rlm.api.errors import translate
+from fleet_rlm.api.deps import Registry, Runtime, Settings, StoreDep, translate
 from fleet_rlm.api.schemas import (
+    Catalog,
     ContextRequest,
     ContextSelected,
+    Deleted,
+    Exported,
     History,
+    Memories,
+    MemoryRequest,
+    MemorySaved,
     Mode,
     ModelRequest,
     Models,
     ModelSelection,
     ModeRequest,
+    Pushed,
     SessionConfig,
     Sessions,
     Status,
     TurnStatus,
 )
 from fleet_rlm.optimize.artifacts import verify_active
-from fleet_rlm.session import runtime_configuration
+from fleet_rlm.session import SessionRuntime, runtime_configuration
 from fleet_rlm.workspace import WorkspaceDataset
 
 router = APIRouter(tags=["sessions"])
+memory_router = APIRouter(tags=["memory"])
+skills_router = APIRouter(tags=["skills"])
 
 
 @router.get("/sessions", response_model=Sessions)
@@ -146,3 +155,52 @@ def reload_program(session_id: str, runtime: Runtime, settings: Settings, approv
         artifact = verify_active(directory / f"{session_id}.active.json", directory / "candidates")
         runtime.engine.load_compiled_program(artifact.read_bytes())
     return {"status": "reloaded"}
+
+
+@memory_router.get("/sessions/{session_id}/memory", response_model=Memories)
+def list_memory(runtime: Runtime, q: str = "") -> dict:
+    with translate("Session memory is unavailable"):
+        return {"memories": runtime.harness.memories(q)}
+
+
+@memory_router.put("/sessions/{session_id}/memory/{memory_id}", response_model=MemorySaved)
+def put_memory(memory_id: str, body: MemoryRequest, runtime: Runtime) -> dict:
+    with translate("Session memory is unavailable", invalid="Invalid memory"), runtime.turn_lock:
+        runtime.harness.save_memory(
+            memory_id, body.content, sources=body.sources, kind=body.kind, reviewed=body.reviewed
+        )
+    return {"memory_id": memory_id}
+
+
+@memory_router.delete("/sessions/{session_id}/memory/{memory_id}", response_model=Deleted)
+def remove_memory(memory_id: str, runtime: Runtime) -> dict:
+    with translate("Session memory is unavailable", invalid="Invalid memory ID"), runtime.turn_lock:
+        runtime.harness.delete_memory(memory_id)
+    return {"deleted": memory_id}
+
+
+def skills_runtime(registry: Registry, session_id: str = "default") -> SessionRuntime:
+    with translate("Session runtime is unavailable", invalid="Invalid Session ID"):
+        return registry.get(session_id)
+
+
+SkillsRuntime = Annotated[SessionRuntime, Depends(skills_runtime)]
+
+
+@skills_router.get("/skills", response_model=Catalog)
+def get_skills_catalog(runtime: SkillsRuntime) -> dict:
+    with translate("Session Skill catalog is unavailable"), runtime.turn_lock:
+        runtime.skill_mgr.sync_local_skills_to_volume()
+        return {"catalog_xml": runtime.skill_mgr.build_catalog_xml()}
+
+
+@skills_router.post("/skills/pull", response_model=Exported)
+def pull_skills_to_local(runtime: SkillsRuntime) -> dict:
+    with translate("Skill export is unavailable"), runtime.turn_lock:
+        return {"exported": runtime.skill_mgr.export_volume_skills_to_local()}
+
+
+@skills_router.post("/skills/push", response_model=Pushed)
+def push_skills(runtime: SkillsRuntime) -> dict:
+    with translate("Skill push is unavailable"), runtime.turn_lock:
+        return {"pushed": int(runtime.skill_mgr.sync_local_skills_to_volume())}

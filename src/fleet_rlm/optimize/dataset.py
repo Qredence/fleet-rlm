@@ -10,8 +10,8 @@ from typing import Any
 import dspy
 import mlflow
 
-from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.store import Store
+from fleet_rlm.workspace import validate_session_id
 
 _MAX_EXAMPLES = 500
 

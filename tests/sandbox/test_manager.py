@@ -162,3 +162,21 @@ def test_cancelled_manager_cannot_restart_remote_execution() -> None:
     manager.reset_turn_budget()
     manager.end_turn()
     assert manager.ensure_sandbox() is sandbox
+
+
+def test_managers_with_the_same_credentials_share_one_daytona_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.sandbox import manager as manager_module
+
+    created: list[tuple[str, str]] = []
+
+    class FakeDaytona:
+        def __init__(self, config: Any) -> None:
+            created.append((config.api_key, config.organization_id))
+
+    monkeypatch.setattr(manager_module, "Daytona", FakeDaytona)
+    monkeypatch.setattr(manager_module, "_DAYTONA_CLIENTS", {})
+
+    first = manager_module._shared_daytona_client("key", "org")
+    assert manager_module._shared_daytona_client("key", "org") is first
+    assert manager_module._shared_daytona_client("key", "other-org") is not first
+    assert created == [("key", "org"), ("key", "other-org")]

@@ -203,3 +203,57 @@ def test_spawn_agents_children_inherit_the_callers_context(monkeypatch) -> None:
     marker.set("turn-context")
     tool = _engine_with_fake_children(monkeypatch, lambda **_kwargs: marker.get())
     assert [r["findings"] for r in tool(subtasks=["a", "b"])] == ["turn-context", "turn-context"]
+
+
+def _sub_rlm_with_fake_child(monkeypatch, child_call):
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+    )
+    sub_rlm = engine.primary_rlm._user_tools["sub_rlm"]
+    calls: list[str] = []
+    interpreter = SimpleNamespace(
+        owns_manager=True,
+        manager=SimpleNamespace(
+            collect_child_artifacts=lambda: calls.append("collect"),
+            shutdown=lambda: calls.append("shutdown"),
+        ),
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "interpreter_factory", lambda _self, **_kwargs: lambda: interpreter)
+
+    class Child:
+        def __init__(self, *_args, interpreter_factory, **_kwargs) -> None:
+            self.generate_action = dspy.Predict("a -> b")
+            self.interpreter_factory = interpreter_factory
+
+        def __call__(self, **kwargs):
+            self.interpreter_factory()
+            return child_call(**kwargs)
+
+    monkeypatch.setattr(dspy, "RLM", Child)
+    return sub_rlm, interpreter, calls
+
+
+def test_sub_rlm_promotes_artifacts_only_after_clean_completion_and_always_shuts_down(monkeypatch) -> None:
+    sub_rlm, interpreter, calls = _sub_rlm_with_fake_child(
+        monkeypatch, lambda **_kwargs: SimpleNamespace(findings="done")
+    )
+
+    assert sub_rlm(subtask="investigate") == "done"
+    assert interpreter.owns_manager is False
+    assert calls == ["collect", "shutdown"]
+
+
+def test_sub_rlm_failure_does_not_promote_unverified_child_files(monkeypatch) -> None:
+    def fail(**_kwargs):
+        raise AdapterParseError(
+            adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[ ## reasoning ## ]]"
+        )
+
+    sub_rlm, interpreter, calls = _sub_rlm_with_fake_child(monkeypatch, fail)
+
+    assert sub_rlm(subtask="investigate").startswith("ERROR: child agent failed")
+    assert interpreter.owns_manager is False
+    assert calls == ["shutdown"]

@@ -15,8 +15,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from fleet_rlm.api.deps import Runtime, Settings
-from fleet_rlm.api.errors import translate
+from fleet_rlm.api.deps import Runtime, Settings, translate
 from fleet_rlm.api.schemas import Attached, Deleted, Files, FileStat, FileWritten, WorkspaceWriteRequest
 
 router = APIRouter(tags=["workspace"])

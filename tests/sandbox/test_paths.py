@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.sandbox.paths import _workspace_relative_path, session_volume_subpath, validate_session_id
+from fleet_rlm.workspace import _workspace_relative_path, session_volume_subpath, validate_session_id
 
 
 @pytest.mark.parametrize("session_id", ["finance-q4", "session_01", "2e8c98b5-5242-4e3b-91b4-2bf1e8c24f0b"])
@@ -34,14 +34,14 @@ def test_workspace_paths_are_rooted_and_have_bounded_names() -> None:
     ],
 )
 def test_child_input_paths_accept_the_sandbox_absolute_form(given: str, expected: str) -> None:
-    from fleet_rlm.sandbox.paths import _child_input_path
+    from fleet_rlm.workspace import _child_input_path
 
     assert _child_input_path(given) == expected
 
 
 @pytest.mark.parametrize("bad", ["/workspace/artifacts/x", "/etc/passwd", "/workspace/files/../memory/x", "files/../x"])
 def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> None:
-    from fleet_rlm.sandbox.paths import _child_input_path
+    from fleet_rlm.workspace import _child_input_path
 
     with pytest.raises(ValueError):
         _child_input_path(bad)

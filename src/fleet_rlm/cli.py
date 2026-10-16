@@ -15,7 +15,7 @@ from rich.console import Console
 
 from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
-from fleet_rlm.engine.routes import Route
+from fleet_rlm.engine.signatures import Route
 from fleet_rlm.tui.app import run_interactive_cli
 
 _CONSOLE = Console()

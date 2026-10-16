@@ -15,9 +15,9 @@ from prompt_toolkit.completion import Completer, NestedCompleter, WordCompleter,
 from prompt_toolkit.history import FileHistory
 from rich.panel import Panel
 
-from fleet_rlm.sandbox.paths import validate_session_id
 from fleet_rlm.tui.commands import completion_options, handle_command
 from fleet_rlm.tui.render import CONSOLE, print_http_error, render_event
+from fleet_rlm.workspace import validate_session_id
 
 
 def _completer() -> Completer:

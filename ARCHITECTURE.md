@@ -29,7 +29,7 @@ defines the typed `FleetSettings` configuration.
 
 ## State and workspace
 
-PostgreSQL holds Session turn history and file content. The `VolumePostgresHarness`
+PostgreSQL holds Session turn history and file content. The `VolumePostgresHarness` (in `store/db.py`)
 creates the tables it needs at startup and synchronizes workspace data through
 the Daytona Volume. There are no Alembic migrations in this Lite runtime.
 Daytona uses per-session subpaths for its workspaces. The supported workspace
@@ -56,7 +56,7 @@ an explicit operation rather than an automatic CI or release action.
 
 Strict `rlm` enters a primary DSPy 3.4.1 RLM; `flex` enters Flex. Hybrid triage
 selects one route from the single vocabulary `direct` / `flex` / `rlm`
-(`engine/routes.py`), with `rlm` as the fallback on routing errors or unknown
+(`engine/signatures.py`), with `rlm` as the fallback on routing errors or unknown
 labels. The triage label is the route that runs; there is no mapping step.
 Dataset tasks cannot take a context-free direct answer path. Dataset handles
 carry source digests and bounded previews; files stay in the sandbox.
@@ -114,7 +114,7 @@ policy.
 - `sandbox/`: Daytona sandbox lifecycle (`manager.py`), the DSPy interpreter
   (`interpreter.py`), the `run_code` transport (`repl.py`) and the sandbox-side
   runtime (`runtime/repl.py`).
-- `engine/`: routes, signatures, the Turn program, and child agents.
+- `engine/`: routes and signatures (`signatures.py`), the Turn program, and child agents.
 - `store/`: PostgreSQL access and the workspace/Turn mirror.
 - `optimize/`: datasets, scorers, the GEPA metric and runner, compiled-program artifacts.
 - `observability.py`: redacted activity previews and MLflow tracing setup.

@@ -23,20 +23,33 @@ from fleet_rlm.config import validate_shared_notes_subpath
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
-from fleet_rlm.sandbox.paths import (
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError as ExecutionOutcomeUnknownError
+from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
+from fleet_rlm.workspace import (
     _child_input_path,
     _workspace_relative_path,
     session_volume_subpath,
     validate_session_id,
 )
-from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError as ExecutionOutcomeUnknownError
-from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 
 _LOGGER = logging.getLogger(__name__)
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
+
+_DAYTONA_CLIENTS: dict[tuple[str, str], Daytona] = {}
+_DAYTONA_CLIENTS_LOCK = threading.Lock()
+
+
+def _shared_daytona_client(api_key: str, org_id: str) -> Daytona:
+    """One client per credential pair: each `Daytona()` opens its own event-dispatcher connection and thread."""
+    with _DAYTONA_CLIENTS_LOCK:
+        client = _DAYTONA_CLIENTS.get((api_key, org_id))
+        if client is None:
+            client = _DAYTONA_CLIENTS[api_key, org_id] = Daytona(DaytonaConfig(api_key=api_key, organization_id=org_id))
+        return client
+
 
 _ACTIVE_MANAGER: contextvars.ContextVar[Any] = contextvars.ContextVar("fleet_active_manager", default=None)
 _NATIVE_CHILDREN: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
@@ -271,7 +284,7 @@ class DaytonaSandboxManager:
         self.check_turn()
         with self._lock:
             if self._client is None:
-                self._client = Daytona(DaytonaConfig(api_key=self.api_key, organization_id=self.org_id))
+                self._client = _shared_daytona_client(self.api_key, self.org_id)
             if self._sandbox is None:
                 self.check_turn()
                 if self._creation_pending:
