@@ -14,6 +14,9 @@ bootstrap and version recording run in one transaction. Future schema changes
 must add a numbered migration rather than edit an already released migration.
 Migration 2 adds `fleet_lite_review_labels`, which stores human curation metadata
 only for an existing selected replay and cascades with that replay's deletion.
+Migration 3 adds optional `structured_expectations` JSONB with an empty-object
+default. It stores artifact/delegation gold without changing replay snapshots.
+The migration role owns the change; existing runtime DML grants apply.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy

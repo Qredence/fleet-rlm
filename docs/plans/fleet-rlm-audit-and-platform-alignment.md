@@ -14,7 +14,7 @@ The target remains a local CLI/API with Daytona execution. Databricks is the def
 
 ## Current GEPA contract
 
-The audit entries below preserve the implementation and live-evidence record as it stood when each item was completed. They are historical where they describe the original instruction-only pilot, its frozen Flex proposer, or its acceptance criteria. Current GEPA uses DSPy's built-in code proposer and deployment settings, including persisted Session overrides; the manifest captures effective model configuration as provenance only. Search is limited to train/dev, and holdout runs only after search. Validation uses three paired passes. Quality is the minimum of judge correctness, gold expected values, and gold route; composite score is zero when quality is below 1, otherwise `0.9 + 0.1 * efficiency`. Critical cases require quality 1 in every pass. Promotion requires no aggregate quality regression on dev/holdout, improved dev composite score, no holdout composite regression, zero holdout execution errors, and measured usage. Approval rechecks the incumbent, configuration, code, and dependency identities; older manifests require reevaluation.
+The audit entries below preserve the implementation and live-evidence record as it stood when each item was completed. They are historical where they describe the original instruction-only pilot, its frozen Flex proposer, or its acceptance criteria. Current GEPA uses DSPy's built-in code proposer and deployment settings, including persisted Session overrides; the manifest captures effective model configuration as provenance only. Search is limited to train/dev, and holdout runs only after search. Validation uses three paired passes. Quality is the minimum of judge correctness/safety, gold expected values, gold route, and applicable structured artifact/delegation checks; composite score is zero when quality is below 1, otherwise `0.9 + 0.1 * efficiency`. Critical cases require quality 1 in every pass. Promotion requires no aggregate quality regression on dev/holdout, improved dev composite score, no holdout composite regression, zero holdout execution errors, and measured usage. Approval rechecks the incumbent, configuration, code, and dependency identities; older manifests require reevaluation.
 
 Current live verification uses `scripts/verify_runtime_live.py` for runtime acceptance and `scripts/verify_gepa_live.py` for the native GEPA canary. Selected replay examples need approved gold labels; partial label updates preserve existing expectations. Optimization and compilation do not automatically score historical traces. The standalone `auto_evaluate_traces` operation remains available for explicit evaluation.
 
@@ -235,6 +235,118 @@ The evaluation infrastructure milestone is complete. The operator used a real PT
 - **Evidence retained locally:** `.scratch/evaluation-canary-20261017/` contains the launch/forecast, PTY transcript, trace and expectation readback, initial failed scoring run, successful metrics/results and feedback, and provider sandbox receipts. Credentials are not included in these receipts.
 
 **Remaining P5.5 gates at the time of this 2026-10-17 continuation:** resolve or review the direct-versus-Flex quality expectation; prepare at least eight reviewed selected replays across three source groups; calibrate the judge and run the then-planned GEPA acceptance pilot; reconcile final incremental costs. No GEPA run, candidate approval, or installation was performed in that continuation. Rotate the Databricks token used with the stale external judge URL before further credentialed acceptance work.
+
+## P5.5 governed acceptance continuation — 2026-10-17
+
+The implementation now follows [the governed acceptance runbook](../runbooks/p55-acceptance.md).
+P5.5 remains open. A completely evaluated, rejected candidate can complete the
+acceptance experiment, while installation remains a separate explicit action.
+Missing evidence, budget stops and pending reconciliation are incomplete outcomes.
+
+- **Local quality gate passed:** `make check`, `make check-docs` and
+  `git diff --check` passed with **486 tests passed, one opt-in live test skipped**,
+  Ruff, formatting, type checking, documentation links, OpenAPI and package build.
+  Regression coverage includes interrupted search escaping optimizer retry
+  handlers while preserving cleanup and recovery receipts.
+- **Scorer governance verified:** `fleet-metric-v5`, approval policy 3, and eight
+  version-1 scorer definitions were published and read back in both evaluation
+  experiment `3776499476974920` and optimization experiment `2589809242323267`.
+  Monitoring remains disabled. The optimization experiment was previously unbound;
+  it now uses the configured `uscentral.fleet_gepa.fleet_rlm_gepa` trace prefix.
+  Evaluation retains `uscentral.fleet_observability.fleet_rlm_eval`. No existing
+  trace binding was reassigned.
+- **Judge calibration passed:** the user approved all twelve control verdicts;
+  six valid and six negative controls passed **12/12** with caching disabled.
+  [Calibration run](https://8259565402437752.2.gcp.databricks.com/ml/experiments/3776499476974920/runs/5c3014e8ec0e41a3ab53d50b1cc60882)
+  is `FINISHED`; its report artifact matched local readback. A calibration
+  [trace with six spans](https://8259565402437752.2.gcp.databricks.com/ml/experiments/3776499476974920/traces/4d29a83c247c7e299ddc7dd5bb76821f)
+  was read back from the exact evaluation UC prefix. This calibrates the bounded
+  control set; it does not establish general task quality.
+- **Structured evidence implemented:** reviewed artifact/delegation gold stays
+  outside program inputs. Host receipts cover artifact content, explicit/native
+  children, copied input paths, successful invocation and promoted hashes.
+  Declared Python verification executes only in Daytona. Missing or incomplete
+  required evidence fails quality. The new source remains subject to live
+  Daytona acceptance; the local regressions do not claim provider compatibility.
+- **Lakebase migration passed:** schema 2 upgraded to schema 3 through the
+  migration role, adding structured expectation storage. No expired replay rows
+  were present. Lakebase currently contains **zero approved replay reviews across
+  zero source groups**. This does not classify older UC tables as eligible replay
+  evidence. Eight approved selected replays across three source groups, including
+  two noncritical train/dev groups and a critical holdout group, remain required.
+- **Route rubric resolved for new cases:** direct means no execution, Flex means
+  bounded computation/files, and RLM means exploration. Newly generated numerical
+  cases use Flex. The historical conversion trace and its direct-label mismatch
+  were not relabeled or rescored into a pass.
+- **Recovery and budget controls implemented:** the search winner is persisted
+  before validation; exclusive campaign/ledger locks and individual receipts allow
+  scoring recovery and reuse completed observations. Unknown execution/search
+  outcomes cannot automatically replay. Resume checks current data, labels,
+  scorer, calibration, incumbent, code, dependencies and effective configuration.
+- **Cost remains provisional:** the Genie readback returned **$2.427101** of shared
+  workspace overlap, with latest covered usage through **11:20 UTC**. It is delayed,
+  excludes Daytona attribution, and does not replace the carried $20 prior
+  forecast. The live ledger reserves $1.20 for the twelve controls and $3 fixed
+  overhead, giving a **$24.20 cumulative forecast** for this continuation. Its
+  conservative current-deployment allowances ($5 per complete rollout and $2
+  extra reflection per search metric call) reject even a minimum production
+  campaign: twelve validation rollouts plus one search call project **$91.20**.
+  These are planning allowances, not measured tariffs or billed charges. No GEPA
+  search, candidate installation or live Daytona verification was run here.
+- **Evidence:** `.scratch/p55-acceptance/` contains publication, migration,
+  calibration/readback, Genie metadata/billing and forecast receipts. The local
+  registry/calibration pointers are under ignored `.fleet/compiled/`. Credentials
+  are excluded. The user confirmed token rotation before credentialed work.
+
+**Remaining gates:** prepare and review the selected replay set, publish/read back
+its frozen UC dataset, obtain an admissible forecast within the unchanged $48/$60
+thresholds, execute complete paired production acceptance, verify provider cleanup
+and reconcile final incremental costs. Lakebase lease-loss fault injection and
+other previously listed operational checks remain open independently.
+
+### Additional complex-trace request — 2026-10-17
+
+The bounded trace-generation attempt did not produce a completed Turn or a trace
+ID. Its isolated Session workspace had no source files. A multiline prompt was
+split by the interactive TUI into five separate requests; one exploration reached
+10 model calls before cancellation, one partial request failed, and three queued
+fragments were stopped with the temporary CLI. Lakebase readback found zero
+persisted Turns for the Session. The single Daytona sandbox created for the
+exploration is confirmed `STOPPED`; the temporary API on port 8001 is stopped.
+No trace, artifact, or evaluation result is claimed from these attempts.
+
+Five conservative $5 rollout allowances are retained in the local acceptance
+ledger because exact costs for the canceled requests are unavailable. This raises
+the projected cumulative forecast from $24.20 to **$49.20**, above the $48 target
+but below the $60 cumulative cap. The refreshed Genie billing snapshot showed
+**$2.465045** of shared workspace usage through 12:00 UTC, queried at 13:38 UTC;
+it predates this run and cannot attribute this Session. Daytona/model usage is not
+fully reconciled. Receipts are under `.scratch/complex-traces-20261017/` and the
+refreshed Genie [billing readback](https://8259565402437752.2.gcp.databricks.com/one/chat/threads/148e3b4e533a45b186c6d5e0fd3e4cac?o=8259565402437752&utm_source=genie_chat_mcp).
+The user then explicitly requested additional complex traces and directed that
+they be generated by interacting with `uv run fleet cli` in tmux. Two one-line
+RLM tasks completed in Session `complex-traces-02d3e0ff96e5`. The event
+reconciliation trace
+`trace:/uscentral.fleet_observability.fleet_rlm_eval/69d338932f0fc47cb2ac9d43622ffc77`
+contains 81 spans, saved `normalized.csv` and `summary.json`, and records an
+independent delegated recomputation agreeing on 13 input rows, 12 transactions,
+status counts (8 paid, 3 refunded, 1 pending), paid totals (North 200, South
+655, West 455), and grand total 1,310. The scheduling trace
+`trace:/uscentral.fleet_observability.fleet_rlm_eval/d2ddc112138e0300fe8a524c909e6ead`
+contains 92 spans, saved `schedule.csv` and `summary.json`, and records a
+delegated schedule verification and a brute-force path check agreeing on an
+18-unit project duration and critical path A → C → D → F → G. Both fully
+qualified trace references passed `fleet trace verify --scope evaluation` and
+were read back from Session history. The interactive CLI and temporary API
+shut down after completion.
+
+These two later runs were authorized as a bounded continuation despite the
+previous $49.20 forecast exceeding the $48 admission target. Retaining two
+additional conservative $5 allowances projects $59.20 cumulative spend,
+including the $3 fixed remainder, leaving $0.80 under the $60 cap. This is a
+planning estimate, not attributed or reconciled provider billing. Do not run
+more paid traces or evaluation campaigns until usage is reconciled and the
+forecast is brought back within the $48 target.
 
 ## Operating constraints
 

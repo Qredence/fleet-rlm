@@ -53,7 +53,9 @@ Use `/mode hybrid`, then enter exactly:
 Convert 72 degrees Fahrenheit to Celsius, rounded to one decimal place.
 ```
 
-The expected value is **22.2**. Retain the answer, reported route, trace ID,
+The expected value is **22.2** and the current computation rubric expects **Flex**.
+The historical run with a gold direct label remains recorded as a mismatch;
+new label versions do not erase that evidence. Retain the answer, reported route, trace ID,
 Session ID, persistence confirmation, and `/history` and `/trace` output. Exit
 with `/exit` to flush tracing and close the temporary runtime. Confirm the
 canary sandbox reaches the stopped state through Daytona; do not delete
@@ -70,7 +72,7 @@ window for a cold warehouse; poll the same trace and record any timeout.
 uv run --env-file .env fleet trace verify TRACE_ID --scope evaluation
 uv run --env-file .env fleet eval label TRACE_ID \
   --status synthetic --group synthetic-direct-00 \
-  --answer 22.2 --value 22.2 --route direct --critical
+  --answer 22.2 --value 22.2 --route flex --critical
 ```
 
 For a bounded read and scoring of the already executed Turn, use the following

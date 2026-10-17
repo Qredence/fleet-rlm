@@ -4,6 +4,10 @@ Evaluation scorers live in `src/fleet_rlm/optimize/scorers.py`. This page descri
 the explicit evaluation workflows. `fleet eval` exposes dataset/run/label commands;
 GEPA remains a deliberate isolated optimization workflow.
 
+The [P5.5 runbook](../runbooks/p55-acceptance.md) describes scorer publication,
+structured gold, reviewed UC datasets, calibration, spend admission and resumable
+paired validation. Registration does not start automatic monitoring.
+
 ## Run evaluation against its own server
 
 Use `uv run --env-file .env` for the server, evaluation commands, and trace
@@ -62,8 +66,8 @@ Retrieval groundedness is applied only to traces containing a `RETRIEVER`
 span. Inapplicable custom scorers return `None`, which MLflow skips, instead of
 logging null feedback without an error. Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
-These decoding changes use scorer version `fleet-metric-v3` so stale feedback
-is not treated as current.
+Current scoring uses `fleet-metric-v5`; changed definitions invalidate earlier
+feedback and candidate approval evidence.
 
 ## Metrics
 
@@ -87,12 +91,14 @@ Every metric scores the Turn's final prediction (`answer`, `route`, `lm_calls`,
 | `answer_correctness` | always | `FleetJudge` verdict: `AnswerJudge` against the gold answer, or `TurnJudge` reference-free when there is none |
 | `expected_values` | `expected_values` labelled | 1 if every value appears in the answer |
 | `route` | gold `route` labelled | 1 if the Turn took that route |
+| `artifact_correctness` | structured artifact gold | 1 if content and required Daytona verification match |
+| `delegation_correctness` | structured child gold | 1 if child count, inputs, success and promoted hashes match |
 | `efficiency` | always | Measured execution efficiency; it contributes only after all applicable correctness checks pass |
 
 `fleet_metric(gold, pred, trace=None, pred_name=None, pred_trace=None, *, judge_lm)`
 returns `dspy.Prediction(score, feedback, objective_scores)`. `quality` is the
-minimum of judge correctness, labeled expected-value checks, and a labeled route
-check. `score` is zero if quality is below 1; otherwise it is
+minimum of judge correctness/safety, labeled values and route, and applicable
+artifact/delegation checks. `score` is zero if quality is below 1; otherwise it is
 `0.9 + 0.1 * efficiency`. The judge must report both correctness and safety.
 An empty answer scores zero without calling the judge. The feedback lists each
 check and its reason, adds the expected answer, and names the component GEPA is
