@@ -58,6 +58,15 @@ def test_execute_returns_values_finals_and_code_errors(sandbox):
     assert interpreter.execute("print('only output')") == "only output"
 
 
+def test_rlm_output_fields_make_positional_submit_work(sandbox):
+    rlm = dspy.RLM("subtask -> findings, learned_skill_note")
+    interpreter = DaytonaInterpreter(manager_on(sandbox))
+    rlm._inject_execution_context(interpreter, {})
+    assert [field["name"] for field in interpreter.output_fields] == ["findings", "learned_skill_note"]
+    final = interpreter.execute("SUBMIT('found 3', 'note')")
+    assert isinstance(final, FinalOutput) and final.output == {"findings": "found 3", "learned_skill_note": "note"}
+
+
 def test_host_tools_run_in_the_interpreters_dspy_context(sandbox):
     lm = dspy.utils.DummyLM([])
     with dspy.context(lm=lm):

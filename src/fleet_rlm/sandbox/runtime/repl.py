@@ -123,6 +123,20 @@ def _submit(**kwargs: Any) -> None:
     raise FinalOutput(kwargs)
 
 
+def _typed_submit(names: list[str]) -> Any:
+    """SUBMIT over the run's output fields, accepting positional or keyword values like DSPy's interpreters."""
+
+    def submit(*args: Any, **kwargs: Any) -> None:
+        if args and kwargs:
+            raise TypeError("SUBMIT accepts positional or keyword values, not both")
+        values = dict(zip(names, args, strict=False)) if args else dict(kwargs)
+        if len(args) > len(names) or set(values) != set(names):
+            raise TypeError(f"SUBMIT fields do not match the output fields: SUBMIT({', '.join(names)})")
+        raise FinalOutput(values)
+
+    return submit
+
+
 def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
     context_globals = globals()
     namespace: dict[str, Any] = {
@@ -174,14 +188,21 @@ def _invalid_bindings(variables: Any, tools: Any) -> bool:
     )
 
 
-def _run(code: str, variables: dict[str, Any], tools: list[str]) -> dict[str, Any]:
+def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = None) -> dict[str, Any]:
     if not isinstance(code, str) or len(code.encode("utf-8")) > MAX_CODE:
         return {"error": True, "error_type": "ValueError", "stderr": "invalid or oversized code"}
     if _invalid_bindings(variables, tools):
         return {"error": True, "error_type": "ValueError", "stderr": "invalid execution bindings"}
+    if outputs is not None and (
+        not isinstance(outputs, list)
+        or len(outputs) > 64
+        or any(not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name) for name in outputs)
+    ):
+        return {"error": True, "error_type": "ValueError", "stderr": "invalid output fields"}
     namespace = _STATE["namespace"]
     if namespace is None:
         namespace = _STATE["namespace"] = _make_namespace(tools)
+    namespace["SUBMIT"] = _typed_submit(outputs) if outputs else _submit
     protected = RESERVED_NAMES | set(tools)
     for name in tools:
         if name not in RESERVED_NAMES:
@@ -238,7 +259,9 @@ def _fleet_exec(payload_json: str) -> None:
     _STATE["stdout"] = sys.stdout  # the interpreter's per-run stream; markers must reach it, not the capture
     try:
         payload = json.loads(payload_json)
-        result = _run(payload.get("code"), payload.get("variables") or {}, payload.get("tools") or [])
+        result = _run(
+            payload.get("code"), payload.get("variables") or {}, payload.get("tools") or [], payload.get("outputs")
+        )
         if len(json.dumps(result, separators=(",", ":")).encode("utf-8")) > MAX_BODY - 1024:
             result = {"error": True, "error_type": "ValueError", "stderr": "Execution result exceeds response limit"}
         _emit(RESULT_MARK, result)

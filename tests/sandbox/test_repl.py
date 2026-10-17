@@ -73,6 +73,25 @@ def test_errors_and_submit_are_reported(sandbox):
     assert final["final"] == {"answer": 42, "note": "done"}
 
 
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("SUBMIT('found', 'note')", {"findings": "found", "learned": "note"}),
+        ("SUBMIT(findings='found', learned='note')", {"findings": "found", "learned": "note"}),
+        ("SUBMIT('found', learned='note')", None),
+        ("SUBMIT(answer='found')", None),
+        ("SUBMIT('a', 'b', 'c')", None),
+    ],
+)
+def test_submit_takes_the_run_output_fields_positionally_or_by_keyword(sandbox, code, expected):
+    result = run(sandbox, repl.create_context(sandbox), code, outputs=["findings", "learned"])
+    if expected is None:
+        assert result["error"] is True and result["error_type"] == "TypeError"
+        assert "SUBMIT" in result["stderr"]
+    else:
+        assert result["final"] == expected
+
+
 def test_tool_bindings_survive_variables_and_round_trip_through_the_host(sandbox):
     calls: list[dict[str, Any]] = []
 

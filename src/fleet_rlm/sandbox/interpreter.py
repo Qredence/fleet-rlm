@@ -54,6 +54,8 @@ class DaytonaInterpreter:
             for name in self.tools
         ):
             raise ValueError("Bridged tool names must be unreserved Python identifiers")
+        # DSPy's RLM sets this before each run so SUBMIT takes the signature's output fields.
+        self.output_fields: list[dict[str, Any]] | None = None
         self.ns_id = f"ns_{uuid.uuid4().hex[:8]}"
         self._context = contextvars.copy_context()
         self._started = False
@@ -261,9 +263,10 @@ class DaytonaInterpreter:
             span.set_inputs({"code": activity_text(code)})
             host_calls_before = self._host_calls
             try:
-                response = self.manager.run_namespace(
-                    self, {"code": code, "variables": variables or {}, "tools": list(self.tools)}
-                )
+                payload: dict[str, Any] = {"code": code, "variables": variables or {}, "tools": list(self.tools)}
+                if self.output_fields:
+                    payload["outputs"] = [field["name"] for field in self.output_fields]
+                response = self.manager.run_namespace(self, payload)
                 span.set_outputs(
                     {
                         "stdout": activity_text(str(response.get("stdout", ""))),
