@@ -219,10 +219,14 @@ class DaytonaSandboxManager:
         self.check_turn()
         results = []
         total = 0
+        with self.root._budget_lock:
+            inputs = dict(self.root._child_receipts.get(self.agent_id, {}).get("inputs", {}))
         for path in self.list_workspace_files():
             if not path.startswith("artifacts/"):
                 continue
             raw = self.read_workspace_file(path)
+            if inputs.get(path) == hashlib.sha256(raw).hexdigest():
+                continue  # an unchanged copied-in artifact is the parent's, not this child's output
             total += len(raw)
             if total > 25_000_000 or len(results) >= 100:
                 raise ValueError("Child output promotion quota exceeded")
@@ -710,7 +714,8 @@ class DaytonaSandboxManager:
             "context datasets expose .path/.lines()/.chunks()/.search(). "
             "Use workspace.write_artifact(name, content) for results. "
             "Artifact names are relative to artifacts/ (e.g. 'result.txt'); use the helper's returned path. "
-            "Nested DSPy code agents allocate fresh child sandboxes; only files/ and skills/ inputs are copied. "
+            "Nested DSPy code agents allocate fresh child sandboxes; files/ and skills/ inputs are copied, and "
+            "spawn_agent(input_paths=[...]) can also pass earlier artifacts/ paths. "
             "Successful child artifacts appear under artifacts/<agent-id>/; inspect workspace.tree() for their paths. "
             + STOPPING_RULES
         )

@@ -31,6 +31,7 @@ def test_workspace_paths_are_rooted_and_have_bounded_names() -> None:
         ("files/a.log", "files/a.log"),
         ("/workspace/files/a.log", "files/a.log"),
         ("skills/x/SKILL.md", "skills/x/SKILL.md"),
+        ("/workspace/artifacts/report.json", "artifacts/report.json"),
     ],
 )
 def test_child_input_paths_accept_the_sandbox_absolute_form(given: str, expected: str) -> None:
@@ -39,7 +40,7 @@ def test_child_input_paths_accept_the_sandbox_absolute_form(given: str, expected
     assert _child_input_path(given) == expected
 
 
-@pytest.mark.parametrize("bad", ["/workspace/artifacts/x", "/etc/passwd", "/workspace/files/../memory/x", "files/../x"])
+@pytest.mark.parametrize("bad", ["/workspace/memory/x", "/etc/passwd", "/workspace/files/../memory/x", "files/../x"])
 def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> None:
     from fleet_rlm.workspace import _child_input_path
 

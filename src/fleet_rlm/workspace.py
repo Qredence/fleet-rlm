@@ -32,8 +32,8 @@ def _child_input_path(path: str) -> str:
     if isinstance(path, str) and path.startswith("/workspace/"):
         path = path[len("/workspace/") :]
     clean_path = _workspace_relative_path(path)
-    if not clean_path.startswith(("files/", "skills/")):
-        raise ValueError("Child inputs must be files beneath files/ or skills/")
+    if not clean_path.startswith(("files/", "skills/", "artifacts/")):
+        raise ValueError("Child inputs must be files beneath files/, skills/ or artifacts/")
     return clean_path
 
 

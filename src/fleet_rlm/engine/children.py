@@ -49,7 +49,8 @@ class ChildAgents:
     ) -> dict[str, Any]:
         """Run a child with selected files; return findings and digest-verified promoted artifacts.
 
-        No inputs are copied unless listed. The only optional Fleet tool is
+        No inputs are copied unless listed; input_paths may name files/, skills/ or earlier
+        artifacts/ paths, and unchanged copied artifacts are not promoted back. The only optional Fleet tool is
         spawn_agent, allowing bounded further delegation. max_llm_calls is
         DSPy's query/facade limit; the shared turn ledger also meters actions.
         """
