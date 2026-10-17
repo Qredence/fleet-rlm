@@ -11,6 +11,9 @@ source control.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/fleet` | PostgreSQL DSN for Session/VFS storage. |
+| `FLEET_DATABASE_SCHEMA` | `fleet_rlm_lite` in the checked-in config (`public` code fallback) | Lowercase schema name for Fleet Lite tables. The fresh Lakebase database is configured to use a dedicated schema; provision a separate migration role and grant the runtime role access to its objects. |
+| `FLEET_DATABASE_MIGRATION_URL` | empty | Optional secret-only DSN for schema migrations. When omitted, migrations use `FLEET_DATABASE_URL`; when separate, it must target the same database. |
+| `FLEET_LAKEBASE_ENDPOINT` | empty | Optional Lakebase endpoint resource path. When set, Fleet generates a fresh Databricks OAuth database credential for each new physical connection; the DSN must contain host/user/database, omit password, and require TLS. |
 | `FLEET_DAYTONA_API_KEY` | empty | Daytona API credential. |
 | `FLEET_DAYTONA_ORG_ID` | empty | Daytona organization ID. |
 | `FLEET_DAYTONA_VOLUME_ID` | empty | Daytona Volume ID. |
@@ -18,8 +21,8 @@ source control.
 | `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes. Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
-| `FLEET_SUB_MODEL` | `openai/system.ai.claude-haiku-5-5` | Sub-model identifier. |
-| `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Reflection model for optimization. |
+| `FLEET_SUB_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Code fallback for the sub-model. The checked-in `config/fleet.toml` instead selects `openai/system.ai.deepseek-v4-1-flash` for both root and sub roles. |
+| `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-haiku-5-5` | Code fallback for GEPA reflection. The checked-in `config/fleet.toml` selects the same route, with temperature 1.0 and max tokens 32000. Relative model strength is an evaluation hypothesis, not established by configuration. |
 | `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. |
 | `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |
 | `DATABRICKS_TOKEN` | empty | Databricks credential for Unity Gateway `openai/` models. |
@@ -37,14 +40,18 @@ source control.
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
 | `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |
-| `FLEET_MLFLOW_MODE` | `local` | `local` sends traces, eval and optimizer runs to the local MLflow server; `databricks` uses the workspace URI and Unity Catalog trace storage. |
-| `FLEET_MLFLOW_TRACKING_URI` | `http://127.0.0.1:5001` | MLflow tracking destination. `MLFLOW_TRACKING_URI` is also accepted. In `local` mode a `databricks` URI is ignored. |
-| `FLEET_MLFLOW_EXPERIMENT_NAME` | `fleet-rlm-dev` | MLflow experiment name. `MLFLOW_EXPERIMENT_NAME` is also accepted. In `local` mode an absolute workspace path is ignored. |
-| `FLEET_MLFLOW_TRACE_CATALOG` | empty | Optional Unity Catalog trace catalog. |
-| `FLEET_MLFLOW_TRACE_SCHEMA` | empty | Optional Unity Catalog trace schema. |
-| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` | empty | Optional trace table prefix. |
-| `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | empty | SQL warehouse ID for Databricks tracing. |
-| `FLEET_MLFLOW_EVAL_EXPERIMENT_NAME` | `fleet-rlm-eval` (local mode) | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
+| `FLEET_MLFLOW_MODE` | `databricks` | `databricks` is the default for runtime, evaluation, and optimization; set `local` explicitly for local-only MLflow. |
+| `FLEET_MLFLOW_TRACKING_URI` | `databricks` | MLflow tracking destination. `MLFLOW_TRACKING_URI` is also accepted. |
+| `FLEET_MLFLOW_EXPERIMENT_NAME` | `/Shared/fleet-rlm-runtime` | Runtime trace experiment. `MLFLOW_EXPERIMENT_NAME` is also accepted. |
+| `FLEET_MLFLOW_TRACE_CATALOG` | `uscentral` | Unity Catalog catalog for runtime traces. |
+| `FLEET_MLFLOW_TRACE_SCHEMA` | `fleet_observability` | Unity Catalog schema for runtime traces. |
+| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` | `fleet_rlm_runtime` | Runtime trace table prefix. |
+| `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | configured warehouse ID | SQL warehouse ID for Databricks tracing. |
+| `FLEET_MLFLOW_EVAL_EXPERIMENT_NAME` | `/Shared/fleet-rlm-eval` | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
+| `FLEET_MLFLOW_OPTIMIZATION_EXPERIMENT_NAME` | `/Shared/fleet-rlm-gepa` | Experiment for GEPA runs and candidate artifacts. |
+| `FLEET_MLFLOW_OPTIMIZATION_TRACE_SCHEMA` | `fleet_gepa` | Unity Catalog schema for optimization traces. |
+| `FLEET_MLFLOW_OPTIMIZATION_TRACE_TABLE_PREFIX` | `fleet_rlm_gepa` | Optimization trace table prefix. |
+| `FLEET_MLFLOW_EVAL_TRACE_TABLE_PREFIX` | `fleet_rlm_eval` | Unity Catalog trace table prefix for evaluation. |
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |
@@ -53,18 +60,53 @@ Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
 validation; it does not authenticate callers. The API has no authentication.
 
-`local` is the default MLflow mode. `fleet cli` starts (or reuses) the local
-server on `127.0.0.1:5001`, and `fleet serve`, `fleet eval` and the optimizer
-use the same target. `fleet serve` logs a warning and runs without tracing when
-the local server is not reachable. In `local` mode, Databricks values left in
-`.env` (`databricks://` URIs, `/Users/...` experiment paths) are ignored rather
-than rejected; `GET /sessions/{id}/config` reports the resolved destination as
-`mlflow_target`.
+`databricks` is the default MLflow mode. Runtime traces, evaluation, and GEPA
+use distinct experiments; the optimization experiment uses the `fleet_gepa`
+Unity Catalog schema. The checked-in `/Shared/...` names are portable defaults;
+set environment overrides when using an existing workspace experiment. `fleet
+cli` starts a local MLflow server only when `FLEET_MLFLOW_MODE=local`. In that
+explicit local mode, Databricks URIs and absolute workspace experiment names
+are ignored. `GET /sessions/{id}/config` reports the effective destination.
 
-`FLEET_MLFLOW_MODE=databricks` requires a `databricks` tracking URI and all of
-`FLEET_MLFLOW_TRACE_CATALOG`, `FLEET_MLFLOW_TRACE_SCHEMA`, and
-`FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID`. The experiment name must be an
-absolute workspace path (for example, `/Shared/fleet-rlm`).
+Databricks mode requires a `databricks` tracking URI, a Unity Catalog catalog,
+runtime and optimization schemas, a SQL warehouse ID, and absolute workspace
+paths for all three experiments. GEPA reads approved examples from runtime
+traces but writes optimization runs to its separate experiment.
+
+Authentication is client-specific. MLflow uses the Databricks SDK identity
+selected by its tracking URI (default auth for `databricks`, or the named SDK
+profile in `databricks://<profile>`); Unity Gateway requests use the static
+`DATABRICKS_TOKEN` value and Fleet does not refresh it in-process; Lakebase uses
+the PostgreSQL identity in `FLEET_DATABASE_URL` for runtime queries and session
+leases. These settings can therefore resolve to different principals. Databricks
+recommends OAuth for production Gateway clients; configure a supported OAuth
+flow before relying on unattended long-lived service operation ([Gateway
+quickstart](https://docs.databricks.com/gcp/en/unity-gateway/quickstart)). Without
+`FLEET_LAKEBASE_ENDPOINT`, it uses the DSN's native PostgreSQL credential. With
+an endpoint configured, Fleet asks the Databricks SDK for a fresh OAuth database
+credential for every new pooled or dedicated lease connection. The Databricks
+identity must have matching Lakebase OAuth roles and database grants for each
+configured DSN; an existing native-password `fleet_app` role is not automatically
+an OAuth role.
+Set `FLEET_DATABASE_MIGRATION_URL` to a separate DDL role when runtime privileges
+must not create or alter schema objects. Fleet creates the configured schema and
+applies versioned migrations through that role; provision USAGE and required
+table privileges for the runtime role. The migration role must be able to create
+the schema and objects. The current Lakebase setup uses native-password
+`fleet_migrator` for migrations and `fleet_app` for runtime queries and session
+leases; both DSNs are secret-only and must remain in ignored local or deployment
+configuration. No new service principal or shared authentication flow is
+required. MLflow uses Databricks SDK authentication and Gateway uses the
+configured `DATABRICKS_TOKEN`. Lakebase OAuth remains an optional alternative;
+when used, Fleet validates TLS and that both DSNs target the same host and
+database, then obtains credentials separately for each role from the configured
+Databricks identity.
+Configure the SDK identity through the normal Databricks auth environment/profile
+before starting Fleet; SDK-based OAuth needs Databricks SDK 0.89.0 or newer. See
+[Lakebase OAuth token rotation](https://docs.databricks.com/gcp/en/oltp/projects/external-apps-connect).
+A valid CLI profile does not verify MLflow SDK auth,
+Gateway access, SQL warehouse grants, or Lakebase role access. Fleet's local
+configuration is not evidence that the deployed identities or grants match.
 
 These MLflow-related names are not read by Fleet and have no effect:
 `MLFLOW_ENABLED`, `FLEET_MLFLOW_TRACING_ENABLED`, `FLEET_MLFLOW_EXPOSE_TRACE_ID`,
@@ -111,7 +153,8 @@ Leave optional non-secret overrides commented out rather than inserting blank
 values that shadow TOML.
 
 Credentials (`DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`,
-`FLEET_TYPESAFE_API_KEY`) and `FLEET_DATABASE_URL` are environment/.env only.
+`FLEET_TYPESAFE_API_KEY`, `FLEET_DATABASE_URL`, and
+`FLEET_DATABASE_MIGRATION_URL`) are environment/.env only.
 TOML secret keys are rejected without echoing values. Organization and Volume
 identifiers are not credentials and may be configured in `[daytona]`.
 

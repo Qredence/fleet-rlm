@@ -6,6 +6,8 @@
 - [CLI](reference/cli.md)
 - [Database](reference/database.md)
 - [Evaluation](reference/evaluation.md)
+- [MLflow trace retention runbook](runbooks/mlflow-trace-retention.md)
+- [Evaluation canary runbook](runbooks/evaluation-canary.md)
 - [Source layout](reference/source-layout.md)
 - [Architecture](../ARCHITECTURE.md)
 - [Contributing](../CONTRIBUTING.md)

@@ -12,12 +12,15 @@ Current user and developer documentation for Fleet RLM Lite.
 - [HTTP API](reference/http-api.md): routes and SSE behavior.
 - [CLI](reference/cli.md): server and Rich client commands.
 - [Database](reference/database.md): Postgres tables and persistence model.
+- [MLflow trace retention](runbooks/mlflow-trace-retention.md): manual governed
+  cleanup for Fleet's Unity Catalog trace tables.
 - [Source layout](reference/source-layout.md): current runtime file ownership.
 
 ## Current behavior is the source of truth
 
 Runtime behavior is implemented under `src/fleet_rlm/`. This Lite runtime does
-not include the legacy terminal package or Alembic migrations.
+not include the legacy terminal package. Store schema changes use numbered
+additive migrations.
 Non-secret process settings use schema-3 `config/fleet.toml` and validated
 environment overrides. It creates its required tables at startup. Live Daytona
 and model-provider behavior requires external credentials and resources and is

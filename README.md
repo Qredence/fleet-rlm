@@ -33,8 +33,9 @@ persists session state, and a streaming terminal client makes execution visible.
   results, agent lifecycles, and budgets in the terminal; correlate turns with
   MLflow traces.
 - **Evaluate program changes deliberately.** Use reviewed examples and GEPA to
-  produce versioned candidate programs, then explicitly promote or roll them back.
-  Optimization does not silently replace the active program.
+  produce versioned candidate programs, then explicitly approve one after its
+  recorded identities match the current runtime. Older manifests require
+  reevaluation. Optimization never replaces the active program by itself.
 
 ## How it fits together
 
@@ -100,11 +101,11 @@ Never commit `.env` or credentials. See the
 uv run fleet cli --session research-1
 ```
 
-One command starts a local MLflow server (data in `.fleet/mlflow`, UI at
-`http://127.0.0.1:5001`), starts the API server on the configured loopback port
-(default 8000, log in `.fleet/logs/server.log`), opens the terminal client, and
-stops both when you exit. Traces go to the local MLflow experiment `fleet-rlm-dev`
-instead of the tracking URI in `.env`; pass `--mlflow env` to keep the configured one.
+One command starts the API server on the configured loopback port (default 8000,
+log in `.fleet/logs/server.log`), opens the terminal client, and stops the server
+when you exit. By default, runtime traces use the configured Databricks MLflow
+experiment. Pass `--mlflow local` to use a local MLflow server under `.fleet/mlflow`;
+pass `--mlflow env` to explicitly use the configured tracking URI.
 If an API server is already running on that port (for example from `uv run fleet
 serve`), the client connects to it and leaves it running; pass `--url` to connect to a
 specific server without starting anything. Reuse a session ID to continue its saved
@@ -140,7 +141,7 @@ completion for slash commands and arguments. Use `/help` for the full command li
 | Models and settings | `/models`, `/model root`, `/model sub`, `/config`, `/settings` |
 | Durable state | `/sessions`, `/history`, `/memory [query]` |
 | Skills | `/skills`, `/skills push`, `/skills pull` |
-| Inspection and program updates | `/trace`, `/optimize`, `/reload` |
+| Inspection and program updates | `/trace`, `/optimize` |
 
 Streaming events expose route summaries, model/module/tool start and end events,
 IDs and timing, bounded tool arguments and results, generated Python, execution
@@ -153,18 +154,34 @@ terminal captures, traces, and artifacts as potentially sensitive.
 
 ## Evaluation and optimization
 
-`fleet optimize --session <id>` (or `/optimize` in the TUI) runs the GEPA evaluation workflow against reviewed,
-gold-labeled session examples. It requires configured external services and
-complete source lineage and input hashes. Source-grouped train/dev/holdout splits
-and fresh evaluation runtimes keep candidate evaluation separate from live
-session state.
+Every Turn is an MLflow trace. `fleet optimize --session <id>` (or `/optimize` in
+the TUI) runs the explicit native DSPy GEPA workflow; it does not automatically
+score historical traces. `fleet eval label <trace-id> --answer "..." [--value V]
+[--route R]` adds gold labels. Only approved, selected replay examples with valid
+immutable snapshots can enter the curated optimization dataset; a lossy trace
+can remain evaluation evidence, with its identity references, but cannot supply
+replay content. Partial labels preserve the existing expectations for that
+example. Selected replays must have gold labels before they can be approved for
+GEPA.
 
-Candidates and evaluation manifests are saved separately from the active program;
-promotion and rollback are explicit, gated operations. `/reload` asks for approval
-before loading the saved Flex program at a turn boundary. This optimizes DSPy
-programs, not model weights, and does not establish a quality improvement without
-measured results. ReAnchor calibration is currently skipped without a compatible
-client.
+GEPA uses the built-in code proposer and current deployment settings, including
+persisted Session overrides. The manifest records the effective model
+configuration provenance. Search uses grouped train/dev data; holdout is read
+only after search. Each candidate and incumbent receives three paired validation
+passes. The correctness quality is the minimum of judge correctness, labeled
+expected-value checks, and a labeled route check. The composite score is zero
+when quality is below 1; otherwise it is `0.9 + 0.1 × efficiency`. A critical
+case must have quality 1 in every pass. Promotion also requires no aggregate
+quality regression on dev or holdout, improved dev composite score, no holdout
+composite regression, zero holdout execution errors, and measured usage. The
+candidate manifest records split results and provenance.
+
+At `--approve`, Fleet verifies that the current incumbent, configuration, code,
+and dependencies still match the candidate's recorded identities. A stale
+manifest must be reevaluated before approval; `--approve` is not an unchecked
+rollback mechanism. Reflection uses `FLEET_REFLECTION_MODEL`. This optimizes
+DSPy programs, not model weights, and makes no quality claim without measured
+results.
 
 ## Limits and security
 

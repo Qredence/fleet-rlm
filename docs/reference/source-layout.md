@@ -19,9 +19,9 @@ src/fleet_rlm/
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # spawn_agent, spawn_agents, sub_rlm
 ├── store/
-│   └── db.py          # Store (every SQL statement, one pool) and the workspace/Turn mirror
+│   └── db.py          # Store, numbered additive migrations, one pool, workspace/Turn mirror
 ├── optimize/
-│   ├── artifacts.py   # Isolated rollouts, manifests, promotion gates, compiled-program loader
+│   ├── artifacts.py   # Isolated rollouts, manifests, promotion gate, approval, compiled-program loader
 │   ├── dataset.py     # Reviewed examples from Postgres/MLflow, grouped splits
 │   ├── scorers.py     # MLflow scorers, judge suite, and the GEPA metric
 │   ├── gepa.py        # `fleet optimize`
@@ -44,7 +44,7 @@ src/fleet_rlm/
 
 The corresponding implementation areas are covered by `tests/`. Repository
 commands are defined in the root `Makefile`; CI runs the Lite quality targets
-there rather than the removed terminal client or migration checks.
+there, including Store migration regressions.
 
 User Skills are managed from `.fleet/skills/`. `.agents/skills/` belongs to
 developer tooling and must not be treated as a user Skill source.

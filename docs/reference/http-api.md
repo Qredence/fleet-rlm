@@ -23,7 +23,6 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET`, `PUT`, `DELETE` | `/sessions/{session_id}/workspace/files/{rel_path}` | Download/write/delete workspace files. |
 | `GET` | `/sessions/{session_id}/memory?q=...` | Retrieve scoped memories and mark stale source digests. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/memory/{memory_id}` | Create/review/update/delete memories. |
-| `POST` | `/sessions/{session_id}/reload?approved=true` | Load the integrity-checked operator-owned active candidate. |
 | `POST` | `/skills/push?session_id=...` | Synchronize validated local user Skills. |
 
 There is no caller authentication. The service binds to loopback by default;
@@ -52,6 +51,17 @@ The JSON request has one required `task` string:
 ```json
 {"task":"Summarize the attached CSV and verify the totals with Python.","idempotency_key":"ledger-review-1"}
 ```
+
+`record_replay` defaults to `false`. Set it to `true` only when this Turn's
+inputs should be retained as a possible reviewed GEPA example. Fleet captures
+the exact bounded conversation, memory, selected dataset handle, Skills
+catalog/revision, non-secret runtime configuration, and workspace file bytes
+(up to 8 MB total). The snapshot
+is stored in Lakebase only after the Turn completes successfully and is not
+eligible for GEPA until its MLflow trace is explicitly labeled `approved` with
+gold expectations. This option can retain sensitive workspace content; use it
+only for data approved for that purpose. An oversized workspace fails before
+the engine runs. The TUI exposes the same opt-in with `/replay on` and `/replay off`.
 
 The response uses `text/event-stream`. Each data event is JSON prefixed by
 `data: ` and separated by a blank line. The server initially emits a

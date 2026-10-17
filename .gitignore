@@ -205,6 +205,8 @@ skills-lock.json
 
 plans
 PLANS.md
+!docs/plans/
+!docs/plans/fleet-rlm-audit-and-platform-alignment.md
 
 notebooks/
 .databricks

@@ -23,15 +23,18 @@ workspace and runs Python there. `store/` holds every SQL statement over one
 connection pool, plus the harness that mirrors the workspace and committed Turns.
 `engine/` holds the route vocabulary, every DSPy signature, the Turn program
 (`programs.py`) and the child-agent tools (`children.py`); `optimize/` holds
-datasets, scorers, the GEPA metric and runner (`fleet optimize`), and the single
-compiled-program loader. `skills.py` validates and synchronizes Skills. `config.py`
+datasets, scorers, the one `fleet_metric` and the GEPA runner (`fleet optimize`), and
+the single compiled-program loader. `skills.py` validates and synchronizes Skills. `config.py`
 defines the typed `FleetSettings` configuration.
 
 ## State and workspace
 
 PostgreSQL holds Session turn history and file content. The `VolumePostgresHarness` (in `store/db.py`)
 creates the tables it needs at startup and synchronizes workspace data through
-the Daytona Volume. There are no Alembic migrations in this Lite runtime.
+the Daytona Volume. Store schema changes use numbered additive migrations
+recorded in a migration ledger. Startup applies pending migrations under a
+transaction lock, using `FLEET_DATABASE_MIGRATION_URL` when configured and
+otherwise the runtime DSN.
 Daytona uses per-session subpaths for its workspaces. The supported workspace
 areas include `files`, `artifacts`, `memory`, `skills`, `buffers`, and `sessions`.
 Root sandboxes also mount a shared notes subpath at `/learned`
@@ -87,9 +90,15 @@ deployment policy. Native facade-created RLMs retain the compatibility policy
 of copying the current parent's `files/` and `skills/`, not its artifacts/memory.
 
 The optimization runner curates approved gold answers, groups by source lineage,
-and uses fresh disposable runtimes for each GEPA/evaluation example. Candidate
-programs and manifests are separate from operator-approved active pointers.
-The reflection LM is explicitly labeled when used as the metric judge; MLflow
+and uses fresh disposable runtimes for each GEPA/evaluation example. Native DSPy
+GEPA uses its built-in code proposer and the deployment's current settings,
+including persisted Session overrides; manifests capture model configuration
+provenance. Search uses train/dev data, with holdout evaluated only after search.
+Candidate programs and manifests are separate from operator-approved active
+pointers. Approval requires the current incumbent, configuration, code, and
+dependency identities to match the candidate manifest. Older manifests require
+reevaluation; approval does not provide an unchecked rollback path. The
+reflection LM is explicitly labeled when used as the metric judge; MLflow
 judge URIs are never passed as DSPy model IDs. ReAnchor is currently reported
 as skipped without a compatible calibration client. Passing unit tests is not
 evidence of provider compatibility or a measured quality improvement.
@@ -126,7 +135,7 @@ policy.
 - `cli.py`: the `fleet` command-line entry point.
 
 Keep documentation aligned with implemented routes and settings. Avoid
-reintroducing claims about removed migrations, a Node TUI,
+reintroducing claims about removed capabilities or a Node TUI,
 or retired API surfaces.
 
 ## Execution transport and recovery

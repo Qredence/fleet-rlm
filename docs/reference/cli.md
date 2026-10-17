@@ -7,21 +7,29 @@ uv run fleet cli [--session SESSION_ID] [--url URL] [--mlflow local|env]
                  [--mlflow-port 5001] [--mlflow-experiment fleet-rlm-dev] [--startup-timeout 180]
 uv run fleet serve [--host 127.0.0.1] [--port 8000]
 uv run fleet eval dataset|run|label
+uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization]
 ```
 
-`cli` is the one-command entry point. Unless `--url` is given, it starts what is not
-already running, waits for each service's `/health`, opens the interactive Rich
-client, and stops what it started when the client exits (the API server first, so it
-can flush traces, then MLflow):
+For Databricks operations with credentials in `.env`, use
+`uv run --env-file .env fleet ...` so SDK authentication receives them. For
+evaluation, follow the [evaluation canary runbook](../runbooks/evaluation-canary.md):
+the server must use the evaluation experiment and UC prefix before executing
+the task. `fleet eval run` prints recovery identifiers, uses fresh Sessions per
+invocation, and exits unsuccessfully on incomplete collection or scoring.
 
-- **MLflow** (`--mlflow local`, the default for now): a local MLflow server on
+`cli` is the one-command entry point. Unless `--url` is given, it starts the API
+server, waits for its `/health`, opens the interactive Rich client, and stops the
+server when the client exits:
+
+- **MLflow** (`--mlflow env`, the default): the configured tracking destination.
+  `--mlflow local` starts a local MLflow server on
   `127.0.0.1:{--mlflow-port}` with SQLite storage under `.fleet/mlflow`. The API server it
   starts traces to experiment `--mlflow-experiment` via environment overrides; `.env` is
-  not modified. `--mlflow env` starts no MLflow and leaves the configured tracking URI.
+  not modified. `--mlflow env` starts no MLflow server and leaves the configured tracking URI.
 - **API server**: `python -m fleet_rlm.cli serve` on the configured host and port, logging
   to `.fleet/logs/server.log` (MLflow logs to `.fleet/logs/mlflow.log`).
-- A healthy API server already on that port is reused and left running, and a healthy
-  MLflow server on the MLflow port is reused. `--url` connects to that server only.
+- A healthy API server already on that port is reused and left running. `--url`
+  connects to that server only.
 - A service that exits or is not ready within `--startup-timeout` seconds aborts the
   launch, prints the end of its log, and exits non-zero.
 
@@ -34,17 +42,45 @@ records. Older or untraced turns may have no ID; the client reports that explici
 A completed Turn is reported as persisted only
 after the server has successfully synchronized it to Session history.
 
+`fleet trace verify <trace-id>` flushes pending async writes and checks that a
+stored trace can be read with its spans. Use `--scope evaluation` or
+`--scope optimization` for those configured experiments. In Databricks mode,
+the command also verifies the experiment is bound to the configured Unity
+Catalog schema and table prefix; pass the fully qualified `trace:/...` ID for a
+Unity Catalog trace. This explicit operator check may issue a read to the
+configured tracking destination; it is not run during serving.
+
 Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
-`/memory [query]`, `/history`, `/trace`, `/reload`, `/sessions`, `/optimize`,
+`/memory [query]`, `/history`, `/trace`, `/sessions`, `/optimize`,
 `/config`, `/settings`, `/models`, `/model`, and `/exit`.
 `/memory [query]` reads this Session's saved memories, optionally
-filtered by query. `/reload` asks for explicit approval before reloading the
-saved Flex program at a turn boundary. `/optimize` invokes the source-checkout
-GEPA/MLflow workflow, which curates only reviewed, gold-labeled Session
-examples; it requires at least three usable examples as well as the corresponding
-model, Daytona, database, and tracking services. It does not approve or promote
-a candidate automatically.
+filtered by query. `/optimize [args]` runs `fleet optimize --session <this session> [args]`.
+It compiles and gates a GEPA candidate from self-contained, explicitly selected
+Turn snapshots with approved gold labels; it does not automatically score
+historical traces. Traces without a matching immutable Lakebase snapshot are
+skipped. It requires at least 8 examples from 3 source groups, as well as the
+corresponding model, Daytona, database, and tracking services. It never installs
+a candidate.
+`/optimize --approve <version>` (or the same CLI flag) installs one only when
+the current incumbent, configuration, code, and dependencies match the
+candidate's recorded identities. Old manifests require reevaluation. The engine
+loads an approved candidate at the start of the next Turn.
+
+`fleet eval label <trace-id> --answer "..." [--value V ...] [--route R] [--critical]`
+writes gold labels onto a trace; partial updates preserve existing expectations.
+`--critical` requires at least one supplied or previously saved expected value and pins the complete source group
+to GEPA holdout; a candidate must achieve quality 1 for every critical case in
+each of three paired validation passes. A promotion is refused if no critical
+holdout case is labeled. `--status` defaults to
+`approved` for a new label; updates preserve status and source group unless supplied.
+A new source group defaults to the trace's session id. The trace ID is printed after
+each Turn and by `/trace`.
+
+`fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
+`--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
+`--validation-ratio`, and `--approve VERSION`. Reflection calls and the three paired
+final validation passes are additional work, not covered by the search budget.
 
 ## Interactive tasks, settings, and model selection
 
@@ -68,6 +104,8 @@ key. Ctrl+C while editing clears input; Ctrl+C while streaming closes the stream
 and the server requests remote cancellation. A lost connection is not proof of
 rollback: check `/history` before retrying. An incomplete stream is labeled unknown,
 not persisted. EOF or `/exit` exits. Tab completes commands and supported arguments.
+Use `/replay on` to opt in to bounded immutable snapshot capture for subsequent
+Turns in this client process; `/replay off` disables it. Capture is off by default.
 
 - `/config` or `/settings`: inspect non-secret session models, mode, dataset,
   and operator-owned resource limits. Credentials are never returned.
