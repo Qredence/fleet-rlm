@@ -29,7 +29,7 @@ dependencies = [
     # Exact published release: the certified Fleet contract is DSPy 3.4.0.
     # assert_dspy_version() accepts only the literal final release and rejects
     # patches, prereleases, post-releases, and local builds.
-    "dspy==3.4.0",
+    "dspy==3.4.1",
     "packaging>=26.3,<27",
     # Exact SDK pin: its resource and cleanup surface is verified by the
     # Daytona contract and live lifecycle lanes.
