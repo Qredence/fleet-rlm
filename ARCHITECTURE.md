@@ -46,9 +46,20 @@ intents/outcomes, and persisted mode/dataset settings without renaming old table
 A PostgreSQL session advisory lock gives one worker ownership of a runtime and
 is released on close or database disconnect. One connection is held per runtime.
 
-User Skills are stored locally under `.fleet/skills/` and synchronized to the
-session workspace. `.agents/skills/` is reserved for developer-facing agent
-skills and is not a Fleet user-Skills directory.
+Fleet ships bundled Skills in `src/fleet_rlm/bundled_skills/` (tabular-analysis,
+long-context-search, delegation). Each Turn synchronizes them, then user Skills
+from `.fleet/skills/`, into `/workspace/skills` on the Session Volume, so root and
+child sandboxes can `list_skills`/`use_skill` them. A user Skill with the same
+name replaces a bundled one. A changed bundled file replaces the session copy;
+user Skills keep the conflict check. `.agents/skills/` is reserved for
+developer-facing agent skills and is not a Fleet user-Skills directory.
+
+With a TypeSafe Jev backend, the engine's `skill_selector` predictor
+(`SkillRelevance`, a typed `relevant | not_relevant` Choice) judges each catalog
+Skill after routing (never for direct answers) and appends up to three relevant
+`SKILL.md` files to `skills_catalog` as `<preloaded_skill>` blocks. Selection
+consumes one budget unit per Skill, failures fall back to the catalog, and
+GEPA can tune the predictor like any other.
 
 ## Reasoning, evaluation, and delegation
 
@@ -139,7 +150,7 @@ policy.
 ## Change ownership
 
 - `config.py`: settings, defaults, validation, and model construction.
-- `skills.py`: Skill validation and `.fleet/skills/` synchronization.
+- `skills.py`: Skill validation and bundled plus `.fleet/skills/` synchronization.
 - `sandbox/`: Daytona sandbox lifecycle (`manager.py`), the DSPy interpreter
   (`interpreter.py`), the `run_code` transport (`repl.py`) and the sandbox-side
   runtime (`runtime/repl.py`).

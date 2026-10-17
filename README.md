@@ -26,8 +26,10 @@ persists session state, and a streaming terminal client makes execution visible.
 - **Continue a session.** Workspace files, turn history, outcomes, model choices,
   execution mode, and context selection persist in PostgreSQL. Restarting recovers
   durable state, not the Python interpreter's in-memory variables.
-- **Reuse Skills and reviewed memory.** Sync user-managed Agent Skills from
-  `.fleet/skills/` and retain source-backed memories with review status. `.agents/skills/` is developer guidance, not user Skill content.
+- **Reuse Skills and reviewed memory.** Bundled Agent Skills plus your own from
+  `.fleet/skills/` are synced into every Session's Daytona workspace; with a
+  TypeSafe Jev backend the relevant ones are preloaded per Turn. Source-backed
+  memories are retained with review status. `.agents/skills/` is developer guidance, not user Skill content.
 - **Inspect execution.** Follow model and tool activity, generated code, execution
   results, agent lifecycles, and budgets in the terminal; correlate turns with
   MLflow traces.
