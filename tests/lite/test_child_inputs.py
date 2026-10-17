@@ -96,6 +96,24 @@ def test_selected_artifacts_are_copied_and_unchanged_copies_are_not_promoted(
     assert promoted == [f"artifacts/{child.agent_id}/counterfactual.json"]
 
 
+def test_explicit_children_always_get_skills_without_receipting_them_as_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = _manager()
+    available = ["files/sales.csv", "files/other.csv", "skills/tabular-analysis/SKILL.md"]
+    writes: list[str] = []
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: available)
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, path: path.encode())
+    monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", lambda _self, path, _data: writes.append(path))
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: object())
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", lambda _self: None)
+
+    child = parent.allocate_child(input_paths=["files/sales.csv"])
+
+    assert writes == ["files/sales.csv", "skills/tabular-analysis/SKILL.md"]
+    assert list(parent._child_receipts[child.agent_id]["inputs"]) == ["files/sales.csv"]
+
+
 def test_allocate_child_default_still_copies_all_files_and_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     parent = _manager()
     available = ["files/one.txt", "skills/review/SKILL.md", "artifacts/result.txt"]

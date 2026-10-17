@@ -87,8 +87,8 @@ root provisioning for that session; provider TTL covers loss of local journals.
 
 The explicit `spawn_agent` host tool accepts a subtask, selected `files/`,
 `skills/` or earlier `artifacts/` input paths, approved delegation tools, and
-bounded DSPy iteration/query limits. It copies no input files by default, stages
-child outputs until success, and returns bounded findings plus promoted paths,
+bounded DSPy iteration/query limits. It always copies the Session's `skills/` and
+otherwise only the listed inputs (none by default), stages child outputs until success, and returns bounded findings plus promoted paths,
 digests, and agent IDs. Copied-in artifacts that the child leaves unchanged are
 not promoted back as its output.
 `spawn_agents` runs several independent `spawn_agent` children concurrently on a bounded

@@ -30,9 +30,10 @@ for result in results:
 - Limits per child: `max_iters` from 1 to 8, `max_llm_calls` from 1 to 25, and
   at most 8 subtasks per `spawn_agents` call. Values outside these ranges are
   rejected before any child starts.
-- `input_paths` copies only the listed files. Paths may be under `files/`,
-  `skills/`, or `artifacts/` (a previous Turn's report, for example). A child
-  sees nothing else from the parent.
+- `input_paths` copies the listed files. Paths may be under `files/`,
+  `skills/`, or `artifacts/` (a previous Turn's report, for example). Every
+  child also receives the Session's Skills under `skills/`; it sees nothing
+  else from the parent.
 - A failed child returns `{findings: "", error, artifacts: []}`. Handle it and
   retry or work around it; do not assume success.
 

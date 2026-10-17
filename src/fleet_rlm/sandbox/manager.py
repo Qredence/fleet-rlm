@@ -138,6 +138,7 @@ class DaytonaSandboxManager:
         root = self.root
         self.check_turn()
         selected_paths: list[str] | None = None
+        ambient_skills: set[str] = set()
         if input_paths is not None:
             if not isinstance(input_paths, list):
                 raise TypeError("input_paths must be a list of workspace paths")
@@ -155,6 +156,9 @@ class DaytonaSandboxManager:
             missing_paths = [path for path in selected_paths if path not in available_paths]
             if missing_paths:
                 raise ValueError(f"Child input file is unavailable: {missing_paths[0]}")
+            # Skills are part of every sandbox, not task inputs, so they are copied but not receipted as inputs.
+            ambient_skills = {path for path in available_paths if path.startswith("skills/")} - set(selected_paths)
+            selected_paths.extend(sorted(ambient_skills))
 
         with root._budget_lock:
             if self.depth >= root.max_depth:
@@ -197,6 +201,8 @@ class DaytonaSandboxManager:
                 if total > 100_000_000:
                     raise ValueError("Child input transfer quota exceeded")
                 child.write_workspace_file(path, data)
+                if path in ambient_skills:
+                    continue
                 with root._budget_lock:
                     root._child_receipts[child.agent_id]["inputs"][path] = hashlib.sha256(data).hexdigest()
             return child
