@@ -122,6 +122,8 @@ def render_event(event: dict[str, Any]) -> None:
                     Text(str(event["summary"])), title="Decision summary · not private reasoning", border_style="cyan"
                 )
             )
+    elif event_type == "skill_selection":
+        CONSOLE.print(f"[cyan]Skills preloaded:[/cyan] {', '.join(event.get('selected') or []) or 'none relevant'}")
     elif event_type == "ungrounded_submit":
         verdict = "rejected; the agent must compute them" if event.get("rejected") else "accepted after retries"
         CONSOLE.print(

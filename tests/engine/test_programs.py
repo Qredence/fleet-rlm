@@ -303,3 +303,106 @@ def test_spawn_agent_failure_does_not_promote_unverified_child_files(monkeypatch
     assert spawn_agent(subtask="investigate", input_paths=[])["error"].startswith("child agent failed")
     assert interpreter.owns_manager is False
     assert calls == ["shutdown"]
+
+
+CATALOG = (
+    "<available_skills>\n"
+    '  <skill name="tabular-analysis">Aggregate CSV data &amp; write reports.</skill>\n'
+    '  <skill name="delegation">Split work across child agents.</skill>\n'
+    "</available_skills>"
+)
+
+
+def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> tuple[AdaptiveFleetEngine, dict]:
+    from fleet_rlm.engine.signatures import Route
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+        jev_lm=SimpleNamespace(model="jev-test") if jev else None,
+    )
+    seen: dict[str, Any] = {"budget": 0, "events": [], "batched": []}
+
+    def batch(examples, **_kwargs):
+        seen["batched"].extend(example.skill_name for example in examples)
+        return [
+            SimpleNamespace(
+                relevance=SimpleNamespace(value="relevant" if example.skill_name in relevant else "not_relevant")
+            )
+            for example in examples
+        ]
+
+    monkeypatch.setattr(engine.skill_selector, "batch", batch)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "consume_budget",
+        lambda _self, count=1: seen.__setitem__("budget", seen["budget"] + count),
+    )
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_file",
+        lambda _self, path, **_limits: f"---\nname: {path.split('/')[1]}\n---\nUse csv.DictReader.".encode(),
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "emit", lambda _self, _event, **payload: seen["events"].append(payload))
+    seen["route"] = Route
+    return engine, seen
+
+
+def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) -> None:
+    engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
+
+    catalog = engine._select_skills("Total revenue per region in files/sales.csv", CATALOG, seen["route"].FLEX)
+
+    assert seen["batched"] == ["tabular-analysis", "delegation"] and seen["budget"] == 2
+    assert catalog.startswith(CATALOG)
+    assert '<preloaded_skill name="tabular-analysis">' in catalog and "Use csv.DictReader." in catalog
+    assert 'name="delegation">' not in catalog.removeprefix(CATALOG)
+    assert seen["events"][0]["selected"] == ["tabular-analysis"]
+
+
+def test_skill_selection_is_skipped_without_jev_or_for_direct_answers(monkeypatch) -> None:
+    engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"}, jev=False)
+    assert engine._select_skills("task", CATALOG, seen["route"].FLEX) == CATALOG
+    engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
+    assert engine._select_skills("hello", CATALOG, seen["route"].DIRECT) == CATALOG
+    assert engine._select_skills("task", "<available_skills>No Skills installed.</available_skills>", seen["route"].RLM)
+    assert seen["batched"] == [] and seen["budget"] == 0
+
+
+def test_skill_selection_failure_keeps_the_catalog_but_budget_exhaustion_ends_the_turn(monkeypatch) -> None:
+    engine, seen = _selecting_engine(monkeypatch, set())
+
+    def broken(*_args, **_kwargs):
+        raise ConnectionError("jev unavailable")
+
+    monkeypatch.setattr(engine.skill_selector, "batch", broken)
+    assert engine._select_skills("task", CATALOG, seen["route"].RLM) == CATALOG
+
+    def exhausted(_self, _count=1):
+        raise RuntimeError("Shared RLM budget exhausted (3 calls)")
+
+    monkeypatch.setattr(DaytonaSandboxManager, "consume_budget", exhausted)
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        engine._select_skills("task", CATALOG, seen["route"].RLM)
+
+
+def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    path = tmp_path / "session-a.json"
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+        compiled_path=str(path),
+    )
+    engine.save(str(path))
+    state = json.loads(path.read_text())
+    state.pop("skill_selector")
+    state["triage"]["signature"]["instructions"] = "Older approved triage instructions."
+    path.write_text(json.dumps(state))
+
+    engine.compiled.reload_if_changed(engine)
+
+    assert engine.triage.signature.instructions == "Older approved triage instructions."

@@ -143,6 +143,7 @@ def test_trace_command_shows_trace_id_when_saved_turn_has_one(monkeypatch: pytes
         ({"event": "turn_cancelled", "error": "Cancelled by client."}, "Turn cancelled"),
         ({"event": "budget_update", "lm_calls": 3, "max_llm_calls": 3}, "budget full; no calls remain"),
         ({"event": "ungrounded_submit", "figures": ["16995.71"], "rejected": True}, "not seen in sandbox output"),
+        ({"event": "skill_selection", "selected": ["tabular-analysis"]}, "Skills preloaded: tabular-analysis"),
         ({"event": "turn_complete", "answer": "Done", "route": "hybrid"}, "Turn persisted"),
     ],
 )

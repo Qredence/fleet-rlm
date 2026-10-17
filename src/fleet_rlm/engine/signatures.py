@@ -75,6 +75,26 @@ TRIAGE_CRITERIA = {
     },
 }
 
+SKILL_RELEVANCE = make_choice_type(
+    (
+        ("relevant", "Following this Skill's instructions would help complete the task"),
+        ("not_relevant", "The Skill does not apply to this task"),
+    )
+)
+SkillRelevance = make_signature(
+    {
+        "task": (str, dspy.InputField(desc="User request.")),
+        "skill_name": (str, dspy.InputField(desc="Skill name.")),
+        "skill_description": (str, dspy.InputField(desc="When the Skill applies.")),
+        "relevance": (
+            SKILL_RELEVANCE,
+            dspy.OutputField(desc="relevant only when the Skill's described use matches what the task needs."),
+        ),
+    },
+    "Decide whether this Skill's instructions would help complete the task.",
+    signature_name="SkillRelevance",
+)
+
 TurnTriage = make_signature(
     {
         "task": (str, dspy.InputField(desc="User request to route.")),

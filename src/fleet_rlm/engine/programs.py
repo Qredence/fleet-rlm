@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import xml.etree.ElementTree as ElementTree
 from typing import Any
 
 import dspy
@@ -19,6 +20,7 @@ from fleet_rlm.engine.signatures import (
     DirectAnswer,
     FleetTask,
     Route,
+    SkillRelevance,
     TurnTriage,
     parse_route,
 )
@@ -29,6 +31,18 @@ from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
+_MAX_SELECTABLE_SKILLS = 20
+_MAX_PRELOADED_SKILLS = 3
+_MAX_PRELOADED_SKILL_CHARS = 20_000
+
+
+def _catalog_entries(skills_catalog: str) -> list[tuple[str, str]]:
+    """(name, description) pairs from the Stage-1 catalog; empty when it lists no Skills or is malformed."""
+    try:
+        root = ElementTree.fromstring(skills_catalog)
+    except ElementTree.ParseError:
+        return []
+    return [(item.get("name") or "", (item.text or "").strip()) for item in root.iter("skill") if item.get("name")]
 
 
 def _safe_route_error(exc: Exception, route_lm: Any) -> str:
@@ -67,6 +81,7 @@ class AdaptiveFleetEngine(dspy.Module):
         self.triage = dspy.Predict(TurnTriage)
         self.triage.set_criteria("route", TRIAGE_CRITERIA)
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
+        self.skill_selector = dspy.Predict(SkillRelevance)
 
         self.children = ChildAgents(sandbox_mgr, self._metered_sub)
         tools = self.children.tools()
@@ -165,7 +180,52 @@ class AdaptiveFleetEngine(dspy.Module):
             if context.sha256 and hashlib.sha256(raw).hexdigest() != context.sha256:
                 raise ValueError("Dataset source changed; select the new revision")
         route = self._route(mode, task, workspace_manifest, skills_catalog, context)
+        skills_catalog = self._select_skills(task, skills_catalog, route)
         return self._execute(route, workspace_manifest, memory_summary, task, skills_catalog, session_history, context)
+
+    def _select_skills(self, task: str, skills_catalog: str, route: Route) -> str:
+        """Preload the instructions of Skills the TypeSafe Jev marks relevant; other Skills stay in the catalog."""
+        skills = _catalog_entries(skills_catalog)[:_MAX_SELECTABLE_SKILLS]
+        if self.jev_lm is None or route is Route.DIRECT or not skills:
+            return skills_catalog
+        try:
+            self.sandbox_mgr.consume_budget(len(skills))
+            examples = [
+                dspy.Example(task=task, skill_name=name, skill_description=description).with_inputs(
+                    "task", "skill_name", "skill_description"
+                )
+                for name, description in skills
+            ]
+            callbacks = _without_mlflow_dspy_callback(list(dspy.settings.callbacks))
+            with mlflow.start_span(name="typesafe_skill_selection", span_type=SpanType.LLM) as span:
+                span.set_inputs({"task": activity_text(task), "skills": [name for name, _ in skills]})
+                with dspy.context(lm=self.jev_lm, callbacks=callbacks):
+                    predictions = self.skill_selector.batch(examples, num_threads=min(8, len(examples)))
+                decisions = []
+                for (name, _), prediction in zip(skills, predictions, strict=True):
+                    decision = getattr(prediction, "relevance", None)
+                    decisions.append(
+                        {"skill": name, "decision": getattr(decision, "value", None)}
+                        | decision_evidence(decision, self.jev_lm)
+                    )
+                selected = [row["skill"] for row in decisions if row["decision"] == "relevant"]
+                selected = selected[:_MAX_PRELOADED_SKILLS]
+                span.set_outputs({"selected": selected, "decisions": decisions})
+        except Exception as exc:
+            if turn_is_over(exc):
+                raise
+            _LOGGER.warning("Optional Skill selection failed (%s); using the catalog only", type(exc).__name__)
+            return skills_catalog
+        preloaded = []
+        for name in selected:
+            try:
+                text = self.sandbox_mgr.read_workspace_file(f"skills/{name}/SKILL.md").decode("utf-8")
+            except (OSError, ValueError, RuntimeError, UnicodeError):
+                continue
+            body = text[:_MAX_PRELOADED_SKILL_CHARS].replace("</preloaded_skill>", "")
+            preloaded.append(f'<preloaded_skill name="{name}">\n{body}\n</preloaded_skill>')
+        self.sandbox_mgr.emit("skill_selection", selected=selected, decisions=decisions)
+        return "\n".join([skills_catalog, *preloaded])
 
     def _route(self, mode: str, task: str, workspace_manifest: str, skills_catalog: str, context: Any) -> Route:
         """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""

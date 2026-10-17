@@ -209,6 +209,8 @@ class CompiledProgramFile:
             raise ValueError("Compiled program must be a JSON object")
         if state and all(key.startswith("program.") or key == "metadata" for key in state):
             state = {key.removeprefix("program."): value for key, value in state.items()}
+        # A program saved before a predictor existed keeps that predictor's current state.
+        state = {**program.dump_state(), **state}
         program.load_state(state)  # DSPy trial-loads a copy first, so a bad artifact leaves `program` unchanged.
         if self.path and os.path.lexists(self.path):
             stat = self._regular_stat(self.path)
