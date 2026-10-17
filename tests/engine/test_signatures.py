@@ -40,6 +40,5 @@ def test_stopping_rules_have_one_source():
 
 def test_child_and_judge_signatures_are_named():
     assert list(signatures.ChildTask.output_fields) == ["findings"]
-    assert list(signatures.ContextualChildTask.input_fields) == ["context_hint", "subtask"]
     assert list(signatures.AnswerJudge.output_fields) == ["is_correct", "is_safe", "critique"]
     assert list(signatures.item_decision(["a", "b"]).output_fields) == ["decision"]

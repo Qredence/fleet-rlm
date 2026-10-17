@@ -119,10 +119,8 @@ old manifests are not an unchecked rollback path.
 
 ## Explicit historical trace evaluation
 
-Compiling or optimizing does not automatically score historical traces. The
-separate `auto_evaluate_traces` operation remains available for an explicit
-evaluation run. It records scorer version, judge route, and an expectations
-fingerprint; matching assessments can be reused and stale ones rescored.
+Compiling or optimizing does not score historical traces. `fleet eval run`
+executes cases and scores only the traces it just produced.
 
 ## DSPy integration rationale and validation
 
@@ -220,21 +218,6 @@ not the official benchmark scoring.
 Critical deterministic cases are explicitly labeled by a reviewer with `fleet eval label ... --critical` and one or
 more `--value` expectations. Their complete source groups are pinned to holdout, and promotion requires every such
 case to have quality 1.0 on every pass. Candidate approval fails closed when the holdout has no critical case.
-
-## Stopping regression evaluation
-
-`fleet_rlm.optimize.evaluation.evaluate_stopping_traces(traces, judge_model=...)` is an
-explicit offline evaluation entry point for captured MLflow traces. It combines
-answer completion, expected-value presence, and a Guidelines judge over bounded,
-chronological task code and observations. Bootstrap code and predictor reasoning
-are excluded. Missing or oversized evidence is unavailable, not a passing grade.
-
-The policy is to submit on the next action once the answer and a supporting
-check agree. Additional investigation remains appropriate for failed checks,
-disagreement, or an explicit independent-verification request. This is guidance
-and evaluation, not a host-enforced completion gate. Judge execution uses the
-explicit model argument and is never part of the runtime request path.
-
 
 ## Decision regression and configuration comparisons
 

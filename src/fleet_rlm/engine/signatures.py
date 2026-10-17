@@ -118,9 +118,6 @@ class FleetTask(dspy.Signature):
 
 DirectAnswer = make_signature("memory_summary, session_history, task -> answer", signature_name="DirectAnswer")
 ChildTask = make_signature("subtask: str -> findings: str", signature_name="ChildTask")
-ContextualChildTask = make_signature(
-    "context_hint: str, subtask: str -> findings: str", signature_name="ContextualChildTask"
-)
 AnswerJudge = make_signature(
     "task, expected_answer, candidate_answer -> is_correct: bool, is_safe: bool, critique: str",
     "Judge whether the candidate answer gives the same result as the expected answer. Ignore formatting, "

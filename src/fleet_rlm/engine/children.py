@@ -1,4 +1,4 @@
-"""Child agents a Turn can delegate to: spawn_agent, spawn_agents, and sub_rlm.
+"""Child agents a Turn can delegate to: spawn_agent and spawn_agents.
 
 Each runs a fresh dspy.RLM in its own child sandbox on the metered sub LM. A child that fails
 returns its failure to the parent; only deadline, cancellation, and budget exhaustion end the Turn.
@@ -14,7 +14,7 @@ import dspy
 from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
-from fleet_rlm.engine.signatures import ChildTask, ContextualChildTask
+from fleet_rlm.engine.signatures import ChildTask
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
@@ -37,7 +37,7 @@ class ChildAgents:
         self._metered_sub = metered_sub
 
     def tools(self) -> list[Any]:
-        return [self.sub_rlm, self.spawn_agent, self.spawn_agents]
+        return [self.spawn_agent, self.spawn_agents]
 
     def spawn_agent(
         self,
@@ -154,38 +154,3 @@ class ChildAgents:
                 for future in futures:
                     future.cancel()
                 raise
-
-    def sub_rlm(self, subtask: str, context_hint: str = "") -> str:
-        """Spawn an isolated recursive investigation; input files and Skills are copied, not parent memory."""
-        factory = self.sandbox_mgr.interpreter_factory(tools={"sub_rlm": self.sub_rlm})
-        interpreters: list[DaytonaInterpreter] = []
-
-        def create() -> DaytonaInterpreter:
-            interpreter = factory()
-            if not interpreters:
-                # Promotion is decided here: a failed child must not publish its unverified staging files.
-                interpreter.owns_manager = False
-            interpreters.append(interpreter)
-            return interpreter
-
-        create.execution_instructions = getattr(factory, "execution_instructions", "")  # ty: ignore[unresolved-attribute]
-        child = dspy.RLM(
-            signature=ContextualChildTask,
-            tools=[self.sub_rlm],
-            interpreter_factory=create,
-            sub_lm=self._metered_sub,
-            max_iters=8,
-            max_llm_calls=25,
-        )
-        try:
-            with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
-                findings = str(child(context_hint=context_hint[:10000], subtask=subtask[:20000]).findings)[:20000]
-        except AdapterParseError as exc:
-            return f"ERROR: {child_failure(exc)}"
-        else:
-            if interpreters:
-                interpreters[0].manager.collect_child_artifacts()
-            return findings
-        finally:
-            if interpreters:
-                interpreters[0].manager.shutdown()

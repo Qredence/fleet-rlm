@@ -493,20 +493,6 @@ class Store:
         return files, str((session or {}).get("memory_summary") or ""), (session or {}).get("turns") or []
 
     @_retry_once
-    def vfs_files(self, session_id: str, rel_paths: list[str]) -> dict[str, dict[str, Any]]:
-        with self.pool.connection() as connection:
-            rows = (
-                connection.cursor(row_factory=dict_row)
-                .execute(
-                    "SELECT rel_path, sha256, content FROM fleet_lite_vfs_files "
-                    "WHERE session_id = %s AND rel_path = ANY(%s)",
-                    (session_id, rel_paths),
-                )
-                .fetchall()
-            )
-        return {row["rel_path"]: row for row in rows}
-
-    @_retry_once
     def mirror_files(
         self,
         session_id: str,

@@ -7,7 +7,6 @@ never from historical traces or stored Turns.
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 import random
@@ -27,13 +26,9 @@ from mlflow.genai.scorers import scorer
 
 from fleet_rlm.engine.signatures import Route
 from fleet_rlm.observability import trace_object
-from fleet_rlm.optimize.dataset import labels_of, turn_traces
+from fleet_rlm.optimize.dataset import labels_of
 from fleet_rlm.optimize.scorers import (
-    SCORER_VERSION,
     build_mlflow_scorer_suite,
-    fleet_metric,
-    gold_and_prediction,
-    metric_feedbacks,
     missing_values,
 )
 from fleet_rlm.replay import validate_review_labels
@@ -449,114 +444,3 @@ def score_evaluation_traces(
     ):
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     return result
-
-
-def auto_evaluate_traces(experiment_name: str, judge_lm: Any, judge_model: str) -> tuple[int, int]:
-    """Score every Turn trace without a current-version ``fleet_metric`` assessment.
-
-    Returns ``(newly_scored, already_current)``. A prior assessment is reused only when its
-    scorer version, judge model, and current gold labels match. Historical assessments remain
-    attached to the trace as an audit trail.
-    """
-    source = AssessmentSource(source_type=AssessmentSourceType.LLM_JUDGE, source_id=judge_model)
-    scored = skipped = 0
-    for trace in turn_traces(experiment_name):
-        labels = labels_of(trace)
-        fingerprint = _metric_fingerprint(labels, judge_model)
-        assessments = trace.search_assessments(name="fleet_metric", type="feedback")
-        if any(
-            getattr(item, "metadata", None) and item.metadata.get("fleet.metric_fingerprint") == fingerprint
-            for item in assessments
-        ):
-            skipped += 1
-            continue
-        root = next(span for span in trace.data.spans if span.parent_id is None)
-        gold, pred = gold_and_prediction(root.inputs, root.outputs, labels)
-        feedbacks = metric_feedbacks(fleet_metric(gold, pred, judge_lm=judge_lm))
-        metadata = {
-            "fleet.scorer_version": SCORER_VERSION,
-            "fleet.metric_fingerprint": fingerprint,
-            "fleet.judge_model": judge_model,
-        }
-        # Keep the overall assessment as the completion marker. If writing an objective
-        # assessment fails midway, the next run retries instead of treating partial output as done.
-        for feedback in (*feedbacks[1:], feedbacks[0]):
-            mlflow.log_feedback(
-                trace_id=trace.info.trace_id,
-                name=feedback.name,
-                value=feedback.value,
-                rationale=feedback.rationale,
-                source=source,
-                metadata=metadata,
-            )
-        scored += 1
-    return scored, skipped
-
-
-def _metric_fingerprint(labels: dict[str, Any], judge_model: str) -> str:
-    """Identify the scorer implementation, judge route, and expectations used for a score."""
-    identity = {"scorer_version": SCORER_VERSION, "judge_model": judge_model, "expectations": labels}
-    return hashlib.sha256(
-        json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()
-    ).hexdigest()
-
-
-def stopping_evidence(trace: Any) -> dict[str, Any] | None:
-    """Project chronological task execution, excluding predictors and bootstrap code."""
-    from fleet_rlm.observability import activity_preview, activity_text
-
-    spans = trace.search_spans() if trace is not None else []
-    roots = [span for span in spans if span.name == "fleet_turn"]
-    if not roots or not isinstance(roots[0].inputs, dict):
-        return None
-    steps = []
-    for span in sorted(spans, key=lambda item: getattr(item, "start_time_ns", 0)):
-        if span.name != "sandbox.exec" or span.attributes.get("phase") != "task":
-            continue
-        inputs, outputs = span.inputs, span.outputs
-        if not isinstance(inputs, dict) or not isinstance(outputs, dict) or not inputs.get("code"):
-            return None
-        steps.append({"code": activity_text(inputs["code"]), "observation": activity_preview(outputs)})
-    if not steps:
-        return None
-    evidence = {"task": activity_text(str(roots[0].inputs.get("task", ""))), "steps": steps}
-    # Do not silently discard steps and then judge an incomplete trajectory.
-    return evidence if len(json.dumps(evidence)) <= 40_000 else None
-
-
-def evaluate_stopping_traces(traces: list[Any], *, judge_model: str) -> Any:
-    """Explicit stopping regression evaluation; never called on the request path."""
-    from mlflow.genai.scorers import Guidelines
-
-    judge = Guidelines(
-        name="verification_stopping_discipline",
-        model=judge_model,
-        guidelines=(
-            "Evaluate the chronological execution evidence. Once an answer and a supporting check agree, "
-            "the next action should submit it. Further verification is justified when a check fails, "
-            "results disagree, or the task explicitly requests independent verification. "
-            "Do not treat correction after a Python error as unnecessary verification."
-        ),
-    )
-
-    @scorer
-    def verification_stopping_discipline(trace: Any) -> Feedback | None:
-        evidence = stopping_evidence(trace)
-        if evidence is None:
-            return None
-        return judge(inputs={"task": evidence["task"]}, outputs={"execution_steps": evidence["steps"]})
-
-    @scorer
-    def task_completed(trace: Any) -> Feedback:
-        roots = [span for span in trace.search_spans() if span.name == "fleet_turn"]
-        completed = bool(
-            str(trace.info.state) == "OK"
-            and roots
-            and isinstance(roots[0].outputs, dict)
-            and roots[0].outputs.get("answer")
-        )
-        return Feedback(value=completed, rationale="A successful turn must deliver an answer.")
-
-    return mlflow.genai.evaluate(
-        data=traces, scorers=[task_completed, expected_values_present, verification_stopping_discipline]
-    )
