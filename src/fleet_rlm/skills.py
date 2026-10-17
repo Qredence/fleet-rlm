@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import json
 import re
@@ -313,7 +314,7 @@ class SkillManager:
 
         remote_manifest = json.dumps([relative for relative, _ in staged_files])
         inspection_code = (
-            "import base64,json,os\n"
+            "import hashlib,json,os\n"
             "root='/workspace'\n"
             f"paths=json.loads({remote_manifest!r})\n"
             "result={}\n"
@@ -324,7 +325,7 @@ class SkillManager:
             "  current=os.path.join(current,part)\n"
             "  if os.path.islink(current): raise ValueError('Existing Skill path traverses a symbolic link: '+rel)\n"
             " if os.path.isfile(path) and not os.path.islink(path):\n"
-            "  with open(path,'rb') as handle: result[rel]=base64.b64encode(handle.read()).decode()\n"
+            "  with open(path,'rb') as handle: result[rel]=hashlib.sha256(handle.read()).hexdigest()\n"
             " elif os.path.lexists(path): raise ValueError('Existing Skill path is not a regular file: '+rel)\n"
             "print(json.dumps(result))"
         )
@@ -337,7 +338,7 @@ class SkillManager:
         conflicts = [
             relative
             for relative, content in staged_files
-            if relative in existing and base64.b64decode(existing[relative], validate=True) != content
+            if relative in existing and existing[relative] != hashlib.sha256(content).hexdigest()
         ]
         if conflicts:
             raise ValueError("Skill sync conflicts with existing session files: " + ", ".join(conflicts))

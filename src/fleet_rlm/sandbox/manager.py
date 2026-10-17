@@ -718,8 +718,10 @@ class DaytonaSandboxManager:
 
     def delete_workspace_file(self, rel_path: str) -> None:
         clean = _workspace_relative_path(rel_path)
-        self._workspace_file_metadata(self.ensure_sandbox(), clean, create_parents=False)
-        self.exec_remote_python(f"import os; os.unlink({('/workspace/' + clean)!r})")
+        sandbox = self.ensure_sandbox()
+        # The remote check rejects symbolic links; Daytona's file API does not report them.
+        self._workspace_file_metadata(sandbox, clean, create_parents=False)
+        sandbox.fs.delete_file(f"/workspace/{clean}")
 
     def _register_interpreter(self, interpreter: DaytonaInterpreter) -> None:
         with self._lock:

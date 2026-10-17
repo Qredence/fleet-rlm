@@ -22,7 +22,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from fleet_rlm.workspace import validate_session_id
+from fleet_rlm.workspace import _workspace_relative_path, validate_session_id
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -807,16 +807,11 @@ class VolumePostgresHarness:
 
     @staticmethod
     def _valid_vfs_path(rel_path: str) -> bool:
-        parts = rel_path.split("/")
-        return (
-            bool(parts)
-            and parts[0] in {"files", "memory", "skills", "artifacts", "buffers", "sessions"}
-            and len(rel_path) <= 1024
-            and all(part not in {"", ".", ".."} for part in parts)
-            and "\\" not in rel_path
-            and "\x00" not in rel_path
-            and not any(ord(character) < 32 for character in rel_path)
-        )
+        try:
+            _workspace_relative_path(rel_path)
+        except ValueError:
+            return False
+        return True
 
 
 def lakebase_connection_class(client: Any, endpoint: str) -> type[psycopg.Connection[Any]]:

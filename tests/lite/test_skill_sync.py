@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -26,8 +27,8 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
         def __init__(self) -> None:
             self.writes: list[tuple[str, bytes]] = []
             self.existing = {
-                "skills/ledger-audit/SKILL.md": base64.b64encode(skill_md).decode(),
-                "skills/ledger-audit/existing.txt": base64.b64encode(b"remote version").decode(),
+                "skills/ledger-audit/SKILL.md": hashlib.sha256(skill_md).hexdigest(),
+                "skills/ledger-audit/existing.txt": hashlib.sha256(b"remote version").hexdigest(),
             }
 
         def exec_remote_python(self, code: str) -> str:
@@ -42,7 +43,7 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
         SkillManager(sandbox, skills).sync_local_skills_to_volume()  # type: ignore[arg-type]
 
     assert sandbox.writes == []
-    sandbox.existing["skills/ledger-audit/existing.txt"] = base64.b64encode(b"local version").decode()
+    sandbox.existing["skills/ledger-audit/existing.txt"] = hashlib.sha256(b"local version").hexdigest()
     assert SkillManager(sandbox, skills).sync_local_skills_to_volume() == 1  # type: ignore[arg-type]
     assert sandbox.writes == [("skills/ledger-audit/new.txt", b"new file")]
 

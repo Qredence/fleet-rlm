@@ -52,3 +52,24 @@ def test_daytona_path_transfer_overloads_and_25mb_provider_limits(tmp_path, monk
     with pytest.raises(ValueError, match="size limit"):
         manager.read_workspace_file_to_path("files/too-large.bin", local_destination, max_bytes=3)
     assert len(calls) == 2
+
+
+def test_delete_checks_the_path_remotely_before_using_the_file_api(monkeypatch) -> None:
+    manager = DaytonaSandboxManager(api_key="key", org_id="org", volume_id="volume", session_id="session-a")
+    calls: list[tuple[str, str]] = []
+    sandbox = SimpleNamespace(fs=SimpleNamespace(delete_file=lambda path: calls.append(("delete", path))))
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: sandbox)
+
+    def workspace_metadata(_self, _sandbox, path, **_kwargs):
+        calls.append(("check", path))
+        if path.endswith("link.txt"):
+            raise ValueError("workspace target may not be a symbolic link")
+        return {"size": 1}
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_workspace_file_metadata", workspace_metadata)
+    manager.delete_workspace_file("files/a.txt")
+    with pytest.raises(ValueError, match="symbolic link"):
+        manager.delete_workspace_file("files/link.txt")
+    with pytest.raises(ValueError):
+        manager.delete_workspace_file("../escape")
+    assert calls == [("check", "files/a.txt"), ("delete", "/workspace/files/a.txt"), ("check", "files/link.txt")]
