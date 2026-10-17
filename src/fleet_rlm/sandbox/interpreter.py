@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import contextvars
+import json
 import keyword
 import logging
+import re
 import threading
 import time
 import uuid
@@ -23,6 +25,31 @@ from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, Daytona
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 
 _LOGGER = logging.getLogger(__name__)
+
+# A figure: an optionally signed number, with `$` and thousands separators allowed; not part of an identifier.
+_FIGURE = re.compile(r"(?<![\w.])\$?-?\d[\d,]*(?:\.\d+)?")
+_MAX_OBSERVED_FIGURES = 200_000
+_MAX_UNGROUNDED_REJECTIONS = 2
+
+
+def _figures(text: str) -> dict[str, float]:
+    """Normalized number literals in `text`; small integers carry no evidence and are ignored."""
+    found: dict[str, float] = {}
+    for match in _FIGURE.finditer(text):
+        literal = match.group().replace("$", "").replace(",", "")
+        try:
+            value = float(literal)
+        except ValueError:
+            continue
+        if "." in literal or abs(value) >= 10:
+            found[literal] = value
+    return found
+
+
+def _grounded(literal: str, value: float, observed: set[float]) -> bool:
+    """A typed figure is grounded when some observed value rounds to it at the typed precision."""
+    places = len(literal.split(".", 1)[1]) if "." in literal else 0
+    return any(round(seen, places) == round(value, places) for seen in observed)
 
 
 class DaytonaInterpreter:
@@ -62,6 +89,9 @@ class DaytonaInterpreter:
         self._closed = False
         self._host_calls = 0
         self._host_call_lock = threading.Lock()
+        # Figures this namespace's inputs and executions have shown the model, for the SUBMIT check.
+        self._observed: set[float] = set()
+        self._ungrounded_rejections = 0
 
     def start(self) -> None:
         if self._closed:
@@ -225,6 +255,37 @@ class DaytonaInterpreter:
             span.set_outputs({"decisions": [{k: v for k, v in row.items() if k != "item"} for row in results]})
             return results
 
+    def _observe(self, text: str) -> None:
+        if len(self._observed) < _MAX_OBSERVED_FIGURES:
+            self._observed.update(_figures(text).values())
+
+    def _check_grounded_submit(self, code: str, final: Any, span: Any, error_type: type[Exception]) -> None:
+        """Reject a SUBMIT whose figures were typed into the code but never shown by an execution or input.
+
+        Computed values (formatted from variables) are not code literals and pass. A capped number of
+        rejections keeps a legitimate answer from blocking the Turn; past the cap it is accepted and flagged.
+        """
+        typed = _figures(code)
+        submitted = _figures(json.dumps(final, default=str))
+        ungrounded = sorted(
+            literal
+            for literal, value in submitted.items()
+            if literal in typed and not _grounded(literal, value, self._observed)
+        )
+        if not ungrounded:
+            return
+        rejected = self._ungrounded_rejections < _MAX_UNGROUNDED_REJECTIONS
+        span.set_attribute("ungrounded_submit", True)
+        if hasattr(self.manager, "emit"):
+            self.manager.emit("ungrounded_submit", namespace=self.ns_id, figures=ungrounded[:20], rejected=rejected)
+        if rejected:
+            self._ungrounded_rejections += 1
+            span.set_attribute("outcome", "ungrounded_submit_rejected")
+            raise error_type(
+                f"SUBMIT rejected: figures {ungrounded[:20]} were typed, not taken from sandbox output. "
+                "Compute or print them in code, then SUBMIT values from variables."
+            )
+
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if not isinstance(code, str) or len(code.encode("utf-8")) > 1_000_000:
             raise ValueError("Interpreter code exceeds the 1 MB size limit")
@@ -236,6 +297,8 @@ class DaytonaInterpreter:
         execution_id = uuid.uuid4().hex
         phase = "bootstrap" if code == SHIM_SETUP else "task"
         started = time.monotonic()
+        if phase == "task" and variables:
+            self._observe(json.dumps(variables, default=str))
         if hasattr(self.manager, "check_turn"):
             self.manager.check_turn()
         if hasattr(self.manager, "emit"):
@@ -287,6 +350,8 @@ class DaytonaInterpreter:
                     raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")
                 span.set_attribute("outcome", "completed")
                 if response.get("final") is not None:
+                    if phase == "task":
+                        self._check_grounded_submit(code, response["final"], span, CodeExecutionError)
                     return FinalOutput(response["final"])
                 if response.get("has_value") and response.get("value") is not None:
                     return response["value"]
@@ -309,6 +374,8 @@ class DaytonaInterpreter:
                     span.set_attribute("outcome", outcome)
                 raise
             finally:
+                if phase == "task":
+                    self._observe(f"{response.get('stdout', '')}\n{response.get('value', '')}")
                 span.set_attribute("host_calls", self._host_calls - host_calls_before)
                 if hasattr(self.manager, "emit"):
                     self.manager.emit(

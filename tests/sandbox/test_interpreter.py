@@ -51,6 +51,7 @@ def recording_span(recorded: list[dict[str, Any]], name: str, span_type: str):
 def test_execute_returns_values_finals_and_code_errors(sandbox):
     interpreter = DaytonaInterpreter(manager_on(sandbox))
     assert interpreter.execute("import json\njson.dumps({'answer': 42})") == '{"answer": 42}'
+    assert interpreter.execute("print(17)") == "17"
     final = interpreter.execute("SUBMIT(answer='17')")
     assert isinstance(final, FinalOutput) and final.output == {"answer": "17"}
     with pytest.raises(CodeExecutionError, match="ValueError: broken"):
@@ -216,3 +217,44 @@ assert execution.attributes['remote_error_type'] == 'ValueError'
         },
     )
     assert result.returncode == 0, result.stderr
+
+
+FABRICATED = (
+    'answer = ("No. central (12/60 = 0.20 refund rate) trails south ($16,995.71); '
+    'counterfactual $12,753.67.")\nSUBMIT(answer=answer)'
+)
+
+
+def test_a_submit_with_typed_unseen_figures_is_rejected_then_accepted_once_computed(sandbox):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+    variables = {"task": "Would central overtake north ($33,891.86)?"}
+    with pytest.raises(CodeExecutionError, match=r"SUBMIT rejected: figures .*16995\.71"):
+        interpreter.execute(FABRICATED, variables)
+    rejected = [event for event in events if event["event"] == "ungrounded_submit"]
+    assert rejected and rejected[0]["rejected"] is True and "12753.67" in rejected[0]["figures"]
+
+    assert interpreter.execute("total = 30286.42 + 5816.87\nprint(round(total, 2))", variables) == "36103.29"
+    final = interpreter.execute('SUBMIT(answer="Yes: $36,103.29 beats north $33,891.86")', variables)
+    assert isinstance(final, FinalOutput)
+
+
+def test_computed_answers_and_rounded_copies_of_printed_values_pass(sandbox):
+    interpreter = DaytonaInterpreter(manager_on(sandbox))
+    interpreter.execute("refunded, orders = 12, 86\nrate = refunded / orders\nprint(refunded, orders, rate)")
+    computed = interpreter.execute("SUBMIT(answer=f'central refund rate {rate:.4f}')")
+    assert isinstance(computed, FinalOutput) and computed.output["answer"] == "central refund rate 0.1395"
+    copied = interpreter.execute("SUBMIT(answer='central refund rate 0.1395 (12 of 86)')")
+    assert isinstance(copied, FinalOutput)
+
+
+def test_ungrounded_submit_is_accepted_and_flagged_after_the_rejection_cap(sandbox):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+    for _ in range(2):
+        with pytest.raises(CodeExecutionError, match="SUBMIT rejected"):
+            interpreter.execute(FABRICATED)
+    final = interpreter.execute(FABRICATED)
+    assert isinstance(final, FinalOutput)
+    flags = [event["rejected"] for event in events if event["event"] == "ungrounded_submit"]
+    assert flags == [True, True, False]

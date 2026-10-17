@@ -122,6 +122,11 @@ def render_event(event: dict[str, Any]) -> None:
                     Text(str(event["summary"])), title="Decision summary · not private reasoning", border_style="cyan"
                 )
             )
+    elif event_type == "ungrounded_submit":
+        verdict = "rejected; the agent must compute them" if event.get("rejected") else "accepted after retries"
+        CONSOLE.print(
+            f"[yellow]SUBMIT with figures not seen in sandbox output ({verdict}):[/yellow] {event.get('figures')}"
+        )
     elif event_type == "budget_update":
         calls = event.get("lm_calls")
         maximum = event.get("max_llm_calls")
