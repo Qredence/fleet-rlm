@@ -82,8 +82,13 @@ and returns bounded findings plus promoted paths, digests, and agent IDs.
 thread pool (at most the active-child capacity), each with a copy of the caller's context,
 and returns one result per subtask in order. A child that fails for ordinary reasons comes
 back as `{findings: "", error, artifacts: []}`; deadline, cancellation, and shared-budget
-exhaustion still abort the Turn. A child whose reply cannot be parsed is re-asked once by
-`FleetRLMChatAdapter` before it fails.
+exhaustion still abort the Turn. `FleetRLMChatAdapter` covers root Flex/RLM predictors,
+spawned children, and host-mediated predictors. It accepts an unambiguous Python fence
+for string-valued `reasoning`/`code` outputs, including one redundant closing fence.
+An unparseable reply is re-asked once with field-format feedback, through the same
+metered LM. Fleet disables DSPy's automatic JSON fallback, limiting each adapter
+request to two model invocations (one when `parse_retries=0`). Provider errors,
+deadlines, cancellation, and budget exhaustion propagate without format retries.
 `allowed_tools=[]` disables further Fleet tool delegation; it is not a Python
 or network sandbox policy. All generated Python still runs under Daytona's
 deployment policy. Native facade-created RLMs retain the compatibility policy

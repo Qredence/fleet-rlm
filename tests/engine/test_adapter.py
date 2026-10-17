@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from threading import Barrier
+
 import dspy
 import pytest
-from dspy.adapters.chat_adapter import ChatAdapter
-from dspy.utils.exceptions import AdapterParseError
+from dspy.primitives.facade import SandboxLM
+from dspy.utils.exceptions import AdapterParseError, LMUnexpectedError
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
 
@@ -20,11 +25,12 @@ def test_dspy_history_is_disabled_for_session_turn_contexts() -> None:
 
 @pytest.mark.parametrize("reasoning", ["", "The header is `id,value`. I'll stream the full file.\n\n"])
 @pytest.mark.parametrize("suffix", ["", "\n\n[[ ## completed ## ]]\n"])
-def test_fleet_rlm_adapter_accepts_code_only_python_fences(reasoning: str, suffix: str) -> None:
+@pytest.mark.parametrize("closing", ["```", "```\n```", "```  \r\n\r\n  ```  "])
+def test_fleet_rlm_adapter_accepts_code_only_python_fences(reasoning: str, suffix: str, closing: str) -> None:
     signature = dspy.Signature("task -> reasoning, code")
     adapter = FleetRLMChatAdapter()
 
-    assert adapter.parse(signature, reasoning + "```python\nprint(17 + 23 + 41)\n```" + suffix) == {
+    assert adapter.parse(signature, reasoning + "```python\nprint(17 + 23 + 41)\n" + closing + suffix) == {
         "reasoning": reasoning.strip(),
         "code": "print(17 + 23 + 41)",
     }
@@ -49,65 +55,202 @@ def test_fleet_rlm_adapter_drops_leaked_thinking_before_the_answer() -> None:
     assert FleetRLMChatAdapter().parse(dspy.Signature("task -> answer"), leaked_fields) == {"answer": "42"}
 
 
-def _parse_error() -> AdapterParseError:
-    return AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
-
-
-def _call_adapter(adapter: FleetRLMChatAdapter):
-    return adapter(None, {}, dspy.Signature("a -> b"), [], {"a": "x"})
-
-
-def test_adapter_reasks_once_then_returns_the_valid_reply(monkeypatch) -> None:
-    calls = []
-
-    def flaky(_self, *_args, **_kwargs):
-        calls.append(1)
-        if len(calls) == 1:
-            raise _parse_error()
-        return [{"b": "ok"}]
-
-    monkeypatch.setattr(ChatAdapter, "__call__", flaky)
-    assert _call_adapter(FleetRLMChatAdapter()) == [{"b": "ok"}]
-    assert len(calls) == 2
-
-
-def test_adapter_gives_up_after_the_retry_budget(monkeypatch) -> None:
-    attempts = []
-
-    def always_bad(_self, *_args, **_kwargs):
-        attempts.append(1)
-        raise _parse_error()
-
-    monkeypatch.setattr(ChatAdapter, "__call__", always_bad)
+@pytest.mark.parametrize(
+    "completion",
+    [
+        "```python\n   \n```\n```",
+        "```python\nprint(1)\n```\n```python\nprint(2)\n```",
+        "```python\nprint('```')\n```",
+        "```python\nprint(1)\n```\nTrailing explanation",
+        "```python\nprint(1)\n```\n```\n```",
+        "```python\nprint(1)\n``` ```",
+    ],
+)
+def test_adapter_rejects_ambiguous_or_empty_fences(completion: str) -> None:
     with pytest.raises(AdapterParseError):
-        _call_adapter(FleetRLMChatAdapter(parse_retries=2))
-    assert len(attempts) == 3
+        FleetRLMChatAdapter().parse(dspy.Signature("task -> reasoning, code"), completion)
 
 
-def test_adapter_does_not_retry_other_errors(monkeypatch) -> None:
-    attempts = []
+def test_adapter_preserves_code_and_standard_typed_parsing() -> None:
+    code = "if True:\n    print('pi')  \n\n    print(3.14)"
+    assert FleetRLMChatAdapter().parse(dspy.Signature("task -> reasoning, code"), f"```python\n{code}\n```\n```") == {
+        "reasoning": "",
+        "code": code,
+    }
+    assert FleetRLMChatAdapter().parse(
+        dspy.Signature("task -> answer: int"), "[[ ## answer ## ]]\n42\n[[ ## completed ## ]]"
+    ) == {"answer": 42}
+    with pytest.raises(AdapterParseError):
+        FleetRLMChatAdapter().parse(dspy.Signature("task -> answer"), "```python\nprint(42)\n```\n```")
 
-    def exhausted(_self, *_args, **_kwargs):
-        attempts.append(1)
-        raise RuntimeError("Shared RLM budget exhausted (32 calls)")
 
-    monkeypatch.setattr(ChatAdapter, "__call__", exhausted)
-    with pytest.raises(RuntimeError, match="budget exhausted"):
-        _call_adapter(FleetRLMChatAdapter())
-    assert len(attempts) == 1
+class ScriptedLM(dspy.utils.DummyLM):
+    """Supply raw completions while keeping DSPy's real formatting/call/parsing pipeline."""
+
+    def __init__(self, responses, barrier: Barrier | None = None):
+        super().__init__([{"raw": response} for response in responses])
+        self.calls = []
+        self.barrier = barrier
+
+    def _format_answer_fields(self, fields):
+        response = fields["raw"]
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    def _record(self, kwargs):
+        self.calls.append(deepcopy(kwargs))
+        if self.barrier is not None and len(self.calls) == 1:
+            self.barrier.wait(timeout=10)
+
+    def __call__(self, *args, **kwargs):
+        self._record(kwargs)
+        return super().__call__(*args, **kwargs)
+
+    async def acall(self, *args, **kwargs):
+        self._record(kwargs)
+        return await super().acall(*args, **kwargs)
 
 
-def test_adapter_async_path_reasks_too(monkeypatch) -> None:
-    import asyncio
+def _invoke(adapter, lm, signature, *, asynchronous=False, lm_kwargs=None, demos=None, inputs=None):
+    args = (lm, lm_kwargs if lm_kwargs is not None else {}, signature, demos or [], inputs or {"task": "pi"})
+    if asynchronous:
+        return asyncio.run(adapter.acall(*args))
+    return adapter(*args)
 
-    calls = []
 
-    async def flaky(_self, *_args, **_kwargs):
-        calls.append(1)
-        if len(calls) == 1:
-            raise _parse_error()
-        return [{"b": "ok"}]
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "response,signature,expected",
+    [
+        ("```python\nprint(3.14)\n```\n```", "task -> reasoning, code", {"reasoning": "", "code": "print(3.14)"}),
+        ("[[ ## answer ## ]]\n42", "task -> answer: int", {"answer": 42}),
+    ],
+)
+def test_adapter_valid_reply_costs_one_call(asynchronous, response, signature, expected) -> None:
+    lm = ScriptedLM([response])
+    charged = []
+    assert _invoke(
+        FleetRLMChatAdapter(), SandboxLM(lm, charged.append), dspy.Signature(signature), asynchronous=asynchronous
+    ) == [expected]
+    assert len(lm.calls) == 1 and charged == [1]
 
-    monkeypatch.setattr(ChatAdapter, "acall", flaky)
-    result = asyncio.run(FleetRLMChatAdapter().acall(None, {}, dspy.Signature("a -> b"), [], {"a": "x"}))
-    assert result == [{"b": "ok"}] and len(calls) == 2
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_adapter_reasks_once_with_format_feedback_without_mutating_inputs(asynchronous) -> None:
+    signature = dspy.Signature("task -> answer: int").with_instructions("Keep the original task instructions.")
+    lm_kwargs, inputs, demos = {"temperature": 0.1}, {"task": "pi"}, [{"task": "one", "answer": 1}]
+    original = deepcopy((lm_kwargs, inputs, demos))
+    lm = ScriptedLM(["PRIVATE MALFORMED RESPONSE", "[[ ## answer ## ]]\n42"])
+    charged = []
+    assert _invoke(
+        FleetRLMChatAdapter(),
+        SandboxLM(lm, charged.append),
+        signature,
+        asynchronous=asynchronous,
+        lm_kwargs=lm_kwargs,
+        inputs=inputs,
+        demos=demos,
+    ) == [{"answer": 42}]
+    assert len(lm.calls) == 2 and charged == [1, 1]
+    first, second = [call["messages"][0]["content"] for call in lm.calls]
+    assert "Format correction" not in first and "Format correction" in second
+    assert "Keep the original task instructions." in second
+    assert "[[ ## answer ## ]]" in second and "int" in second and "[[ ## completed ## ]]" in second
+    assert "PRIVATE MALFORMED RESPONSE" not in second
+    assert signature.instructions == "Keep the original task instructions."
+    assert (lm_kwargs, inputs, demos) == original
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("retries,expected_calls", [(0, 1), (1, 2)])
+def test_adapter_stops_at_retry_budget(asynchronous, retries, expected_calls) -> None:
+    lm = ScriptedLM(["invalid"] * 5)
+    charged = []
+    with pytest.raises(AdapterParseError):
+        _invoke(
+            FleetRLMChatAdapter(parse_retries=retries),
+            SandboxLM(lm, charged.append),
+            dspy.Signature("task -> answer"),
+            asynchronous=asynchronous,
+        )
+    assert len(lm.calls) == expected_calls and charged == [1] * expected_calls
+
+
+@pytest.mark.parametrize("retries", [-1, 2, 3, 1.0, True])
+def test_adapter_rejects_unbounded_retry_configuration(retries) -> None:
+    with pytest.raises(ValueError, match="parse_retries"):
+        FleetRLMChatAdapter(parse_retries=retries)
+
+
+def test_adapter_rejects_automatic_json_fallback() -> None:
+    with pytest.raises(ValueError, match="use_json_adapter_fallback"):
+        FleetRLMChatAdapter(use_json_adapter_fallback=True)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_adapter_feedback_identifies_missing_fields_without_echoing_values(asynchronous) -> None:
+    signature = dspy.Signature("task -> answer: int, note: str")
+    lm = ScriptedLM(["[[ ## note ## ]]\nprivate note", "[[ ## answer ## ]]\n42\n[[ ## note ## ]]\nok"])
+    assert _invoke(FleetRLMChatAdapter(), lm, signature, asynchronous=asynchronous) == [{"answer": 42, "note": "ok"}]
+    correction = lm.calls[1]["messages"][0]["content"].split("Format correction:", 1)[1]
+    assert "Missing or invalid output fields: answer." in correction
+    assert "private note" not in correction
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("Shared RLM budget exhausted"),
+        TimeoutError("deadline"),
+        ValueError("provider error"),
+        asyncio.CancelledError(),
+    ],
+)
+def test_adapter_does_not_retry_other_errors(asynchronous, error) -> None:
+    lm = ScriptedLM([error, "[[ ## answer ## ]]\n42"])
+    expected = type(error) if isinstance(error, asyncio.CancelledError) else LMUnexpectedError
+    with pytest.raises(expected) as caught:
+        _invoke(FleetRLMChatAdapter(), lm, dspy.Signature("task -> answer"), asynchronous=asynchronous)
+    if not isinstance(error, asyncio.CancelledError):
+        assert caught.value.__cause__ is error
+    assert len(lm.calls) == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "error", [RuntimeError("Shared RLM budget exhausted"), TimeoutError("deadline"), asyncio.CancelledError()]
+)
+def test_adapter_turn_limits_can_stop_the_retry(asynchronous, error) -> None:
+    lm = ScriptedLM(["invalid", "[[ ## answer ## ]]\n42"])
+    charged = []
+
+    def reserve(count):
+        charged.append(count)
+        if len(charged) > 1:
+            raise error
+
+    with pytest.raises(type(error)) as caught:
+        _invoke(
+            FleetRLMChatAdapter(), SandboxLM(lm, reserve), dspy.Signature("task -> answer"), asynchronous=asynchronous
+        )
+    assert caught.value is error
+    assert charged == [1, 1] and len(lm.calls) == 1
+
+
+def test_adapter_concurrent_retries_do_not_share_instructions() -> None:
+    adapter = FleetRLMChatAdapter()
+    barrier = Barrier(2)
+
+    def invoke(field):
+        signature = dspy.Signature(f"task -> {field}").with_instructions(f"Task for {field}.")
+        lm = ScriptedLM(["invalid", f"[[ ## {field} ## ]]\nok"], barrier=barrier)
+        assert _invoke(adapter, lm, signature) == [{field: "ok"}]
+        assert signature.instructions == f"Task for {field}."
+        return lm.calls[1]["messages"][0]["content"]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        alpha, beta = list(executor.map(invoke, ["alpha", "beta"]))
+    assert "Task for alpha." in alpha and "beta" not in alpha
+    assert "Task for beta." in beta and "alpha" not in beta
