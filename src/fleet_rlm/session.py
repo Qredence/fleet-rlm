@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,46 @@ class SessionRuntime:
     context: WorkspaceDataset | None = None
     lease: psycopg.Connection | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
+    lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
+    _lease_monitor_stop: threading.Event = field(default_factory=threading.Event, repr=False)
+    _lease_monitor: threading.Thread | None = field(default=None, repr=False)
+
+    def assert_lease_held(self) -> None:
+        """Fail closed after the dedicated connection holding this Session lock is lost."""
+        if self.lease_lost.is_set():
+            raise RuntimeError("Session ownership lease was lost; runtime must be rebuilt")
+
+    def start_lease_monitor(self, *, interval_seconds: float = 10.0) -> None:
+        """Probe the dedicated lease connection and cancel remote work when it becomes unhealthy."""
+        lease = self.lease
+        if lease is None or self._lease_monitor is not None:
+            return
+
+        def monitor() -> None:
+            while not self._lease_monitor_stop.wait(interval_seconds):
+                try:
+                    lease.execute("SELECT 1")
+                except Exception:
+                    self.lease_lost.set()
+                    with suppress(Exception):
+                        self.sandbox_mgr.cancel_turn()
+                    return
+
+        self._lease_monitor = threading.Thread(
+            target=monitor,
+            name="fleet-session-lease",
+            daemon=True,
+        )
+        self._lease_monitor.start()
+
+    def close_lease(self) -> None:
+        self._lease_monitor_stop.set()
+        if self._lease_monitor is not None:
+            self._lease_monitor.join(timeout=5)
+            self._lease_monitor = None
+        if self.lease is not None:
+            self.lease.close()
+            self.lease = None
 
     def set_mode(self, mode: str) -> None:
         self.execution_mode = mode
@@ -48,6 +89,16 @@ class SessionRuntime:
         self.configuration_overrides.update(
             {"fleet_root_model": engine.root_lm.model, "fleet_sub_model": engine.sub_lm.model}
         )
+
+
+def settings_for_session(settings: FleetSettings, saved: dict[str, Any]) -> FleetSettings:
+    """Apply only the supported persisted mode/model overrides, never credentials or provider endpoints."""
+    overrides = {}
+    if "mode" in saved:
+        overrides["execution_mode"] = saved["mode"]
+    if saved.get("models"):
+        overrides.update({f"fleet_{role}_model": saved["models"][role] for role in ("root", "sub")})
+    return settings.with_explicit_overrides(**overrides)
 
 
 def runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, Any]:
@@ -80,6 +131,7 @@ class SessionRuntimeRegistry:
         with self._lock:
             runtime = self._sessions.get(session_id)
             if runtime is not None:
+                runtime.assert_lease_held()
                 return runtime
             if len(self._sessions) >= self.settings.max_active_sessions:
                 raise RuntimeError("The maximum number of active Sessions has been reached")
@@ -131,20 +183,19 @@ class SessionRuntimeRegistry:
         try:
             saved = self.store.runtime_settings(session_id)
             if "mode" in saved:
-                runtime.set_mode(saved["mode"])
+                runtime.set_mode(settings_for_session(settings, saved).execution_mode)
             if saved.get("models"):
                 runtime.set_engine(self.engine_for_models(runtime, saved["models"]))
             if saved.get("context"):
                 runtime.context = WorkspaceDataset(**saved["context"])
+            runtime.start_lease_monitor()
         except BaseException:
-            runtime.lease.close()
+            runtime.close_lease()
             raise
         return runtime
 
     def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> AdaptiveFleetEngine:
-        settings = self.settings.model_copy(
-            update={"fleet_root_model": models["root"], "fleet_sub_model": models["sub"]}
-        )
+        settings = settings_for_session(self.settings, {"models": models})
         root, sub, _, _ = settings.build_lms()
         return AdaptiveFleetEngine(
             sandbox_mgr=runtime.sandbox_mgr,
@@ -165,5 +216,4 @@ class SessionRuntimeRegistry:
                     list(pool.map(lambda runtime: runtime.sandbox_mgr.shutdown(), runtimes))
         finally:
             for runtime in runtimes:
-                if runtime.lease is not None:
-                    runtime.lease.close()
+                runtime.close_lease()

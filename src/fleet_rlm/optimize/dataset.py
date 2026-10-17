@@ -1,19 +1,34 @@
-"""Curated optimization examples: approved gold-labeled turns and traces, split by source lineage."""
+"""Curated optimization examples: approved gold-labeled immutable replays, split by source lineage."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import re
 from typing import Any
 
 import dspy
 import mlflow
 
+from fleet_rlm.observability import trace_object
+from fleet_rlm.replay import decode_snapshot, selected_snapshot, validate_review_labels
 from fleet_rlm.store import Store
 from fleet_rlm.workspace import validate_session_id
 
 _MAX_EXAMPLES = 500
+MIN_EXAMPLES = 8
+MIN_GROUPS = 3
+# Model inputs plus the immutable reference checked by the isolated runtime factory.
+_INPUTS = (
+    "workspace_manifest",
+    "skills_catalog",
+    "memory_summary",
+    "session_history",
+    "task",
+    "source_session",
+    "replay_turn_id",
+    "replay_snapshot_sha256",
+    "context_files",
+)
 
 
 def grouped_split(
@@ -39,199 +54,175 @@ def grouped_split(
         group = hashlib.sha256(lineage.encode()).hexdigest()
         groups.setdefault(group, []).append(example)
     ordered = sorted(groups.items(), key=lambda pair: hashlib.sha256(f"{seed}:{pair[0]}".encode()).hexdigest())
-    if len(ordered) < 3:
-        raise ValueError("At least three distinct task/source groups are required for train/dev/holdout")
-    count = len(ordered)
-    train_n = max(1, min(count - 2, int(count * train_ratio)))
-    dev_n = max(1, min(count - train_n - 1, int(count * dev_ratio)))
+    critical_keys = {
+        key for key, members in ordered if any(getattr(example, "critical", False) is True for example in members)
+    }
+    critical = [pair for pair in ordered if pair[0] in critical_keys]
+    remaining = [pair for pair in ordered if pair[0] not in critical_keys]
+    if len(remaining) < 2 or (not critical and len(remaining) < 3):
+        requirement = "two noncritical groups and one critical holdout group" if critical else "three distinct groups"
+        raise ValueError(f"Source-group split needs {requirement} for train/dev/holdout")
+    count = len(remaining)
+    holdout_reserve = 0 if critical else 1
+    train_n = max(1, min(count - holdout_reserve - 1, int(count * train_ratio)))
+    dev_n = max(1, min(count - train_n - holdout_reserve, int(count * dev_ratio)))
     partitions = {"train": [], "dev": [], "holdout": []}
-    for index, (_, members) in enumerate(ordered):
+    for index, (_, members) in enumerate(remaining):
         key = "train" if index < train_n else "dev" if index < train_n + dev_n else "holdout"
         partitions[key].extend(members)
+    for _, members in critical:
+        partitions["holdout"].extend(members)
     return partitions
 
 
-def load_examples_from_postgres(store: Store, session_id: str, default_catalog: str) -> list[dspy.Example]:
+def load_examples_from_postgres(store: Store, session_id: str) -> list[dspy.Example]:
     """Load only approved, explicitly gold-labeled turns with source lineage."""
     session_id = validate_session_id(session_id)
-    rows = store.reviewed_examples(session_id, default_catalog, _MAX_EXAMPLES)
+    rows = store.reviewed_examples(session_id, _MAX_EXAMPLES)
     examples = []
     for row in rows:
         try:
-            contexts = context_snapshot(row["workspace_manifest"], row["context_files"])
-        except ValueError:
-            continue
-        examples.append(
-            dspy.Example(
-                workspace_manifest=row["workspace_manifest"],
-                skills_catalog=row["skills_catalog"],
-                memory_summary=row["memory_summary"] or "",
-                task=row["task"],
-                answer=row["answer"],
-                context_files=contexts,
-                source_group=row["source_group"],
-                provenance=f"postgres-session:{session_id}",
-            ).with_inputs(
-                "workspace_manifest",
-                "skills_catalog",
-                "memory_summary",
-                "task",
-                "source_group",
-                "context_files",
+            snapshot = decode_snapshot(row["replay_snapshot_sha256"], bytes(row["replay_snapshot"]))
+            if snapshot["session_id"] != session_id or snapshot["turn_id"] != row["turn_id"]:
+                continue
+            labels = {**row, "expected_answer": row.get("answer"), "review_status": "approved"}
+            values = labels.get("expected_values")
+            if isinstance(values, str):
+                labels["expected_values"] = json.loads(values)
+            examples.append(
+                _example(
+                    snapshot, labels, row["replay_snapshot_sha256"], f"postgres-session:{session_id}:{row['turn_id']}"
+                )
             )
-        )
+        except (KeyError, TypeError, ValueError):
+            continue
     return examples
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
+def _example(snapshot: dict[str, Any], labels: dict[str, Any], digest: str, provenance: str) -> dspy.Example:
+    """Both curation sources expose exactly the same verified replay inputs."""
+    validate_review_labels(labels, require_gold=True)
+    return dspy.Example(
+        **{
+            name: snapshot[name]
+            for name in ("workspace_manifest", "skills_catalog", "memory_summary", "session_history", "task")
+        },
+        answer=labels.get("expected_answer") or "",
+        expected_values=labels.get("expected_values") or [],
+        route=labels.get("route"),
+        critical=labels.get("critical") is True,
+        category=labels.get("category", ""),
+        context_files=snapshot["context_files"],
+        source_group=labels["source_group"],
+        source_session=snapshot["session_id"],
+        replay_turn_id=snapshot["turn_id"],
+        replay_snapshot_sha256=digest,
+        provenance=provenance,
+    ).with_inputs(*_INPUTS)
 
 
-def context_snapshot(manifest: str, value: Any) -> dict[str, str]:
-    """Require a digest for every path in Fleet's canonical workspace manifest."""
-    contexts = _mapping(value)
-    if any(
-        not isinstance(path, str) or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
-        for path, digest in contexts.items()
-    ):
-        raise ValueError("Curated context snapshot contains an invalid digest")
-    expected = ", ".join(f"/workspace/{path}" for path in sorted(contexts)) or "/workspace/files (empty)"
-    if manifest != expected:
-        raise ValueError("Curated context snapshot does not cover the complete workspace manifest")
-    return contexts
+def turn_traces(experiment_name: str, max_results: int = _MAX_EXAMPLES) -> list[Any]:
+    """Successful Fleet Turn traces, including those with lossy workspace previews."""
+    if not 1 <= max_results <= _MAX_EXAMPLES:
+        raise ValueError(f"max_results must be between 1 and {_MAX_EXAMPLES}")
+    experiment = mlflow.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        return []
+    traces = mlflow.search_traces(
+        locations=[experiment.experiment_id],
+        filter_string="status = 'OK'",
+        max_results=max_results,
+        order_by=["timestamp_ms DESC"],
+        return_type="list",
+    )
+    return [
+        trace
+        for trace in traces
+        if (
+            isinstance(trace_object(trace.data.request).get("workspace_manifest"), str)
+            or trace_object(trace.data.request).get("replay_snapshot_selected") is True
+        )
+        and not _is_test_trace(trace)
+    ]
+
+
+def _is_test_trace(trace: Any) -> bool:
+    """Traces emitted by the pytest suite share the runtime experiment; they are not user Turns."""
+    source = str(trace.info.trace_metadata.get("mlflow.source.name", ""))
+    return "pytest" in source
+
+
+def labels_of(trace: Any) -> dict[str, Any]:
+    """A trace's expectations by name; relabelling wins because the newest assessment is applied last."""
+    items = sorted(
+        trace.search_assessments(type="expectation"), key=lambda item: getattr(item, "create_time_ms", 0) or 0
+    )
+    return {item.name: item.value for item in items}
 
 
 def load_examples_from_mlflow(
     experiment_name: str,
-    session_id: str,
-    default_catalog: str,
     max_results: int = _MAX_EXAMPLES,
+    *,
+    store: Store | None = None,
 ) -> list[dspy.Example]:
-    """Read only this Session's successful traces with an explicit gold answer."""
-    session_id = validate_session_id(session_id)
-    if not 1 <= max_results <= _MAX_EXAMPLES:
-        raise ValueError(f"max_results must be between 1 and {_MAX_EXAMPLES}")
-    traces = mlflow.search_traces(
-        experiment_names=[experiment_name],
-        filter_string=f"status = 'OK' AND metadata.`mlflow.trace.session` = '{session_id}'",
-        max_results=max_results,
-    )
-    if traces is None or traces.empty:
+    """Load approved traces only when their immutable selected snapshot is available and matches."""
+    if store is None:
         return []
     examples: list[dspy.Example] = []
-    for _, row in traces.iterrows():
-        request = _mapping(row.get("request")) or _mapping(row.get("inputs"))
-        expectations = _mapping(row.get("expectations"))
-        task = request.get("task")
-        answer = expectations.get("expected_answer")
-        approved = expectations.get("review_status") == "approved"
-        source_group = expectations.get("source_group") or request.get("source_group")
-        contexts = _mapping(expectations.get("context_files") or request.get("context_files"))
-        if not isinstance(task, str) or not task.strip() or not isinstance(answer, str) or not answer.strip():
+    for trace in turn_traces(experiment_name, max_results):
+        labels = labels_of(trace)
+        request = trace_object(trace.data.request)
+        if labels.get("review_status") != "approved" or request.get("replay_snapshot_selected") is not True:
             continue
-        if not approved or not isinstance(source_group, str) or not source_group.strip():
-            continue
-        manifest = request.get("workspace_manifest", "/workspace/files (empty)")
+        session = trace.info.trace_metadata.get("mlflow.trace.session", "")
         try:
-            contexts = context_snapshot(manifest, contexts)
-        except ValueError:
-            continue
-        examples.append(
-            dspy.Example(
-                workspace_manifest=manifest,
-                skills_catalog=request.get("skills_catalog", default_catalog),
-                memory_summary=request.get("memory_summary", ""),
-                task=task,
-                answer=answer,
-                context_files=contexts,
-                source_group=source_group,
-                provenance=f"mlflow-trace:{row.get('trace_id', '')}",
-            ).with_inputs(
-                "workspace_manifest",
-                "skills_catalog",
-                "memory_summary",
-                "task",
-                "source_group",
-                "context_files",
+            snapshot = selected_snapshot(
+                store, session, request.get("turn_id", ""), request.get("replay_snapshot_sha256", "")
             )
-        )
+            labels = {**labels, "source_group": labels.get("source_group") or session}
+            examples.append(
+                _example(
+                    snapshot,
+                    labels,
+                    request["replay_snapshot_sha256"],
+                    f"mlflow-trace:{trace.info.trace_id}:{snapshot['turn_id']}",
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
     return examples
-
-
-def build_seed_fallback_examples(catalog: str) -> list[dspy.Example]:
-    """Provide a small generic starter set when a Session has no reviewed data."""
-    seeds = (
-        (
-            "/workspace/files (empty)",
-            "Prefer deterministic Python for exact calculations.",
-            "Compute the exact sum and mean of [1420.50, 8930.25, 310.75, 4490.00].",
-            "The exact sum is 15,151.50 and the arithmetic mean is 3,787.875.",
-        ),
-        (
-            "/workspace/files (empty)",
-            "Use Python to check every count.",
-            "Count 2xx, 4xx, and 5xx statuses in [200, 502, 503, 404, 200, 500].",
-            "2xx: 2; 4xx: 1; 5xx: 3.",
-        ),
-        (
-            "/workspace/files (empty)",
-            "Simple conceptual answers do not need sandbox execution.",
-            "What does a Daytona Volume provide Fleet-RLM Lite?",
-            "A Daytona Volume provides persistent workspace storage mounted into the Session's sandbox.",
-        ),
-        (
-            "/workspace/files (empty)",
-            "Use Python for financial calculations.",
-            "Calculate the three-year CAGR from 120.0 to 195.6.",
-            "The three-year CAGR is approximately 17.69%.",
-        ),
-    )
-    return [
-        dspy.Example(
-            workspace_manifest=manifest,
-            skills_catalog=catalog,
-            memory_summary=memory,
-            task=task,
-            answer=answer,
-        ).with_inputs("workspace_manifest", "skills_catalog", "memory_summary", "task")
-        for manifest, memory, task, answer in seeds
-    ]
 
 
 def curate_dataset(
     store: Store,
     experiment_name: str,
     session_id: str,
-    catalog: str,
     *,
     validation_ratio: float = 0.35,
 ) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
-    """Return train/dev/holdout from reviewed examples; seed data is never silently mixed."""
+    """Return train/dev/holdout from reviewed examples; refuse to optimize on too little data."""
     if not 0.1 <= validation_ratio <= 0.5:
         raise ValueError("validation_ratio must be between 0.1 and 0.5")
-    examples = load_examples_from_postgres(store, session_id, catalog)
-    try:
-        examples.extend(load_examples_from_mlflow(experiment_name, session_id, catalog))
-    except Exception as exc:
-        print(f"[dataset] Session-scoped MLflow trace query unavailable ({type(exc).__name__}).")
-    deduplicated: dict[str, dspy.Example] = {}
+    examples = load_examples_from_postgres(store, session_id)
+    examples.extend(load_examples_from_mlflow(experiment_name, store=store))
+    deduplicated: dict[tuple[str, str, str], dspy.Example] = {}
     for example in examples:
-        key = hashlib.sha256(f"{example.task}::{example.workspace_manifest}".encode()).hexdigest()
-        deduplicated[key] = example
+        # PostgreSQL is loaded first and owns durable reviews. A partial MLflow sync must not
+        # introduce a second, conflicting gold label for the very same replay.
+        identity = (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256)
+        deduplicated.setdefault(identity, example)
     all_examples = list(deduplicated.values())
-    if len(all_examples) < 3:
-        raise ValueError("At least three reviewed examples are required; seed fallback is not production data")
+    groups = {example.source_group for example in all_examples}
+    if len(all_examples) < MIN_EXAMPLES or len(groups) < MIN_GROUPS:
+        raise ValueError(
+            f"GEPA needs at least {MIN_EXAMPLES} approved examples from {MIN_GROUPS} source groups; "
+            f"found {len(all_examples)} from {len(groups)}. Run more Turns in more Sessions; "
+            '`fleet eval label <trace-id> --answer "..."` adds a gold answer to one.'
+        )
     splits = grouped_split(all_examples, train_ratio=1.0 - validation_ratio - 0.2, dev_ratio=validation_ratio)
     print(
-        f"[dataset] Session {session_id}: {sum(map(len, splits.values()))} reviewed examples; "
+        f"[dataset] {len(all_examples)} reviewed examples from {len(groups)} groups; "
         f"{len(splits['train'])} train, {len(splits['dev'])} dev, {len(splits['holdout'])} holdout."
     )
     return splits["train"], splits["dev"], splits["holdout"]

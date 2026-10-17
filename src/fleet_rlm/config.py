@@ -27,7 +27,13 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_SECRET_FIELDS = {"fleet_database_url", "fleet_daytona_api_key", "databricks_token", "typesafe_api_key"}
+_SECRET_FIELDS = {
+    "fleet_database_url",
+    "fleet_database_migration_url",
+    "fleet_daytona_api_key",
+    "databricks_token",
+    "typesafe_api_key",
+}
 _TOML_FIELDS = {
     "runtime": {
         "execution_mode": "execution_mode",
@@ -52,16 +58,22 @@ _TOML_FIELDS = {
         "max_upload_bytes": "max_upload_bytes",
         "compiled_program_dir": "compiled_program_dir",
         "local_skills_dir": "local_skills_dir",
+        "lakebase_endpoint": "fleet_lakebase_endpoint",
+        "database_schema": "fleet_database_schema",
     },
     "mlflow": {
         "mode": "mlflow_mode",
         "tracking_uri": "mlflow_tracking_uri",
         "experiment_name": "mlflow_experiment_name",
         "eval_experiment_name": "mlflow_eval_experiment_name",
+        "optimization_experiment_name": "mlflow_optimization_experiment_name",
         "trace_catalog": "mlflow_trace_catalog",
         "trace_schema": "mlflow_trace_schema",
         "trace_table_prefix": "mlflow_trace_table_prefix",
         "tracing_sql_warehouse_id": "mlflow_tracing_sql_warehouse_id",
+        "optimization_trace_schema": "mlflow_optimization_trace_schema",
+        "optimization_trace_table_prefix": "mlflow_optimization_trace_table_prefix",
+        "eval_trace_table_prefix": "mlflow_eval_trace_table_prefix",
     },
     "evaluation": {"judge_model": "fleet_judge_model"},
     "server": {"host": "host", "port": "port", "allow_non_loopback_bind": "allow_non_loopback_bind"},
@@ -82,6 +94,7 @@ class MlflowTarget(NamedTuple):
     tracking_uri: str
     experiment_name: str
     eval_experiment_name: str
+    optimization_experiment_name: str
 
 
 _SETTINGS_SOURCES: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
@@ -215,6 +228,19 @@ class FleetSettings(BaseSettings):
         return updated
 
     fleet_database_url: str = "postgresql://postgres:postgres@localhost:5432/fleet"
+    fleet_database_migration_url: str = Field(
+        default="",
+        description="Optional PostgreSQL DSN for schema migrations; defaults to the runtime DSN.",
+    )
+    fleet_database_schema: str = Field(
+        default="public",
+        description="PostgreSQL schema containing Fleet Lite tables.",
+    )
+    fleet_lakebase_endpoint: str = Field(
+        default="",
+        validation_alias="FLEET_LAKEBASE_ENDPOINT",
+        description="Lakebase endpoint resource path; enables per-connection Databricks OAuth credentials.",
+    )
 
     fleet_daytona_api_key: str = ""
     fleet_daytona_org_id: str = ""
@@ -236,8 +262,8 @@ class FleetSettings(BaseSettings):
     )
 
     fleet_root_model: str = "openai/system.ai.deepseek-v4-1-flash"
-    fleet_sub_model: str = "openai/system.ai.claude-haiku-5-5"
-    fleet_reflection_model: str = "openai/system.ai.claude-sonnet-5-5"
+    fleet_sub_model: str = "openai/system.ai.claude-sonnet-5-5"
+    fleet_reflection_model: str = "openai/system.ai.claude-haiku-5-5"
     fleet_root_max_tokens: int | None = Field(default=None, ge=1)
     fleet_sub_max_tokens: int | None = Field(default=None, ge=1)
     fleet_reflection_max_tokens: int | None = Field(default=None, ge=1)
@@ -294,25 +320,41 @@ class FleetSettings(BaseSettings):
     )
 
     mlflow_mode: Literal["local", "databricks"] = Field(
-        default="local",
+        default="databricks",
         validation_alias="FLEET_MLFLOW_MODE",
         description="local: the 127.0.0.1 MLflow server; databricks: the configured workspace URI and UC storage.",
     )
     mlflow_tracking_uri: str = Field(
-        default=LOCAL_MLFLOW_URI,
+        default="databricks",
         validation_alias=AliasChoices("FLEET_MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_URI"),
     )
     mlflow_experiment_name: str = Field(
-        default=LOCAL_MLFLOW_EXPERIMENT,
+        default="/Shared/fleet-rlm-runtime",
         validation_alias=AliasChoices("FLEET_MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_NAME"),
     )
-    mlflow_eval_experiment_name: str = Field(default="", validation_alias="FLEET_MLFLOW_EVAL_EXPERIMENT_NAME")
-    mlflow_trace_catalog: str = Field(default="", validation_alias="FLEET_MLFLOW_TRACE_CATALOG")
-    mlflow_trace_schema: str = Field(default="", validation_alias="FLEET_MLFLOW_TRACE_SCHEMA")
-    mlflow_trace_table_prefix: str = Field(default="", validation_alias="FLEET_MLFLOW_TRACE_TABLE_PREFIX")
+    mlflow_eval_experiment_name: str = Field(
+        default="/Shared/fleet-rlm-eval", validation_alias="FLEET_MLFLOW_EVAL_EXPERIMENT_NAME"
+    )
+    mlflow_optimization_experiment_name: str = Field(
+        default="/Shared/fleet-rlm-gepa", validation_alias="FLEET_MLFLOW_OPTIMIZATION_EXPERIMENT_NAME"
+    )
+    mlflow_trace_catalog: str = Field(default="uscentral", validation_alias="FLEET_MLFLOW_TRACE_CATALOG")
+    mlflow_trace_schema: str = Field(default="fleet_observability", validation_alias="FLEET_MLFLOW_TRACE_SCHEMA")
+    mlflow_trace_table_prefix: str = Field(
+        default="fleet_rlm_runtime", validation_alias="FLEET_MLFLOW_TRACE_TABLE_PREFIX"
+    )
     mlflow_tracing_sql_warehouse_id: str = Field(
-        default="",
+        default="4d07bd43a3ddfff2",
         validation_alias="FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    )
+    mlflow_optimization_trace_schema: str = Field(
+        default="fleet_gepa", validation_alias="FLEET_MLFLOW_OPTIMIZATION_TRACE_SCHEMA"
+    )
+    mlflow_optimization_trace_table_prefix: str = Field(
+        default="fleet_rlm_gepa", validation_alias="FLEET_MLFLOW_OPTIMIZATION_TRACE_TABLE_PREFIX"
+    )
+    mlflow_eval_trace_table_prefix: str = Field(
+        default="fleet_rlm_eval", validation_alias="FLEET_MLFLOW_EVAL_TRACE_TABLE_PREFIX"
     )
 
     host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("FLEET_HOST", "HOST"))
@@ -379,6 +421,14 @@ class FleetSettings(BaseSettings):
     def shared_notes_subpath_is_relative(cls, value: str) -> str:
         return validate_shared_notes_subpath(value)
 
+    @field_validator("fleet_database_schema")
+    @classmethod
+    def database_schema_is_safe_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", normalized):
+            raise ValueError("database schema must be a lowercase PostgreSQL identifier")
+        return normalized
+
     @field_validator("fleet_judge_model")
     @classmethod
     def judge_model_is_a_provider_uri(cls, value: str) -> str:
@@ -389,6 +439,39 @@ class FleetSettings(BaseSettings):
 
     @model_validator(mode="after")
     def databricks_tracking_requires_governed_trace_storage(self) -> FleetSettings:
+        if self.fleet_database_migration_url:
+            from psycopg.conninfo import conninfo_to_dict
+
+            runtime_database = conninfo_to_dict(self.fleet_database_url)
+            migration_database = conninfo_to_dict(self.fleet_database_migration_url)
+            for key, default in (("host", ""), ("port", "5432"), ("dbname", "")):
+                if migration_database.get(key, default) != runtime_database.get(key, default):
+                    raise ValueError("FLEET_DATABASE_MIGRATION_URL must target the runtime database")
+        if self.fleet_lakebase_endpoint:
+            if not re.fullmatch(
+                r"projects/[a-z0-9-]+/branches/[a-z0-9-]+/endpoints/[a-z0-9-]+",
+                self.fleet_lakebase_endpoint,
+            ):
+                raise ValueError("FLEET_LAKEBASE_ENDPOINT must be a Lakebase endpoint resource path")
+            from psycopg.conninfo import conninfo_to_dict
+
+            database = conninfo_to_dict(self.fleet_database_url)
+            if database.get("sslmode") != "require" or not database.get("host") or not database.get("user"):
+                raise ValueError("OAuth Lakebase DSN requires host, user, and sslmode=require")
+            if database.get("password"):
+                raise ValueError("Remove the embedded password when FLEET_LAKEBASE_ENDPOINT enables OAuth")
+            if self.fleet_database_migration_url:
+                migration = conninfo_to_dict(self.fleet_database_migration_url)
+                if (
+                    migration.get("sslmode") != "require"
+                    or not migration.get("host")
+                    or not migration.get("user")
+                    or migration.get("host") != database.get("host")
+                    or migration.get("dbname") != database.get("dbname")
+                ):
+                    raise ValueError("Lakebase migration DSN must target the same TLS endpoint and database")
+                if migration.get("password"):
+                    raise ValueError("Remove the embedded password from the Lakebase migration DSN")
         if self.mlflow_mode == "databricks":
             if not self.mlflow_tracking_uri.startswith("databricks"):
                 raise ValueError("FLEET_MLFLOW_MODE=databricks requires a databricks tracking URI")
@@ -405,13 +488,21 @@ class FleetSettings(BaseSettings):
                 raise ValueError("Databricks MLflow tracking URI must be 'databricks' or 'databricks://<profile>'")
             if not self.mlflow_experiment_name.startswith("/"):
                 raise ValueError("Databricks MLflow experiment names must be absolute workspace paths")
+            if not self.mlflow_eval_experiment_name.startswith("/"):
+                raise ValueError("Databricks MLflow eval experiment names must be absolute workspace paths")
+            if not self.mlflow_optimization_experiment_name.startswith("/"):
+                raise ValueError("Databricks MLflow optimization experiment names must be absolute workspace paths")
         return self
 
     def mlflow_target(self) -> MlflowTarget:
         """Resolve the MLflow destination. Local mode ignores Databricks-only URIs and workspace paths."""
         if self.mlflow_mode == "databricks":
             return MlflowTarget(
-                "databricks", self.mlflow_tracking_uri, self.mlflow_experiment_name, self.mlflow_eval_experiment_name
+                "databricks",
+                self.mlflow_tracking_uri,
+                self.mlflow_experiment_name,
+                self.mlflow_eval_experiment_name,
+                self.mlflow_optimization_experiment_name,
             )
         uri = self.mlflow_tracking_uri
         experiment = self.mlflow_experiment_name
@@ -422,6 +513,9 @@ class FleetSettings(BaseSettings):
             LOCAL_MLFLOW_URI if uri.startswith("databricks") else uri,
             LOCAL_MLFLOW_EXPERIMENT if experiment.startswith("/") else experiment,
             eval_experiment if local_eval else LOCAL_MLFLOW_EVAL_EXPERIMENT,
+            self.mlflow_optimization_experiment_name
+            if self.mlflow_optimization_experiment_name and not self.mlflow_optimization_experiment_name.startswith("/")
+            else "fleet-rlm-gepa",
         )
 
     def judge_environment(self) -> dict[str, str]:
@@ -444,6 +538,20 @@ class FleetSettings(BaseSettings):
                 raise RuntimeError("TypeSafe routing requires the DSPy 'typesafe' extra") from exc
             jev_lm = TypeSafe(self.typesafe_model, api_key=self.typesafe_api_key)
         return root_lm, sub_lm, reflection_lm, jev_lm
+
+    def build_judge_lm(self) -> dspy.LM:
+        """The DSPy twin of FLEET_JUDGE_MODEL: temperature zero and cached for consistent repeated judging."""
+        if not self.fleet_judge_model.startswith("openai:/"):
+            raise ValueError("The DSPy judge needs FLEET_JUDGE_MODEL as an 'openai:/<service-id>' gateway route")
+        return dspy.LM(
+            self.fleet_judge_model.replace("openai:/", "openai/", 1),
+            api_base=self._gateway_base_url(),
+            api_key=self._gateway_api_key(),
+            engine="lm15",
+            temperature=0.0,
+            cache=True,
+            num_retries=self.fleet_reflection_num_retries,
+        )
 
     def list_models(self, scope: str = "system.ai") -> list[str]:
         """Discover authorized chat-capable Unity Gateway services, not inference /models."""

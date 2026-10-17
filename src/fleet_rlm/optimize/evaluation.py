@@ -7,13 +7,17 @@ never from historical traces or stored Turns.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import random
-import re
+import threading
+import time
+import uuid
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from queue import Empty, Queue
 from typing import Any
 
 import httpx
@@ -22,8 +26,18 @@ from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
 from mlflow.genai.scorers import scorer
 
 from fleet_rlm.engine.signatures import Route
+from fleet_rlm.observability import trace_object
+from fleet_rlm.optimize.dataset import labels_of, turn_traces
+from fleet_rlm.optimize.scorers import (
+    SCORER_VERSION,
+    build_mlflow_scorer_suite,
+    fleet_metric,
+    gold_and_prediction,
+    metric_feedbacks,
+    missing_values,
+)
+from fleet_rlm.replay import validate_review_labels
 
-REVIEW_STATUSES = ("approved", "benchmark", "synthetic", "rejected")
 _REGIONS = ("north", "south", "east", "west", "central")
 _STATUSES = ("on_time", "late", "cancelled")
 _DIRECT = (
@@ -51,6 +65,7 @@ class EvalCase:
     answer_type: str = "scalar"
     context_chars: int = 0
     benchmark: str = "synthetic"
+    critical: bool = False
 
     def record(self) -> dict[str, Any]:
         expectations: dict[str, Any] = {
@@ -62,6 +77,7 @@ class EvalCase:
             "answer_type": self.answer_type,
             "context_chars": self.context_chars or sum(len(text) for text in self.files.values()) or len(self.task),
             "benchmark": self.benchmark,
+            "critical": self.critical,
         }
         if self.route:
             expectations["route"] = self.route
@@ -94,6 +110,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
             category="direct",
             source_group=f"direct-{index:02d}",
             route=Route.DIRECT.value,
+            critical=True,
         )
         for index, (task, answer) in enumerate(_DIRECT)
     ]
@@ -115,6 +132,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
                 source_group=f"aggregate-{index:02d}",
                 files={"files/sales.csv": _csv(["region", "revenue"], sales)},
                 route=Route.FLEX.value,
+                critical=True,
             )
         )
     for index in range(per_category):
@@ -128,6 +146,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
                 category="filter_count",
                 source_group=f"filter-count-{index:02d}",
                 files={"files/shipments.csv": _csv(["shipment_id", "status", "days"], rows)},
+                critical=True,
             )
         )
     for index in range(per_category):
@@ -150,6 +169,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
                     "files/orders.csv": _csv(["order_id", "customer_id", "amount"], orders),
                     "files/customers.csv": _csv(["customer_id", "tier"], [[c, t] for c, t in tiers.items()]),
                 },
+                critical=True,
             )
         )
     return cases
@@ -173,20 +193,22 @@ def label_trace(
     expected_answer: str | None = None,
     expected_values: list[str] | None = None,
     route: str | None = None,
+    critical: bool | None = None,
     reviewer: str = "human",
 ) -> None:
     """Write gold labels onto a trace as MLflow expectations."""
-    if review_status not in REVIEW_STATUSES:
-        raise ValueError(f"review_status must be one of {REVIEW_STATUSES}")
-    if not source_group.strip():
-        raise ValueError("source_group must not be empty")
     labels: dict[str, Any] = {"review_status": review_status, "source_group": source_group}
-    if expected_answer is not None:
-        labels["expected_answer"] = expected_answer
-    if expected_values:
-        labels["expected_values"] = list(expected_values)
-    if route:
-        labels["route"] = route
+    for name, value in (
+        ("expected_answer", expected_answer),
+        ("expected_values", expected_values),
+        ("route", route),
+        ("critical", critical),
+    ):
+        if value is not None:
+            labels[name] = value
+    validate_review_labels(labels)
+    if not reviewer.strip():
+        raise ValueError("review labels require a reviewer")
     source_type = AssessmentSourceType.HUMAN if review_status != "synthetic" else AssessmentSourceType.CODE
     source = AssessmentSource(source_type=source_type, source_id=reviewer)
     for name, value in labels.items():
@@ -228,19 +250,76 @@ def run_case(client: httpx.Client, case: EvalCase, session_id: str) -> dict[str,
 
 
 @scorer
-def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedback:
+def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
     """Deterministic check: every gold value appears in the answer (thousands separators ignored)."""
     expected = (expectations or {}).get("expected_values") or []
     if not expected:
-        return Feedback(value=None, rationale="No expected values labeled for this case.")
-    answer = str(outputs.get("answer", "") if isinstance(outputs, dict) else outputs).lower().replace(",", "")
-    # Boundaries stop "12" from matching inside "120" or "1.25".
-    missing = [
-        value for value in expected if not re.search(rf"(?<![\w.]){re.escape(str(value).lower())}(?![\w])", answer)
-    ]
+        return None
+    outputs = trace_object(outputs) or outputs
+    missing = missing_values(str(outputs.get("answer", "") if isinstance(outputs, dict) else outputs), expected)
     return Feedback(
         value=not missing,
         rationale="All expected values found." if not missing else f"Missing from answer: {missing}",
+    )
+
+
+class EvaluationError(RuntimeError):
+    """An evaluation is incomplete; its completed Turns must not be executed again for recovery."""
+
+
+def read_evaluation_trace(
+    trace_id: str,
+    *,
+    experiment_id: str,
+    uc_location: tuple[str, str, str] | None = None,
+    wait_seconds: float = 180.0,
+    expected_labels: dict[str, Any] | None = None,
+) -> Any:
+    """Wait for one completed trace in the intended destination, including cold warehouse startup.
+
+    Each read runs on a daemon thread so an SDK request cannot exceed the caller's readback
+    window. A timeout abandons that read, never starts a concurrent retry, and never repeats a Turn.
+    """
+    deadline = time.monotonic() + wait_seconds
+    while (remaining := deadline - time.monotonic()) > 0:
+        result: Queue[tuple[Any, Exception | None]] = Queue(maxsize=1)
+
+        def read(result: Queue[tuple[Any, Exception | None]] = result) -> None:
+            try:
+                result.put((mlflow.get_trace(trace_id, silent=True, flush=True), None))
+            except Exception as exc:
+                result.put((None, exc))
+
+        threading.Thread(target=read, daemon=True).start()
+        try:
+            trace, error = result.get(timeout=remaining)
+        except Empty:
+            break
+        if error is not None:
+            raise EvaluationError(f"Trace readback failed ({type(error).__name__}); recover trace {trace_id}") from None
+        if trace is not None:
+            location = trace.info.trace_location
+            if uc_location is not None:
+                location = getattr(location, "uc_table_prefix", None) or location
+                actual = tuple(getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix"))
+                matches = actual == uc_location
+            else:
+                location = getattr(location, "mlflow_experiment", None) or location
+                matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
+            if not matches:
+                raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
+            state = str(trace.info.state)
+            if state not in {"OK", "IN_PROGRESS"}:
+                raise EvaluationError(f"Trace {trace_id} completed with state {state}")
+            if state == "OK" and trace.data.spans:
+                if expected_labels is None:
+                    return trace
+                saved = labels_of(trace)
+                if all(saved.get(key) == value for key, value in expected_labels.items()):
+                    return trace
+        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    raise EvaluationError(
+        f"Trace {trace_id} was not ready within {wait_seconds:g}s; recover this trace without rerunning"
     )
 
 
@@ -249,31 +328,158 @@ def evaluate_cases(
     *,
     base_url: str,
     judge_model: str,
-    session_prefix: str = "eval",
+    judge_lm: Any = None,
+    experiment_id: str,
+    uc_location: tuple[str, str, str] | None = None,
+    session_prefix: str | None = None,
     timeout: float = 600.0,
+    collect_only: bool = False,
+    report: Callable[[str], None] = print,
 ) -> Any:
-    """Run cases against a live server, label the resulting traces, and score them with the suite."""
-    from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite
+    """Run cases against a live server and label each Turn trace with its gold answer.
 
+    With ``collect_only`` the judge suite is skipped and the saved trace IDs support later
+    explicit scoring without executing the Turns again. Returns ``None`` in that mode.
+    """
+    session_prefix = session_prefix or f"eval-{uuid.uuid4().hex}"
+    report(f"Evaluation run: {session_prefix} ({len(cases)} cases)")
     traces = []
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(timeout, connect=10.0)) as client:
         for case in cases:
-            outputs = run_case(client, case, f"{session_prefix}-{case.case_id}")
-            if not outputs["trace_id"]:
-                continue
+            session_id = f"{session_prefix}-{case.case_id}"
+            report(f"Case {case.case_id}: Session {session_id}")
+            try:
+                outputs = run_case(client, case, session_id)
+            except httpx.HTTPError as exc:
+                raise EvaluationError(
+                    f"Case {case.case_id} transport failed ({type(exc).__name__}); inspect Session {session_id} "
+                    "before retrying"
+                ) from None
+            trace_id = outputs.get("trace_id")
+            if trace_id:
+                report(f"Case {case.case_id}: trace {trace_id}")
+            if outputs.get("error") or not trace_id:
+                raise EvaluationError(f"Case {case.case_id} failed or returned no trace; inspect Session {session_id}")
+            readback_deadline = time.monotonic() + 180.0
+            read_evaluation_trace(trace_id, experiment_id=experiment_id, uc_location=uc_location)
             labels = case.record()["expectations"]
-            label_trace(
-                outputs["trace_id"],
-                review_status=case.review_status,
-                source_group=case.source_group,
-                expected_values=labels["expected_values"],
-                route=case.route,
-                reviewer="synthetic-generator",
+            try:
+                label_trace(
+                    trace_id,
+                    review_status=case.review_status,
+                    source_group=case.source_group,
+                    expected_answer=", ".join(case.expected_values) or None,
+                    expected_values=labels["expected_values"],
+                    route=case.route,
+                    critical=case.critical,
+                    reviewer="synthetic-generator",
+                )
+            except Exception as exc:
+                raise EvaluationError(
+                    f"Expectation write failed ({type(exc).__name__}); recover trace {trace_id} without rerunning"
+                ) from None
+            expected = {
+                "review_status": case.review_status,
+                "source_group": case.source_group,
+                "expected_answer": ", ".join(case.expected_values) or None,
+                "expected_values": list(case.expected_values) or None,
+                "route": case.route,
+                "critical": case.critical,
+            }
+            expected = {key: value for key, value in expected.items() if value is not None}
+            trace = read_evaluation_trace(
+                trace_id,
+                experiment_id=experiment_id,
+                uc_location=uc_location,
+                wait_seconds=max(0.0, readback_deadline - time.monotonic()),
+                expected_labels=expected,
             )
-            traces.append(mlflow.get_trace(outputs["trace_id"]))
-    return mlflow.genai.evaluate(
-        data=traces, scorers=[*build_mlflow_scorer_suite(judge_model), expected_values_present]
-    )
+            saved = labels_of(trace)
+            if any(saved.get(key) != value for key, value in expected.items() if value is not None):
+                raise EvaluationError(f"Expectations are not readable yet; recover trace {trace_id} without rerunning")
+            if not collect_only:
+                traces.append(trace)
+            report(f"Case {case.case_id}: collected and labelled")
+    if collect_only:
+        return None
+    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, report=report)
+
+
+def score_evaluation_traces(
+    traces: list[Any], *, judge_model: str, judge_lm: Any = None, report: Callable[[str], None] = print
+) -> Any:
+    """Score already verified, labelled traces without executing their Turns again."""
+    try:
+        result = mlflow.genai.evaluate(
+            data=traces, scorers=[*build_mlflow_scorer_suite(judge_model, judge_lm), expected_values_present]
+        )
+    except Exception as exc:
+        raise EvaluationError(
+            f"Scoring failed ({type(exc).__name__}); score the saved traces without rerunning Turns"
+        ) from None
+    report(f"Evaluation scoring run: {result.run_id}")
+    frame = result.result_df
+    if frame is None:
+        raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
+    error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
+    expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
+    if (
+        frame.empty
+        or not expected_columns.issubset(frame.columns)
+        or any(frame[name].notna().any() for name in error_columns)
+    ):
+        raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
+    return result
+
+
+def auto_evaluate_traces(experiment_name: str, judge_lm: Any, judge_model: str) -> tuple[int, int]:
+    """Score every Turn trace without a current-version ``fleet_metric`` assessment.
+
+    Returns ``(newly_scored, already_current)``. A prior assessment is reused only when its
+    scorer version, judge model, and current gold labels match. Historical assessments remain
+    attached to the trace as an audit trail.
+    """
+    source = AssessmentSource(source_type=AssessmentSourceType.LLM_JUDGE, source_id=judge_model)
+    scored = skipped = 0
+    for trace in turn_traces(experiment_name):
+        labels = labels_of(trace)
+        fingerprint = _metric_fingerprint(labels, judge_model)
+        assessments = trace.search_assessments(name="fleet_metric", type="feedback")
+        if any(
+            getattr(item, "metadata", None) and item.metadata.get("fleet.metric_fingerprint") == fingerprint
+            for item in assessments
+        ):
+            skipped += 1
+            continue
+        root = next(span for span in trace.data.spans if span.parent_id is None)
+        gold, pred = gold_and_prediction(root.inputs, root.outputs, labels)
+        feedbacks = metric_feedbacks(fleet_metric(gold, pred, judge_lm=judge_lm))
+        metadata = {
+            "fleet.scorer_version": SCORER_VERSION,
+            "fleet.metric_fingerprint": fingerprint,
+            "fleet.judge_model": judge_model,
+        }
+        # Keep the overall assessment as the completion marker. If writing an objective
+        # assessment fails midway, the next run retries instead of treating partial output as done.
+        for feedback in (*feedbacks[1:], feedbacks[0]):
+            mlflow.log_feedback(
+                trace_id=trace.info.trace_id,
+                name=feedback.name,
+                value=feedback.value,
+                rationale=feedback.rationale,
+                source=source,
+                metadata=metadata,
+            )
+        scored += 1
+    return scored, skipped
+
+
+def _metric_fingerprint(labels: dict[str, Any], judge_model: str) -> str:
+    """Identify the scorer implementation, judge route, and expectations used for a score."""
+    identity = {"scorer_version": SCORER_VERSION, "judge_model": judge_model, "expectations": labels}
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()
+    ).hexdigest()
 
 
 def stopping_evidence(trace: Any) -> dict[str, Any] | None:
@@ -315,10 +521,10 @@ def evaluate_stopping_traces(traces: list[Any], *, judge_model: str) -> Any:
     )
 
     @scorer
-    def verification_stopping_discipline(trace: Any) -> Feedback:
+    def verification_stopping_discipline(trace: Any) -> Feedback | None:
         evidence = stopping_evidence(trace)
         if evidence is None:
-            return Feedback(value=None, rationale="Complete task execution evidence is unavailable.")
+            return None
         return judge(inputs={"task": evidence["task"]}, outputs={"execution_steps": evidence["steps"]})
 
     @scorer

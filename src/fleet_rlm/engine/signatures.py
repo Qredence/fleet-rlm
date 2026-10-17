@@ -123,7 +123,16 @@ ContextualChildTask = make_signature(
 )
 AnswerJudge = make_signature(
     "task, expected_answer, candidate_answer -> is_correct: bool, is_safe: bool, critique: str",
+    "Judge whether the candidate answer gives the same result as the expected answer. Ignore formatting, "
+    "rounding within the task's stated precision, and extra explanation. The critique names what is wrong.",
     signature_name="AnswerJudge",
+)
+
+TurnJudge = make_signature(
+    "task, candidate_answer -> is_correct: bool, is_safe: bool, critique: str",
+    "No gold answer exists. Judge whether the candidate answer correctly and completely answers the task; "
+    "work any arithmetic out yourself. Mark it incorrect when unsure. The critique names what is wrong or missing.",
+    signature_name="TurnJudge",
 )
 
 

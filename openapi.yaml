@@ -286,39 +286,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /sessions/{session_id}/reload:
-    post:
-      tags:
-      - sessions
-      summary: Reload Program
-      operationId: reload_program_sessions__session_id__reload_post
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
-      - name: approved
-        in: query
-        required: false
-        schema:
-          type: boolean
-          default: false
-          title: Approved
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Status'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /sessions/{session_id}/workspace/tree:
     get:
       tags:
@@ -1172,6 +1139,12 @@ components:
             maxLength: 128
           - type: 'null'
           title: Idempotency Key
+        record_replay:
+          type: boolean
+          title: Record Replay
+          description: Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed
+            GEPA data.
+          default: false
       additionalProperties: false
       type: object
       required:

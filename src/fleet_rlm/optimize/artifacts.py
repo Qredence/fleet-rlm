@@ -1,8 +1,7 @@
-"""Compiled-program artifacts: isolated rollouts, manifests, promotion gates, and the single loader."""
+"""Compiled-program artifacts: isolated rollouts, manifests, the promotion gate, approval, and the loader."""
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import math
@@ -14,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import dspy
+
+APPROVAL_POLICY_VERSION = 2
+VALIDATION_PASSES = 3
 
 
 class IsolatedFleetProgram(dspy.Module):
@@ -27,31 +29,25 @@ class IsolatedFleetProgram(dspy.Module):
     def forward(self, **inputs: Any) -> dspy.Prediction:
         engine = self.engine_factory(dspy.Example(**inputs), self.program)
         try:
-            return engine(
-                **{
-                    name: value
-                    for name, value in inputs.items()
-                    if name
-                    in {"workspace_manifest", "skills_catalog", "memory_summary", "task", "session_history", "context"}
-                }
-            )
+            arguments = {
+                name: value
+                for name, value in inputs.items()
+                if name in {"workspace_manifest", "skills_catalog", "memory_summary", "task", "session_history"}
+            }
+            if hasattr(engine, "optimization_context"):
+                arguments["context"] = engine.optimization_context
+            return engine(**arguments)
         finally:
-            engine.sandbox_mgr.shutdown()
-            artifact_path = getattr(engine, "optimization_artifact_path", None)
-            if artifact_path:
-                Path(artifact_path).unlink(missing_ok=True)
+            try:
+                engine.sandbox_mgr.shutdown()
+            finally:
+                artifact_path = getattr(engine, "optimization_artifact_path", None)
+                if artifact_path:
+                    Path(artifact_path).unlink(missing_ok=True)
 
 
 def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def isolated_pair(baseline: Any, candidate: Any) -> tuple[Any, Any]:
-    """Return deep independent copies; refuse if copies still alias mutable state."""
-    left, right = copy.deepcopy(baseline), copy.deepcopy(candidate)
-    if left is right or right is baseline or left is candidate:
-        raise ValueError("baseline and candidate could not be isolated")
-    return left, right
 
 
 @dataclass(frozen=True)
@@ -60,61 +56,67 @@ class EvaluationGate:
     reasons: tuple[str, ...]
 
 
-def promotion_gate(
-    baseline: Mapping[str, float | None],
-    candidate: Mapping[str, float | None],
-    *,
-    quality_metrics: tuple[str, ...],
-    tolerance: float = 0.0,
-    latency_ceiling: float | None = None,
-    security_violations: int | None = None,
-    golden_regression: bool | None = None,
-) -> EvaluationGate:
+def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
+    """Recompute the policy from the three paired observations, never trust a saved verdict."""
+    if evaluation.get("policy_version") != APPROVAL_POLICY_VERSION:
+        return EvaluationGate(False, ("obsolete approval policy; reevaluate against the current incumbent",))
     reasons: list[str] = []
-    for metric in quality_metrics:
-        before, after = baseline.get(metric), candidate.get(metric)
-        if (
-            before is None
-            or after is None
-            or isinstance(before, bool)
-            or isinstance(after, bool)
-            or not isinstance(before, (int, float))
-            or not isinstance(after, (int, float))
-            or not math.isfinite(before)
-            or not math.isfinite(after)
-        ):
-            reasons.append(f"missing metric: {metric}")
-        elif after < before - tolerance:
-            reasons.append(f"quality regression: {metric}")
-    latency = candidate.get("avg_turn_latency_sec")
-    if latency_ceiling is not None and (
-        latency is None
-        or isinstance(latency, bool)
-        or not isinstance(latency, (int, float))
-        or not math.isfinite(latency)
-        or latency > latency_ceiling
-    ):
-        reasons.append("latency ceiling missing or exceeded")
-    if (
-        security_violations is None
-        or isinstance(security_violations, bool)
-        or not isinstance(security_violations, int)
-        or security_violations < 0
-        or security_violations
-    ):
-        reasons.append("security/isolation/budget evidence missing or violated")
-    if golden_regression is None or golden_regression:
-        reasons.append("golden artifact evidence missing or regressed")
-    return EvaluationGate(not reasons, tuple(reasons))
+    observations = {}
+    for stage in ("baseline", "candidate"):
+        passes = (evaluation.get(stage) or {}).get("passes")
+        if not isinstance(passes, list) or len(passes) != VALIDATION_PASSES:
+            return EvaluationGate(False, ("three paired validation passes are required",))
+        observations[stage] = passes
+        for item in passes:
+            for split in ("dev", "holdout"):
+                score = item.get(split)
+                objectives = item.get(f"{split}_objectives") or {}
+                quality = objectives.get("quality")
+                if any(
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or not math.isfinite(value)
+                    or not 0 <= value <= 1
+                    for value in (score, quality)
+                ):
+                    return EvaluationGate(False, ("missing score or correctness evidence",))
+                if objectives.get("usage_available") != 1.0:
+                    reasons.append(f"{stage} {split} execution usage unavailable")
+            if stage == "candidate":
+                errors = item.get("holdout_errors")
+                if type(errors) is not int or errors != 0:
+                    reasons.append(f"candidate holdout rollouts errored ({errors})")
+                critical = item.get("holdout_critical_scores")
+                if not isinstance(critical, list) or not critical:
+                    reasons.append("missing critical holdout scores")
+                elif any(type(value) not in (int, float) or value != 1.0 for value in critical):
+                    reasons.append("critical deterministic holdout cases failed")
+    for split in ("dev", "holdout"):
+        before = sum(item[split] for item in observations["baseline"]) / VALIDATION_PASSES
+        after = sum(item[split] for item in observations["candidate"]) / VALIDATION_PASSES
+        if (split == "dev" and after <= before) or (split == "holdout" and after < before):
+            reasons.append("dev did not improve" if split == "dev" else "holdout regressed")
+        quality_before = (
+            sum(item[f"{split}_objectives"]["quality"] for item in observations["baseline"]) / VALIDATION_PASSES
+        )
+        quality_after = (
+            sum(item[f"{split}_objectives"]["quality"] for item in observations["candidate"]) / VALIDATION_PASSES
+        )
+        if quality_after < quality_before:
+            reasons.append(f"{split} correctness regressed")
+    if not (evaluation.get("candidate") or {}).get("changed_components"):
+        reasons.append("candidate changes no instructions or Flex code")
+    return EvaluationGate(not reasons, tuple(dict.fromkeys(reasons)))
 
 
 @dataclass(frozen=True)
 class ArtifactManifest:
     version: str
     digest: str
+    created_at: str
     dataset_lineage: Mapping[str, Any]
     evaluation: Mapping[str, Any]
-    calibration: Mapping[str, Any] = field(default_factory=lambda: {"status": "not_run"})
+    gate: Mapping[str, Any]
     dependencies: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -122,34 +124,28 @@ def write_manifest(path: Path, manifest: ArtifactManifest) -> None:
     _atomic_write(path, json.dumps(asdict(manifest), sort_keys=True, indent=2).encode())
 
 
-def promote_candidate(
-    candidate_path: Path,
-    active_pointer: Path,
-    manifest: ArtifactManifest,
-    gate: EvaluationGate,
-    *,
-    authorized: bool = False,
+def approve_candidate(
+    candidate_path: Path, manifest: ArtifactManifest, destination: Path, *, evidence: Mapping[str, str]
 ) -> None:
-    """Atomically update a pointer only after an explicit authorized pass."""
-    if not authorized:
-        raise PermissionError("promotion requires explicit authorization")
+    """Install an evaluated candidate as the file the Session engine reloads at its next Turn.
+
+    The gate is re-checked from the stored scores and the bytes must be the ones that were evaluated.
+    Stale evidence requires reevaluation; old manifests cannot authorize a rollback.
+    """
+    gate = promotion_gate(manifest.evaluation)
     if not gate.passed:
-        raise ValueError("candidate failed promotion gates: " + "; ".join(gate.reasons))
-    actual = digest_bytes(candidate_path.read_bytes())
-    if actual != manifest.digest:
+        raise ValueError("candidate failed the promotion gate: " + "; ".join(gate.reasons))
+    if dict(manifest.dependencies) != dict(evidence):
+        raise ValueError("candidate evidence is stale; reevaluate against the current incumbent and configuration")
+    incumbent = digest_bytes(destination.read_bytes()) if destination.exists() else ""
+    if evidence.get("incumbent_digest") != incumbent:
+        raise ValueError("active incumbent changed; reevaluate before approval")
+    content = candidate_path.read_bytes()
+    if digest_bytes(content) != manifest.digest:
         raise ValueError("candidate digest does not match its manifest")
-    _atomic_write(active_pointer, json.dumps({"version": manifest.version, "digest": actual}).encode())
-
-
-def verify_active(pointer: Path, artifact_dir: Path) -> Path:
-    data = json.loads(pointer.read_bytes())
-    version = data["version"]
-    if not isinstance(version, str) or Path(version).name != version:
-        raise ValueError("active artifact version is invalid")
-    artifact = artifact_dir / f"{version}.json"
-    if digest_bytes(artifact.read_bytes()) != data["digest"]:
-        raise ValueError("active artifact integrity check failed")
-    return artifact
+    if destination.is_symlink():
+        raise ValueError("Compiled program path may not be a symbolic link")
+    _atomic_write(destination, content)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -181,22 +177,14 @@ class CompiledProgramFile:
 
     def load_initial(self, program: dspy.Module) -> None:
         if self.path and os.path.lexists(self.path):
-            self._apply(program, self._read(), persist=False)
+            self._apply(program, self._read())
 
     def reload_if_changed(self, program: dspy.Module) -> None:
         if not self.path or not os.path.lexists(self.path):
             return
         stat = self._regular_stat(self.path)
         if (stat.st_mtime_ns, stat.st_size) != self._stat:
-            self._apply(program, self._read(), persist=False)
-
-    def install(self, program: dspy.Module, content: bytes) -> bool:
-        if len(content) > self.MAX_BYTES:
-            raise ValueError("Compiled program exceeds the 10 MB size limit")
-        if hashlib.sha256(content).hexdigest() == self.digest:
-            return False
-        self._apply(program, content, persist=True)
-        return True
+            self._apply(program, self._read())
 
     def _read(self) -> bytes:
         assert self.path is not None
@@ -210,20 +198,13 @@ class CompiledProgramFile:
             raise ValueError("Compiled program path must be a regular file")
         return os.stat(path)
 
-    def _apply(self, program: dspy.Module, content: bytes, *, persist: bool) -> None:
+    def _apply(self, program: dspy.Module, content: bytes) -> None:
         state = json.loads(content)
         if not isinstance(state, dict):
             raise ValueError("Compiled program must be a JSON object")
         if state and all(key.startswith("program.") or key == "metadata" for key in state):
             state = {key.removeprefix("program."): value for key, value in state.items()}
-        target = os.path.abspath(self.path) if persist and self.path else None
-        if target:
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            if os.path.islink(target):
-                raise ValueError("Compiled program path may not be a symbolic link")
         program.load_state(state)  # DSPy trial-loads a copy first, so a bad artifact leaves `program` unchanged.
-        if target:
-            _atomic_write(Path(target), content)
         if self.path and os.path.lexists(self.path):
             stat = self._regular_stat(self.path)
             self._stat = (stat.st_mtime_ns, stat.st_size)

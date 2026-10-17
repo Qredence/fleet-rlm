@@ -20,7 +20,8 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
     for path in ("/sessions/{session_id}/history", "/sessions/{session_id}/turns/{turn_id}"):
         assert "get" in schema["paths"][path]
     assert {"get", "put", "delete"} <= set(schema["paths"]["/sessions/{session_id}/workspace/files/{rel_path}"])
-    assert "post" in schema["paths"]["/sessions/{session_id}/reload"]
+    # Approved programs are installed by `fleet optimize --approve`; the engine reloads them per Turn.
+    assert "/sessions/{session_id}/reload" not in schema["paths"]
     assert "post" in schema["paths"]["/skills/push"]
     turn = schema["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]["text/event-stream"]
     assert turn["schema"] == {"type": "string"} and "itemSchema" in turn
@@ -197,12 +198,6 @@ def test_turn_status_is_404_for_an_unknown_turn():
     client, _ = client_for(runtime_with())
     with client:
         assert client.get("/sessions/s1/turns/unknown").status_code == 404
-
-
-def test_reload_needs_explicit_approval():
-    client, _ = client_for(runtime_with())
-    with client:
-        assert client.post("/sessions/s1/reload").status_code == 409
 
 
 def test_session_listing_needs_storage():

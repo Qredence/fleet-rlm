@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ from fakes import FakeHarness, FakeManager, client_for, runtime_with, store_with
 import fleet_rlm.api.app as api_app
 import fleet_rlm.engine.turn as turn_module
 from fleet_rlm.api.events import SSERuntimeCallback
+from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.store import IdempotencyConflictError
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -33,9 +35,10 @@ def traced(monkeypatch):
     def span(**_kwargs):
         yield SimpleNamespace(
             trace_id=seen.get("span_trace_id"),
-            set_inputs=lambda _value: None,
-            set_outputs=lambda _value: None,
+            set_inputs=lambda value: seen.__setitem__("inputs", value),
+            set_outputs=lambda value: seen.__setitem__("outputs", value),
             set_attributes=lambda _value: None,
+            set_attribute=lambda name, value: seen.__setitem__(name, value),
         )
 
     @contextmanager
@@ -69,7 +72,11 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         assert "- older.md: prior hint" in kwargs["memory_summary"]
         files["files/input.txt"] = b"modified during execution"
         return SimpleNamespace(
-            answer="processed locally", route="flex", learned_skill_note="Reuse the digit window check."
+            answer="processed locally",
+            route="flex",
+            learned_skill_note="Reuse the digit window check.",
+            lm_calls=4,
+            sandbox_errors=1,
         )
 
     def persist(**kwargs):
@@ -118,6 +125,15 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     ]
     assert {"response_preview": "processed locally"} in traced["updates"]
     assert traced["global_callback"] in traced["callbacks"]
+    # The root span is a self-contained optimization example and says which program served it.
+    assert traced["inputs"]["session_id"] == "session-a"
+    assert traced["inputs"]["workspace_manifest"] == "/workspace/files/input.txt, /workspace/files/rates.csv"
+    assert traced["inputs"]["context_files"] == {
+        "files/input.txt": hashlib.sha256(b"initial input").hexdigest(),
+        "files/rates.csv": hashlib.sha256(b"rate\n3\n").hexdigest(),
+    }
+    assert traced["outputs"]["lm_calls"] == 4 and traced["outputs"]["sandbox_errors"] == 1
+    assert traced["compiled_program_digest"] == ""
     assert any(isinstance(callback, SSERuntimeCallback) for callback in traced["callbacks"])
     assert records[0]["context_files"] == {
         "files/input.txt": hashlib.sha256(b"initial input").hexdigest(),
@@ -127,6 +143,53 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     assert order == ["sync", "write"]
     assert written == ([] if write_fails else [(records[0]["turn_id"], "Reuse the digit window check.", None)])
     assert not runtime.turn_lock.locked()
+
+
+def test_selected_replay_persists_the_exact_pre_turn_inputs(traced) -> None:
+    content = b"id,value\n1,17\n"
+    files = {"files/input.csv": content}
+    persisted: list[dict[str, Any]] = []
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            list_workspace_files=lambda: list(files),
+            read_workspace_file=lambda path: files[path],
+        ),
+        harness=FakeHarness(
+            sync_volume_to_postgres=lambda **kwargs: persisted.append(kwargs) or [],
+        ),
+        engine=lambda **_kwargs: SimpleNamespace(
+            answer="17", route="flex", learned_skill_note="", lm_calls=1, sandbox_errors=0
+        ),
+        context=WorkspaceDataset(
+            "files/input.csv", "selected source", len(content), hashlib.sha256(content).hexdigest()
+        ),
+    )
+    client, _app = client_for(runtime)
+    with client:
+        response = client.post(
+            "/sessions/session-a/turn",
+            json={"task": "sum the values", "record_replay": True},
+        )
+
+    assert response.status_code == 200
+    assert len(persisted) == 1
+    turn_record = persisted[0]["turn_record"]
+    digest, compressed = persisted[0]["replay_snapshot"]
+    snapshot = decode_snapshot(digest, compressed)
+    assert turn_record["replay_snapshot_selected"] is True
+    assert turn_record["replay_snapshot_sha256"] == digest
+    assert snapshot["session_id"] == "session-a"
+    assert snapshot["task"] == "sum the values"
+    assert snapshot["dataset_context"] == {
+        "workspace_path": "files/input.csv",
+        "description": "selected source",
+        "size_bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+    assert snapshot["replay_files"] == {"files/input.csv": base64.b64encode(content).decode("ascii")}
+    assert snapshot["context_files"] == {"files/input.csv": hashlib.sha256(content).hexdigest()}
+    assert traced["inputs"]["turn_id"] == turn_record["turn_id"]
+    assert traced["inputs"]["replay_snapshot_sha256"] == digest
 
 
 @pytest.mark.parametrize("fail_preparation", [False, True])

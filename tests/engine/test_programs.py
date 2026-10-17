@@ -16,7 +16,7 @@ from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
-def test_invalid_compiled_program_does_not_replace_the_last_good_session_artifact(tmp_path: Path) -> None:
+def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path: Path) -> None:
     compiled_path = tmp_path / "session-a.json"
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     engine = AdaptiveFleetEngine(
@@ -29,11 +29,11 @@ def test_invalid_compiled_program_does_not_replace_the_last_good_session_artifac
     known_good = compiled_path.read_bytes()
     corrupt = json.loads(known_good)
     corrupt["flex_agent"]["module_src"] = "class Invalid(:\n"
+    compiled_path.write_text(json.dumps(corrupt))
 
     with pytest.raises((KeyError, SyntaxError, ValueError)):
-        engine.load_compiled_program(json.dumps(corrupt).encode("utf-8"))
+        engine.compiled.reload_if_changed(engine)
 
-    assert compiled_path.read_bytes() == known_good
     assert engine.flex_agent.module_src == json.loads(known_good)["flex_agent"]["module_src"]
 
 

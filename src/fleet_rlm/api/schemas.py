@@ -24,6 +24,10 @@ class TurnRequest(_Request):
 
     task: str = Field(min_length=1, max_length=MAX_TASK_CHARS)
     idempotency_key: str | None = Field(default=None, max_length=128)
+    record_replay: bool = Field(
+        default=False,
+        description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",
+    )
 
 
 class ModeRequest(_Request):

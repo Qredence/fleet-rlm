@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,7 +30,6 @@ from fleet_rlm.api.schemas import (
     Status,
     TurnStatus,
 )
-from fleet_rlm.optimize.artifacts import verify_active
 from fleet_rlm.session import SessionRuntime, runtime_configuration
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -143,20 +141,6 @@ def clear_context(session_id: str, runtime: Runtime) -> dict:
         runtime.harness.store.save_runtime_settings(session_id, {"mode": runtime.execution_mode, "context": None})
         runtime.context = None
     return {"status": "cleared"}
-
-
-@router.post("/sessions/{session_id}/reload", response_model=Status)
-def reload_program(session_id: str, runtime: Runtime, settings: Settings, approved: bool = False) -> dict:
-    if not approved:
-        raise HTTPException(status_code=409, detail="Explicit approval is required to reload the saved program")
-    # Only operator-owned, integrity-checked artifacts may become executable programs;
-    # the model-writable workspace is not an approval boundary.
-    directory = Path(settings.compiled_program_dir)
-    unavailable = "No approved saved program is available"
-    with translate(unavailable, invalid="Saved program is invalid", status=404), runtime.turn_lock:
-        artifact = verify_active(directory / f"{session_id}.active.json", directory / "candidates")
-        runtime.engine.load_compiled_program(artifact.read_bytes())
-    return {"status": "reloaded"}
 
 
 @memory_router.get("/sessions/{session_id}/memory", response_model=Memories)

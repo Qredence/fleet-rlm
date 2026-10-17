@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -204,12 +205,6 @@ def _context(ctx: Context, arg: str) -> None:
         CONSOLE.print(f"[green]Context selected:[/green] {arg}")
 
 
-def _reload(ctx: Context, _arg: str) -> None:
-    if CONSOLE.input("Reload the saved Flex program? [y/N] ").strip().lower() == "y":
-        ctx.post(f"{ctx.session}/reload", params={"approved": "true"})
-        CONSOLE.print("[green]Saved program reloaded.[/green]")
-
-
 def _sessions(ctx: Context, _arg: str) -> None:
     for item in ctx.get("/sessions").json().get("sessions", []):
         CONSOLE.print(
@@ -217,8 +212,15 @@ def _sessions(ctx: Context, _arg: str) -> None:
         )
 
 
-def _optimize(ctx: Context, _arg: str) -> None:
-    subprocess.run([sys.executable, "-m", "fleet_rlm.cli", "optimize", "--session", ctx.session_id], check=False)
+def _optimize(ctx: Context, arg: str) -> None:
+    """Run `fleet optimize` for this Session; extra arguments pass through (e.g. `--approve VERSION`)."""
+    try:
+        extra = shlex.split(arg)
+    except ValueError as exc:
+        CONSOLE.print(f"[red]Invalid /optimize arguments:[/red] {exc}")
+        return
+    command = [sys.executable, "-m", "fleet_rlm.cli", "optimize", "--session", ctx.session_id, *extra]
+    subprocess.run(command, check=False)
 
 
 _MODE_OPTIONS = dict.fromkeys(MODES)
@@ -256,10 +258,11 @@ COMMANDS: dict[str, Command] = {
     "/memory": Command("/memory [query]", "show saved memories, optionally filtered by query", _memory),
     "/history": Command("/history", "show saved turns", _history),
     "/trace": Command("/trace", "show the most recent persisted turn trace ID, if available", _trace),
-    "/reload": Command("/reload", "approve reloading the saved program at a turn boundary", _reload),
     "/sessions": Command("/sessions", "list saved Sessions", _sessions),
     "/optimize": Command(
-        "/optimize", "evaluate reviewed, gold-labeled Session examples and compile with GEPA", _optimize
+        "/optimize [--max-metric-calls N | --approve VERSION]",
+        "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",
+        _optimize,
     ),
 }
 EXIT_COMMANDS = {"/exit", "/quit"}

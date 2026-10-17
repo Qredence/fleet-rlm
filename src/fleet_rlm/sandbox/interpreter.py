@@ -277,6 +277,8 @@ class DaytonaInterpreter:
                 span.set_attribute("transport_retries", response.get("transport_retries", 0))
                 if response.get("error"):
                     span.set_attribute("outcome", "remote_code_error")
+                    if hasattr(self.manager, "record_sandbox_error"):
+                        self.manager.record_sandbox_error()
                     span.set_attribute("remote_error_type", response.get("error_type", "PythonError"))
                     output = str(response.get("stdout", "")) + str(response.get("stderr", ""))
                     raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")

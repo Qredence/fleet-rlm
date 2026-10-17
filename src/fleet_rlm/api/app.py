@@ -36,9 +36,21 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # The pool opens in the background so a cold Lakebase connect does not block startup.
-        application.state.store = store or (Store.open(resolved.fleet_database_url) if initialize_db else None)
+        application.state.store = store or (
+            Store.open(
+                resolved.fleet_database_url,
+                lakebase_endpoint=resolved.fleet_lakebase_endpoint,
+                migration_dsn=resolved.fleet_database_migration_url,
+                schema=resolved.fleet_database_schema,
+            )
+            if initialize_db
+            else None
+        )
         if initialize_db and application.state.store is not None:
-            await asyncio.to_thread(application.state.store.initialize)
+            try:
+                await asyncio.to_thread(application.state.store.initialize)
+            finally:
+                await asyncio.to_thread(application.state.store.close_migration_pool)
         application.state.mlflow_experiment_id = (
             await asyncio.to_thread(_configure_tracing, resolved) if configure_observability else None
         )

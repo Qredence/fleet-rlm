@@ -41,19 +41,6 @@ def test_saved_candidate_loads_into_a_fresh_engine(tmp_path, saved_from):
     assert fresh.compiled.digest
 
 
-def test_install_persists_and_skips_an_identical_artifact(tmp_path):
-    source = tmp_path / "source.json"
-    tuned().save(str(source))
-    target = tmp_path / "active" / "sess_live.json"
-    live = engine("sess_live", compiled_path=str(target))
-
-    content = source.read_bytes()
-    assert live.load_compiled_program(content) is True
-    assert target.read_bytes() == content
-    assert live.triage.signature.instructions == "TUNED triage"
-    assert live.load_compiled_program(content) is False
-
-
 def test_turn_time_reload_picks_up_a_changed_file(tmp_path):
     path = tmp_path / "sess_reload.json"
     engine().save(str(path))

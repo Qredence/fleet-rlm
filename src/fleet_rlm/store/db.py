@@ -1,8 +1,8 @@
 """The Store: every SQL statement Fleet runs, over one psycopg connection pool, plus the harness that mirrors a Session.
 
-Methods take the Session ID explicitly and do no validation beyond SQL; callers validate paths,
-sizes and digests. Pooled connections are autocommit, so a single statement costs one network
-round trip (about 116 ms to Lakebase from a laptop); only `mirror_files` opens a transaction.
+Methods take the Session ID explicitly. Replay reviews validate immutable evidence before writing;
+the harness validates workspace paths, sizes and digests before synchronization. Pooled connections
+are autocommit; schema bootstrap and workspace commits use explicit transactions.
 """
 
 from __future__ import annotations
@@ -11,11 +11,14 @@ import base64
 import functools
 import hashlib
 import json
+import re
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, Self, TypeVar
 
 import psycopg
+from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -73,12 +76,50 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS fleet_lite_replay_snapshots (
+        session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        content BYTEA NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, turn_id),
+        FOREIGN KEY (session_id, turn_id)
+            REFERENCES fleet_lite_turns(session_id, turn_id) ON DELETE CASCADE
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS fleet_lite_runtime_settings (
         session_id TEXT PRIMARY KEY REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
         settings JSONB NOT NULL DEFAULT '{}'::jsonb
     )
     """,
 )
+_SCHEMA_VERSION_TABLE = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+_REVIEW_LABELS_TABLE = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_review_labels (
+        session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        task TEXT NOT NULL,
+        workspace_manifest TEXT NOT NULL,
+        context_files JSONB NOT NULL,
+        review_status TEXT NOT NULL,
+        source_group TEXT NOT NULL,
+        expected_answer TEXT,
+        expected_values JSONB NOT NULL DEFAULT '[]'::jsonb,
+        route TEXT,
+        critical BOOLEAN NOT NULL DEFAULT FALSE,
+        reviewer TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, turn_id),
+        FOREIGN KEY (session_id, turn_id)
+            REFERENCES fleet_lite_replay_snapshots(session_id, turn_id) ON DELETE CASCADE
+    )
+"""
 
 _UPSERT_FILE = """
     INSERT INTO fleet_lite_vfs_files (session_id, rel_path, sha256, content, updated_at)
@@ -103,7 +144,17 @@ _APPEND_TURN = """
             ELSE memory_summary END,
         updated_at = NOW()
     WHERE session_id = %s
+      AND (%s::text IS NULL OR NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(turns) AS existing(entry)
+          WHERE entry->>'turn_id' = %s
+      ))
 """
+
+# Each migration is one atomic schema revision. Add new numbered entries here rather than
+# editing an already-shipped migration; the ledger makes upgrades and retries explicit.
+_SCHEMA_MIGRATIONS = ((1, SCHEMA_STATEMENTS), (2, (_REVIEW_LABELS_TABLE,)))
+SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
+_REPLAY_RETENTION_DAYS = 30
 
 
 _P = ParamSpec("_P")
@@ -129,34 +180,130 @@ def _retry_once(method: Callable[_P, _R]) -> Callable[_P, _R]:
 class Store:
     """Pooled access to the Lite tables."""
 
-    def __init__(self, pool: ConnectionPool, dsn: str) -> None:
+    def __init__(
+        self,
+        pool: ConnectionPool,
+        dsn: str,
+        connection_class: type[psycopg.Connection[Any]] = psycopg.Connection,
+        *,
+        migration_pool: ConnectionPool | None = None,
+        schema: str = "public",
+        connection_kwargs: dict[str, Any] | None = None,
+    ) -> None:
         self.pool = pool
         self.dsn = dsn
+        self.connection_class = connection_class
+        self.migration_pool = migration_pool or pool
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", schema):
+            raise ValueError("database schema must be a lowercase PostgreSQL identifier")
+        self.schema = schema
+        self.connection_kwargs = connection_kwargs or {}
 
     @classmethod
-    def open(cls, dsn: str, *, wait: bool = False, max_size: int = 10) -> Store:
+    def open(
+        cls,
+        dsn: str,
+        *,
+        wait: bool = False,
+        max_size: int = 10,
+        lakebase_endpoint: str = "",
+        migration_dsn: str = "",
+        schema: str = "public",
+    ) -> Store:
         """Open a pool. With wait=False the (slow, cold) first connect happens in the background."""
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", schema):
+            raise ValueError("database schema must be a lowercase PostgreSQL identifier")
+        connection_class: type[psycopg.Connection[Any]] = psycopg.Connection
+        if lakebase_endpoint:
+            from databricks.sdk import WorkspaceClient
+
+            connection_class = lakebase_connection_class(WorkspaceClient(), lakebase_endpoint)
+        connection_kwargs: dict[str, Any] = {"connect_timeout": 30, "autocommit": True}
+        if schema != "public":
+            connection_kwargs["options"] = f"-c search_path={schema}"
         pool = ConnectionPool(
             dsn,
             min_size=1,
             max_size=max_size,
             open=False,
-            kwargs={"connect_timeout": 30, "autocommit": True},
+            kwargs=connection_kwargs,
+            connection_class=connection_class,
             name="fleet",
         )
         pool.open(wait=wait, timeout=60)
-        return cls(pool, dsn)
+        migration_pool = None
+        try:
+            if migration_dsn and migration_dsn != dsn:
+                migration_pool = ConnectionPool(
+                    migration_dsn,
+                    min_size=1,
+                    max_size=1,
+                    open=False,
+                    kwargs=connection_kwargs,
+                    connection_class=connection_class,
+                    name="fleet-migrations",
+                )
+                migration_pool.open(wait=wait, timeout=60)
+        except BaseException:
+            pool.close()
+            raise
+        return cls(
+            pool,
+            dsn,
+            connection_class,
+            migration_pool=migration_pool,
+            schema=schema,
+            connection_kwargs=connection_kwargs,
+        )
 
     def close(self) -> None:
-        self.pool.close()
+        try:
+            self.close_migration_pool()
+        finally:
+            self.pool.close()
+
+    def close_migration_pool(self) -> None:
+        """Release the optional DDL role connection pool after startup migrations."""
+        migration_pool = self.migration_pool
+        if migration_pool is not self.pool:
+            self.migration_pool = self.pool
+            migration_pool.close()
 
     # Schema and Sessions
 
     @_retry_once
     def initialize(self) -> None:
-        with self.pool.connection() as connection:
-            for statement in SCHEMA_STATEMENTS:
-                connection.execute(statement)
+        """Apply each pending schema migration once under a transaction-scoped lock."""
+        with self.migration_pool.connection() as connection, connection.transaction():
+            if self.schema != "public":
+                connection.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(self.schema)))
+                connection.execute(sql.SQL("SET LOCAL search_path TO {}").format(sql.Identifier(self.schema)))
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,17))", ("fleet_lite_schema_migrations",)
+            )
+            connection.execute(_SCHEMA_VERSION_TABLE)
+            row = connection.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()
+            current_version = int(row[0]) if row and row[0] is not None else 0
+            if current_version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Database schema version {current_version} is newer than this Fleet version {SCHEMA_VERSION}"
+                )
+            for version, statements in _SCHEMA_MIGRATIONS:
+                if version <= current_version:
+                    continue
+                if version != current_version + 1:
+                    raise RuntimeError(f"Missing Fleet schema migration {current_version + 1}")
+                for statement in statements:
+                    connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (version,),
+                )
+                current_version = version
+            connection.execute(
+                "DELETE FROM fleet_lite_replay_snapshots WHERE created_at < NOW() - (%s * INTERVAL '1 day')",
+                (_REPLAY_RETENTION_DAYS,),
+            )
 
     @_retry_once
     def ensure_session(self, session_id: str) -> None:
@@ -186,7 +333,10 @@ class Store:
 
     def acquire_session_lease(self, session_id: str) -> psycopg.Connection:
         """A dedicated (unpooled) connection holding the Session's advisory lock until it is closed."""
-        connection = psycopg.connect(self.dsn, autocommit=True, connect_timeout=30)
+        connection = self.connection_class.connect(
+            self.dsn,
+            **self.connection_kwargs,
+        )
         try:
             locked = connection.execute(
                 "SELECT pg_try_advisory_lock(hashtextextended(%s,17))", (session_id,)
@@ -356,11 +506,15 @@ class Store:
         max_turns: int = 200,
         memory_note: str = "",
         completion: tuple[str, dict[str, Any]] | None = None,
+        replay_snapshot: tuple[str, bytes] | None = None,
     ) -> None:
         """In one transaction: upsert changed files, drop missing ones, and optionally append a Turn.
 
         `files` is (rel_path, sha256, content). `completion` is (turn_id, result) for the turn record.
+        A selected replay snapshot is committed with the same transaction and Turn completion.
         """
+        if replay_snapshot is not None and completion is None:
+            raise ValueError("A replay snapshot can only be committed with a completed Turn")
         with self.pool.connection() as connection, connection.transaction():
             connection.execute(
                 "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
@@ -380,7 +534,29 @@ class Store:
                 )
             else:
                 note = memory_note[:10_000]
-                connection.execute(_APPEND_TURN, (turn_record_json, max_turns, note, note, session_id))
+                turn_id = None
+                with suppress(TypeError, json.JSONDecodeError):
+                    turn_id = json.loads(turn_record_json).get("turn_id")
+                connection.execute(
+                    _APPEND_TURN, (turn_record_json, max_turns, note, note, session_id, turn_id, turn_id)
+                )
+            if replay_snapshot is not None:
+                assert completion is not None
+                digest, content = replay_snapshot
+                if len(content) > 16_000_000 or hashlib.sha256(content).hexdigest() != digest:
+                    raise ValueError("Replay snapshot digest or size validation failed")
+                turn_id = completion[0]
+                connection.execute(
+                    "INSERT INTO fleet_lite_replay_snapshots(session_id,turn_id,sha256,content) "
+                    "VALUES (%s,%s,%s,%s) ON CONFLICT(session_id,turn_id) DO NOTHING",
+                    (session_id, turn_id, digest, content),
+                )
+                stored_digest = connection.execute(
+                    "SELECT sha256 FROM fleet_lite_replay_snapshots WHERE session_id=%s AND turn_id=%s",
+                    (session_id, turn_id),
+                ).fetchone()
+                if not stored_digest or stored_digest[0] != digest:
+                    raise ValueError("Turn already has a different immutable replay snapshot")
             if completion is not None:
                 turn_id, result = completion
                 connection.execute(
@@ -392,34 +568,129 @@ class Store:
     # Optimization examples
 
     @_retry_once
-    def reviewed_examples(self, session_id: str, default_catalog: str, limit: int) -> list[dict[str, Any]]:
-        """Approved, gold-labeled turns with source lineage."""
+    def save_review_labels(
+        self,
+        session_id: str,
+        turn_id: str,
+        snapshot_sha256: str,
+        *,
+        review_status: str,
+        source_group: str,
+        expected_answer: str | None,
+        expected_values: list[str],
+        route: str | None,
+        critical: bool,
+        reviewer: str,
+    ) -> None:
+        """Persist reviewed labels only when they match an existing immutable replay snapshot."""
+        from fleet_rlm.replay import selected_snapshot, validate_review_labels
+
+        validate_review_labels(
+            dict(
+                review_status=review_status,
+                source_group=source_group,
+                expected_answer=expected_answer,
+                expected_values=expected_values,
+                critical=critical,
+            ),
+            require_gold=True,
+        )
+        if not isinstance(reviewer, str) or not reviewer.strip():
+            raise ValueError("review labels require a reviewer")
+        snapshot = selected_snapshot(self, session_id, turn_id, snapshot_sha256)
+        task = snapshot["task"]
+        workspace_manifest = snapshot["workspace_manifest"]
+        context_files = snapshot["context_files"]
+        with self.pool.connection() as connection:
+            saved = connection.execute(
+                """
+                INSERT INTO fleet_lite_review_labels(
+                    session_id,turn_id,task,workspace_manifest,context_files,review_status,source_group,
+                    expected_answer,expected_values,route,critical,reviewer
+                )
+                SELECT %s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s,%s
+                WHERE EXISTS (
+                    SELECT 1 FROM fleet_lite_replay_snapshots
+                    WHERE session_id=%s AND turn_id=%s AND sha256=%s
+                )
+                ON CONFLICT (session_id,turn_id) DO UPDATE SET
+                    task=EXCLUDED.task,
+                    workspace_manifest=EXCLUDED.workspace_manifest,
+                    context_files=EXCLUDED.context_files,
+                    review_status=EXCLUDED.review_status,
+                    source_group=EXCLUDED.source_group,
+                    expected_answer=EXCLUDED.expected_answer,
+                    expected_values=EXCLUDED.expected_values,
+                    route=EXCLUDED.route,
+                    critical=EXCLUDED.critical,
+                    reviewer=EXCLUDED.reviewer,
+                    updated_at=NOW()
+                RETURNING 1
+                """,
+                (
+                    session_id,
+                    turn_id,
+                    task,
+                    workspace_manifest,
+                    json.dumps(context_files),
+                    review_status,
+                    source_group,
+                    expected_answer,
+                    json.dumps(expected_values),
+                    route,
+                    critical,
+                    reviewer,
+                    session_id,
+                    turn_id,
+                    snapshot_sha256,
+                ),
+            ).fetchone()
+        if not saved:
+            raise ValueError("Selected replay snapshot is missing or has changed")
+
+    @_retry_once
+    def reviewed_examples(self, session_id: str, limit: int) -> list[dict[str, Any]]:
+        """Approved, gold-labeled turns with a complete immutable replay snapshot."""
         with self.pool.connection() as connection:
             return (
                 connection.cursor(row_factory=dict_row)
                 .execute(
                     """
-                    SELECT s.memory_summary,
-                           turn->>'task' AS task,
-                           COALESCE(turn->>'workspace_manifest', '/workspace/files (empty)') AS workspace_manifest,
-                           COALESCE(turn->>'skills_catalog', %s) AS skills_catalog,
-                           turn->>'expected_answer' AS answer,
-                           turn->>'source_group' AS source_group,
-                           turn->'context_files' AS context_files
-                    FROM fleet_lite_sessions AS s
-                    CROSS JOIN LATERAL jsonb_array_elements(s.turns) AS turn
-                    WHERE s.session_id = %s
-                      AND turn->>'task' IS NOT NULL
-                      AND turn->>'expected_answer' IS NOT NULL
-                      AND turn->>'review_status' = 'approved'
-                      AND turn->>'source_group' IS NOT NULL
-                    ORDER BY s.updated_at DESC
+                    SELECT labels.turn_id,
+                           labels.task,
+                           labels.workspace_manifest,
+                           labels.expected_answer AS answer,
+                           labels.expected_values,
+                           labels.route,
+                           labels.source_group,
+                           labels.critical,
+                           labels.context_files,
+                           replay.sha256 AS replay_snapshot_sha256,
+                           replay.content AS replay_snapshot
+                    FROM fleet_lite_review_labels AS labels
+                    JOIN fleet_lite_replay_snapshots AS replay
+                      ON replay.session_id=labels.session_id AND replay.turn_id=labels.turn_id
+                    WHERE labels.session_id = %s
+                      AND labels.review_status = 'approved'
+                      AND (NULLIF(labels.expected_answer,'') IS NOT NULL
+                           OR jsonb_array_length(labels.expected_values) > 0)
+                    ORDER BY labels.updated_at DESC
                     LIMIT %s
                     """,
-                    (default_catalog, session_id, limit),
+                    (session_id, limit),
                 )
                 .fetchall()
             )
+
+    @_retry_once
+    def replay_snapshot(self, session_id: str, turn_id: str) -> tuple[str, bytes] | None:
+        """Fetch selected immutable replay evidence by its owning Session and Turn."""
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT sha256,content FROM fleet_lite_replay_snapshots WHERE session_id=%s AND turn_id=%s",
+                (session_id, turn_id),
+            ).fetchone()
+        return (row[0], bytes(row[1])) if row else None
 
 
 _MAX_VFS_FILE_BYTES = 25_000_000
@@ -541,8 +812,13 @@ class VolumePostgresHarness:
         session_id: str,
         turn_record: dict[str, Any],
         new_memory_note: str = "",
+        replay_snapshot: tuple[str, bytes] | None = None,
     ) -> list[str]:
         """Hash and upsert changed Session files in the same transaction as its Turn."""
+        if bool(turn_record.get("replay_snapshot_selected")) != (replay_snapshot is not None):
+            raise ValueError("Selected replay metadata and immutable snapshot must be committed together")
+        if replay_snapshot is not None and turn_record.get("replay_snapshot_sha256") != replay_snapshot[0]:
+            raise ValueError("Turn replay digest does not match the immutable snapshot")
         session_id = validate_session_id(session_id)
         files = self._scan_volume_files()
         record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
@@ -569,6 +845,7 @@ class VolumePostgresHarness:
             max_turns=_MAX_STORED_TURNS,
             memory_note=new_memory_note,
             completion=completion,
+            replay_snapshot=replay_snapshot,
         )
         return artifacts
 
@@ -621,3 +898,34 @@ class VolumePostgresHarness:
             and "\x00" not in rel_path
             and not any(ord(character) < 32 for character in rel_path)
         )
+
+
+def lakebase_connection_class(client: Any, endpoint: str) -> type[psycopg.Connection[Any]]:
+    """Create psycopg connections with a fresh Lakebase OAuth credential per physical connection."""
+
+    class LakebaseOAuthConnection(psycopg.Connection):
+        @classmethod
+        def connect(
+            cls,
+            conninfo: str = "",
+            *,
+            autocommit: bool = False,
+            prepare_threshold: int | None = 5,
+            context: Any = None,
+            row_factory: Any = None,
+            cursor_factory: Any = None,
+            **kwargs: Any,
+        ) -> Self:
+            credential = client.postgres.generate_database_credential(endpoint=endpoint)
+            kwargs["password"] = credential.token
+            return super().connect(
+                conninfo,
+                autocommit=autocommit,
+                prepare_threshold=prepare_threshold,
+                context=context,
+                row_factory=row_factory,
+                cursor_factory=cursor_factory,
+                **kwargs,
+            )
+
+    return LakebaseOAuthConnection

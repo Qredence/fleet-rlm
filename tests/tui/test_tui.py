@@ -32,7 +32,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
             "trace_id": "trace-123",
         },
     ]
-    submitted_tasks: list[dict[str, str]] = []
+    submitted_tasks: list[dict[str, Any]] = []
 
     def handle_request(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
@@ -51,7 +51,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
 
     output = io.StringIO()
     console = Console(file=output, width=100)
-    user_inputs = iter(("summarize the file", "/help", "/exit"))
+    user_inputs = iter(("/replay on", "summarize the file", "/replay off", "/help", "/exit"))
 
     def read_input(prompt: str) -> str:
         console.print(prompt, end="")
@@ -66,6 +66,8 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
     assert len(submitted_tasks) == 1
     assert submitted_tasks[0]["task"] == "summarize the file"
     assert len(submitted_tasks[0]["idempotency_key"]) == 32
+    assert submitted_tasks[0]["record_replay"] is True
+    assert "Replay capture enabled" in rendered and "Replay capture disabled" in rendered
     assert "Fleet-RLM Lite" in rendered
     assert "Session: session-1" in rendered
     assert "→ Module: AdaptiveFleetEngine" in rendered
@@ -294,3 +296,21 @@ def test_unknown_and_exit_commands(monkeypatch):
     assert commands.handle_command(None, "/nope", "s1") is True
     assert "Unknown command" in output.getvalue()
     assert commands.handle_command(None, "/exit", "s1") is False
+
+
+def test_optimize_passes_its_arguments_to_fleet_optimize(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(commands.subprocess, "run", lambda command, **_kwargs: calls.append(command))
+    ctx = SimpleNamespace(session_id="sess_tui")
+    commands.COMMANDS["/optimize"].run(ctx, "--approve 'sess_tui-abc'")
+    commands.COMMANDS["/optimize"].run(ctx, "")
+    assert calls[0][-5:] == [
+        "optimize",
+        "--session",
+        "sess_tui",
+        "--approve",
+        "sess_tui-abc",
+    ]
+    assert calls[1][-3:] == ["optimize", "--session", "sess_tui"]

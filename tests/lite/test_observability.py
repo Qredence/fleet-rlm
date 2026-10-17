@@ -12,6 +12,11 @@ def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.Monkey
     calls: dict[str, Any] = {}
     monkeypatch.setattr(memory_and_eval.mlflow, "set_tracking_uri", lambda uri: calls.setdefault("uri", uri))
     monkeypatch.setattr(
+        memory_and_eval.mlflow.tracing,
+        "configure",
+        lambda **kwargs: calls.setdefault("processors", kwargs),
+    )
+    monkeypatch.setattr(
         memory_and_eval.mlflow,
         "set_experiment",
         lambda name: calls.setdefault("experiment", name),
@@ -36,12 +41,34 @@ def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.Monkey
     assert calls == {
         "uri": "sqlite:///mlflow-test.db",
         "experiment": "fleet-rlm-test",
+        "processors": {"span_processors": [memory_and_eval.sanitize_trace_span]},
         "autolog": {
             "log_traces": True,
             "log_traces_from_compile": False,
             "log_traces_from_eval": False,
         },
     }
+
+
+def test_trace_span_sanitization_redacts_secret_fields_and_bounds_content():
+    import fleet_rlm.observability as memory_and_eval
+
+    class Span:
+        def __init__(self):
+            self.inputs = {"token": "secret-value", "task": "Bearer abcdefghijklmnopqrstuvwxyz"}
+            self.outputs = {"answer": "x" * (memory_and_eval._TRACE_STRING_LIMIT + 1)}
+
+        def set_inputs(self, value):
+            self.inputs = value
+
+        def set_outputs(self, value):
+            self.outputs = value
+
+    span = Span()
+    memory_and_eval.sanitize_trace_span(span)
+    assert span.inputs["token"] == "[redacted]"
+    assert "[redacted]" in span.inputs["task"]
+    assert len(span.outputs["answer"]) < memory_and_eval._TRACE_STRING_LIMIT + 100
 
 
 def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:

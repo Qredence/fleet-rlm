@@ -60,6 +60,7 @@ class AdaptiveFleetEngine(dspy.Module):
         if execution_mode not in {"rlm", "flex", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
+        self.optimization_context: WorkspaceDataset | None = None
         self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
@@ -87,10 +88,6 @@ class AdaptiveFleetEngine(dspy.Module):
         self.optimization_artifact_path: str | None = None
         self.compiled.load_initial(self)
 
-    def load_compiled_program(self, content: bytes) -> bool:
-        """Install one session-owned GEPA artifact; False when it is already active."""
-        return self.compiled.install(self, content)
-
     def forward(
         self,
         workspace_manifest: str,
@@ -103,9 +100,13 @@ class AdaptiveFleetEngine(dspy.Module):
     ) -> dspy.Prediction:
         owns_turn = not self.sandbox_mgr.root._deadline
         try:
-            return self._run_turn(
+            prediction = self._run_turn(
                 workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
             )
+            # The metric scores efficiency from these, so evaluation and GEPA see the same numbers.
+            for name, value in self.sandbox_mgr.turn_usage().items():
+                prediction[name] = value
+            return prediction
         finally:
             if owns_turn:
                 self.sandbox_mgr.end_turn()

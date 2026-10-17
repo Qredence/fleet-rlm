@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from fleet_rlm.store import IdempotencyConflictError, Store
-from fleet_rlm.store.db import SCHEMA_STATEMENTS, VolumePostgresHarness
+from fleet_rlm.store.db import SCHEMA_STATEMENTS, VolumePostgresHarness, lakebase_connection_class
 
 
 class FakeCursor:
@@ -20,7 +20,8 @@ class FakeCursor:
         self.connection = connection
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
-        self.connection.statements.append((" ".join(sql.split()), params))
+        rendered = sql.as_string() if hasattr(sql, "as_string") else sql
+        self.connection.statements.append((" ".join(rendered.split()), params))
         self.rows = self.connection.replies.pop(0) if self.connection.replies else []
         return self
 
@@ -71,6 +72,62 @@ def test_schema_keeps_the_lite_tables_separate_from_the_legacy_schema():
     assert "CREATE TABLE IF NOT EXISTS fleet_lite_vfs_files" in vfs_schema
     assert "REFERENCES fleet_lite_sessions(session_id)" in vfs_schema
     assert "CREATE TABLE IF NOT EXISTS fleet_sessions" not in session_schema
+    replay_schema = next(statement for statement in SCHEMA_STATEMENTS if "fleet_lite_replay_snapshots" in statement)
+    assert "REFERENCES fleet_lite_turns(session_id, turn_id) ON DELETE CASCADE" in replay_schema
+
+
+def test_review_labels_require_the_selected_immutable_replay_before_writing():
+    store, pool = make_store()
+    store.replay_snapshot = lambda *_args: None
+
+    with pytest.raises(ValueError, match="snapshot is missing or has changed"):
+        store.save_review_labels(
+            "s1",
+            "t1",
+            "a" * 64,
+            review_status="approved",
+            source_group="group-1",
+            expected_answer="safe",
+            expected_values=[],
+            route=None,
+            critical=False,
+            reviewer="reviewer-1",
+        )
+
+    assert pool.borrowed == 0
+
+
+def test_review_store_derives_provenance_from_snapshot_not_trace_previews():
+    from fleet_rlm.replay import encode_snapshot
+
+    snapshot = {
+        "schema_version": 1,
+        "session_id": "s1",
+        "turn_id": "t1",
+        "task": "immutable task",
+        "workspace_manifest": "/workspace/files (empty)",
+        "context_files": {},
+        "replay_files": {},
+        "skill_revision_sha256": hashlib.sha256(b"{}").hexdigest(),
+    }
+    digest, compressed = encode_snapshot(snapshot)
+    store, pool = make_store([(1,)])
+    store.replay_snapshot = lambda *_args: (digest, compressed)
+    store.save_review_labels(
+        "s1",
+        "t1",
+        digest,
+        review_status="approved",
+        source_group="group",
+        expected_answer="4",
+        expected_values=["4"],
+        route="flex",
+        critical=True,
+        reviewer="human",
+    )
+    sql, parameters = pool.conn.statements[0]
+    assert "INSERT INTO fleet_lite_review_labels" in sql
+    assert parameters[2:5] == ("immutable task", "/workspace/files (empty)", "{}")
 
 
 def test_every_call_borrows_one_pooled_connection():
@@ -78,6 +135,99 @@ def test_every_call_borrows_one_pooled_connection():
     store.list_sessions()
     store.runtime_settings("s1")
     assert pool.borrowed == 2
+
+
+def test_schema_bootstrap_records_an_additive_versioned_baseline():
+    store, pool = make_store()
+    store.initialize()
+    statements = [statement for statement, _ in pool.conn.statements]
+    assert statements[0] == "BEGIN"
+    lock_index = next(i for i, sql in enumerate(statements) if "pg_advisory_xact_lock" in sql)
+    ledger_index = next(
+        i for i, sql in enumerate(statements) if "CREATE TABLE IF NOT EXISTS fleet_lite_schema_migrations" in sql
+    )
+    assert lock_index < ledger_index
+    assert any("CREATE TABLE IF NOT EXISTS fleet_lite_schema_migrations" in sql for sql in statements)
+    version_index = statements.index("SELECT MAX(version) FROM fleet_lite_schema_migrations")
+    assert ledger_index < version_index
+    assert "SELECT MAX(version) FROM fleet_lite_schema_migrations" in statements
+    assert any("INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s)" in sql for sql in statements)
+    assert any("DELETE FROM fleet_lite_replay_snapshots WHERE created_at < NOW()" in sql for sql in statements)
+    assert statements[-1] == "COMMIT"
+
+
+def test_custom_schema_is_created_by_migration_pool_and_runtime_uses_runtime_pool():
+    runtime_pool = FakePool([({"turns": []},)])
+    migration_pool = FakePool()
+    store = Store(
+        runtime_pool,  # ty: ignore[invalid-argument-type]
+        "postgresql://runtime",
+        migration_pool=migration_pool,  # ty: ignore[invalid-argument-type]
+        schema="fleet_rlm_lite",
+    )
+
+    store.initialize()
+    store.history("s1")
+
+    migration_sql = [sql for sql, _ in migration_pool.conn.statements]
+    assert 'CREATE SCHEMA IF NOT EXISTS "fleet_rlm_lite"' in migration_sql
+    assert 'SET LOCAL search_path TO "fleet_rlm_lite"' in migration_sql
+    assert any("fleet_lite_sessions" in sql for sql in migration_sql)
+    assert runtime_pool.borrowed == 1
+    assert migration_pool.borrowed == 1
+
+
+def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(monkeypatch):
+    import fleet_rlm.store.db as store_db
+
+    opened = []
+
+    class CapturedPool:
+        def __init__(self, dsn, **kwargs):
+            self.dsn = dsn
+            self.kwargs = kwargs
+            self.closed = False
+            opened.append(self)
+
+        def open(self, **_kwargs):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(store_db, "ConnectionPool", CapturedPool)
+    store = Store.open(
+        "postgresql://runtime@db.example/fleet",
+        migration_dsn="postgresql://migrator@db.example/fleet",
+        schema="fleet_rlm_lite",
+    )
+
+    assert [pool.dsn for pool in opened] == [
+        "postgresql://runtime@db.example/fleet",
+        "postgresql://migrator@db.example/fleet",
+    ]
+    assert all(pool.kwargs["kwargs"]["options"] == "-c search_path=fleet_rlm_lite" for pool in opened)
+    assert store.migration_pool is opened[1]
+    assert store.connection_kwargs["options"] == "-c search_path=fleet_rlm_lite"
+    store.close_migration_pool()
+    assert store.migration_pool is store.pool
+    assert opened[1].closed and not opened[0].closed
+    store.close()
+    assert opened[0].closed
+
+
+def test_schema_bootstrap_does_not_rerun_an_applied_migration():
+    from fleet_rlm.store.db import SCHEMA_VERSION
+
+    store, pool = make_store([], [], [(SCHEMA_VERSION,)])
+    store.initialize()
+    statements = [statement for statement, _ in pool.conn.statements]
+    assert statements[0] == "BEGIN"
+    assert any("pg_advisory_xact_lock" in sql for sql in statements)
+    assert "SELECT MAX(version) FROM fleet_lite_schema_migrations" in statements
+    assert not any("CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in sql for sql in statements)
+    assert not any("INSERT INTO fleet_lite_schema_migrations(version)" in sql for sql in statements)
+    assert statements[-1] == "COMMIT"
 
 
 def test_memories_are_marked_stale_when_a_source_digest_changed():
@@ -100,7 +250,7 @@ def test_mirroring_a_turn_is_one_transaction_with_the_completion():
     store.mirror_files(
         "s1",
         [("files/a.txt", "abc", b"x")],
-        turn_record_json="{}",
+        turn_record_json='{"turn_id":"turn-1"}',
         memory_note="note",
         completion=("t1", {"event": "turn_complete"}),
     )
@@ -110,7 +260,35 @@ def test_mirroring_a_turn_is_one_transaction_with_the_completion():
     assert sql[2].endswith("FOR UPDATE")
     assert any(statement.startswith("INSERT INTO fleet_lite_vfs_files") for statement in sql)
     assert any(statement.startswith("UPDATE fleet_lite_sessions SET turns") for statement in sql)
+    append_sql, append_params = next(
+        (statement, params)
+        for statement, params in pool.conn.statements
+        if statement.startswith("UPDATE fleet_lite_sessions SET turns")
+    )
+    assert "%s::text IS NULL" in append_sql
+    assert "NOT EXISTS" in append_sql and append_params[-2:] == ("turn-1", "turn-1")
     assert sql[-2].startswith("UPDATE fleet_lite_turns SET status='completed'")
+
+
+def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
+    content = b"immutable input"
+    digest = hashlib.sha256(content).hexdigest()
+    snapshot = (digest, content)
+    store, pool = make_store([], [], [], [], [], [(digest,)], [])
+    store.mirror_files(
+        "s1",
+        [],
+        turn_record_json='{"turn_id":"t1","replay_snapshot_selected":true}',
+        completion=("t1", {"event": "turn_complete"}),
+        replay_snapshot=snapshot,
+    )
+    sql = [statement for statement, _ in pool.conn.statements]
+    assert sql[0] == "BEGIN" and sql[-1] == "COMMIT"
+    assert any(statement.startswith("INSERT INTO fleet_lite_replay_snapshots") for statement in sql)
+    assert any(statement.startswith("UPDATE fleet_lite_turns SET status='completed'") for statement in sql)
+    assert sql.index(next(s for s in sql if s.startswith("INSERT INTO fleet_lite_replay_snapshots"))) < sql.index(
+        next(s for s in sql if s.startswith("UPDATE fleet_lite_turns SET status='completed'"))
+    )
 
 
 def _harness(store: Any, files: dict[str, bytes]) -> VolumePostgresHarness:
@@ -173,3 +351,27 @@ def test_a_dropped_idle_connection_is_retried_once():
     pool.connection = flaky
     assert store.runtime_settings("s1") == {"mode": "flex"}
     assert len(calls) == 2
+
+
+def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(monkeypatch):
+    import psycopg
+
+    credentials = iter(("token-one", "token-two"))
+    calls = []
+    client = SimpleNamespace(
+        postgres=SimpleNamespace(
+            generate_database_credential=lambda *, endpoint: SimpleNamespace(token=next(credentials), endpoint=endpoint)
+        )
+    )
+
+    def connect(connection_class, conninfo="", **kwargs):
+        calls.append((connection_class, conninfo, kwargs))
+        return kwargs
+
+    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(connect))
+    connection_class = lakebase_connection_class(client, "projects/p/branches/b/endpoints/e")
+    first = connection_class.connect("host=lakebase", user="fleet_app")
+    second = connection_class.connect("host=lakebase", user="fleet_app")
+    assert first["password"] == "token-one" and second["password"] == "token-two"
+    assert len(calls) == 2
+    assert all(call[0] is connection_class and call[1] == "host=lakebase" for call in calls)

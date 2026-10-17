@@ -90,6 +90,7 @@ class DaytonaSandboxManager:
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
     _budget_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _llm_calls_used: int = field(default=0, init=False, repr=False)
+    _sandbox_errors: int = field(default=0, init=False, repr=False)
     _interpreters: dict[str, DaytonaInterpreter] = field(default_factory=dict, init=False, repr=False)
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
     _contexts: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
@@ -443,6 +444,7 @@ class DaytonaSandboxManager:
         root.end_turn()
         with root._budget_lock:
             root._llm_calls_used = 0
+            root._sandbox_errors = 0
             root._allocations = 0
             root._cancelled.clear()
             root._deadline = time.monotonic() + root.turn_timeout_seconds
@@ -473,6 +475,16 @@ class DaytonaSandboxManager:
             tokens=None,
             estimated_cost=None,
         )
+
+    def record_sandbox_error(self) -> None:
+        with self.root._budget_lock:
+            self.root._sandbox_errors += 1
+
+    def turn_usage(self) -> dict[str, int]:
+        """LM calls and failed sandbox executions so far this Turn, across every agent in the tree."""
+        root = self.root
+        with root._budget_lock:
+            return {"lm_calls": root._llm_calls_used, "sandbox_errors": root._sandbox_errors}
 
     def list_workspace_files(self) -> list[str]:
         code = (

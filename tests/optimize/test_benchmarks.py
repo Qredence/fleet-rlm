@@ -61,7 +61,7 @@ def test_oolong_adapter_parses_labels_and_skips_truncated_rows():
     cases = benchmarks.oolong_cases(_client(payload), limit=5, max_pages=3, pause=0)
     assert [c.case_id for c in cases] == ["oolong-7"]
     case = cases[0]
-    assert case.expected_values == ("spam",) and case.review_status == "benchmark"
+    assert case.expected_values == ("spam",) and case.review_status == benchmarks.window_status("3")
     assert case.files == {"files/context.txt": "text"} and case.source_group == "oolong-window-3"
     assert case.record()["expectations"]["benchmark"] == "oolong-synth"
 

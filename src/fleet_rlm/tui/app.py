@@ -40,9 +40,10 @@ def run_interactive_cli(base_url: str, session_id: str) -> None:
     CONSOLE.print(
         Panel.fit(
             f"[bold cyan]Fleet-RLM Lite[/bold cyan] | Session: [yellow]{session_id}[/yellow]\n"
-            "Enter `/help` for commands; `/exit` to quit."
+            "Enter `/help` for commands; `/replay on|off` selects bounded replay capture; `/exit` to quit."
         )
     )
+    record_replay = False
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
         while True:
             try:
@@ -58,6 +59,15 @@ def run_interactive_cli(base_url: str, session_id: str) -> None:
             if not user_input:
                 continue
             if user_input.startswith("/"):
+                if user_input.startswith("/replay"):
+                    parts = user_input.split()
+                    if len(parts) != 2 or parts[1] not in {"on", "off"}:
+                        CONSOLE.print("[yellow]Usage: /replay on|off[/yellow]")
+                    else:
+                        record_replay = parts[1] == "on"
+                        state = "enabled for subsequent Turns" if record_replay else "disabled"
+                        CONSOLE.print(f"[dim]Replay capture {state}.[/dim]")
+                    continue
                 if not handle_command(client, user_input, session_id):
                     break
                 continue
@@ -66,7 +76,7 @@ def run_interactive_cli(base_url: str, session_id: str) -> None:
                 with client.stream(
                     "POST",
                     f"/sessions/{quote(session_id, safe='')}/turn",
-                    json={"task": user_input, "idempotency_key": uuid.uuid4().hex},
+                    json={"task": user_input, "idempotency_key": uuid.uuid4().hex, "record_replay": record_replay},
                 ) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():

@@ -126,6 +126,67 @@ def test_public_configuration_omits_credentials_and_tracks_session_override():
     assert settings.configuration({"execution_mode": settings.execution_mode})["sources"]["execution_mode"] == "session"
 
 
+def test_lakebase_oauth_requires_endpoint_and_password_free_tls_dsn():
+    endpoint = "projects/fleet-rlm/branches/production/endpoints/primary"
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_database_url="postgresql://fleet_app@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
+        fleet_lakebase_endpoint=endpoint,
+    )
+    assert settings.fleet_lakebase_endpoint == endpoint
+    with pytest.raises(ValidationError, match="sslmode=require"):
+        FleetSettings(
+            _env_file=None,
+            fleet_database_url="postgresql://fleet_app@ep.example.databricks.com/fleet_rlm_lite",
+            fleet_lakebase_endpoint=endpoint,
+        )
+    with pytest.raises(ValidationError, match="embedded password"):
+        FleetSettings(
+            _env_file=None,
+            fleet_database_url="postgresql://fleet_app:password@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
+            fleet_lakebase_endpoint=endpoint,
+        )
+
+
+def test_database_schema_is_a_safe_identifier_and_migration_url_is_not_public_configuration():
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_database_url="postgresql://runtime@db.example/fleet",
+        fleet_database_schema="fleet_rlm_lite",
+        fleet_database_migration_url="postgresql://migration:secret@db.example/fleet",
+    )
+    public = settings.configuration()
+    assert public["values"]["fleet_database_schema"] == "fleet_rlm_lite"
+    assert "fleet_database_migration_url" not in public["values"]
+    assert "secret" not in str(public)
+    with pytest.raises(ValidationError, match="lowercase PostgreSQL identifier"):
+        FleetSettings(_env_file=None, fleet_database_schema="bad-name")
+    with pytest.raises(ValidationError, match="must target the runtime database"):
+        FleetSettings(
+            _env_file=None,
+            fleet_database_url="postgresql://runtime@db.example/fleet",
+            fleet_database_migration_url="postgresql://migrator@other.example/fleet",
+        )
+
+
+def test_lakebase_migration_dsn_uses_the_same_tls_database_with_a_separate_role():
+    endpoint = "projects/fleet-rlm/branches/production/endpoints/primary"
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_database_url="postgresql://runtime@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
+        fleet_database_migration_url="postgresql://migrator@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
+        fleet_lakebase_endpoint=endpoint,
+    )
+    assert settings.fleet_database_schema == "public"
+    with pytest.raises(ValidationError, match="must target the runtime database"):
+        FleetSettings(
+            _env_file=None,
+            fleet_database_url="postgresql://runtime@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
+            fleet_database_migration_url="postgresql://migrator@ep.example.databricks.com/other?sslmode=require",
+            fleet_lakebase_endpoint=endpoint,
+        )
+
+
 def test_validation_errors_hide_input_values():
     with pytest.raises(ValidationError) as error:
         FleetSettings(_env_file=None, fleet_root_temperature="credential-marker")
@@ -202,14 +263,16 @@ def test_cli_reports_invalid_configuration_without_traceback(monkeypatch, capsys
 
 
 def test_local_mlflow_mode_ignores_databricks_targets(monkeypatch):
+    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks://profile")
     monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "/Users/someone/fleet")
     monkeypatch.setenv("FLEET_MLFLOW_EVAL_EXPERIMENT_NAME", "/Users/someone/fleet-eval")
     target = FleetSettings(_env_file=None).mlflow_target()
-    assert target == ("local", "http://127.0.0.1:5001", "fleet-rlm-dev", "fleet-rlm-eval")
+    assert target == ("local", "http://127.0.0.1:5001", "fleet-rlm-dev", "fleet-rlm-eval", "fleet-rlm-gepa")
 
 
 def test_local_mlflow_mode_keeps_local_targets(monkeypatch):
+    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
     monkeypatch.setenv("FLEET_MLFLOW_TRACKING_URI", "sqlite:///local.db")
     monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "mine")
     target = FleetSettings(_env_file=None).mlflow_target()
@@ -217,14 +280,27 @@ def test_local_mlflow_mode_keeps_local_targets(monkeypatch):
 
 
 def test_databricks_mlflow_mode_is_validated_only_when_selected(monkeypatch):
+    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks://profile")
     assert FleetSettings(_env_file=None).mlflow_target().mode == "local"
     monkeypatch.setenv("FLEET_MLFLOW_MODE", "databricks")
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "")
     with pytest.raises(ValidationError, match="Unity Catalog"):
         FleetSettings(_env_file=None)
+    monkeypatch.delenv("FLEET_MLFLOW_TRACE_CATALOG")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
     with pytest.raises(ValidationError, match="databricks tracking URI"):
         FleetSettings(_env_file=None)
+
+
+def test_checked_in_configuration_defaults_to_databricks(monkeypatch):
+    monkeypatch.delenv("FLEET_MLFLOW_MODE", raising=False)
+    monkeypatch.delenv("FLEET_MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    target = FleetSettings(_env_file=None).mlflow_target()
+    assert target.mode == "databricks"
+    assert target.experiment_name.startswith("/")
+    assert target.optimization_experiment_name.startswith("/")
 
 
 def test_gateway_judge_environment_uses_gateway_credentials():

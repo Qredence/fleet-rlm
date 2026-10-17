@@ -7,6 +7,7 @@ held-out split only; GEPA must never train or validate on them.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import random
 import time
@@ -129,6 +130,15 @@ def _get(client: httpx.Client, path: str, **params: Any) -> list[dict[str, Any]]
     return []
 
 
+def window_status(window_id: str) -> str:
+    """Two of every three Oolong context windows train (``approved``); the rest stay a held-out benchmark.
+
+    A stable hash of the window id keeps every question from one window on the same side, and reruns never reshuffle.
+    """
+    bucket = int(hashlib.sha256(str(window_id).encode()).hexdigest(), 16) % 3
+    return "approved" if bucket < 2 else "benchmark"
+
+
 def oolong_cases(
     client: httpx.Client,
     *,
@@ -176,7 +186,7 @@ def oolong_cases(
                 category=f"oolong_{row['task_group']}",
                 source_group=f"oolong-window-{row['context_window_id']}",
                 files={"files/context.txt": row["context_window_text"]},
-                review_status="benchmark",
+                review_status=window_status(row["context_window_id"]),
                 answer_type="list" if len(values) > 1 else "scalar",
                 benchmark="oolong-synth",
             )

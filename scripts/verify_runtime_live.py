@@ -1,6 +1,6 @@
 """Explicitly authorized live acceptance using disposable DB/provider resources.
 
-Usage: uv run python scripts/verify_v2_live.py --live --snapshot NAME --model openai/SERVICE
+Usage: uv run python scripts/verify_runtime_live.py --live --snapshot NAME --model openai/SERVICE
 Never prints credential values. Creates and drops a private PostgreSQL schema;
 creates and deletes only sandboxes labeled with this run's random session ID.
 """
@@ -20,7 +20,6 @@ from daytona import Daytona, DaytonaConfig, ListSandboxesQuery
 from dspy.primitives.facade import FacadeInvocation
 from fastapi.testclient import TestClient
 from psycopg import sql
-from psycopg.conninfo import make_conninfo
 
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
@@ -34,49 +33,61 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--local-postgres", action="store_true", help="Use disposable Orb PostgreSQL on port 55432")
     parser.add_argument("--trace", action="store_true", help="Capture traces in disposable local MLflow storage")
-    parser.add_argument("--output", type=Path, default=Path(".amp/in/artifacts/v2-live.json"))
+    parser.add_argument("--output", type=Path, help="Report path (default: .scratch/runtime-validation/<run>.json)")
     args = parser.parse_args()
     if not args.live:
         parser.error("--live authorization is required")
-    settings = FleetSettings(
+
+    session = "runtime-acceptance-" + uuid.uuid4().hex[:12]
+    schema = session.replace("-", "_")
+    run_dir = Path(".scratch/runtime-validation") / session
+    output = args.output or Path(".scratch/runtime-validation") / f"{session}.json"
+    local_database = "postgresql://user@127.0.0.1:55432/postgres"
+    base_settings = FleetSettings()
+    settings = base_settings.with_explicit_overrides(
         fleet_root_model=args.model,
         fleet_sub_model=args.model,
         fleet_reflection_model=args.model,
         fleet_daytona_snapshot=args.snapshot,
+        fleet_database_url=local_database if args.local_postgres else base_settings.fleet_database_url,
+        fleet_database_migration_url=local_database
+        if args.local_postgres
+        else base_settings.fleet_database_migration_url,
+        fleet_database_schema=schema,
+        compiled_program_dir=str(run_dir / "compiled"),
+        local_skills_dir=str(run_dir / "skills"),
+        mlflow_mode="local",
+        mlflow_tracking_uri=f"sqlite:///{(run_dir / 'mlflow.db').resolve()}",
+        mlflow_experiment_name=f"runtime-acceptance-{uuid.uuid4().hex[:12]}",
         typesafe_api_key="",
         execution_mode="rlm",
         max_upload_bytes=25_000_000,
     )
-    if args.local_postgres:
-        settings = settings.model_copy(update={"fleet_database_url": "postgresql://user@127.0.0.1:55432/postgres"})
     required = {
         "FLEET_DAYTONA_API_KEY": settings.fleet_daytona_api_key,
         "FLEET_DAYTONA_ORG_ID": settings.fleet_daytona_org_id,
         "FLEET_DAYTONA_VOLUME_ID": settings.fleet_daytona_volume_id,
-        "DATABRICKS_TOKEN": settings.databricks_token.get_secret_value(),
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
         parser.error("Missing credentials: " + ", ".join(missing))
+    if not settings.fleet_database_migration_url:
+        parser.error("FLEET_DATABASE_MIGRATION_URL is required for private-schema setup and cleanup")
 
-    session = "v2-live-" + uuid.uuid4().hex[:12]
-    schema = session.replace("-", "_")
     report: dict = {"session": session, "model": args.model, "snapshot": args.snapshot, "cases": {}}
-    provider = Daytona(
-        DaytonaConfig(api_key=settings.fleet_daytona_api_key, organization_id=settings.fleet_daytona_org_id)
-    )
-    with psycopg.connect(settings.fleet_database_url) as connection:
-        connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-    isolated = settings.model_copy(
-        update={
-            "fleet_database_url": make_conninfo(settings.fleet_database_url, options=f"-c search_path={schema}"),
-            "mlflow_tracking_uri": "sqlite:////tmp/fleet-v2-mlflow.db",
-            "mlflow_experiment_name": "fleet-v2-live",
-        }
-    )
     start = time.monotonic()
+    provider = None
+    schema_created = False
+    failure: Exception | None = None
     try:
-        app = create_app(settings=isolated, configure_observability=args.trace)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        provider = Daytona(
+            DaytonaConfig(api_key=settings.fleet_daytona_api_key, organization_id=settings.fleet_daytona_org_id)
+        )
+        with psycopg.connect(settings.fleet_database_migration_url) as connection:
+            connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            schema_created = True
+        app = create_app(settings=settings, configure_observability=args.trace)
         with TestClient(app) as client:
             assert client.get("/health").status_code == 200
             # 1.25M records, >10 MB, far above the model context window.
@@ -220,7 +231,7 @@ def main() -> None:
             assert manager.list_workspace_files() == []
             report["cases"]["working_copy_removed"] = "passed"
         # Rebuild the app and root manager, recovering exclusively from PostgreSQL.
-        with TestClient(create_app(settings=isolated, configure_observability=False)) as resumed:
+        with TestClient(create_app(settings=settings, configure_observability=False)) as resumed:
             recovered_config = resumed.get(f"/sessions/{session}/config").json()
             assert recovered_config == configuration
             report["cases"]["model_configuration_restart"] = "passed"
@@ -276,34 +287,52 @@ def main() -> None:
             manager.event_callback = None
         report["status"] = "passed"
     except Exception as exc:
-        # Provider exceptions may contain request headers: never persist their raw messages.
+        # Provider and database exceptions may contain request headers or credentials.
+        failure = exc
         report["status"] = "failed"
         report["error_type"] = type(exc).__name__
-        raise
     finally:
         deleted = []
-        for sandbox in provider.list(ListSandboxesQuery(labels={"fleet_session": session})):
-            provider.delete(sandbox, wait=True, timeout=60)
-            deleted.append(sandbox.id)
+        remaining = []
+        if provider is not None:
+            try:
+                for sandbox in provider.list(ListSandboxesQuery(labels={"fleet_session": session})):
+                    provider.delete(sandbox, wait=True, timeout=60)
+                    deleted.append(sandbox.id)
+                # Provider list indexes can briefly lag a confirmed delete.
+                deadline = time.monotonic() + 60
+                while True:
+                    remaining = [s.id for s in provider.list(ListSandboxesQuery(labels={"fleet_session": session}))]
+                    if not remaining or time.monotonic() >= deadline:
+                        break
+                    time.sleep(2)
+            except Exception as exc:
+                report["sandbox_cleanup_error_type"] = type(exc).__name__
+                report["status"] = "cleanup_incomplete"
         report["deleted_sandboxes"] = deleted
-        # Provider list indexes can briefly lag a confirmed delete.
-        deadline = time.monotonic() + 60
-        while True:
-            remaining = [s.id for s in provider.list(ListSandboxesQuery(labels={"fleet_session": session}))]
-            if not remaining or time.monotonic() >= deadline:
-                break
-            time.sleep(2)
         report["remaining_sandboxes"] = remaining
         if remaining:
             report["status"] = "cleanup_incomplete"
-        with psycopg.connect(settings.fleet_database_url) as connection:
-            connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+        if schema_created:
+            try:
+                with psycopg.connect(settings.fleet_database_migration_url) as connection:
+                    connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+                report["schema_cleanup"] = "dropped"
+            except Exception as exc:
+                report["schema_cleanup_error_type"] = type(exc).__name__
+                report["status"] = "cleanup_incomplete"
         report["elapsed_seconds"] = round(time.monotonic() - start, 2)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, indent=2, default=str))
-        print(
-            json.dumps({"status": report.get("status"), "cases": list(report["cases"]), "evidence": str(args.output)})
-        )
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(report, indent=2, default=str))
+            print(json.dumps({"status": report.get("status"), "cases": list(report["cases"]), "evidence": str(output)}))
+        except Exception as exc:
+            print(json.dumps({"status": "report_write_failed", "error_type": type(exc).__name__}))
+            if failure is None:
+                failure = exc
+
+    if failure is not None or report.get("status") != "passed":
+        raise SystemExit("Runtime acceptance failed or cleanup was incomplete; inspect the sanitized report") from None
 
 
 if __name__ == "__main__":

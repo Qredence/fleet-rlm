@@ -52,6 +52,7 @@ async def stream_turn(
             mlflow_experiment_id=request.app.state.mlflow_experiment_id,
             callback=callback,
             emit=callback.emit,
+            record_replay=req.record_replay,
         ),
     )
     try:
