@@ -40,11 +40,11 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
 
     sandbox = RecordingSandbox()
     with pytest.raises(ValueError, match=r"skills/ledger-audit/existing.txt"):
-        SkillManager(sandbox, skills).sync_local_skills_to_volume()  # type: ignore[arg-type]
+        SkillManager(sandbox, skills, None).sync_local_skills_to_volume()  # type: ignore[arg-type]
 
     assert sandbox.writes == []
     sandbox.existing["skills/ledger-audit/existing.txt"] = hashlib.sha256(b"local version").hexdigest()
-    assert SkillManager(sandbox, skills).sync_local_skills_to_volume() == 1  # type: ignore[arg-type]
+    assert SkillManager(sandbox, skills, None).sync_local_skills_to_volume() == 1  # type: ignore[arg-type]
     assert sandbox.writes == [("skills/ledger-audit/new.txt", b"new file")]
 
 
@@ -75,3 +75,54 @@ def test_export_conflicts_are_reported_before_any_local_write(tmp_path: Path) ->
     assert SkillManager(RecordingSandbox(), skills).export_volume_skills_to_local() == ["local-skill", "new-skill"]  # type: ignore[arg-type]
     assert (local / "SKILL.md").read_bytes() == _skill("local-skill")
     assert (skills / "new-skill" / "SKILL.md").read_bytes() == _skill("new-skill")
+
+
+class _VolumeDouble:
+    def __init__(self, existing: dict[str, str] | None = None) -> None:
+        self.existing = existing or {}
+        self.writes: dict[str, bytes] = {}
+
+    def exec_remote_python(self, _code: str) -> str:
+        return json.dumps(self.existing)
+
+    def write_workspace_file(self, relative_path: str, content: bytes) -> None:
+        self.writes[relative_path] = content
+
+
+def test_bundled_skills_ship_valid_and_sync_with_local_overrides(tmp_path: Path) -> None:
+    from fleet_rlm.skills import BUNDLED_SKILLS_DIR, parse_and_validate_skill_md
+
+    bundled = sorted(path.parent.name for path in BUNDLED_SKILLS_DIR.glob("*/SKILL.md"))
+    assert bundled == ["delegation", "long-context-search", "tabular-analysis"]
+    for name in bundled:
+        parse_and_validate_skill_md(name, (BUNDLED_SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8"))
+
+    local = tmp_path / "skills"
+    (local / "delegation").mkdir(parents=True)
+    override = _skill("delegation", "Local delegation rules.")
+    (local / "delegation" / "SKILL.md").write_bytes(override)
+    sandbox = _VolumeDouble()
+
+    assert SkillManager(sandbox, local).sync_local_skills_to_volume() == 3  # type: ignore[arg-type]
+    assert sorted(sandbox.writes) == [f"skills/{name}/SKILL.md" for name in bundled]
+    assert sandbox.writes["skills/delegation/SKILL.md"] == override
+
+
+def test_a_changed_bundled_skill_replaces_the_session_copy_but_user_edits_still_conflict(tmp_path: Path) -> None:
+    bundled = tmp_path / "bundled"
+    (bundled / "tabular-analysis").mkdir(parents=True)
+    new_version = _skill("tabular-analysis", "Version 2.")
+    (bundled / "tabular-analysis" / "SKILL.md").write_bytes(new_version)
+    local = tmp_path / "local"
+    (local / "mine").mkdir(parents=True)
+    (local / "mine" / "SKILL.md").write_bytes(_skill("mine"))
+    stale = hashlib.sha256(b"old").hexdigest()
+
+    sandbox = _VolumeDouble({"skills/tabular-analysis/SKILL.md": stale})
+    assert SkillManager(sandbox, local, bundled).sync_local_skills_to_volume() == 2  # type: ignore[arg-type]
+    assert sandbox.writes["skills/tabular-analysis/SKILL.md"] == new_version
+
+    sandbox = _VolumeDouble({"skills/mine/SKILL.md": stale})
+    with pytest.raises(ValueError, match=r"skills/mine/SKILL\.md"):
+        SkillManager(sandbox, local, bundled).sync_local_skills_to_volume()  # type: ignore[arg-type]
+    assert sandbox.writes == {}

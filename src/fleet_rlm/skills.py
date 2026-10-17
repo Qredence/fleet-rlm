@@ -6,6 +6,7 @@ import base64
 import hashlib
 import html
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -16,6 +17,9 @@ import yaml
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
+_LOGGER = logging.getLogger(__name__)
+# Skills shipped with Fleet; a user Skill with the same name in the local folder replaces one.
+BUNDLED_SKILLS_DIR = Path(__file__).parent / "bundled_skills"
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 MAX_SKILL_FILE_BYTES = 1_000_000
@@ -277,18 +281,34 @@ class SkillManager:
 
     sandbox_mgr: DaytonaSandboxManager
     local_skills_dir: Path = Path(".fleet/skills")
+    bundled_skills_dir: Path | None = BUNDLED_SKILLS_DIR
+
+    def _skill_dirs(self) -> dict[str, Path]:
+        """Bundled Skills, then local ones; a local Skill replaces a bundled Skill of the same name."""
+        selected: dict[str, Path] = {}
+        for root in (self.bundled_skills_dir, self.local_skills_dir):
+            if root is None:
+                continue
+            if root.is_symlink():
+                raise ValueError("A Skills directory may not be a symbolic link")
+            if not root.is_dir():
+                continue
+            for skill_md in sorted(root.glob("*/SKILL.md")):
+                name = skill_md.parent.name
+                if name in selected:
+                    _LOGGER.info("Local Skill %s replaces the bundled Skill of the same name", name)
+                selected[name] = skill_md.parent
+        return selected
 
     def sync_local_skills_to_volume(self) -> int:
-        """Upload validated local Skills; developer-only `.agents/skills` is never read."""
-        if self.local_skills_dir.is_symlink():
-            raise ValueError("The local Skills directory may not be a symbolic link")
-        if not self.local_skills_dir.is_dir():
-            return 0
+        """Upload validated bundled and local Skills; developer-only `.agents/skills` is never read."""
         count = 0
         total_bytes = 0
         staged_files: list[tuple[str, bytes]] = []
-        for skill_md in sorted(self.local_skills_dir.glob("*/SKILL.md")):
-            skill_dir = skill_md.parent
+        bundled_paths: set[str] = set()
+        for skill_dir in self._skill_dirs().values():
+            bundled = self.bundled_skills_dir is not None and skill_dir.parent == self.bundled_skills_dir
+            skill_md = skill_dir / "SKILL.md"
             if skill_dir.is_symlink() or skill_md.is_symlink() or skill_md.stat().st_size > MAX_SKILL_FILE_BYTES:
                 raise ValueError("Local Skills and their instructions may not be symbolic links or oversized")
             parse_and_validate_skill_md(skill_dir.name, skill_md.read_text(encoding="utf-8"))
@@ -298,7 +318,7 @@ class SkillManager:
                     raise ValueError(f"Skill resources may not be symbolic links: {file_path}")
                 if not file_path.is_file():
                     continue
-                relative = file_path.relative_to(self.local_skills_dir).as_posix()
+                relative = file_path.relative_to(skill_dir.parent).as_posix()
                 _validated_relative_file_path(relative)
                 content = file_path.read_bytes()
                 if len(content) > MAX_SKILL_FILE_BYTES:
@@ -308,6 +328,8 @@ class SkillManager:
                 if file_count > MAX_SKILL_FILES or total_bytes > MAX_SKILL_TOTAL_BYTES:
                     raise ValueError("Local Skills exceed the synchronization bounds")
                 staged_files.append((f"skills/{relative}", content))
+                if bundled:
+                    bundled_paths.add(f"skills/{relative}")
             count += 1
             if count > MAX_SKILL_FILES:
                 raise ValueError("Too many local Skills to synchronize")
@@ -335,15 +357,19 @@ class SkillManager:
             raise ValueError("Could not inspect existing session Skills before synchronization") from exc
         if not isinstance(existing, dict):
             raise ValueError("Existing session Skill manifest is invalid")
-        conflicts = [
+        changed = {
             relative
             for relative, content in staged_files
             if relative in existing and existing[relative] != hashlib.sha256(content).hexdigest()
-        ]
+        }
+        # Bundled Skills belong to this Fleet version, so a newer bundled file replaces the session copy.
+        conflicts = sorted(changed - bundled_paths)
         if conflicts:
             raise ValueError("Skill sync conflicts with existing session files: " + ", ".join(conflicts))
         for relative, content in staged_files:
-            if relative not in existing:
+            if relative not in existing or relative in changed:
+                if relative in changed:
+                    _LOGGER.info("Updating bundled Skill file %s in the session workspace", relative)
                 self.sandbox_mgr.write_workspace_file(relative, content)
         return count
 

@@ -78,7 +78,7 @@ def test_local_skill_sync_prevalidates_all_skills_before_writing(tmp_path: Path)
             self.writes.append((relative_path, content))
 
     sandbox = RecordingSandbox()
-    manager = SkillManager(sandbox, skills_root)  # type: ignore[arg-type]
+    manager = SkillManager(sandbox, skills_root, None)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="frontmatter"):
         manager.sync_local_skills_to_volume()
     assert sandbox.writes == []
