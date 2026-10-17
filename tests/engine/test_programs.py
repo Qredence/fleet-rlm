@@ -81,6 +81,53 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
     assert "typesafe-test-token" not in caplog.text
 
 
+def _answering_engine() -> AdaptiveFleetEngine:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+        execution_mode="rlm",
+    )
+    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+        answer="computed", learned_skill_note=""
+    )
+    return engine
+
+
+def test_evidence_collection_failure_keeps_the_answer_and_marks_evidence_incomplete(monkeypatch) -> None:
+    engine = _answering_engine()
+    engine.optimization_verifications = [{"path": "artifacts/check.py", "timeout_seconds": 5}]
+
+    def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise OSError("transport down")
+
+    monkeypatch.setattr(DaytonaSandboxManager, "execution_evidence", broken)
+    monkeypatch.setattr(DaytonaSandboxManager, "verify_python_artifact", broken)
+
+    prediction = engine(workspace_manifest="", memory_summary="", task="compute")
+
+    assert prediction.answer == "computed"
+    assert prediction.execution_evidence["artifacts"]["complete"] is False
+    assert prediction.execution_evidence["children_complete"] is False
+    assert prediction.execution_evidence["python"] == {"artifacts/check.py": {"complete": False}}
+
+
+def test_unknown_verification_outcome_still_ends_the_turn(monkeypatch) -> None:
+    from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
+
+    engine = _answering_engine()
+    engine.optimization_verifications = [{"path": "artifacts/check.py", "timeout_seconds": 5}]
+
+    def unknown(*_args: Any, **_kwargs: Any) -> Any:
+        raise ExecutionOutcomeUnknownError("outcome unknown")
+
+    monkeypatch.setattr(DaytonaSandboxManager, "verify_python_artifact", unknown)
+
+    with pytest.raises(ExecutionOutcomeUnknownError):
+        engine(workspace_manifest="", memory_summary="", task="compute")
+
+
 def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_turn(monkeypatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     engine = AdaptiveFleetEngine(

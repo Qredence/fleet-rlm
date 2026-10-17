@@ -10,9 +10,10 @@ from mlflow.entities import Feedback, SpanStatusCode, SpanType
 from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, scorer
 
 from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge, parse_route
-from fleet_rlm.observability import activity_preview, trace_object
+from fleet_rlm.observability import activity_preview, measured_lm_usage, trace_object
+from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
 
-SCORER_VERSION = "fleet-metric-v4"
+SCORER_VERSION = "fleet-metric-v5"
 
 
 def _lm_call_count(spans: list[Any]) -> int:
@@ -25,8 +26,12 @@ def _used_rlm_or_flex(spans: list[Any]) -> bool:
 
 
 @scorer
-def rlm_trajectory_efficiency(trace: Any) -> Feedback | None:
+def rlm_trajectory_efficiency(trace):
     """Penalize unnecessary LM calls and visible sandbox exceptions."""
+    from mlflow.entities import Feedback
+
+    from fleet_rlm.optimize.scorers import _lm_call_count, efficiency
+
     if trace is None:
         return None
     spans = trace.search_spans()
@@ -49,8 +54,12 @@ def rlm_trajectory_efficiency(trace: Any) -> Feedback | None:
 
 
 @scorer
-def jev_routing_efficiency(trace: Any) -> Feedback | None:
+def jev_routing_efficiency(trace):
     """Score simple requests routed without starting a Flex/RLM execution."""
+    from mlflow.entities import Feedback
+
+    from fleet_rlm.optimize.scorers import _lm_call_count, _used_rlm_or_flex
+
     if trace is None:
         return None
     spans = trace.search_spans()
@@ -65,14 +74,19 @@ def jev_routing_efficiency(trace: Any) -> Feedback | None:
 
 
 @scorer
-def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
+def route_correctness(outputs, expectations):
     """Check that the turn took the labeled gold route (direct, flex, or rlm; legacy labels are read too)."""
+    from mlflow.entities import Feedback
+
+    from fleet_rlm.engine.signatures import parse_route
+    from fleet_rlm.observability import trace_object
+
     expected = parse_route((expectations or {}).get("route"))
     if expected is None:
         return None
     actual = parse_route(trace_object(outputs).get("route"))
     if actual is None:
-        return None
+        return Feedback(value=False, rationale="Gold route exists but actual route evidence is missing")
     correct = str(actual) == str(expected)
     return Feedback(value=correct, rationale=f"Expected route {expected!r}, observed {actual!r}.")
 
@@ -206,6 +220,7 @@ def fleet_metric(
 ) -> dspy.Prediction:
     """Incorrect answers score zero; correct answers compete on measured execution efficiency."""
     answer = str(getattr(pred, "answer", "") or "").strip()
+    judge_usage_start = len(getattr(judge_lm, "history", []))
     if not answer:
         return dspy.Prediction(
             score=0.0,
@@ -217,11 +232,17 @@ def fleet_metric(
         "expected_values": expected_values_metric(gold, answer),
         "route": route_metric(gold, pred),
         "efficiency": efficiency_metric(pred),
+        "artifact_correctness": artifact_correctness(
+            getattr(gold, "structured_expectations", {}) or {}, getattr(pred, "execution_evidence", {}) or {}
+        ),
+        "delegation_correctness": delegation_correctness(
+            getattr(gold, "structured_expectations", {}) or {}, getattr(pred, "execution_evidence", {}) or {}
+        ),
     }
     applied = {name: result for name, result in metrics.items() if result is not None}
     quality = {name: result for name, result in applied.items() if name != "efficiency"}
     correctness = min(value for value, _ in quality.values())
-    score = correctness * (0.9 + 0.1 * (metrics["efficiency"][0] if metrics["efficiency"] else 0.0))
+    score = (0.9 + 0.1 * (metrics["efficiency"][0] if metrics["efficiency"] else 0.0)) if correctness == 1 else 0.0
     lines = [
         f"{'PASS' if value == 1.0 else 'FAIL'} {name} ({value:.2f}): {detail}"
         for name, (value, detail) in applied.items()
@@ -246,6 +267,7 @@ def fleet_metric(
         feedback="\n".join(lines),
         objective_scores={name: value for name, (value, _) in applied.items()}
         | {"quality": correctness, "usage_available": float(metrics["efficiency"] is not None)},
+        judge_usage=measured_lm_usage(judge_lm, judge_usage_start),
     )
 
 
@@ -259,6 +281,7 @@ def gold_and_prediction(inputs: Any, outputs: Any, expectations: dict[str, Any] 
         answer=labels.get("expected_answer") or "",
         expected_values=labels.get("expected_values") or [],
         route=labels.get("route"),
+        structured_expectations=labels.get("structured_expectations") or {},
     )
     pred = dspy.Prediction(**outputs) if isinstance(outputs, dict) else dspy.Prediction(answer=str(outputs or ""))
     return gold, pred

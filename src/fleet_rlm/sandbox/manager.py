@@ -91,6 +91,8 @@ class DaytonaSandboxManager:
     _budget_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _llm_calls_used: int = field(default=0, init=False, repr=False)
     _sandbox_errors: int = field(default=0, init=False, repr=False)
+    _child_receipts: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
+    _cleanup_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     _interpreters: dict[str, DaytonaInterpreter] = field(default_factory=dict, init=False, repr=False)
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
     _contexts: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
@@ -176,6 +178,14 @@ class DaytonaSandboxManager:
             root._children[child.agent_id] = child
             root._allocations += 1
         child.emit("agent_spawn", depth=child.depth)
+        with root._budget_lock:
+            root._child_receipts[child.agent_id] = {
+                "agent_id": child.agent_id,
+                "parent_agent_id": self.agent_id,
+                "inputs": {},
+                "artifacts": [],
+                "status": "running",
+            }
         try:
             child.ensure_sandbox()
             total = 0
@@ -188,10 +198,21 @@ class DaytonaSandboxManager:
                 if total > 100_000_000:
                     raise ValueError("Child input transfer quota exceeded")
                 child.write_workspace_file(path, data)
+                with root._budget_lock:
+                    root._child_receipts[child.agent_id]["inputs"][path] = hashlib.sha256(data).hexdigest()
             return child
         except BaseException:
+            child.record_child_outcome(False)
             child.shutdown()
             raise
+
+    def record_child_outcome(self, succeeded: bool) -> None:
+        """Record invocation success independently of transport/tool-call success."""
+        if self.parent is not None:
+            with self.root._budget_lock:
+                receipt = self.root._child_receipts.get(self.agent_id)
+                if receipt is not None:
+                    receipt["status"] = "succeeded" if succeeded else "failed"
 
     def collect_child_artifacts(self) -> list[dict[str, Any]]:
         if self.parent is None:
@@ -210,7 +231,75 @@ class DaytonaSandboxManager:
             self.parent.write_workspace_file(target, raw)
             results.append({"path": target, "sha256": hashlib.sha256(raw).hexdigest(), "agent_id": self.agent_id})
         self.emit("agent_result", artifacts=results)
+        root_receipts = []
+        for row in results:
+            root_path = row["path"]
+            ancestor = self.parent
+            while ancestor is not None and ancestor.parent is not None:
+                root_path = f"artifacts/{ancestor.agent_id}/{root_path.removeprefix('artifacts/')}"
+                ancestor = ancestor.parent
+            root_receipts.append({**row, "root_path": root_path})
+        with self.root._budget_lock:
+            self.root._child_receipts[self.agent_id]["artifacts"] = root_receipts
+        self.record_child_outcome(True)
         return results
+
+    def execution_evidence(self) -> dict[str, Any]:
+        """Observe actual workspace bytes before teardown, never model-provided receipts."""
+        from fleet_rlm.optimize.evidence import collect_artifacts
+
+        artifacts = collect_artifacts(self) if self._sandbox is not None else {"complete": True, "files": {}}
+        with self.root._budget_lock:
+            children = json.loads(json.dumps(list(self.root._child_receipts.values())))
+        return {
+            "schema_version": 1,
+            "artifacts": artifacts,
+            "children": children,
+            "children_complete": all(child["status"] != "running" for child in children),
+        }
+
+    def verify_python_artifact(self, path: str, timeout_seconds: int) -> dict[str, Any]:
+        """Execute one declared entry point in Daytona, bounded by the remaining Turn deadline."""
+        from fleet_rlm.optimize.evidence import MAX_ARTIFACT_BYTES, artifact_path
+
+        artifact_path(path)
+        if not path.endswith(".py") or type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 60:
+            raise ValueError("Invalid Python verification entry")
+        self.check_turn()
+        remaining = self.root._deadline - time.monotonic() if self.root._deadline else 0
+        if remaining <= 1:
+            raise TimeoutError("No Turn time remains for artifact verification")
+        timeout = min(timeout_seconds, max(1, int(remaining) - 1))
+        raw = self.read_workspace_file(path, max_bytes=MAX_ARTIFACT_BYTES)
+        digest = hashlib.sha256(raw).hexdigest()
+        # Only the child process executes generated code. Temporary files bound host output;
+        # the process group is killed on timeout so background children cannot survive it.
+        code = (
+            "import hashlib,json,os,signal,subprocess,sys,tempfile\n"
+            f"path={json.dumps('/workspace/' + path)}\n"
+            f"assert hashlib.sha256(open(path,'rb').read()).hexdigest()=={digest!r}\n"
+            "with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:\n"
+            " p=subprocess.Popen([sys.executable,'-I',path],cwd='/workspace',stdout=out,stderr=err,"
+            "start_new_session=True)\n"
+            " complete=True\n"
+            f" try: p.wait(timeout={timeout})\n"
+            " except subprocess.TimeoutExpired: complete=False\n"
+            " finally:\n"
+            "  try: os.killpg(p.pid,signal.SIGKILL)\n"
+            "  except ProcessLookupError: pass\n"
+            "  p.wait()\n"
+            " out.seek(0); data=out.read(65537)\n"
+            " print(json.dumps({'complete':complete and len(data)<=65536,'exit_code':p.returncode,"
+            "'stdout':data[:65536].decode('utf-8',errors='replace')}))\n"
+        )
+        try:
+            result = json.loads(self._remote_exec(self.ensure_sandbox(), code, timeout=timeout + 1))
+        except Exception as exc:
+            # The process transport cannot establish whether execution finished. Never replay it.
+            self.cancel_turn()
+            raise ExecutionOutcomeUnknownError("Python artifact verification outcome unknown") from exc
+        self.check_turn()
+        return {**result, "sha256": digest}
 
     def cancel_turn(self) -> None:
         root = self.root
@@ -446,6 +535,8 @@ class DaytonaSandboxManager:
             root._llm_calls_used = 0
             root._sandbox_errors = 0
             root._allocations = 0
+            root._child_receipts.clear()
+            root._cleanup_receipts.clear()
             root._cancelled.clear()
             root._deadline = time.monotonic() + root.turn_timeout_seconds
             root._watchdog = threading.Timer(root.turn_timeout_seconds, root.cancel_turn)
@@ -641,6 +732,11 @@ class DaytonaSandboxManager:
             self._interpreters.pop(interpreter.ns_id, None)
 
     def shutdown(self) -> None:
+        if self.parent is not None:
+            with self.root._budget_lock:
+                receipt = self.root._child_receipts.get(self.agent_id)
+                if receipt is not None and receipt["status"] == "running":
+                    receipt["status"] = "failed"
         if self.parent is None:
             self.end_turn()
             for child in tuple(self._children.values()):
@@ -677,10 +773,12 @@ class DaytonaSandboxManager:
                     with self.root._budget_lock:
                         self.root._children.pop(self.agent_id, None)
                     self.emit("sandbox_deleted", sandbox_id=sandbox.id)
+                    self.root._cleanup_receipts.append({"sandbox_id": sandbox.id, "status": "deleted"})
                 else:
                     client.stop(sandbox, timeout=60)
             except Exception:
                 _LOGGER.warning("Daytona Session sandbox stop failed")
+                self.root._cleanup_receipts.append({"sandbox_id": sandbox.id, "status": "unconfirmed"})
                 if self.parent is not None:
                     # Retain the handle so a later shutdown can retry deletion.
                     self._sandbox = sandbox

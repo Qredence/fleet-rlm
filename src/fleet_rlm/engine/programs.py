@@ -22,9 +22,10 @@ from fleet_rlm.engine.signatures import (
     TurnTriage,
     parse_route,
 )
-from fleet_rlm.observability import activity_text
+from fleet_rlm.observability import activity_text, measured_lm_usage
 from fleet_rlm.optimize.artifacts import CompiledProgramFile
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ class AdaptiveFleetEngine(dspy.Module):
         self.compiled = CompiledProgramFile(compiled_path)
         # Set by the optimizer's per-example factory; IsolatedFleetProgram deletes it after the rollout.
         self.optimization_artifact_path: str | None = None
+        self.optimization_verifications: list[dict[str, Any]] = []
+        self.optimization_observer: Any = None
         self.compiled.load_initial(self)
 
     def forward(
@@ -99,10 +102,19 @@ class AdaptiveFleetEngine(dspy.Module):
         execution_mode: str | None = None,
     ) -> dspy.Prediction:
         owns_turn = not self.sandbox_mgr.root._deadline
+        usage_starts = {
+            role: len(getattr(lm, "history", [])) for role, lm in (("root", self.root_lm), ("sub", self.sub_lm))
+        }
         try:
             prediction = self._run_turn(
                 workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
             )
+            # Replace any candidate-provided evidence with observations from the host manager.
+            prediction["execution_evidence"] = self._execution_evidence()
+            prediction["provider_usage"] = {
+                role: measured_lm_usage(lm, usage_starts[role])
+                for role, lm in (("root", self.root_lm), ("sub", self.sub_lm))
+            }
             # The metric scores efficiency from these, so evaluation and GEPA see the same numbers.
             for name, value in self.sandbox_mgr.turn_usage().items():
                 prediction[name] = value
@@ -110,6 +122,34 @@ class AdaptiveFleetEngine(dspy.Module):
         finally:
             if owns_turn:
                 self.sandbox_mgr.end_turn()
+
+    def _execution_evidence(self) -> dict[str, Any]:
+        """Collection failures mark evidence incomplete, which scores zero, instead of failing an answered Turn."""
+        verifications: dict[str, Any] = {}
+        for entry in self.optimization_verifications:
+            try:
+                verifications[entry["path"]] = self.sandbox_mgr.verify_python_artifact(
+                    entry["path"], entry["timeout_seconds"]
+                )
+            except Exception as exc:
+                # An unknown remote outcome must stay terminal; it must never be replayed.
+                if isinstance(exc, ExecutionOutcomeUnknownError) or turn_is_over(exc):
+                    raise
+                _LOGGER.warning("Python artifact verification failed (%s)", type(exc).__name__)
+                verifications[entry["path"]] = {"complete": False}
+        try:
+            evidence = self.sandbox_mgr.execution_evidence()
+        except Exception as exc:
+            if turn_is_over(exc):
+                raise
+            _LOGGER.warning("Execution evidence collection failed (%s)", type(exc).__name__)
+            evidence = {
+                "schema_version": 1,
+                "artifacts": {"complete": False, "files": {}},
+                "children": [],
+                "children_complete": False,
+            }
+        return {**evidence, "python": verifications}
 
     def _run_turn(
         self,

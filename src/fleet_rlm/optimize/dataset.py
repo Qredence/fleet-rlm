@@ -109,6 +109,7 @@ def _example(snapshot: dict[str, Any], labels: dict[str, Any], digest: str, prov
         },
         answer=labels.get("expected_answer") or "",
         expected_values=labels.get("expected_values") or [],
+        structured_expectations=labels.get("structured_expectations") or {},
         route=labels.get("route"),
         critical=labels.get("critical") is True,
         category=labels.get("category", ""),
@@ -200,12 +201,15 @@ def curate_dataset(
     session_id: str,
     *,
     validation_ratio: float = 0.35,
+    evaluation_experiment_name: str | None = None,
 ) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
     """Return train/dev/holdout from reviewed examples; refuse to optimize on too little data."""
     if not 0.1 <= validation_ratio <= 0.5:
         raise ValueError("validation_ratio must be between 0.1 and 0.5")
     examples = load_examples_from_postgres(store, session_id)
     examples.extend(load_examples_from_mlflow(experiment_name, store=store))
+    if evaluation_experiment_name and evaluation_experiment_name != experiment_name:
+        examples.extend(load_examples_from_mlflow(evaluation_experiment_name, store=store))
     deduplicated: dict[tuple[str, str, str], dspy.Example] = {}
     for example in examples:
         # PostgreSQL is loaded first and owns durable reviews. A partial MLflow sync must not
@@ -226,3 +230,65 @@ def curate_dataset(
         f"{len(splits['train'])} train, {len(splits['dev'])} dev, {len(splits['holdout'])} holdout."
     )
     return splits["train"], splits["dev"], splits["holdout"]
+
+
+def reviewed_records(splits: dict[str, list[dspy.Example]]) -> list[dict[str, Any]]:
+    """Publish references and reviewed gold, never immutable workspace bytes."""
+    records = []
+    for split, examples in splits.items():
+        for example in examples:
+            records.append(
+                {
+                    "inputs": {
+                        "task": example.task,
+                        "source_session": example.source_session,
+                        "replay_turn_id": example.replay_turn_id,
+                        "replay_snapshot_sha256": example.replay_snapshot_sha256,
+                    },
+                    "expectations": {
+                        "expected_answer": example.answer,
+                        "expected_values": example.expected_values,
+                        "route": example.route,
+                        "critical": example.critical,
+                        "source_group": example.source_group,
+                        "split": split,
+                        "structured_expectations": getattr(example, "structured_expectations", {}),
+                    },
+                }
+            )
+    return records
+
+
+def publish_reviewed_dataset(
+    settings: Any, splits: dict[str, list[dspy.Example]], experiment_id: str
+) -> dict[str, Any]:
+    from mlflow.exceptions import MlflowException
+
+    from fleet_rlm.optimize.artifacts import fingerprint
+
+    records = reviewed_records(splits)
+    digest = fingerprint(sorted(records, key=lambda row: fingerprint(row)))
+    name = f"{settings.mlflow_trace_catalog}.fleet_evaluation.fleet_rlm_acceptance_{digest[:16]}"
+    try:
+        dataset = mlflow.genai.datasets.get_dataset(name=name)
+    except MlflowException as exc:
+        if exc.error_code != "RESOURCE_DOES_NOT_EXIST":
+            raise
+        dataset = mlflow.genai.datasets.create_dataset(name=name, experiment_id=experiment_id)
+    # Confirm semantic records after publication. Never merge changed gold into a frozen table.
+    frame = dataset.to_df()
+    if frame.empty:
+        # Recover a creation whose initial record upload failed. A nonempty
+        # frozen dataset is never repaired or merged into silently.
+        dataset.merge_records(records)
+        frame = dataset.to_df()
+    actual = [{"inputs": row["inputs"], "expectations": row["expectations"]} for row in frame.to_dict("records")]
+    if fingerprint(sorted(actual, key=lambda row: fingerprint(row))) != digest:
+        raise ValueError("Published reviewed dataset does not match its immutable content identity")
+    return {
+        "name": name,
+        "digest": digest,
+        "dataset_id": str(dataset.dataset_id),
+        "version": dataset.version,
+        "records": len(records),
+    }

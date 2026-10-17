@@ -152,7 +152,17 @@ _APPEND_TURN = """
 
 # Each migration is one atomic schema revision. Add new numbered entries here rather than
 # editing an already-shipped migration; the ledger makes upgrades and retries explicit.
-_SCHEMA_MIGRATIONS = ((1, SCHEMA_STATEMENTS), (2, (_REVIEW_LABELS_TABLE,)))
+_SCHEMA_MIGRATIONS = (
+    (1, SCHEMA_STATEMENTS),
+    (2, (_REVIEW_LABELS_TABLE,)),
+    (
+        3,
+        (
+            "ALTER TABLE fleet_lite_review_labels ADD COLUMN IF NOT EXISTS "
+            "structured_expectations JSONB NOT NULL DEFAULT '{}'::jsonb",
+        ),
+    ),
+)
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
 
@@ -581,6 +591,7 @@ class Store:
         route: str | None,
         critical: bool,
         reviewer: str,
+        structured_expectations: dict[str, Any] | None = None,
     ) -> None:
         """Persist reviewed labels only when they match an existing immutable replay snapshot."""
         from fleet_rlm.replay import selected_snapshot, validate_review_labels
@@ -592,6 +603,7 @@ class Store:
                 expected_answer=expected_answer,
                 expected_values=expected_values,
                 critical=critical,
+                structured_expectations=structured_expectations or {},
             ),
             require_gold=True,
         )
@@ -606,9 +618,9 @@ class Store:
                 """
                 INSERT INTO fleet_lite_review_labels(
                     session_id,turn_id,task,workspace_manifest,context_files,review_status,source_group,
-                    expected_answer,expected_values,route,critical,reviewer
+                    expected_answer,expected_values,route,critical,reviewer,structured_expectations
                 )
-                SELECT %s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s,%s
+                SELECT %s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb
                 WHERE EXISTS (
                     SELECT 1 FROM fleet_lite_replay_snapshots
                     WHERE session_id=%s AND turn_id=%s AND sha256=%s
@@ -624,6 +636,7 @@ class Store:
                     route=EXCLUDED.route,
                     critical=EXCLUDED.critical,
                     reviewer=EXCLUDED.reviewer,
+                    structured_expectations=EXCLUDED.structured_expectations,
                     updated_at=NOW()
                 RETURNING 1
                 """,
@@ -640,6 +653,7 @@ class Store:
                     route,
                     critical,
                     reviewer,
+                    json.dumps(structured_expectations or {}),
                     session_id,
                     turn_id,
                     snapshot_sha256,
@@ -661,6 +675,7 @@ class Store:
                            labels.workspace_manifest,
                            labels.expected_answer AS answer,
                            labels.expected_values,
+                           labels.structured_expectations,
                            labels.route,
                            labels.source_group,
                            labels.critical,

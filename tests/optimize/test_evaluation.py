@@ -25,7 +25,7 @@ def test_synthetic_cases_are_deterministic_and_grouped():
     assert [c.record() for c in first] != [c.record() for c in synthetic_cases(seed=4)]
     assert len({c.case_id for c in first}) == len(first)
     assert {c.review_status for c in first} == {"synthetic"}
-    assert {c.category for c in first} == {"direct", "aggregate", "filter_count", "join"}
+    assert {c.category for c in first} == {"direct", "compute", "aggregate", "filter_count", "join"}
 
 
 def test_gold_values_match_independent_recomputation():
@@ -48,7 +48,7 @@ def test_gold_values_match_independent_recomputation():
 
 def test_only_confident_routes_are_labeled():
     routes = {c.category: c.route for c in synthetic_cases()}
-    assert routes == {"direct": "direct", "aggregate": "flex", "filter_count": None, "join": None}
+    assert routes == {"direct": "direct", "compute": "flex", "aggregate": "flex", "filter_count": None, "join": None}
 
 
 def test_label_trace_writes_each_expectation(monkeypatch):

@@ -22,6 +22,9 @@ def validate_review_labels(labels: dict[str, Any], *, require_gold: bool = False
     """Validate the resolved review before either persistence boundary writes it."""
     if labels.get("review_status") not in REVIEW_STATUSES:
         raise ValueError(f"review_status must be one of {REVIEW_STATUSES}")
+    from fleet_rlm.optimize.evidence import validate_structured
+
+    validate_structured(labels.get("structured_expectations", {}))
     if not isinstance(labels.get("source_group"), str) or not labels["source_group"].strip():
         raise ValueError("source_group must not be empty")
     answer = labels.get("expected_answer")

@@ -144,7 +144,15 @@ def run_turn(
             )
             _write_learned_note(runtime, turn_id, learned_note, trace_id)
             usage = {name: getattr(prediction, name, None) for name in ("lm_calls", "sandbox_errors")}
-            span.set_outputs({"answer": answer, "route": route, "artifacts": artifacts, **usage})
+            span.set_outputs(
+                {
+                    "answer": answer,
+                    "route": route,
+                    "artifacts": artifacts,
+                    **usage,
+                    "execution_evidence": getattr(prediction, "execution_evidence", {}),
+                }
+            )
             # Read after the engine ran: it reloads an approved program at the start of the Turn.
             span.set_attribute(
                 "compiled_program_digest", getattr(getattr(runtime.engine, "compiled", None), "digest", "")

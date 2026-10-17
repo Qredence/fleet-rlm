@@ -7,6 +7,7 @@ import ipaddress
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -70,6 +71,7 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
         "expected_values": [],
         "route": None,
         "critical": False,
+        "structured_expectations": {},
     }
     labels.update({name: existing[name] for name in labels if name in existing})
     for name, value in (
@@ -82,6 +84,10 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
     ):
         if value is not None:
             labels[name] = value
+    if getattr(args, "expectations_file", None):
+        from fleet_rlm.optimize.evidence import parse_expectations_file
+
+        labels["structured_expectations"] = parse_expectations_file(args.expectations_file)
     request = _trace_request(trace)
     selected = request.get("replay_snapshot_selected") is True
     store = None
@@ -131,6 +137,19 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
     from fleet_rlm.optimize import evaluation
 
     target = settings.mlflow_target()
+    if args.eval_command == "scorers":
+        from fleet_rlm.optimize.contracts import govern
+
+        _CONSOLE.print_json(data=govern(settings, args.scorer_action, args.scope))
+        return
+    if args.eval_command == "calibrate":
+        from fleet_rlm.optimize.acceptance import calibrate
+
+        result = calibrate(settings, Path(args.controls), Path(args.acceptance_ledger), Path(args.output))
+        _CONSOLE.print_json(data=result)
+        if not result["passed"]:
+            raise SystemExit("Judge calibration failed; GEPA acceptance remains blocked")
+        return
     mlflow.set_tracking_uri(target.tracking_uri)
     if target.mode == "databricks":
         os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
@@ -152,6 +171,29 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         )
     else:
         experiment = mlflow.set_experiment(target.eval_experiment_name)
+    if args.eval_command == "dataset" and args.reviewed:
+        from fleet_rlm.optimize.dataset import curate_dataset, publish_reviewed_dataset
+        from fleet_rlm.store import Store
+
+        if not args.session or target.mode != "databricks":
+            raise SystemExit("Reviewed dataset publication requires --session and Databricks mode")
+        store = Store.open(
+            settings.fleet_database_url,
+            wait=True,
+            schema=settings.fleet_database_schema,
+            lakebase_endpoint=settings.fleet_lakebase_endpoint,
+        )
+        try:
+            train, dev, holdout = curate_dataset(
+                store, target.experiment_name, args.session, evaluation_experiment_name=target.eval_experiment_name
+            )
+            result = publish_reviewed_dataset(
+                settings, {"train": train, "dev": dev, "holdout": holdout}, experiment.experiment_id
+            )
+            _CONSOLE.print_json(data=result)
+        finally:
+            store.close()
+        return
     cases = evaluation.synthetic_cases(seed=args.seed)
     if args.eval_command == "dataset":
         name = args.name or (
@@ -180,12 +222,17 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         with httpx.Client(follow_redirects=True) as hf:
             cases = benchmarks.oolong_cases(hf, limit=args.oolong)
     try:
+        from fleet_rlm.optimize.contracts import pinned_suite
+
         result = evaluation.evaluate_cases(
             cases[: args.limit] if args.limit else cases,
             base_url=args.url,
             judge_model=settings.fleet_judge_model,
             judge_lm=settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
             collect_only=args.collect_only,
+            scorers=pinned_suite(settings, "evaluation")
+            if target.mode == "databricks" and not args.collect_only
+            else None,
             experiment_id=experiment.experiment_id,
             uc_location=(
                 (settings.mlflow_trace_catalog, settings.mlflow_trace_schema, settings.mlflow_eval_trace_table_prefix)
@@ -322,7 +369,16 @@ def main(argv: list[str] | None = None) -> None:
 
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
+    scorers = eval_commands.add_parser("scorers", help="plan, publish, or verify the shared scorer contract")
+    scorers.add_argument("scorer_action", choices=("plan", "register", "verify"))
+    scorers.add_argument("--scope", choices=("evaluation", "optimization", "all"), default="all")
+    calibration = eval_commands.add_parser("calibrate", help="verify twelve reviewed judge controls")
+    calibration.add_argument("--controls", required=True)
+    calibration.add_argument("--acceptance-ledger", required=True)
+    calibration.add_argument("--output", default=".fleet/compiled/calibration.json")
     dataset = eval_commands.add_parser("dataset", help="create the synthetic evaluation dataset")
+    dataset.add_argument("--reviewed", action="store_true", help="publish frozen reviewed selected replays to UC")
+    dataset.add_argument("--session", help="curation Session for the reviewed dataset")
     dataset.add_argument(
         "--name", default="", help="dataset name (databricks mode: catalog.schema.table from the trace settings)"
     )
@@ -350,6 +406,7 @@ def main(argv: list[str] | None = None) -> None:
         help="source_group for grouped train/dev/holdout splits (default: existing label, then the trace's session id)",
     )
     label.add_argument("--answer")
+    label.add_argument("--expectations-file", help="replace structured artifact/delegation gold with a JSON object")
     label.add_argument("--value", action="append", help="expected value that must appear in the answer (repeatable)")
     label.add_argument("--route", choices=[route.value for route in Route])
     label.add_argument(

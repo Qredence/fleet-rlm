@@ -78,7 +78,7 @@ def activity_preview(value: Any, *, limit: int = 4000) -> str:
     return text[:limit] + ("… [truncated]" if len(text) > limit else "")
 
 
-def _trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
+def trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
     """Bound and redact framework-captured trace data before MLflow exports it."""
     nodes[0] += 1
     if nodes[0] > _TRACE_NODE_LIMIT:
@@ -88,18 +88,27 @@ def _trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
     if isinstance(value, str):
         return activity_text(value, limit=_TRACE_STRING_LIMIT)
     if isinstance(value, dict):
+        if "base64" in value and "sha256" in value:
+            import base64
+
+            # Encoded artifact bytes must not bypass recursive credential redaction.
+            try:
+                raw = base64.b64decode(value["base64"], validate=True)
+                value = {"sha256": value["sha256"], "text": raw.decode("utf-8")}
+            except (ValueError, TypeError, UnicodeError):
+                value = {"sha256": value["sha256"], "text": "[binary artifact omitted]"}
         result = {}
         for key, child in islice(value.items(), _TRACE_NODE_LIMIT):
             name = str(key)[:100]
             result[name] = (
-                "[redacted]" if _PRIVATE_KEY.search(name) else _trace_value(child, nodes=nodes, depth=depth + 1)
+                "[redacted]" if _PRIVATE_KEY.search(name) else trace_value(child, nodes=nodes, depth=depth + 1)
             )
         if len(value) > _TRACE_NODE_LIMIT:
             result["…"] = "[truncated]"
         return result
     if isinstance(value, (list, tuple)):
         items = list(islice(value, 50))
-        result = [_trace_value(child, nodes=nodes, depth=depth + 1) for child in items]
+        result = [trace_value(child, nodes=nodes, depth=depth + 1) for child in items]
         if len(value) > len(items):
             result.append("[truncated]")
         return result
@@ -115,7 +124,7 @@ def sanitize_trace_span(span: Any) -> None:
         if value is not None:
             setattr_fn = getattr(span, f"set_{name}", None)
             if callable(setattr_fn):
-                cleaned = _trace_value(value, nodes=[0])
+                cleaned = trace_value(value, nodes=[0])
                 # Only Fleet's root reference is lossless; arbitrary nested payloads remain previews.
                 if name == "inputs" and getattr(span, "name", None) == "fleet_turn" and isinstance(value, dict):
                     from fleet_rlm.workspace import validate_session_id
@@ -129,6 +138,29 @@ def sanitize_trace_span(span: Any) -> None:
                     if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
                         cleaned["replay_snapshot_sha256"] = digest
                 setattr_fn(cleaned)
+
+
+def measured_lm_usage(lm: Any, start: int = 0) -> dict[str, Any]:
+    """Copy numeric provider receipts only; absent costs remain unavailable."""
+    import math
+
+    receipts = []
+    for item in getattr(lm, "history", [])[start:]:
+        values = dict(item.get("usage") or {})
+        if item.get("cost") is not None:
+            values["cost_usd"] = item["cost"]
+        receipts.append(
+            {
+                key: value
+                for key, value in values.items()
+                if key
+                in {"prompt_tokens", "completion_tokens", "input_tokens", "output_tokens", "total_tokens", "cost_usd"}
+                and type(value) in (int, float)
+                and math.isfinite(value)
+                and value >= 0
+            }
+        )
+    return {"receipts": receipts, "cost_available": any("cost_usd" in row for row in receipts)}
 
 
 def configure_mlflow_observability(

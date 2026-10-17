@@ -40,13 +40,13 @@ from fleet_rlm.replay import validate_review_labels
 
 _REGIONS = ("north", "south", "east", "west", "central")
 _STATUSES = ("on_time", "late", "cancelled")
-_DIRECT = (
-    ("Convert 72 degrees Fahrenheit to Celsius, rounded to one decimal place.", "22.2"),
-    ("What is 17 multiplied by 23?", "391"),
-    ("How many days are there in a leap year?", "366"),
-    ("What is the sum of the integers from 1 to 100?", "5050"),
-    ("What is 15 percent of 240?", "36"),
-    ("How many minutes are in 3.5 hours?", "210"),
+_SELF_CONTAINED = (
+    ("Convert 72 degrees Fahrenheit to Celsius, rounded to one decimal place.", "22.2", Route.FLEX),
+    ("What is 17 multiplied by 23?", "391", Route.FLEX),
+    ("How many days are there in a leap year?", "366", Route.DIRECT),
+    ("What is the sum of the integers from 1 to 100?", "5050", Route.FLEX),
+    ("What is 15 percent of 240?", "36", Route.FLEX),
+    ("How many minutes are in 3.5 hours?", "210", Route.FLEX),
 )
 
 
@@ -107,12 +107,12 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
             case_id=f"direct-{index:02d}",
             task=task,
             expected_values=(answer,),
-            category="direct",
+            category="direct" if route is Route.DIRECT else "compute",
             source_group=f"direct-{index:02d}",
-            route=Route.DIRECT.value,
+            route=route.value,
             critical=True,
         )
-        for index, (task, answer) in enumerate(_DIRECT)
+        for index, (task, answer, route) in enumerate(_SELF_CONTAINED)
     ]
     for index in range(per_category):
         sales = [(rng.choice(_REGIONS), rng.randrange(20, 500)) for _ in range(rng.randrange(8, 40))]
@@ -195,6 +195,7 @@ def label_trace(
     route: str | None = None,
     critical: bool | None = None,
     reviewer: str = "human",
+    structured_expectations: dict[str, Any] | None = None,
 ) -> None:
     """Write gold labels onto a trace as MLflow expectations."""
     labels: dict[str, Any] = {"review_status": review_status, "source_group": source_group}
@@ -203,6 +204,7 @@ def label_trace(
         ("expected_values", expected_values),
         ("route", route),
         ("critical", critical),
+        ("structured_expectations", structured_expectations),
     ):
         if value is not None:
             labels[name] = value
@@ -265,6 +267,14 @@ def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedb
 
 class EvaluationError(RuntimeError):
     """An evaluation is incomplete; its completed Turns must not be executed again for recovery."""
+
+
+def verify_experiment_location(experiment: Any, catalog: str, schema: str, prefix: str) -> None:
+    location = experiment.trace_location
+    location = getattr(location, "uc_table_prefix", None) or location
+    actual = tuple(getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix"))
+    if actual != (catalog, schema, prefix):
+        raise EvaluationError("Experiment does not match the configured Unity Catalog trace destination")
 
 
 def read_evaluation_trace(
@@ -335,6 +345,7 @@ def evaluate_cases(
     timeout: float = 600.0,
     collect_only: bool = False,
     report: Callable[[str], None] = print,
+    scorers: list[Any] | None = None,
 ) -> Any:
     """Run cases against a live server and label each Turn trace with its gold answer.
 
@@ -402,16 +413,24 @@ def evaluate_cases(
             report(f"Case {case.case_id}: collected and labelled")
     if collect_only:
         return None
-    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, report=report)
+    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, report=report, scorers=scorers)
 
 
 def score_evaluation_traces(
-    traces: list[Any], *, judge_model: str, judge_lm: Any = None, report: Callable[[str], None] = print
+    traces: list[Any],
+    *,
+    judge_model: str,
+    judge_lm: Any = None,
+    report: Callable[[str], None] = print,
+    scorers: list[Any] | None = None,
 ) -> Any:
     """Score already verified, labelled traces without executing their Turns again."""
     try:
         result = mlflow.genai.evaluate(
-            data=traces, scorers=[*build_mlflow_scorer_suite(judge_model, judge_lm), expected_values_present]
+            data=traces,
+            scorers=scorers
+            if scorers is not None
+            else [*build_mlflow_scorer_suite(judge_model, judge_lm), expected_values_present],
         )
     except Exception as exc:
         raise EvaluationError(

@@ -14,7 +14,7 @@ from typing import Any
 
 import dspy
 
-APPROVAL_POLICY_VERSION = 2
+APPROVAL_POLICY_VERSION = 3
 VALIDATION_PASSES = 3
 
 
@@ -28,6 +28,7 @@ class IsolatedFleetProgram(dspy.Module):
 
     def forward(self, **inputs: Any) -> dspy.Prediction:
         engine = self.engine_factory(dspy.Example(**inputs), self.program)
+        prediction = None
         try:
             arguments = {
                 name: value
@@ -36,11 +37,31 @@ class IsolatedFleetProgram(dspy.Module):
             }
             if hasattr(engine, "optimization_context"):
                 arguments["context"] = engine.optimization_context
-            return engine(**arguments)
+            prediction = engine(**arguments)
+            return prediction
+        except Exception as exc:
+            from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
+
+            observer = getattr(engine, "optimization_observer", None)
+            if isinstance(exc, ExecutionOutcomeUnknownError) and observer is not None:
+                observer({"event": "execution_outcome_unknown", "session_id": engine.sandbox_mgr.session_id})
+            raise
         finally:
             try:
                 engine.sandbox_mgr.shutdown()
             finally:
+                if prediction is not None:
+                    prediction["cleanup_receipts"] = list(getattr(engine.sandbox_mgr, "_cleanup_receipts", []))
+                observer = getattr(engine, "optimization_observer", None)
+                if observer is not None:
+                    observer(
+                        {
+                            "event": "rollout_completed",
+                            "session_id": engine.sandbox_mgr.session_id,
+                            "provider_usage": prediction.get("provider_usage", {}) if prediction is not None else {},
+                            "cleanup_receipts": list(getattr(engine.sandbox_mgr, "_cleanup_receipts", [])),
+                        }
+                    )
                 artifact_path = getattr(engine, "optimization_artifact_path", None)
                 if artifact_path:
                     Path(artifact_path).unlink(missing_ok=True)
@@ -48,6 +69,11 @@ class IsolatedFleetProgram(dspy.Module):
 
 def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def fingerprint(value: Any) -> str:
+    """Digest of canonical JSON, for identities of structured evidence."""
+    return digest_bytes(json.dumps(value, sort_keys=True, allow_nan=False, default=str).encode())
 
 
 @dataclass(frozen=True)
@@ -121,7 +147,7 @@ class ArtifactManifest:
 
 
 def write_manifest(path: Path, manifest: ArtifactManifest) -> None:
-    _atomic_write(path, json.dumps(asdict(manifest), sort_keys=True, indent=2).encode())
+    atomic_write(path, json.dumps(asdict(manifest), sort_keys=True, indent=2).encode())
 
 
 def approve_candidate(
@@ -145,10 +171,10 @@ def approve_candidate(
         raise ValueError("candidate digest does not match its manifest")
     if destination.is_symlink():
         raise ValueError("Compiled program path may not be a symbolic link")
-    _atomic_write(destination, content)
+    atomic_write(destination, content)
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
+def atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:

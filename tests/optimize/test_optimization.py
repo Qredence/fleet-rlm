@@ -502,7 +502,7 @@ def test_grouped_split_refuses_missing_source_lineage() -> None:
 
 
 def _evaluation(baseline=(0.5, 0.5), candidate=(0.6, 0.5), errors=0) -> dict:
-    result = {"policy_version": 2}
+    result = {"policy_version": workflow.APPROVAL_POLICY_VERSION}
     for stage, scores in (("baseline", baseline), ("candidate", candidate)):
         passes = [
             {
@@ -772,7 +772,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(monke
     monkeypatch.setattr(
         workflow,
         "build_isolated_engine_factory",
-        lambda config, _store: factories.append(config) or (lambda *_args: None),
+        lambda config, _store, _examples=(): factories.append(config) or (lambda *_args: None),
     )
     searched = []
 
