@@ -140,29 +140,6 @@ def sanitize_trace_span(span: Any) -> None:
                 setattr_fn(cleaned)
 
 
-def measured_lm_usage(lm: Any, start: int = 0) -> dict[str, Any]:
-    """Copy numeric provider receipts only; absent costs remain unavailable."""
-    import math
-
-    receipts = []
-    for item in getattr(lm, "history", [])[start:]:
-        values = dict(item.get("usage") or {})
-        if item.get("cost") is not None:
-            values["cost_usd"] = item["cost"]
-        receipts.append(
-            {
-                key: value
-                for key, value in values.items()
-                if key
-                in {"prompt_tokens", "completion_tokens", "input_tokens", "output_tokens", "total_tokens", "cost_usd"}
-                and type(value) in (int, float)
-                and math.isfinite(value)
-                and value >= 0
-            }
-        )
-    return {"receipts": receipts, "cost_available": any("cost_usd" in row for row in receipts)}
-
-
 def configure_mlflow_observability(
     experiment_name: str = "fleet-rlm-production",
     tracking_uri: str = "sqlite:///mlflow.db",

@@ -105,11 +105,7 @@ dependency identities to match the candidate manifest. Older manifests require
 reevaluation; approval does not provide an unchecked rollback path. Structured
 artifact/delegation gold stays outside model inputs. Host-owned runtime receipts
 are collected before sandbox disposal; declared Python artifact verification
-runs only in Daytona. Governed acceptance adds experiment-registered scorers,
-frozen UC datasets, judge controls, spend admission and durable paired-validation
-receipts. A failed or budget-stopped campaign never authorizes replay of an
-uncertain execution or installs a candidate. See the
-[acceptance runbook](docs/runbooks/p55-acceptance.md).
+runs only in Daytona.
 
 The reflection LM is explicitly labeled when used as the metric judge; MLflow
 judge URIs are never passed as DSPy model IDs. ReAnchor is currently reported

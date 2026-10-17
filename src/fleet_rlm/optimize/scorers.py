@@ -10,7 +10,7 @@ from mlflow.entities import Feedback, SpanStatusCode, SpanType
 from mlflow.genai.scorers import Guidelines, RelevanceToQuery, RetrievalGroundedness, scorer
 
 from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge, parse_route
-from fleet_rlm.observability import activity_preview, measured_lm_usage, trace_object
+from fleet_rlm.observability import activity_preview, trace_object
 from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
 
 SCORER_VERSION = "fleet-metric-v5"
@@ -26,12 +26,8 @@ def _used_rlm_or_flex(spans: list[Any]) -> bool:
 
 
 @scorer
-def rlm_trajectory_efficiency(trace):
+def rlm_trajectory_efficiency(trace: Any) -> Feedback | None:
     """Penalize unnecessary LM calls and visible sandbox exceptions."""
-    from mlflow.entities import Feedback
-
-    from fleet_rlm.optimize.scorers import _lm_call_count, efficiency
-
     if trace is None:
         return None
     spans = trace.search_spans()
@@ -54,12 +50,8 @@ def rlm_trajectory_efficiency(trace):
 
 
 @scorer
-def jev_routing_efficiency(trace):
+def jev_routing_efficiency(trace: Any) -> Feedback | None:
     """Score simple requests routed without starting a Flex/RLM execution."""
-    from mlflow.entities import Feedback
-
-    from fleet_rlm.optimize.scorers import _lm_call_count, _used_rlm_or_flex
-
     if trace is None:
         return None
     spans = trace.search_spans()
@@ -74,13 +66,8 @@ def jev_routing_efficiency(trace):
 
 
 @scorer
-def route_correctness(outputs, expectations):
+def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
     """Check that the turn took the labeled gold route (direct, flex, or rlm; legacy labels are read too)."""
-    from mlflow.entities import Feedback
-
-    from fleet_rlm.engine.signatures import parse_route
-    from fleet_rlm.observability import trace_object
-
     expected = parse_route((expectations or {}).get("route"))
     if expected is None:
         return None
@@ -220,7 +207,6 @@ def fleet_metric(
 ) -> dspy.Prediction:
     """Incorrect answers score zero; correct answers compete on measured execution efficiency."""
     answer = str(getattr(pred, "answer", "") or "").strip()
-    judge_usage_start = len(getattr(judge_lm, "history", []))
     if not answer:
         return dspy.Prediction(
             score=0.0,
@@ -267,7 +253,6 @@ def fleet_metric(
         feedback="\n".join(lines),
         objective_scores={name: value for name, (value, _) in applied.items()}
         | {"quality": correctness, "usage_available": float(metrics["efficiency"] is not None)},
-        judge_usage=measured_lm_usage(judge_lm, judge_usage_start),
     )
 
 

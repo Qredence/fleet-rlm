@@ -238,7 +238,9 @@ The evaluation infrastructure milestone is complete. The operator used a real PT
 
 ## P5.5 governed acceptance continuation — 2026-10-17
 
-The implementation now follows [the governed acceptance runbook](../runbooks/p55-acceptance.md).
+At that time the implementation followed a governed acceptance runbook. That
+layer (spend ledger, campaigns, judge calibration, scorer lockfile) was removed
+later on 2026-10-17 in favor of plain `fleet optimize`; see git history.
 P5.5 remains open. A completely evaluated, rejected candidate can complete the
 acceptance experiment, while installation remains a separate explicit action.
 Missing evidence, budget stops and pending reconciliation are incomplete outcomes.

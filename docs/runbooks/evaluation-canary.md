@@ -150,5 +150,5 @@ not establish whether the SDK's SQL statement has finished; inspect its status
 before starting another read. Never rerun a Turn merely to recover telemetry.
 
 Update the audit plan with receipts and cumulative estimated/observed spend.
-Keep P5.5 open for reviewed examples, judge calibration, GEPA acceptance, and
-final cost reconciliation. This canary does not approve or install a candidate.
+Keep P5.5 open for reviewed examples, a GEPA run, and final cost reconciliation.
+This canary does not approve or install a candidate.

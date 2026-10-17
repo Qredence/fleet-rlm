@@ -92,7 +92,6 @@ class DaytonaSandboxManager:
     _llm_calls_used: int = field(default=0, init=False, repr=False)
     _sandbox_errors: int = field(default=0, init=False, repr=False)
     _child_receipts: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
-    _cleanup_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     _interpreters: dict[str, DaytonaInterpreter] = field(default_factory=dict, init=False, repr=False)
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
     _contexts: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
@@ -536,7 +535,6 @@ class DaytonaSandboxManager:
             root._sandbox_errors = 0
             root._allocations = 0
             root._child_receipts.clear()
-            root._cleanup_receipts.clear()
             root._cancelled.clear()
             root._deadline = time.monotonic() + root.turn_timeout_seconds
             root._watchdog = threading.Timer(root.turn_timeout_seconds, root.cancel_turn)
@@ -773,12 +771,10 @@ class DaytonaSandboxManager:
                     with self.root._budget_lock:
                         self.root._children.pop(self.agent_id, None)
                     self.emit("sandbox_deleted", sandbox_id=sandbox.id)
-                    self.root._cleanup_receipts.append({"sandbox_id": sandbox.id, "status": "deleted"})
                 else:
                     client.stop(sandbox, timeout=60)
             except Exception:
                 _LOGGER.warning("Daytona Session sandbox stop failed")
-                self.root._cleanup_receipts.append({"sandbox_id": sandbox.id, "status": "unconfirmed"})
                 if self.parent is not None:
                     # Retain the handle so a later shutdown can retry deletion.
                     self._sandbox = sandbox

@@ -28,7 +28,6 @@ class IsolatedFleetProgram(dspy.Module):
 
     def forward(self, **inputs: Any) -> dspy.Prediction:
         engine = self.engine_factory(dspy.Example(**inputs), self.program)
-        prediction = None
         try:
             arguments = {
                 name: value
@@ -37,31 +36,11 @@ class IsolatedFleetProgram(dspy.Module):
             }
             if hasattr(engine, "optimization_context"):
                 arguments["context"] = engine.optimization_context
-            prediction = engine(**arguments)
-            return prediction
-        except Exception as exc:
-            from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
-
-            observer = getattr(engine, "optimization_observer", None)
-            if isinstance(exc, ExecutionOutcomeUnknownError) and observer is not None:
-                observer({"event": "execution_outcome_unknown", "session_id": engine.sandbox_mgr.session_id})
-            raise
+            return engine(**arguments)
         finally:
             try:
                 engine.sandbox_mgr.shutdown()
             finally:
-                if prediction is not None:
-                    prediction["cleanup_receipts"] = list(getattr(engine.sandbox_mgr, "_cleanup_receipts", []))
-                observer = getattr(engine, "optimization_observer", None)
-                if observer is not None:
-                    observer(
-                        {
-                            "event": "rollout_completed",
-                            "session_id": engine.sandbox_mgr.session_id,
-                            "provider_usage": prediction.get("provider_usage", {}) if prediction is not None else {},
-                            "cleanup_receipts": list(getattr(engine.sandbox_mgr, "_cleanup_receipts", [])),
-                        }
-                    )
                 artifact_path = getattr(engine, "optimization_artifact_path", None)
                 if artifact_path:
                     Path(artifact_path).unlink(missing_ok=True)

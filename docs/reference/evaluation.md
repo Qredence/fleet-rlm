@@ -4,10 +4,6 @@ Evaluation scorers live in `src/fleet_rlm/optimize/scorers.py`. This page descri
 the explicit evaluation workflows. `fleet eval` exposes dataset/run/label commands;
 GEPA remains a deliberate isolated optimization workflow.
 
-The [P5.5 runbook](../runbooks/p55-acceptance.md) describes scorer publication,
-structured gold, reviewed UC datasets, calibration, spend admission and resumable
-paired validation. Registration does not start automatic monitoring.
-
 ## Run evaluation against its own server
 
 Use `uv run --env-file .env` for the server, evaluation commands, and trace

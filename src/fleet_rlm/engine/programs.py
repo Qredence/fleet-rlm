@@ -22,7 +22,7 @@ from fleet_rlm.engine.signatures import (
     TurnTriage,
     parse_route,
 )
-from fleet_rlm.observability import activity_text, measured_lm_usage
+from fleet_rlm.observability import activity_text
 from fleet_rlm.optimize.artifacts import CompiledProgramFile
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
@@ -88,7 +88,6 @@ class AdaptiveFleetEngine(dspy.Module):
         # Set by the optimizer's per-example factory; IsolatedFleetProgram deletes it after the rollout.
         self.optimization_artifact_path: str | None = None
         self.optimization_verifications: list[dict[str, Any]] = []
-        self.optimization_observer: Any = None
         self.compiled.load_initial(self)
 
     def forward(
@@ -102,19 +101,12 @@ class AdaptiveFleetEngine(dspy.Module):
         execution_mode: str | None = None,
     ) -> dspy.Prediction:
         owns_turn = not self.sandbox_mgr.root._deadline
-        usage_starts = {
-            role: len(getattr(lm, "history", [])) for role, lm in (("root", self.root_lm), ("sub", self.sub_lm))
-        }
         try:
             prediction = self._run_turn(
                 workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
             )
             # Replace any candidate-provided evidence with observations from the host manager.
             prediction["execution_evidence"] = self._execution_evidence()
-            prediction["provider_usage"] = {
-                role: measured_lm_usage(lm, usage_starts[role])
-                for role, lm in (("root", self.root_lm), ("sub", self.sub_lm))
-            }
             # The metric scores efficiency from these, so evaluation and GEPA see the same numbers.
             for name, value in self.sandbox_mgr.turn_usage().items():
                 prediction[name] = value

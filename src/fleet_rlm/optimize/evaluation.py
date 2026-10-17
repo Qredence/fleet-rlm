@@ -264,14 +264,6 @@ class EvaluationError(RuntimeError):
     """An evaluation is incomplete; its completed Turns must not be executed again for recovery."""
 
 
-def verify_experiment_location(experiment: Any, catalog: str, schema: str, prefix: str) -> None:
-    location = experiment.trace_location
-    location = getattr(location, "uc_table_prefix", None) or location
-    actual = tuple(getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix"))
-    if actual != (catalog, schema, prefix):
-        raise EvaluationError("Experiment does not match the configured Unity Catalog trace destination")
-
-
 def read_evaluation_trace(
     trace_id: str,
     *,
@@ -340,7 +332,6 @@ def evaluate_cases(
     timeout: float = 600.0,
     collect_only: bool = False,
     report: Callable[[str], None] = print,
-    scorers: list[Any] | None = None,
 ) -> Any:
     """Run cases against a live server and label each Turn trace with its gold answer.
 
@@ -408,24 +399,16 @@ def evaluate_cases(
             report(f"Case {case.case_id}: collected and labelled")
     if collect_only:
         return None
-    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, report=report, scorers=scorers)
+    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, report=report)
 
 
 def score_evaluation_traces(
-    traces: list[Any],
-    *,
-    judge_model: str,
-    judge_lm: Any = None,
-    report: Callable[[str], None] = print,
-    scorers: list[Any] | None = None,
+    traces: list[Any], *, judge_model: str, judge_lm: Any = None, report: Callable[[str], None] = print
 ) -> Any:
     """Score already verified, labelled traces without executing their Turns again."""
     try:
         result = mlflow.genai.evaluate(
-            data=traces,
-            scorers=scorers
-            if scorers is not None
-            else [*build_mlflow_scorer_suite(judge_model, judge_lm), expected_values_present],
+            data=traces, scorers=[*build_mlflow_scorer_suite(judge_model, judge_lm), expected_values_present]
         )
     except Exception as exc:
         raise EvaluationError(

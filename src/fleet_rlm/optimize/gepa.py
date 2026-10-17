@@ -128,9 +128,7 @@ def summarize_passes(passes: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
-def build_isolated_engine_factory(
-    settings: FleetSettings, store: Store, examples: Any = (), observer: Any = None
-) -> Any:
+def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
     """Create a fresh Daytona namespace containing only digest-verified immutable replay files."""
 
     from fleet_rlm.optimize.evidence import verification_entries
@@ -181,20 +179,6 @@ def build_isolated_engine_factory(
             linked_children=settings.linked_children,
             disposable=True,
         )
-        if observer is not None:
-            observer({"event": "allocated", "session_id": namespace, "agent_id": manager.agent_id})
-
-            def event_observer(event: dict[str, Any]) -> None:
-                if event.get("event") in {
-                    "sandbox_ready",
-                    "sandbox_deleted",
-                    "sandbox_cleanup_failed",
-                    "sandbox_deleting",
-                    "agent_spawn",
-                }:
-                    observer({**event, "session_id": namespace})
-
-            manager.event_callback = event_observer
         descriptor, program_path = tempfile.mkstemp(prefix="fleet-optimization-", suffix=".json")
         os.close(descriptor)
         try:
@@ -211,21 +195,16 @@ def build_isolated_engine_factory(
                 execution_mode=settings.execution_mode,
             )
             engine.optimization_artifact_path = program_path
-            engine.optimization_observer = observer
             engine.optimization_verifications = verifications.get(
                 (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256), []
             )
             engine.optimization_context = WorkspaceDataset(**replay_context) if replay_context else None
             return engine
-        except BaseException as exc:
+        except BaseException:
             try:
                 manager.shutdown()
             finally:
                 Path(program_path).unlink(missing_ok=True)
-            from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
-
-            if isinstance(exc, ExecutionOutcomeUnknownError) and observer is not None:
-                observer({"event": "execution_outcome_unknown", "session_id": namespace})
             raise
 
     return create
@@ -268,9 +247,6 @@ def optimization_code_digest() -> str:
 
 def approval_evidence(settings: FleetSettings, incumbent_digest: str) -> dict[str, str]:
     """Evidence must still match when a separately invoked approval installs the candidate."""
-    from fleet_rlm.optimize.contracts import contract, registry_path
-
-    path = registry_path(settings)
     return {
         "dspy": dspy.__version__,
         "gepa": package_version("gepa"),
@@ -281,8 +257,6 @@ def approval_evidence(settings: FleetSettings, incumbent_digest: str) -> dict[st
         "configuration_digest": settings.configuration()["digest"],
         "code_digest": optimization_code_digest(),
         "incumbent_digest": incumbent_digest,
-        "scorer_contract_digest": contract(settings)["digest"],
-        "registry_lock_digest": digest_bytes(path.read_bytes()) if path.exists() else "",
     }
 
 
@@ -335,12 +309,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="GEPA search metric-call budget; final validation and reflection are additional",
     )
     parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument(
-        "--preflight", action="store_true", help="read reviewed data and forecast; do not execute models"
-    )
-    parser.add_argument("--acceptance-ledger", type=Path, help="enable sequential, governed, budgeted acceptance")
-    parser.add_argument("--resume", metavar="CAMPAIGN", help="resume durable acceptance without repeating search")
-    parser.add_argument("--calibration", type=Path, default=Path(".fleet/compiled/calibration.json"))
     parser.add_argument("--validation-ratio", type=float, default=0.35)
     parser.add_argument(
         "--approve",
@@ -356,13 +324,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         parser.error("--threads must be between 1 and 32")
     if args.max_metric_calls is not None and args.max_metric_calls < 1:
         parser.error("--max-metric-calls must be positive")
-    acceptance = getattr(args, "acceptance_ledger", None)
-    if getattr(args, "resume", None) and not acceptance:
-        parser.error("--resume requires --acceptance-ledger")
-    if acceptance and (args.max_metric_calls is None or args.threads != 1):
-        parser.error("Acceptance requires explicit --max-metric-calls and --threads 1")
-    if getattr(args, "preflight", False) and args.approve:
-        parser.error("--preflight cannot approve a candidate")
     if args.approve:
         version = args.approve
         if Path(version).name != version or not version.startswith(session_id + "-"):
@@ -378,10 +339,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         )
         try:
             current = settings_for_session(settings, store.runtime_settings(session_id))
-            if manifest.dataset_lineage.get("uc"):
-                from fleet_rlm.optimize.contracts import govern
-
-                govern(current, "verify", "all")
             active = directory / f"{session_id}.json"
             incumbent = digest_bytes(active.read_bytes()) if active.exists() else ""
             approve_candidate(candidate_path, manifest, active, evidence=approval_evidence(current, incumbent))
@@ -390,19 +347,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         print(f"Approved {version} (digest {manifest.digest[:12]}); Session {session_id} serves it from its next Turn.")
         return
     target = settings.mlflow_target()
-    if getattr(args, "preflight", False):
-        mlflow.set_tracking_uri(target.tracking_uri)
-        store = Store.open(
-            settings.fleet_database_url,
-            wait=True,
-            schema=settings.fleet_database_schema,
-            lakebase_endpoint=settings.fleet_lakebase_endpoint,
-        )
-        try:
-            _compile(args, settings, store, session_id, target)
-        finally:
-            store.close()
-        return
     experiment_id = configure_mlflow_observability(
         target.optimization_experiment_name,
         target.tracking_uri,
@@ -431,12 +375,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
     )
     try:
         _compile(args, settings, store, session_id, target)
-    except BaseException as exc:
-        from fleet_rlm.optimize.acceptance import AcceptanceOutcomeUnknown
-
-        if isinstance(exc, AcceptanceOutcomeUnknown):
-            raise SystemExit(str(exc)) from None
-        raise
     finally:
         store.close()
 
@@ -452,63 +390,6 @@ def _compile(args: argparse.Namespace, settings: FleetSettings, store: Store, se
         evaluation_experiment_name=target.eval_experiment_name,
     )
     examples = [*trainset, *devset, *holdout]
-    splits = {"train": trainset, "dev": devset, "holdout": holdout}
-    acceptance = getattr(args, "acceptance_ledger", None)
-    ledger = None
-    if acceptance or getattr(args, "preflight", False):
-        from fleet_rlm.optimize.acceptance import SpendLedger
-        from fleet_rlm.optimize.contracts import contract
-        from fleet_rlm.optimize.evidence import validate_structured
-
-        for example in examples:
-            if not str(example.answer).strip():
-                raise ValueError("Acceptance requires complete reviewed gold answers, not values alone")
-            structured = validate_structured(getattr(example, "structured_expectations", {}) or {})
-            if any(item["path"] in example.context_files for item in structured.get("artifacts", [])):
-                raise ValueError("Required output already exists in immutable replay; curate a clean case")
-        if not any(getattr(item, "critical", False) for item in holdout):
-            raise ValueError("Acceptance requires a critical holdout group")
-        definition = contract(settings)
-        validation_rollouts = 2 * VALIDATION_PASSES * (len(devset) + len(holdout))
-        ledger = SpendLedger(acceptance) if acceptance else None
-        forecast = (
-            ledger.forecast(validation_rollouts, args.max_metric_calls or 0)
-            if ledger
-            else {
-                "admitted": False,
-                "reason": "Provide an acceptance ledger and explicit search budget for paid execution",
-            }
-        )
-        if getattr(args, "preflight", False):
-            print(
-                json.dumps(
-                    {
-                        "splits": {key: len(items) for key, items in splits.items()},
-                        "dataset_digest": dataset_digest(splits),
-                        "contract_digest": definition["digest"],
-                        "validation_rollouts": validation_rollouts,
-                        "budget": forecast,
-                    },
-                    indent=2,
-                )
-            )
-            return
-        if not forecast["admitted"] and not getattr(args, "resume", None):
-            raise ValueError(
-                f"Full acceptance forecast exceeds ${forecast['forecast_threshold_usd']:g}; campaign remains incomplete"
-            )
-        from fleet_rlm.optimize.acceptance import read_json
-        from fleet_rlm.optimize.contracts import govern
-
-        calibration = read_json(args.calibration)
-        if (
-            calibration.get("contract_digest") != definition["digest"]
-            or calibration.get("passed") is not True
-            or len(calibration.get("verdicts", [])) != 12
-            or not all(row.get("passed") is True for row in calibration["verdicts"])
-        ):
-            raise ValueError("Current scorer contract requires passing 12/12 calibration")
-        govern(settings, "verify", "all")
     root_lm, sub_lm, reflection_lm, jev_lm = settings.build_lms()
     if settings.fleet_reflection_model == settings.fleet_root_model:
         print("[gepa] FLEET_REFLECTION_MODEL equals the serving model; GEPA proposes better with a stronger one.")
@@ -534,11 +415,6 @@ def _compile(args: argparse.Namespace, settings: FleetSettings, store: Store, se
 
     directory = Path(settings.compiled_program_dir)
     version = f"{session_id}-{uuid.uuid4().hex}"
-    if acceptance:
-        _acceptance_compile(
-            args, settings, store, session_id, target, template, baseline, splits, metric, reflection_lm, ledger
-        )
-        return
     budget = {"max_metric_calls": args.max_metric_calls} if args.max_metric_calls else {"auto": args.gepa_budget}
     with mlflow.start_run(run_name=f"fleet-gepa-{session_id}"):
         mlflow.set_tags({"fleet.version": version, "fleet.judge_model": settings.fleet_judge_model})
@@ -618,212 +494,3 @@ def _compile(args: argparse.Namespace, settings: FleetSettings, store: Store, se
     print(f"Candidate saved at {destination}; not installed.")
     if gate.passed:
         print(f"Approve with: fleet optimize --session {session_id} --approve {version}")
-
-
-def _acceptance_compile(
-    args: argparse.Namespace,
-    settings: FleetSettings,
-    store: Store,
-    session_id: str,
-    target: Any,
-    template: AdaptiveFleetEngine,
-    baseline: IsolatedFleetProgram,
-    splits: dict[str, list[dspy.Example]],
-    metric: Any,
-    reflection_lm: Any,
-    ledger: Any,
-) -> None:
-    """Search once, persist its winner, then journal serial paired observations."""
-    from fleet_rlm.optimize.acceptance import Campaign, read_json, save_json
-    from fleet_rlm.optimize.contracts import contract
-    from fleet_rlm.optimize.dataset import publish_reviewed_dataset
-
-    resume = getattr(args, "resume", None)
-    version = resume if resume else f"{session_id}-{uuid.uuid4().hex}"
-    suffix = version.removeprefix(session_id + "-")
-    if (
-        Path(version).name != version
-        or not version.startswith(session_id + "-")
-        or len(suffix) != 32
-        or any(char not in "0123456789abcdef" for char in suffix)
-    ):
-        raise ValueError("Campaign must belong to the selected Session")
-    directory = Path(settings.compiled_program_dir)
-    run_dir = directory / "runs" / version
-    identity = {
-        **approval_evidence(settings, template.compiled.digest),
-        "dataset_digest": dataset_digest(splits),
-        "contract_digest": contract(settings)["digest"],
-        "calibration_digest": digest_bytes(args.calibration.read_bytes()),
-        "search_metric_calls": args.max_metric_calls,
-    }
-    from fleet_rlm.optimize.acceptance import exclusive_file
-
-    with exclusive_file(run_dir / "acceptance.json"):
-        campaign = Campaign(run_dir / "acceptance.json", identity, resume=bool(resume))
-        if campaign.data.get("outcome_unknown"):
-            raise ValueError("Execution outcome unknown; resolve saved receipts without replay")
-        examples = [example for group in splits.values() for example in group]
-        baseline = IsolatedFleetProgram(
-            template,
-            build_isolated_engine_factory(settings, store, [*splits["train"], *splits["dev"]], campaign.resource),
-        )
-        destination = directory / "candidates" / f"{version}.json"
-        if campaign.data["status"] == "search_started":
-            raise ValueError("Search outcome unresolved; inspect saved GEPA logs without restarting search")
-        if "dataset" not in campaign.data:
-            experiment = mlflow.get_experiment_by_name(target.eval_experiment_name)
-            if experiment is None:
-                raise ValueError("Evaluation experiment is missing")
-            campaign.data["dataset"] = publish_reviewed_dataset(settings, splits, experiment.experiment_id)
-            campaign.save()
-        with mlflow.start_run(
-            run_id=campaign.data.get("mlflow_run_id"),
-            run_name=None if campaign.data.get("mlflow_run_id") else f"fleet-gepa-acceptance-{session_id}",
-        ) as run:
-            campaign.data["mlflow_run_id"] = run.info.run_id
-            campaign.save()
-            if campaign.data["status"] == "prepared":
-                search_estimate = args.max_metric_calls * (ledger.data["rollout_usd"] + ledger.data["reflection_usd"])
-                ledger.admit(f"{version}/search", search_estimate)
-                campaign.data["status"] = "search_started"
-                campaign.save()
-                optimized = dspy.GEPA(
-                    metric=metric,
-                    reflection_lm=reflection_lm,
-                    instruction_proposer=InstructionProposer(adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)),
-                    max_metric_calls=args.max_metric_calls,
-                    num_threads=1,
-                    track_stats=True,
-                    seed=0,
-                    log_dir=str(run_dir / "search"),
-                    use_mlflow=True,
-                    gepa_kwargs={"mlflow_attach_existing": True},
-                ).compile(baseline, trainset=splits["train"], valset=splits["dev"])
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                optimized.program.save(str(destination))
-                campaign.data.update(
-                    status="validating",
-                    candidate_digest=digest_bytes(destination.read_bytes()),
-                    changed_components=changed_components(template, optimized.program),
-                )
-                save_json(run_dir / "search-results.json", optimized.detailed_results.to_dict())
-                from fleet_rlm.observability import measured_lm_usage
-
-                campaign.data["reflection_usage"] = measured_lm_usage(reflection_lm)
-                campaign.save()
-            if digest_bytes(destination.read_bytes()) != campaign.data["candidate_digest"]:
-                raise ValueError("Checkpointed candidate bytes changed")
-            candidate = template.deepcopy()
-            candidate.load(str(destination))
-            settings = settings.with_explicit_overrides(fleet_root_cache=False, fleet_sub_cache=False)
-            factory = build_isolated_engine_factory(settings, store, examples, campaign.resource)
-            programs = {
-                "baseline": IsolatedFleetProgram(template, factory),
-                "candidate": IsolatedFleetProgram(candidate, factory),
-            }
-            paired: dict[str, list[dict[str, Any]]] = {"baseline": [], "candidate": []}
-            for pass_index in range(VALIDATION_PASSES):
-                order = ("baseline", "candidate") if pass_index % 2 == 0 else ("candidate", "baseline")
-                for stage in order:
-                    scores = {}
-                    for split in ("dev", "holdout"):
-                        predictions, results = [], []
-                        for index, example in enumerate(splits[split]):
-                            key = f"pass-{pass_index}/{stage}/{split}/{index}"
-                            prediction, result = campaign.observe(key, programs[stage], example, metric, ledger)
-                            if any(row.get("status") != "deleted" for row in prediction.get("cleanup_receipts", [])):
-                                raise ValueError(
-                                    "Provider cleanup is unconfirmed; recover cleanup without execution replay"
-                                )
-                            predictions.append(prediction)
-                            results.append(result)
-                        objectives = {name for result in results for name in result.objective_scores}
-                        scores.update(
-                            {
-                                split: sum(result.score for result in results) / len(results),
-                                f"{split}_errors": sum("answer" not in pred for pred in predictions),
-                                f"{split}_scores": [result.score for result in results],
-                                f"{split}_critical_scores": [
-                                    result.objective_scores["quality"]
-                                    for example, result in zip(splits[split], results, strict=True)
-                                    if example.critical
-                                ],
-                                f"{split}_objectives": {
-                                    name: sum(result.objective_scores.get(name, 0) for result in results) / len(results)
-                                    for name in objectives
-                                },
-                            }
-                        )
-                    paired[stage].append({**scores, "seconds": 0})
-            evaluation: dict[str, Any] = {
-                "policy_version": APPROVAL_POLICY_VERSION,
-                **{stage: summarize_passes(values) for stage, values in paired.items()},
-            }
-            evaluation["candidate"]["changed_components"] = campaign.data["changed_components"]
-            evaluation["validation_cache"] = "serving_response_cache_disabled"
-            gate = promotion_gate(evaluation)
-            # Reconstruct original deployment identity, not validation-only cache overrides.
-            if any(
-                receipt.get("status") != "deleted"
-                for row in campaign.data.get("resources", [])
-                for receipt in row.get("cleanup_receipts", [])
-            ):
-                raise ValueError("Search or validation provider cleanup is incomplete")
-            manifest = ArtifactManifest(
-                version=version,
-                digest=campaign.data["candidate_digest"],
-                created_at=datetime.now(UTC).isoformat(),
-                dataset_lineage={
-                    "digest": identity["dataset_digest"],
-                    "split_policy": "source_group",
-                    **{key: len(items) for key, items in splits.items()},
-                    "uc": campaign.data["dataset"],
-                },
-                evaluation=evaluation,
-                gate={"passed": gate.passed, "reasons": list(gate.reasons)},
-                dependencies={key: identity[key] for key in approval_evidence(settings, template.compiled.digest)},
-            )
-            write_manifest(destination.with_suffix(".manifest.json"), manifest)
-            campaign.data.update(status="evaluated", candidate_eligible=gate.passed, cost_reconciliation="pending")
-            campaign.save()
-            if not campaign.data.get("trace_id"):
-                with mlflow.start_span(name="fleet_gepa_acceptance", span_type="CHAIN") as span:
-                    span.set_inputs(
-                        {
-                            "campaign": version,
-                            "dataset_digest": identity["dataset_digest"],
-                            "contract_digest": identity["contract_digest"],
-                        }
-                    )
-                    span.set_outputs({"candidate_digest": manifest.digest, "candidate_eligible": gate.passed})
-                trace_id = mlflow.get_last_active_trace_id()
-                if trace_id is None:
-                    raise ValueError("Acceptance trace unavailable; recover saved campaign without replay")
-                campaign.data["trace_id"] = trace_id
-                campaign.save()
-            mlflow.flush_trace_async_logging()
-            from fleet_rlm.optimize.evaluation import read_evaluation_trace
-
-            experiment = mlflow.get_experiment_by_name(target.optimization_experiment_name)
-            if experiment is None:
-                raise ValueError("Optimization experiment is missing")
-            trace = read_evaluation_trace(
-                campaign.data["trace_id"],
-                experiment_id=experiment.experiment_id,
-                uc_location=(
-                    settings.mlflow_trace_catalog,
-                    settings.mlflow_optimization_trace_schema,
-                    settings.mlflow_optimization_trace_table_prefix,
-                ),
-            )
-            campaign.data["verified_trace_spans"] = len(trace.data.spans)
-            campaign.save()
-            mlflow.log_artifact(str(destination), "candidate")
-            mlflow.log_dict(asdict(manifest), "candidate/manifest.json")
-            from fleet_rlm.observability import trace_value
-
-            mlflow.log_dict(trace_value(campaign.data, nodes=[0]), "acceptance/receipts.json")
-            mlflow.log_dict(read_json(run_dir / "search-results.json"), "search/results.json")
-            print(format_report(manifest, splits["holdout"]))
-            print(f"Campaign {version}: evaluated; final cost reconciliation pending; candidate not installed.")
