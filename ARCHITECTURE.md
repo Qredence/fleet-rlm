@@ -74,10 +74,12 @@ Deletion waits for provider confirmation; ambiguous creation is not blindly retr
 Local allocation journals support expired-allocation reconciliation on the next
 root provisioning for that session; provider TTL covers loss of local journals.
 
-The explicit `spawn_agent` host tool accepts a subtask, selected `files/` or
-`skills/` input paths, approved delegation tools, and bounded DSPy iteration/query
-limits. It copies no input files by default, stages child outputs until success,
-and returns bounded findings plus promoted paths, digests, and agent IDs.
+The explicit `spawn_agent` host tool accepts a subtask, selected `files/`,
+`skills/` or earlier `artifacts/` input paths, approved delegation tools, and
+bounded DSPy iteration/query limits. It copies no input files by default, stages
+child outputs until success, and returns bounded findings plus promoted paths,
+digests, and agent IDs. Copied-in artifacts that the child leaves unchanged are
+not promoted back as its output.
 `spawn_agents` runs several independent `spawn_agent` children concurrently on a bounded
 thread pool (at most the active-child capacity), each with a copy of the caller's context,
 and returns one result per subtask in order. A child that fails for ordinary reasons comes
@@ -93,6 +95,15 @@ deadlines, cancellation, and budget exhaustion propagate without format retries.
 or network sandbox policy. All generated Python still runs under Daytona's
 deployment policy. Native facade-created RLMs retain the compatibility policy
 of copying the current parent's `files/` and `skills/`, not its artifacts/memory.
+
+`DaytonaInterpreter` exposes `output_fields`, which DSPy's RLM fills per run, so
+the sandbox `SUBMIT` takes the signature's output fields positionally or by
+keyword (not both), as DSPy's own interpreters do. The host also rejects a
+`SUBMIT` whose figures appear as literals in the submitting code but were never
+shown by an execution or input (compared at the typed precision); the model gets
+the rejection as iteration feedback. Figures computed from variables pass. After
+two rejections per namespace the output is accepted and flagged as
+`ungrounded_submit` on the `sandbox.exec` span and as a stream event.
 
 The optimization runner curates approved gold answers, groups by source lineage,
 and uses fresh disposable runtimes for each GEPA/evaluation example. Native DSPy
