@@ -120,7 +120,6 @@ def turn_status(turn_id: str, runtime: Runtime) -> dict:
 @router.put("/sessions/{session_id}/context", response_model=ContextSelected)
 def select_context(session_id: str, body: ContextRequest, runtime: Runtime) -> dict:
     with translate("Context selection is unavailable", invalid="Invalid context selection"), runtime.turn_lock:
-        runtime.harness.hydrate_volume_from_postgres(session_id)
         content = runtime.sandbox_mgr.read_workspace_file(body.path)
         context = WorkspaceDataset(
             workspace_path=body.path,

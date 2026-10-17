@@ -10,7 +10,7 @@ source control.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `FLEET_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/fleet` | PostgreSQL DSN for Session/VFS storage. |
+| `FLEET_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/fleet` | PostgreSQL DSN for Session, Turn and memory storage. |
 | `FLEET_DATABASE_SCHEMA` | `fleet_rlm_lite` in the checked-in config (`public` code fallback) | Lowercase schema name for Fleet Lite tables. The fresh Lakebase database is configured to use a dedicated schema; provision a separate migration role and grant the runtime role access to its objects. |
 | `FLEET_DATABASE_MIGRATION_URL` | empty | Optional secret-only DSN for schema migrations. When omitted, migrations use `FLEET_DATABASE_URL`; when separate, it must target the same database. |
 | `FLEET_LAKEBASE_ENDPOINT` | empty | Optional Lakebase endpoint resource path. When set, Fleet generates a fresh Databricks OAuth database credential for each new physical connection; the DSN must contain host/user/database, omit password, and require TLS. |

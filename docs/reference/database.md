@@ -1,6 +1,7 @@
 # Database and persistence
 
-Fleet requires PostgreSQL for Session history and VFS content. Configure the
+Fleet requires PostgreSQL for Sessions, Turns, memories and selected replays.
+Workspace files live on the Session's Daytona Volume. Configure the
 connection with `FLEET_DATABASE_URL`; the default DSN is local PostgreSQL at
 `postgresql://postgres:postgres@localhost:5432/fleet`.
 
@@ -16,6 +17,9 @@ Migration 2 adds `fleet_lite_review_labels`, which stores human curation metadat
 only for an existing selected replay and cascades with that replay's deletion.
 Migration 3 adds optional `structured_expectations` JSONB with an empty-object
 default. It stores artifact/delegation gold without changing replay snapshots.
+Migration 4 renames `fleet_lite_vfs_files` to `fleet_lite_vfs_files_retired`.
+Fleet no longer reads or writes it; the rows stay for manual recovery and the
+table can be dropped by an operator.
 The migration role owns the change; existing runtime DML grants apply.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
@@ -30,17 +34,12 @@ compatibility schema `public`, while the checked-in config selects
 must already exist with appropriate permissions.
 
 `fleet_lite_sessions` stores each session's timestamp, memory summary, and
-bounded turn history as JSONB. `fleet_lite_vfs_files` stores session-scoped
-relative paths, content, SHA-256 values, metadata, and update times. Workspace
-contents are restored from and synchronized to this VFS through the Daytona
-sandbox manager. A complete bounded scan must succeed before deletions are
-committed; a failed transfer cannot mark unvisited files deleted. File bytes
-and successful turn history commit in one transaction. Limits are 25 MB per
-file, 100 MB per workspace sync, and 5,000 files.
+bounded turn history as JSONB. A Turn's record, memory note, optional replay
+snapshot and completion commit in one transaction; workspace file bytes are not
+copied to PostgreSQL.
 
 Structured memories retain their kind, review status, and source digests.
-Retrieval uses bounded full-text relevance and recency ranking; stale source
-hashes are reported rather than treated as verified current evidence. Turn
+Retrieval uses bounded full-text relevance and recency ranking. Turn
 intents retain idempotency keys and terminal outcomes; uncertain running turns
 are not automatically replayed. Runtime settings retain selected mode and
 dataset revision. A session advisory lock prevents two workers from owning
@@ -54,7 +53,7 @@ sets `record_replay=true`, Fleet writes the complete bounded input snapshot to
 `fleet_lite_replay_snapshots`, keyed by Session and Turn and protected by a
 content digest. It commits only with successful Turn completion; cascade deletion
 follows the parent Turn. GEPA checks the trace reference and restores the stored
-bytes in its isolated workspace rather than reading the current VFS. Ordinary
+bytes in its isolated workspace rather than reading the current workspace. Ordinary
 Turns retain hashes only and cannot enter GEPA without a selected snapshot.
 
 For Lakebase, use the direct PostgreSQL endpoint with TLS for `FLEET_DATABASE_URL`.
@@ -97,8 +96,9 @@ DML rights on tables created by future migrations. Both DSNs stay in ignored
 local/deployment secret configuration. The shared Lakebase endpoint's scaling
 and suspend settings are unchanged.
 
-Daytona Volume bytes are a working copy, not a database transaction. Recovery
-restores files and metadata; it does not restore Python process memory.
+Daytona Volume bytes are not part of a database transaction. Restarting
+recovers Turns and settings from PostgreSQL and files from the Volume; it does
+not restore Python process memory.
 
 The default URL includes a development username and password; replace it for
 any shared or production environment. Do not include database secrets in a

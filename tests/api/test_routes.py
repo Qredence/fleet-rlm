@@ -135,14 +135,12 @@ def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failur
 
 def test_attach_streams_to_the_provider_path_and_cleans_temp_files():
     uploaded: list[tuple[str, bytes]] = []
-    persisted: list[str] = []
     runtime = runtime_with(
         sandbox_mgr=FakeManager(
             write_workspace_file_from_path=lambda rel_path, path: (
                 uploaded.append((rel_path, Path(path).read_bytes())) or f"/workspace/{rel_path}"
             )
         ),
-        harness=FakeHarness(persist_workspace_files=persisted.append),
     )
     existing = set(Path("/tmp").glob("fleet-upload-*"))
     client, _ = client_for(runtime, settings=api_settings(max_upload_bytes=4))
@@ -151,7 +149,7 @@ def test_attach_streams_to_the_provider_path_and_cleans_temp_files():
         rejected = client.post("/sessions/session-a/attach", files={"file": ("too-large.bin", b"12345")})
     assert accepted.status_code == 200
     assert accepted.json() == {"mounted_path": "/workspace/files/sample.bin", "rel_path": "files/sample.bin"}
-    assert uploaded == [("files/sample.bin", b"1234")] and persisted == ["session-a"]
+    assert uploaded == [("files/sample.bin", b"1234")]
     assert rejected.status_code == 413
     assert set(Path("/tmp").glob("fleet-upload-*")) == existing
 

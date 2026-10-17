@@ -136,7 +136,7 @@ def run_turn(
                 "replay_snapshot_selected": record_replay,
                 "replay_snapshot_sha256": replay_snapshot[0] if replay_snapshot else None,
             }
-            artifacts = runtime.harness.sync_volume_to_postgres(
+            artifacts = runtime.harness.commit_turn(
                 session_id=session_id,
                 turn_record=turn_record,
                 new_memory_note=learned_note,
@@ -202,7 +202,7 @@ def _replayed(prior: dict[str, Any]) -> dict[str, Any]:
 def _prepare_inputs(
     runtime: SessionRuntime, session_id: str, task: str, *, record_replay: bool = False
 ) -> dict[str, Any]:
-    memory_summary, session_history = runtime.harness.hydrate_volume_from_postgres(session_id)
+    memory_summary, session_history = runtime.harness.load_context(session_id)
     shared_notes = runtime.sandbox_mgr.list_learned_notes()
     if shared_notes:
         memory_summary = "\n".join(

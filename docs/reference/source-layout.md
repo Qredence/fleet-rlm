@@ -19,7 +19,7 @@ src/fleet_rlm/
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # spawn_agent, spawn_agents
 ├── store/
-│   └── db.py          # Store, numbered additive migrations, one pool, workspace/Turn mirror
+│   └── db.py          # Store, numbered additive migrations, one pool, Turn commits
 ├── optimize/
 │   ├── artifacts.py   # Isolated rollouts, manifests, promotion gate, approval, compiled-program loader
 │   ├── dataset.py     # Reviewed examples from Postgres/MLflow, grouped splits

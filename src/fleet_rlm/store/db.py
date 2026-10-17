@@ -1,29 +1,31 @@
-"""The Store: every SQL statement Fleet runs, over one psycopg connection pool, plus the harness that mirrors a Session.
+"""The Store: every SQL statement Fleet runs, over one psycopg connection pool, plus the Session harness.
 
-Methods take the Session ID explicitly. Replay reviews validate immutable evidence before writing;
-the harness validates workspace paths, sizes and digests before synchronization. Pooled connections
-are autocommit; schema bootstrap and workspace commits use explicit transactions.
+Methods take the Session ID explicitly. Workspace files live only on the Session's Daytona Volume;
+Postgres holds Sessions, Turns, memories and selected replay snapshots. Replay reviews validate
+immutable evidence before writing. Pooled connections are autocommit; schema bootstrap and Turn
+commits use explicit transactions.
 """
 
 from __future__ import annotations
 
-import base64
 import functools
 import hashlib
 import json
 import re
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
-from typing import Any, ParamSpec, Self, TypeVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ParamSpec, Self, TypeVar
 
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.workspace import validate_session_id
+
+if TYPE_CHECKING:
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
 class IdempotencyConflictError(ValueError):
@@ -121,13 +123,6 @@ _REVIEW_LABELS_TABLE = """
     )
 """
 
-_UPSERT_FILE = """
-    INSERT INTO fleet_lite_vfs_files (session_id, rel_path, sha256, content, updated_at)
-    VALUES (%s, %s, %s, %s, NOW())
-    ON CONFLICT (session_id, rel_path) DO UPDATE
-    SET sha256 = EXCLUDED.sha256, content = EXCLUDED.content, updated_at = NOW()
-    WHERE fleet_lite_vfs_files.sha256 IS DISTINCT FROM EXCLUDED.sha256
-"""
 _APPEND_TURN = """
     UPDATE fleet_lite_sessions
     SET turns = (
@@ -162,6 +157,8 @@ _SCHEMA_MIGRATIONS = (
             "structured_expectations JSONB NOT NULL DEFAULT '{}'::jsonb",
         ),
     ),
+    # The Daytona Volume is the only workspace file store. Rows are kept for manual recovery.
+    (4, ("ALTER TABLE IF EXISTS fleet_lite_vfs_files RENAME TO fleet_lite_vfs_files_retired",)),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -395,7 +392,7 @@ class Store:
 
     @_retry_once
     def memories(self, session_id: str, search: str, *, reviewed_only: bool) -> list[dict[str, Any]]:
-        """Matching memories, each marked stale when a source file's digest has changed."""
+        """Memories matching a full-text search, best match first."""
         with self.pool.connection() as connection:
             cursor = connection.cursor(row_factory=dict_row)
             rows = cursor.execute(
@@ -406,13 +403,7 @@ class Store:
                 "updated_at DESC LIMIT 20",
                 (session_id, reviewed_only, search, search, search),
             ).fetchall()
-            hashes = dict(
-                connection.execute(
-                    "SELECT rel_path,sha256 FROM fleet_lite_vfs_files WHERE session_id=%s", (session_id,)
-                ).fetchall()
-            )
         for row in rows:
-            row["stale"] = any(hashes.get(path) != digest for path, digest in row["sources"].items())
             row["updated_at"] = row["updated_at"].isoformat()
         return rows
 
@@ -473,41 +464,36 @@ class Store:
             row["updated_at"] = row["updated_at"].isoformat()
         return row
 
-    # Workspace mirror
+    # Session context and Turn commits
 
     @_retry_once
-    def load_session(self, session_id: str) -> tuple[list[dict[str, Any]], str, list[Any]]:
-        """Create the Session if needed; return its files (rel_path, sha256, content), summary and turns."""
+    def load_session(self, session_id: str) -> tuple[str, list[Any]]:
+        """Create the Session if needed; return its memory summary and Turn history."""
         with self.pool.connection() as connection:
             connection.execute(
                 "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
             )
-            cursor = connection.cursor(row_factory=dict_row)
-            files = cursor.execute(
-                "SELECT rel_path, sha256, content FROM fleet_lite_vfs_files WHERE session_id = %s ORDER BY rel_path",
-                (session_id,),
-            ).fetchall()
-            session = cursor.execute(
-                "SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s", (session_id,)
-            ).fetchone()
-        return files, str((session or {}).get("memory_summary") or ""), (session or {}).get("turns") or []
+            session = (
+                connection.cursor(row_factory=dict_row)
+                .execute("SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s", (session_id,))
+                .fetchone()
+            )
+        return str((session or {}).get("memory_summary") or ""), (session or {}).get("turns") or []
 
     @_retry_once
-    def mirror_files(
+    def commit_turn(
         self,
         session_id: str,
-        files: list[tuple[str, str, bytes]],
         *,
-        turn_record_json: str | None = None,
+        turn_record_json: str,
         max_turns: int = 200,
         memory_note: str = "",
         completion: tuple[str, dict[str, Any]] | None = None,
         replay_snapshot: tuple[str, bytes] | None = None,
     ) -> None:
-        """In one transaction: upsert changed files, drop missing ones, and optionally append a Turn.
+        """In one transaction: append the Turn record and memory note, store a selected replay, complete the Turn.
 
-        `files` is (rel_path, sha256, content). `completion` is (turn_id, result) for the turn record.
-        A selected replay snapshot is committed with the same transaction and Turn completion.
+        `completion` is (turn_id, result) for the turn record.
         """
         if replay_snapshot is not None and completion is None:
             raise ValueError("A replay snapshot can only be committed with a completed Turn")
@@ -518,24 +504,11 @@ class Store:
             connection.execute(
                 "SELECT session_id FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE", (session_id,)
             )
-            for rel_path, sha256, content in files:
-                connection.execute(_UPSERT_FILE, (session_id, rel_path, sha256, content))
-            connection.execute(
-                "DELETE FROM fleet_lite_vfs_files WHERE session_id = %s AND NOT (rel_path = ANY(%s))",
-                (session_id, [rel_path for rel_path, _, _ in files]),
-            )
-            if turn_record_json is None:
-                connection.execute(
-                    "UPDATE fleet_lite_sessions SET updated_at = NOW() WHERE session_id = %s", (session_id,)
-                )
-            else:
-                note = memory_note[:10_000]
-                turn_id = None
-                with suppress(TypeError, json.JSONDecodeError):
-                    turn_id = json.loads(turn_record_json).get("turn_id")
-                connection.execute(
-                    _APPEND_TURN, (turn_record_json, max_turns, note, note, session_id, turn_id, turn_id)
-                )
+            note = memory_note[:10_000]
+            turn_id = None
+            with suppress(TypeError, json.JSONDecodeError):
+                turn_id = json.loads(turn_record_json).get("turn_id")
+            connection.execute(_APPEND_TURN, (turn_record_json, max_turns, note, note, session_id, turn_id, turn_id))
             if replay_snapshot is not None:
                 assert completion is not None
                 digest, content = replay_snapshot
@@ -694,9 +667,6 @@ class Store:
         return (row[0], bytes(row[1])) if row else None
 
 
-_MAX_VFS_FILE_BYTES = 25_000_000
-_MAX_VFS_SYNC_BYTES = 100_000_000
-_MAX_VFS_FILES = 5_000
 _MAX_TURN_RECORD_BYTES = 1_000_000
 _SESSION_HISTORY_TURNS = 8
 _SESSION_HISTORY_CHARS = 16_000
@@ -705,11 +675,10 @@ _MAX_STORED_TURNS = 200
 
 @dataclass(slots=True)
 class VolumePostgresHarness:
-    """Mirror per-Session workspace files and committed Turns to Postgres (SQL lives in the Store)."""
+    """A Session's Postgres state (SQL lives in the Store) next to its Volume-backed workspace."""
 
     store: Store
     sandbox_mgr: DaytonaSandboxManager
-    _hydrated: bool = field(default=False, init=False)
 
     @property
     def session_id(self) -> str:
@@ -757,23 +726,9 @@ class VolumePostgresHarness:
     def turn_status(self, turn_id: str) -> dict[str, Any] | None:
         return self.store.turn_status(self.session_id, validate_session_id(turn_id))
 
-    def hydrate_volume_from_postgres(self, session_id: str) -> tuple[str, str]:
-        """Restore only the requested Session's files, summary, and bounded history."""
-        session_id = validate_session_id(session_id)
-        files, summary, turns = self.store.load_session(session_id)
-        restored_bytes = 0
-        for row in [] if self._hydrated else files:
-            content = bytes(row["content"])
-            restored_bytes += len(content)
-            if (
-                not self._valid_vfs_path(row["rel_path"])
-                or len(content) > _MAX_VFS_FILE_BYTES
-                or restored_bytes > _MAX_VFS_SYNC_BYTES
-                or hashlib.sha256(content).hexdigest() != row["sha256"]
-            ):
-                raise ValueError("Persisted workspace file hash validation failed")
-            self.sandbox_mgr.write_workspace_file(row["rel_path"], content)
-        self._hydrated = True
+    def load_context(self, session_id: str) -> tuple[str, str]:
+        """The Session's memory summary and bounded rendered history."""
+        summary, turns = self.store.load_session(validate_session_id(session_id))
         return summary, self._render_history(turns)
 
     @staticmethod
@@ -808,25 +763,26 @@ class VolumePostgresHarness:
             total_chars += len(entries[-1])
         return "\n\n".join(reversed(entries))
 
-    def sync_volume_to_postgres(
+    def commit_turn(
         self,
         session_id: str,
         turn_record: dict[str, Any],
         new_memory_note: str = "",
         replay_snapshot: tuple[str, bytes] | None = None,
     ) -> list[str]:
-        """Hash and upsert changed Session files in the same transaction as its Turn."""
+        """Record a finished Turn; return the workspace artifacts it can report."""
         if bool(turn_record.get("replay_snapshot_selected")) != (replay_snapshot is not None):
             raise ValueError("Selected replay metadata and immutable snapshot must be committed together")
         if replay_snapshot is not None and turn_record.get("replay_snapshot_sha256") != replay_snapshot[0]:
             raise ValueError("Turn replay digest does not match the immutable snapshot")
         session_id = validate_session_id(session_id)
-        files = self._scan_volume_files()
         record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
         if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:
             raise ValueError("Turn record exceeds the persistence size limit")
-        verified = self._verified_files(files)
-        artifacts = sorted({rel_path for rel_path, _, _ in verified if rel_path.startswith("artifacts/")})
+        paths = self.sandbox_mgr.list_workspace_files()
+        if any(not self._valid_vfs_path(path) for path in paths):
+            raise ValueError("Workspace listing returned an invalid relative path")
+        artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
         completion = None
         if turn_record.get("turn_id"):
             result = {
@@ -839,9 +795,8 @@ class VolumePostgresHarness:
             if turn_record.get("trace_id"):
                 result["trace_id"] = turn_record["trace_id"]
             completion = (turn_record["turn_id"], result)
-        self.store.mirror_files(
+        self.store.commit_turn(
             session_id,
-            verified,
             turn_record_json=record_json,
             max_turns=_MAX_STORED_TURNS,
             memory_note=new_memory_note,
@@ -849,43 +804,6 @@ class VolumePostgresHarness:
             replay_snapshot=replay_snapshot,
         )
         return artifacts
-
-    def persist_workspace_files(self, session_id: str) -> list[str]:
-        """Mirror a Session's current files without recording a synthetic Turn."""
-        session_id = validate_session_id(session_id)
-        files = self._verified_files(self._scan_volume_files())
-        self.store.mirror_files(session_id, files)
-        return [rel_path for rel_path, _, _ in files]
-
-    def _verified_files(self, files: list[dict[str, Any]]) -> list[tuple[str, str, bytes]]:
-        """Decode a workspace scan into (rel_path, sha256, content), re-checking every path, size and digest."""
-        verified = []
-        for item in files:
-            rel_path = str(item.get("rel", ""))
-            if not self._valid_vfs_path(rel_path):
-                raise ValueError("Workspace scan returned an invalid relative path")
-            content = base64.b64decode(item["b64"], validate=True)
-            if len(content) > _MAX_VFS_FILE_BYTES or hashlib.sha256(content).hexdigest() != item.get("sha"):
-                raise ValueError("Workspace file hash or size validation failed")
-            verified.append((rel_path, str(item["sha"]), content))
-        return verified
-
-    def _scan_volume_files(self) -> list[dict[str, Any]]:
-        """Read a bounded, symlink-free manifest from the owning Session Volume."""
-        paths = self.sandbox_mgr.list_workspace_files()
-        if len(paths) > _MAX_VFS_FILES:
-            raise ValueError("Workspace contains too many files")
-        files = []
-        total = 0
-        for path in paths:
-            if not self._valid_vfs_path(path):
-                raise ValueError("Invalid workspace scan path")
-            raw = self.sandbox_mgr.read_workspace_file(path, max_bytes=_MAX_VFS_FILE_BYTES)
-            total += len(raw)
-            if total > _MAX_VFS_SYNC_BYTES:
-                raise ValueError("Workspace exceeds sync quota")
-            files.append({"rel": path, "sha": hashlib.sha256(raw).hexdigest(), "b64": base64.b64encode(raw).decode()})
-        return files
 
     @staticmethod
     def _valid_vfs_path(rel_path: str) -> bool:

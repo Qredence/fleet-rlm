@@ -167,7 +167,7 @@ GEPA accepts only approved gold-labeled traces whose selected snapshot exists,
 passes its integrity checks, and matches the trace task, manifest, and file
 digests. Unselected, missing, changed, or malformed snapshots are excluded. The
 isolated rollout restores the captured file bytes and Skills revision rather
-than reading mutable current VFS or local Skills. The `compiled_program_digest`
+than reading the mutable current workspace or local Skills. The `compiled_program_digest`
 attribute names the approved program that served the Turn (empty when none is
 installed). Selected replay snapshots expire after 30 days and are pruned when
 the Store initializes; their Lakebase curation rows are deleted with them. Do

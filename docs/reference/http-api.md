@@ -21,7 +21,7 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/workspace/tree` | List workspace paths. |
 | `GET` | `/sessions/{session_id}/workspace/stat/{rel_path}` | Get a file's size and SHA-256. |
 | `GET`, `PUT`, `DELETE` | `/sessions/{session_id}/workspace/files/{rel_path}` | Download/write/delete workspace files. |
-| `GET` | `/sessions/{session_id}/memory?q=...` | Retrieve scoped memories and mark stale source digests. |
+| `GET` | `/sessions/{session_id}/memory?q=...` | Retrieve scoped memories. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/memory/{memory_id}` | Create/review/update/delete memories. |
 | `POST` | `/skills/push?session_id=...` | Synchronize validated local user Skills. |
 
@@ -112,7 +112,6 @@ dataset selection persist across server restarts. Dataset hashes are checked
 again at execution, so changing a source requires selecting its new revision.
 Memory writes accept `content`, `kind`, source path-to-digest mappings, and an
 explicit `reviewed` flag; only reviewed retrieval is included as turn evidence.
-Stale memory remains labeled rather than being treated as newly verified data.
 
 ## Skills and files
 
@@ -122,5 +121,5 @@ parameter, defaulting to `default`. Local user Skills are read from
 synced as user Skills.
 
 `GET /sessions/{session_id}/files` returns `files` and an `artifacts` subset;
-it does not download file contents. The workspace is session-scoped on Daytona
-and persisted through the Postgres VFS.
+it does not download file contents. The workspace is session-scoped and
+persisted on the Session's Daytona Volume.

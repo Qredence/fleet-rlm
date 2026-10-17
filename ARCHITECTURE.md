@@ -10,17 +10,17 @@ TypeScript terminal application.
 Rich CLI ──HTTP/SSE──> FastAPI server ──> DSPy engine
                               │                 │
                               │                 └── Daytona Python execution
-                              └── PostgreSQL VFS, MLflow traces/evaluation
+                              └── PostgreSQL state, MLflow traces/evaluation
 ```
 
 `cli.py` is the `fleet` entry point; `tui/` is the terminal client. `api/` owns the FastAPI
 endpoints (sync `def` routes in FastAPI's threadpool; only the Turn stream is
 async) and SSE streaming; `session.py` owns the Session runtime registry, and
 `engine/turn.py` runs one Turn on a worker thread. A Session
-runtime combines a Daytona sandbox manager, PostgreSQL VFS harness, Skill
+runtime combines a Daytona sandbox manager, PostgreSQL Session harness, Skill
 manager, and DSPy engine. `sandbox/manager.py` creates the per-session Daytona
 workspace and runs Python there. `store/` holds every SQL statement over one
-connection pool, plus the harness that mirrors the workspace and committed Turns.
+connection pool, plus the harness that commits Turns; workspace files stay on the Daytona Volume.
 `engine/` holds the route vocabulary, every DSPy signature, the Turn program
 (`programs.py`) and the child-agent tools (`children.py`); `optimize/` holds
 datasets, scorers, the one `fleet_metric` and the GEPA runner (`fleet optimize`), and
@@ -133,7 +133,7 @@ policy.
   (`interpreter.py`), the `run_code` transport (`repl.py`) and the sandbox-side
   runtime (`runtime/repl.py`).
 - `engine/`: routes and signatures (`signatures.py`), the Turn program, and child agents.
-- `store/`: PostgreSQL access and the workspace/Turn mirror.
+- `store/`: PostgreSQL access and Turn commits.
 - `optimize/`: datasets, scorers, the GEPA metric and runner, compiled-program artifacts.
 - `observability.py`: redacted activity previews and MLflow tracing setup.
 - `api/`: the FastAPI app (`app.py`), dependencies, request/response schemas,

@@ -345,18 +345,18 @@ paths:
       summary: Workspace Stat
       operationId: workspace_stat_sessions__session_id__workspace_stat__rel_path__get
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: rel_path
         in: path
         required: true
         schema:
           type: string
           title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
       responses:
         '200':
           description: Successful Response
@@ -377,18 +377,18 @@ paths:
       summary: Read Workspace File
       operationId: read_workspace_file_sessions__session_id__workspace_files__rel_path__get
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: rel_path
         in: path
         required: true
         schema:
           type: string
           title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
       responses:
         '200':
           description: Successful Response
@@ -404,18 +404,18 @@ paths:
       summary: Write Workspace File
       operationId: write_workspace_file_sessions__session_id__workspace_files__rel_path__put
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: rel_path
         in: path
         required: true
         schema:
           type: string
           title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
       requestBody:
         required: true
         content:
@@ -441,18 +441,18 @@ paths:
       summary: Delete Workspace File
       operationId: delete_workspace_file_sessions__session_id__workspace_files__rel_path__delete
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: rel_path
         in: path
         required: true
         schema:
           type: string
           title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
       responses:
         '200':
           description: Successful Response

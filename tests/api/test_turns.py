@@ -97,9 +97,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
             list_learned_notes=lambda: [{"file": "older.md", "summary": "prior hint"}],
             write_learned_note=write_note,
         ),
-        harness=FakeHarness(
-            hydrate_volume_from_postgres=lambda _session: ("summary", "prior history"), sync_volume_to_postgres=persist
-        ),
+        harness=FakeHarness(load_context=lambda _session: ("summary", "prior history"), commit_turn=persist),
         engine=run_engine,
         context=WorkspaceDataset("files/input.txt"),
     )
@@ -155,7 +153,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced) -> None:
             read_workspace_file=lambda path: files[path],
         ),
         harness=FakeHarness(
-            sync_volume_to_postgres=lambda **kwargs: persisted.append(kwargs) or [],
+            commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         ),
         engine=lambda **_kwargs: SimpleNamespace(
             answer="17", route="flex", learned_skill_note="", lm_calls=1, sandbox_errors=0
@@ -208,7 +206,7 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
 
     runtime = runtime_with(
         harness=FakeHarness(
-            hydrate_volume_from_postgres=hydrate,
+            load_context=hydrate,
             store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
         ),
         engine=failing_engine,

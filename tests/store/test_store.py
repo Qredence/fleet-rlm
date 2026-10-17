@@ -12,7 +12,13 @@ from typing import Any
 import pytest
 
 from fleet_rlm.store import IdempotencyConflictError, Store
-from fleet_rlm.store.db import SCHEMA_STATEMENTS, VolumePostgresHarness, lakebase_connection_class
+from fleet_rlm.store.db import (
+    _SCHEMA_MIGRATIONS,
+    SCHEMA_STATEMENTS,
+    SCHEMA_VERSION,
+    VolumePostgresHarness,
+    lakebase_connection_class,
+)
 
 
 class FakeCursor:
@@ -74,6 +80,13 @@ def test_schema_keeps_the_lite_tables_separate_from_the_legacy_schema():
     assert "CREATE TABLE IF NOT EXISTS fleet_sessions" not in session_schema
     replay_schema = next(statement for statement in SCHEMA_STATEMENTS if "fleet_lite_replay_snapshots" in statement)
     assert "REFERENCES fleet_lite_turns(session_id, turn_id) ON DELETE CASCADE" in replay_schema
+
+
+def test_migration_four_retires_the_file_mirror_without_deleting_rows():
+    assert SCHEMA_VERSION == 4
+    version, statements = _SCHEMA_MIGRATIONS[-1]
+    assert version == 4
+    assert statements == ("ALTER TABLE IF EXISTS fleet_lite_vfs_files RENAME TO fleet_lite_vfs_files_retired",)
 
 
 def test_review_labels_require_the_selected_immutable_replay_before_writing():
@@ -230,7 +243,7 @@ def test_schema_bootstrap_does_not_rerun_an_applied_migration():
     assert statements[-1] == "COMMIT"
 
 
-def test_memories_are_marked_stale_when_a_source_digest_changed():
+def test_memories_return_iso_timestamps_without_reading_workspace_files():
     updated = dt.datetime(2026, 10, 15, tzinfo=dt.UTC)
     memory = {
         "memory_id": "m1",
@@ -240,16 +253,16 @@ def test_memories_are_marked_stale_when_a_source_digest_changed():
         "reviewed": True,
         "updated_at": updated,
     }
-    store, _ = make_store([memory], [("files/a", "new")])
+    store, pool = make_store([memory])
     [row] = store.memories("s1", "", reviewed_only=True)
-    assert row["stale"] is True and row["updated_at"] == updated.isoformat()
+    assert row["updated_at"] == updated.isoformat() and "stale" not in row
+    assert not any("fleet_lite_vfs_files" in statement for statement, _ in pool.conn.statements)
 
 
-def test_mirroring_a_turn_is_one_transaction_with_the_completion():
+def test_committing_a_turn_is_one_transaction_with_the_completion():
     store, pool = make_store()
-    store.mirror_files(
+    store.commit_turn(
         "s1",
-        [("files/a.txt", "abc", b"x")],
         turn_record_json='{"turn_id":"turn-1"}',
         memory_note="note",
         completion=("t1", {"event": "turn_complete"}),
@@ -258,7 +271,7 @@ def test_mirroring_a_turn_is_one_transaction_with_the_completion():
     assert pool.borrowed == 1
     assert sql[0] == "BEGIN" and sql[-1] == "COMMIT"
     assert sql[2].endswith("FOR UPDATE")
-    assert any(statement.startswith("INSERT INTO fleet_lite_vfs_files") for statement in sql)
+    assert not any("fleet_lite_vfs_files" in statement for statement in sql)
     assert any(statement.startswith("UPDATE fleet_lite_sessions SET turns") for statement in sql)
     append_sql, append_params = next(
         (statement, params)
@@ -274,10 +287,9 @@ def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
     content = b"immutable input"
     digest = hashlib.sha256(content).hexdigest()
     snapshot = (digest, content)
-    store, pool = make_store([], [], [], [], [], [(digest,)], [])
-    store.mirror_files(
+    store, pool = make_store([], [], [], [], [(digest,)], [])
+    store.commit_turn(
         "s1",
-        [],
         turn_record_json='{"turn_id":"t1","replay_snapshot_selected":true}',
         completion=("t1", {"event": "turn_complete"}),
         replay_snapshot=snapshot,
@@ -291,36 +303,27 @@ def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
     )
 
 
-def _harness(store: Any, files: dict[str, bytes]) -> VolumePostgresHarness:
-    sandbox = SimpleNamespace(
-        session_id="s1",
-        list_workspace_files=lambda: list(files),
-        read_workspace_file=lambda path, **_limits: files[path],
-    )
+def _harness(store: Any, files: list[str]) -> VolumePostgresHarness:
+    sandbox = SimpleNamespace(session_id="s1", list_workspace_files=lambda: list(files))
     return VolumePostgresHarness(store, sandbox)  # ty: ignore[invalid-argument-type]
 
 
-def test_harness_rejects_a_bad_scan_before_any_sql_runs():
+def test_harness_rejects_an_invalid_workspace_listing_before_any_sql_runs():
     store, pool = make_store()
-    harness = _harness(store, {"../escape": b"x"})
-    with pytest.raises(ValueError):
-        harness.persist_workspace_files("s1")
+    with pytest.raises(ValueError, match="invalid relative path"):
+        _harness(store, ["../escape"]).commit_turn("s1", {"turn_id": "t1"})
     assert pool.borrowed == 0
 
 
-def test_harness_reports_artifacts_and_records_the_completion():
+def test_harness_reports_artifacts_and_records_the_completion_without_reading_files():
     calls = []
-    store = SimpleNamespace(mirror_files=lambda *args, **kwargs: calls.append((args, kwargs)))
-    files = {"files/in.txt": b"in", "artifacts/out.txt": b"out"}
-    artifacts = _harness(store, files).sync_volume_to_postgres(
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    artifacts = _harness(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
         "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1"}
     )
     assert artifacts == ["artifacts/out.txt"]
-    (session_id, verified), kwargs = calls[0]
+    (session_id,), kwargs = calls[0]
     assert session_id == "s1"
-    assert [(path, digest) for path, digest, _ in verified] == [
-        (path, hashlib.sha256(raw).hexdigest()) for path, raw in files.items()
-    ]
     turn_id, result = kwargs["completion"]
     assert turn_id == "t1" and result["trace_id"] == "tr-1" and result["artifacts"] == ["artifacts/out.txt"]
     assert json.loads(kwargs["turn_record_json"])["route"] == "flex"
@@ -330,7 +333,7 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
     prior = {"turn_id": "t0", "task_sha256": "other", "status": "running", "result": {}}
     store = SimpleNamespace(claim_turn=lambda *_args: prior)
     with pytest.raises(IdempotencyConflictError, match="another task"):
-        _harness(store, {}).claim_turn("t1", "key", "task")
+        _harness(store, []).claim_turn("t1", "key", "task")
 
 
 def test_a_dropped_idle_connection_is_retried_once():

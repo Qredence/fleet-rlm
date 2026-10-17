@@ -26,27 +26,24 @@ _MAX_FILE_BYTES = 25_000_000
 @router.get("/sessions/{session_id}/workspace/tree", response_model=Files)
 def list_files(session_id: str, runtime: Runtime) -> dict:
     with translate("Session workspace is unavailable"), runtime.turn_lock:
-        runtime.harness.hydrate_volume_from_postgres(session_id)
         files = runtime.sandbox_mgr.list_workspace_files()
     return {"session_id": session_id, "files": files, "artifacts": [p for p in files if p.startswith("artifacts/")]}
 
 
 @router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", response_model=FileStat)
-def workspace_stat(session_id: str, rel_path: str, runtime: Runtime) -> dict:
+def workspace_stat(rel_path: str, runtime: Runtime) -> dict:
     with translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404), runtime.turn_lock:
-        runtime.harness.hydrate_volume_from_postgres(session_id)
         content = runtime.sandbox_mgr.read_workspace_file(rel_path)
     return {"path": rel_path, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
 
 @router.get("/sessions/{session_id}/workspace/files/{rel_path:path}", response_class=FileResponse)
-def read_workspace_file(session_id: str, rel_path: str, runtime: Runtime) -> FileResponse:
+def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
     descriptor, temporary = tempfile.mkstemp(prefix="fleet-download-")
     os.close(descriptor)
     try:
         unavailable = "Workspace file is unavailable"
         with translate(unavailable, invalid="Invalid workspace path", status=404), runtime.turn_lock:
-            runtime.harness.hydrate_volume_from_postgres(session_id)
             runtime.sandbox_mgr.read_workspace_file_to_path(rel_path, temporary, max_bytes=_MAX_FILE_BYTES)
     except BaseException:
         with suppress(FileNotFoundError):
@@ -61,7 +58,7 @@ def read_workspace_file(session_id: str, rel_path: str, runtime: Runtime) -> Fil
 
 
 @router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=FileWritten)
-def write_workspace_file(session_id: str, rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> dict:
+def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> dict:
     with translate("Workspace write failed", invalid="Invalid workspace path or content"):
         if (body.content is None) == (body.content_base64 is None):
             raise HTTPException(status_code=422, detail="Supply exactly one of content or content_base64")
@@ -73,9 +70,7 @@ def write_workspace_file(session_id: str, rel_path: str, body: WorkspaceWriteReq
         if len(content) > _MAX_FILE_BYTES:
             raise HTTPException(status_code=413, detail="Workspace file exceeds the 25 MB limit")
         with runtime.turn_lock:
-            runtime.harness.hydrate_volume_from_postgres(session_id)
             mounted_path = runtime.sandbox_mgr.write_workspace_file(rel_path, content)
-            runtime.harness.persist_workspace_files(session_id)
     return {
         "path": rel_path,
         "mounted_path": mounted_path,
@@ -85,17 +80,15 @@ def write_workspace_file(session_id: str, rel_path: str, body: WorkspaceWriteReq
 
 
 @router.delete("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=Deleted)
-def delete_workspace_file(session_id: str, rel_path: str, runtime: Runtime) -> dict:
+def delete_workspace_file(rel_path: str, runtime: Runtime) -> dict:
     unavailable = "Workspace file could not be deleted"
     with translate(unavailable, invalid="Invalid workspace path", status=404), runtime.turn_lock:
-        runtime.harness.hydrate_volume_from_postgres(session_id)
         runtime.sandbox_mgr.delete_workspace_file(rel_path)
-        runtime.harness.persist_workspace_files(session_id)
     return {"deleted": rel_path}
 
 
 @router.post("/sessions/{session_id}/attach", response_model=Attached)
-def attach_file(session_id: str, runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> dict:
+def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> dict:
     try:
         with translate("Attachment storage is unavailable"):
             name = (file.filename or "attachment").replace("\\", "/").split("/")[-1]
@@ -113,9 +106,7 @@ def attach_file(session_id: str, runtime: Runtime, settings: Settings, file: Ann
                         output.write(chunk)
                 relative_path = f"files/{name}"
                 with runtime.turn_lock:
-                    runtime.harness.hydrate_volume_from_postgres(session_id)
                     mounted_path = runtime.sandbox_mgr.write_workspace_file_from_path(relative_path, temporary)
-                    runtime.harness.persist_workspace_files(session_id)
             finally:
                 with suppress(FileNotFoundError):
                     os.unlink(temporary)

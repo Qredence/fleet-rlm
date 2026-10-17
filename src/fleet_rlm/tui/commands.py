@@ -177,8 +177,6 @@ def _memory(ctx: Context, arg: str) -> None:
     entries = []
     for item in memories:
         status = "reviewed" if item.get("reviewed") else "unreviewed"
-        if item.get("stale"):
-            status += ", stale sources"
         entries.append(
             f"[{item.get('kind', 'memory')}] {item.get('content', '')}\n"
             f"ID: {item.get('memory_id', 'unknown')} · {status}"

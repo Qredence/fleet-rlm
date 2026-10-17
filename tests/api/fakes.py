@@ -52,9 +52,8 @@ class FakeHarness(SimpleNamespace):
         defaults: dict[str, Any] = {
             "claim_turn": lambda *_args: None,
             "memories": lambda *_args, **_kwargs: [],
-            "hydrate_volume_from_postgres": lambda _session: ("", ""),
-            "sync_volume_to_postgres": lambda **_kwargs: [],
-            "persist_workspace_files": lambda _session: [],
+            "load_context": lambda _session: ("", ""),
+            "commit_turn": lambda **_kwargs: [],
             "turn_status": lambda _turn_id: None,
             "store": store_with(),
         }

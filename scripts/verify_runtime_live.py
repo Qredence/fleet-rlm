@@ -154,7 +154,6 @@ def main() -> None:
                 ).status_code
                 == 200
             )
-            assert client.get(f"/sessions/{session}/memory").json()["memories"][0]["stale"] is False
             matched = client.get(f"/sessions/{session}/memory", params={"q": "reconcile ledger anomalies"}).json()
             assert [item["memory_id"] for item in matched["memories"]] == ["ledger"]
             report["cases"]["source_backed_memory"] = "passed"
@@ -224,27 +223,15 @@ def main() -> None:
             assert configuration["models"] == {"root": args.model, "sub": alternate}
             assert configuration["context"]["workspace_path"] == "files/ledger.csv"
             report["cases"]["model_discovery_selection"] = {"count": len(models), "configuration": configuration}
-            # Remove the disposable working copy without syncing the deletion.
-            # Recovery must use PostgreSQL, not retained Daytona Volume bytes.
-            for path in manager.list_workspace_files():
-                manager.delete_workspace_file(path)
-            assert manager.list_workspace_files() == []
-            report["cases"]["working_copy_removed"] = "passed"
-        # Rebuild the app and root manager, recovering exclusively from PostgreSQL.
+        # Rebuild the app and root manager: Turns and settings come from PostgreSQL, files from the Volume.
         with TestClient(create_app(settings=settings, configure_observability=False)) as resumed:
             recovered_config = resumed.get(f"/sessions/{session}/config").json()
             assert recovered_config == configuration
             report["cases"]["model_configuration_restart"] = "passed"
             assert resumed.get(f"/sessions/{session}/workspace/files/artifacts/summary.json").json() == expected
             assert len(resumed.get(f"/sessions/{session}/history").json()["turns"]) == 1
-            assert resumed.get(f"/sessions/{session}/memory").json()["memories"][0]["stale"] is False
+            assert resumed.get(f"/sessions/{session}/memory").json()["memories"][0]["memory_id"] == "ledger"
             report["cases"]["restart_recovery"] = "passed"
-            changed = resumed.put(
-                f"/sessions/{session}/workspace/files/files/ledger.csv", json={"content": "id,value\n0,7\n"}
-            )
-            assert changed.status_code == 200
-            assert resumed.get(f"/sessions/{session}/memory").json()["memories"][0]["stale"] is True
-            report["cases"]["stale_memory_detection"] = "passed"
             manager = resumed.app.state.session_registry._sessions[session].sandbox_mgr
             manager.reset_turn_budget()
             allowance = manager.max_llm_calls
