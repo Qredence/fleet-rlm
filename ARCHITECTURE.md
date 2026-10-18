@@ -45,6 +45,8 @@ Additive Lite tables retain reviewed source-backed memories, idempotent turn
 intents/outcomes, and persisted mode/dataset settings without renaming old tables.
 A PostgreSQL session advisory lock gives one worker ownership of a runtime and
 is released on close or database disconnect. One connection is held per runtime.
+Eviction fences the runtime before releasing its Turn lock, so requests holding
+stale references cannot use it. Lease renewal cannot publish a connection after closure begins.
 
 Fleet ships bundled Skills in `src/fleet_rlm/bundled_skills/` (tabular-analysis,
 long-context-search, delegation). Each Turn synchronizes them, then user Skills
@@ -188,6 +190,8 @@ polls for.
 A failed transport makes the outcome unknown: the Turn aborts, the root sandbox
 is stopped, and code is never replayed. A deadline interrupts the running cell
 and leaves the context usable; deleting a context ends anything it was running.
+Declared Python artifact verification also executes once and reports an unknown
+outcome on transport failure; maintenance-call retries do not replay artifacts.
 
 Each `sandbox.exec` span covers one `run_code` call through result interpretation,
 with bounded redacted code/output, identity, host-call count, and outcome. Remote Python

@@ -1,85 +1,78 @@
 # Fleet-RLM
 
-**A recursive AI system for code-driven reasoning, task delegation, and durable work.**
+**A Python agent runtime for working with files, executing code, and delegating tasks.**
 
-Fleet-RLM combines language models, executable workspaces, and recursive agents
-to explore data, solve tasks, and produce artifacts. Agents can delegate subtasks
-to child agents in separate Daytona sandboxes, while the system persists session
-state and exposes execution through live events and traces.
+Fleet-RLM combines DSPy reasoning with Daytona execution, PostgreSQL persistence,
+and MLflow observability. Use its streaming terminal client to inspect data,
+run calculations, create artifacts, and delegate independent investigations to
+child agents. The current implementation is also called **Fleet RLM Lite**.
 
-Rather than putting every byte of a dataset into a prompt, it keeps data in
-workspace files and gives the model bounded previews and handles it can use to
-explore the source programmatically.
+Large inputs stay in workspace files. The model receives paths, metadata, digests,
+and bounded previews, then explores the data through Python. Sessions retain
+history, files, reviewed memory, and runtime selections across restarts;
+interpreter variables are not durable session state.
 
-The current implementation is a compact Python runtime, also called **Fleet RLM
-Lite**: DSPy orchestrates the agents, Daytona runs generated Python, PostgreSQL
-persists session state, and a streaming terminal client makes execution visible.
-
-## What you can do
-
-- **Work with file-backed context.** Attach data, select an input file, and ask
-  the agent to inspect, calculate, or produce artifacts. Dataset handles include
-  paths, metadata, source digests, and bounded previews—not the entire dataset.
-- **Delegate recursively.** DSPy RLM agents can create child agents with fresh
-  Daytona sandboxes and separate workspace subpaths. Explicit delegation can
-  restrict copied inputs and further delegation, within shared execution budgets.
-- **Continue a session.** Workspace files, turn history, outcomes, model choices,
-  execution mode, and context selection persist in PostgreSQL. Restarting recovers
-  durable state, not the Python interpreter's in-memory variables.
-- **Reuse Skills and reviewed memory.** Bundled Agent Skills plus your own from
-  `.fleet/skills/` are synced into every Session's Daytona workspace; with a
-  TypeSafe Jev backend the relevant ones are preloaded per Turn. Source-backed
-  memories are retained with review status. `.agents/skills/` is developer guidance, not user Skill content.
-- **Inspect execution.** Follow model and tool activity, generated code, execution
-  results, agent lifecycles, and budgets in the terminal; correlate turns with
-  MLflow traces.
-- **Evaluate program changes deliberately.** Use reviewed examples and GEPA to
-  produce versioned candidate programs, then explicitly approve one after its
-  recorded identities match the current runtime. Older manifests require
-  reevaluation. Optimization never replaces the active program by itself.
-
-## How it fits together
+## Runtime at a glance
 
 ```text
-Terminal client ── HTTP / SSE ──> FastAPI server ──> DSPy engine
-                                      │                 │
-                                      │                 └── Daytona sandboxes
-                                      ├── PostgreSQL        ├── root agent
-                                      └── MLflow            └── child agents
+Terminal client ── HTTP / SSE ──> FastAPI ──> DSPy Turn program
+                                    │              │
+                                    │              └── Daytona: generated Python,
+                                    │                  root and child sandboxes
+                                    ├── PostgreSQL: durable session state
+                                    └── MLflow: traces and evaluation
 ```
 
-The runtime pins **DSPy 3.4.1** and **Daytona 0.224.0**. Generated Python executes
-in Daytona; model credentials and host-mediated tools remain on the server.
-See [Architecture](ARCHITECTURE.md) for ownership and trust boundaries.
+The dependency manifest supports DSPy `>=3.4.1,<3.5` and pins Daytona `0.224.0`
+and MLflow `3.17.1`; [uv.lock](uv.lock) records resolved versions. The integration
+uses DSPy 3.4.1's RLM, Flex, and native GEPA contracts. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for runtime ownership and execution boundaries.
 
-### Execution modes
+## RLM, Flex, and routing
 
-| Mode | Entry point | Use |
-| --- | --- | --- |
-| `hybrid` (default) | Route between direct chain-of-thought, Flex, and deep RLM | Let the engine choose a path for each task. |
-| `rlm` | DSPy RLM | Start with recursive, code-driven exploration. |
-| `flex` | DSPy Flex | Start with a generated DSPy program. |
+| Session mode | Execution |
+| --- | --- |
+| `hybrid` (default) | A router selects `direct`, `flex`, or `rlm` for each Turn. |
+| `rlm` | Enter the primary RLM directly for iterative code-driven reasoning. |
+| `flex` | Execute the current Flex module implementation directly. |
 
-Change modes with `/mode rlm`, `/mode flex`, or `/mode hybrid`. Tasks with a
-selected dataset cannot take the context-free direct-answer route.
+The `direct` route uses chain-of-thought answer generation without code execution.
+A selected dataset prevents this context-free route. Routing errors or unknown
+labels fall back to RLM. Change modes with `/mode hybrid`, `/mode rlm`, or
+`/mode flex`.
+
+**RLM is the iterative reasoning loop.** It generates Python, observes execution
+results, and continues until it submits an answer or reaches its limits. GEPA
+can tune the primary RLM's action-generation and fallback-extraction instructions.
+
+**Flex makes a module's source code optimizable.** Fleet supplies Flex with the
+same task signature, delegation tools, and a Daytona interpreter. Its initial
+implementation wraps an RLM because tools are present. A GEPA candidate can
+replace that implementation with different Python control flow and DSPy calls.
+Choosing Flex does not by itself imply a deterministic or faster workflow.
+
+Both execution routes can delegate. `spawn_agent` runs a subtask in a fresh child
+sandbox; `spawn_agents` runs independent subtasks concurrently within the shared
+limits. Explicit delegation selects copied inputs and promotes resulting artifacts
+with provenance. Dynamically created child RLMs are not separate persisted GEPA
+instruction components.
 
 ## Quickstart
 
-### 1. Prepare the external services
+### 1. Prepare services
 
-You need Python **3.11–3.13**, [uv](https://docs.astral.sh/uv/), and:
+Use Python **3.11–3.13** and [uv](https://docs.astral.sh/uv/). Live execution needs:
 
-| Resource | Required configuration |
+| Service | Configuration |
 | --- | --- |
-| An existing PostgreSQL database | `FLEET_DATABASE_URL` |
-| A Daytona organization, Volume, and usable snapshot | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DAYTONA_VOLUME_ID`, `FLEET_DAYTONA_SNAPSHOT` |
-| Authorized Databricks Unity Gateway model services | `DATABRICKS_TOKEN`, plus `DATABRICKS_HOST` or `FLEET_LLM_BASE_URL`; accessible root, sub, and reflection model IDs |
+| Existing PostgreSQL database | `FLEET_DATABASE_URL` |
+| Daytona organization, Volume, and usable snapshot | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DAYTONA_VOLUME_ID`, `FLEET_DAYTONA_SNAPSHOT` |
+| Authorized Databricks Unity Gateway model services | `DATABRICKS_TOKEN`, plus `DATABRICKS_HOST` or `FLEET_LLM_BASE_URL`, and accessible model IDs |
 
-Runtime model IDs use `openai/<service-id>` through DSPy's native `lm15` engine.
-Fleet requires an HTTPS Gateway URL and does not fall back to LiteLLM. Example
-model IDs in the configuration do not guarantee access in your workspace.
-MLflow defaults to local SQLite; remote Databricks tracing needs additional
-configuration.
+DSPy runtime model IDs use `openai/<service-id>` through the native `lm15` engine.
+The Gateway URL must use HTTPS; Fleet does not fall back to LiteLLM. Example model
+IDs do not guarantee availability in your workspace. Evaluation and optimization
+also require access to their configured judge and reflection models.
 
 ### 2. Install and configure
 
@@ -91,140 +84,204 @@ cp .env.example .env
 ${EDITOR:-vi} .env
 ```
 
-Replace the placeholders in `.env` with your resources and credentials. Fleet
-creates its own PostgreSQL tables at startup, but does not create the database.
-Never commit `.env` or credentials. See the
-[configuration reference](docs/reference/configuration.md) for settings and limits.
+Fill in your resources and credentials. Fleet creates its tables in the existing
+database at startup. Never commit `.env` or credentials.
 
-### 3. Start Fleet
+Non-secret defaults live in [config/fleet.toml](config/fleet.toml). Precedence is
+built-in defaults, TOML, `.env`, environment, then explicit overrides; persisted
+Session selections can override process settings for that Session. See the
+[configuration reference](docs/reference/configuration.md) for details.
+
+### 3. Start a session
 
 ```bash
 uv run fleet cli --session research-1
 ```
 
-One command starts the API server on the configured loopback port (default 8000,
-log in `.fleet/logs/server.log`), opens the terminal client, and stops the server
-when you exit. By default, runtime traces use the configured Databricks MLflow
-experiment. Pass `--mlflow local` to use a local MLflow server under `.fleet/mlflow`;
-pass `--mlflow env` to explicitly use the configured tracking URI.
-If an API server is already running on that port (for example from `uv run fleet
-serve`), the client connects to it and leaves it running; pass `--url` to connect to a
-specific server without starting anything. Reuse a session ID to continue its saved
-work; omit `--session` to create a new short ID.
+The client starts a server on the configured loopback port (default `8000`), logs
+it to `.fleet/logs/server.log`, and stops it when you exit. If a server is already
+running on that port, the client connects and leaves it running. Pass `--url` to
+connect to a specific server without starting one, or run `uv run fleet serve`
+separately.
+
+The default MLflow mode is Databricks. Pass `--mlflow local` to start a local
+MLflow server under `.fleet/mlflow`, or `--mlflow env` to use the configured
+tracking URI. Reuse the Session ID to continue saved work; omit `--session` to
+create a new short ID.
 
 ### 4. Work with a file
 
-For example, with a local CSV containing `region` and `revenue` columns:
+For a CSV with `region` and `revenue` columns:
 
 ```text
 /attach ./sales.csv
-/files
 /context files/sales.csv
-Calculate total revenue by region and save the summary as artifacts/revenue_by_region.csv.
+Calculate revenue by region and save artifacts/revenue_by_region.csv.
 /artifacts
 /get artifacts/revenue_by_region.csv ./revenue_by_region.csv
-/history
 /trace
 ```
 
-The prompt is a task for the agent, not a guaranteed output. Inspect the result
-and any generated artifact before relying on it.
+Inspect the answer and artifact before relying on them. Use `/help` for available
+commands and Tab completion for commands and arguments.
 
-## Terminal workflow and observability
-
-The Rich / Prompt Toolkit client accepts free-form tasks and supports Tab
-completion for slash commands and arguments. Use `/help` for the full command list.
-
-| Area | Commands |
+| Workflow | Commands |
 | --- | --- |
-| Workspace | `/attach`, `/files`, `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/artifacts` |
-| Task context and execution | `/context <path>`, `/context clear`, `/mode` |
-| Models and settings | `/models`, `/model root`, `/model sub`, `/config`, `/settings` |
-| Durable state | `/sessions`, `/history`, `/memory [query]` |
+| Workspace and artifacts | `/attach`, `/files`, `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/artifacts` |
+| Context and execution | `/context <path>`, `/context clear`, `/mode` |
+| Models and configuration | `/models`, `/model root`, `/model sub`, `/config`, `/settings` |
+| Sessions and memory | `/sessions`, `/history`, `/memory [query]` |
 | Skills | `/skills`, `/skills push`, `/skills pull` |
-| Inspection and program updates | `/trace`, `/optimize` |
+| Traces and optimization | `/trace`, `/optimize` |
 
-Streaming events expose route summaries, model/module/tool start and end events,
-IDs and timing, bounded tool arguments and results, generated Python, execution
-output and errors, sandbox lifecycle events, and budget usage. **These are execution
-records, not access to a model's private chain-of-thought.** A request for a terse
-final answer does not hide the client's execution-event panels.
+Bundled Skills and user Skills from `.fleet/skills/` are synchronized into the
+workspace. An optional TypeSafe Jev backend selects relevant Skills for preloading.
+`.agents/skills/` contains developer guidance and is never user Skill content.
 
-Tool payload redaction is best-effort, not a data-loss-prevention guarantee. Treat
-terminal captures, traces, and artifacts as potentially sensitive.
+## Evaluation: what is measured
 
-## Evaluation and optimization
+Fleet evaluates complete Turn results against reviewed expectations. The shared
+`fleet_metric` supplies GEPA with a scalar score and natural-language feedback.
+It can also be reported through MLflow.
 
-Every Turn is an MLflow trace. `fleet optimize --session <id>` (or `/optimize` in
-the TUI) runs the explicit native DSPy GEPA workflow; it does not automatically
-score historical traces. `fleet eval label <trace-id> --answer "..." [--value V]
-[--route R]` adds gold labels. Only approved, selected replay examples with valid
-immutable snapshots can enter the curated optimization dataset; a lossy trace
-can remain evaluation evidence, with its identity references, but cannot supply
-replay content. Partial labels preserve the existing expectations for that
-example. Selected replays must have gold labels before they can be approved for
-GEPA.
+| Check | Evidence | When applied |
+| --- | --- | --- |
+| Answer correctness and safety | Judge compares task, answer, and reviewed reference | Every nonempty answer; reference-free judging is available outside curated gold examples |
+| Expected values | Required values appear in the answer | Values are labeled |
+| Route correctness | Effective route matches the label | A route is labeled |
+| Artifact correctness | Text, JSON, CSV, or declared Python verification matches expectations | Artifacts are declared |
+| Delegation correctness | Child count, inputs, success, and promoted artifact receipts match | Children are declared |
+| Execution efficiency | Host-recorded model-call usage and sandbox errors | Usage is available |
 
-GEPA uses the built-in code proposer and current deployment settings, including
-persisted Session overrides. The manifest records the effective model
-configuration provenance. Search uses grouped train/dev data; holdout is read
-only after search. Each candidate and incumbent receives three paired validation
-passes. The correctness quality is the minimum of judge correctness, labeled
-expected-value checks, and a labeled route check. The composite score is zero
-when quality is below 1; otherwise it is `0.9 + 0.1 × efficiency`. A critical
-case must have quality 1 in every pass. Promotion also requires no aggregate
-quality regression on dev or holdout, improved dev composite score, no holdout
-composite regression, zero holdout execution errors, and measured usage. The
-candidate manifest records split results and provenance.
+An empty answer or any failed applicable quality check scores zero. Otherwise:
 
-At `--approve`, Fleet verifies that the current incumbent, configuration, code,
-and dependencies still match the candidate's recorded identities. A stale
-manifest must be reevaluated before approval; `--approve` is not an unchecked
-rollback mechanism. Reflection uses `FLEET_REFLECTION_MODEL`. This optimizes
-DSPy programs, not model weights, and makes no quality claim without measured
-results.
+```text
+efficiency = max(0, 1 - 0.015 × max(0, model_calls - 3) - 0.15 × sandbox_errors)
+score      = 0.9 + 0.1 × efficiency
+```
 
-## Limits and security
+Missing usage earns no efficiency credit and cannot support promotion. A labeled
+route is a hard quality requirement, even when another route produces the right
+answer. Artifact and delegation checks require explicit structured expectations.
+Efficiency is a call/error proxy, not a token-cost or latency measurement.
 
-Fleet is intended for **trusted workloads behind a secured boundary**, not an
-unvalidated hostile multi-tenant deployment.
+The broader MLflow suite also reports relevance, retrieval groundedness,
+sandbox-verification discipline, Skill-use discipline, and trace-based efficiency.
+These additional metrics do not automatically become GEPA objectives. Retrieval
+groundedness applies only when retrieval spans exist. See the
+[evaluation reference](docs/reference/evaluation.md) for labeling and scoring.
 
-- **The HTTP API has no caller authentication.** It binds to loopback by default.
-  `FLEET_ALLOW_NON_LOOPBACK_BIND=true` permits another bind address; it does not
-  secure the service. Do not expose it directly to an untrusted network.
-- Default turn limits are 150 model calls, recursive depth 3, 8 total child
-  sandboxes, 4 active children, and a 900-second whole-turn watchdog. File-backed
-  context is not unlimited: uploads are capped at 25 MB; workspace synchronization
-  is bounded to 25 MB per file, 100 MB total, and 5,000 files.
-- Delegation tool restrictions are not a Python or network security policy.
-  Daytona deployment policy governs generated code execution.
-- Local tests do not certify your live Gateway, Daytona resources, database,
-  provider-side isolation, or answer correctness.
+## Optimization with GEPA
 
-## API, documentation, and development
+GEPA improves DSPy program instructions and Flex source code; it does not train
+model weights or rewrite Fleet's host runtime. Fleet uses native `dspy.GEPA` and
+its built-in proposers. Serving models execute candidates, the judge scores
+answers, and the reflection model proposes revisions.
 
-The FastAPI interface supports session management, streaming turns, workspace
-files, Skills, memory review, model and mode selection, and program reloads.
-Use the [HTTP API reference](docs/reference/http-api.md) and checked-in
-[OpenAPI contract](openapi.yaml) rather than treating this README as an endpoint list.
+```text
+Selected immutable replays + approved gold labels
+                       │
+                       ▼
+             Split by source group
+                       │
+             Train / dev GEPA search
+                       │
+               Selected candidate
+                       │
+        Three baseline/candidate validation passes
+                  on dev + holdout
+                       │
+              Save report and candidate
+                       │
+          Passing gate + explicit approval
+                       │
+              Serve from the next Turn
+```
 
-- [Documentation index](docs/index.md)
-- [CLI reference](docs/reference/cli.md)
-- [Configuration](docs/reference/configuration.md)
-- [Database and persistence](docs/reference/database.md)
-- [Architecture](ARCHITECTURE.md)
-- [Contributing](CONTRIBUTING.md)
+The curated dataset needs at least eight approved examples from three source
+groups. Replay capture must have been selected for the original Turn; labeling
+a trace afterward cannot reconstruct missing workspace inputs. Critical source
+groups are reserved for holdout. Benchmark-labeled traces are excluded from the
+curated optimization dataset.
 
-For development:
+After collecting and reviewing eligible examples:
+
+```bash
+uv run fleet eval label TRACE_ID --answer "Reviewed answer" --value "42"
+uv run fleet optimize --session research-1 --gepa-budget light
+```
+
+Use `--expectations-file` when labeling artifact/delegation requirements, and
+`--critical` with deterministic expectations for critical holdout cases. The
+[HTTP API reference](docs/reference/http-api.md) describes replay capture; the
+[evaluation runbook](docs/runbooks/evaluation-canary.md) covers live collection.
+
+Search uses train/dev examples only. Each replay gets a fresh disposable runtime
+restored from its immutable snapshot, using current deployment settings and
+Session overrides. After search, baseline and candidate each receive three
+validation passes with serving response caches disabled.
+
+Promotion requires improved mean dev score, no holdout score or aggregate
+quality regression, measured usage, no candidate holdout errors, passing critical
+holdout cases in every pass, and changed instructions or Flex code. A dataset
+without critical holdout cases cannot produce an approvable candidate.
+
+A passing candidate is saved but remains inactive until explicitly approved:
+
+```bash
+uv run fleet optimize --session research-1 --approve CANDIDATE_VERSION
+```
+
+Approval checks the candidate bytes and recorded incumbent, configuration, code,
+and dependency identities. Stale evidence requires reevaluation.
+
+`--max-metric-calls` can replace `--gepa-budget`; it is a search budget, not a
+whole-run spending limit. Reflection, judging, retries, sandbox lifecycle, and
+final validation incur additional work. Final validation alone runs
+`6 × (dev examples + holdout examples)` Turn replays. Passing tests or a promotion
+gate is not proof of general improvement beyond the evaluated workload.
+
+## Operational boundaries
+
+- The HTTP API has no caller authentication. It binds to loopback by default;
+  `FLEET_ALLOW_NON_LOOPBACK_BIND=true` permits another address but adds no access
+  control. Deploy behind a secured boundary.
+- Host-enforced Turn budgets bound model calls, runtime, recursion depth, and
+  child sandboxes. See [configuration](docs/reference/configuration.md) for the
+  current defaults and file limits.
+- Generated Python runs in Daytona. Delegation-tool restrictions are not a
+  Python or network security policy; provider-side deployment policy governs
+  execution isolation.
+- Streaming events and MLflow traces expose execution activity, not a model's
+  private chain-of-thought. Redaction is best-effort; captures, traces, and
+  artifacts may contain sensitive data.
+- Live Gateway, Daytona, database, and evaluation behavior requires validation
+  with the actual deployment resources.
+
+## Development and documentation
 
 ```bash
 make install-dev
 make check
 ```
 
-`make check` runs non-live tests, lint, formatting, type checks, documentation links,
-OpenAPI validation, and a package build. Live provider and evaluation runs require
-external resources and are not part of this gate.
+`make check` runs non-live tests, lint, formatting, type checks, documentation
+links, OpenAPI validation, and a package build. For documentation-only changes,
+run `make check-docs` and `git diff --check`. Live evaluation and optimization
+require external resources and are not part of the ordinary quality gate.
+
+- [Documentation index](docs/index.md)
+- [CLI reference](docs/reference/cli.md)
+- [Configuration](docs/reference/configuration.md)
+- [Evaluation](docs/reference/evaluation.md)
+- [HTTP API](docs/reference/http-api.md) and [OpenAPI contract](openapi.yaml)
+- [Database and persistence](docs/reference/database.md)
+- [Architecture](ARCHITECTURE.md)
+- [Contributing](CONTRIBUTING.md) and [agent instructions](AGENTS.md)
+- DSPy 3.4.1: [RLM](https://dspy.ai/3.4.1/diving-deeper/rlm/),
+  [Flex](https://dspy.ai/3.4.1/diving-deeper/flex/),
+  [GEPA](https://dspy.ai/3.4.1/diving-deeper/gepa-in-depth/), and
+  [metrics](https://dspy.ai/3.4.1/diving-deeper/metrics-and-evaluation/)
 
 ## License
 
