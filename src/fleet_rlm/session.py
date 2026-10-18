@@ -70,6 +70,7 @@ class SessionRuntime:
         self._lease_monitor.start()
 
     def close_lease(self) -> None:
+        """Stop the lease monitor and close the dedicated lease connection."""
         self._lease_monitor_stop.set()
         if self._lease_monitor is not None:
             self._lease_monitor.join(timeout=5)
@@ -79,11 +80,13 @@ class SessionRuntime:
             self.lease = None
 
     def set_mode(self, mode: str) -> None:
+        """Set the execution mode on this Session and its engine, and record it as an override."""
         self.execution_mode = mode
         self.engine.execution_mode = mode
         self.configuration_overrides["execution_mode"] = mode
 
     def set_engine(self, engine: AdaptiveFleetEngine) -> None:
+        """Install a rebuilt engine and point the sandbox manager at its sub LM."""
         self.engine = engine
         self.sandbox_mgr.sub_lm = engine.sub_lm
         self.configuration_overrides.update(
@@ -118,6 +121,7 @@ class SessionRuntimeRegistry:
     """Build a separate sandbox, namespace, and engine per Session, once."""
 
     def __init__(self, settings: FleetSettings, store: Store | None) -> None:
+        """Store the settings and optional Store; no Session runtimes exist yet."""
         self.settings = settings
         self.store = store
         self.root_lm: Any = None
@@ -127,6 +131,7 @@ class SessionRuntimeRegistry:
         self._lock = threading.Lock()
 
     def get(self, session_id: str) -> SessionRuntime:
+        """Return the Session's runtime, validating its id and building it on first use."""
         session_id = validate_session_id(session_id)
         with self._lock:
             runtime = self._sessions.get(session_id)
@@ -195,6 +200,7 @@ class SessionRuntimeRegistry:
         return runtime
 
     def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> AdaptiveFleetEngine:
+        """Build an engine for this Session that uses the given root and sub model names."""
         settings = settings_for_session(self.settings, {"models": models})
         root, sub, _, _ = settings.build_lms()
         return AdaptiveFleetEngine(
@@ -207,6 +213,7 @@ class SessionRuntimeRegistry:
         )
 
     def close(self) -> None:
+        """Shut down every Session sandbox, then release each lease."""
         with self._lock:
             runtimes = tuple(self._sessions.values())
             self._sessions.clear()

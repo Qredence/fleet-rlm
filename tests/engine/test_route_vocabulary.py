@@ -1,4 +1,4 @@
-"""One route vocabulary: direct / flex / rlm, with legacy names readable but never produced."""
+"""One route vocabulary: direct / flex / rlm."""
 
 from types import SimpleNamespace
 
@@ -13,18 +13,15 @@ from fleet_rlm.engine.signatures import TRIAGE_CRITERIA, TRIAGE_ROUTE, Route, pa
         ("direct", Route.DIRECT),
         ("flex", Route.FLEX),
         ("rlm", Route.RLM),
-        ("direct_cot", Route.DIRECT),
-        ("single_rlm", Route.FLEX),
-        ("flex_pipeline", Route.FLEX),
-        ("delegated_rlm", Route.RLM),
-        ("deep_rlm", Route.RLM),
         (" rlm ", Route.RLM),
         (SimpleNamespace(value="flex"), Route.FLEX),
         (None, None),
         ("unknown", None),
+        ("direct_cot", None),
+        ("deep_rlm", None),
     ],
 )
-def test_parse_route_reads_current_and_legacy_names(raw, expected):
+def test_parse_route_reads_only_current_names(raw, expected):
     assert parse_route(raw) is expected
 
 

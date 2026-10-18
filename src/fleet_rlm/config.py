@@ -159,6 +159,7 @@ class FleetSettings(BaseSettings):
     _configuration_sources: dict[str, str] = PrivateAttr(default_factory=dict)
 
     def __init__(self, **values: Any) -> None:
+        """Load settings while recording which source supplied each explicit value."""
         sources: dict[str, str] = {}
         token = _SETTINGS_SOURCES.set(sources)
         try:
@@ -176,6 +177,10 @@ class FleetSettings(BaseSettings):
         dotenv_settings: Any,
         file_secret_settings: Any,
     ) -> tuple[Any, ...]:
+        """Order sources as explicit, environment, .env, then TOML, and exclude file secrets.
+
+        Credentials come only from explicit input, the environment, and .env; the TOML map cannot set them.
+        """
         del file_secret_settings  # Credentials intentionally use environment/.env only.
         aliases = {name: name for name in cls.model_fields}
         for name, field in cls.model_fields.items():
@@ -378,6 +383,7 @@ class FleetSettings(BaseSettings):
     )
     @classmethod
     def required_values_are_nonempty(cls, value: str) -> str:
+        """Strip whitespace and reject empty required values."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("value must not be empty")
@@ -386,6 +392,7 @@ class FleetSettings(BaseSettings):
     @field_validator("fleet_root_model", "fleet_sub_model", "fleet_reflection_model")
     @classmethod
     def model_routes_use_native_gateway(cls, value: str) -> str:
+        """Require runtime models to use the native 'openai/<service-id>' route."""
         if not value.startswith("openai/") or not value.removeprefix("openai/").strip():
             raise ValueError("Runtime models require an OpenAI-compatible 'openai/<service-id>' route")
         return value
@@ -393,6 +400,7 @@ class FleetSettings(BaseSettings):
     @field_validator("fleet_llm_base_url")
     @classmethod
     def gateway_override_uses_https(cls, value: str) -> str:
+        """Accept an empty gateway override, or an HTTPS workspace URL."""
         parsed = urlsplit(value)
         if value and (parsed.scheme != "https" or not parsed.netloc):
             raise ValueError("Gateway base URL must be an HTTPS workspace URL")
@@ -401,6 +409,7 @@ class FleetSettings(BaseSettings):
     @field_validator("typesafe_model")
     @classmethod
     def typesafe_model_is_nonempty(cls, value: str) -> str:
+        """Strip the TypeSafe route model and reject an empty value."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("TypeSafe route model must not be empty")
@@ -409,6 +418,7 @@ class FleetSettings(BaseSettings):
     @field_validator("databricks_host", "fleet_llm_base_url", "mlflow_tracking_uri")
     @classmethod
     def public_urls_do_not_contain_credentials(cls, value: str) -> str:
+        """Reject URLs that embed credentials or carry HTTP query strings and fragments."""
         parsed = urlsplit(value if "://" in value else "https://" + value)
         if parsed.username is not None or parsed.password is not None:
             raise ValueError("Configuration URLs cannot contain credentials; use environment credentials")
@@ -419,11 +429,13 @@ class FleetSettings(BaseSettings):
     @field_validator("fleet_shared_notes_subpath")
     @classmethod
     def shared_notes_subpath_is_relative(cls, value: str) -> str:
+        """Validate the shared notes Volume subpath as relative."""
         return validate_shared_notes_subpath(value)
 
     @field_validator("fleet_database_schema")
     @classmethod
     def database_schema_is_safe_identifier(cls, value: str) -> str:
+        """Normalize the database schema and require a safe lowercase identifier."""
         normalized = value.strip()
         if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", normalized):
             raise ValueError("database schema must be a lowercase PostgreSQL identifier")
@@ -432,6 +444,7 @@ class FleetSettings(BaseSettings):
     @field_validator("fleet_judge_model")
     @classmethod
     def judge_model_is_a_provider_uri(cls, value: str) -> str:
+        """Require an MLflow '<provider>:/<model>' judge URI and strip surrounding whitespace."""
         provider, _, name = value.strip().partition(":/")
         if not provider or not name.strip():
             raise ValueError("Judge model must be an MLflow '<provider>:/<model>' URI")
@@ -439,6 +452,10 @@ class FleetSettings(BaseSettings):
 
     @model_validator(mode="after")
     def databricks_tracking_requires_governed_trace_storage(self) -> FleetSettings:
+        """Cross-check database, Lakebase, and Databricks MLflow settings for consistency.
+
+        Databricks tracking needs Unity Catalog trace storage and absolute experiment paths.
+        """
         if self.fleet_database_migration_url:
             from psycopg.conninfo import conninfo_to_dict
 

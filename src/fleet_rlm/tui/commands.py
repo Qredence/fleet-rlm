@@ -23,23 +23,30 @@ MODES = ("rlm", "flex", "hybrid")
 
 @dataclass(frozen=True, slots=True)
 class Context:
+    """HTTP client and Session id that slash command handlers use."""
+
     client: httpx.Client
     session_id: str
 
     @property
     def session(self) -> str:
+        """Return the URL path prefix for this Session, with its id percent-encoded."""
         return f"/sessions/{quote(self.session_id, safe='')}"
 
     def get(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a GET request, raising on an HTTP error status."""
         return _ok(self.client.get(path, **kwargs))
 
     def put(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a PUT request, raising on an HTTP error status."""
         return _ok(self.client.put(path, **kwargs))
 
     def post(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a POST request, raising on an HTTP error status."""
         return _ok(self.client.post(path, **kwargs))
 
     def delete(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a DELETE request, raising on an HTTP error status."""
         return _ok(self.client.delete(path, **kwargs))
 
 
@@ -54,6 +61,8 @@ def _file(path: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Command:
+    """One slash command: its usage line, help text, handler, and completion options."""
+
     usage: str
     help: str
     run: Callable[[Context, str], None]
@@ -267,11 +276,13 @@ EXIT_COMMANDS = {"/exit", "/quit"}
 
 
 def help_text() -> str:
+    """Return the `/help` text listing every slash command and the built-in commands."""
     lines = [f"- `{command.usage}` — {command.help}" for command in COMMANDS.values()]
     return "\n".join([*lines, "- `/help` — show this list", "- `/exit` — quit the CLI"])
 
 
 def completion_options() -> dict[str, Any]:
+    """Return the nested completer options for every slash command, including help and exit."""
     return {
         **{name: command.completions for name, command in COMMANDS.items()},
         **dict.fromkeys(["/help", *EXIT_COMMANDS]),

@@ -34,6 +34,10 @@ _DISCONNECT_POLL_SECONDS = 15
 async def stream_turn(
     session_id: str, req: TurnRequest, request: Request, runtime: Runtime, settings: Settings
 ) -> AsyncIterator[ServerSentEvent]:
+    """Run one Turn and stream its activity as Server-Sent Events.
+
+    The Turn runs on a worker thread; a client disconnect cancels it and waits for sandbox work to drain.
+    """
     await _acquire(runtime)
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)

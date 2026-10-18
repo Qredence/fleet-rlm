@@ -45,6 +45,8 @@ from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 @dataclass(frozen=True, slots=True)
 class SplitScore:
+    """Mean score, error count, per-example scores, and objectives for one example split."""
+
     mean: float
     errors: int
     scores: list[float]
@@ -95,6 +97,7 @@ def score_split(program: dspy.Module, examples: list[dspy.Example], metric: Any,
 def score_stage(
     program: dspy.Module, devset: list[dspy.Example], holdout: list[dspy.Example], metric: Any, threads: int
 ) -> dict[str, Any]:
+    """Score the dev and holdout splits and return the combined metrics for one GEPA stage."""
     dev, held = score_split(program, devset, metric, threads), score_split(program, holdout, metric, threads)
     return {
         "dev": dev.mean,
@@ -130,7 +133,6 @@ def summarize_passes(passes: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
     """Create a fresh Daytona namespace containing only digest-verified immutable replay files."""
-
     from fleet_rlm.optimize.evidence import verification_entries
 
     verifications = {

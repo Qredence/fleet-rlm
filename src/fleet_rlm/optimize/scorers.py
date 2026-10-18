@@ -67,7 +67,7 @@ def jev_routing_efficiency(trace: Any) -> Feedback | None:
 
 @scorer
 def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
-    """Check that the turn took the labeled gold route (direct, flex, or rlm; legacy labels are read too)."""
+    """Check that the turn took the labeled gold route (direct, flex, or rlm)."""
     expected = parse_route((expectations or {}).get("route"))
     if expected is None:
         return None
@@ -134,11 +134,13 @@ class FleetJudge(dspy.Module):
     """LLM-as-judge for one Turn answer: against the gold answer when labelled, reference-free otherwise."""
 
     def __init__(self) -> None:
+        """Create the reference-aware and reference-free judge programs."""
         super().__init__()
         self.with_reference = dspy.ChainOfThought(AnswerJudge)
         self.without_reference = dspy.ChainOfThought(TurnJudge)
 
     def forward(self, task: str, answer: str, expected_answer: str = "") -> dspy.Prediction:
+        """Score 1.0 only when the judge marks the answer both correct and safe, attaching its critique."""
         if expected_answer:
             verdict = self.with_reference(task=task, expected_answer=expected_answer, candidate_answer=answer)
         else:

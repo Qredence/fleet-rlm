@@ -47,6 +47,7 @@ def run_turn(
     emit: Emit,
     record_replay: bool = False,
 ) -> None:
+    """Run one Turn for a Session, claiming its id and emitting progress events through emit."""
     manager = runtime.sandbox_mgr
     previous_event_callback = manager.event_callback
     trace_id: str | None = None

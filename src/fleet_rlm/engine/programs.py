@@ -66,6 +66,7 @@ class AdaptiveFleetEngine(dspy.Module):
         compiled_path: str | None = None,
         execution_mode: str = "hybrid",
     ) -> None:
+        """Build the triage, direct, Flex, and RLM programs, then load any compiled artifact."""
         super().__init__()
         self.sandbox_mgr = sandbox_mgr
         self.root_lm = root_lm
@@ -115,6 +116,7 @@ class AdaptiveFleetEngine(dspy.Module):
         context: Any = None,
         execution_mode: str | None = None,
     ) -> dspy.Prediction:
+        """Run one Turn, attaching the execution evidence and turn usage that scoring reads."""
         owns_turn = not self.sandbox_mgr.root._deadline
         try:
             prediction = self._run_turn(

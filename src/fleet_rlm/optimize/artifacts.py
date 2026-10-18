@@ -22,11 +22,16 @@ class IsolatedFleetProgram(dspy.Module):
     """Expose candidate predictors while giving every rollout a private runtime."""
 
     def __init__(self, program: dspy.Module, engine_factory: Any):
+        """Wrap the program so each forward call builds its own engine."""
         super().__init__()
         self.program = program
         self.engine_factory = engine_factory
 
     def forward(self, **inputs: Any) -> dspy.Prediction:
+        """Run one rollout in a fresh engine and always shut that engine's sandbox down.
+
+        The rollout's optimization artifact file is removed even when the call raises.
+        """
         engine = self.engine_factory(dspy.Example(**inputs), self.program)
         try:
             arguments = {
@@ -47,6 +52,7 @@ class IsolatedFleetProgram(dspy.Module):
 
 
 def digest_bytes(data: bytes) -> str:
+    """Return the SHA-256 hex digest of raw bytes."""
     return hashlib.sha256(data).hexdigest()
 
 
@@ -57,6 +63,8 @@ def fingerprint(value: Any) -> str:
 
 @dataclass(frozen=True)
 class EvaluationGate:
+    """Hold a promotion verdict and the reasons it failed, if any."""
+
     passed: bool
     reasons: tuple[str, ...]
 
@@ -116,6 +124,8 @@ def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
 
 @dataclass(frozen=True)
 class ArtifactManifest:
+    """Describe one compiled-program digest and the evidence that approved it."""
+
     version: str
     digest: str
     created_at: str
@@ -126,6 +136,7 @@ class ArtifactManifest:
 
 
 def write_manifest(path: Path, manifest: ArtifactManifest) -> None:
+    """Atomically write a manifest as sorted, indented JSON."""
     atomic_write(path, json.dumps(asdict(manifest), sort_keys=True, indent=2).encode())
 
 
@@ -154,6 +165,10 @@ def approve_candidate(
 
 
 def atomic_write(path: Path, data: bytes) -> None:
+    """Replace path with data so readers never see a partial file.
+
+    The bytes are fsynced before the rename, and a leftover temporary file is removed.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
@@ -176,15 +191,18 @@ class CompiledProgramFile:
     MAX_BYTES = 10_000_000
 
     def __init__(self, path: str | None) -> None:
+        """Record the artifact path before any file is read or applied."""
         self.path = path
         self.digest = ""
         self._stat: tuple[int, int] | None = None
 
     def load_initial(self, program: dspy.Module) -> None:
+        """Apply the artifact at startup when it exists; a missing file keeps the program unchanged."""
         if self.path and os.path.lexists(self.path):
             self._apply(program, self._read())
 
     def reload_if_changed(self, program: dspy.Module) -> None:
+        """Reapply the artifact only when its mtime or size has changed since the last load."""
         if not self.path or not os.path.lexists(self.path):
             return
         stat = self._regular_stat(self.path)

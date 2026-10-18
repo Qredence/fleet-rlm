@@ -40,7 +40,7 @@ lint:
 	uv run ruff check $(PYTHON_SOURCES)
 
 typecheck:
-	uv run ty check src/fleet_rlm
+	uv run ty check
 
 eval-dataset:
 	uv run fleet eval dataset

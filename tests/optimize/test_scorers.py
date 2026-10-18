@@ -53,9 +53,6 @@ def test_route_correctness_matches_gold_label():
     assert route_correctness(outputs={"route": "rlm"}, expectations={"route": "rlm"}).value is True
     assert route_correctness(outputs={"route": "direct"}, expectations={"route": "rlm"}).value is False
     assert route_correctness(outputs={"route": "direct"}, expectations={}) is None
-    # Gold labels and traces written before the rename still score.
-    assert route_correctness(outputs={"route": "rlm"}, expectations={"route": "deep_rlm"}).value is True
-    assert route_correctness(outputs={"route": "flex_pipeline"}, expectations={"route": "flex"}).value is True
 
 
 def test_scorer_suite_includes_route_correctness():

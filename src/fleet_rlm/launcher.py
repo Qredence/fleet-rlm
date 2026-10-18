@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -100,6 +100,7 @@ class ManagedProcess:
     _process: subprocess.Popen[bytes] | None = field(default=None, init=False, repr=False)
 
     def start(self) -> None:
+        """Start the command in its own session, appending its output to log_path."""
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         environment = {**os.environ, "MLFLOW_DISABLE_AGENT_HINT": "1", **self.env}
         with self.log_path.open("ab") as log:
@@ -114,9 +115,11 @@ class ManagedProcess:
 
     @property
     def running(self) -> bool:
+        """Return True while the started process has not exited."""
         return self._process is not None and self._process.poll() is None
 
     def tail(self, lines: int = 15) -> str:
+        """Return the last `lines` lines of the log, or an empty string if it cannot be read."""
         try:
             return "\n".join(self.log_path.read_text(errors="replace").splitlines()[-lines:])
         except OSError:
@@ -136,6 +139,7 @@ class ManagedProcess:
             time.sleep(interval)
 
     def stop(self, grace: float = 10.0) -> None:
+        """Send SIGTERM to the process group, then SIGKILL if it has not exited within grace seconds."""
         process = self._process
         if process is None or process.poll() is not None:
             return
@@ -195,7 +199,7 @@ def running_services(
     mlflow_port: int,
     startup_timeout: float,
     log: Callable[[str], None],
-) -> Iterator[LaunchPlan]:
+) -> Generator[LaunchPlan, None, None]:
     """Start what `plan` asks for, yield, and always stop it: the API server first (it flushes traces), then MLflow."""
     started: list[ManagedProcess] = []
 

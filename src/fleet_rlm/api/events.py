@@ -49,6 +49,7 @@ class SSERuntimeCallback(BaseCallback):
         queue: asyncio.Queue[dict[str, Any]],
         manager: DaytonaSandboxManager | None = None,
     ):
+        """Bind the callback to the SSE stream's event loop and queue."""
         self.loop = loop
         self.queue = queue
         self.manager = manager
@@ -60,6 +61,7 @@ class SSERuntimeCallback(BaseCallback):
         self._usage_starts: dict[str, tuple[Any, str, int]] = {}
 
     def close(self) -> None:
+        """Stop accepting events and cancel emits still waiting on the consumer."""
         self._closed.set()
         with self._pending_lock:
             for future in self._pending:
@@ -120,13 +122,16 @@ class SSERuntimeCallback(BaseCallback):
         )
 
     def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
+        """Emit a module-start event with the predictor's class name."""
         self._start("module", call_id, module=instance.__class__.__name__)
 
     def on_module_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
+        """Emit a module-end event with status only, never predictor outputs."""
         # Predictor outputs can contain private reasoning; report status, never harvest them.
         self._end("module", call_id, exception)
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
+        """Emit an LM-start event and record where this call's usage tracking begins."""
         model = str(getattr(instance, "model", "unknown"))
         # DSPy's own tracker (set up per module call) receives this call's usage; remember where it stood.
         tracker = dspy.settings.usage_tracker
@@ -136,6 +141,10 @@ class SSERuntimeCallback(BaseCallback):
         self._start("lm", call_id, model=model[:150])
 
     def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:
+        """Emit an LM-end event with reasoning when present and usage when attributable.
+
+        Usage is reported only when this call's tracker entry can be isolated from concurrent calls.
+        """
         usage: dict[str, Any] = {}
         with self._calls_lock:
             start = self._usage_starts.pop(call_id, None)
@@ -157,6 +166,7 @@ class SSERuntimeCallback(BaseCallback):
         )
 
     def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
+        """Emit a tool-start event with the tool name and a bounded input preview."""
         self._start(
             "tool",
             call_id,
@@ -171,6 +181,7 @@ class SSERuntimeCallback(BaseCallback):
         outputs: dict[str, Any] | None,
         exception: BaseException | None = None,
     ) -> None:
+        """Emit a tool-end event with a bounded output preview."""
         self._end("tool", call_id, exception, output=activity_preview(outputs))
 
     def emit(self, payload: dict[str, Any]) -> None:
@@ -182,12 +193,17 @@ class Envelope:
     """Numbered version-1 envelopes for one Turn's events."""
 
     def __init__(self, session_id: str, turn_id: str, manager: Any) -> None:
+        """Store the identifiers and sandbox manager stamped onto each envelope."""
         self.session_id = session_id
         self.turn_id = turn_id
         self.manager = manager
         self.sequence = 0
 
     def wrap(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Number one event and wrap it in a version-1 envelope.
+
+        The payload is nested under `payload` and also spread at the top level.
+        """
         self.sequence += 1
         payload = {key: value for key, value in event.items() if key != "event"}
         return {

@@ -17,8 +17,13 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic :: 2",
     "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -30,7 +35,7 @@ dependencies = [
     "dspy[typesafe]>=3.4.1,<3.5",
     "daytona==0.224.0",
     "mlflow==3.17.1",
-    "databricks-sdk>=0.139.0,<1",
+    "databricks-sdk>=0.153.0,<1",
     "psycopg[binary]>=3.3.6,<4",
     "fastapi[standard]==0.142.2",
     "python-multipart>=0.0.12",
@@ -64,11 +69,12 @@ build-backend = "hatchling.build"
 # The single dev dependency list (PEP 735). Local workflows install it via
 # `uv sync --dev`; there is deliberately no published `dev` extra.
 dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.8.0",
-    "ty>=0.0.84",
-    "pre-commit>=4.6.2",
+    # `[tool.pytest]` needs pytest 9; keep Ruff in step with `.pre-commit-config.yaml`.
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.17.1",
+    "ty>=0.0.89",
+    "pre-commit>=4.7.0",
 ]
 
 [tool.uv]
@@ -90,9 +96,6 @@ override-dependencies = [
     "idna>=3.16",
     # Mako <=1.3.11 allows TemplateLookup traversal with Windows backslash URIs.
     "mako>=1.3.12",
-    # Duplicate of the direct floor below; retained so `uv lock --check`
-    # stays green without a lock refresh (config-only change lane).
-    "python-dotenv>=1.2.3",
     # GitPython <=3.1.57 allows unsafe git option forwarding and path access.
     "gitpython>=3.1.58",
     # Starlette <1.3.1 has form-limit DoS and request URL hostname parsing advisories.
@@ -112,41 +115,29 @@ override-dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/fleet_rlm"]
 
-[tool.pytest.ini_options]
+# Ship only what builds and tests the package; agent, editor, and CI config stay out.
+# Hatch always adds pyproject.toml, the readme, and the license files.
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "tests", "config", "docs", "scripts", "openapi.yaml", "CHANGELOG.md"]
+
+[tool.pytest]
+minversion = "9.0"
 pythonpath = ["src"]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = ["-q"]
+# strict_config, strict_markers, strict_parametrization_ids, strict_xfail; uv.lock pins pytest.
+strict = true
 asyncio_mode = "strict"
-markers = [
-    "unit: fast isolated tests",
-    "integration: cross-boundary tests",
-    "live_daytona: requires an explicitly configured Daytona account and Volume",
-    "live_llm: requires an explicitly configured model provider",
-]
 
+# Ruff infers the target version from `requires-python` and keeps its default excludes
+# plus `.gitignore`.
 [tool.ruff]
 line-length = 120
-target-version = "py311"
-exclude = [
-    ".git",
-    ".venv",
-    ".ruff_cache",
-    "__pycache__",
-    "node_modules",
-    "build",
-    "dist",
-    ".egg-info",
-]
 
 [tool.ruff.lint]
-# Selected families: F (pyflakes), E/W (pycodestyle), I (isort), N (pep8-naming),
-# B (flake8-bugbear), UP (pyupgrade), A (flake8-builtins), Q (flake8-quotes),
-# T20 (flake8-print), ARG (unused-arguments), RUF (ruff-specific), SIM (simplify),
-# LOG (flake8-logging-usage).
-# Selected rules are enforced across the repository. Exceptions are scoped to
-# files whose public role makes the otherwise-disallowed construct intentional.
-# pydocstyle (D) is not selected; enable only after a dedicated docstring pass.
-# Note: COM (trailing commas) handled by formatter, so excluded to avoid conflicts
+# Enforced across the repository. Exceptions are scoped to files whose public role makes
+# the otherwise-disallowed construct intentional. The formatter owns quotes and trailing
+# commas, so Q and COM are not selected. pydocstyle (D) applies to src/ public API.
 select = [
     "F",     # Pyflakes
     "E",     # Pycodestyle errors
@@ -156,39 +147,36 @@ select = [
     "B",     # flake8-bugbear
     "UP",    # pyupgrade
     "A",     # flake8-builtins
-    "Q",     # flake8-quotes
     "T20",   # flake8-print
     "ARG",   # flake8-unused-arguments
     "RUF",   # ruff-specific rules
     "SIM",   # flake8-simplify
     "LOG",   # flake8-logging-usage
+    "D",     # pydocstyle - public API in src/ carries hover docs
 ]
+# Magic methods and `__init__` are described by the class docstring instead.
+ignore = ["D105", "D107"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 # Scripts and the `fleet optimize` command print operator-facing CLI output.
+# Tests and scripts are not documented API, so pydocstyle does not apply to them.
 [tool.ruff.lint.per-file-ignores]
-"scripts/**/*.py" = ["T201"]
+"scripts/**/*.py" = ["T201", "D"]
+"tests/**/*.py" = ["D"]
 "src/fleet_rlm/optimize/gepa.py" = ["T201"]
 "src/fleet_rlm/optimize/dataset.py" = ["T201"]
 
-[tool.ruff.lint.flake8-quotes]
-docstring-quotes = "double"
-inline-quotes = "double"
-
-[tool.ruff.lint.flake8-builtins]
-builtins-ignorelist = []
-
-# Applied when D is selected in a future docstring-enforcement mission.
-[tool.ruff.lint.pydocstyle]
-convention = "google"  # Use Google-style docstrings
-
-[tool.ruff.lint.isort]
-known-first-party = ["fleet_rlm"]
-force-single-line = false
-
 [tool.ruff.format]
-indent-style = "space"
-quote-style = "double"
-skip-magic-trailing-comma = false
+docstring-code-format = true
 
+# ty infers the Python version from `requires-python`. `ty check` with no paths, the
+# editor, pre-commit, and CI all check the same tree. Tests rely on duck-typed fakes and
+# stay unchecked.
 [tool.ty.src]
-exclude = ["tests/", "scripts/"]
+include = ["src"]
+
+[tool.ty.rules]
+deprecated = "error"
+unused-ignore-comment = "error"

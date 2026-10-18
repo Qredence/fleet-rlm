@@ -14,10 +14,12 @@ CONSOLE = Console()
 
 
 def print_http_error(error: httpx.HTTPStatusError) -> None:
+    """Print a one-line summary of a failed HTTP request, showing only its status code."""
     CONSOLE.print(f"[bold red]HTTP {error.response.status_code}:[/bold red] Request was not completed.")
 
 
 def render_event(event: dict[str, Any]) -> None:
+    """Print one Turn stream event as a terminal line, merging its payload into the event."""
     event = {**event.get("payload", {}), **event}
     event_type = event.get("event")
     identity = " · ".join(

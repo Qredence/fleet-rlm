@@ -63,6 +63,7 @@ class EvalCase:
     critical: bool = False
 
     def record(self) -> dict[str, Any]:
+        """Return this case as the inputs and expectations record used for evaluation."""
         expectations: dict[str, Any] = {
             "expected_values": list(self.expected_values),
             "expected_facts": [f"The answer states {value}." for value in self.expected_values],

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Annotated
 
@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger("fleet_rlm.api")
 
 
 @contextmanager
-def translate(unavailable: str, *, invalid: str | None = None, status: int = 503) -> Iterator[None]:
+def translate(unavailable: str, *, invalid: str | None = None, status: int = 503) -> Generator[None, None, None]:
     """ValueError → 422 (`invalid`, or the error text); any other failure → `status` with `unavailable`.
 
     HTTPExceptions raised inside pass through unchanged. Unexpected failures are logged by type only.
@@ -34,10 +34,12 @@ def translate(unavailable: str, *, invalid: str | None = None, status: int = 503
 
 
 def get_settings(request: Request) -> FleetSettings:
+    """Return the FleetSettings stored on the app state."""
     return request.app.state.settings
 
 
 def get_store(request: Request) -> Store:
+    """Return the Store, or raise 503 when Session storage is unavailable."""
     store = request.app.state.store
     if store is None:
         raise HTTPException(status_code=503, detail="Session storage is unavailable")
@@ -45,6 +47,7 @@ def get_store(request: Request) -> Store:
 
 
 def get_registry(request: Request) -> SessionRuntimeRegistry:
+    """Return the Session runtime registry, or raise 503 when the runtime is not ready."""
     registry = request.app.state.session_registry
     if registry is None:
         raise HTTPException(status_code=503, detail="Fleet runtime is not ready")
@@ -52,6 +55,7 @@ def get_registry(request: Request) -> SessionRuntimeRegistry:
 
 
 def get_runtime(session_id: str, registry: Annotated[SessionRuntimeRegistry, Depends(get_registry)]) -> SessionRuntime:
+    """Return the runtime for the path's Session ID, or raise 422 for an invalid ID."""
     with translate("Session runtime is unavailable", invalid="Invalid Session ID"):
         return registry.get(session_id)
 

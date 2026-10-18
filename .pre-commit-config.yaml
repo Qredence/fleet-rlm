@@ -17,7 +17,7 @@ repos:
         stages: [pre-commit]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.10
+    rev: v0.17.1
     hooks:
       - id: ruff-check
         args:
@@ -39,7 +39,7 @@ repos:
 
       - id: backend-fast-tests
         name: Run backend fast test lane
-        entry: make test-fast
+        entry: make test
         language: system
         pass_filenames: false
         stages: [pre-push]

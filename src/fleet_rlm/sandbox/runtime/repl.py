@@ -52,11 +52,15 @@ _WRITE_LOCK = threading.Lock()
 
 
 class BoundedBuffer(io.StringIO):
+    """StringIO that keeps at most MAX_CAPTURE_CHARS characters and records whether output was dropped."""
+
     def __init__(self) -> None:
+        """Start an empty capture buffer with no truncation recorded."""
         super().__init__()
         self.truncated = False
 
     def write(self, value: str) -> int:
+        """Write up to the capture limit, recording when output is dropped."""
         remaining = MAX_CAPTURE_CHARS - self.tell()
         if remaining <= 0:
             self.truncated = True
@@ -68,7 +72,10 @@ class BoundedBuffer(io.StringIO):
 
 
 class FinalOutput(BaseException):
+    """Raised by SUBMIT to end an execution with its final payload."""
+
     def __init__(self, payload: Any) -> None:
+        """Store the payload that SUBMIT produced."""
         self.payload = payload
 
 

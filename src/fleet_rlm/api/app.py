@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
 
@@ -34,7 +34,7 @@ def create_app(
     resolved = settings or get_settings()
 
     @asynccontextmanager
-    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         # The pool opens in the background so a cold Lakebase connect does not block startup.
         application.state.store = store or (
             Store.open(

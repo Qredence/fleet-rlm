@@ -20,26 +20,15 @@ class Route(StrEnum):
     RLM = "rlm"  # dspy.RLM with Daytona Python and child agents
 
 
-# Names written by releases before the single vocabulary; read-side only, never emitted.
-_LEGACY = {
-    "direct_cot": Route.DIRECT,
-    "single_rlm": Route.FLEX,
-    "flex_pipeline": Route.FLEX,
-    "delegated_rlm": Route.RLM,
-    "deep_rlm": Route.RLM,
-}
-
-
 def parse_route(value: Any) -> Route | None:
     """Read a route from a decision, stored turn, trace, or gold label; None when absent or unknown."""
     raw = getattr(value, "value", value)
     if raw is None:
         return None
-    text = str(raw).strip()
     try:
-        return Route(text)
+        return Route(str(raw).strip())
     except ValueError:
-        return _LEGACY.get(text)
+        return None
 
 
 # One copy of the stopping rules: FleetTask instructions and the sandbox execution instructions both use it.
@@ -116,6 +105,8 @@ TurnTriage = make_signature(
 
 
 class FleetTask(dspy.Signature):
+    """Signature for a Session-scoped task solved by the Flex or RLM program."""
+
     __doc__ = (
         "Solve a task with Session-scoped workspace files and progressive Skills.\n\n"
         "Delegate independent subtasks together with spawn_agents (they run concurrently) instead of calling\n"

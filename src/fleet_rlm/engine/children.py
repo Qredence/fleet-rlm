@@ -33,10 +33,12 @@ class ChildAgents:
     """The delegation tools given to the Flex and RLM programs."""
 
     def __init__(self, sandbox_mgr: DaytonaSandboxManager, metered_sub: Any) -> None:
+        """Bind the delegation tools to the sandbox manager and the metered sub LM."""
         self.sandbox_mgr = sandbox_mgr
         self._metered_sub = metered_sub
 
     def tools(self) -> list[Any]:
+        """Return the delegation tools, spawn_agent and spawn_agents, for the Flex and RLM programs."""
         return [self.spawn_agent, self.spawn_agents]
 
     def spawn_agent(

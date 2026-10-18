@@ -197,6 +197,7 @@ class Store:
         schema: str = "public",
         connection_kwargs: dict[str, Any] | None = None,
     ) -> None:
+        """Wrap a runtime pool with an optional DDL pool; the schema must be a safe identifier."""
         self.pool = pool
         self.dsn = dsn
         self.connection_class = connection_class
@@ -264,6 +265,7 @@ class Store:
         )
 
     def close(self) -> None:
+        """Release the DDL pool, then the runtime pool, even if the first close fails."""
         try:
             self.close_migration_pool()
         finally:
@@ -314,6 +316,7 @@ class Store:
 
     @_retry_once
     def ensure_session(self, session_id: str) -> None:
+        """Create the Session row if it does not exist."""
         with self.pool.connection() as connection:
             connection.execute(
                 "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
@@ -321,6 +324,7 @@ class Store:
 
     @_retry_once
     def list_sessions(self) -> list[dict[str, Any]]:
+        """Return the 100 most recently updated Sessions with their Turn counts."""
         with self.pool.connection() as connection:
             return (
                 connection.cursor(row_factory=dict_row)
@@ -333,6 +337,7 @@ class Store:
 
     @_retry_once
     def history(self, session_id: str) -> list[dict[str, Any]]:
+        """Return the stored Turn history for a Session, or an empty list if none exists."""
         with self.pool.connection() as connection:
             row = connection.execute("SELECT turns FROM fleet_lite_sessions WHERE session_id = %s", (session_id,))
             found = row.fetchone()
@@ -359,6 +364,7 @@ class Store:
 
     @_retry_once
     def runtime_settings(self, session_id: str) -> dict[str, Any]:
+        """Return the Session's saved runtime settings, or an empty dict."""
         with self.pool.connection() as connection:
             row = connection.execute(
                 "SELECT settings FROM fleet_lite_runtime_settings WHERE session_id=%s", (session_id,)
@@ -367,6 +373,7 @@ class Store:
 
     @_retry_once
     def save_runtime_settings(self, session_id: str, settings: dict[str, Any]) -> None:
+        """Merge settings into the Session's saved runtime settings."""
         with self.pool.connection() as connection:
             connection.execute(
                 "INSERT INTO fleet_lite_runtime_settings(session_id,settings) VALUES(%s,%s::jsonb) "
@@ -381,6 +388,7 @@ class Store:
     def save_memory(
         self, session_id: str, memory_id: str, content: str, kind: str, sources: dict[str, str], reviewed: bool
     ) -> None:
+        """Insert or replace one memory row, keyed by Session and memory ID."""
         with self.pool.connection() as connection:
             connection.execute(
                 "INSERT INTO fleet_lite_memories(session_id,memory_id,content,kind,sources,reviewed) "
@@ -409,6 +417,7 @@ class Store:
 
     @_retry_once
     def delete_memory(self, session_id: str, memory_id: str) -> None:
+        """Delete one memory row from a Session."""
         with self.pool.connection() as connection:
             connection.execute(
                 "DELETE FROM fleet_lite_memories WHERE session_id=%s AND memory_id=%s", (session_id, memory_id)
@@ -442,6 +451,7 @@ class Store:
 
     @_retry_once
     def finish_turn(self, session_id: str, turn_id: str, status: str, result: dict[str, Any]) -> None:
+        """Set a Turn's terminal status and result unless it is already completed."""
         with self.pool.connection() as connection:
             connection.execute(
                 "UPDATE fleet_lite_turns SET status=%s,result=%s::jsonb,updated_at=NOW() "
@@ -451,6 +461,7 @@ class Store:
 
     @_retry_once
     def turn_status(self, session_id: str, turn_id: str) -> dict[str, Any] | None:
+        """Return one Turn's status, result, and update time, or None if absent."""
         with self.pool.connection() as connection:
             row = (
                 connection.cursor(row_factory=dict_row)
@@ -682,9 +693,11 @@ class VolumePostgresHarness:
 
     @property
     def session_id(self) -> str:
+        """Return the Session ID owned by the sandbox manager."""
         return self.sandbox_mgr.session_id
 
     def ensure_session(self, session_id: str) -> None:
+        """Create the Session row after validating its ID."""
         self.store.ensure_session(validate_session_id(session_id))
 
     def save_memory(
@@ -696,6 +709,7 @@ class VolumePostgresHarness:
         kind: str = "observation",
         reviewed: bool = False,
     ) -> None:
+        """Validate and save one memory, checking content, kind, and source paths."""
         validate_session_id(memory_id)
         if (
             not content.strip()
@@ -709,10 +723,12 @@ class VolumePostgresHarness:
         self.store.save_memory(self.session_id, memory_id, content, kind, sources, reviewed)
 
     def memories(self, query: str = "", *, reviewed_only: bool = False) -> list[dict[str, Any]]:
+        """Search memories with a bounded OR-of-words query, optionally only reviewed ones."""
         search = " OR ".join(query[:2000].split()[:32])
         return self.store.memories(self.session_id, search, reviewed_only=reviewed_only)
 
     def delete_memory(self, memory_id: str) -> None:
+        """Delete one memory after validating its ID."""
         self.store.delete_memory(self.session_id, validate_session_id(memory_id))
 
     def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
@@ -724,6 +740,7 @@ class VolumePostgresHarness:
         return prior
 
     def turn_status(self, turn_id: str) -> dict[str, Any] | None:
+        """Return one Turn's status after validating its ID."""
         return self.store.turn_status(self.session_id, validate_session_id(turn_id))
 
     def load_context(self, session_id: str) -> tuple[str, str]:

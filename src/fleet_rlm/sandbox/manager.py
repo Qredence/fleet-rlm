@@ -98,6 +98,7 @@ class DaytonaSandboxManager:
     _creation_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """Validate identity, budgets, and the shared-notes subpath before any sandbox work."""
         validate_session_id(self.session_id)
         if not self.api_key or not self.org_id or not self.volume_id:
             raise ValueError("Daytona API key, organization ID, and Volume ID are required")
@@ -107,13 +108,16 @@ class DaytonaSandboxManager:
 
     @property
     def root(self) -> DaytonaSandboxManager:
+        """Return the top-level manager that owns the Turn budget and deadline."""
         return self.parent.root if self.parent is not None else self
 
     @property
     def depth(self) -> int:
+        """Return how many parents separate this agent from the root."""
         return self.parent.depth + 1 if self.parent is not None else 0
 
     def emit(self, event: str, **payload: Any) -> None:
+        """Send one lifecycle event, tagged with agent lineage, to the root's callback."""
         callback = self.root.event_callback
         if callback:
             callback(
@@ -127,6 +131,7 @@ class DaytonaSandboxManager:
             )
 
     def check_turn(self) -> None:
+        """Raise if the Turn was cancelled or its deadline passed, marking it cancelled on timeout."""
         root = self.root
         if root._cancelled.is_set():
             raise RuntimeError("Turn cancelled")
@@ -135,6 +140,10 @@ class DaytonaSandboxManager:
             raise TimeoutError("Turn deadline exceeded")
 
     def allocate_child(self, *, input_paths: list[str] | None = None) -> DaytonaSandboxManager:
+        """Reserve and provision a child sandbox, copying the requested or default inputs into it.
+
+        Capacity limits refuse the spawn before any sandbox is created. Skills are copied but not receipted as inputs.
+        """
         root = self.root
         self.check_turn()
         selected_paths: list[str] | None = None
@@ -220,6 +229,10 @@ class DaytonaSandboxManager:
                     receipt["status"] = "succeeded" if succeeded else "failed"
 
     def collect_child_artifacts(self) -> list[dict[str, Any]]:
+        """Promote this child's new artifacts into the parent's artifacts/<agent-id>/ tree.
+
+        Copied-in artifacts are skipped, and promoted paths are recorded relative to the root.
+        """
         if self.parent is None:
             return []
         self.check_turn()
@@ -311,6 +324,7 @@ class DaytonaSandboxManager:
         return {**result, "sha256": digest}
 
     def cancel_turn(self) -> None:
+        """Cancel the Turn, stop child sandboxes, and stop the root sandbox to interrupt remote Python."""
         root = self.root
         root._cancelled.set()
         root.emit("cancellation_requested")
@@ -380,6 +394,10 @@ class DaytonaSandboxManager:
         return mounts
 
     def ensure_sandbox(self) -> Any:
+        """Create or resume this agent's sandbox, returning the live handle.
+
+        A pending create is adopted only when exactly one matching sandbox exists, so creates never duplicate.
+        """
         self.check_turn()
         with self._lock:
             if self._client is None:
@@ -475,6 +493,7 @@ class DaytonaSandboxManager:
         return {**result, "transport_retries": 0}
 
     def drop_namespace(self, ns_id: str) -> None:
+        """Delete one interpreter namespace's remote context, if the sandbox still exists."""
         with self._lock:
             context = self._contexts.pop(ns_id, None)
             sandbox = self._sandbox
@@ -538,6 +557,7 @@ class DaytonaSandboxManager:
         return [row for row in rows if isinstance(row, dict)]
 
     def reset_turn_budget(self) -> None:
+        """Start a fresh Turn: zero the counters, clear receipts, and arm the deadline watchdog."""
         root = self.root
         root.end_turn()
         with root._budget_lock:
@@ -552,6 +572,7 @@ class DaytonaSandboxManager:
             root._watchdog.start()
 
     def end_turn(self) -> None:
+        """Cancel the watchdog and clear the Turn deadline."""
         root = self.root
         if root._watchdog is not None:
             root._watchdog.cancel()
@@ -559,6 +580,7 @@ class DaytonaSandboxManager:
         root._deadline = 0
 
     def consume_budget(self, count: int = 1) -> None:
+        """Charge LM calls against the shared Turn budget, raising once it is exhausted."""
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             raise ValueError("budget consumption must be a positive integer")
         self.check_turn()
@@ -576,6 +598,7 @@ class DaytonaSandboxManager:
         )
 
     def record_sandbox_error(self) -> None:
+        """Count one failed sandbox execution toward the Turn's usage."""
         with self.root._budget_lock:
             self.root._sandbox_errors += 1
 
@@ -586,6 +609,10 @@ class DaytonaSandboxManager:
             return {"lm_calls": root._llm_calls_used, "sandbox_errors": root._sandbox_errors}
 
     def list_workspace_files(self) -> list[str]:
+        """List regular files under the Session workspace as sorted relative paths.
+
+        Symbolic links are skipped and never traversed.
+        """
         code = (
             "import json,os\n"
             "root='/workspace'\n"
@@ -624,6 +651,10 @@ class DaytonaSandboxManager:
         return f"/workspace/{clean_path}"
 
     def read_workspace_file(self, rel_path: str, *, max_bytes: int = 25_000_000) -> bytes:
+        """Read one workspace file, refusing anything over max_bytes.
+
+        Metadata is checked remotely first, and a size change during download raises.
+        """
         if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 25_000_000:
             raise ValueError("max_bytes must be an integer between 0 and 25000000")
         clean_path = _workspace_relative_path(rel_path)
@@ -728,6 +759,7 @@ class DaytonaSandboxManager:
         return create
 
     def delete_workspace_file(self, rel_path: str) -> None:
+        """Delete one validated workspace file, refusing symbolic links."""
         clean = _workspace_relative_path(rel_path)
         sandbox = self.ensure_sandbox()
         # The remote check rejects symbolic links; Daytona's file API does not report them.
@@ -743,6 +775,10 @@ class DaytonaSandboxManager:
             self._interpreters.pop(interpreter.ns_id, None)
 
     def shutdown(self) -> None:
+        """Stop or delete this agent's sandbox after shutting down any children.
+
+        A child's workspace is cleared before deletion; a root sandbox is stopped unless disposable.
+        """
         if self.parent is not None:
             with self.root._budget_lock:
                 receipt = self.root._child_receipts.get(self.agent_id)

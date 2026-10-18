@@ -40,6 +40,7 @@ def preamble() -> str:
 
 
 def create_context(sandbox: Any) -> Any:
+    """Create a sandbox interpreter context and prepare it with the runtime preamble."""
     interpreter = sandbox.code_interpreter
     context = interpreter.create_context()
     prepared = interpreter.run_code(preamble(), context=context, timeout=_PREAMBLE_TIMEOUT_SECONDS)
@@ -50,6 +51,7 @@ def create_context(sandbox: Any) -> Any:
 
 
 def delete_context(sandbox: Any, context: Any) -> None:
+    """Delete a sandbox interpreter context, ignoring cleanup failures."""
     _delete_quietly(sandbox, context)
 
 

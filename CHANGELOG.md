@@ -16,6 +16,8 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- The wheel ships a `py.typed` marker, so type checkers use Fleet's inline annotations. The
+  sdist now contains only source, tests, config, docs, and scripts.
 - **Breaking:** one route vocabulary, `direct` / `flex` / `rlm`, replaces the triage labels
   (`direct_cot`, `single_rlm`, `delegated_rlm`) and the effective routes (`direct_cot`,
   `flex_pipeline`, `deep_rlm`) in triage, `triage_decision` and `turn_complete` events, stored

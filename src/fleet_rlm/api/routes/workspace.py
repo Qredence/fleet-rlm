@@ -25,6 +25,7 @@ _MAX_FILE_BYTES = 25_000_000
 @router.get("/sessions/{session_id}/files", response_model=Files)
 @router.get("/sessions/{session_id}/workspace/tree", response_model=Files)
 def list_files(session_id: str, runtime: Runtime) -> dict:
+    """List a Session's workspace files and the artifacts among them."""
     with translate("Session workspace is unavailable"), runtime.turn_lock:
         files = runtime.sandbox_mgr.list_workspace_files()
     return {"session_id": session_id, "files": files, "artifacts": [p for p in files if p.startswith("artifacts/")]}
@@ -32,6 +33,7 @@ def list_files(session_id: str, runtime: Runtime) -> dict:
 
 @router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", response_model=FileStat)
 def workspace_stat(rel_path: str, runtime: Runtime) -> dict:
+    """Return the size and SHA-256 digest of one workspace file."""
     with translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404), runtime.turn_lock:
         content = runtime.sandbox_mgr.read_workspace_file(rel_path)
     return {"path": rel_path, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
@@ -39,6 +41,10 @@ def workspace_stat(rel_path: str, runtime: Runtime) -> dict:
 
 @router.get("/sessions/{session_id}/workspace/files/{rel_path:path}", response_class=FileResponse)
 def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
+    """Return one workspace file as a download, capped at 25 MB.
+
+    An unavailable or invalid path returns 404.
+    """
     descriptor, temporary = tempfile.mkstemp(prefix="fleet-download-")
     os.close(descriptor)
     try:
@@ -59,6 +65,10 @@ def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
 
 @router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=FileWritten)
 def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> dict:
+    """Write one workspace file from text or base64 content, capped at 25 MB.
+
+    Supplying both or neither of the content fields returns 422.
+    """
     with translate("Workspace write failed", invalid="Invalid workspace path or content"):
         if (body.content is None) == (body.content_base64 is None):
             raise HTTPException(status_code=422, detail="Supply exactly one of content or content_base64")
@@ -81,6 +91,10 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
 
 @router.delete("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=Deleted)
 def delete_workspace_file(rel_path: str, runtime: Runtime) -> dict:
+    """Delete one workspace file.
+
+    Failures return 404.
+    """
     unavailable = "Workspace file could not be deleted"
     with translate(unavailable, invalid="Invalid workspace path", status=404), runtime.turn_lock:
         runtime.sandbox_mgr.delete_workspace_file(rel_path)
@@ -89,6 +103,10 @@ def delete_workspace_file(rel_path: str, runtime: Runtime) -> dict:
 
 @router.post("/sessions/{session_id}/attach", response_model=Attached)
 def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> dict:
+    """Store an uploaded attachment under files/ in the workspace.
+
+    Uploads stream to disk and return 413 above the size limit.
+    """
     try:
         with translate("Attachment storage is unavailable"):
             name = (file.filename or "attachment").replace("\\", "/").split("/")[-1]

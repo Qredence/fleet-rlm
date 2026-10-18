@@ -75,6 +75,7 @@ class FleetRLMChatAdapter(ChatAdapter):
         *,
         parse_retries: int = 1,
     ) -> None:
+        """Configure the adapter; parse_retries must be 0 or 1 and JSON fallback must stay off."""
         if type(parse_retries) is not int or parse_retries not in (0, 1):
             raise ValueError("parse_retries must be 0 or 1")
         if use_json_adapter_fallback:
@@ -108,6 +109,7 @@ class FleetRLMChatAdapter(ChatAdapter):
         return signature.with_instructions(f"{signature.instructions}\n\n{correction}")
 
     def __call__(self, lm: Any, lm_kwargs: Any, signature: Any, demos: Any, inputs: Any) -> Any:
+        """Run the predictor, re-asking once on format failures up to parse_retries."""
         for attempt in range(self.parse_retries + 1):
             try:
                 return super().__call__(lm, dict(lm_kwargs), signature, demos, inputs)
@@ -118,6 +120,7 @@ class FleetRLMChatAdapter(ChatAdapter):
         raise AssertionError("unreachable")
 
     async def acall(self, lm: Any, lm_kwargs: Any, signature: Any, demos: Any, inputs: Any) -> Any:
+        """Async variant of __call__ with the same format-retry behavior."""
         for attempt in range(self.parse_retries + 1):
             try:
                 return await super().acall(lm, dict(lm_kwargs), signature, demos, inputs)
@@ -128,6 +131,7 @@ class FleetRLMChatAdapter(ChatAdapter):
         raise AssertionError("unreachable")
 
     def parse(self, signature: type[Signature], completion: str) -> dict[str, object]:
+        """Parse a completion, dropping leaked thinking and accepting a raw Python fence for reasoning and code."""
         # Some providers leak the model's thinking into content, closed by </think>; the answer follows it.
         completion = completion.rsplit("</think>", 1)[-1]
         output_fields = signature.output_fields

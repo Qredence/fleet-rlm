@@ -61,6 +61,7 @@ class DaytonaInterpreter:
         tools: dict[str, Callable[..., Any]] | None = None,
         owns_manager: bool = False,
     ):
+        """Create an interpreter with a fresh namespace and validated bridged tool names."""
         self.manager = manager
         self.owns_manager = owns_manager
         self.tools = dict(tools or {})
@@ -94,6 +95,7 @@ class DaytonaInterpreter:
         self._ungrounded_rejections = 0
 
     def start(self) -> None:
+        """Start the sandbox and bootstrap this namespace once; raise if already shut down."""
         if self._closed:
             raise RuntimeError("Interpreter has already been shut down")
         self.manager.ensure_sandbox()
@@ -287,6 +289,7 @@ class DaytonaInterpreter:
             )
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+        """Run code in this namespace, rejecting code over 1 MB and non-object variables."""
         if not isinstance(code, str) or len(code.encode("utf-8")) > 1_000_000:
             raise ValueError("Interpreter code exceeds the 1 MB size limit")
         if variables is not None and not isinstance(variables, dict):
@@ -394,6 +397,7 @@ class DaytonaInterpreter:
                     )
 
     def shutdown(self) -> None:
+        """Drop this namespace and release the manager once; later calls are no-ops."""
         if self._closed:
             return
         self._closed = True

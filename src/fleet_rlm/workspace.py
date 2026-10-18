@@ -179,15 +179,18 @@ class WorkspaceDataset(SandboxSerializable):
     sha256: str = ""
 
     def __post_init__(self) -> None:
+        """Normalize workspace_path to a workspace-relative path and validate the metadata bounds."""
         path = self.workspace_path.removeprefix("/workspace/")
         object.__setattr__(self, "workspace_path", _workspace_relative_path(path))
         if self.size_bytes < 0 or len(self.description) > 2000:
             raise ValueError("Invalid dataset metadata")
 
     def sandbox_setup(self) -> str:
+        """Return the import the sandbox needs before sandbox_assignment runs."""
         return "import json"
 
     def to_sandbox(self) -> bytes:
+        """Serialize this handle to JSON bytes for the sandbox."""
         return json.dumps(
             {
                 "path": self.workspace_path,
@@ -198,13 +201,16 @@ class WorkspaceDataset(SandboxSerializable):
         ).encode()
 
     def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+        """Return sandbox code that binds var_name to a WorkspaceDatasetView built from data_expr."""
         return f"{var_name} = WorkspaceDatasetView(json.loads({data_expr}))"
 
     def rlm_preview(self, max_chars: int = 500) -> str:
+        """Return a bounded one-line summary of this handle for the RLM prompt."""
         return (
             f"WorkspaceDataset({self.workspace_path!r}, {self.size_bytes} bytes): "
             f"{self.description}. Use .path, .preview(), .chunks(), .lines(), .search()."
         )[:max_chars]
 
     def __str__(self) -> str:
+        """Return the same summary as rlm_preview."""
         return self.rlm_preview()

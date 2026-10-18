@@ -107,7 +107,8 @@ trace = read_evaluation_trace(
     ),
 )
 result = score_evaluation_traces(
-    [trace], judge_model=settings.fleet_judge_model,
+    [trace],
+    judge_model=settings.fleet_judge_model,
     judge_lm=settings.build_judge_lm(),
 )
 print(result.run_id, result.metrics)

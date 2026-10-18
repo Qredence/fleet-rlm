@@ -23,6 +23,7 @@ MAX_ARTIFACTS = 32
 
 
 def artifact_path(value: str) -> str:
+    """Return value when it is a normalized relative path under artifacts/, else raise."""
     path = PurePosixPath(value)
     if (
         not value.startswith("artifacts/")
@@ -36,10 +37,14 @@ def artifact_path(value: str) -> str:
 
 
 class StrictModel(BaseModel):
+    """Pydantic base that forbids unknown fields and type coercion."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class ArtifactExpectation(StrictModel):
+    """Gold for one artifact under artifacts/, scored by its declared kind."""
+
     path: str
     kind: Literal["text", "json", "csv", "python"]
     expected: Any = None
@@ -52,6 +57,7 @@ class ArtifactExpectation(StrictModel):
 
     @model_validator(mode="after")
     def check(self) -> ArtifactExpectation:
+        """Reject kind, path, and execution combinations that cannot be scored."""
         artifact_path(self.path)
         if self.kind == "python":
             if not self.path.endswith(".py") or not self.execute:
@@ -71,11 +77,14 @@ class ArtifactExpectation(StrictModel):
 
 
 class ChildExpectation(StrictModel):
+    """Gold for one required successful child: its input paths and promoted artifacts."""
+
     input_paths: list[str] = Field(max_length=100)
     artifacts: list[str] = Field(default_factory=list, max_length=32)
 
     @model_validator(mode="after")
     def check(self) -> ChildExpectation:
+        """Validate normalized child inputs, unique inputs, and artifact suffixes."""
         from fleet_rlm.workspace import _child_input_path
 
         if any(_child_input_path(path) != path for path in self.input_paths):
@@ -88,6 +97,8 @@ class ChildExpectation(StrictModel):
 
 
 class StructuredExpectations(StrictModel):
+    """Versioned gold for declared artifacts and required child sandboxes."""
+
     schema_version: Literal[1] = 1
     artifacts: list[ArtifactExpectation] = Field(default_factory=list, max_length=MAX_ARTIFACTS)
     # One entry per required successful child; duplicate entries represent multiple children.
@@ -95,6 +106,7 @@ class StructuredExpectations(StrictModel):
 
     @model_validator(mode="after")
     def check(self) -> StructuredExpectations:
+        """Reject duplicate artifact expectations."""
         paths = [item.path for item in self.artifacts]
         if len(set(paths)) != len(paths):
             raise ValueError("Duplicate artifact expectation")
@@ -102,6 +114,10 @@ class StructuredExpectations(StrictModel):
 
 
 def validate_structured(value: Any) -> dict[str, Any]:
+    """Validate reviewed gold against the schema and the evidence size limit.
+
+    Empty input means no checks; non-JSON values and nonfinite numbers are rejected.
+    """
     if value == {}:
         return {}
     if not isinstance(value, dict):
@@ -123,6 +139,10 @@ def verification_entries(value: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def collect_artifacts(manager: Any) -> dict[str, Any]:
+    """Collect the bounded artifacts/ files the Session wrote, with digests and bytes.
+
+    Anything unreadable or over a limit marks the result incomplete instead of raising.
+    """
     files: dict[str, Any] = {}
     total = 0
     complete = True
@@ -177,6 +197,7 @@ def _file(receipt: dict[str, Any]) -> bytes:
 
 
 def artifact_correctness(gold: dict[str, Any], evidence: dict[str, Any]) -> tuple[float, str] | None:
+    """Score declared artifacts as (score, reason), or return None when none are declared."""
     specifications = validate_structured(gold).get("artifacts", [])
     if not specifications:
         return None
@@ -220,6 +241,10 @@ def artifact_correctness(gold: dict[str, Any], evidence: dict[str, Any]) -> tupl
 
 
 def delegation_correctness(gold: dict[str, Any], evidence: dict[str, Any]) -> tuple[float, str] | None:
+    """Score required children as (score, reason), or return None when none are required.
+
+    Each required child must match one unused successful child by inputs, artifacts, and promoted digests.
+    """
     required = validate_structured(gold).get("children")
     if required is None:
         return None
@@ -248,6 +273,7 @@ def delegation_correctness(gold: dict[str, Any], evidence: dict[str, Any]) -> tu
 
 
 def parse_expectations_file(path: str) -> dict[str, Any]:
+    """Read and validate an expectations JSON file within the size limit."""
     from pathlib import Path
 
     raw = Path(path).read_bytes()
