@@ -1,6 +1,6 @@
 PYTHON_SOURCES := src/fleet_rlm tests scripts
 
-.PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security precommit-run
+.PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke precommit-run
 
 help:
 	@echo "Fleet-RLM Lite development targets:"
@@ -64,8 +64,32 @@ api-sync:
 check-docs:
 	uv run python scripts/check_docs.py
 
+# DiskCache 5.6.3 has no fixed upstream release; suppress only PYSEC-2026-2447.
 check-security:
-	uvx pip-audit
+	@set -eu; requirements=$$(mktemp); trap 'rm -f "$$requirements"' EXIT; \
+		uv export --locked --all-groups --no-emit-project --format requirements.txt --python 3.12 --output-file "$$requirements" > /dev/null; \
+		uv run --locked -- pip-audit --requirement "$$requirements" --ignore-vuln PYSEC-2026-2447
+
+check-release:
+	@test -n "$$FLEET_RELEASE_VERSION" && test -n "$$FLEET_RELEASE_SHA" || (echo "FLEET_RELEASE_VERSION and FLEET_RELEASE_SHA are required" && exit 2)
+	uv run --locked python scripts/release_checks.py preflight --version "$$FLEET_RELEASE_VERSION" --sha "$$FLEET_RELEASE_SHA"
+
+build-release:
+	@test -n "$$FLEET_RELEASE_VERSION" || (echo "FLEET_RELEASE_VERSION is required" && exit 2)
+	@test ! -e dist || (echo "dist/ already exists; refusing to overwrite release artifacts" && exit 2)
+	uv build
+	uv run --locked python scripts/release_checks.py verify-artifacts --version "$$FLEET_RELEASE_VERSION" --dist dist
+	uv run --locked twine check dist/fleet_rlm-*
+
+verify-release-artifacts:
+	@test -n "$$FLEET_RELEASE_VERSION" || (echo "FLEET_RELEASE_VERSION is required" && exit 2)
+	uv run --locked python scripts/release_checks.py verify-artifacts --version "$$FLEET_RELEASE_VERSION" --dist dist
+
+release-smoke:
+	@test -n "$$FLEET_RELEASE_VERSION" || (echo "FLEET_RELEASE_VERSION is required" && exit 2)
+	@set -eu; requirements=$$(mktemp); trap 'rm -f "$$requirements"' EXIT; \
+		uv export --locked --no-dev --no-emit-project --format requirements.txt --python 3.12 --output-file "$$requirements" > /dev/null; \
+		uv run --locked python scripts/release_checks.py smoke --version "$$FLEET_RELEASE_VERSION" --wheel dist/fleet_rlm-"$$FLEET_RELEASE_VERSION"-*.whl --requirements "$$requirements"
 
 build:
 	uv build

@@ -48,6 +48,7 @@ dependencies = [
     "rich>=13.9.0",
     "prompt-toolkit>=3.0.50,<4",
     "psycopg-pool>=3.2.6,<4",
+    "textual>=8.2.8",
 ]
 
 [project.urls]
@@ -74,6 +75,8 @@ dev = [
     "ruff>=0.17.1",
     "ty>=0.0.89",
     "pre-commit>=4.7.0",
+    "pip-audit>=2.10.1,<3",
+    "twine>=7.0.0,<8",
 ]
 
 [tool.uv]
@@ -107,6 +110,10 @@ override-dependencies = [
     "litellm>=1.87.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
+    # multidict <=6.9.0 has a memory leak in attacker-controlled item-view operations.
+    "multidict>=6.9.1,<7",
+    # Werkzeug <3.1.9 has a Windows path traversal issue in safe_join.
+    "werkzeug>=3.1.9",
     # sqlparse <0.6.0 has multiple SQL parsing DoS and code-generation flaws.
     "sqlparse>=0.6.0",
 ]
