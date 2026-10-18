@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -142,6 +143,17 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
         for item in examples
     }
 
+    shared: list[Any] = []
+    shared_lock = threading.Lock()
+
+    def language_models() -> tuple[Any, Any, Any]:
+        """Build the serving LMs once per factory; rollouts share them instead of rebuilding per example."""
+        with shared_lock:
+            if not shared:
+                root, sub, _reflection, jev = settings.build_lms()
+                shared.extend((root, sub, jev))
+            return shared[0], shared[1], shared[2]
+
     def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
         snapshot = selected_snapshot(
             store, example.source_session, example.replay_turn_id, example.replay_snapshot_sha256
@@ -160,7 +172,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             raise ValueError("Curated replay snapshot does not match the reviewed example")
         if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
             raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")
-        root_lm, sub_lm, _reflection_lm, jev_lm = settings.build_lms()
+        root_lm, sub_lm, jev_lm = language_models()
         replay_context = snapshot.get("dataset_context")
         replay_files = snapshot["replay_files"]
         namespace = validate_session_id(f"opt-{uuid.uuid4().hex}")

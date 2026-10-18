@@ -10,17 +10,54 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import threading
+import time
 from collections.abc import Callable
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
+
+from daytona.common.errors import DaytonaConnectionError, DaytonaError, DaytonaRateLimitError, DaytonaTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
 CALL_MARK = "\x1eFLEET_CALL "
 RESULT_MARK = "\x1eFLEET_RESULT "
 REPLY_DIR = "/tmp/fleet/replies"
 _PREAMBLE_TIMEOUT_SECONDS = 60
+# A host tool that never answers (lost reply upload, hung tool) fails the sandbox call after this long
+# instead of stalling the execution until the Turn watchdog stops the sandbox.
+HOST_CALL_TIMEOUT_SECONDS = 600.0
+_RETRY_ATTEMPTS = 3
+_RETRY_BASE_SECONDS = 0.5
+
+_T = TypeVar("_T")
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Daytona transport, timeout, rate-limit, and 5xx failures; everything else is a real answer."""
+    if isinstance(exc, (DaytonaConnectionError, DaytonaTimeoutError, DaytonaRateLimitError)):
+        return True
+    status = exc.status_code if isinstance(exc, DaytonaError) else None
+    return isinstance(status, int) and status >= 500
+
+
+def with_retries(operation: Callable[[], _T], *, before_retry: Callable[[], None] | None = None) -> _T:
+    """Run an idempotent Daytona call, retrying transient failures with jittered exponential backoff.
+
+    Never wrap `run_code`: a timed-out or disconnected execution may have run, and must not be replayed.
+    """
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            return operation()
+        except Exception as exc:
+            if attempt == _RETRY_ATTEMPTS - 1 or not is_transient(exc):
+                raise
+            _LOGGER.warning("Transient Daytona error (%s); retrying", type(exc).__name__)
+            time.sleep(_RETRY_BASE_SECONDS * (2**attempt) * (0.5 + random.random()))
+            if before_retry is not None:
+                before_retry()
+    raise AssertionError("unreachable")
 
 
 class ExecutionOutcomeUnknownError(RuntimeError):
@@ -101,9 +138,9 @@ class _Protocol:
         except (TypeError, ValueError):
             body = json.dumps({"error": "Host tool result is not JSON-serializable"}).encode("utf-8")
         try:
-            self.sandbox.fs.upload_file(body, f"{REPLY_DIR}/{call['id']}.json")
+            with_retries(lambda: self.sandbox.fs.upload_file(body, f"{REPLY_DIR}/{call['id']}.json"))
         except Exception:
-            # The sandbox keeps waiting; the Turn deadline or cancellation stops it.
+            # The sandbox call times out (HOST_CALL_TIMEOUT_SECONDS) and the model sees the error.
             _LOGGER.warning("Could not return a host tool result to the sandbox")
 
 
@@ -120,6 +157,7 @@ def run(
     Raises the SDK's error when the transport fails; the caller decides whether the outcome is known.
     """
     protocol = _Protocol(sandbox, on_call)
+    payload = {"host_call_timeout": min(HOST_CALL_TIMEOUT_SECONDS, timeout), **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
     try:
         execution = sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)

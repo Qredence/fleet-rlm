@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 import mlflow
 from mlflow.entities import SpanType
+from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.engine.signatures import Route
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
@@ -59,8 +60,6 @@ def run_turn(
         if prior is not None:
             emit({**_replayed(prior), "turn_id": prior["turn_id"]})
             return
-        if mlflow_experiment_id:
-            mlflow.set_experiment(experiment_id=mlflow_experiment_id)
         inputs = _prepare_inputs(runtime, session_id, task, record_replay=record_replay)
         replay_snapshot: tuple[str, bytes] | None = None
         if record_replay:
@@ -105,9 +104,12 @@ def run_turn(
                 "provenance": {"fleet_rlm_version": version("fleet-rlm")},
             }
             replay_snapshot = encode_snapshot(snapshot)
-        with mlflow.start_span(name="fleet_turn", span_type=SpanType.CHAIN) as span:
+        # The destination travels with the span: `mlflow.set_experiment` is process-wide and would race
+        # across Sessions that trace to different experiments.
+        destination = MlflowExperimentLocation(mlflow_experiment_id) if mlflow_experiment_id else None
+        with mlflow.start_span(name="fleet_turn", span_type=SpanType.CHAIN, trace_destination=destination) as span:
             trace_id = getattr(span, "trace_id", None) if mlflow_experiment_id else None
-            _describe_turn(span, runtime, settings, session_id, task, turn_id, inputs, replay_snapshot)
+            _describe_turn(span, runtime, settings, session_id, task, turn_id, idempotency_key, inputs, replay_snapshot)
             with dspy.context(callbacks=[*dspy.settings.callbacks, callback], disable_history=True):
                 prediction = runtime.engine(
                     workspace_manifest=inputs["manifest"],
@@ -158,7 +160,7 @@ def run_turn(
             span.set_attribute(
                 "compiled_program_digest", getattr(getattr(runtime.engine, "compiled", None), "digest", "")
             )
-            mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS])
+            mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS], tags={"fleet.route": route})
         completion: dict[str, Any] = {
             "event": "turn_complete",
             "answer": answer,
@@ -166,7 +168,6 @@ def run_turn(
             "learned_skill_note": learned_note,
             "artifacts": artifacts,
         }
-        trace_id = trace_id or (mlflow.get_last_active_trace_id() if mlflow_experiment_id else None)
         if trace_id:
             completion["trace_id"] = trace_id
         emit(completion)
@@ -245,6 +246,7 @@ def _describe_turn(
     session_id: str,
     task: str,
     turn_id: str,
+    idempotency_key: str | None,
     inputs: dict[str, Any],
     replay_snapshot: tuple[str, bytes] | None,
 ) -> None:
@@ -276,9 +278,17 @@ def _describe_turn(
             },
         }
     )
-    # Previews keep the trace list scannable; the full task and answer stay on the span.
+    # Previews keep the trace list scannable; the full task and answer stay on the span. The Turn id
+    # is the client request id so a stream event, a stored Turn, and its trace can be joined.
     mlflow.update_current_trace(
-        metadata={"mlflow.trace.session": session_id}, request_preview=task[:_TRACE_PREVIEW_CHARS]
+        metadata={"mlflow.trace.session": session_id},
+        client_request_id=turn_id,
+        tags={
+            "fleet.execution_mode": runtime.execution_mode,
+            "fleet.idempotency_key": idempotency_key or turn_id,
+            "fleet.configuration_digest": configuration["digest"],
+        },
+        request_preview=task[:_TRACE_PREVIEW_CHARS],
     )
 
 

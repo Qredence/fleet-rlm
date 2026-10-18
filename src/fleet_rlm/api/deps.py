@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
 
@@ -14,6 +14,12 @@ from fleet_rlm.session import SessionRuntime, SessionRuntimeRegistry
 from fleet_rlm.store import Store
 
 _LOGGER = logging.getLogger("fleet_rlm.api")
+# How long a route waits for a Session's lock before answering 409. Routes run in FastAPI's bounded
+# threadpool, and a Turn can hold the lock for the whole Turn timeout; waiting would pin a worker.
+_LOCK_WAIT_SECONDS = 2.0
+LOCKED: dict[int | str, dict[str, Any]] = {
+    409: {"description": "A Turn or workspace change holds the Session lock; retry when it completes"}
+}
 
 
 @contextmanager
@@ -31,6 +37,19 @@ def translate(unavailable: str, *, invalid: str | None = None, status: int = 503
     except Exception as exc:
         _LOGGER.warning("%s (%s)", unavailable, type(exc).__name__)
         raise HTTPException(status_code=status, detail=unavailable) from None
+
+
+@contextmanager
+def session_lock(runtime: SessionRuntime) -> Generator[None, None, None]:
+    """Hold the Session's `turn_lock` for the block, or raise 409 when a Turn keeps it busy."""
+    if not runtime.turn_lock.acquire(timeout=_LOCK_WAIT_SECONDS):
+        raise HTTPException(status_code=409, detail="A Turn is running on this Session; retry when it completes")
+    try:
+        with translate("Session runtime is unavailable"):
+            runtime.assert_lease_held()
+        yield
+    finally:
+        runtime.turn_lock.release()
 
 
 def get_settings(request: Request) -> FleetSettings:

@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- `DELETE /sessions/{session_id}` stops a Session's sandbox, releases its lease, and drops its
+  in-process runtime (history is kept); 404 without a runtime, 409 while a Turn runs.
+- Turn traces now carry `client_request_id` (the Turn id) and `fleet.*` tags (execution mode,
+  idempotency key, configuration digest, route).
+- Sandbox host calls fail with `TimeoutError` inside the sandbox after 600s (bounded by the
+  execution timeout) instead of stalling until the Turn deadline.
 - Shared learned notes: root sandboxes mount `FLEET_SHARED_NOTES_SUBPATH` (default
   `shared/learned-notes`) at `/learned`. Each committed Turn's learned note is written there
   as an unreviewed, redacted file, and later Sessions see the newest summaries in their memory
@@ -15,6 +21,18 @@ All notable changes to this project are documented in this file.
   from root spans only.
 
 ### Changed
+
+- Session routes that need the Session lock (mode, context, memory, Skills, workspace files, model
+  selection) now answer **409** after 2s instead of holding a threadpool worker for the whole Turn.
+- Sandbox state is refreshed from Daytona before each Turn, so a sandbox auto-stopped while idle is
+  restarted instead of failing the Turn. Idempotent Daytona calls retry transient failures with
+  jittered backoff; `run_code` is never retried.
+- Turns pass their MLflow experiment with the root span instead of calling `set_experiment` per Turn.
+- `commit_turn` requires a `turn_id`, so the connection retry cannot store a Turn twice. Pooled
+  Postgres connections are recycled at 50 minutes (Lakebase tokens last an hour) and checked on
+  checkout; a dropped Session lease is re-acquired on a fresh connection.
+- GEPA rollouts share one set of LMs per run and one judge per judge LM instead of rebuilding them.
+- Removed the unused `databricks-agents` dependency.
 
 - The wheel ships a `py.typed` marker, so type checkers use Fleet's inline annotations. The
   sdist now contains only source, tests, config, docs, and scripts.

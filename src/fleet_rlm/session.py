@@ -19,6 +19,9 @@ from fleet_rlm.store import Store
 from fleet_rlm.store.db import VolumePostgresHarness
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
+_EVICT_WAIT_SECONDS = 2.0
+_LEASE_MONITOR_JOIN_SECONDS = 5.0
+
 
 @dataclass(slots=True)
 class SessionRuntime:
@@ -40,6 +43,7 @@ class SessionRuntime:
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
     _lease_monitor_stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _lease_monitor: threading.Thread | None = field(default=None, repr=False)
+    _lease_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def assert_lease_held(self) -> None:
         """Fail closed after the dedicated connection holding this Session lock is lost."""
@@ -53,14 +57,33 @@ class SessionRuntime:
             return
 
         def monitor() -> None:
+            current = lease
             while not self._lease_monitor_stop.wait(interval_seconds):
                 try:
-                    lease.execute("SELECT 1")
+                    current.execute("SELECT 1")
+                    continue
                 except Exception:
+                    pass
+                # The connection dropped (Lakebase closes idle ones). Re-take the advisory lock on a fresh
+                # connection, which also carries a fresh credential; another worker holding it means we lost.
+                try:
+                    renewed = self.harness.store.acquire_session_lease(self.sandbox_mgr.session_id)
+                except Exception:
+                    if self._lease_monitor_stop.is_set():
+                        return
                     self.lease_lost.set()
                     with suppress(Exception):
                         self.sandbox_mgr.cancel_turn()
                     return
+                with self._lease_lock:
+                    if self._lease_monitor_stop.is_set():
+                        with suppress(Exception):
+                            renewed.close()
+                        return
+                    self.lease = renewed
+                with suppress(Exception):
+                    current.close()
+                current = renewed
 
         self._lease_monitor = threading.Thread(
             target=monitor,
@@ -71,13 +94,15 @@ class SessionRuntime:
 
     def close_lease(self) -> None:
         """Stop the lease monitor and close the dedicated lease connection."""
-        self._lease_monitor_stop.set()
+        with self._lease_lock:
+            self._lease_monitor_stop.set()
+            self.lease_lost.set()
+            lease, self.lease = self.lease, None
         if self._lease_monitor is not None:
-            self._lease_monitor.join(timeout=5)
+            self._lease_monitor.join(timeout=_LEASE_MONITOR_JOIN_SECONDS)
             self._lease_monitor = None
-        if self.lease is not None:
-            self.lease.close()
-            self.lease = None
+        if lease is not None:
+            lease.close()
 
     def set_mode(self, mode: str) -> None:
         """Set the execution mode on this Session and its engine, and record it as an override."""
@@ -212,10 +237,38 @@ class SessionRuntimeRegistry:
             execution_mode=runtime.execution_mode,
         )
 
+    def evict(self, session_id: str) -> bool:
+        """Stop one Session's sandbox and release its lease; False when it has no runtime in this process.
+
+        Stored history is untouched, and the next request rebuilds the runtime.
+        """
+        session_id = validate_session_id(session_id)
+        with self._lock:
+            runtime = self._sessions.get(session_id)
+        if runtime is None:
+            return False
+        if not runtime.turn_lock.acquire(timeout=_EVICT_WAIT_SECONDS):
+            raise TimeoutError("A Turn is running on this Session")
+        try:
+            with self._lock:
+                if self._sessions.get(session_id) is not runtime:
+                    return False
+                runtime.lease_lost.set()
+                self._sessions.pop(session_id, None)
+            try:
+                runtime.sandbox_mgr.shutdown()
+            finally:
+                runtime.close_lease()
+        finally:
+            runtime.turn_lock.release()
+        return True
+
     def close(self) -> None:
         """Shut down every Session sandbox, then release each lease."""
         with self._lock:
             runtimes = tuple(self._sessions.values())
+            for runtime in runtimes:
+                runtime.lease_lost.set()
             self._sessions.clear()
         try:
             if runtimes:

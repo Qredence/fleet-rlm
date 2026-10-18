@@ -29,10 +29,11 @@ def events_of(response) -> list[dict[str, Any]]:
 @pytest.fixture
 def traced(monkeypatch):
     """Replace MLflow and dspy.context in the Turn module; record what the Turn reports."""
-    seen: dict[str, Any] = {"updates": [], "callbacks": []}
+    seen: dict[str, Any] = {"updates": [], "callbacks": [], "destinations": []}
 
     @contextmanager
-    def span(**_kwargs):
+    def span(**kwargs):
+        seen["destinations"].append(kwargs.get("trace_destination"))
         yield SimpleNamespace(
             trace_id=seen.get("span_trace_id"),
             set_inputs=lambda value: seen.__setitem__("inputs", value),
@@ -55,8 +56,12 @@ def traced(monkeypatch):
     )
     monkeypatch.setattr(turn_module.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **kwargs: seen["updates"].append(kwargs))
-    monkeypatch.setattr(turn_module.mlflow, "set_experiment", lambda **_kwargs: None)
-    monkeypatch.setattr(turn_module.mlflow, "get_last_active_trace_id", lambda: seen.get("last_trace_id"))
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("a Turn must not change process-wide MLflow state")
+
+    monkeypatch.setattr(turn_module.mlflow, "set_experiment", forbidden)
+    monkeypatch.setattr(turn_module.mlflow, "get_last_active_trace_id", forbidden)
     return seen
 
 
@@ -66,7 +71,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     records: list[dict] = []
     order: list[str] = []
     written: list[tuple] = []
-    traced["last_trace_id"] = "trace-test-id"
+    traced["span_trace_id"] = "trace-test-id"
 
     def run_engine(**kwargs):
         assert "- older.md: prior hint" in kwargs["memory_summary"]
@@ -118,10 +123,15 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         "artifacts": ["artifacts/result.csv"],
         "trace_id": "trace-test-id",
     }
-    assert {"metadata": {"mlflow.trace.session": "session-a"}, "request_preview": "summarize this file"} in traced[
-        "updates"
-    ]
-    assert {"response_preview": "processed locally"} in traced["updates"]
+    described, completed = traced["updates"]
+    assert described["metadata"] == {"mlflow.trace.session": "session-a"}
+    assert described["request_preview"] == "summarize this file"
+    assert described["client_request_id"] == records[0]["turn_id"]
+    assert described["tags"]["fleet.execution_mode"] == "hybrid"
+    assert described["tags"]["fleet.idempotency_key"] == records[0]["turn_id"]
+    assert completed == {"response_preview": "processed locally", "tags": {"fleet.route": "flex"}}
+    # The experiment travels with the span rather than through process-wide `set_experiment`.
+    assert [getattr(d, "experiment_id", None) for d in traced["destinations"]] == ["experiment-test-id"]
     assert traced["global_callback"] in traced["callbacks"]
     # The root span is a self-contained optimization example and says which program served it.
     assert traced["inputs"]["session_id"] == "session-a"
@@ -139,7 +149,9 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     }
     assert records[0]["workspace_manifest"] == "/workspace/files/input.txt, /workspace/files/rates.csv"
     assert order == ["sync", "write"]
-    assert written == ([] if write_fails else [(records[0]["turn_id"], "Reuse the digit window check.", None)])
+    # The learned note carries the Turn's own trace id, read from the root span.
+    expected_note = (records[0]["turn_id"], "Reuse the digit window check.", "trace-test-id")
+    assert written == ([] if write_fails else [expected_note])
     assert not runtime.turn_lock.locked()
 
 
@@ -193,7 +205,6 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced) -> None:
 @pytest.mark.parametrize("fail_preparation", [False, True])
 def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_preparation):
     traced["span_trace_id"] = "trace-failed-id"
-    traced["last_trace_id"] = "stale-previous-trace"
     finished: list[tuple] = []
 
     def hydrate(_session):

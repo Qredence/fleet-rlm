@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from typing import Any
 
@@ -155,15 +156,21 @@ class FleetJudge(dspy.Module):
         )
 
 
+@functools.lru_cache(maxsize=8)
+def _judge_for(judge_lm: dspy.LM) -> FleetJudge:
+    """One judge per judge LM: the metric runs once per rollout, and the judge holds no per-call state."""
+    judge = FleetJudge()
+    judge.set_lm(judge_lm)
+    return judge
+
+
 # Each metric returns (score, detail), or None when it does not apply to the example.
 Metric = tuple[float, str] | None
 
 
 def answer_correctness(gold: Any, answer: str, judge_lm: dspy.LM) -> Metric:
     """The judge's verdict; uses the gold answer when one is labelled."""
-    judge = FleetJudge()
-    judge.set_lm(judge_lm)
-    verdict = judge(
+    verdict = _judge_for(judge_lm)(
         task=str(getattr(gold, "task", "")), answer=answer, expected_answer=str(getattr(gold, "answer", "") or "")
     )
     return verdict.score, verdict.feedback

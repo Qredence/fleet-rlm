@@ -94,6 +94,10 @@ class FakeRegistry:
     def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> Any:
         return self._engine_for_models(runtime, models)
 
+    def evict(self, session_id: str) -> bool:
+        validate_session_id(session_id)
+        return self._evicted.pop(session_id, False) if hasattr(self, "_evicted") else True
+
     def close(self) -> None:
         return None
 

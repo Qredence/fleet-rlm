@@ -12,12 +12,14 @@ import functools
 import hashlib
 import json
 import re
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ParamSpec, Self, TypeVar
 
 import psycopg
+import psycopg_pool
 from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -162,6 +164,11 @@ _SCHEMA_MIGRATIONS = (
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
+_RETRY_DELAY_SECONDS = 0.5
+# Lakebase credentials live at most one hour; recycle pooled connections before theirs expire.
+_POOL_MAX_LIFETIME_SECONDS = 50 * 60.0
+_POOL_MAX_IDLE_SECONDS = 10 * 60.0
+_POOL_RECONNECT_TIMEOUT_SECONDS = 60.0
 
 
 _P = ParamSpec("_P")
@@ -171,7 +178,8 @@ _R = TypeVar("_R")
 def _retry_once(method: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry once on a connection error. Lakebase closes idle connections; the pool discards the dead one.
 
-    Safe because every Store write is an upsert, a conditional update, or a delete.
+    Safe because every Store write is an upsert, a conditional update, or a delete; `commit_turn` is
+    conditional on the record's turn_id, which it therefore requires.
     """
 
     @functools.wraps(method)
@@ -179,6 +187,7 @@ def _retry_once(method: Callable[_P, _R]) -> Callable[_P, _R]:
         try:
             return method(*args, **kwargs)
         except psycopg.OperationalError:
+            time.sleep(_RETRY_DELAY_SECONDS)
             return method(*args, **kwargs)
 
     return wrapper
@@ -229,27 +238,22 @@ class Store:
         connection_kwargs: dict[str, Any] = {"connect_timeout": 30, "autocommit": True}
         if schema != "public":
             connection_kwargs["options"] = f"-c search_path={schema}"
-        pool = ConnectionPool(
-            dsn,
-            min_size=1,
-            max_size=max_size,
-            open=False,
-            kwargs=connection_kwargs,
-            connection_class=connection_class,
-            name="fleet",
-        )
+        pool_options: dict[str, Any] = {
+            "kwargs": connection_kwargs,
+            "connection_class": connection_class,
+            "max_lifetime": _POOL_MAX_LIFETIME_SECONDS,
+            "max_idle": _POOL_MAX_IDLE_SECONDS,
+            "reconnect_timeout": _POOL_RECONNECT_TIMEOUT_SECONDS,
+            # A connection Lakebase closed while idle is discarded on checkout rather than handed out.
+            "check": psycopg_pool.ConnectionPool.check_connection,
+        }
+        pool = ConnectionPool(dsn, min_size=1, max_size=max_size, open=False, name="fleet", **pool_options)
         pool.open(wait=wait, timeout=60)
         migration_pool = None
         try:
             if migration_dsn and migration_dsn != dsn:
                 migration_pool = ConnectionPool(
-                    migration_dsn,
-                    min_size=1,
-                    max_size=1,
-                    open=False,
-                    kwargs=connection_kwargs,
-                    connection_class=connection_class,
-                    name="fleet-migrations",
+                    migration_dsn, min_size=1, max_size=1, open=False, name="fleet-migrations", **pool_options
                 )
                 migration_pool.open(wait=wait, timeout=60)
         except BaseException:
@@ -508,6 +512,12 @@ class Store:
         """
         if replay_snapshot is not None and completion is None:
             raise ValueError("A replay snapshot can only be committed with a completed Turn")
+        turn_id = None
+        with suppress(TypeError, AttributeError, json.JSONDecodeError):
+            turn_id = json.loads(turn_record_json).get("turn_id")
+        if not turn_id:
+            # The append is guarded on turn_id; without one, the connection retry could store the Turn twice.
+            raise ValueError("Turn record must carry a turn_id")
         with self.pool.connection() as connection, connection.transaction():
             connection.execute(
                 "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
@@ -516,9 +526,6 @@ class Store:
                 "SELECT session_id FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE", (session_id,)
             )
             note = memory_note[:10_000]
-            turn_id = None
-            with suppress(TypeError, json.JSONDecodeError):
-                turn_id = json.loads(turn_record_json).get("turn_id")
             connection.execute(_APPEND_TURN, (turn_record_json, max_turns, note, note, session_id, turn_id, turn_id))
             if replay_snapshot is not None:
                 assert completion is not None
@@ -792,6 +799,8 @@ class VolumePostgresHarness:
             raise ValueError("Selected replay metadata and immutable snapshot must be committed together")
         if replay_snapshot is not None and turn_record.get("replay_snapshot_sha256") != replay_snapshot[0]:
             raise ValueError("Turn replay digest does not match the immutable snapshot")
+        if not turn_record.get("turn_id"):
+            raise ValueError("Turn record must carry a turn_id")
         session_id = validate_session_id(session_id)
         record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
         if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:

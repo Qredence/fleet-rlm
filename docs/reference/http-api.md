@@ -7,6 +7,7 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/health` | Return status and application version. |
 | `GET` | `/sessions` | List persisted sessions (up to 100). |
 | `GET` | `/models?scope=system.ai` | Discover authorized chat-capable Unity Gateway model services (up to 1000). |
+| `DELETE` | `/sessions/{session_id}` | Stop the session sandbox and release its runtime and lease; history is kept. 404 without a runtime, 409 during a Turn. |
 | `GET` | `/sessions/{session_id}/config` | Inspect non-secret session models, mode, dataset, and limits. |
 | `PUT` | `/sessions/{session_id}/model` | Select and persist an accessible model for the `root` or `sub` role. |
 | `GET` | `/skills?session_id=...` | Return the selected session's Skill catalog. |
@@ -24,6 +25,9 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/memory?q=...` | Retrieve scoped memories. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/memory/{memory_id}` | Create/review/update/delete memories. |
 | `POST` | `/skills/push?session_id=...` | Synchronize validated local user Skills. |
+
+Routes that change or read workspace, context, memory, Skill, mode, or model state take the
+session lock. While a Turn holds it they answer `409` after two seconds rather than queueing.
 
 There is no caller authentication. The service binds to loopback by default;
 binding elsewhere does not add authentication. Only use on a trusted host or

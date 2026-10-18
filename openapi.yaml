@@ -61,6 +61,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}:
+    delete:
+      tags:
+      - sessions
+      summary: Evict Session
+      description: 'Stop a Session''s sandbox and release its runtime; stored history is kept.
+
+
+        Returns 404 when this process holds no runtime for the Session, and 409 while a Turn is running.'
+      operationId: evict_session_sessions__session_id__delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deleted'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /sessions/{session_id}/config:
     get:
       tags:
@@ -118,6 +150,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelSelection'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -180,6 +214,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Mode'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -276,6 +312,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ContextSelected'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -302,6 +340,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Status'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -329,6 +369,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Files'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -356,6 +398,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Files'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -389,6 +433,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileStat'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -421,6 +467,8 @@ paths:
       responses:
         '200':
           description: Successful Response
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -462,6 +510,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileWritten'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -497,6 +547,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Deleted'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -533,6 +585,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Attached'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -606,6 +660,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MemorySaved'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -638,6 +694,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Deleted'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -666,6 +724,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Catalog'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -694,6 +754,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Exported'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
@@ -722,6 +784,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pushed'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:

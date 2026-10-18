@@ -56,11 +56,6 @@ def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def fingerprint(value: Any) -> str:
-    """Digest of canonical JSON, for identities of structured evidence."""
-    return digest_bytes(json.dumps(value, sort_keys=True, allow_nan=False, default=str).encode())
-
-
 @dataclass(frozen=True)
 class EvaluationGate:
     """Hold a promotion verdict and the reasons it failed, if any."""

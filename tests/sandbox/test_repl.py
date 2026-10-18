@@ -234,3 +234,39 @@ def test_a_broken_context_is_reported_as_an_error_not_a_hang(sandbox):
     sandbox.code_interpreter.run_code("del _fleet_exec", context=context, timeout=10)
     result = run(sandbox, context, "x = 1")
     assert result["error"] is True and result["error_type"] == "NameError"
+
+
+def test_a_host_call_whose_reply_never_arrives_times_out_in_the_sandbox(sandbox, monkeypatch):
+    from fleet_rlm.sandbox import repl as repl_module
+
+    monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
+
+    def lost_upload(*_args, **_kwargs):
+        raise RuntimeError("upload failed")
+
+    monkeypatch.setattr(sandbox.fs, "upload_file", lost_upload)
+    started = time.monotonic()
+    result = run(
+        sandbox,
+        repl.create_context(sandbox),
+        "lookup()",
+        tools=["lookup"],
+        on_call=lambda _call: {"value": 1},
+        host_call_timeout=0.3,
+    )
+    assert result["error"] is True and result["error_type"] == "TimeoutError"
+    assert "did not reply within" in result["stderr"]
+    assert time.monotonic() - started < 5
+
+
+def test_the_host_call_deadline_is_bounded_by_the_execution_timeout(sandbox):
+    captured: dict[str, Any] = {}
+    original = sandbox.code_interpreter.run_code
+
+    def spy(code, **kwargs):
+        captured["code"] = code
+        return original(code, **kwargs)
+
+    sandbox.code_interpreter.run_code = spy
+    run(sandbox, repl.create_context(sandbox), "1", timeout=7)
+    assert '"host_call_timeout": 7' in captured["code"] or '"host_call_timeout":7' in captured["code"]

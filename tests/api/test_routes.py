@@ -242,3 +242,69 @@ def test_request_bodies_reject_unknown_fields(method: str, path: str, body: dict
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["type"] == "extra_forbidden"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("put", "/sessions/s1/mode", {"mode": "rlm"}),
+        ("put", "/sessions/s1/context", {"path": "files/a.csv"}),
+        ("delete", "/sessions/s1/context", None),
+        ("put", "/sessions/s1/memory/m1", {"content": "x"}),
+        ("delete", "/sessions/s1/memory/m1", None),
+        ("get", "/sessions/s1/files", None),
+        ("get", "/sessions/s1/workspace/stat/files/a.csv", None),
+        ("put", "/sessions/s1/workspace/files/files/a.csv", {"content": "x"}),
+        ("delete", "/sessions/s1/workspace/files/files/a.csv", None),
+        ("get", "/skills?session_id=s1", None),
+        ("post", "/skills/push?session_id=s1", None),
+    ],
+)
+def test_session_routes_return_409_instead_of_waiting_on_a_running_turn(monkeypatch, method, path, body):
+    from fleet_rlm.api import deps
+
+    monkeypatch.setattr(deps, "_LOCK_WAIT_SECONDS", 0.01)
+    runtime = runtime_with()
+    runtime.turn_lock.acquire()
+    client, _ = client_for(runtime)
+    try:
+        with client:
+            response = client.request(method.upper(), path, json=body)
+    finally:
+        runtime.turn_lock.release()
+    assert response.status_code == 409
+    assert "Turn" in response.json()["detail"]
+
+
+def test_openapi_documents_the_409_on_lock_guarded_routes():
+    _, app = client_for()
+    schema = app.openapi()
+    for path, method in (
+        ("/sessions/{session_id}/mode", "put"),
+        ("/sessions/{session_id}/workspace/files/{rel_path}", "put"),
+        ("/skills/push", "post"),
+    ):
+        assert "409" in schema["paths"][path][method]["responses"], (path, method)
+    assert "409" not in schema["paths"]["/sessions/{session_id}/mode"]["get"]["responses"]
+
+
+def test_deleting_a_session_releases_its_runtime():
+    client, _ = client_for(runtime_with())
+    with client:
+        response = client.delete("/sessions/s1")
+    assert response.status_code == 200 and response.json() == {"deleted": "s1"}
+
+
+def test_deleting_a_session_without_a_runtime_is_a_404_and_a_busy_one_a_409():
+    from fakes import FakeRegistry
+
+    client, _ = client_for(runtime_with())
+    with client:
+        FakeRegistry.evict = lambda _self, _sid: False
+        assert client.delete("/sessions/s1").status_code == 404
+
+        def busy(_self, _sid):
+            raise TimeoutError("busy")
+
+        FakeRegistry.evict = busy
+        assert client.delete("/sessions/s1").status_code == 409

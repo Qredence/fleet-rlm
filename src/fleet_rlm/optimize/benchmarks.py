@@ -1,7 +1,8 @@
 """RLM-oriented eval cases: synthetic long-context generators and public benchmark adapters.
 
-Public sets (Oolong, LongCoT) are labeled ``review_status="benchmark"`` and are meant for the
-held-out split only; GEPA must never train or validate on them.
+LongCoT cases are labeled ``review_status="benchmark"`` and are held out entirely. Oolong cases are
+split by context window (see ``window_status``): two of three windows are ``approved`` and may train,
+and the rest stay ``benchmark``. GEPA must never train or validate on a ``benchmark`` case.
 """
 
 from __future__ import annotations

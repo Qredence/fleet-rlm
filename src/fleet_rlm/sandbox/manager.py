@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextvars
+import functools
 import hashlib
 import json
 import logging
@@ -24,6 +25,7 @@ from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError as ExecutionOutcomeUnknownError
+from fleet_rlm.sandbox.repl import with_retries
 from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
 from fleet_rlm.workspace import (
     _child_input_path,
@@ -38,6 +40,13 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
 
+# Daytona sandbox states, as the provider reports them after `refresh_data()`.
+_RESUMABLE_STATES = frozenset({"stopped", "archived", "paused"})
+_SETTLING_STATES = frozenset({"stopping", "archiving", "pausing", "starting", "resuming", "restoring", "creating"})
+_FAILED_STATES = frozenset({"error", "build_failed", "destroyed", "destroying"})
+_STATE_POLL_SECONDS = 1.0
+_STATE_SETTLE_SECONDS = 90.0
+
 _DAYTONA_CLIENTS: dict[tuple[str, str], Daytona] = {}
 _DAYTONA_CLIENTS_LOCK = threading.Lock()
 
@@ -49,6 +58,15 @@ def _shared_daytona_client(api_key: str, org_id: str) -> Daytona:
         if client is None:
             client = _DAYTONA_CLIENTS[api_key, org_id] = Daytona(DaytonaConfig(api_key=api_key, organization_id=org_id))
         return client
+
+
+def _sandbox_state(sandbox: Any) -> str:
+    """Refresh the handle from the provider and return its lowercase state ("" when unknown)."""
+    refresh = getattr(sandbox, "refresh_data", None)
+    if callable(refresh):
+        refresh()
+    state = getattr(sandbox, "state", None)
+    return str(getattr(state, "value", state) or "").lower()
 
 
 _ACTIVE_MANAGER: contextvars.ContextVar[Any] = contextvars.ContextVar("fleet_active_manager", default=None)
@@ -315,7 +333,7 @@ class DaytonaSandboxManager:
             "'stdout':data[:65536].decode('utf-8',errors='replace')}))\n"
         )
         try:
-            result = json.loads(self._remote_exec(self.ensure_sandbox(), code, timeout=timeout + 1))
+            result = json.loads(self._remote_exec(self.ensure_sandbox(), code, timeout=timeout + 1, retry=False))
         except Exception as exc:
             # The process transport cannot establish whether execution finished. Never replay it.
             self.cancel_turn()
@@ -333,7 +351,8 @@ class DaytonaSandboxManager:
         # Stopping the root interrupts remote Python, including a running infinite loop.
         with root._lock:
             if root._sandbox is not None and root._client is not None:
-                root._client.stop(root._sandbox, timeout=60)
+                client, sandbox = root._client, root._sandbox
+                with_retries(lambda: client.stop(sandbox, timeout=60))
                 root._contexts.clear()
 
     def _record_allocation(self, status: str) -> None:
@@ -364,15 +383,9 @@ class DaytonaSandboxManager:
                 continue
             if record["agent_id"] == self.agent_id:
                 continue
-            for sandbox in self._client.list(
-                ListSandboxesQuery(
-                    labels={
-                        "fleet_session": self.session_id,
-                        "fleet_agent": record["agent_id"],
-                    }
-                )
-            ):
-                self._client.delete(sandbox, wait=True, timeout=60)
+            query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": record["agent_id"]})
+            for sandbox in with_retries(functools.partial(self._list_sandboxes, query)):
+                with_retries(functools.partial(self._client.delete, sandbox, wait=True, timeout=60))
                 self.emit("orphan_deleted", sandbox_id=sandbox.id, agent_id=record["agent_id"])
             path.unlink()
 
@@ -402,19 +415,12 @@ class DaytonaSandboxManager:
         with self._lock:
             if self._client is None:
                 self._client = _shared_daytona_client(self.api_key, self.org_id)
+            created = False
             if self._sandbox is None:
                 self.check_turn()
                 if self._creation_pending:
-                    matches = list(
-                        self._client.list(
-                            ListSandboxesQuery(
-                                labels={
-                                    "fleet_session": self.session_id,
-                                    "fleet_agent": self.agent_id,
-                                }
-                            )
-                        )
-                    )
+                    query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
+                    matches = with_retries(functools.partial(self._list_sandboxes, query))
                     if len(matches) != 1:
                         raise RuntimeError("Sandbox allocation outcome is uncertain; refusing a duplicate create")
                     self._sandbox = matches[0]
@@ -448,19 +454,48 @@ class DaytonaSandboxManager:
                 self._record_allocation("ready")
                 self.check_turn()
                 self.emit("sandbox_ready", depth=self.depth)
-            state = getattr(self._sandbox, "state", None)
-            normalized_state = str(getattr(state, "value", state) or "").lower()
-            if normalized_state in {"stopped", "archived", "archiving", "stopping"}:
-                self._client.start(self._sandbox)
-                self._contexts.clear()
+                created = True
+            if not created:
+                self._resume_if_needed()
             return self._sandbox
 
-    def _remote_exec(self, sandbox: Any, code: str, *, timeout: int | None = None) -> str:
+    def _list_sandboxes(self, query: ListSandboxesQuery) -> list[Any]:
+        assert self._client is not None
+        return list(self._client.list(query))
+
+    def _resume_if_needed(self) -> None:
+        """Start a sandbox the provider has stopped, archived, or paused since the handle was cached.
+
+        The cached `state` lags the provider (Daytona auto-stops idle sandboxes), so the handle is
+        refreshed first. A sandbox still settling into a stable state is polled; a failed one raises.
+        """
+        sandbox = self._sandbox
+        assert sandbox is not None and self._client is not None
+        state = _sandbox_state(sandbox)
+        deadline = time.monotonic() + _STATE_SETTLE_SECONDS
+        while state in _SETTLING_STATES:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Sandbox {sandbox.id} did not settle from state {state!r}")
+            time.sleep(_STATE_POLL_SECONDS)
+            self.check_turn()
+            state = _sandbox_state(sandbox)
+        if state in _FAILED_STATES:
+            raise RuntimeError(f"Sandbox {sandbox.id} is in state {state!r} and cannot be resumed")
+        if state in _RESUMABLE_STATES:
+            self.emit("sandbox_resuming", state=state)
+            client = self._client
+            with_retries(lambda: client.start(sandbox), before_retry=self.check_turn)
+            self._contexts.clear()
+
+    def _remote_exec(self, sandbox: Any, code: str, *, timeout: int | None = None, retry: bool = True) -> str:
         encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
         command = (
             "python3 -c 'import base64; exec(compile(base64.b64decode(\"" + encoded + '"), "<fleet-remote>", "exec"))\''
         )
-        result = sandbox.process.exec(command, timeout=timeout)
+        if retry:
+            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout))
+        else:
+            result = sandbox.process.exec(command, timeout=timeout)
         if getattr(result, "exit_code", 0) != 0:
             raise RuntimeError("Remote Daytona command failed")
         return getattr(result, "result", "") or ""
@@ -525,7 +560,8 @@ class DaytonaSandboxManager:
             f"summary: {summary}",
             "---",
         ]
-        self.ensure_sandbox().fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60)
+        sandbox = self.ensure_sandbox()
+        with_retries(lambda: sandbox.fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60))
         return path
 
     def list_learned_notes(self, limit: int = 20) -> list[dict[str, str]]:
@@ -635,7 +671,7 @@ class DaytonaSandboxManager:
             raise ValueError("Workspace file exceeds the 25 MB limit")
         sandbox = self.ensure_sandbox()
         self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
-        sandbox.fs.upload_file(content, f"/workspace/{clean_path}", timeout=1800)
+        with_retries(lambda: sandbox.fs.upload_file(content, f"/workspace/{clean_path}", timeout=1800))
         return f"/workspace/{clean_path}"
 
     def write_workspace_file_from_path(self, rel_path: str, local_path: str | Path) -> str:
@@ -647,7 +683,7 @@ class DaytonaSandboxManager:
             raise ValueError("Workspace file exceeds the 25 MB limit")
         sandbox = self.ensure_sandbox()
         self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
-        sandbox.fs.upload_file(str(source), f"/workspace/{clean_path}", timeout=1800)
+        with_retries(lambda: sandbox.fs.upload_file(str(source), f"/workspace/{clean_path}", timeout=1800))
         return f"/workspace/{clean_path}"
 
     def read_workspace_file(self, rel_path: str, *, max_bytes: int = 25_000_000) -> bytes:
@@ -660,7 +696,8 @@ class DaytonaSandboxManager:
         clean_path = _workspace_relative_path(rel_path)
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
-        content = sandbox.fs.download_file(f"/workspace/{clean_path}", 1800)
+        # The SDK's download_file is positional-only at runtime (an *args overload); keep the timeout positional.
+        content = with_retries(lambda: sandbox.fs.download_file(f"/workspace/{clean_path}", 1800))
         if not isinstance(content, bytes) or len(content) != metadata["size"]:
             raise RuntimeError("Workspace file changed or could not be downloaded")
         return content
@@ -673,7 +710,7 @@ class DaytonaSandboxManager:
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
         destination = Path(local_path)
-        sandbox.fs.download_file(f"/workspace/{clean_path}", str(destination), 1800)
+        with_retries(lambda: sandbox.fs.download_file(f"/workspace/{clean_path}", str(destination), 1800))
         if not destination.is_file() or destination.stat().st_size != metadata["size"]:
             raise RuntimeError("Workspace file changed or could not be downloaded")
         return metadata["size"]
@@ -764,7 +801,7 @@ class DaytonaSandboxManager:
         sandbox = self.ensure_sandbox()
         # The remote check rejects symbolic links; Daytona's file API does not report them.
         self._workspace_file_metadata(sandbox, clean, create_parents=False)
-        sandbox.fs.delete_file(f"/workspace/{clean}")
+        with_retries(lambda: sandbox.fs.delete_file(f"/workspace/{clean}"))
 
     def _register_interpreter(self, interpreter: DaytonaInterpreter) -> None:
         with self._lock:
@@ -815,13 +852,13 @@ class DaytonaSandboxManager:
                         self.emit("workspace_cleanup_failed", sandbox_id=sandbox.id)
                     # A stopped or failed sandbox cannot run workspace cleanup,
                     # but must still be deleted and confirmed by the provider.
-                    client.delete(sandbox, timeout=60, wait=True)
+                    with_retries(lambda: client.delete(sandbox, timeout=60, wait=True))
                     (Path(".fleet/allocations") / f"{self.agent_id}.json").unlink(missing_ok=True)
                     with self.root._budget_lock:
                         self.root._children.pop(self.agent_id, None)
                     self.emit("sandbox_deleted", sandbox_id=sandbox.id)
                 else:
-                    client.stop(sandbox, timeout=60)
+                    with_retries(lambda: client.stop(sandbox, timeout=60))
             except Exception:
                 _LOGGER.warning("Daytona Session sandbox stop failed")
                 if self.parent is not None:

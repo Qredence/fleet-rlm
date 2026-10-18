@@ -47,7 +47,9 @@ RESERVED_NAMES = {
 REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
 SKILL_HELPERS = ("list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill")
 
-_STATE: dict[str, Any] = {"namespace": None, "stdout": None}
+HOST_CALL_TIMEOUT_SECONDS = 600.0
+
+_STATE: dict[str, Any] = {"namespace": None, "stdout": None, "host_call_timeout": HOST_CALL_TIMEOUT_SECONDS}
 _WRITE_LOCK = threading.Lock()
 
 
@@ -102,13 +104,18 @@ def _bridge_call(tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any
         raise ValueError("Host tool request exceeds the size limit")
     path = os.path.join(REPLY_DIR, request["id"] + ".json")
     _emit(CALL_MARK, request)
-    # The Turn watchdog stops the sandbox; there is deliberately no per-call timer here.
+    # The Turn watchdog is the outer bound; this per-call deadline turns a lost reply into an error the
+    # model can act on instead of a stall.
+    limit = float(_STATE.get("host_call_timeout") or HOST_CALL_TIMEOUT_SECONDS)
+    deadline = time.monotonic() + limit
     delay = 0.005
     while True:
         try:
             with open(path, encoding="utf-8") as handle:
                 reply = json.load(handle)
         except (OSError, ValueError):  # absent, or the upload is still in progress
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Host tool {tool_name!r} did not reply within {limit:.0f}s") from None
             time.sleep(delay)
             delay = min(delay * 2, 0.05)
             continue
@@ -266,6 +273,7 @@ def _fleet_exec(payload_json: str) -> None:
     _STATE["stdout"] = sys.stdout  # the interpreter's per-run stream; markers must reach it, not the capture
     try:
         payload = json.loads(payload_json)
+        _STATE["host_call_timeout"] = payload.get("host_call_timeout") or HOST_CALL_TIMEOUT_SECONDS
         result = _run(
             payload.get("code"), payload.get("variables") or {}, payload.get("tools") or [], payload.get("outputs")
         )

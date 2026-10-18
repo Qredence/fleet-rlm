@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Any
 
 import dspy
-from dspy.signatures.signature import make_signature
+from dspy import make_signature
 
 from fleet_rlm.dspy_support import make_choice_type
 

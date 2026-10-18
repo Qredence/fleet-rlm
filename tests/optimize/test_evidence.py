@@ -139,7 +139,8 @@ def test_python_verification_runs_only_via_daytona_transport(monkeypatch):
     monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda *_args, **_kw: b"print(42)")
     monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: object())
 
-    def remote(_self, _sandbox, code, *, timeout):
+    def remote(_self, _sandbox, code, *, timeout, retry):
+        assert retry is False
         commands.append((code, timeout))
         return json.dumps({"complete": True, "exit_code": 0, "stdout": "42\n"})
 

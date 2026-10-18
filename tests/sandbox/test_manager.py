@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -180,3 +181,140 @@ def test_managers_with_the_same_credentials_share_one_daytona_client(monkeypatch
     assert manager_module._shared_daytona_client("key", "org") is first
     assert manager_module._shared_daytona_client("key", "other-org") is not first
     assert created == [("key", "org"), ("key", "other-org")]
+
+
+class _RemoteSandbox(SimpleNamespace):
+    """A sandbox handle whose cached `state` lags the provider until `refresh_data()` is called."""
+
+    def __init__(self, cached: str, *remote: str) -> None:
+        super().__init__(id="sandbox-remote", state=cached, refreshes=0)
+        self._remote = list(remote)
+
+    def refresh_data(self) -> None:
+        self.refreshes += 1
+        if self._remote:
+            self.state = self._remote.pop(0)
+
+
+def _manager_with(sandbox: Any, **client_methods: Any) -> tuple[DaytonaSandboxManager, list[str]]:
+    calls: list[str] = []
+    manager = DaytonaSandboxManager("key", "org", "volume", "state-test")
+    manager._sandbox = sandbox
+    manager._contexts["main"] = object()
+    manager._client = SimpleNamespace(
+        start=lambda *_args, **_kwargs: calls.append("start"),
+        stop=lambda *_args, **_kwargs: calls.append("stop"),
+        **client_methods,
+    )
+    return manager, calls
+
+
+def test_ensure_sandbox_refreshes_remote_state_before_deciding_to_restart() -> None:
+    # Daytona auto-stops an idle sandbox; the cached handle still says "started".
+    sandbox = _RemoteSandbox("started", "stopped")
+    manager, calls = _manager_with(sandbox)
+    assert manager.ensure_sandbox() is sandbox
+    assert sandbox.refreshes == 1 and calls == ["start"]
+    assert manager._contexts == {}, "interpreter contexts are invalid after a stop"
+
+
+def test_ensure_sandbox_waits_for_a_settling_sandbox_before_starting_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.sandbox import manager as manager_module
+
+    monkeypatch.setattr(manager_module, "_STATE_POLL_SECONDS", 0.0)
+    sandbox = _RemoteSandbox("started", "stopping", "stopping", "stopped")
+    manager, calls = _manager_with(sandbox)
+    assert manager.ensure_sandbox() is sandbox
+    assert sandbox.refreshes == 3 and calls == ["start"]
+
+
+def test_ensure_sandbox_refuses_a_failed_sandbox() -> None:
+    sandbox = _RemoteSandbox("started", "error")
+    manager, calls = _manager_with(sandbox)
+    with pytest.raises(RuntimeError, match="error"):
+        manager.ensure_sandbox()
+    assert calls == []
+
+
+def test_ensure_sandbox_does_not_touch_a_running_sandbox() -> None:
+    sandbox = _RemoteSandbox("started", "started")
+    manager, calls = _manager_with(sandbox)
+    assert manager.ensure_sandbox() is sandbox
+    assert calls == [] and manager._contexts != {}
+
+
+@pytest.mark.parametrize("transient", [True, False])
+def test_idempotent_daytona_calls_retry_only_transient_failures(
+    monkeypatch: pytest.MonkeyPatch, transient: bool
+) -> None:
+    from daytona.common.errors import DaytonaConnectionError, DaytonaError
+
+    from fleet_rlm.sandbox import repl as repl_module
+
+    monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
+    attempts: list[str] = []
+
+    class FileSystem:
+        def upload_file(self, _data: bytes, path: str, *, timeout: int) -> None:  # noqa: ARG002
+            attempts.append(path)
+            if len(attempts) == 1:
+                if transient:
+                    raise DaytonaConnectionError("websocket closed")
+                raise DaytonaError("no such volume", status_code=400)
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "retry-test")
+    manager._client = object()
+    manager._sandbox = SimpleNamespace(state=None, fs=FileSystem())
+    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", lambda *_a, **_k: json.dumps({"size": None}))
+    if transient:
+        assert manager.write_workspace_file("files/a.txt", b"x") == "/workspace/files/a.txt"
+        assert len(attempts) == 2
+    else:
+        with pytest.raises(DaytonaError, match="no such volume"):
+            manager.write_workspace_file("files/a.txt", b"x")
+        assert len(attempts) == 1
+
+
+def test_run_code_transport_failures_are_never_retried() -> None:
+    from daytona.common.errors import DaytonaTimeoutError
+
+    from fleet_rlm.sandbox import repl as repl_module
+
+    attempts: list[int] = []
+
+    def never(*_args: Any, **_kwargs: Any) -> None:
+        attempts.append(1)
+        raise DaytonaTimeoutError("Execution timed out")
+
+    sandbox = SimpleNamespace(code_interpreter=SimpleNamespace(run_code=never), fs=SimpleNamespace())
+    with pytest.raises(DaytonaTimeoutError):
+        repl_module.run(sandbox, object(), {"code": "1"}, on_call=lambda _c: {}, timeout=5)
+    assert attempts == [1]
+
+
+def test_artifact_execution_is_not_replayed_after_losing_its_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daytona.common.errors import DaytonaConnectionError
+
+    from fleet_rlm.sandbox import repl as repl_module
+
+    monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
+    executions: list[str] = []
+    cancelled = threading.Event()
+
+    def execute(command: str, *, timeout: int | None) -> None:
+        assert timeout is not None and 1 <= timeout <= 31
+        executions.append(command)
+        raise DaytonaConnectionError("response lost after execution")
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "artifact-replay")
+    manager._client = object()
+    manager._sandbox = SimpleNamespace(state=None, process=SimpleNamespace(exec=execute))
+    manager._deadline = time.monotonic() + 60
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda *_args, **_kwargs: b"print(42)")
+    monkeypatch.setattr(DaytonaSandboxManager, "cancel_turn", lambda _self: cancelled.set())
+
+    with pytest.raises(repl_module.ExecutionOutcomeUnknownError, match="verification outcome unknown"):
+        manager.verify_python_artifact("artifacts/result.py", 30)
+
+    assert len(executions) == 1
+    assert cancelled.is_set()

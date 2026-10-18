@@ -220,6 +220,10 @@ def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(
         "postgresql://migrator@db.example/fleet",
     ]
     assert all(pool.kwargs["kwargs"]["options"] == "-c search_path=fleet_rlm_lite" for pool in opened)
+    # Pooled connections are recycled before a one-hour Lakebase credential expires and checked on checkout.
+    for pool in opened:
+        assert pool.kwargs["max_lifetime"] < 60 * 60 and pool.kwargs["max_idle"] <= pool.kwargs["max_lifetime"]
+        assert callable(pool.kwargs["check"])
     assert store.migration_pool is opened[1]
     assert store.connection_kwargs["options"] == "-c search_path=fleet_rlm_lite"
     store.close_migration_pool()
@@ -336,9 +340,14 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
         _harness(store, []).claim_turn("t1", "key", "task")
 
 
-def test_a_dropped_idle_connection_is_retried_once():
+def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
     import psycopg
 
+    import fleet_rlm.store.db as store_db
+
+    paused: list[float] = []
+    monkeypatch.setattr(store_db, "_RETRY_DELAY_SECONDS", 0.25)
+    monkeypatch.setattr(store_db.time, "sleep", paused.append)
     store, pool = make_store([({"mode": "flex"},)])
     calls = []
     real = pool.connection
@@ -353,7 +362,7 @@ def test_a_dropped_idle_connection_is_retried_once():
 
     pool.connection = flaky
     assert store.runtime_settings("s1") == {"mode": "flex"}
-    assert len(calls) == 2
+    assert len(calls) == 2 and paused == [0.25]
 
 
 def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(monkeypatch):
@@ -378,3 +387,18 @@ def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(m
     assert first["password"] == "token-one" and second["password"] == "token-two"
     assert len(calls) == 2
     assert all(call[0] is connection_class and call[1] == "host=lakebase" for call in calls)
+
+
+def test_commit_turn_requires_a_turn_id_so_a_connection_retry_cannot_duplicate_the_record():
+    store, pool = make_store()
+    with pytest.raises(ValueError, match="turn_id"):
+        store.commit_turn("s1", turn_record_json='{"answer":"42"}')
+    assert pool.borrowed == 0
+
+
+def test_harness_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
+    calls: list = []
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    with pytest.raises(ValueError, match="turn_id"):
+        _harness(store, []).commit_turn("s1", {"answer": "42"})
+    assert calls == []
