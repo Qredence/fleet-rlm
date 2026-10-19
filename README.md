@@ -278,6 +278,7 @@ require external resources and are not part of the ordinary quality gate.
 - [Evaluation](docs/reference/evaluation.md)
 - [HTTP API](docs/reference/http-api.md) and [OpenAPI contract](openapi.yaml)
 - [Database and persistence](docs/reference/database.md)
+- [CircleCI validation and releases](docs/runbooks/circleci-releases.md)
 - [Architecture](ARCHITECTURE.md)
 - [Contributing](CONTRIBUTING.md) and [agent instructions](AGENTS.md)
 - DSPy 3.4.1: [RLM](https://dspy.ai/3.4.1/diving-deeper/rlm/),

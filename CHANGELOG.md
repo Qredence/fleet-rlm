@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-19
+
+### Release automation
+
+- Guard package publication with immutable artifact manifests, exact registry checks,
+  supported-Python installation smoke tests and an account-specific production approval.
+- Use restricted OIDC publishing contexts and short-lived repository-scoped GitHub App
+  tokens, with a non-publishing activation workflow and inspect-before-retry recovery.
+
 ### Fixed
 
 - Evaluation CLI diagnostics name the selected MLflow backend's supported experiment

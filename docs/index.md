@@ -25,3 +25,5 @@ Non-secret process settings use schema-3 `config/fleet.toml` and validated
 environment overrides. It creates its required tables at startup. Live Daytona
 and model-provider behavior requires external credentials and resources and is
 not certified by local documentation or CI.
+
+- [CircleCI validation, package releases, and recovery](runbooks/circleci-releases.md)

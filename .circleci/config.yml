@@ -1,6 +1,9 @@
 version: 2.1
 
 parameters:
+  run_activation_checks:
+    type: boolean
+    default: false
   run_python314:
     type: boolean
     default: false
@@ -14,247 +17,342 @@ parameters:
     type: string
     default: ""
 
+executors:
+  python:
+    parameters:
+      version:
+        type: string
+        default: "3.12"
+    docker:
+      - image: cimg/python:<< parameters.version >>
+    environment:
+      UV_VERSION: "0.12.21"
+      # Override the developer .python-version in every uv subprocess, including make targets.
+      UV_PYTHON: << parameters.version >>
+      FLEET_PIPELINE_ID: << pipeline.id >>
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
+
+commands:
+  install:
+    parameters:
+      python:
+        type: string
+        default: "3.12"
+    steps:
+      - run:
+          name: Install pinned uv
+          command: |
+            curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - restore_cache:
+          keys:
+            - v1-uv-{{ arch }}-linux-<< parameters.python >>-0.12.21-{{ checksum "uv.lock" }}
+      - run:
+          name: Install locked dependencies
+          command: uv sync --locked --dev --python << parameters.python >>
+          no_output_timeout: 30m
+      - save_cache:
+          key: v1-uv-{{ arch }}-linux-<< parameters.python >>-0.12.21-{{ checksum "uv.lock" }}
+          paths:
+            - ~/.cache/uv
+  release-inputs:
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - install
+      - run:
+          name: Verify release source and artifact identity
+          command: uv run --locked python scripts/release_checks.py verify-manifest --manifest release/manifest.json --dist dist
+  smoke-registry:
+    parameters:
+      registry:
+        type: enum
+        enum: [testpypi, pypi]
+      python:
+        type: string
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - install:
+          python: << parameters.python >>
+      - run:
+          name: Verify exact registry artifacts and installed CLI
+          command: |
+            uv export --locked --no-dev --no-emit-project --format requirements.txt --python << parameters.python >> --output-file /tmp/runtime-requirements.txt
+            uv run --locked python scripts/release_checks.py registry-smoke \
+              --registry << parameters.registry >> --manifest release/manifest.json --dist dist \
+              --requirements /tmp/runtime-requirements.txt --receipt receipts/<< parameters.registry >>-<< parameters.python >>.json
+          no_output_timeout: 30m
+      - store_artifacts:
+          path: receipts
+
 jobs:
-  quality:
+  context-probe:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          name: Verify context authorization without reading credentials
+          command: "true"
+  activation-approval:
+    executor: python
+    steps:
+      - checkout
+      - install
+      - run:
+          name: Verify server-owned approval without publishing
+          command: uv run --locked python scripts/release_checks.py activation-check --check approval --receipt receipts/approval-probe.json
+      - store_artifacts:
+          path: receipts
+  activation-github:
+    executor: python
+    steps:
+      - checkout
+      - install
+      - run:
+          name: Mint, scope-check and revoke GitHub App token without creating releases
+          command: uv run --locked python scripts/release_checks.py activation-check --check github --receipt receipts/github-probe.json
+      - store_artifacts:
+          path: receipts
+  invalid-request:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          command: echo "Activation checks and release publication are mutually exclusive"; exit 1
+  tests:
     parameters:
       python-version:
         type: string
-    docker:
-      - image: cimg/python:<< parameters.python-version >>
-    environment:
-      UV_VERSION: "0.12.21"
+    executor:
+      name: python
+      version: << parameters.python-version >>
     steps:
       - checkout
+      - install:
+          python: << parameters.python-version >>
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
+          name: Run non-live tests
+          command: |
+            mkdir -p test-results
+            timeout 30m uv run --locked pytest --junitxml=test-results/pytest.xml -o junit_family=legacy
+          no_output_timeout: 30m
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+  static:
+    executor: python
+    steps:
+      - checkout
+      - install
       - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python << parameters.python-version >>
-      - run:
-          name: Run non-live quality checks
-          command: make check
-
+          name: Static contracts and package build
+          command: timeout 30m make lint format-check typecheck check-docs api-check build
+          no_output_timeout: 30m
+      - store_artifacts:
+          path: dist
   security:
-    docker:
-      - image: cimg/python:3.12
+    executor: python
     steps:
       - checkout
+      - install
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Audit every locked runtime and development dependency
-          command: make check-security
-
+          name: Audit locked runtime and development dependencies
+          command: timeout 30m make check-security
+          no_output_timeout: 30m
   quality-gate:
     docker:
       - image: cimg/base:current
     steps:
-      - run: echo "All supported Python versions and the locked dependency audit passed."
-
+      - run: echo "Supported Python tests, static contracts, build and dependency audit passed."
   python314-probe:
-    docker:
-      - image: cimg/python:3.14
+    executor:
+      name: python
+      version: "3.14"
     steps:
       - checkout
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
+          name: Install pinned uv
+          command: |
+            curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
       - run:
-          name: Probe lockfile dependencies on Python 3.14 (informational)
+          name: Informational Python 3.14 probe
           command: |
             set +e
-            uv export --locked --all-groups --no-emit-project --format requirements.txt --output-file /tmp/fleet-requirements.txt
+            uv export --locked --all-groups --no-emit-project --format requirements.txt --output-file /tmp/requirements.txt && \
+              uv venv --python 3.14 /tmp/probe && \
+              uv pip install --python /tmp/probe/bin/python -r /tmp/requirements.txt && \
+              PYTHONPATH=src /tmp/probe/bin/python -m pytest -q
             status=$?
-            if [ "$status" -eq 0 ]; then
-              uv venv --python 3.14 /tmp/fleet-314
-              status=$?
-            fi
-            if [ "$status" -eq 0 ]; then
-              uv pip install --python /tmp/fleet-314/bin/python -r /tmp/fleet-requirements.txt
-              status=$?
-            fi
-            if [ "$status" -eq 0 ]; then
-              PYTHONPATH=src /tmp/fleet-314/bin/python -m pytest -q
-              status=$?
-            fi
-            if [ "$status" -ne 0 ]; then
-              echo "INFO: Python 3.14 compatibility probe did not pass (exit $status); this job is informational and does not affect the required gate."
-            fi
+            echo "Informational Python 3.14 probe exit status: $status"
             exit 0
-
+          no_output_timeout: 30m
   release-preflight:
-    docker:
-      - image: cimg/python:3.12
-    parameters:
-      release-version:
-        type: string
-      release-sha:
-        type: string
-    environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
-      FLEET_RELEASE_SHA: << parameters.release-sha >>
+    executor: python
     steps:
       - checkout
+      - install
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Validate release version and source SHA
-          command: make check-release
-
+          name: Validate fresh release source and unused version
+          command: uv run --locked python scripts/release_checks.py preflight --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA" --remote
   build-release:
-    docker:
-      - image: cimg/python:3.12
-    parameters:
-      release-version:
-        type: string
-    environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
+    executor: python
     steps:
       - checkout
+      - install
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Build and verify release distributions once
-          command: make build-release
+          name: Build immutable release artifacts once
+          command: |
+            make build-release
+            uv run --locked python scripts/release_checks.py manifest --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA" --dist dist --output release/manifest.json
       - persist_to_workspace:
           root: .
           paths:
             - dist
-
+            - release
+      - store_artifacts:
+          path: dist
+      - store_artifacts:
+          path: release
   publish-testpypi:
-    docker:
-      - image: cimg/python:3.12
+    executor: python
     steps:
-      - attach_workspace:
-          at: .
+      - release-inputs
       - run:
-          name: Publish distributions to TestPyPI with CircleCI OIDC
-          command: |
-            python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
-            twine upload --repository testpypi dist/fleet_rlm-*
-
+          name: Inspect and publish only missing TestPyPI files with OIDC
+          command: uv run --locked python scripts/release_checks.py publish --registry testpypi --manifest release/manifest.json --dist dist --receipt receipts/testpypi.json
+      - store_artifacts:
+          path: receipts
   smoke-test-testpypi:
-    docker:
-      - image: cimg/python:3.12
     parameters:
-      release-version:
+      python-version:
         type: string
-    environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
+    executor:
+      name: python
+      version: << parameters.python-version >>
     steps:
-      - checkout
-      - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Export the locked runtime environment
-          command: uv export --locked --no-dev --no-emit-project --format requirements.txt --python 3.12 --output-file /tmp/fleet-smoke-requirements.txt
-      - run:
-          name: Install the exact TestPyPI release and verify public entry points
-          command: |
-            uv run --locked -- python scripts/release_checks.py smoke --version "$FLEET_RELEASE_VERSION" --index-url https://test.pypi.org/simple --requirements /tmp/fleet-smoke-requirements.txt
-
+      - smoke-registry:
+          registry: testpypi
+          python: << parameters.python-version >>
   publish-pypi:
-    docker:
-      - image: cimg/python:3.12
+    executor: python
     steps:
-      - attach_workspace:
-          at: .
+      - release-inputs
       - run:
-          name: Publish distributions to PyPI with CircleCI OIDC
-          command: |
-            python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
-            twine upload dist/fleet_rlm-*
-
-  github-release:
-    docker:
-      - image: cimg/python:3.12
+          name: Verify approval and inspect/publish missing PyPI files with OIDC
+          command: uv run --locked python scripts/release_checks.py publish --registry pypi --manifest release/manifest.json --dist dist --receipt receipts/pypi.json
+      - store_artifacts:
+          path: receipts
+  smoke-test-pypi:
     parameters:
-      release-version:
+      python-version:
         type: string
-    environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
+    executor:
+      name: python
+      version: << parameters.python-version >>
     steps:
-      - checkout
-      - attach_workspace:
-          at: .
+      - smoke-registry:
+          registry: pypi
+          python: << parameters.python-version >>
+  github-release:
+    executor: python
+    steps:
+      - release-inputs
       - run:
-          name: Create version tag and GitHub release
+          name: Finalize or verify GitHub release without replacing assets
           command: |
             command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
-            test -n "${GH_TOKEN:-}" || { echo "GH_TOKEN is required from the restricted release context"; exit 1; }
-            if gh release view "v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub release already exists"; exit 1; fi
-            if git ls-remote --exit-code --tags origin "refs/tags/v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub tag already exists"; exit 1; fi
-            gh release create "v$FLEET_RELEASE_VERSION" dist/fleet_rlm-* --target "$CIRCLE_SHA1" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --generate-notes
+            uv run --locked python scripts/release_checks.py github-release --manifest release/manifest.json --dist dist --receipt receipts/github.json
+      - store_artifacts:
+          path: receipts
 
 workflows:
   required-ci:
-    when: (pipeline.event.name == "push" and pipeline.git.branch == "main") or pipeline.event.name == "pull_request" or (pipeline.parameters.run_release and pipeline.git.branch == "main") or (pipeline.parameters.run_python314 and pipeline.git.branch == "main")
+    when: not pipeline.parameters.run_activation_checks and ((pipeline.event.name == "push" and pipeline.git.branch == "main") or pipeline.event.name == "pull_request" or ((pipeline.parameters.run_release or pipeline.parameters.run_python314) and pipeline.git.branch == "main"))
     jobs:
-      - quality:
-          name: quality-python-<< matrix.python-version >>
+      - tests:
+          name: tests-python-<< matrix.python-version >>
           matrix:
-            alias: supported-python
             parameters:
               python-version: ["3.11", "3.12", "3.13"]
+      - static
       - security
       - quality-gate:
           name: quality
-          requires:
-            - quality-python-3.11
-            - quality-python-3.12
-            - quality-python-3.13
-            - security
+          requires: [tests-python-3.11, tests-python-3.12, tests-python-3.13, static, security]
       - release-preflight:
-          release-version: << pipeline.parameters.release_version >>
-          release-sha: << pipeline.parameters.release_sha >>
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
-          requires:
-            - quality
+          filters: &release-filter pipeline.parameters.run_release and pipeline.git.branch == "main" and pipeline.event.name == "api"
+          requires: [quality]
       - build-release:
-          release-version: << pipeline.parameters.release_version >>
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
-          requires:
-            - release-preflight
+          filters: *release-filter
+          requires: [release-preflight]
       - publish-testpypi:
+          filters: *release-filter
           context: fleet-testpypi-trusted-publishing
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
-          requires:
-            - build-release
+          serial-group: 122b2cc9-5a9c-4b3b-88c6-9276bd5d5d98/fleet-testpypi
+          requires: [build-release]
       - smoke-test-testpypi:
-          release-version: << pipeline.parameters.release_version >>
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
-          requires:
-            - publish-testpypi
+          name: testpypi-python-<< matrix.python-version >>
+          filters: *release-filter
+          matrix:
+            parameters:
+              python-version: ["3.11", "3.12", "3.13"]
+          requires: [publish-testpypi]
+      - approve-pypi:
+          type: approval
+          filters: *release-filter
+          requires: [testpypi-python-3.11, testpypi-python-3.12, testpypi-python-3.13]
       - publish-pypi:
+          filters: *release-filter
           context: fleet-pypi-trusted-publishing
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
-          requires:
-            - smoke-test-testpypi
+          serial-group: 122b2cc9-5a9c-4b3b-88c6-9276bd5d5d98/fleet-pypi
+          requires: [approve-pypi]
+      - smoke-test-pypi:
+          name: pypi-python-<< matrix.python-version >>
+          filters: *release-filter
+          matrix:
+            parameters:
+              python-version: ["3.11", "3.12", "3.13"]
+          requires: [publish-pypi]
       - github-release:
-          release-version: << pipeline.parameters.release_version >>
+          filters: *release-filter
           context: fleet-github-release
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
-          requires:
-            - publish-pypi
-
+          serial-group: 122b2cc9-5a9c-4b3b-88c6-9276bd5d5d98/fleet-github-release
+          requires: [pypi-python-3.11, pypi-python-3.12, pypi-python-3.13]
   python314-manual:
-    when: pipeline.parameters.run_python314 and pipeline.git.branch == "main"
+    when: pipeline.parameters.run_python314 and not pipeline.parameters.run_activation_checks and pipeline.git.branch == "main" and pipeline.event.name == "api"
     jobs:
       - python314-probe
+  activation-checks:
+    when: pipeline.parameters.run_activation_checks and not pipeline.parameters.run_release and pipeline.event.name == "api"
+    jobs:
+      - context-probe:
+          name: context-testpypi
+          context: fleet-testpypi-trusted-publishing
+      - context-probe:
+          name: context-pypi
+          context: fleet-pypi-trusted-publishing
+      - context-probe:
+          name: context-github
+          context: fleet-github-release
+      - approve-pypi:
+          type: approval
+          filters: pipeline.git.branch == "main"
+          requires: [context-testpypi, context-pypi, context-github]
+      - activation-approval:
+          filters: pipeline.git.branch == "main"
+          context: fleet-pypi-trusted-publishing
+          requires: [approve-pypi]
+      - activation-github:
+          filters: pipeline.git.branch == "main"
+          context: fleet-github-release
+          requires: [activation-approval]
+  invalid-activation-request:
+    when: pipeline.parameters.run_activation_checks and pipeline.parameters.run_release
+    jobs:
+      - invalid-request

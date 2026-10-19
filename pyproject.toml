@@ -44,6 +44,7 @@ dependencies = [
     "pydantic-settings>=2.15.0,<3",
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3,<7",
+    "packaging>=26.3,<27",
     "httpx>=0.28.1,<1",
     "rich>=13.9.0",
     "prompt-toolkit>=3.0.50,<4",
@@ -77,6 +78,7 @@ dev = [
     "pre-commit>=4.7.0",
     "pip-audit>=2.10.1,<3",
     "twine>=7.0.0,<8",
+    "pyjwt[crypto]>=2.10,<3",
 ]
 
 [tool.uv]
@@ -91,7 +93,7 @@ environments = [
 override-dependencies = [
     # LiteLLM 1.83.x pins older vulnerable releases; keep the resolver on
     # patched floors until upstream relaxes its metadata.
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
     # cryptography >=44.0.0,<50.0.0 exposes a PKCS#7 Bleichenbacher oracle.
     "cryptography>=50.0.0",
     # idna.encode() bypass advisory; force a patched release family.
