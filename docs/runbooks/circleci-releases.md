@@ -13,6 +13,14 @@ TestPyPI publication, exact-artifact CLI smoke tests on all supported Pythons,
 `approve-pypi`, PyPI publication, the same smoke matrix, and GitHub finalization.
 Ordinary pushes, PR events, and tags cannot publish.
 
+The PyPI publisher creates a CircleCI deploy marker in the existing `pypi`
+environment for component `fleet-rlm`, using the explicit release version as its
+target. It marks publication running while upload and exact-hash registry
+verification execute, then records success or failure. A failure marker does not
+yank or remove a PyPI release. CircleCI's restored "live version" is timeline
+metadata only and does not change what users can install. The marker is deliberately
+in the same job as the publisher so status and upload share one workflow execution.
+
 As of 2026-10-19, repository validation is separate from account activation:
 
 | Item | Verified state |

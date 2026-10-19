@@ -14,6 +14,7 @@ Priority: PyPI and CLI releases first; hosted Fleet API deployment later.
 - [x] Add pinned uv setup, interpreter-aware download caching and JUnit artifacts.
 - [x] Implement source/metadata checks, immutable manifest/checksums and exact registry downloads.
 - [x] Gate PyPI on TestPyPI smoke matrix, approval evidence and serialized publishing.
+- [x] Track PyPI publication status in CircleCI's existing `pypi` environment for component `fleet-rlm`; document that a marker cannot undo a package upload.
 - [x] Implement inspect-before-retry registry/GitHub recovery and offline regression coverage.
 - [x] Document operator activation, release requests, recovery and rollback in the
   [release runbook](../runbooks/circleci-releases.md).

@@ -244,8 +244,45 @@ jobs:
     steps:
       - release-inputs
       - run:
+          name: Plan PyPI release marker
+          command: |
+            circleci run release plan "fleet-pypi-${CIRCLE_BUILD_NUM}" \
+              --environment-name pypi \
+              --component-name fleet-rlm \
+              --target-version "$FLEET_RELEASE_VERSION"
+            touch /tmp/fleet-pypi-marker-planned
+      - run:
+          name: Mark PyPI publication as running
+          command: circleci run release update "fleet-pypi-${CIRCLE_BUILD_NUM}" --status=RUNNING
+      - run:
           name: Verify approval and inspect/publish missing PyPI files with OIDC
-          command: uv run --locked python scripts/release_checks.py publish --registry pypi --manifest release/manifest.json --dist dist --receipt receipts/pypi.json
+          command: |
+            if uv run --locked python scripts/release_checks.py publish \
+              --registry pypi --manifest release/manifest.json --dist dist \
+              --receipt receipts/pypi.json; then
+              touch /tmp/fleet-pypi-publish-succeeded
+              circleci run release update "fleet-pypi-${CIRCLE_BUILD_NUM}" --status=SUCCESS
+              touch /tmp/fleet-pypi-status-finalized
+            else
+              publish_status=$?
+              if circleci run release update "fleet-pypi-${CIRCLE_BUILD_NUM}" \
+                --status=FAILED --failure-reason="PyPI upload or exact-artifact verification failed"; then
+                touch /tmp/fleet-pypi-status-finalized
+              fi
+              exit "$publish_status"
+            fi
+      - run:
+          name: Finalize marker after publisher-step failure
+          when: on_fail
+          command: |
+            if [ -f /tmp/fleet-pypi-marker-planned ] && [ ! -f /tmp/fleet-pypi-status-finalized ]; then
+              if [ -f /tmp/fleet-pypi-publish-succeeded ]; then
+                circleci run release update "fleet-pypi-${CIRCLE_BUILD_NUM}" --status=SUCCESS || true
+              else
+                circleci run release update "fleet-pypi-${CIRCLE_BUILD_NUM}" \
+                  --status=FAILED --failure-reason="PyPI publisher job failed before verified publication" || true
+              fi
+            fi
       - store_artifacts:
           path: receipts
   smoke-test-pypi:
