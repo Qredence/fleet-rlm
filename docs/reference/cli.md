@@ -52,10 +52,12 @@ configured tracking destination; it is not run during serving.
 
 Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
-`/memory [query]`, `/history`, `/trace`, `/sessions`, `/optimize`,
-`/config`, `/settings`, `/models`, `/model`, and `/exit`.
+`/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
+`/sessions`, `/optimize`, `/config`, `/settings`, `/models`, `/model`, and `/exit`.
 `/memory [query]` reads this Session's saved memories, optionally
-filtered by query. `/optimize [args]` runs `fleet optimize --session <this session> [args]`.
+filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
+the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
+`/optimize [args]` runs `fleet optimize --session <this session> [args]`.
 It compiles and gates a GEPA candidate from self-contained, explicitly selected
 Turn snapshots with approved gold labels; it does not automatically score
 historical traces. Traces without a matching immutable Lakebase snapshot are
@@ -91,8 +93,14 @@ start/end status, correlated call IDs, elapsed milliseconds, and bounded tool
 arguments/results. Sandbox bridge and DSPy tool events identify their source;
 they can describe nested layers of the same operation, not extra model calls.
 Python panels distinguish DSPy bootstrap from task code and include expression
-results and execution failures, even when no stdout was produced. Routing panels
-provide factual decision summaries, not private model thoughts or chain-of-thought.
+results and execution failures, even when no stdout was produced. In an
+interactive terminal, task REPL cells expand while executing and collapse to a
+one-line summary on clean completion (failed cells stay expanded); click any
+`▸`/`▾` disclosure row or press `Ctrl+O` (`e` while streaming), `Alt+A` (`a` to
+toggle all), `Ctrl+T` (`t` for Thinking blocks), or `Alt+1`–`Alt+9` (`1`–`9`
+while streaming) to expand or collapse code, outputs, tool calls, and thinking
+blocks in place. Routing panels provide factual decision summaries, not private
+model thoughts or chain-of-thought.
 The answer panel preserves literal line breaks and markup; learned notes are
 separate from the answer. Activity previews redact sensitive dictionary keys
 and labelled credentials, limit depth/size, and omit predictor payloads. This is

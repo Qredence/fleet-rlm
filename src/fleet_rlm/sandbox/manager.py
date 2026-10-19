@@ -207,7 +207,8 @@ class DaytonaSandboxManager:
             )
             root._children[child.agent_id] = child
             root._allocations += 1
-        child.emit("agent_spawn", depth=child.depth)
+        spawn_inputs = [path for path in selected_paths if path not in ambient_skills] if selected_paths else []
+        child.emit("agent_spawn", depth=child.depth, **({"input_paths": spawn_inputs} if spawn_inputs else {}))
         with root._budget_lock:
             root._child_receipts[child.agent_id] = {
                 "agent_id": child.agent_id,
@@ -270,7 +271,7 @@ class DaytonaSandboxManager:
             target = f"artifacts/{self.agent_id}/{path.removeprefix('artifacts/')}"
             self.parent.write_workspace_file(target, raw)
             results.append({"path": target, "sha256": hashlib.sha256(raw).hexdigest(), "agent_id": self.agent_id})
-        self.emit("agent_result", artifacts=results)
+        self.emit("agent_result", artifacts=results, status="succeeded")
         root_receipts = []
         for row in results:
             root_path = row["path"]
