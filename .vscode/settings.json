@@ -6,14 +6,9 @@
     "file:/**/*.jsonl": "jupyter-data-wrangler"
   },
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
-  "python.analysis.languageServerMode": "default",
-  "python.analysis.typeCheckingMode": "standard",
-  "python.analysis.extraPaths": [
-    "src"
-  ],
-  "basedpyright.analysis.extraPaths": [
-    "src"
-  ],
+  "ty.importStrategy": "fromEnvironment",
+  "cursorpyright.analysis.typeCheckingMode": "off",
+  "cursorpyright.disableLanguageServices": true,
   "fastapi.entryPoint": "fleet_rlm.main:app",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
@@ -24,8 +19,6 @@
     }
   },
   "ruff.lint.enable": true,
-  "python.linting.enabled": true,
-  "python.linting.pylintEnabled": false,
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
   "files.exclude": {

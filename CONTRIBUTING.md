@@ -1,71 +1,78 @@
-# Contributing to Fleet RLM
+# Contributing to Fleet RLM Lite
 
-Fleet is a Python 3.11–3.13 backend with a standalone TypeScript terminal
-client. Start with the [README](README.md) for a short system overview, the
-[architecture](ARCHITECTURE.md) for ownership boundaries, and
-[AGENTS.md](AGENTS.md) for repository operating rules.
+Start with the [README](README.md), [architecture](ARCHITECTURE.md), and
+[repository guidelines](AGENTS.md). The application uses Python 3.11–3.13 and
+uv; no Node toolchain is required.
 
-## Set up a local checkout
-
-Install uv and a supported Python version. Node 22.19+ and pnpm are needed for
-the maintained client and the full check. The setup and checks below do not
-require provider, Daytona, or database credentials:
+## Setup and checks
 
 ```bash
-uv sync --all-extras --dev
-pnpm --dir tools/fleet-tui install --frozen-lockfile
+uv sync --dev
 uv run fleet --help
 make check
+make check-security
 ```
 
-For a focused change, run its relevant `uv run pytest -q` tests and the
-matching validation lane from [AGENTS.md](AGENTS.md#validate-and-deliver-safely).
-`make check-docs` covers authored documentation, repository guidance, and the
-generated configuration-environment check. The [testing strategy](docs/how-to-guides/testing-strategy.md)
-explains suite selection and what the non-live gate proves.
+For focused changes, run the relevant tests with `uv run pytest -q <path>` and
+the relevant Make targets. `make check` is the repository's non-live quality
+gate. It must not require Daytona, model-provider, or production credentials.
+CircleCI runs `make check` on Python 3.11, 3.12, and 3.13 and audits all
+locked runtime and development dependencies once per pipeline. The aggregate
+required status is `ci/circleci: quality`.
+During migration, `.github/workflows/quality.yml` remains enabled until this
+CircleCI configuration has passed on the branch and the project connection is
+confirmed.
+The audit currently suppresses only `PYSEC-2026-2447` for transitive
+`diskcache==5.6.3`: this package has no fixed upstream release, and the
+advisory requires write access to its local cache directory. Remove this
+narrow suppression when DSPy no longer brings in the affected package or a
+fixed release becomes available. Other findings fail the audit.
 
-To run a real Session, follow the [optional live setup](README.md#run-a-live-local-session).
-The configuration names its secrets in `config/fleet.toml`; the
-[configuration environment reference](docs/reference/configuration-environment.md) lists the exact environment
-variables. Fleet's database must be migrated explicitly before serving. Use
-local `.env` files or an authorized secret manager; never commit credentials
-or use a Daytona API key as an API bearer token.
+The Python 3.14 probe is manual and informational. It installs dependencies
+exported from `uv.lock` without installing Fleet itself, since Fleet declares
+support as `>=3.11,<3.14`. In CircleCI, trigger the pipeline on `main` with
+`run_python314=true`; its result does not gate supported-version CI.
 
-Codex Cloud workspaces use `.codex/environments/environment.toml` to run
-`zsh .codex/workspace-bootstrap.zsh` automatically. That bootstrap requires a
-feature branch based on `origin/main`; ordinary local setup should use the
-commands above.
+## Guarded releases
 
-## Make a change
+Releases are operator-triggered on `main` only. Set `run_release=true`,
+`release_version` to the version in `pyproject.toml`, and `release_sha` to the
+full source commit SHA. The pipeline runs the quality and dependency audit,
+checks the requested version and SHA, builds and verifies the wheel and source
+archive once, publishes to TestPyPI through CircleCI OIDC, and installs and
+smoke-tests that exact package before publishing to PyPI and creating the
+versioned GitHub release.
 
-1. Read the affected code, tests, policy, and generated contracts. Start with
-   the [source layout](docs/reference/source-layout.md) for file ownership and
-   the [TUI agent guide](tools/fleet-tui/AGENTS.md) for terminal-client work.
-2. Keep behavior in its owning package. API routes validate and project
-   transport; `TurnRuntime` coordinates a Run; Daytona owns provider resources.
-   Update architecture guidance when a durable owner or trust boundary moves.
-3. Add or update regression tests in the existing behavior-owning suite. Keep
-   documentation aligned with the behavior being changed.
-4. Run the focused checks, inspect the final diff, and run `git diff --check`.
-   Credentialed provider, Daytona, database, and benchmark lanes need an
-   explicit operator decision and their documented entry points.
+The CircleCI project must have restricted contexts named
+`fleet-testpypi-trusted-publishing` and `fleet-pypi-trusted-publishing`, each
+configured as a PyPI trusted publisher for its respective registry. Restrict
+them to this project, `main`, and non-SSH reruns. The
+`fleet-github-release` context must expose a narrowly scoped `GH_TOKEN` that
+can create repository tags and releases. Configure these once with CircleCI
+and PyPI repository owner access. Do not use long-lived PyPI upload tokens.
 
-## Documentation and generated files
+If a published PyPI release is bad, yank that release and publish a follow-up
+version; the workflow deliberately has no automated rollback path.
 
-- `docs/index.md` is the documentation navigation root. Keep current guidance
-  separate from dated plans, measurements, and receipts.
-- `ARCHITECTURE.md` owns durable boundaries; `docs/reference/source-layout.md`
-  owns the literal package map; `scripts/README.md` inventories supported
-  top-level helpers.
-- Regenerate OpenAPI and TUI HTTP types with `make api-sync`, stream fixtures
-  with `make stream-sync`, and the configuration environment reference with `make config-reference`.
-  Do not hand-edit their outputs.
-- Bundled Skill Markdown is shipped runtime content. Check its catalog,
-  manifests, resources, and contract tests when changing it.
+Running the application itself requires PostgreSQL, Daytona API key,
+organization ID, and Volume ID, plus model-provider configuration. See
+[Configuration](docs/reference/configuration.md). Tables are created by the
+application at startup; there is no migration command. Use only disposable or
+authorized external resources for integration work.
 
-## Submit work
+## Making changes
 
-Use focused conventional commits such as `feat:`, `fix:`, `refactor:`, `test:`,
-`docs:`, or `chore:`. A pull request should describe the behavior change,
-validation results, and any credentialed evidence still outstanding. Report
-vulnerabilities through [SECURITY.md](SECURITY.md), not a public issue.
+1. Read the owning code and its tests. Current runtime owners are documented in
+   [Architecture](ARCHITECTURE.md).
+2. Keep changes focused and add regression tests for behavior changes.
+3. Update the docs and API contract when public behavior changes.
+4. Run focused tests, `make check` as appropriate, and `git diff --check`.
+5. Preserve `.agents/skills/` as developer skills; user Skills live under
+   `.fleet/skills/`.
+
+## Pull requests
+
+Use a conventional prefix such as `feat:`, `fix:`, `test:`, `docs:`, or
+`chore:`. Summarize behavior, validation, and any external integration that
+remains unverified. Never include credentials. Report security issues through
+[SECURITY.md](SECURITY.md), not a public issue.

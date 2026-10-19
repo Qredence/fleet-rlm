@@ -1,13 +1,8 @@
-# Backend Reference
+# Reference
 
-- [Architecture](../../ARCHITECTURE.md) — current component ownership and dependency direction.
-- [Configuration](configuration.md) — TOML policy, explicit environment references, and startup prerequisites.
-- [Runtime configuration environment reference](configuration-environment.md) — policy-derived providers, token limits, and environment names.
-- [HTTP API](http-api.md) — supported routes and SSE behavior.
-- [CLI](cli.md) — supervised, backend-only, diagnostics, and Artifact commands.
-- [Database](database.md) — canonical tables and Alembic ownership.
-- [Source layout](source-layout.md) — package and client ownership.
-- [P7 performance decision](performance-budget.md) — historical Sandbox, Volume, broker, and Run measurements; current policy is owned by TOML.
-
-`openapi.yaml` is authoritative for HTTP shapes; generated TUI HTTP types are
-checked alongside it by `make api-check`.
+- [Configuration](configuration.md)
+- [HTTP API](http-api.md)
+- [CLI](cli.md)
+- [Database](database.md)
+- [Evaluation](evaluation.md)
+- [Source layout](source-layout.md)

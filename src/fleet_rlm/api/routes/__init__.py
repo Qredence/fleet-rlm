@@ -1,1 +1,1 @@
-"""HTTP route modules."""
+"""One APIRouter per area."""

@@ -1,0 +1,164 @@
+[
+  {
+    "id": "direct-1",
+    "task": "Say hello in one short sentence.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "direct",
+    "review_status": "developer_reviewed",
+    "rationale": "Self-contained response with no execution required."
+  },
+  {
+    "id": "direct-2",
+    "task": "Explain the difference between a Python tuple and list without executing code.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "direct",
+    "review_status": "developer_reviewed",
+    "rationale": "Self-contained response with no execution required."
+  },
+  {
+    "id": "direct-3",
+    "task": "What does HTTP 404 mean? Give a brief conceptual answer.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "direct",
+    "review_status": "developer_reviewed",
+    "rationale": "Self-contained response with no execution required."
+  },
+  {
+    "id": "direct-4",
+    "task": "Rewrite this sentence politely: Send the report now.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "direct",
+    "review_status": "developer_reviewed",
+    "rationale": "Self-contained response with no execution required."
+  },
+  {
+    "id": "direct-5",
+    "task": "Define a database transaction in plain language.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "direct",
+    "review_status": "developer_reviewed",
+    "rationale": "Self-contained response with no execution required."
+  },
+  {
+    "id": "direct-6",
+    "task": "Suggest a concise title for a guide about organizing notes.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "direct",
+    "review_status": "developer_reviewed",
+    "rationale": "Self-contained response with no execution required."
+  },
+  {
+    "id": "flex-1",
+    "task": "Use Python to calculate sum(i*i for i in range(1,101)) and verify the result.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "flex",
+    "review_status": "developer_reviewed",
+    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+  },
+  {
+    "id": "flex-2",
+    "task": "Read files/sales.csv, group revenue by region, and write the totals as an artifact.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "flex",
+    "review_status": "developer_reviewed",
+    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+  },
+  {
+    "id": "flex-3",
+    "task": "Tell me the 1492252th digits after the decimal point of Pi",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "flex",
+    "review_status": "developer_reviewed",
+    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+  },
+  {
+    "id": "flex-4",
+    "task": "Use the available Skill to convert files/input.json into a CSV artifact.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills><skill name=\"convert-json-csv\"/></available_skills>",
+    "route": "flex",
+    "review_status": "developer_reviewed",
+    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+  },
+  {
+    "id": "flex-5",
+    "task": "Execute two independent arithmetic checks in parallel child tasks and combine their results.",
+    "workspace_manifest": "",
+    "skills_catalog": "<available_skills/>",
+    "route": "flex",
+    "review_status": "developer_reviewed",
+    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+  },
+  {
+    "id": "flex-6",
+    "task": "Using the same files/sales.csv selected earlier, compute its row count in Python.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "flex",
+    "review_status": "developer_reviewed",
+    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+  },
+  {
+    "id": "rlm-1",
+    "task": "Explore the unfamiliar files in this workspace, identify likely causes of inconsistent totals, and test competing explanations.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "rlm",
+    "review_status": "developer_reviewed",
+    "rationale": "Open-ended iterative exploration determines subsequent actions."
+  },
+  {
+    "id": "rlm-2",
+    "task": "Investigate conflicting accounts in the incident documents; iteratively gather evidence until the contradictions are resolved.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "rlm",
+    "review_status": "developer_reviewed",
+    "rationale": "Open-ended iterative exploration determines subsequent actions."
+  },
+  {
+    "id": "rlm-3",
+    "task": "Determine why the provided test suite fails by examining logs, forming hypotheses, and testing them.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "rlm",
+    "review_status": "developer_reviewed",
+    "rationale": "Open-ended iterative exploration determines subsequent actions."
+  },
+  {
+    "id": "rlm-4",
+    "task": "Explore this unknown dataset for anomalies, then investigate whichever patterns the initial exploration reveals.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "rlm",
+    "review_status": "developer_reviewed",
+    "rationale": "Open-ended iterative exploration determines subsequent actions."
+  },
+  {
+    "id": "rlm-5",
+    "task": "Investigate an intermittent production issue across traces and logs, revising the investigation as new evidence appears.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "rlm",
+    "review_status": "developer_reviewed",
+    "rationale": "Open-ended iterative exploration determines subsequent actions."
+  },
+  {
+    "id": "rlm-6",
+    "task": "Continue the investigation in files/findings.md: identify unresolved hypotheses and decide what evidence to inspect next.",
+    "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+    "skills_catalog": "<available_skills/>",
+    "route": "rlm",
+    "review_status": "developer_reviewed",
+    "rationale": "Open-ended iterative exploration determines subsequent actions."
+  }
+]

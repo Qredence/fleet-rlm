@@ -1,242 +1,111 @@
-"""Session-scoped Turn creation with preparation heartbeats inside the SSE stream."""
+"""The streaming Turn route: the one async handler. The Turn itself runs on a worker thread."""
 
 from __future__ import annotations
 
 import asyncio
-import logging
+import uuid
 from collections.abc import AsyncIterator
-from typing import Annotated, Any, Final
-from uuid import UUID, uuid4
+from contextlib import suppress
+from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from fleet_rlm.api.dependencies import LocalScopeDep, SettingsDep, TurnRuntimeDep
-from fleet_rlm.api.schemas import CreateTurnRequest
-from fleet_rlm.api.sse import AISDKUIProjector
-from fleet_rlm.observability.diagnostics import normalize_turn_failure
-from fleet_rlm.observability.posthog import capture
-from fleet_rlm.sessions.models import TurnAccess, TurnInput
-from fleet_rlm.sessions.run_state import (
-    RunIdempotencyMismatchError,
-    RunInProgressError,
-    RunLifecycleUnavailableError,
-    RunNotFoundError,
-)
-from fleet_rlm.skills.errors import InvalidSkillSelectionError
-from fleet_rlm.skills.models import SkillSelectionRef
-from fleet_rlm.turns import OpenedTurnStream, OpenTurnCommand
-from fleet_rlm.turns.preparation import (
-    RunPreparationCancelledError,
-    RunPreparationTimeoutError,
-    RunPreparationUnavailableError,
-)
+from fleet_rlm.api.deps import Runtime, Settings
+from fleet_rlm.api.events import Envelope, SSERuntimeCallback
+from fleet_rlm.api.schemas import TurnRequest
+from fleet_rlm.engine.turn import run_turn
+from fleet_rlm.session import SessionRuntime
 
-router = APIRouter(prefix="/api/sessions", tags=["turns"])
-logger = logging.getLogger(__name__)
-
-# Transient client-facing pre-run heartbeat emitted until the runtime-owned open
-# resolves; it never enters the durable event log and may repeat.
-_PREPARATION_PRELUDE_CHUNK: Final[dict[str, Any]] = {
-    "type": "turn_status",
-    "phase": "preparation",
-    "status": "running",
-    "message": None,
-}
-
-
-def _preparation_prelude() -> ServerSentEvent:
-    return ServerSentEvent(event="turn_status", data=_PREPARATION_PRELUDE_CHUNK)
-
-
-def _correlation_id(request: Request) -> str:
-    for header in ("x-request-id", "x-correlation-id"):
-        value = request.headers.get(header)
-        if value and value.strip():
-            return value.strip()
-    return str(uuid4())
-
-
-def _log_preparation_unavailable(correlation_id: str, exc: BaseException) -> None:
-    diagnostic = normalize_turn_failure(exc)
-    logger.warning(
-        "turn_preparation_failure correlation_id=%s cause_type=%s provider_status_category=%s message=%s",
-        correlation_id,
-        diagnostic.cause_type,
-        diagnostic.provider_status_category,
-        diagnostic.message,
-    )
-
-
-def _open_failure_message(exc: BaseException) -> str | None:
-    """Map one open failure to its closed public message, preserving _open_turn semantics."""
-    if isinstance(exc, RunNotFoundError):
-        return "Session not found"
-    if isinstance(exc, RunInProgressError):
-        return "A Turn is already running"
-    if isinstance(exc, RunIdempotencyMismatchError):
-        return "Idempotency key input mismatch"
-    if isinstance(exc, InvalidSkillSelectionError):
-        return "Invalid Skill selection"
-    if isinstance(exc, RunPreparationTimeoutError):
-        return "Turn preparation timed out"
-    if isinstance(exc, (RunLifecycleUnavailableError, RunPreparationUnavailableError)):
-        return "Turn is unavailable"
-    if isinstance(exc, ValueError):
-        return "Invalid request"
-    return None
-
-
-def _open_failure_frames(message: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Project an open failure as typed terminal events."""
-    return (
-        {"type": "turn_error", "message": message, "code": "open_failed"},
-        {"type": "turn_finish", "finishReason": "error", "status": "error"},
-    )
-
-
-def _command(
-    session_id: UUID,
-    body: CreateTurnRequest,
-    identity: LocalScopeDep,
-    idempotency_key: str,
-) -> OpenTurnCommand:
-    return OpenTurnCommand(
-        TurnAccess(identity.user_id, identity.workspace_id),
-        session_id,
-        TurnInput(
-            body.text,
-            tuple(body.attachment_ids),
-            tuple(SkillSelectionRef(selection.id, selection.expected_version) for selection in body.skill_selections),
-        ),
-        idempotency_key,
-        uuid4(),
-    )
-
-
-def _stream_headers(response: Response) -> None:
-    response.headers["x-vercel-ai-ui-message-stream"] = "v1"
+router = APIRouter(tags=["turns"])
+_DISCONNECT_POLL_SECONDS = 15
 
 
 @router.post(
-    "/{session_id}/turns",
-    operation_id="create_turn",
+    "/sessions/{session_id}/turn",
     response_class=EventSourceResponse,
     responses={
         200: {
-            "description": (
-                "Fleet Turn SSE stream. It opens immediately with a transient"
-                " turn_status prelude (phase=preparation) that repeats every runtime heartbeat"
-                " until the Turn is claimed and prepared. Claim or preparation failures"
-                " project closed turn_error + turn_finish events"
-                " inside the stream, and cancellation projects one turn_cancelled event."
-            ),
+            "description": "Server-Sent Events for Turn status, activity, completion, or failure.",
             "content": {"text/event-stream": {"schema": {"type": "string"}}},
-            "headers": {
-                "Cache-Control": {"schema": {"type": "string"}},
-                "X-Accel-Buffering": {"schema": {"type": "string"}},
-                "x-vercel-ai-ui-message-stream": {"schema": {"type": "string"}},
-            },
-        },
-        422: {"description": "Invalid request"},
-        503: {"description": "Turn unavailable while composition installs dependencies"},
+        }
     },
 )
-async def create_turn(
-    session_id: UUID,
-    body: CreateTurnRequest,
-    request: Request,
-    identity: LocalScopeDep,
-    coordinator: TurnRuntimeDep,
-    settings: SettingsDep,
-    idempotency_key: Annotated[
-        str,
-        Header(alias="Idempotency-Key", min_length=1, max_length=128),
-    ],
-    _headers: Annotated[None, Depends(_stream_headers)],
+async def stream_turn(
+    session_id: str, req: TurnRequest, request: Request, runtime: Runtime, settings: Settings
 ) -> AsyncIterator[ServerSentEvent]:
-    """Stream one Turn, opening claim and preparation inside the SSE generator."""
-    yield _preparation_prelude()
-    heartbeat_seconds = float(settings.run_heartbeat_seconds)
-    owner: OpenedTurnStream | None = None
+    """Run one Turn and stream its activity as Server-Sent Events.
+
+    The Turn runs on a worker thread; a client disconnect cancels it and waits for sandbox work to drain.
+    """
+    await _acquire(runtime)
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
+    callback = SSERuntimeCallback(loop, queue, runtime.sandbox_mgr)
+    turn_id = uuid.uuid4().hex
+    envelope = Envelope(session_id, turn_id, runtime.sandbox_mgr)
+    future = loop.run_in_executor(
+        None,
+        lambda: run_turn(
+            runtime,
+            settings,
+            session_id=session_id,
+            turn_id=turn_id,
+            task=req.task,
+            idempotency_key=req.idempotency_key,
+            mlflow_experiment_id=request.app.state.mlflow_experiment_id,
+            callback=callback,
+            emit=callback.emit,
+            record_replay=req.record_replay,
+        ),
+    )
     try:
-        owner = coordinator.open_owned(_command(session_id, body, identity, idempotency_key))
+        status = envelope.wrap({"event": "turn_status", "phase": "preparation"})
+        yield ServerSentEvent(data=status, id=str(status["seq"]))
+        connected = True
         while True:
-            opened = await owner.wait_open(timeout=heartbeat_seconds)
-            if opened is not None:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=_DISCONNECT_POLL_SECONDS)
+            except TimeoutError:
+                if connected and await request.is_disconnected():
+                    connected = False
+                    await _cancel(runtime)
+                continue
+            if event.get("event") == "done":
                 break
-            yield _preparation_prelude()
-    except RunPreparationCancelledError:
-        if owner is not None:
-            await owner.aclose()
-        yield ServerSentEvent(event="turn_cancelled", data={"type": "turn_cancelled", "reason": "Turn cancelled"})
-        yield ServerSentEvent(raw_data="[DONE]")
-        return
-    except (asyncio.CancelledError, GeneratorExit):
-        # The owner retains/adopts the pending open task and settles it before
-        # the transport task can finish; disconnect never strands a claim.
-        if owner is not None:
-            await owner.aclose()
-        raise
-    except BaseException as exc:
-        if owner is not None:
-            await owner.aclose()
-        message = _open_failure_message(exc)
-        if message is None:
-            raise
-        if message == "Turn is unavailable":
-            _log_preparation_unavailable(_correlation_id(request), exc)
-        capture(
-            "turn_failed",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "session_id": str(session_id),
-                "failure_phase": "open",
-                "failure_message": message,
-            },
-        )
-        for chunk in _open_failure_frames(message):
-            yield ServerSentEvent(event=chunk["type"], data=chunk)
-        yield ServerSentEvent(raw_data="[DONE]")
-        return
-
-    skill_count = len(body.skill_selections)
-    projector = AISDKUIProjector()
-    try:
-        assert owner is not None
-        # Recorded inside the protected region: the owner is already open, so
-        # every exit from here must pass the `finally` that closes it.
-        capture(
-            "turn_created",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "session_id": str(session_id),
-                "skill_count": skill_count,
-                "has_attachments": len(body.attachment_ids) > 0,
-                "attachment_count": len(body.attachment_ids),
-            },
-        )
-        async for event in owner:
-            for sse_event in projector.project_sse(event):
-                yield sse_event
-        yield ServerSentEvent(raw_data="[DONE]")
-    except (asyncio.CancelledError, GeneratorExit):
-        # Client disconnect is not a turn failure; never capture it.
-        raise
-    except BaseException as exc:
-        capture(
-            "turn_failed",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "session_id": str(session_id),
-                "failure_phase": "stream",
-                "failure_message": normalize_turn_failure(exc).message,
-            },
-        )
-        raise
+            if connected and await request.is_disconnected():
+                connected = False
+                await _cancel(runtime)
+            if connected:
+                wrapped = envelope.wrap(event)
+                yield ServerSentEvent(data=wrapped, id=str(wrapped["seq"]))
+        await future
     finally:
-        if owner is not None:
-            await owner.aclose()
+        # Keep this Session serialized until sandbox work has drained after a disconnect.
+        callback.close()
+        if not future.done():
+            await _cancel(runtime)
+            while not future.done():
+                try:
+                    await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    continue
+        runtime.turn_lock.release()
 
 
-__all__ = ["router"]
+async def _acquire(runtime: SessionRuntime) -> None:
+    """Wait for any running Turn or workspace change on this Session without blocking the event loop.
+
+    If the client goes away while waiting, the lock is released as soon as the worker gets it.
+    """
+    acquiring = asyncio.ensure_future(asyncio.to_thread(runtime.turn_lock.acquire))
+    try:
+        await asyncio.shield(acquiring)
+    except asyncio.CancelledError:
+        acquiring.add_done_callback(lambda _done: runtime.turn_lock.release())
+        raise
+
+
+async def _cancel(runtime: SessionRuntime) -> None:
+    with suppress(Exception):
+        await asyncio.to_thread(runtime.sandbox_mgr.cancel_turn)

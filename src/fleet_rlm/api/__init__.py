@@ -1,8 +1,1 @@
-"""Transport helpers for the Fleet RLM backend.
-
-Import concrete HTTP, SSE, and schema types from their owning modules. Keeping
-package initialization side-effect free avoids loading the projector graph on
-submodule imports.
-"""
-
-from __future__ import annotations
+"""HTTP API: the FastAPI app, dependencies, schemas, routers, and the Turn event stream."""

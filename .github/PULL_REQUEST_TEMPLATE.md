@@ -1,7 +1,7 @@
 # Description
 
 Describe the concrete problem and resulting behavior. Include a before/after
-example when useful, and identify any contract or migration impact.
+example when useful, and identify any API contract impact.
 
 Fixes # (issue)
 
@@ -24,6 +24,7 @@ Please delete options that are not relevant.
 ## Validation
 
 List the commands run and outcomes. For documentation-only changes, use
-`make check-docs` and `git diff --check`. For broader code/contract changes,
+`make check-docs` when available and `git diff --check`. For broader changes,
 follow AGENTS.md. Distinguish deterministic checks from live provider,
-database, security, and release evidence; name any remaining validation gap.
+database, and security evidence; name any remaining validation gap. Releases
+and publishing are operator-controlled, not automated by this workflow.

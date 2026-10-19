@@ -1,44 +1,824 @@
 openapi: 3.1.0
 info:
-  title: fleet-rlm
-  version: 0.7.11
+  title: Fleet-RLM Lite API
+  version: 0.8.0
 paths:
-  /api/sessions/{session_id}/turns:
-    post:
+  /health:
+    get:
       tags:
-      - turns
-      summary: Create Turn
-      description: Stream one Turn, opening claim and preparation inside the SSE generator.
-      operationId: create_turn
+      - health
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /sessions:
+    get:
+      tags:
+      - sessions
+      summary: List Sessions
+      description: List stored Sessions with their update times and Turn counts.
+      operationId: list_sessions_sessions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sessions'
+  /models:
+    get:
+      tags:
+      - sessions
+      summary: List Models
+      description: 'List the chat models in a discovery scope.
+
+
+        An invalid scope or missing Gateway credentials returns 422.'
+      operationId: list_models_models_get
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+          default: system.ai
+          title: Scope
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Models'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}:
+    delete:
+      tags:
+      - sessions
+      summary: Evict Session
+      description: 'Stop a Session''s sandbox and release its runtime; stored history is kept.
+
+
+        Returns 404 when this process holds no runtime for the Session, and 409 while a Turn is running.'
+      operationId: evict_session_sessions__session_id__delete
       parameters:
       - name: session_id
         in: path
         required: true
         schema:
           type: string
-          format: uuid
           title: Session Id
-      - name: Idempotency-Key
-        in: header
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deleted'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/config:
+    get:
+      tags:
+      - sessions
+      summary: Session Config
+      description: Describe a Session's mode, models, context, configuration, and limits.
+      operationId: session_config_sessions__session_id__config_get
+      parameters:
+      - name: session_id
+        in: path
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
-          title: Idempotency-Key
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionConfig'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/model:
+    put:
+      tags:
+      - sessions
+      summary: Select Model
+      description: 'Bind a model to a role, persist it, and swap in a new engine.
+
+
+        Returns 409 while a Turn holds the Session lock.'
+      operationId: select_model_sessions__session_id__model_put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateTurnRequest'
+              $ref: '#/components/schemas/ModelRequest'
       responses:
         '200':
-          description: Fleet Turn SSE stream. It opens immediately with a transient
-            turn_status prelude (phase=preparation) that repeats every runtime heartbeat
-            until the Turn is claimed and prepared. Claim or preparation failures
-            project closed turn_error + turn_finish events inside the stream, and
-            cancellation projects one turn_cancelled event.
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelSelection'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/mode:
+    get:
+      tags:
+      - sessions
+      summary: Get Mode
+      description: Return a Session's current execution mode.
+      operationId: get_mode_sessions__session_id__mode_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mode'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - sessions
+      summary: Set Mode
+      description: 'Persist a new execution mode and apply it to the Session runtime.
+
+
+        The current context is saved with the mode.'
+      operationId: set_mode_sessions__session_id__mode_put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModeRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mode'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/history:
+    get:
+      tags:
+      - sessions
+      summary: Get History
+      description: Return a Session's stored Turns.
+      operationId: get_history_sessions__session_id__history_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/History'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/turns/{turn_id}:
+    get:
+      tags:
+      - sessions
+      summary: Turn Status
+      description: Return one Turn's recorded status, or 404 when the Turn is unknown.
+      operationId: turn_status_sessions__session_id__turns__turn_id__get
+      parameters:
+      - name: turn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Turn Id
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/context:
+    put:
+      tags:
+      - sessions
+      summary: Select Context
+      description: 'Select a workspace file as the Session''s context and persist it.
+
+
+        The response reports the file''s size and SHA-256 digest.'
+      operationId: select_context_sessions__session_id__context_put
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContextRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextSelected'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - sessions
+      summary: Clear Context
+      description: Clear the Session's selected context and persist the change.
+      operationId: clear_context_sessions__session_id__context_delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/tree:
+    get:
+      tags:
+      - workspace
+      summary: List Files
+      description: List a Session's workspace files and the artifacts among them.
+      operationId: list_files_sessions__session_id__workspace_tree_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Files'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/files:
+    get:
+      tags:
+      - workspace
+      summary: List Files
+      description: List a Session's workspace files and the artifacts among them.
+      operationId: list_files_sessions__session_id__files_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Files'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/stat/{rel_path}:
+    get:
+      tags:
+      - workspace
+      summary: Workspace Stat
+      description: Return the size and SHA-256 digest of one workspace file.
+      operationId: workspace_stat_sessions__session_id__workspace_stat__rel_path__get
+      parameters:
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileStat'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/files/{rel_path}:
+    get:
+      tags:
+      - workspace
+      summary: Read Workspace File
+      description: 'Return one workspace file as a download, capped at 25 MB.
+
+
+        An unavailable or invalid path returns 404.'
+      operationId: read_workspace_file_sessions__session_id__workspace_files__rel_path__get
+      parameters:
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - workspace
+      summary: Write Workspace File
+      description: 'Write one workspace file from text or base64 content, capped at 25 MB.
+
+
+        Supplying both or neither of the content fields returns 422.'
+      operationId: write_workspace_file_sessions__session_id__workspace_files__rel_path__put
+      parameters:
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceWriteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileWritten'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - workspace
+      summary: Delete Workspace File
+      description: 'Delete one workspace file.
+
+
+        Failures return 404.'
+      operationId: delete_workspace_file_sessions__session_id__workspace_files__rel_path__delete
+      parameters:
+      - name: rel_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rel Path
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deleted'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/attach:
+    post:
+      tags:
+      - workspace
+      summary: Attach File
+      description: 'Store an uploaded attachment under files/ in the workspace.
+
+
+        Uploads stream to disk and return 413 above the size limit.'
+      operationId: attach_file_sessions__session_id__attach_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_attach_file_sessions__session_id__attach_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attached'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/memory:
+    get:
+      tags:
+      - memory
+      summary: List Memory
+      description: List a Session's memory entries that match an optional query.
+      operationId: list_memory_sessions__session_id__memory_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Q
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Memories'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/memory/{memory_id}:
+    put:
+      tags:
+      - memory
+      summary: Put Memory
+      description: Save one memory entry under the given ID.
+      operationId: put_memory_sessions__session_id__memory__memory_id__put
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySaved'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - memory
+      summary: Remove Memory
+      description: Delete one memory entry by ID.
+      operationId: remove_memory_sessions__session_id__memory__memory_id__delete
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deleted'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /skills:
+    get:
+      tags:
+      - skills
+      summary: Get Skills Catalog
+      description: Sync local Skills to the Session's volume and return the catalog XML.
+      operationId: get_skills_catalog_skills_get
+      parameters:
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: default
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Catalog'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /skills/pull:
+    post:
+      tags:
+      - skills
+      summary: Pull Skills To Local
+      description: Export the Session's volume Skills to local storage.
+      operationId: pull_skills_to_local_skills_pull_post
+      parameters:
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: default
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Exported'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /skills/push:
+    post:
+      tags:
+      - skills
+      summary: Push Skills
+      description: Push local Skills to the Session's volume and return the count.
+      operationId: push_skills_skills_push_post
+      parameters:
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: default
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pushed'
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/turn:
+    post:
+      tags:
+      - turns
+      summary: Stream Turn
+      description: 'Run one Turn and stream its activity as Server-Sent Events.
+
+
+        The Turn runs on a worker thread; a client disconnect cancels it and waits for sandbox work to
+        drain.'
+      operationId: stream_turn_sessions__session_id__turn_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnRequest'
+      responses:
+        '200':
+          description: Server-Sent Events for Turn status, activity, completion, or failure.
           content:
             text/event-stream:
               itemSchema:
@@ -55,2832 +835,595 @@ paths:
                     minimum: 0
               schema:
                 type: string
-              x-event-data-schema:
-                $ref: '#/components/schemas/FleetUIMessageChunk'
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-            X-Accel-Buffering:
-              schema:
-                type: string
-            x-vercel-ai-ui-message-stream:
-              schema:
-                type: string
-        '422':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Turn unavailable while composition installs dependencies
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    get:
-      tags:
-      - sessions
-      summary: List Session Turns
-      operationId: list_session_turns
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: after_sequence
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: integer
-            minimum: 0
-          - type: 'null'
-          title: After Sequence
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionTurnPageResponse'
-        '404':
-          description: Session not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/sessions/{session_id}/traces/feedback:
-    post:
-      tags:
-      - traces
-      summary: Submit Trace Feedback
-      description: Record human feedback for an execution trace owned by this Session.
-      operationId: submit_trace_feedback
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TraceFeedbackRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TraceFeedbackResponse'
-        '404':
-          description: Trace not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Trace feedback is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/sessions:
-    post:
-      tags:
-      - sessions
-      summary: Create Session
-      description: "Create a session for the local user in the current workspace.\n\
-        \nParameters:\n    body (SessionCreateRequest): Session creation data, including\
-        \ the optional title.\n    identity (LocalScopeDep): The deterministic local\
-        \ User and Workspace scope.\n    repo (SessionCatalogDep): Session repository\
-        \ used to create the session.\n    prewarm (SessionPrewarmDep): Optional background\
-        \ Sandbox pre-warm trigger.\n\nReturns:\n    SessionDetailResponse: The newly\
-        \ created session details."
-      operationId: create_session
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SessionCreateRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionDetailResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    get:
-      tags:
-      - sessions
-      summary: List Sessions
-      operationId: list_sessions
-      parameters:
-      - name: status
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - enum:
-            - active
-            - archived
-            type: string
-          - type: 'null'
-          title: Status
-      - name: search
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Title contains
-          title: Search
-        description: Title contains
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionListResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/sessions/{session_id}:
-    get:
-      tags:
-      - sessions
-      summary: Get Session
-      operationId: get_session
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionDetailResponse'
-        '404':
-          description: Session not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
-      tags:
-      - sessions
-      summary: Patch Session
-      description: "Update the title or status of a session within the local user's\
-        \ workspace.\n\nParameters:\n    body (SessionPatchRequest): Fields to update;\
-        \ at least one field is required.\n\nReturns:\n    SessionDetailResponse:\
-        \ The updated session details.\n\nRaises:\n    HTTPException: If no fields\
-        \ are provided, the title is blank, the status is invalid, or the\n      \
-        \  session cannot be updated."
-      operationId: update_session
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SessionPatchRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionDetailResponse'
-        '404':
-          description: Session not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Session update is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Service is not ready, or Session retirement is pending
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/sessions/{session_id}/task:
-    get:
-      tags:
-      - sessions
-      summary: Get Session Task
-      operationId: get_session_task
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionTaskResponse'
-        '404':
-          description: Session or task checkpoint not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Task checkpoint unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/attachments:
-    post:
-      tags:
-      - attachments
-      summary: Upload Attachment
-      operationId: create_attachment
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/Body_create_attachment'
-        required: true
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentResponse'
-        '400':
-          description: Attachment request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Attachment storage is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/attachments/{attachment_id}:
-    get:
-      tags:
-      - attachments
-      summary: Get Attachment
-      operationId: get_attachment
-      parameters:
-      - name: attachment_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Attachment Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentResponse'
-        '404':
-          description: Attachment not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Attachment storage is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/artifacts/{artifact_id}:
-    get:
-      tags:
-      - artifacts
-      summary: Get Artifact
-      operationId: get_artifact
-      parameters:
-      - name: artifact_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Artifact Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ArtifactResponse'
-        '404':
-          description: Artifact not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Artifact storage is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/artifacts/{artifact_id}/content:
-    get:
-      tags:
-      - artifacts
-      summary: Download Artifact
-      operationId: download_artifact
-      parameters:
-      - name: artifact_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Artifact Id
-      responses:
-        '200':
-          description: Artifact bytes with integrity headers
-          headers:
-            Content-Disposition:
-              schema:
-                type: string
-            ETag:
-              description: SHA-256 of the artifact bytes, quoted (e.g. "hex")
-              schema:
-                type: string
-            Content-Length:
-              schema:
-                type: integer
-            X-Content-Type-Options:
-              schema:
-                type: string
-        '404':
-          description: Artifact not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Artifact storage is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/skills:
-    get:
-      tags:
-      - skills
-      summary: List Skills
-      operationId: list_skills
-      parameters:
-      - name: q
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Optional ranking query
-          title: Q
-        description: Optional ranking query
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SkillCardResponse'
-                title: Response List Skills
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/skills/{skill_id}:
-    get:
-      tags:
-      - skills
-      summary: Get Skill
-      operationId: get_skill
-      parameters:
-      - name: skill_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Skill Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SkillCardResponse'
-        '404':
-          description: Skill not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/runs/{run_id}/cancellation:
-    put:
-      tags:
-      - runs
-      summary: Request Run Cancellation
-      description: Request cancellation for a run.
-      operationId: request_run_cancellation
-      parameters:
-      - name: run_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Run Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CancellationResponse'
-        '404':
-          description: Run not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/settings:
-    get:
-      tags:
-      - settings
-      summary: Get Settings Policy
-      operationId: get_settings_policy
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SettingsPolicyResponse'
-        '503':
-          description: Settings are unavailable, or the service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
-      tags:
-      - settings
-      summary: Patch Settings Policy
-      operationId: update_settings_policy
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SettingsPolicyPatchRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SettingsPolicyResponse'
-        '409':
-          description: Settings changed; reload before saving
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Settings value is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/files:
-    get:
-      tags:
-      - workspace-files
-      summary: List Workspace Files
-      operationId: list_workspace_files_api
-      parameters:
-      - name: path
-        in: query
-        required: false
-        schema:
-          type: string
-          description: Workspace-relative path
-          default: .
-          title: Path
-        description: Workspace-relative path
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 100
-          title: Limit
-      - name: after
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: After
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileListResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/files/stat:
-    get:
-      tags:
-      - workspace-files
-      summary: Stat Workspace File
-      operationId: stat_workspace_file_api
-      parameters:
-      - name: path
-        in: query
-        required: true
-        schema:
-          type: string
-          title: Path
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/files/content:
-    get:
-      tags:
-      - workspace-files
-      summary: Read Workspace File
-      operationId: read_workspace_file_api
-      parameters:
-      - name: path
-        in: query
-        required: true
-        schema:
-          type: string
-          title: Path
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: max_chars
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 10000
-          minimum: 1
-          default: 10000
-          title: Max Chars
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileReadResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    put:
-      tags:
-      - workspace-files
-      summary: Write Workspace File
-      operationId: write_workspace_file_api
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkspaceFileWriteRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Workspace file precondition did not match
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    delete:
-      tags:
-      - workspace-files
-      summary: Delete Workspace File
-      operationId: delete_workspace_file_api
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkspaceFileDeleteRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileDeleteResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Workspace file precondition did not match
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
-      tags:
-      - workspace-files
-      summary: Patch Workspace File
-      operationId: patch_workspace_file_api
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkspaceFilePatchRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Workspace file precondition did not match
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/files/append:
-    post:
-      tags:
-      - workspace-files
-      summary: Append Workspace File
-      operationId: append_workspace_file_api
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkspaceFileAppendRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
-        '400':
-          description: Workspace file request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Workspace file not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace files are unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Workspace file precondition did not match
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/volume/tree:
-    get:
-      tags:
-      - volume
-      summary: List Volume Tree
-      operationId: list_volume_tree_api
-      parameters:
-      - name: root
-        in: query
-        required: false
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 256
-          default: .
-          title: Root
-      - name: max_depth
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 32
-          minimum: 1
-          default: 8
-          title: Max Depth
-      - name: max_files
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 10000
-          minimum: 1
-          default: 2000
-          title: Max Files
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VolumeTreeResponse'
-        '400':
-          description: Volume tree request is invalid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Workspace Volume is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /health:
-    get:
-      tags:
-      - health
-      summary: Get Health
-      description: 'Liveness: the process is serving HTTP regardless of composition
-        state.'
-      operationId: get_health
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthLivenessResponse'
-  /health/ready:
-    get:
-      tags:
-      - health
-      summary: Get Readiness
-      description: 'Readiness: composition installed and the configured database answers.'
-      operationId: get_readiness
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthReadinessResponse'
-        '503':
-          description: Service is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    ArtifactResponse:
+    Attached:
       properties:
-        id:
+        mounted_path:
           type: string
-          format: uuid
-          title: Id
-        session_id:
+          title: Mounted Path
+        rel_path:
           type: string
-          format: uuid
-          title: Session Id
-        run_id:
-          type: string
-          format: uuid
-          title: Run Id
-        kind:
-          type: string
-          enum:
-          - text
-          - markdown
-          - json
-          title: Kind
-        title:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Title
-        media_type:
-          type: string
-          title: Media Type
-        byte_size:
-          type: integer
-          title: Byte Size
-        checksum_sha256:
-          type: string
-          title: Checksum Sha256
+          title: Rel Path
       type: object
       required:
-      - id
-      - session_id
-      - run_id
-      - kind
-      - media_type
-      - byte_size
-      - checksum_sha256
-      title: ArtifactResponse
-      description: Public artifact metadata — no host or Volume paths.
-    AttachmentResponse:
+      - mounted_path
+      - rel_path
+      title: Attached
+      description: Location of an uploaded attachment in the workspace and the sandbox.
+    Body_attach_file_sessions__session_id__attach_post:
       properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        filename:
-          type: string
-          title: Filename
-        content_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Content Type
-        byte_size:
-          type: integer
-          title: Byte Size
-        checksum_sha256:
-          type: string
-          title: Checksum Sha256
-      type: object
-      required:
-      - id
-      - filename
-      - byte_size
-      - checksum_sha256
-      title: AttachmentResponse
-      description: Public attachment metadata — no host or Volume paths.
-    Body_create_attachment:
-      properties:
-        attachment:
+        file:
           type: string
           contentMediaType: application/octet-stream
-          title: Attachment
+          title: File
       type: object
       required:
-      - attachment
-      title: Body_create_attachment
-    CancellationResponse:
+      - file
+      title: Body_attach_file_sessions__session_id__attach_post
+    Catalog:
       properties:
-        run_id:
+        catalog_xml:
           type: string
-          format: uuid
-          title: Run Id
-        state:
-          type: string
-          enum:
-          - requested
-          - already_requested
-          - already_terminal
-          title: State
+          title: Catalog Xml
       type: object
       required:
-      - run_id
-      - state
-      title: CancellationResponse
-    CreateTurnRequest:
+      - catalog_xml
+      title: Catalog
+      description: Session Skill catalog rendered as XML.
+    ContextRequest:
       properties:
-        text:
+        path:
           type: string
-          maxLength: 100000
+          maxLength: 1024
           minLength: 1
-          title: Text
-        attachment_ids:
+          title: Path
+        description:
+          type: string
+          maxLength: 2000
+          title: Description
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - path
+      title: ContextRequest
+      description: Workspace file to select as the Session's context.
+    ContextSelected:
+      properties:
+        path:
+          type: string
+          title: Path
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+      type: object
+      required:
+      - path
+      - size_bytes
+      - sha256
+      title: ContextSelected
+      description: Workspace file recorded as the Session's context, with its size and digest.
+    Deleted:
+      properties:
+        deleted:
+          type: string
+          title: Deleted
+      type: object
+      required:
+      - deleted
+      title: Deleted
+      description: Acknowledgement of a deleted memory entry or workspace file.
+    Exported:
+      properties:
+        exported:
           items:
             type: string
-            format: uuid
           type: array
-          title: Attachment Ids
-        skill_selections:
+          title: Exported
+      type: object
+      required:
+      - exported
+      title: Exported
+      description: Skills exported from the Session's volume to local storage.
+    FileStat:
+      properties:
+        path:
+          type: string
+          title: Path
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+      type: object
+      required:
+      - path
+      - size_bytes
+      - sha256
+      title: FileStat
+      description: Size and SHA-256 digest of one workspace file.
+    FileWritten:
+      properties:
+        path:
+          type: string
+          title: Path
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+        mounted_path:
+          type: string
+          title: Mounted Path
+      type: object
+      required:
+      - path
+      - size_bytes
+      - sha256
+      - mounted_path
+      title: FileWritten
+      description: Result of a workspace write, including the sandbox mounted path.
+    Files:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        files:
           items:
-            $ref: '#/components/schemas/SkillSelectionRequest'
+            type: string
           type: array
-          maxItems: 4
-          title: Skill Selections
-      additionalProperties: false
+          title: Files
+        artifacts:
+          items:
+            type: string
+          type: array
+          title: Artifacts
       type: object
       required:
-      - text
-      title: CreateTurnRequest
-      description: Canonical body for POST /api/sessions/{session_id}/turns.
-    DataArtifactUIMessagePart:
+      - session_id
+      - files
+      - artifacts
+      title: Files
+      description: Workspace file paths for one Session, with the artifacts among them.
+    HTTPValidationError:
       properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Id
-        type:
-          type: string
-          const: data-artifact
-          title: Type
-          default: data-artifact
-      additionalProperties: false
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
       type: object
-      required:
-      - data
-      title: DataArtifactUIMessagePart
-    DataAttachmentUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Id
-        type:
-          type: string
-          const: data-attachment
-          title: Type
-          default: data-attachment
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataAttachmentUIMessagePart
-    DataChildProgressUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Id
-        type:
-          type: string
-          const: data-child-progress
-          title: Type
-          default: data-child-progress
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataChildProgressUIMessagePart
-    DataRLMCodeUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-rlm-code
-          title: Type
-          default: data-rlm-code
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataRLMCodeUIMessagePart
-    DataRLMOutputUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-rlm-output
-          title: Type
-          default: data-rlm-output
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataRLMOutputUIMessagePart
-    DataSkillUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Id
-        type:
-          type: string
-          const: data-skill
-          title: Type
-          default: data-skill
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataSkillUIMessagePart
-    DataStatusUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-status
-          title: Type
-          default: data-status
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataStatusUIMessagePart
-    DataStepUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-step
-          title: Type
-          default: data-step
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataStepUIMessagePart
-    DataStructuredResultUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-structured-result
-          title: Type
-          default: data-structured-result
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataStructuredResultUIMessagePart
-    DataUsageUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-usage
-          title: Type
-          default: data-usage
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataUsageUIMessagePart
-    DataWarningUIMessagePart:
-      properties:
-        data:
-          $ref: '#/components/schemas/JsonValue'
-        type:
-          type: string
-          const: data-warning
-          title: Type
-          default: data-warning
-      additionalProperties: false
-      type: object
-      required:
-      - data
-      title: DataWarningUIMessagePart
-    DynamicToolUIMessagePart:
-      properties:
-        type:
-          type: string
-          const: dynamic-tool
-          title: Type
-          default: dynamic-tool
-        toolName:
-          type: string
-          title: Toolname
-        toolCallId:
-          type: string
-          title: Toolcallid
-        state:
-          type: string
-          title: State
-        input:
-          $ref: '#/components/schemas/JsonValue'
-        output:
-          $ref: '#/components/schemas/JsonValue'
-        errorText:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Errortext
-        providerExecuted:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Providerexecuted
-      additionalProperties: false
-      type: object
-      required:
-      - toolName
-      - toolCallId
-      - state
-      - input
-      title: DynamicToolUIMessagePart
-    HealthLivenessResponse:
+      title: HTTPValidationError
+    Health:
       properties:
         status:
           type: string
-          const: ok
           title: Status
-        app:
-          type: string
-          title: App
         version:
           type: string
           title: Version
+        mlflow:
+          $ref: '#/components/schemas/MlflowHealth'
       type: object
       required:
       - status
-      - app
       - version
-      title: HealthLivenessResponse
-      description: Liveness payload — the process is serving HTTP; no dependency checks.
-    HealthReadinessResponse:
+      - mlflow
+      title: Health
+      description: Service status, version, and effective MLflow destination.
+    History:
       properties:
-        status:
+        session_id:
           type: string
-          const: ready
-          title: Status
-        database:
-          type: string
-          enum:
-          - ok
-          - not_configured
-          title: Database
-      type: object
-      required:
-      - status
-      - database
-      title: HealthReadinessResponse
-      description: Readiness payload — composition installed and the database answers.
-    JsonValue: {}
-    ReasoningUIMessagePart:
-      properties:
-        text:
-          type: string
-          title: Text
-        state:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: State
-        type:
-          type: string
-          const: reasoning
-          title: Type
-          default: reasoning
-      additionalProperties: false
-      type: object
-      required:
-      - text
-      title: ReasoningUIMessagePart
-    SessionCreateRequest:
-      properties:
-        title:
-          anyOf:
-          - type: string
-            maxLength: 255
-          - type: 'null'
-          title: Title
-      additionalProperties: false
-      type: object
-      title: SessionCreateRequest
-    SessionDetailResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        title:
-          type: string
-          title: Title
-        status:
-          type: string
-          enum:
-          - active
-          - archived
-          title: Status
-        checkpoint_version:
-          type: integer
-          title: Checkpoint Version
-        created_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Created At
-        updated_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Updated At
-      type: object
-      required:
-      - id
-      - title
-      - status
-      - checkpoint_version
-      title: SessionDetailResponse
-      description: Session detail — same public shape as the summary today.
-    SessionListResponse:
-      properties:
-        items:
+          title: Session Id
+        turns:
           items:
-            $ref: '#/components/schemas/SessionSummaryResponse'
+            additionalProperties: true
+            type: object
           type: array
-          title: Items
-        total:
-          type: integer
-          title: Total
-        offset:
-          type: integer
-          title: Offset
-        limit:
-          type: integer
-          title: Limit
-        has_more:
-          type: boolean
-          title: Has More
+          title: Turns
       type: object
       required:
-      - items
-      - total
-      - offset
-      - limit
-      - has_more
-      title: SessionListResponse
-    SessionPatchRequest:
+      - session_id
+      - turns
+      title: History
+      description: Stored Turn records for one Session.
+    Limits:
       properties:
-        title:
-          anyOf:
-          - type: string
-            maxLength: 255
-          - type: 'null'
-          title: Title
-        status:
-          anyOf:
-          - type: string
-            enum:
-            - active
-            - archived
-          - type: 'null'
-          title: Status
-      additionalProperties: false
-      type: object
-      title: SessionPatchRequest
-    SessionSummaryResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        title:
-          type: string
-          title: Title
-        status:
-          type: string
-          enum:
-          - active
-          - archived
-          title: Status
-        checkpoint_version:
+        lm_calls:
           type: integer
-          title: Checkpoint Version
-        created_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Created At
-        updated_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Updated At
+          title: Lm Calls
+        depth:
+          type: integer
+          title: Depth
+        children:
+          type: integer
+          title: Children
+        active_children:
+          type: integer
+          title: Active Children
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
       type: object
       required:
-      - id
-      - title
-      - status
-      - checkpoint_version
-      title: SessionSummaryResponse
-    SessionTaskResponse:
+      - lm_calls
+      - depth
+      - children
+      - active_children
+      - timeout_seconds
+      title: Limits
+      description: Execution limits the sandbox manager enforces for one Session.
+    Memories:
       properties:
-        revision:
-          type: integer
-          title: Revision
-        goal:
+        memories:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Memories
+      type: object
+      required:
+      - memories
+      title: Memories
+      description: Memory entries matching a Session memory query.
+    MemoryRequest:
+      properties:
+        content:
           type: string
-          title: Goal
-        decisions:
-          items:
-            type: string
-          type: array
-          title: Decisions
-        relevant_paths:
-          items:
-            type: string
-          type: array
-          title: Relevant Paths
-        source_revisions:
+          maxLength: 10000
+          minLength: 1
+          title: Content
+        kind:
+          type: string
+          pattern: ^(observation|preference|hypothesis|procedure)$
+          title: Kind
+          default: observation
+        sources:
           additionalProperties:
             type: string
           type: object
-          title: Source Revisions
-        completed_work:
-          items:
-            type: string
-          type: array
-          title: Completed Work
-        pending_work:
-          items:
-            type: string
-          type: array
-          title: Pending Work
-      type: object
-      required:
-      - revision
-      - goal
-      - decisions
-      - relevant_paths
-      - source_revisions
-      - completed_work
-      - pending_work
-      title: SessionTaskResponse
-      description: Authorized read-only projection of the existing Session checkpoint.
-    SessionTurnPageResponse:
-      properties:
-        items:
-          items:
-            $ref: '#/components/schemas/UIMessageResponse'
-          type: array
-          title: Items
-        next_after_sequence:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Next After Sequence
-      type: object
-      required:
-      - items
-      title: SessionTurnPageResponse
-    SettingsFieldResponse:
-      properties:
-        path:
-          type: string
-          title: Path
-        group:
-          type: string
-          title: Group
-        label:
-          type: string
-          title: Label
-        value:
-          $ref: '#/components/schemas/JsonValue'
-        editor:
-          type: string
-          enum:
-          - text
-          - number
-          - boolean
-          - single_choice
-          - multi_choice
-          - string_list
-          title: Editor
-        choices:
-          items:
-            type: string
-          type: array
-          title: Choices
-        environment_overridden:
+          maxProperties: 100
+          title: Sources
+        reviewed:
           type: boolean
-          title: Environment Overridden
+          title: Reviewed
           default: false
-      type: object
-      required:
-      - path
-      - group
-      - label
-      - value
-      - editor
-      title: SettingsFieldResponse
-    SettingsPolicyPatchRequest:
-      properties:
-        revision:
-          type: string
-          maxLength: 64
-          minLength: 64
-          pattern: ^[0-9a-f]{64}$
-          title: Revision
-        updates:
-          items:
-            $ref: '#/components/schemas/SettingsPolicyUpdate'
-          type: array
-          maxItems: 128
-          minItems: 1
-          title: Updates
       additionalProperties: false
       type: object
       required:
-      - revision
-      - updates
-      title: SettingsPolicyPatchRequest
-    SettingsPolicyResponse:
+      - content
+      title: MemoryRequest
+      description: Memory entry to save, with its kind, sources, and review state.
+    MemorySaved:
       properties:
-        revision:
+        memory_id:
           type: string
-          title: Revision
-        restart_required:
-          type: boolean
-          title: Restart Required
-          default: true
-        fields:
-          items:
-            $ref: '#/components/schemas/SettingsFieldResponse'
-          type: array
-          title: Fields
+          title: Memory Id
       type: object
       required:
-      - revision
-      - fields
-      title: SettingsPolicyResponse
-    SettingsPolicyUpdate:
+      - memory_id
+      title: MemorySaved
+      description: Acknowledgement of a saved memory entry.
+    MlflowHealth:
       properties:
-        path:
-          type: string
-          maxLength: 128
-          minLength: 1
-          pattern: ^[a-z][a-z0-9_.]*$
-          title: Path
-        value:
-          $ref: '#/components/schemas/JsonValue'
-          not:
-            type: 'null'
-      additionalProperties: false
-      type: object
-      required:
-      - path
-      - value
-      title: SettingsPolicyUpdate
-      description: One non-secret field assignment in an atomic settings-policy batch.
-    SkillCardResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        name:
-          type: string
-          title: Name
-        description:
-          type: string
-          title: Description
-        scope:
+        mode:
           type: string
           enum:
-          - system
-          - workspace
-          title: Scope
-        version:
+          - local
+          - databricks
+          title: Mode
+        tracking_uri:
           type: string
-          title: Version
-        trust:
-          type: string
-          enum:
-          - system
-          - workspace
-          - untrusted
-          title: Trust
-        affordances:
-          items:
-            type: string
-          type: array
-          title: Affordances
-        resources_available:
-          type: boolean
-          title: Resources Available
-      type: object
-      required:
-      - id
-      - name
-      - description
-      - scope
-      - version
-      - trust
-      - affordances
-      - resources_available
-      title: SkillCardResponse
-      description: Bounded Skill discovery metadata — no instructions body.
-    SkillSelectionRequest:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        expected_version:
-          type: string
-          maxLength: 64
-          minLength: 1
-          pattern: ^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$
-          title: Expected Version
-      additionalProperties: false
-      type: object
-      required:
-      - id
-      - expected_version
-      title: SkillSelectionRequest
-      description: One exact version-pinned Skill requested for the next Turn.
-    StepStartUIMessagePart:
-      properties:
-        type:
-          type: string
-          const: step-start
-          title: Type
-          default: step-start
-      additionalProperties: false
-      type: object
-      title: StepStartUIMessagePart
-    TextUIMessagePart:
-      properties:
-        text:
-          type: string
-          title: Text
-        state:
+          title: Tracking Uri
+        workspace_host:
           anyOf:
           - type: string
           - type: 'null'
-          title: State
-        type:
+          title: Workspace Host
+        experiment_name:
           type: string
-          const: text
-          title: Type
-          default: text
-      additionalProperties: false
-      type: object
-      required:
-      - text
-      title: TextUIMessagePart
-    TraceFeedbackRequest:
-      properties:
-        trace_id:
+          title: Experiment Name
+        eval_experiment_name:
           type: string
-          maxLength: 256
-          minLength: 1
-          title: Trace Id
-        value:
-          type: boolean
-          title: Value
-        comment:
+          title: Eval Experiment Name
+        optimization_experiment_name:
+          type: string
+          title: Optimization Experiment Name
+        trace_location:
           anyOf:
-          - type: string
-            maxLength: 2000
+          - $ref: '#/components/schemas/MlflowTraceLocation'
           - type: 'null'
-          title: Comment
-      additionalProperties: false
-      type: object
-      required:
-      - trace_id
-      - value
-      title: TraceFeedbackRequest
-      description: One human thumbs assessment for an execution trace.
-    TraceFeedbackResponse:
-      properties:
-        trace_id:
-          type: string
-          title: Trace Id
-        name:
-          type: string
-          const: user_feedback
-          title: Name
-          default: user_feedback
-        value:
-          type: boolean
-          title: Value
-        assessment_id:
+        experiment_id:
           anyOf:
           - type: string
           - type: 'null'
-          title: Assessment Id
+          title: Experiment Id
+        ready:
+          type: boolean
+          title: Ready
       type: object
       required:
-      - trace_id
-      - value
-      title: TraceFeedbackResponse
-      description: Closed public result for a recorded MLflow assessment.
-    UIMessageResponse:
+      - mode
+      - tracking_uri
+      - experiment_name
+      - eval_experiment_name
+      - optimization_experiment_name
+      - ready
+      title: MlflowHealth
+      description: Non-secret, initialized tracking destination for process reuse checks.
+    MlflowTraceLocation:
       properties:
-        id:
+        catalog:
           type: string
-          title: Id
+          title: Catalog
+        schema:
+          type: string
+          title: Schema
+        table_prefix:
+          type: string
+          title: Table Prefix
+      type: object
+      required:
+      - catalog
+      - schema
+      - table_prefix
+      title: MlflowTraceLocation
+      description: Unity Catalog location associated with the runtime experiment.
+    Mode:
+      properties:
+        mode:
+          type: string
+          title: Mode
+      type: object
+      required:
+      - mode
+      title: Mode
+      description: Execution mode of one Session.
+    ModeRequest:
+      properties:
+        mode:
+          type: string
+          pattern: ^(rlm|flex|hybrid)$
+          title: Mode
+      additionalProperties: false
+      type: object
+      required:
+      - mode
+      title: ModeRequest
+      description: Request to switch a Session's execution mode to rlm, flex, or hybrid.
+    ModelRequest:
+      properties:
         role:
           type: string
-          enum:
-          - user
-          - assistant
+          pattern: ^(root|sub)$
           title: Role
-        parts:
-          items:
-            oneOf:
-            - $ref: '#/components/schemas/TextUIMessagePart'
-            - $ref: '#/components/schemas/ReasoningUIMessagePart'
-            - $ref: '#/components/schemas/DynamicToolUIMessagePart'
-            - $ref: '#/components/schemas/StepStartUIMessagePart'
-            - $ref: '#/components/schemas/DataStatusUIMessagePart'
-            - $ref: '#/components/schemas/DataChildProgressUIMessagePart'
-            - $ref: '#/components/schemas/DataStepUIMessagePart'
-            - $ref: '#/components/schemas/DataRLMCodeUIMessagePart'
-            - $ref: '#/components/schemas/DataRLMOutputUIMessagePart'
-            - $ref: '#/components/schemas/DataSkillUIMessagePart'
-            - $ref: '#/components/schemas/DataAttachmentUIMessagePart'
-            - $ref: '#/components/schemas/DataWarningUIMessagePart'
-            - $ref: '#/components/schemas/DataArtifactUIMessagePart'
-            - $ref: '#/components/schemas/DataUsageUIMessagePart'
-            - $ref: '#/components/schemas/DataStructuredResultUIMessagePart'
-            discriminator:
-              propertyName: type
-              mapping:
-                data-artifact: '#/components/schemas/DataArtifactUIMessagePart'
-                data-attachment: '#/components/schemas/DataAttachmentUIMessagePart'
-                data-child-progress: '#/components/schemas/DataChildProgressUIMessagePart'
-                data-rlm-code: '#/components/schemas/DataRLMCodeUIMessagePart'
-                data-rlm-output: '#/components/schemas/DataRLMOutputUIMessagePart'
-                data-skill: '#/components/schemas/DataSkillUIMessagePart'
-                data-status: '#/components/schemas/DataStatusUIMessagePart'
-                data-step: '#/components/schemas/DataStepUIMessagePart'
-                data-structured-result: '#/components/schemas/DataStructuredResultUIMessagePart'
-                data-usage: '#/components/schemas/DataUsageUIMessagePart'
-                data-warning: '#/components/schemas/DataWarningUIMessagePart'
-                dynamic-tool: '#/components/schemas/DynamicToolUIMessagePart'
-                reasoning: '#/components/schemas/ReasoningUIMessagePart'
-                step-start: '#/components/schemas/StepStartUIMessagePart'
-                text: '#/components/schemas/TextUIMessagePart'
-          type: array
-          title: Parts
-        metadata:
-          anyOf:
-          - additionalProperties:
-              $ref: '#/components/schemas/JsonValue'
-            type: object
-          - type: 'null'
-          title: Metadata
+          default: root
+        model:
+          type: string
+          maxLength: 300
+          minLength: 1
+          pattern: ^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$
+          title: Model
+      additionalProperties: false
       type: object
       required:
-      - id
+      - model
+      title: ModelRequest
+      description: Model to bind to the root or sub role of a Session's engine.
+    ModelSelection:
+      properties:
+        role:
+          type: string
+          title: Role
+        model:
+          type: string
+          title: Model
+      type: object
+      required:
       - role
-      - parts
-      title: UIMessageResponse
-    VolumeTreeResponse:
+      - model
+      title: ModelSelection
+      description: Model bound to one role after a successful selection.
+    Models:
       properties:
-        paths:
+        scope:
+          type: string
+          title: Scope
+        models:
           items:
             type: string
           type: array
-          title: Paths
-        directories:
-          items:
-            type: string
-          type: array
-          title: Directories
-        truncated:
-          type: boolean
-          title: Truncated
-          default: false
+          title: Models
       type: object
       required:
-      - paths
-      title: VolumeTreeResponse
-      description: Logical files visible in the LocalScope Workspace Volume.
-    WorkspaceFileAppendRequest:
+      - scope
+      - models
+      title: Models
+      description: Chat models available in one discovery scope.
+    Pushed:
       properties:
-        path:
-          type: string
-          maxLength: 1024
-          minLength: 1
-          title: Path
-        content:
-          type: string
-          title: Content
-        expected_sha256:
-          anyOf:
-          - type: string
-            maxLength: 64
-            minLength: 64
-            pattern: ^[0-9a-f]{64}$
-          - type: 'null'
-          title: Expected Sha256
-      additionalProperties: false
-      type: object
-      required:
-      - path
-      - content
-      title: WorkspaceFileAppendRequest
-    WorkspaceFileDeleteRequest:
-      properties:
-        path:
-          type: string
-          maxLength: 1024
-          minLength: 1
-          title: Path
-        expected_sha256:
-          anyOf:
-          - type: string
-            maxLength: 64
-            minLength: 64
-            pattern: ^[0-9a-f]{64}$
-          - type: 'null'
-          title: Expected Sha256
-      additionalProperties: false
-      type: object
-      required:
-      - path
-      title: WorkspaceFileDeleteRequest
-    WorkspaceFileDeleteResponse:
-      properties:
-        ok:
-          type: boolean
-          title: Ok
-          default: true
-        path:
-          type: string
-          title: Path
-      type: object
-      required:
-      - path
-      title: WorkspaceFileDeleteResponse
-    WorkspaceFileEntryResponse:
-      properties:
-        path:
-          type: string
-          title: Path
-        kind:
-          type: string
-          enum:
-          - file
-          - directory
-          title: Kind
-        byte_size:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Byte Size
-        modified_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Modified At
-        checksum_sha256:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Checksum Sha256
-      type: object
-      required:
-      - path
-      - kind
-      title: WorkspaceFileEntryResponse
-    WorkspaceFileListResponse:
-      properties:
-        entries:
-          items:
-            $ref: '#/components/schemas/WorkspaceFileEntryResponse'
-          type: array
-          title: Entries
-        truncated:
-          type: boolean
-          title: Truncated
-          default: false
-        next_cursor:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Next Cursor
-      type: object
-      required:
-      - entries
-      title: WorkspaceFileListResponse
-    WorkspaceFilePatchRequest:
-      properties:
-        path:
-          type: string
-          maxLength: 1024
-          minLength: 1
-          title: Path
-        old:
-          type: string
-          minLength: 1
-          title: Old
-        new:
-          type: string
-          title: New
-        expected_sha256:
-          anyOf:
-          - type: string
-            maxLength: 64
-            minLength: 64
-            pattern: ^[0-9a-f]{64}$
-          - type: 'null'
-          title: Expected Sha256
-      additionalProperties: false
-      type: object
-      required:
-      - path
-      - old
-      - new
-      title: WorkspaceFilePatchRequest
-    WorkspaceFileReadResponse:
-      properties:
-        path:
-          type: string
-          title: Path
-        content:
-          type: string
-          title: Content
-        next_cursor:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Next Cursor
-        byte_size:
+        pushed:
           type: integer
-          title: Byte Size
-        eof:
-          type: boolean
-          title: Eof
+          title: Pushed
       type: object
       required:
-      - path
-      - content
-      - byte_size
-      - eof
-      title: WorkspaceFileReadResponse
-    WorkspaceFileWriteRequest:
+      - pushed
+      title: Pushed
+      description: Count of local Skills pushed to the Session's volume.
+    SessionConfig:
       properties:
-        path:
+        mode:
           type: string
-          maxLength: 1024
+          title: Mode
+        models:
+          additionalProperties:
+            type: string
+          type: object
+          title: Models
+        context:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Context
+        configuration:
+          additionalProperties: true
+          type: object
+          title: Configuration
+        limits:
+          $ref: '#/components/schemas/Limits'
+      type: object
+      required:
+      - mode
+      - models
+      - context
+      - configuration
+      - limits
+      title: SessionConfig
+      description: Effective mode, models, context, configuration, and limits of one Session.
+    SessionSummary:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        turn_count:
+          type: integer
+          title: Turn Count
+      type: object
+      required:
+      - session_id
+      - updated_at
+      - turn_count
+      title: SessionSummary
+      description: One stored Session with its last update time and Turn count.
+    Sessions:
+      properties:
+        sessions:
+          items:
+            $ref: '#/components/schemas/SessionSummary'
+          type: array
+          title: Sessions
+      type: object
+      required:
+      - sessions
+      title: Sessions
+      description: Listing of every stored Session.
+    Status:
+      properties:
+        status:
+          type: string
+          title: Status
+      type: object
+      required:
+      - status
+      title: Status
+      description: Plain status acknowledgement, such as a cleared context.
+    TurnRequest:
+      properties:
+        task:
+          type: string
+          maxLength: 100000
           minLength: 1
-          title: Path
-        content:
-          type: string
-          title: Content
-        overwrite:
-          type: boolean
-          title: Overwrite
-        expected_sha256:
+          title: Task
+        idempotency_key:
           anyOf:
           - type: string
-            maxLength: 64
-            minLength: 64
-            pattern: ^[0-9a-f]{64}$
+            maxLength: 128
           - type: 'null'
-          title: Expected Sha256
+          title: Idempotency Key
+        record_replay:
+          type: boolean
+          title: Record Replay
+          description: Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed
+            GEPA data.
+          default: false
       additionalProperties: false
       type: object
       required:
-      - path
-      - content
-      - overwrite
-      title: WorkspaceFileWriteRequest
-    ErrorResponse:
+      - task
+      title: TurnRequest
+      description: User prompt sent to one Session's Fleet engine.
+    TurnStatus:
       properties:
-        code:
-          title: Code
+        turn_id:
           type: string
-        message:
-          title: Message
+          title: Turn Id
+        status:
           type: string
-      required:
-      - code
-      - message
-      title: ErrorResponse
+          title: Status
+        result:
+          additionalProperties: true
+          type: object
+          title: Result
+        updated_at:
+          type: string
+          title: Updated At
       type: object
-    FleetUIMessageChunk:
-      oneOf:
-      - additionalProperties: false
-        properties:
-          type:
-            const: turn_start
-            title: Type
-            type: string
-          runId:
-            title: Runid
-            type: string
-          sessionId:
+      required:
+      - turn_id
+      - status
+      - result
+      - updated_at
+      title: TurnStatus
+      description: Recorded status and result of one Turn.
+    ValidationError:
+      properties:
+        loc:
+          items:
             anyOf:
             - type: string
-            - type: 'null'
-            title: Sessionid
-          delivery:
-            enum:
-            - live
-            - replay
-            title: Delivery
-            type: string
-          traceId:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Traceid
-        required:
-        - type
-        - runId
-        title: TurnStartEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: turn_status
-            title: Type
-            type: string
-          phase:
-            title: Phase
-            type: string
-          status:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Status
-          message:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Message
-        required:
-        - type
-        - phase
-        title: TurnStatusEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: step_start
-            title: Type
-            type: string
-          step:
-            title: Step
-            type: integer
-        required:
-        - type
-        - step
-        title: StepStartEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: step_finish
-            title: Type
-            type: string
-          step:
-            title: Step
-            type: integer
-          durationMs:
-            anyOf:
             - type: integer
-            - type: 'null'
-            title: Durationms
-        required:
-        - type
-        - step
-        title: StepFinishEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: reasoning
-            title: Type
-            type: string
-          streamId:
-            title: Streamid
-            type: string
-          step:
-            title: Step
-            type: integer
-          text:
-            title: Text
-            type: string
-          delta:
-            title: Delta
-            type: string
-          final:
-            title: Final
-            type: boolean
-        required:
-        - type
-        - streamId
-        title: ReasoningEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: code
-            title: Type
-            type: string
-          streamId:
-            title: Streamid
-            type: string
-          step:
-            title: Step
-            type: integer
-          code:
-            title: Code
-            type: string
-          isDelta:
-            title: Isdelta
-            type: boolean
-          final:
-            title: Final
-            type: boolean
-        required:
-        - type
-        - streamId
-        - code
-        title: CodeEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: output
-            title: Type
-            type: string
-          streamId:
-            title: Streamid
-            type: string
-          step:
-            title: Step
-            type: integer
-          output:
-            title: Output
-            type: string
-          isDelta:
-            title: Isdelta
-            type: boolean
-          final:
-            title: Final
-            type: boolean
-        required:
-        - type
-        - streamId
-        - output
-        title: OutputEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: tool_call
-            title: Type
-            type: string
-          toolCallId:
-            title: Toolcallid
-            type: string
-          toolName:
-            title: Toolname
-            type: string
-          input:
-            title: Input
-        required:
-        - type
-        - toolCallId
-        - toolName
-        title: ToolCallEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: tool_result
-            title: Type
-            type: string
-          toolCallId:
-            title: Toolcallid
-            type: string
-          toolName:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Toolname
-          output:
-            title: Output
-          error:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Error
-        required:
-        - type
-        - toolCallId
-        title: ToolResultEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: text
-            title: Type
-            type: string
-          streamId:
-            title: Streamid
-            type: string
-          delta:
-            title: Delta
-            type: string
-          text:
-            title: Text
-            type: string
-          final:
-            title: Final
-            type: boolean
-          role:
-            title: Role
-            type: string
-        title: TextEvent
-        type: object
-        required:
-        - type
-      - additionalProperties: false
-        properties:
-          type:
-            const: skill
-            title: Type
-            type: string
-          skillId:
-            title: Skillid
-            type: string
-          name:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Name
-          phase:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Phase
-          version:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Version
-          trust:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Trust
-          affordances:
-            anyOf:
-            - items:
-                type: string
-              type: array
-            - type: 'null'
-            title: Affordances
-        required:
-        - type
-        - skillId
-        title: SkillEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          childId:
-            title: Childid
-            type: string
-          taskLabel:
-            title: Tasklabel
-            type: string
-          state:
-            enum:
-            - not_started
-            - running
-            - completed
-            - failed
-            - cancelled
-            - timed_out
-            title: State
-            type: string
-          elapsedMs:
-            minimum: 0
-            title: Elapsedms
-            type: integer
-          type:
-            const: child_progress
-            title: Type
-            type: string
-          outcome:
-            anyOf:
-            - maxLength: 500
-              type: string
-            - type: 'null'
-            title: Outcome
-          cleanupState:
-            enum:
-            - pending
-            - complete
-            - failed
-            - not_required
-            title: Cleanupstate
-            type: string
-          parentRunId:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Parentrunid
-          evidence:
-            items:
-              type: string
-            maxItems: 8
-            title: Evidence
-            type: array
-          gaps:
-            items:
-              type: string
-            maxItems: 8
-            title: Gaps
-            type: array
-          resultFileCount:
-            maximum: 16
-            minimum: 0
-            title: Resultfilecount
-            type: integer
-          codeExcerpt:
-            anyOf:
-            - maxLength: 800
-              type: string
-            - type: 'null'
-            title: Codeexcerpt
-          outputExcerpt:
-            anyOf:
-            - maxLength: 800
-              type: string
-            - type: 'null'
-            title: Outputexcerpt
-        required:
-        - type
-        - childId
-        - taskLabel
-        - state
-        - elapsedMs
-        title: ChildProgressEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: attachment
-            title: Type
-            type: string
-          attachmentId:
-            title: Attachmentid
-            type: string
-          phase:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Phase
-          filename:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Filename
-          byteSize:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Bytesize
-        required:
-        - type
-        - attachmentId
-        title: AttachmentEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: warning
-            title: Type
-            type: string
-          message:
-            title: Message
-            type: string
-          code:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Code
-        required:
-        - type
-        - message
-        title: WarningEventChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: artifact
-            title: Type
-            type: string
-          artifactId:
-            title: Artifactid
-            type: string
-          artifactKind:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Artifactkind
-          title:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Title
-          mediaType:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Mediatype
-          byteSize:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Bytesize
-          checksumSha256:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Checksumsha256
-        required:
-        - type
-        - artifactId
-        title: ArtifactEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: usage
-            title: Type
-            type: string
-          iterations:
-            title: Iterations
-            type: integer
-          durationMs:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Durationms
-          usage:
-            additionalProperties: true
-            title: Usage
-            type: object
-        title: UsageEvent
-        type: object
-        required:
-        - type
-      - additionalProperties: false
-        properties:
-          type:
-            const: structured_result
-            title: Type
-            type: string
-          schemaId:
-            title: Schemaid
-            type: string
-          schemaVersion:
-            title: Schemaversion
-            type: string
-          value:
-            title: Value
-        required:
-        - type
-        - schemaId
-        - schemaVersion
-        title: StructuredResultEvent
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: turn_finish
-            title: Type
-            type: string
-          finishReason:
-            title: Finishreason
-            type: string
-          status:
-            title: Status
-            type: string
-          checkpointVersion:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Checkpointversion
-          durationMs:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Durationms
-          traceId:
-            anyOf:
-            - type: string
-            - type: 'null'
-            title: Traceid
-        title: TurnFinishEvent
-        type: object
-        required:
-        - type
-      - additionalProperties: false
-        properties:
-          type:
-            const: turn_cancelled
-            title: Type
-            type: string
-          reason:
-            title: Reason
-            type: string
-          durationMs:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Durationms
-        title: TurnCancelledEvent
-        type: object
-        required:
-        - type
-      - additionalProperties: false
-        properties:
-          type:
-            const: turn_error
-            title: Type
-            type: string
-          message:
-            title: Message
-            type: string
-          code:
-            title: Code
-            type: string
-          durationMs:
-            anyOf:
-            - type: integer
-            - type: 'null'
-            title: Durationms
-        required:
-        - type
-        - message
-        title: TurnErrorEvent
-        type: object
-      title: FleetUIMessageChunk
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WorkspaceWriteRequest:
+      properties:
+        content:
+          anyOf:
+          - type: string
+            maxLength: 25000000
+          - type: 'null'
+          title: Content
+        content_base64:
+          anyOf:
+          - type: string
+            maxLength: 34000000
+          - type: 'null'
+          title: Content Base64
+      additionalProperties: false
+      type: object
+      title: WorkspaceWriteRequest
+      description: File content for a workspace write, as text or base64; supply exactly one.

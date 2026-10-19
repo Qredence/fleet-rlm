@@ -1,116 +1,41 @@
-"""Root test configuration — markers, env isolation, fixture registration."""
+"""Keep every test away from the developer's .env, live MLflow and Postgres servers, and shell overrides."""
 
 from __future__ import annotations
 
-import logging
-import os
-import xml.etree.ElementTree as ET
-from pathlib import Path
-
+import mlflow
 import pytest
+from pydantic import AliasChoices
 
-logger = logging.getLogger(__name__)
+from fleet_rlm.config import RETIRED_MLFLOW_ENV, FleetSettings, get_settings
 
 
-@pytest.fixture(scope="session", autouse=True)
-def recursive_application_service():
-    """Close the lazily created test application loop after owned child work."""
+def _setting_env_names() -> set[str]:
+    names = {"FLEET_CONFIG"}
+    for name, field in FleetSettings.model_fields.items():
+        names.add(name.upper())
+        if isinstance(field.validation_alias, str):
+            names.add(field.validation_alias)
+        elif isinstance(field.validation_alias, AliasChoices):
+            names.update(choice for choice in field.validation_alias.choices if isinstance(choice, str))
+    return names
+
+
+@pytest.fixture(scope="session")
+def mlflow_test_uri(tmp_path_factory: pytest.TempPathFactory) -> str:
+    return f"sqlite:///{tmp_path_factory.mktemp('mlflow') / 'mlflow.db'}"
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
+    for name in _setting_env_names() | RETIRED_MLFLOW_ENV | {"MLFLOW_EXPERIMENT_ID"}:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setitem(FleetSettings.model_config, "env_file", None)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_test_uri)
+    monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
+    # A test that forgets its database fake fails fast instead of reaching a real local Postgres.
+    monkeypatch.setenv("FLEET_DATABASE_URL", "postgresql://fleet-test@db.invalid:5432/fleet-test")
+    get_settings.cache_clear()
+    mlflow.set_tracking_uri(mlflow_test_uri)
     yield
-    from tests.support.recursion_scheduler import close_application_loop
-
-    close_application_loop()
-
-
-# Prevent remote model-cost fetch during test collection.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
-
-
-def _suite_from_path(path: Path) -> str | None:
-    """Derive the test-suite marker from the file path."""
-    parts = path.parts
-    if "tests" not in parts:
-        return None
-    idx = parts.index("tests")
-    if idx + 1 >= len(parts):
-        return None
-    suite = parts[idx + 1]
-    if suite in {"unit", "integration", "contracts", "e2e", "packaging"}:
-        return suite
-    return None
-
-
-def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:
-    """Sanitize parametrize IDs to avoid spaces in node IDs for CI tooling."""
-    _ = config, argname
-    if isinstance(val, str) and " " in val:
-        return val.replace(" ", "_")
-    return None
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Auto-apply suite markers and skip live tests unless opted-in."""
-    _ = config
-    for item in items:
-        item_path = Path(str(item.fspath))
-        suite = _suite_from_path(item_path)
-        if suite is not None:
-            item.add_marker(getattr(pytest.mark, suite))
-
-        # Packaging tests build artifacts and isolated virtual environments.
-        # Keep them out of the fast non-live lanes; the dedicated packaging
-        # lane runs them serially so source-tree build metadata cannot race.
-        if suite == "unit" and "packaging" in item_path.parts:
-            item.add_marker(pytest.mark.packaging)
-
-        # Auto-mark DB-dependent integration tests.
-        if suite == "integration" and item_path.name.startswith("test_db_"):
-            item.add_marker(pytest.mark.db)
-
-
-@pytest.hookimpl(trylast=True)
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Post-process the JUnit XML report to align classnames and names for Smarter Testing."""
-    _ = exitstatus
-    junit_xml_path = session.config.getoption("--junitxml")
-    if not junit_xml_path:
-        return
-
-    path = Path(junit_xml_path)
-    if not path.is_file():
-        logger.debug("[conftest] junit xml path does not exist: %s", junit_xml_path)
-        return
-
-    try:
-        tree = ET.parse(path)
-        root = tree.getroot()
-        modified_count = 0
-
-        for testcase in root.iter("testcase"):
-            classname = testcase.get("classname")
-            name = testcase.get("name")
-            file_attr = testcase.get("file")
-
-            if file_attr:
-                module_path = file_attr.replace("/", ".")
-                if module_path.endswith(".py"):
-                    module_path = module_path[:-3]
-
-                if classname and classname.startswith(module_path) and len(classname) > len(module_path):
-                    class_name = classname[len(module_path) + 1 :]
-                    logger.debug(
-                        "[conftest] Adjusting classname '%s' -> '%s', name '%s' -> '%s::%s'",
-                        classname,
-                        module_path,
-                        name,
-                        class_name,
-                        name,
-                    )
-                    testcase.set("classname", module_path)
-                    testcase.set("name", f"{class_name}::{name}")
-                    modified_count += 1
-
-        if modified_count:
-            tree.write(path, encoding="utf-8", xml_declaration=True)
-            logger.info("[conftest] Adjusted %d JUnit XML test cases.", modified_count)
-    except Exception as e:
-        logger.exception("[conftest] Error post-processing JUnit XML for Smarter Testing: %s", e)
+    get_settings.cache_clear()
+    mlflow.set_tracking_uri(mlflow_test_uri)

@@ -1,35 +1,15 @@
-"""Fleet RLM package bootstrap.
+"""Fleet-RLM Lite: DSPy Flex/RLM, Daytona, Postgres, Agent Skills, and MLflow.
 
-Importing the package does not open network connections or construct external
-clients; process-lifetime resources are owned by FastAPI lifespan.
+Import from the subpackages: `api` (HTTP app), `engine` (routes, signatures, Turn program),
+`sandbox` (Daytona), `store` (PostgreSQL), `optimize` (evaluation and GEPA), `tui` (terminal client).
 """
 
-from __future__ import annotations
+import os
 
-import re
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as package_version
-from pathlib import Path
+# MLflow prints a coding-agent hint on import (via DSPy); it is noise in the Fleet CLI and server logs.
+os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
-_PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+from fleet_rlm.config import FleetSettings, get_settings
+from fleet_rlm.engine.signatures import Route
 
-
-def _load_version_from_pyproject() -> str:
-    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    match = _PYPROJECT_VERSION_PATTERN.search(pyproject_path.read_text(encoding="utf-8"))
-    if match is None:
-        msg = "Could not locate [project].version in pyproject.toml"
-        raise RuntimeError(msg)
-    return match.group(1)
-
-
-def _resolve_version() -> str:
-    try:
-        return package_version("fleet-rlm")
-    except PackageNotFoundError:
-        return _load_version_from_pyproject()
-
-
-__version__ = _resolve_version()
-
-__all__ = ["__version__"]
+__all__ = ["FleetSettings", "Route", "get_settings"]

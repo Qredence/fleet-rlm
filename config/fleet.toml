@@ -1,101 +1,90 @@
+# Fleet non-secret process defaults. Environment/.env override this file.
+# Values are a provisional baseline, not performance-tuned defaults.
+# Credentials: DATABRICKS_TOKEN, FLEET_DAYTONA_API_KEY,
+# FLEET_TYPESAFE_API_KEY and FLEET_DATABASE_URL belong in .env/environment.
+# FLEET_DATABASE_MIGRATION_URL is an optional secret-only DDL-role DSN.
 [config]
-schema_version = 2
-
-[application]
-name = "fleet-rlm"
+schema_version = 4
 
 [runtime]
-environment = "daytona"
-live_enabled = true
-turn_timeout_seconds = 1800
-max_active_daytona_leases = 8
-workspace_io_idle_seconds = 300
-workspace_io_acquisition_timeout_seconds = 30
-heartbeat_seconds = 10
-stale_after_seconds = 60
+execution_mode = "hybrid"
+turn_timeout_seconds = 900
+max_llm_calls_per_turn = 150
+max_agent_depth = 3
+max_child_sandboxes = 8
+max_active_children = 4
+max_active_sessions = 64
+linked_children = true
 
-# Root and Sub use the Databricks Unity AI Gateway Chat Completion endpoint.
+# Native lm15 is fixed. Omitted max_tokens/temperature remain provider-controlled, except the
+# root cap, which bounds runaway reasoning; a capped response fails the format check and is re-asked once.
 [llm.root]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
+model = "openai/system.ai.deepseek-v4-1-flash"
 max_tokens = 16384
-timeout_seconds = 300
 num_retries = 3
 cache = false
 
 [llm.sub]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-max_tokens = 16384
-timeout_seconds = 90
-temperature = 0
+model = "openai/system.ai.deepseek-v4-1-flash"
 num_retries = 3
 cache = false
 
-# Bounded Fleet child execution is enabled; native llm_query remains available.
-[rlm]
-max_iters = 12
-max_llm_calls = 32
-max_tool_calls = 256
-max_output_chars = 6000
-max_final_output_chars = 6000
-max_execution_output_chars = 4000
-max_execution_output_bytes = 2000000
-wrap_up_seconds = 300
-finalization_attempts = 2
-recursion_max_calls = 4
-recursion_max_prompt_chars = 50000
-recursion_child_max_iters = 8
-recursion_child_max_llm_calls = 12
-recursion_child_max_output_chars = 4000
-recursion_max_parallel_children = 4
-autonomous_memory_categories = []
-verbose = true
+# GEPA's reflection model should be stronger than the serving model (DSPy GEPA guide); it also
+# rewrites whole Flex modules, hence the large output budget.
+[llm.reflection]
+model = "openai/system.ai.claude-haiku-5-5"
+temperature = 1.0
+max_tokens = 32000
+num_retries = 3
+cache = false
 
-[storage]
-data_root = ".fleet_rlm"
-max_upload_bytes = 10485760
-max_artifact_bytes = 10485760
-database_url_env = "FLEET_DATABASE_URL"
+[gateway]
+# host/base_url may be set here or via DATABRICKS_HOST/FLEET_LLM_BASE_URL.
+
+[decision]
+model = "jev-1.14.0"
 
 [daytona]
-api_key_env = "FLEET_DAYTONA_API_KEY"
-snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
-child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
-org_id_env = "FLEET_DAYTONA_ORG_ID"
-volume_name = "fleet-volume"
-volume_mount_path = "/home/daytona/fleet"
+snapshot = "fleet-rlm-base"
+auto_stop_minutes = 30
+shared_notes_subpath = "shared/learned-notes"
+# Set org_id/volume_id here or FLEET_DAYTONA_ORG_ID/FLEET_DAYTONA_VOLUME_ID.
+# The historical volume_name = "fleet-rlm-architecture" was NOT a Volume ID.
 
-[logging]
-level = "INFO"
+[storage]
+max_upload_bytes = 25000000
+compiled_program_dir = ".fleet/compiled"
+local_skills_dir = ".fleet/skills"
+lakebase_endpoint = ""
+database_schema = "fleet_rlm_lite"
 
-[mlflow]
-tracing_enabled = true
-tracking_uri = "http://127.0.0.1:5001"
-experiment_name = "fleet-rlm"
-experiment_purpose = "runtime"
-expose_trace_id = true
-async_logging = true
-trace_sampling_ratio = 1.0
-trace_content_max_chars = 10000
-trace_content_enabled = true
-trace_export_queue_size = 128
-trace_export_workers = 2
-trace_export_retry_seconds = 10
-http_request_timeout_seconds = 10
-trace_shutdown_seconds = 5.0
+# Local MLflow is managed by `fleet cli`. Standalone commands connect to it.
+[mlflow.local]
+port = 5001
+data_dir = ".fleet/mlflow"
+experiment_name = "fleet-rlm-dev"
+eval_experiment_name = "fleet-rlm-eval"
+optimization_experiment_name = "fleet-rlm-gepa"
 
-[posthog]
-enabled = true
-project_token_env = "POSTHOG_PROJECT_TOKEN"
-host = "https://eu.i.posthog.com"
+# Select with `fleet cli databricks` or --mlflow databricks.
+[mlflow.databricks]
+tracking_uri = "databricks"
+experiment_name = "/Shared/fleet-rlm-runtime"
+eval_experiment_name = "/Shared/fleet-rlm-eval"
+eval_trace_table_prefix = "fleet_rlm_eval"
+optimization_experiment_name = "/Shared/fleet-rlm-gepa"
+trace_catalog = "uscentral"
+trace_schema = "fleet_observability"
+trace_table_prefix = "fleet_rlm_runtime"
+tracing_sql_warehouse_id = "4d07bd43a3ddfff2"
+optimization_trace_schema = "fleet_gepa"
+optimization_trace_table_prefix = "fleet_rlm_gepa"
 
-# One durable local Runtime Event capture file per Run, so a Turn's streamed
-# events survive a client disconnect. Capture is observation, never execution
-# authority; its size and event bounds are module constants, not policy.
-[capture]
-enabled = true
-retention_days = 14
-max_captures = 500
+[evaluation]
+# openai:/<service-id> judges route through the AI Gateway with DATABRICKS_TOKEN.
+judge_model = "openai:/system.ai.deepseek-v4-1-flash"
+
+[server]
+host = "127.0.0.1"
+port = 8000
+allow_non_loopback_bind = false

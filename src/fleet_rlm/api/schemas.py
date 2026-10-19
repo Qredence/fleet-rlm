@@ -1,449 +1,250 @@
-"""HTTP schemas for the Fleet RLM public API."""
+"""Request and response models for every route."""
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
-from uuid import UUID
+from datetime import datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from fleet_rlm.workspace.artifacts import ArtifactKind
-
-SkillScope = Literal["system", "workspace"]
-SkillTrust = Literal["system", "workspace", "untrusted"]
+MAX_TASK_CHARS = 100_000
 
 
-class SkillSelectionRequest(BaseModel):
-    """One exact version-pinned Skill requested for the next Turn."""
+# Requests
+
+
+class _Request(BaseModel):
+    """Request bodies reject unknown fields, so a typo is a 422 rather than a silently ignored option."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: UUID
-    expected_version: str = Field(
-        min_length=1,
-        max_length=64,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
+
+class TurnRequest(_Request):
+    """User prompt sent to one Session's Fleet engine."""
+
+    task: str = Field(min_length=1, max_length=MAX_TASK_CHARS)
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    record_replay: bool = Field(
+        default=False,
+        description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",
     )
 
-    @model_validator(mode="after")
-    def validate_expected_version(self) -> SkillSelectionRequest:
-        if self.expected_version != self.expected_version.strip() or not self.expected_version.isprintable():
-            raise ValueError("expected_version must be a printable non-whitespace value")
-        return self
+
+class ModeRequest(_Request):
+    """Request to switch a Session's execution mode to rlm, flex, or hybrid."""
+
+    mode: str = Field(pattern="^(rlm|flex|hybrid)$")
 
 
-class CreateTurnRequest(BaseModel):
-    """Canonical body for POST /api/sessions/{session_id}/turns."""
+class WorkspaceWriteRequest(_Request):
+    """File content for a workspace write, as text or base64; supply exactly one."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    text: str = Field(min_length=1, max_length=100_000)
-    attachment_ids: list[UUID] = Field(default_factory=list)
-    skill_selections: list[SkillSelectionRequest] = Field(default_factory=list, max_length=4)
-
-    @model_validator(mode="after")
-    def validate_canonical_input(self) -> CreateTurnRequest:
-        if not self.text.strip():
-            raise ValueError("text must contain a non-whitespace character")
-        if len(self.attachment_ids) > 32:
-            raise ValueError("at most 32 Attachments may be selected")
-        if len(set(self.attachment_ids)) != len(self.attachment_ids):
-            raise ValueError("attachment_ids must not contain duplicates")
-        selection_ids = [selection.id for selection in self.skill_selections]
-        if len(set(selection_ids)) != len(selection_ids):
-            raise ValueError("skill_selections must not contain duplicate ids")
-        return self
+    content: str | None = Field(default=None, max_length=25_000_000)
+    content_base64: str | None = Field(default=None, max_length=34_000_000)
 
 
-class AttachmentResponse(BaseModel):
-    """Public attachment metadata — no host or Volume paths."""
+class ContextRequest(_Request):
+    """Workspace file to select as the Session's context."""
 
-    id: UUID
-    filename: str
-    content_type: str | None = None
-    byte_size: int
-    checksum_sha256: str
+    path: str = Field(min_length=1, max_length=1024)
+    description: str = Field(default="", max_length=2000)
 
 
-class ArtifactResponse(BaseModel):
-    """Public artifact metadata — no host or Volume paths."""
+class MemoryRequest(_Request):
+    """Memory entry to save, with its kind, sources, and review state."""
 
-    id: UUID
-    session_id: UUID
-    run_id: UUID
-    kind: ArtifactKind
-    title: str | None = None
-    media_type: str
-    byte_size: int
-    checksum_sha256: str
+    content: str = Field(min_length=1, max_length=10000)
+    kind: str = Field(default="observation", pattern="^(observation|preference|hypothesis|procedure)$")
+    sources: dict[str, str] = Field(default_factory=dict, max_length=100)
+    reviewed: bool = False
 
 
-class SkillCardResponse(BaseModel):
-    """Bounded Skill discovery metadata — no instructions body."""
+class ModelRequest(_Request):
+    """Model to bind to the root or sub role of a Session's engine."""
 
-    id: UUID
-    name: str
-    description: str
-    scope: SkillScope
+    role: str = Field(default="root", pattern="^(root|sub)$")
+    model: str = Field(
+        min_length=1, max_length=300, pattern=r"^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$"
+    )
+
+
+# Responses
+
+
+class MlflowTraceLocation(BaseModel):
+    """Unity Catalog location associated with the runtime experiment."""
+
+    catalog: str
+    schema_: str = Field(alias="schema")
+    table_prefix: str
+
+
+class MlflowHealth(BaseModel):
+    """Non-secret, initialized tracking destination for process reuse checks."""
+
+    mode: Literal["local", "databricks"]
+    tracking_uri: str
+    workspace_host: str | None = None
+    experiment_name: str
+    eval_experiment_name: str
+    optimization_experiment_name: str
+    trace_location: MlflowTraceLocation | None = None
+    experiment_id: str | None = None
+    ready: bool
+
+
+class Health(BaseModel):
+    """Service status, version, and effective MLflow destination."""
+
+    status: str
     version: str
-    trust: SkillTrust
-    affordances: list[str]
-    resources_available: bool
+    mlflow: MlflowHealth
 
 
-# ---------------------------------------------------------------------------
-# Sessions (durable conversation CRUD)
-# ---------------------------------------------------------------------------
+class SessionSummary(BaseModel):
+    """One stored Session with its last update time and Turn count."""
 
+    session_id: str
+    updated_at: datetime
+    turn_count: int
 
-class SessionCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, max_length=255)
+class Sessions(BaseModel):
+    """Listing of every stored Session."""
 
+    sessions: list[SessionSummary]
 
-class SessionPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, max_length=255)
-    status: Literal["active", "archived"] | None = None
+class Catalog(BaseModel):
+    """Session Skill catalog rendered as XML."""
 
+    catalog_xml: str
 
-class SessionSummaryResponse(BaseModel):
-    id: UUID
-    title: str
-    status: Literal["active", "archived"]
-    checkpoint_version: int
-    created_at: str | None = None
-    updated_at: str | None = None
 
+class Exported(BaseModel):
+    """Skills exported from the Session's volume to local storage."""
 
-class SessionTaskResponse(BaseModel):
-    """Authorized read-only projection of the existing Session checkpoint."""
+    exported: list[str]
 
-    revision: int
-    goal: str
-    decisions: list[str]
-    relevant_paths: list[str]
-    source_revisions: dict[str, str]
-    completed_work: list[str]
-    pending_work: list[str]
 
+class Pushed(BaseModel):
+    """Count of local Skills pushed to the Session's volume."""
 
-class SessionDetailResponse(SessionSummaryResponse):
-    """Session detail — same public shape as the summary today."""
+    pushed: int
 
 
-class SessionListResponse(BaseModel):
-    items: list[SessionSummaryResponse]
-    total: int
-    offset: int
-    limit: int
-    has_more: bool
+class Models(BaseModel):
+    """Chat models available in one discovery scope."""
 
+    scope: str
+    models: list[str]
 
-class UIMessagePartModel(BaseModel):
-    """Strict base for one reload UIMessage part variant.
 
-    Top-level ``None`` fields are omitted on dump so HTTP reload JSON matches
-    the lean producer dicts in ``ui_message.py`` (no variant-local null padding).
-    Nested ``data`` payloads may still contain explicit nulls.
-    """
+class Limits(BaseModel):
+    """Execution limits the sandbox manager enforces for one Session."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    lm_calls: int
+    depth: int
+    children: int
+    active_children: int
+    timeout_seconds: int
 
-    @model_serializer(mode="wrap")
-    def _omit_top_level_none(self, handler):
-        payload = handler(self)
-        return {key: value for key, value in payload.items() if value is not None}
 
+class SessionConfig(BaseModel):
+    """Effective mode, models, context, configuration, and limits of one Session."""
 
-class TextContentUIMessagePart(UIMessagePartModel):
-    text: str
-    state: str | None = None
+    mode: str
+    models: dict[str, str]
+    context: dict[str, Any] | None
+    configuration: dict[str, Any]
+    limits: Limits
 
 
-class TextUIMessagePart(TextContentUIMessagePart):
-    type: Literal["text"] = "text"
+class ModelSelection(BaseModel):
+    """Model bound to one role after a successful selection."""
 
+    role: str
+    model: str
 
-class ReasoningUIMessagePart(TextContentUIMessagePart):
-    type: Literal["reasoning"] = "reasoning"
 
+class Mode(BaseModel):
+    """Execution mode of one Session."""
 
-class DynamicToolUIMessagePart(UIMessagePartModel):
-    type: Literal["dynamic-tool"] = "dynamic-tool"
-    tool_name: str = Field(alias="toolName")
-    tool_call_id: str = Field(alias="toolCallId")
-    state: str
-    input: JsonValue
-    output: JsonValue = None
-    error_text: str | None = Field(default=None, alias="errorText")
-    provider_executed: bool | None = Field(default=None, alias="providerExecuted")
+    mode: str
 
 
-class StepStartUIMessagePart(UIMessagePartModel):
-    type: Literal["step-start"] = "step-start"
+class History(BaseModel):
+    """Stored Turn records for one Session."""
 
+    session_id: str
+    turns: list[dict[str, Any]]
 
-class DataUIMessagePart(UIMessagePartModel):
-    data: JsonValue
 
+class TurnStatus(BaseModel):
+    """Recorded status and result of one Turn."""
 
-class IdentifiedDataUIMessagePart(DataUIMessagePart):
-    id: str | None = None
+    turn_id: str
+    status: str
+    result: dict[str, Any]
+    updated_at: str
 
 
-class DataStatusUIMessagePart(DataUIMessagePart):
-    type: Literal["data-status"] = "data-status"
+class Memories(BaseModel):
+    """Memory entries matching a Session memory query."""
 
+    memories: list[dict[str, Any]]
 
-class DataChildProgressUIMessagePart(IdentifiedDataUIMessagePart):
-    type: Literal["data-child-progress"] = "data-child-progress"
 
+class MemorySaved(BaseModel):
+    """Acknowledgement of a saved memory entry."""
 
-class DataStepUIMessagePart(DataUIMessagePart):
-    type: Literal["data-step"] = "data-step"
+    memory_id: str
 
 
-class DataRLMCodeUIMessagePart(DataUIMessagePart):
-    type: Literal["data-rlm-code"] = "data-rlm-code"
+class Deleted(BaseModel):
+    """Acknowledgement of a deleted memory entry or workspace file."""
 
+    deleted: str
 
-class DataRLMOutputUIMessagePart(DataUIMessagePart):
-    type: Literal["data-rlm-output"] = "data-rlm-output"
 
+class Files(BaseModel):
+    """Workspace file paths for one Session, with the artifacts among them."""
 
-class DataSkillUIMessagePart(IdentifiedDataUIMessagePart):
-    type: Literal["data-skill"] = "data-skill"
+    session_id: str
+    files: list[str]
+    artifacts: list[str]
 
 
-class DataAttachmentUIMessagePart(IdentifiedDataUIMessagePart):
-    type: Literal["data-attachment"] = "data-attachment"
+class FileStat(BaseModel):
+    """Size and SHA-256 digest of one workspace file."""
 
-
-class DataWarningUIMessagePart(DataUIMessagePart):
-    type: Literal["data-warning"] = "data-warning"
-
-
-class DataArtifactUIMessagePart(IdentifiedDataUIMessagePart):
-    type: Literal["data-artifact"] = "data-artifact"
-
-
-class DataUsageUIMessagePart(DataUIMessagePart):
-    type: Literal["data-usage"] = "data-usage"
-
-
-class DataStructuredResultUIMessagePart(DataUIMessagePart):
-    type: Literal["data-structured-result"] = "data-structured-result"
-
-
-UIMessagePart = Annotated[
-    TextUIMessagePart
-    | ReasoningUIMessagePart
-    | DynamicToolUIMessagePart
-    | StepStartUIMessagePart
-    | DataStatusUIMessagePart
-    | DataChildProgressUIMessagePart
-    | DataStepUIMessagePart
-    | DataRLMCodeUIMessagePart
-    | DataRLMOutputUIMessagePart
-    | DataSkillUIMessagePart
-    | DataAttachmentUIMessagePart
-    | DataWarningUIMessagePart
-    | DataArtifactUIMessagePart
-    | DataUsageUIMessagePart
-    | DataStructuredResultUIMessagePart,
-    Field(discriminator="type"),
-]
-
-
-class UIMessageResponse(BaseModel):
-    id: str
-    role: Literal["user", "assistant"]
-    parts: list[UIMessagePart]
-    metadata: dict[str, JsonValue] | None = None
-
-
-class SessionTurnPageResponse(BaseModel):
-    items: list[UIMessageResponse]
-    next_after_sequence: int | None = None
-
-
-class TraceFeedbackRequest(BaseModel):
-    """One human thumbs assessment for an execution trace."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    trace_id: str = Field(min_length=1, max_length=256)
-    value: StrictBool
-    comment: str | None = Field(default=None, max_length=2_000)
-
-    @model_validator(mode="after")
-    def validate_trace_id(self) -> TraceFeedbackRequest:
-        if not self.trace_id.strip() or self.trace_id != self.trace_id.strip():
-            raise ValueError("trace_id must be a non-whitespace value")
-        return self
-
-
-class TraceFeedbackResponse(BaseModel):
-    """Closed public result for a recorded MLflow assessment."""
-
-    trace_id: str
-    name: Literal["user_feedback"] = "user_feedback"
-    value: bool
-    assessment_id: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Independent Workspace files (public files/ namespace only)
-# ---------------------------------------------------------------------------
-
-
-class WorkspaceFileEntryResponse(BaseModel):
     path: str
-    kind: Literal["file", "directory"]
-    byte_size: int | None = None
-    modified_at: str | None = None
-    checksum_sha256: str | None = None
+    size_bytes: int
+    sha256: str
 
 
-class WorkspaceFileListResponse(BaseModel):
-    entries: list[WorkspaceFileEntryResponse]
-    truncated: bool = False
-    next_cursor: str | None = None
+class FileWritten(FileStat):
+    """Result of a workspace write, including the sandbox mounted path."""
+
+    mounted_path: str
 
 
-class VolumeTreeResponse(BaseModel):
-    """Logical files visible in the LocalScope Workspace Volume."""
+class ContextSelected(BaseModel):
+    """Workspace file recorded as the Session's context, with its size and digest."""
 
-    paths: list[str]
-    directories: list[str] = Field(default_factory=list)
-    truncated: bool = False
-
-
-class WorkspaceFileReadResponse(BaseModel):
     path: str
-    content: str
-    next_cursor: str | None = None
-    byte_size: int
-    eof: bool
+    size_bytes: int
+    sha256: str
 
 
-class WorkspaceFileWriteRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class Status(BaseModel):
+    """Plain status acknowledgement, such as a cleared context."""
 
-    path: str = Field(min_length=1, max_length=1_024)
-    content: str
-    overwrite: bool
-    expected_sha256: str | None = Field(
-        default=None,
-        min_length=64,
-        max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
-    )
+    status: str
 
 
-class WorkspaceFileAppendRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class Attached(BaseModel):
+    """Location of an uploaded attachment in the workspace and the sandbox."""
 
-    path: str = Field(min_length=1, max_length=1_024)
-    content: str
-    expected_sha256: str | None = Field(
-        default=None,
-        min_length=64,
-        max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
-    )
-
-
-class WorkspaceFileDeleteRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1, max_length=1_024)
-    expected_sha256: str | None = Field(
-        default=None,
-        min_length=64,
-        max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
-    )
-
-
-class WorkspaceFilePatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1, max_length=1_024)
-    old: str = Field(min_length=1)
-    new: str
-    expected_sha256: str | None = Field(
-        default=None,
-        min_length=64,
-        max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
-    )
-
-
-class WorkspaceFileDeleteResponse(BaseModel):
-    ok: bool = True
-    path: str
-
-
-# ---------------------------------------------------------------------------
-# Local settings policy (config/fleet.toml; never .env or process secrets)
-# ---------------------------------------------------------------------------
-
-
-class SettingsFieldResponse(BaseModel):
-    path: str
-    group: str
-    label: str
-    value: JsonValue
-    editor: Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
-    choices: list[str] = Field(default_factory=list)
-    environment_overridden: bool = False
-
-
-class SettingsPolicyResponse(BaseModel):
-    revision: str
-    restart_required: bool = True
-    fields: list[SettingsFieldResponse]
-
-
-class SettingsPolicyUpdate(BaseModel):
-    """One non-secret field assignment in an atomic settings-policy batch."""
-
-    model_config = ConfigDict(extra="forbid")
-    path: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
-    value: JsonValue = Field(json_schema_extra={"not": {"type": "null"}})
-
-    @model_validator(mode="after")
-    def validate_value(self) -> SettingsPolicyUpdate:
-        if self.value is None:
-            raise ValueError("settings updates require a non-null value")
-        return self
-
-
-class SettingsPolicyPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    revision: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
-    updates: list[SettingsPolicyUpdate] = Field(min_length=1, max_length=128)
-
-
-# ---------------------------------------------------------------------------
-# Health probes (liveness / readiness)
-# ---------------------------------------------------------------------------
-
-
-class HealthLivenessResponse(BaseModel):
-    """Liveness payload — the process is serving HTTP; no dependency checks."""
-
-    status: Literal["ok"]
-    app: str
-    version: str
-
-
-class HealthReadinessResponse(BaseModel):
-    """Readiness payload — composition installed and the database answers."""
-
-    status: Literal["ready"]
-    database: Literal["ok", "not_configured"]
+    mounted_path: str
+    rel_path: str

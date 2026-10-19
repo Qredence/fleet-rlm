@@ -4,7 +4,128 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Evaluation CLI diagnostics name the selected MLflow backend's supported experiment
+  setting instead of a retired environment variable.
+- Generation usage derives missing totals from complete per-call input/output
+  receipts before native DSPy rollup, keeping trace spans and stream events aligned
+  without double-counting or combining incomplete receipts into an invented total.
+
+- The shipped root LM caps output at `max_tokens = 16384` (`[llm.root]`), bounding runaway
+  reasoning on the RLM route. Measured effect on the Pi-digit task is not yet verified live.
+- Selected dataset handles cross native Flex's JSON boundary through DSPy's
+  custom-type restoration, retaining native RLM's one-time file-view setup and
+  the existing persisted descriptor. Metadata checks no longer download files.
+- Output-compliance diagnostics judge complete bounded task/answer fields and
+  reject incomplete evidence; diagnostic assessment version is now v5.
+- API shutdown still attempts owned Store closure and trace flushing after a
+  registry cleanup failure. Explicit invalid `fleet serve --port` values are
+  rejected instead of silently using the default port.
+
+### Added
+
+- `DELETE /sessions/{session_id}` stops a Session's sandbox, releases its lease, and drops its
+  in-process runtime (history is kept); 404 without a runtime, 409 while a Turn runs.
+- Turn traces now carry `client_request_id` (the Turn id) and `fleet.*` tags (execution mode,
+  idempotency key, configuration digest, route).
+- Sandbox host calls fail with `TimeoutError` inside the sandbox after 600s (bounded by the
+  execution timeout) instead of stalling until the Turn deadline.
+- Shared learned notes: root sandboxes mount `FLEET_SHARED_NOTES_SUBPATH` (default
+  `shared/learned-notes`) at `/learned`. Each committed Turn's learned note is written there
+  as an unreviewed, redacted file, and later Sessions see the newest summaries in their memory
+  summary as hints to verify. Empty disables the mount.
+- `sandbox.exec` MLflow spans record `host_calls`, the bridged host calls made during that exec.
+  An exec that bridges host calls contains the host work it waits on, so sum sandbox compute
+  from root spans only.
+
 ### Changed
+
+- Native nested code-agent manifests now reflect their permitted child inputs.
+  Root traces and Turn records distinguish retained artifacts from content
+  created or modified during the Turn. TypeSafe decision usage is receipted on
+  manual spans, with missing totals derived from known input/output counts.
+- Shared instructions request explicit imports and a short submission action;
+  these are model guidance rather than enforced latency guarantees.
+- Turn preparation gathers file digests, shared notes, and a probed sandbox environment line
+  (Python version, installed/missing numeric libraries, the int-to-str digit limit) in one
+  remote exec, and Skill sync uploads changed files in one batch. Only selected replays
+  download file bytes, and they must match the digest. The environment line is appended to
+  `memory_summary` as a hint for code agents; avoiding redundant probes remains
+  model-dependent behavior.
+- Child input copy validates, downloads, and uploads all files in one batch per side (4
+  Daytona operations instead of 4 per file). Input receipts are recorded only after the whole
+  batch lands.
+- Shared learned notes are deduplicated (word-overlap ≥ 0.5 with a newer note) and capped at
+  eight, and are labelled as never a verification reference. `STOPPING_RULES` now says a
+  value that only matches a note is unverified. This changes the baseline FleetTask
+  instructions, so evidence measured against the previous baseline is not comparable.
+- `STOPPING_RULES` treats validating a method on known values as the supporting check for its
+  target and forbids recomputing the target with different parameters (another baseline
+  instruction change).
+- Session routes that need the Session lock (mode, context, memory, Skills, workspace files, model
+  selection) now answer **409** after 2s instead of holding a threadpool worker for the whole Turn.
+- Sandbox state is refreshed from Daytona before each Turn, so a sandbox auto-stopped while idle is
+  restarted instead of failing the Turn. Idempotent Daytona calls retry transient failures with
+  jittered backoff; `run_code` is never retried.
+- Turns pass their MLflow experiment with the root span instead of calling `set_experiment` per Turn.
+- `commit_turn` requires a `turn_id`, so the connection retry cannot store a Turn twice. Pooled
+  Postgres connections are recycled at 50 minutes (Lakebase tokens last an hour) and checked on
+  checkout; a dropped Session lease is re-acquired on a fresh connection.
+- GEPA rollouts share one set of LMs per run and one judge per judge LM instead of rebuilding them.
+- Removed the unused `databricks-agents` dependency.
+
+- The wheel ships a `py.typed` marker, so type checkers use Fleet's inline annotations. The
+  sdist now contains only source, tests, config, docs, and scripts.
+- **Breaking:** one route vocabulary, `direct` / `flex` / `rlm`, replaces the triage labels
+  (`direct_cot`, `single_rlm`, `delegated_rlm`) and the effective routes (`direct_cot`,
+  `flex_pipeline`, `deep_rlm`) in triage, `triage_decision` and `turn_complete` events, stored
+  Turns, scorers and `fleet eval label --route`. Old names are still read from existing gold
+  labels, traces and stored Turns. Compiled programs tuned against the old triage labels should
+  be re-optimized.
+- The terminal client is `fleet_rlm.tui` (prompt loop, a slash-command table that also drives
+  `/help` and completion, and event rendering); `cli.py` keeps only the `fleet` entry point.
+  `/help` now shows command arguments, which Rich markup used to strip (`/mode [rlm|flex|hybrid]`
+  rendered as `/mode `).
+- The API is a package: `fleet_rlm.api` (`create_app`, dependencies, schemas, one router per area,
+  the Turn event stream), `fleet_rlm.session` (Session runtime and registry) and
+  `fleet_rlm.engine.turn` (one Turn end to end). Routes are sync `def` handlers using `Depends`;
+  only the Turn stream is async. Every route declares a response model, so `openapi.yaml`
+  documents all 26 responses. `fleet_rlm.server` and its module-level `app` are removed.
+- Sandbox Python runs on Daytona's native `code_interpreter`: one context per namespace, one
+  `run_code` per execution, host-tool calls and results as stdout marker lines, replies through
+  `fs.upload_file`. The in-sandbox HTTP daemon, its bearer token, execution registry,
+  `/exec/status` polling and the host poll thread are removed (`interpreter.py` 1,547 → 1,005
+  lines). Output is captured per execution because Daytona drops the websocket on bursts of
+  small writes. `fleet_turn` spans record `sandbox_transport` instead of `daemon_protocol`.
+- PostgreSQL access goes through one `fleet_rlm.store.Store` over a `psycopg_pool` connection pool
+  (new dependency `psycopg-pool`), opened in the background at startup. Every SQL statement,
+  including the raw SQL that was in the `/sessions` and `/history` routes, lives in the Store.
+  Pooled connections are autocommit, so a read is one round trip: `GET /sessions` on Lakebase
+  went from about 1.2 s (a fresh connection per call) to about 0.12 s. A connection that Lakebase
+  closed while idle is retried once.
+- Optimization code lives in `fleet_rlm.optimize` (artifacts, dataset, metric, scorers, evaluation,
+  benchmarks). The optimizer script is now `fleet optimize --session <id>` (`make optimize` and the
+  TUI `/optimize` use it). Compiled programs load through one `CompiledProgramFile`, which also
+  accepts artifacts saved from the `IsolatedFleetProgram` wrapper. `compile_and_evaluate_fleet`
+  (unused) is removed.
+- All DSPy signatures live in `fleet_rlm.engine.signatures`; the stopping rules have one source,
+  shared by the task instructions and the sandbox execution instructions. The GEPA and
+  evaluation judges share one `AnswerJudge` signature.
+- MLflow defaults to the local server: `FLEET_MLFLOW_MODE=local` (default) sends `fleet serve`,
+  `fleet eval` and optimizer traces to `http://127.0.0.1:5001` (`fleet-rlm-dev` / `fleet-rlm-eval`)
+  and ignores `databricks://` URIs and workspace experiment paths left in `.env`. Unity Catalog
+  trace settings are validated only with `FLEET_MLFLOW_MODE=databricks`. `fleet serve` warns and
+  runs untraced when the local server is unreachable. The config view reports `mlflow_target`.
+- The default MLflow judge is `openai:/system.ai.deepseek-v4-1-flash` through the AI Gateway.
+- Invalid configuration exits with a one-line `fleet: error: invalid configuration: …`.
+- Execution traces include bounded code/results, runtime identity, retry counts, and
+  remote Python errors, including errors DSPy corrects before successfully submitting.
+- Stopping guidance asks DSPy to submit on the next action once supporting checks agree;
+  a focused offline trace evaluation checks unnecessary verification.
+
+- The RLM signature asks the model to stop once one independent check supports the answer, and
+  to copy figures from sandbox output instead of retyping them.
 
 - Remove the unenforced `rlm.max_provider_attempts` setting. Older configuration
   files containing it now fail with an actionable migration message. DSPy owns
@@ -1869,3 +1990,11 @@ in the corresponding runtime evidence.
 [0.4.2]: https://github.com/Qredence/fleet-rlm/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Qredence/fleet-rlm/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Qredence/fleet-rlm/releases/tag/v0.4.0
+
+
+### Validated configuration and DSPy integration
+
+- Load schema-3 non-secret TOML settings with explicit source precedence and safe provenance.
+- Retain decision probabilities/confidence for routing and batch decisions.
+- Honor DSPy invocation query budgets and promote native child artifacts only on successful completion.
+- Support role-specific generation options without changing the shared turn deadline.

@@ -1,7 +1,7 @@
 [project]
 name = "fleet-rlm"
-version = "0.7.11"
-description = "RLM-native FastAPI backend with DSPy and Daytona"
+version = "0.8.0"
+description = "Lightweight session-isolated DSPy RLM runtime on Daytona with Postgres persistence, Skills, and MLflow evaluation"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = "MIT"
@@ -17,8 +17,13 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic :: 2",
     "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -26,40 +31,24 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Exact published release: the certified Fleet contract is DSPy 3.4.0.
-    # assert_dspy_version() accepts only the literal final release and rejects
-    # patches, prereleases, post-releases, and local builds.
-    "dspy==3.4.0",
-    "packaging>=26.3,<27",
-    # Exact SDK pin: its resource and cleanup surface is verified by the
-    # Daytona contract and live lifecycle lanes.
-    "daytona==0.220.0",
-    # Persistence and migrations.
-    "aiosqlite>=0.22.1",
-    "alembic>=1.20.0,<2",
-    "asyncpg>=0.31.0,<1",
-    "psycopg>=3.3.6,<4",
+    # GEPA Flex helpers are imported from DSPy's internal namespace; verify before adopting 3.5+.
+    "dspy[typesafe]>=3.4.1,<3.5",
+    "daytona==0.224.0",
+    "mlflow==3.17.1",
+    "databricks-sdk>=0.153.0,<1",
+    "psycopg[binary]>=3.3.6,<4",
+    "fastapi[standard]==0.142.2",
+    "python-multipart>=0.0.12",
+    "uvicorn[standard]>=0.54.0,<1",
     "pydantic>=2.13.5,<3",
     "pydantic-settings>=2.15.0,<3",
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3,<7",
-    "sqlalchemy[asyncio]>=2.1.1,<3",
-    # Web API surface. Pinned exactly to the latest PyPI release at pin time
-    # for reproducible installs; bump deliberately when a newer release is
-    # validated against the runtime + test suite.
-    "fastapi[standard]==0.142.2",
-    "uvicorn>=0.54.0,<1",
-    # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
-    # connection reuse through the preview proxy. Transitive via the Daytona
-    # SDK; declared direct because daytona.broker imports it.
     "httpx>=0.28.1,<1",
-    # Host-side public URL Tools pin validated addresses and stream bounded
-    # responses without inheriting ambient proxy configuration.
-    # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
-    "mlflow==3.16.1",
-    "opentelemetry-sdk==1.45.0",
-    "tomlkit>=0.15.1,<1",
-    "posthog>=7.63.0,<8",
+    "rich>=13.9.0",
+    "prompt-toolkit>=3.0.50,<4",
+    "psycopg-pool>=3.2.6,<4",
+    "textual>=8.2.8",
 ]
 
 [project.urls]
@@ -69,45 +58,25 @@ Issues = "https://github.com/qredence/fleet-rlm/issues"
 Documentation = "https://docs.qredence.ai/"
 
 [project.scripts]
-fleet = "fleet_rlm.cli.main:fleet_main"
-fleet-rlm = "fleet_rlm.cli.main:fleet_rlm_main"
-
-[project.optional-dependencies]
-server = [
-    "psycopg[binary]>=3.3.6,<4",
-    "uvicorn[standard]>=0.54.0,<1",
-]
-benchmark = [
-    "databricks-agents>=1.12.0",
-    "datasets>=5.0.1",
-]
-optimize = [
-    # Exact official published release; no Git override remains.
-    "gepa==0.1.4",
-]
+fleet = "fleet_rlm.cli:main"
+fleet-rlm = "fleet_rlm.cli:main"
 
 [build-system]
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.fastapi]
-entrypoint = "fleet_rlm.main:app"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 # The single dev dependency list (PEP 735). Local workflows install it via
 # `uv sync --dev`; there is deliberately no published `dev` extra.
 dev = [
-    "pre-commit>=4.6.2",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "pytest-cov>=7.1,<8",
-    "pytest-timeout>=2.4.0",
-    "pytest-xdist>=3.8.0",
-    # Starlette 1.6+ test clients use httpx2; keeping it installed avoids
-    # deprecated fallback behavior when the app's HTTPX transport stays on httpx.
-    "httpx2>=2.13.1",
-    "ruff>=0.16.10",
-    "ty>=0.0.84",
+    # `[tool.pytest]` needs pytest 9; keep Ruff in step with `.pre-commit-config.yaml`.
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.17.1",
+    "ty>=0.0.89",
+    "pre-commit>=4.7.0",
+    "pip-audit>=2.10.1,<3",
+    "twine>=7.0.0,<8",
 ]
 
 [tool.uv]
@@ -129,9 +98,6 @@ override-dependencies = [
     "idna>=3.16",
     # Mako <=1.3.11 allows TemplateLookup traversal with Windows backslash URIs.
     "mako>=1.3.12",
-    # Duplicate of the direct floor below; retained so `uv lock --check`
-    # stays green without a lock refresh (config-only change lane).
-    "python-dotenv>=1.2.3",
     # GitPython <=3.1.57 allows unsafe git option forwarding and path access.
     "gitpython>=3.1.58",
     # Starlette <1.3.1 has form-limit DoS and request URL hostname parsing advisories.
@@ -144,103 +110,40 @@ override-dependencies = [
     "litellm>=1.87.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
+    # multidict <=6.9.0 has a memory leak in attacker-controlled item-view operations.
+    "multidict>=6.9.1,<7",
+    # Werkzeug <3.1.9 has a Windows path traversal issue in safe_join.
+    "werkzeug>=3.1.9",
     # sqlparse <0.6.0 has multiple SQL parsing DoS and code-generation flaws.
     "sqlparse>=0.6.0",
 ]
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-include-package-data = true
+[tool.hatch.build.targets.wheel]
+packages = ["src/fleet_rlm"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["fleet_rlm*"]
-namespaces = false
+# Ship only what builds and tests the package; agent, editor, and CI config stay out.
+# Hatch always adds pyproject.toml, the readme, and the license files.
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "tests", "config", "docs", "scripts", "openapi.yaml", "CHANGELOG.md"]
 
-[tool.setuptools.package-data]
-"fleet_rlm" = [
-    "py.typed",
-    "daytona/snapshot-requirements.txt",
-    "skills/bundled/README.md",
-    "skills/bundled/**/SKILL.md",
-    "skills/bundled/**/*.md",
-    "skills/bundled/**/*.py",
-    "skills/bundled/**/*.txt",
-    "skills/bundled/**/*.json",
-    "skills/bundled/**/*.yaml",
-    "skills/bundled/**/*.yml",
-    "skills/bundled/**/*.toml",
-    "skills/bundled/**/*.csv",
-]
-
-[tool.pytest.ini_options]
+[tool.pytest]
+minversion = "9.0"
 pythonpath = ["src"]
 testpaths = ["tests"]
-norecursedirs = ["tests/live"]
-junit_family = "xunit1"
-addopts = "-q --strict-markers --timeout=30 -n auto --dist=loadfile -m 'not live_llm and not live_daytona and not benchmark and not db and not packaging'"
-timeout_method = "thread"
+addopts = ["-q"]
+# strict_config, strict_markers, strict_parametrization_ids, strict_xfail; uv.lock pins pytest.
+strict = true
 asyncio_mode = "strict"
-markers = [
-    "unit: fast isolated tests",
-    "integration: cross-boundary tests",
-    "contracts: stable behavioral invariants",
-    "db: requires live database",
-    "e2e: full stack smoke tests",
-    "benchmark: performance/throughput benchmark tests",
-    "packaging: release/install matrix tests that create isolated artifacts or environments",
-    "live_llm: tests that require a live configured LM / LiteLLM backend",
-    "live_daytona: tests that require a live Daytona backend and explicit opt-in",
-]
-# DSPy 3.4 deprecates the two legacy LM interfaces this repository migrated off;
-# both are removed in DSPy 3.5. Promote exactly those two to errors so a
-# reintroduced `dspy.BaseLM` subclass or an OpenAI-style `messages=` call fails
-# the lane instead of warning quietly. The filters are message-scoped (not a
-# blanket `error::DeprecationWarning`) because dspy attributes the warning to
-# the caller's frame via `stacklevel`, and because mlflow/pandas deprecations
-# must stay tolerated. A filter's message field is a regex matched at the start
-# of the warning text, and later entries take precedence.
-filterwarnings = [
-    "error:Implementing custom LMs through BaseLM.forward:DeprecationWarning",
-    "error:Passing OpenAI-style message dictionaries:DeprecationWarning",
-]
 
-[tool.coverage.run]
-branch = true
-# Project-wide scope: all backend modules are measured, not only daytona/.
-# The daytona subpackage remains visible per-file in the coverage report.
-source = ["src/fleet_rlm"]
-
-[tool.coverage.report]
-# Project-wide floor.  Raised from the legacy daytona-only 70% gate after
-# extending scope; current full-package coverage is ~82%.
-fail_under = 75
-precision = 1
-show_missing = true
-
+# Ruff infers the target version from `requires-python` and keeps its default excludes
+# plus `.gitignore`.
 [tool.ruff]
 line-length = 120
-target-version = "py311"
-exclude = [
-    ".git",
-    ".venv",
-    ".ruff_cache",
-    "__pycache__",
-    "node_modules",
-    "build",
-    "dist",
-    ".egg-info",
-]
 
 [tool.ruff.lint]
-# Selected families: F (pyflakes), E/W (pycodestyle), I (isort), N (pep8-naming),
-# B (flake8-bugbear), UP (pyupgrade), A (flake8-builtins), Q (flake8-quotes),
-# T20 (flake8-print), ARG (unused-arguments), RUF (ruff-specific), SIM (simplify),
-# LOG (flake8-logging-usage).
-# Selected rules are enforced across the repository. Exceptions are scoped to
-# files whose public role makes the otherwise-disallowed construct intentional.
-# pydocstyle (D) is not selected; enable only after a dedicated docstring pass.
-# Note: COM (trailing commas) handled by formatter, so excluded to avoid conflicts
+# Enforced across the repository. Exceptions are scoped to files whose public role makes
+# the otherwise-disallowed construct intentional. The formatter owns quotes and trailing
+# commas, so Q and COM are not selected. pydocstyle (D) applies to src/ public API.
 select = [
     "F",     # Pyflakes
     "E",     # Pycodestyle errors
@@ -250,58 +153,36 @@ select = [
     "B",     # flake8-bugbear
     "UP",    # pyupgrade
     "A",     # flake8-builtins
-    "Q",     # flake8-quotes
     "T20",   # flake8-print
     "ARG",   # flake8-unused-arguments
     "RUF",   # ruff-specific rules
     "SIM",   # flake8-simplify
     "LOG",   # flake8-logging-usage
+    "D",     # pydocstyle - public API in src/ carries hover docs
 ]
+# Magic methods and `__init__` are described by the class docstring instead.
+ignore = ["D105", "D107"]
 
-# Scripts bootstrap the repo root onto sys.path, then print CLI output.
-# Bundled Skill scripts are operator-facing helpers that write to stdout.
-[tool.ruff.lint.per-file-ignores]
-"scripts/**/*.py" = ["E402", "T201"]
-"src/fleet_rlm/skills/bundled/**/scripts/*.py" = ["T201"]
-
-[tool.ruff.lint.flake8-quotes]
-docstring-quotes = "double"
-inline-quotes = "double"
-
-[tool.ruff.lint.flake8-builtins]
-builtins-ignorelist = []
-
-# Applied when D is selected in a future docstring-enforcement mission.
 [tool.ruff.lint.pydocstyle]
-convention = "google"  # Use Google-style docstrings
+convention = "google"
 
-[tool.ruff.lint.isort]
-known-first-party = ["fleet_rlm"]
-force-single-line = false
+# Scripts and the `fleet optimize` command print operator-facing CLI output.
+# Tests and scripts are not documented API, so pydocstyle does not apply to them.
+[tool.ruff.lint.per-file-ignores]
+"scripts/**/*.py" = ["T201", "D"]
+"tests/**/*.py" = ["D"]
+"src/fleet_rlm/optimize/gepa.py" = ["T201"]
+"src/fleet_rlm/optimize/dataset.py" = ["T201"]
 
 [tool.ruff.format]
-indent-style = "space"
-quote-style = "double"
-skip-magic-trailing-comma = false
+docstring-code-format = true
 
+# ty infers the Python version from `requires-python`. `ty check` with no paths, the
+# editor, pre-commit, and CI all check the same tree. Tests rely on duck-typed fakes and
+# stay unchecked.
 [tool.ty.src]
-exclude = [
-    # Tests and scripts are not the typed public package; they use doubles and
-    # assignment patches that are not worth a host type-check pass.
-    "tests/",
-    "scripts/",
-]
+include = ["src"]
 
-[tool.deptry]
-# Exclude test directories and node_modules from import scanning
-extend_exclude = ["node_modules/"]
-# Ignore unused dependencies (DEP002) - many are transitive or used in optional extras
-# Ignore missing dependencies (DEP001) - many are transitive deps of installed packages
-ignore = ["DEP001", "DEP002"]
-# Known first-party modules
-known_first_party = ["fleet_rlm"]
-
-[tool.deptry.package_module_name_map]
-pydantic-settings = "pydantic_settings"
-python-dotenv = "dotenv"
-pyyaml = "yaml"
+[tool.ty.rules]
+deprecated = "error"
+unused-ignore-comment = "error"

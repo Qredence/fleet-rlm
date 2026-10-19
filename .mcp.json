@@ -12,20 +12,12 @@
         "start"
       ]
     },
-    "agentation": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "agentation-mcp@1.2.0",
-        "server"
-      ]
-    },
     "mlflow-mcp": {
       "command": "uv",
       "args": [
         "run",
         "--with",
-        "mlflow[mcp]>=3.14.0",
+        "mlflow[mcp]>=3.17.1",
         "mlflow",
         "mcp",
         "run"

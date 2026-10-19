@@ -1,50 +1,109 @@
-# Repository Guidelines
+# Repository guidelines
 
-Fleet RLM combines a Python FastAPI backend, DSPy reasoning, Daytona execution, and a TypeScript terminal client.
+Fleet RLM Lite is the active Python application: a Rich / Prompt Toolkit client,
+FastAPI SSE server, DSPy engine, Daytona execution, PostgreSQL persistence, and
+MLflow evaluation with native DSPy GEPA optimization.
 
-## Project Structure & Module Organization
+Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries.
+Use the current source, `pyproject.toml`, and `uv.lock` as the implementation and
+dependency references. Do not describe removed APIs, clients, migrations, or
+configuration features as current behavior.
 
-- `src/fleet_rlm/` contains backend packages for sessions, turns, persistence, API, reasoning, workspace, and Daytona.
-  - `daytona/` splits concrete ownership: `provider.py` (SDK ops), `leases.py` (admission/cleanup), `children.py`, `host_io.py`, coordinated by `runtime.py`.
-  - `config/catalog.py` owns the field-policy inventory; `rlm/event_types.py` owns Runtime Event dataclasses; `app_preparation.py` prepares claimed Turns.
-- `tests/` groups backend tests by behavior owner; shared fixtures live in `tests/support/`.
-- `tools/fleet-tui/` contains the terminal client and its tests.
-- `config/fleet.toml` owns runtime policy; `migrations/` contains Alembic migrations.
-- `docs/` holds guides and references; `scripts/` contains repository helpers. Runtime skill resources live in `src/fleet_rlm/skills/bundled/`.
+## Ownership and layout
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and [TUI guidance](tools/fleet-tui/AGENTS.md) before client changes. Child RLM tools are always available (bounded to depth one); operators do not toggle recursion in TOML.
+| Location | Responsibility |
+| --- | --- |
+| `src/fleet_rlm/cli.py`, `tui/` | CLI entry point and streaming terminal client |
+| `src/fleet_rlm/api/` | FastAPI routes, request/response schemas, SSE events |
+| `src/fleet_rlm/config.py`, `session.py` | Typed settings and Session runtime lifecycle |
+| `src/fleet_rlm/engine/` | Turn orchestration, signatures, routing, RLM/Flex, delegation |
+| `src/fleet_rlm/sandbox/` | Daytona lifecycle, interpreter, execution transport, sandbox runtime |
+| `src/fleet_rlm/store/`, `replay.py` | Persistence, migrations, immutable replay capture and review |
+| `src/fleet_rlm/optimize/` | Datasets, metrics, execution evidence, GEPA, validation and program artifacts |
+| `src/fleet_rlm/skills.py`, `bundled_skills/` | Skill validation, synchronization, bundled workflows |
+| `tests/`, `docs/`, `scripts/` | Tests, maintained documentation, development and validation tooling |
 
-## Build, Test, and Development Commands
+Paths within a source row are relative to `src/fleet_rlm/` unless fully specified.
+User Skills belong in `.fleet/skills/`. `.agents/skills/` is developer guidance
+and must never be configured as user Skill synchronization content.
 
-Use Python 3.11–3.13, uv, Node 22.19+, and the TUI’s pinned pnpm version.
+## Runtime invariants
 
-- `uv sync --all-extras --dev`: install Python dependencies.
-- From `tools/fleet-tui/`, run `pnpm install --frozen-lockfile`.
-- `make dev`: start the backend; follow [README.md](README.md) for credentials and database initialization.
-- `make build`: build Python distributions.
-- `make test`: run default non-live backend tests.
-- `make tui-check`: check generated contracts, formatting, lint, types, and client tests.
-- `make check`: run the primary repository quality gate.
-- `make check-docs`: validate documentation links and structure after docs edits.
+- Preserve the `direct` / `flex` / `rlm` route vocabulary. Strict modes bypass
+  hybrid triage; selected datasets cannot take the context-free direct route.
+- The primary RLM exposes instruction tuning. Flex exposes module-source
+  rewriting and initially wraps an RLM when tools are supplied. Both routes can
+  delegate; do not equate Flex with deterministic execution or RLM with required
+  delegation.
+- Generated Python executes in Daytona. Keep credentials and host-mediated
+  tools on the server. Preserve shared Turn budgets, deadlines, child isolation,
+  cleanup, and artifact provenance.
+- Persist durable session data, not assumptions about live interpreter state.
+  Use the existing Store/migration mechanisms for schema changes.
+- Use scoped `dspy.context` overrides for model/adapter settings. Preserve native
+  DSPy trace, evaluation, and serialization contracts; validate compatibility
+  before changing dependency versions or internal DSPy imports.
 
-## Coding Style & Naming Conventions
+## Evaluation and GEPA invariants
 
-Python uses four-space indentation, double quotes, and 120-character lines. Use `snake_case` for modules/functions and `PascalCase` for classes. Ruff formats and lints; ty checks types.
+- Keep `fleet_metric` as the shared GEPA/evaluation metric. Preserve its five
+  positional arguments and `dspy.Prediction(score, feedback, objective_scores)`
+  result. Other MLflow scorers do not automatically influence GEPA search.
+- Keep serving, judging, and reflection roles explicit. Model identifiers for
+  MLflow judges and DSPy LMs are different formats; use the configuration helpers.
+- Gold answers and structured expectations stay outside program inputs. Score
+  artifacts and delegation from host-collected evidence, not candidate claims.
+- Train/dev search uses approved immutable replays grouped by source lineage.
+  Keep holdout out of search and benchmark-labeled traces out of the curated
+  optimization dataset. Preserve isolated replay runtimes.
+- Preserve paired validation, critical holdout checks, usage evidence, and
+  correctness gates. Changes to scoring or approval semantics must invalidate
+  incompatible evidence through the existing version/identity mechanisms.
+- Candidate creation and installation are separate. Approval must recheck the
+  artifact and incumbent/configuration/code/dependency identities. Do not add an
+  unchecked installation or rollback path.
+- Distinguish offline contract tests, live canaries, and measured workload gains.
+  A correct final answer alone does not prove delegation or artifact behavior;
+  require execution receipts when those capabilities are under evaluation.
 
-TypeScript uses two-space indentation, 100-character lines, and Biome. Import directly from owning modules and respect package boundaries.
+See [evaluation](docs/reference/evaluation.md) for the current scoring policy and
+[evaluation canary runbook](docs/runbooks/evaluation-canary.md) for live procedures.
 
-## Testing Guidelines
+## Development and validation
 
-Backend tests use pytest and pytest-asyncio; client tests use Vitest. Name files `test_*.py` or `*.test.ts`. Add regressions to existing behavior-owning suites.
+Use Python 3.11–3.13 and uv. The [Makefile](Makefile) defines the supported targets:
 
-Run focused tests with `uv run pytest tests/daytona/test_sandbox_lifecycle.py`. `make test-coverage` enforces 75% package-wide backend coverage.
+| Command | Purpose |
+| --- | --- |
+| `make install-dev` | Install runtime and development dependencies |
+| `make serve` | Start the FastAPI server |
+| `make cli` | Display CLI help |
+| `uv run pytest <focused-test>` | Run focused non-live tests |
+| `make test` | Run the non-live test suite |
+| `make lint`, `make format-check`, `make typecheck` | Static checks without rewriting source |
+| `make check-docs` | Validate local documentation links |
+| `make api-check` | Check the generated OpenAPI contract |
+| `make check` | Complete non-live quality gate and package build |
 
-## Commit & Pull Request Guidelines
+For code changes, add regression coverage for changed behavior and run focused
+checks followed by the required quality gate. For documentation-only changes,
+run `make check-docs` and always run `git diff --check`. When changing the API,
+update its documentation and generated contract with the existing tooling.
 
-Use focused conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, or `chore:`. Follow the PR template: explain resulting behavior, link applicable issues, identify contract/migration impacts, and report exact validation commands and outcomes.
+Live Daytona, model-provider, database, and evaluation runs require explicit
+authorization and appropriate resources. Ordinary CI must not depend on them.
+GEPA metric-call budgets do not cap total spending: reflection, judging, retries,
+sandbox lifecycle, and final validation also consume resources. Preserve saved
+trace/run identities and recover completed work rather than replaying it blindly.
 
-## Validate and Deliver Safely
+## Change discipline
 
-For documentation changes, run `make check-docs` and `git diff --check`. Keep secrets out of Git. Credentialed provider, Daytona, database, and benchmark runs require explicit operator authorization.
-
-Regenerate contracts with `make api-sync`, `make stream-sync`, or `make config-reference`; never hand-edit generated outputs. Preserve unrelated local changes.
+- Preserve existing uncommitted work. Keep edits scoped to the requested task.
+- Use four-space Python indentation and Ruff formatting/linting. Prefer existing
+  abstractions and native DSPy functionality over duplicate framework logic.
+- Update documentation when public behavior changes. Describe measured results
+  separately from intended behavior and unverified performance claims.
+- Never commit credentials or `.env` files. Treat traces and artifacts as
+  potentially sensitive even when redaction is enabled.
+- Use conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`,
+  or `chore:`. Do not commit, push, publish, or deploy without explicit authorization.
