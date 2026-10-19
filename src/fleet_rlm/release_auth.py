@@ -14,6 +14,10 @@ REPOSITORY = "Qredence/fleet-rlm"
 
 
 def _verify_scope(client: httpx.Client, token: str, permissions: dict[str, str]) -> None:
+    """Require contents write access to fleet-rlm alone, allowing metadata read access.
+
+    Raise SystemExit for an invalid scope; HTTP and response parsing errors propagate.
+    """
     if permissions.get("contents") != "write" or any(
         key not in {"contents", "metadata"} or (key == "metadata" and value != "read")
         for key, value in permissions.items()
@@ -36,7 +40,18 @@ def _verify_scope(client: httpx.Client, token: str, permissions: dict[str, str])
 
 @contextmanager
 def github_app_token() -> Generator[str]:
-    """Mint a repository-scoped installation token in memory and revoke it on every exit."""
+    """Yield a verified GitHub App token scoped to fleet-rlm contents write access.
+
+    Read GH_APP_ID, GH_APP_INSTALLATION_ID, and GH_APP_PRIVATE_KEY_PEM from the
+    environment. Attempt revocation after scope verification or the context body,
+    including when either raises. Revocation errors propagate and can replace an
+    earlier exception.
+
+    Raises:
+        SystemExit: Credentials are missing or invalid, signing fails, or the
+            issued token has an invalid scope.
+        httpx.HTTPError: Token issuance, scope lookup, or revocation fails.
+    """
     # PyJWT is locked in the development group; serving and CLI imports do not need it.
     import jwt
 

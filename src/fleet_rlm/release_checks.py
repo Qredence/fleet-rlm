@@ -32,29 +32,38 @@ REGISTRIES = {"testpypi": "https://test.pypi.org", "pypi": "https://pypi.org"}
 
 
 def _version() -> str:
+    """Read the project version from pyproject.toml in the current directory."""
     return tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
 
 
 def _git(*args: str) -> str:
+    """Return stripped Git stdout, propagating CalledProcessError on command failure."""
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 def _digest(path: Path) -> str:
+    """Return the hexadecimal SHA-256 digest of a file's bytes."""
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
 def _artifact_paths(directory: Path) -> list[Path]:
+    """Return sorted directory entries except .gitignore, including non-file entries."""
     # uv build creates this marker; it is never release content or an upload input.
     return sorted(path for path in directory.iterdir() if path.name != ".gitignore")
 
 
 def _write(path: Path, value: Any) -> None:
+    """Write indented JSON with sorted keys, creating parents and replacing any existing file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
 def _get(url: str, *, headers: dict[str, str] | None = None, absent: bool = False) -> Any:
+    """Fetch JSON without following redirects; return None for a 404 only if absent is true.
+
+    HTTP, transport, and JSON decoding errors otherwise propagate.
+    """
     with httpx.Client(timeout=30, follow_redirects=False) as client:
         response = client.get(url, headers=headers)
         if absent and response.status_code == 404:
@@ -64,7 +73,15 @@ def _get(url: str, *, headers: dict[str, str] | None = None, absent: bool = Fals
 
 
 def verify_source(version: str, sha: str, *, main: bool = False) -> None:
-    """Bind a release to its checkout and, in CI, the main branch lineage."""
+    """Bind a release to its checkout and, optionally, the main branch lineage.
+
+    Require the pyproject.toml version and full 40-character HEAD SHA. With main
+    enabled, require an untagged CircleCI main build, fetch origin/main, verify
+    that it contains sha, and reject tracked changes relative to HEAD.
+
+    Raise SystemExit for invalid release inputs or branch context. Failed Git
+    commands, including ancestry and tracked-change checks, raise CalledProcessError.
+    """
     if version != _version():
         raise SystemExit(f"requested version {version!r} does not match pyproject.toml ({_version()})")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
@@ -125,7 +142,13 @@ def verify_artifacts(version: str, directory: Path) -> None:
 
 
 def create_manifest(version: str, sha: str, directory: Path, output: Path) -> None:
-    """Write the immutable source and artifact identity outside the distribution directory."""
+    """Write the immutable source and artifact identity outside the distribution directory.
+
+    After validating the checkout and distributions, create the JSON manifest
+    and write a sibling SHA256SUMS file, replacing that checksum file if present.
+    Raise SystemExit if output exists, is inside directory, or validation fails.
+    File access, archive parsing, and Git command errors propagate.
+    """
     verify_source(version, sha)
     verify_artifacts(version, directory)
     if output.exists() or output.resolve().is_relative_to(directory.resolve()):
@@ -150,7 +173,15 @@ def create_manifest(version: str, sha: str, directory: Path, output: Path) -> No
 
 
 def verify_manifest(path: Path, directory: Path, *, ci: bool = False) -> dict[str, Any]:
-    """Verify source, lockfile, distribution metadata and every persisted artifact byte."""
+    """Verify source, lockfile, distribution metadata and every persisted artifact byte.
+
+    Return the parsed manifest. With ci enabled, also enforce main branch
+    lineage and match FLEET_PIPELINE_ID, FLEET_RELEASE_SHA, and
+    FLEET_RELEASE_VERSION against the manifest.
+
+    Raise SystemExit for identity mismatches. File access, malformed manifest or
+    archive data, and failed Git commands propagate their underlying errors.
+    """
     manifest = json.loads(path.read_text())
     if manifest.get("schema_version") != 1 or manifest.get("package") != PACKAGE:
         raise SystemExit("unsupported release manifest")
@@ -175,7 +206,13 @@ def verify_manifest(path: Path, directory: Path, *, ci: bool = False) -> dict[st
 
 
 def registry_files(manifest: dict[str, Any], registry: str) -> dict[str, dict[str, Any]]:
-    """Inspect registry metadata; only a version-level 404 counts as absent."""
+    """Inspect registry metadata; only a version-level 404 counts as absent.
+
+    For registry 'testpypi' or 'pypi', return metadata keyed by filename. An empty
+    or partial mapping is allowed while files are missing. Raise SystemExit for
+    unexpected, duplicate, yanked, or mismatched files. HTTP, transport, and
+    response parsing errors propagate rather than indicating absence.
+    """
     data = _get(f"{REGISTRIES[registry]}/pypi/{PACKAGE}/{manifest['version']}/json", absent=True)
     if data is None:
         return {}
@@ -197,7 +234,13 @@ def registry_files(manifest: dict[str, Any], registry: str) -> dict[str, dict[st
 
 
 def wait_registry(manifest: dict[str, Any], registry: str) -> dict[str, dict[str, Any]]:
-    """Wait at most five minutes for exact registry visibility; other errors fail closed."""
+    """Poll until all manifest artifacts are visible and return their registry metadata.
+
+    Retry missing files at intervals of up to ten seconds. After a five-minute
+    deadline, an incomplete response raises SystemExit; in-flight requests can
+    extend elapsed time beyond that deadline. Identity, HTTP, transport, and
+    response parsing errors propagate immediately.
+    """
     deadline = time.monotonic() + 300
     while True:
         files = registry_files(manifest, registry)
@@ -210,6 +253,10 @@ def wait_registry(manifest: dict[str, Any], registry: str) -> dict[str, dict[str
 
 
 def _circle_jobs(workflow: str, token: str) -> list[dict[str, Any]]:
+    """Return all CircleCI workflow jobs across pages using the supplied API token.
+
+    HTTP, transport, and response parsing errors propagate.
+    """
     items = []
     url = f"https://circleci.com/api/v2/workflow/{workflow}/job"
     while True:
@@ -225,13 +272,24 @@ def _circle_jobs(workflow: str, token: str) -> list[dict[str, Any]]:
 
 
 def approval_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
-    """Read server-owned approval and workflow identity immediately before production publication."""
+    """Read server-owned approval and workflow identity immediately before production publication.
+
+    Use CIRCLECI_READ_TOKEN and CIRCLE_WORKFLOW_ID to require exactly one
+    successful approve-pypi job by the configured approver in the expected project
+    and manifest pipeline. If the current workflow has no hold, the manifest's
+    original workflow may supply it only when its status is failed or success.
+
+    Return the current and approval workflow IDs, pipeline ID, and approval job.
+    Raise SystemExit for missing context or invalid approval evidence; HTTP,
+    transport, and response parsing errors propagate.
+    """
     token = os.environ.get("CIRCLECI_READ_TOKEN")
     workflow = os.environ.get("CIRCLE_WORKFLOW_ID")
     if not token or not workflow:
         raise SystemExit("CIRCLECI_READ_TOKEN and workflow identity are required for approval evidence")
 
     def inspect(workflow_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Return workflow data and approval jobs after checking project and pipeline identity."""
         data = _get(f"https://circleci.com/api/v2/workflow/{workflow_id}", headers={"Circle-Token": token})
         if data["project_slug"] != "circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf":
             raise SystemExit("approval project identity mismatch")
@@ -264,7 +322,15 @@ def approval_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 def publish(path: Path, directory: Path, registry: str, receipt: Path) -> None:
-    """Upload only missing files after identity checks; never blanket-retry an ambiguous upload."""
+    """Upload only missing files after identity checks; never blanket-retry an ambiguous upload.
+
+    Validate CI manifest identity and reject configured Twine credentials. For
+    registry 'pypi', verify production approval and write a sibling approval.json
+    before inspecting the registry. Write receipt after all artifacts are visible.
+
+    Validation failures raise SystemExit; HTTP and parsing errors propagate.
+    Failed Git or Twine commands raise CalledProcessError without retrying uploads.
+    """
     manifest = verify_manifest(path, directory, ci=True)
     if os.environ.get("TWINE_PASSWORD") or os.environ.get("TWINE_USERNAME"):
         raise SystemExit("publishing requires OIDC, not configured Twine credentials")
@@ -292,7 +358,16 @@ def publish(path: Path, directory: Path, registry: str, receipt: Path) -> None:
 
 
 def download_registry(manifest: dict[str, Any], registry: str, directory: Path) -> Path:
-    """Download and hash exact registry distributions without using a package-index resolver."""
+    """Download and hash exact registry distributions without using a package-index resolver.
+
+    Return the downloaded wheel path after validating both distributions. Create
+    directory as needed and overwrite matching filenames; partial downloads
+    remain on failure. Only HTTPS URLs on the two Python package file hosts are
+    accepted, and redirects are not followed.
+
+    Raise SystemExit for an untrusted origin, size or hash mismatch, invalid
+    artifacts, or indexing timeout. HTTP, transport, file, and parsing errors propagate.
+    """
     files = wait_registry(manifest, registry)
     directory.mkdir(parents=True, exist_ok=True)
     for wanted in manifest["artifacts"]:
@@ -319,7 +394,14 @@ def download_registry(manifest: dict[str, Any], registry: str, directory: Path) 
 
 
 def smoke(version: str, wheel: Path, requirements: Path | None) -> None:
-    """Install an exact local wheel and exercise both CLIs without live service initialization."""
+    """Install an exact local wheel and exercise both CLIs without live service initialization.
+
+    In a temporary virtual environment, install requirements first if supplied,
+    then install wheel without resolving its dependencies. Check CLI help, the
+    installed version, and the OpenAPI title and health path with database and
+    observability initialization disabled. Remove the environment on exit.
+    Failed installations or smoke checks propagate as CalledProcessError.
+    """
     with tempfile.TemporaryDirectory(prefix="fleet-release-smoke-") as temp:
         env_dir = Path(temp) / "venv"
         venv.EnvBuilder(with_pip=True).create(env_dir)
@@ -355,6 +437,11 @@ def registry_smoke(path: Path, directory: Path, registry: str, requirements: Pat
 
 
 def _gh(*args: str, token: str) -> str:
+    """Return gh stdout using token as GH_TOKEN in the child environment.
+
+    Omit inherited GitHub App credentials, GitHub tokens, and CIRCLECI_READ_TOKEN
+    from that environment. Failed commands propagate as CalledProcessError.
+    """
     env = {
         key: value
         for key, value in os.environ.items()
@@ -374,6 +461,17 @@ def github_release(path: Path, directory: Path, receipt: Path) -> None:
 
 
 def _finalize_github_release(path: Path, directory: Path, receipt: Path, manifest: dict[str, Any], token: str) -> None:
+    """Create or complete a GitHub release using a previously verified local manifest.
+
+    Require the sibling SHA256SUMS to match manifest, verify existing tags and
+    downloaded assets, and upload only missing assets without replacing them.
+    Write receipt after verification. A newly created release may also create
+    its version tag at the manifest's source commit.
+
+    Raise SystemExit for conflicting identities, checksums, or assets. HTTP,
+    transport, file, response parsing, and gh command errors propagate; completed
+    remote writes are not rolled back on failure.
+    """
     tag = f"v{manifest['version']}"
     # A non-404 API failure must never be interpreted as permission to create another release.
     headers = {"Authorization": f"Bearer {token}"}
@@ -442,7 +540,14 @@ def _finalize_github_release(path: Path, directory: Path, receipt: Path, manifes
 
 
 def activation_check(check: str, receipt: Path) -> None:
-    """Exercise authorization and token scope without any publication or release creation."""
+    """Run a selected authorization probe and write its evidence receipt on success.
+
+    Require an untagged CircleCI main build and FLEET_PIPELINE_ID. The 'approval'
+    check reads production approval; other values mint, verify, and revoke a
+    GitHub App token. Neither probe publishes artifacts or creates releases.
+    Invalid context or evidence raises SystemExit; HTTP and token cleanup errors
+    propagate.
+    """
     if os.environ.get("CIRCLE_BRANCH") != "main" or os.environ.get("CIRCLE_TAG"):
         raise SystemExit("activation evidence checks require main")
     pipeline = os.environ.get("FLEET_PIPELINE_ID")
@@ -460,7 +565,11 @@ def activation_check(check: str, receipt: Path) -> None:
 
 
 def main() -> None:
-    """Run release checks; network writes require the explicit publish/finalize subcommands."""
+    """Dispatch release commands from CLI arguments, propagating validation failures.
+
+    The publish and github-release commands can publish artifacts; activation-check
+    with --check github mints and revokes a token without creating a release.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     activation = commands.add_parser("activation-check")
