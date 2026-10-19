@@ -12,21 +12,30 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import dspy
-from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, ListSandboxesQuery, VolumeMount
+import mlflow
+from daytona import (
+    CreateSandboxFromSnapshotParams,
+    Daytona,
+    DaytonaConfig,
+    FileDownloadRequest,
+    FileUpload,
+    ListSandboxesQuery,
+    VolumeMount,
+)
+from mlflow.entities import SpanType
 
 from fleet_rlm.config import validate_shared_notes_subpath
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
-from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError as ExecutionOutcomeUnknownError
-from fleet_rlm.sandbox.repl import with_retries
-from fleet_rlm.workspace import WorkspaceDataset as WorkspaceDataset
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
 from fleet_rlm.workspace import (
     _child_input_path,
     _workspace_relative_path,
@@ -39,6 +48,61 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
+
+# Remote code fragments; each binds one variable so a Turn can gather them in a single exec.
+_DIGESTS_CODE = (
+    "import hashlib,json,os\n"
+    "digests={}\n"
+    "for base,dirs,files in os.walk('/workspace',followlinks=False):\n"
+    " dirs[:]=[name for name in dirs if not os.path.islink(os.path.join(base,name))]\n"
+    " for name in files:\n"
+    "  path=os.path.join(base,name)\n"
+    "  if os.path.islink(path) or not os.path.isfile(path): continue\n"
+    "  digest=hashlib.sha256()\n"
+    "  with open(path,'rb') as handle:\n"
+    "   for block in iter(lambda: handle.read(1048576), b''): digest.update(block)\n"
+    "  digests[os.path.relpath(path,'/workspace')]=digest.hexdigest()\n"
+)
+# Probed rather than configured: the snapshot is user-selectable (FLEET_DAYTONA_SNAPSHOT).
+_ENVIRONMENT_MODULES = ("numpy", "pandas", "scipy", "mpmath", "sympy", "gmpy2", "polars", "pyarrow", "sklearn")
+_ENVIRONMENT_CODE = (
+    "import importlib.metadata,importlib.util,platform,sys\n"
+    "found=[]\n"
+    f"for module in {_ENVIRONMENT_MODULES!r}:\n"
+    " if importlib.util.find_spec(module) is None: continue\n"
+    " try: found.append(module+' '+importlib.metadata.version('scikit-learn' if module=='sklearn' else module))\n"
+    " except importlib.metadata.PackageNotFoundError: found.append(module)\n"
+    "names=[item.split()[0] for item in found]\n"
+    f"missing=[module for module in {_ENVIRONMENT_MODULES!r} if module not in names]\n"
+    "environment='Sandbox environment: Python '+platform.python_version()+'; installed: '+(', '.join(found) or 'none')"
+    "+'; not installed: '+(', '.join(missing) or 'none')"
+    "+('; call sys.set_int_max_str_digits(0) before converting integers over 4300 digits to str'"
+    " if hasattr(sys,'set_int_max_str_digits') else '')+'.'\n"
+)
+
+
+def _notes_code(limit: int) -> str:
+    """Bind `notes`: newest-first `{file, summary}` rows from the shared mount, empty when unreadable."""
+    return (
+        "import json, os\n"
+        "notes = []\n"
+        "try:\n"
+        "    if os.path.ismount('/learned'):\n"
+        "        names = [name for name in os.listdir('/learned') if name.endswith('.md')]\n"
+        "        names.sort(key=lambda name: os.stat(os.path.join('/learned', name)).st_mtime, reverse=True)\n"
+        f"        for name in names[:{limit}]:\n"
+        "            with open(os.path.join('/learned', name), encoding='utf-8', errors='replace') as handle:\n"
+        "                head = [handle.readline() for _ in range(8)]\n"
+        "            lines = [line[len('summary: '):].strip() for line in head if line.startswith('summary: ')]\n"
+        "            notes.append({'file': name, 'summary': (lines[0] if lines else '')[:120]})\n"
+        "except OSError:\n"
+        "    notes = None\n"
+    )
+
+
+def _valid_notes(rows: Any) -> list[dict[str, str]]:
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
 
 # Daytona sandbox states, as the provider reports them after `refresh_data()`.
 _RESUMABLE_STATES = frozenset({"stopped", "archived", "paused"})
@@ -109,6 +173,12 @@ class DaytonaSandboxManager:
     _budget_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _llm_calls_used: int = field(default=0, init=False, repr=False)
     _sandbox_errors: int = field(default=0, init=False, repr=False)
+    _submit_rejections: int = field(default=0, init=False, repr=False)
+    _budget_breakdown: dict[str, int] = field(
+        default_factory=lambda: dict.fromkeys(("generation_query", "routing", "skill_selection", "other_decisions"), 0),
+        init=False,
+        repr=False,
+    )
     _child_receipts: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
     _interpreters: dict[str, DaytonaInterpreter] = field(default_factory=dict, init=False, repr=False)
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
@@ -158,6 +228,30 @@ class DaytonaSandboxManager:
             raise TimeoutError("Turn deadline exceeded")
 
     def allocate_child(self, *, input_paths: list[str] | None = None) -> DaytonaSandboxManager:
+        """Trace preparation separately from generated execution, without recording file contents."""
+        with self._lifecycle_span("sandbox.child_prepare") as span:
+            child = self._allocate_child(input_paths=input_paths)
+            span.set_attribute("child_agent_id", child.agent_id)
+            span.set_attribute("child_sandbox_id", getattr(child._sandbox, "id", None))
+            return child
+
+    @contextmanager
+    def _lifecycle_span(self, name: str) -> Generator[Any, None, None]:
+        # Manual spans deliberately record only identity and numeric transfer metadata, never self/credentials.
+        with mlflow.start_span(name=name, span_type=SpanType.TOOL) as span:
+            span.set_attributes(
+                {"agent_id": self.agent_id, "parent_agent_id": self.parent.agent_id if self.parent else None}
+            )
+            span.set_inputs({"operation": name})
+            completed = False
+            try:
+                yield span
+                completed = True
+            finally:
+                span.set_attribute("sandbox_id", getattr(self._sandbox, "id", None))
+                span.set_outputs({"completed": completed})
+
+    def _allocate_child(self, *, input_paths: list[str] | None = None) -> DaytonaSandboxManager:
         """Reserve and provision a child sandbox, copying the requested or default inputs into it.
 
         Capacity limits refuse the spawn before any sandbox is created. Skills are copied but not receipted as inputs.
@@ -219,20 +313,47 @@ class DaytonaSandboxManager:
             }
         try:
             child.ensure_sandbox()
-            total = 0
-            paths_to_copy = selected_paths
-            if paths_to_copy is None:
-                paths_to_copy = [path for path in self.list_workspace_files() if path.startswith(("files/", "skills/"))]
-            for path in paths_to_copy:
-                data = self.read_workspace_file(path)
-                total += len(data)
-                if total > 100_000_000:
-                    raise ValueError("Child input transfer quota exceeded")
-                child.write_workspace_file(path, data)
-                if path in ambient_skills:
-                    continue
-                with root._budget_lock:
-                    root._child_receipts[child.agent_id]["inputs"][path] = hashlib.sha256(data).hexdigest()
+            with child._lifecycle_span("sandbox.input_copy") as span:
+                total = 0
+                copied = 0
+                try:
+                    paths_to_copy = selected_paths
+                    if paths_to_copy is None:
+                        paths_to_copy = [
+                            path for path in self.list_workspace_files() if path.startswith(("files/", "skills/"))
+                        ]
+                    with self._lifecycle_span("sandbox.input_read") as read_span:
+                        read_span.set_attribute("target_agent_id", child.agent_id)
+                        read_span.set_attribute("files_requested", len(paths_to_copy))
+                        try:
+                            contents = self.read_workspace_files(paths_to_copy)
+                        except ValueError as exc:
+                            if "transfer quota" in str(exc):
+                                raise ValueError("Child input transfer quota exceeded") from exc
+                            raise
+                        total = sum(len(data) for data in contents.values())
+                        read_span.set_attributes({"files_read": len(contents), "bytes_read": total})
+                    with child._lifecycle_span("sandbox.input_write") as write_span:
+                        write_span.set_attributes(
+                            {
+                                "source_agent_id": self.agent_id,
+                                "files_requested": len(contents),
+                                "bytes_requested": total,
+                            }
+                        )
+                        child.write_workspace_files(contents)
+                    copied = len(contents)
+                    # Receipts are recorded only after the whole batch landed in the child.
+                    with root._budget_lock:
+                        root._child_receipts[child.agent_id]["inputs"].update(
+                            {
+                                path: hashlib.sha256(data).hexdigest()
+                                for path, data in contents.items()
+                                if path not in ambient_skills
+                            }
+                        )
+                finally:
+                    span.set_attributes({"files_copied": copied, "bytes_read": total})
             return child
         except BaseException:
             child.record_child_outcome(False)
@@ -408,6 +529,12 @@ class DaytonaSandboxManager:
         return mounts
 
     def ensure_sandbox(self) -> Any:
+        """Trace provisioning/resume, including the provider state check on a reused sandbox."""
+        with self._lifecycle_span("sandbox.provision") as span:
+            span.set_attribute("action", "reuse" if self._sandbox is not None else "create")
+            return self._ensure_sandbox()
+
+    def _ensure_sandbox(self) -> Any:
         """Create or resume this agent's sandbox, returning the live handle.
 
         A pending create is adopted only when exactly one matching sandbox exists, so creates never duplicate.
@@ -483,6 +610,9 @@ class DaytonaSandboxManager:
         if state in _FAILED_STATES:
             raise RuntimeError(f"Sandbox {sandbox.id} is in state {state!r} and cannot be resumed")
         if state in _RESUMABLE_STATES:
+            span = mlflow.get_current_active_span()
+            if span is not None:
+                span.set_attribute("action", "resume")
             self.emit("sandbox_resuming", state=state)
             client = self._client
             with_retries(lambda: client.start(sandbox), before_retry=self.check_turn)
@@ -508,7 +638,9 @@ class DaytonaSandboxManager:
         with self._lock:
             context = self._contexts.get(interpreter.ns_id)
         if context is None:
-            context = repl.create_context(sandbox)
+            with self._lifecycle_span("sandbox.namespace_prepare") as span:
+                span.set_attribute("namespace", interpreter.ns_id)
+                context = repl.create_context(sandbox)
             with self._lock:
                 self._contexts[interpreter.ns_id] = context
         remaining = self.root._deadline - time.monotonic() if self.root._deadline else self.root.turn_timeout_seconds
@@ -565,33 +697,33 @@ class DaytonaSandboxManager:
         with_retries(lambda: sandbox.fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60))
         return path
 
-    def list_learned_notes(self, limit: int = 20) -> list[dict[str, str]]:
-        """Newest-first `{file, summary}` rows from the shared mount; empty when unavailable."""
-        if not self.shared_notes_subpath or not 1 <= limit <= 50:
-            return []
+    def turn_inputs(self, notes_limit: int = 20) -> dict[str, Any]:
+        """Gather a Turn's remote inputs in one exec: file digests, shared notes, and the environment.
+
+        Digests follow `list_workspace_files` (symbolic links skipped, never traversed) and are required;
+        notes are optional hints, so an unreadable mount yields none instead of failing the Turn.
+        """
+        with_notes = bool(self.shared_notes_subpath) and 1 <= notes_limit <= 50
         code = (
-            "import json, os\n"
-            "root = '/learned'\n"
-            "rows = []\n"
-            "if os.path.ismount(root):\n"
-            "    names = [name for name in os.listdir(root) if name.endswith('.md')]\n"
-            "    names.sort(key=lambda name: os.stat(os.path.join(root, name)).st_mtime, reverse=True)\n"
-            f"    for name in names[:{limit}]:\n"
-            "        with open(os.path.join(root, name), encoding='utf-8', errors='replace') as handle:\n"
-            "            head = [handle.readline() for _ in range(8)]\n"
-            "        lines = [line[len('summary: '):].strip() for line in head if line.startswith('summary: ')]\n"
-            "        summary = lines[0] if lines else ''\n"
-            "        rows.append({'file': name, 'summary': summary[:120]})\n"
-            "print(json.dumps(rows))\n"
+            _DIGESTS_CODE
+            + _ENVIRONMENT_CODE
+            + (_notes_code(notes_limit) if with_notes else "notes = []\n")
+            + "print(json.dumps({'digests': digests, 'notes': notes, 'environment': environment}, sort_keys=True))"
         )
-        try:
-            rows = json.loads(self.exec_remote_python(code) or "[]")
-        except Exception:
+        result = json.loads(self.exec_remote_python(code) or "{}")
+        digests = result.get("digests") if isinstance(result, dict) else None
+        if not isinstance(digests, dict) or not all(
+            isinstance(path, str) and isinstance(digest, str) for path, digest in digests.items()
+        ):
+            raise RuntimeError("Invalid workspace digest listing")
+        if result.get("notes") is None:
             _LOGGER.warning("Shared learned notes were unavailable for Session %s", self.session_id)
-            return []
-        if not isinstance(rows, list):
-            return []
-        return [row for row in rows if isinstance(row, dict)]
+        environment = result.get("environment")
+        return {
+            "digests": digests,
+            "notes": _valid_notes(result.get("notes")),
+            "environment": environment if isinstance(environment, str) else "",
+        }
 
     def reset_turn_budget(self) -> None:
         """Start a fresh Turn: zero the counters, clear receipts, and arm the deadline watchdog."""
@@ -600,6 +732,8 @@ class DaytonaSandboxManager:
         with root._budget_lock:
             root._llm_calls_used = 0
             root._sandbox_errors = 0
+            root._submit_rejections = 0
+            root._budget_breakdown = dict.fromkeys(root._budget_breakdown, 0)
             root._allocations = 0
             root._child_receipts.clear()
             root._cancelled.clear()
@@ -616,19 +750,23 @@ class DaytonaSandboxManager:
             root._watchdog = None
         root._deadline = 0
 
-    def consume_budget(self, count: int = 1) -> None:
-        """Charge LM calls against the shared Turn budget, raising once it is exhausted."""
+    def consume_budget(self, count: int = 1, *, category: str = "generation_query") -> None:
+        """Charge shared budget units, categorized without changing admission or completion counts."""
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             raise ValueError("budget consumption must be a positive integer")
+        if category not in self.root._budget_breakdown:
+            raise ValueError("Unknown budget category")
         self.check_turn()
         root = self.root
         with root._budget_lock:
             if root._llm_calls_used + count > root.max_llm_calls:
                 raise RuntimeError(f"Shared RLM budget exhausted ({root.max_llm_calls} calls)")
             root._llm_calls_used += count
+            root._budget_breakdown[category] += count
+            usage = self._usage_unlocked()
         self.emit(
             "budget_update",
-            lm_calls=root._llm_calls_used,
+            **usage,
             max_llm_calls=root.max_llm_calls,
             tokens=None,
             estimated_cost=None,
@@ -639,11 +777,25 @@ class DaytonaSandboxManager:
         with self.root._budget_lock:
             self.root._sandbox_errors += 1
 
-    def turn_usage(self) -> dict[str, int]:
-        """LM calls and failed sandbox executions so far this Turn, across every agent in the tree."""
+    def record_submit_rejection(self) -> None:
+        """Count a blocking host rejection once, independently of remote Python failures."""
+        with self.root._budget_lock:
+            self.root._submit_rejections += 1
+
+    def _usage_unlocked(self) -> dict[str, Any]:
+        root = self.root
+        return {
+            "lm_calls": root._llm_calls_used,
+            "sandbox_errors": root._sandbox_errors,
+            "submit_rejections": root._submit_rejections,
+            "budget_breakdown": dict(root._budget_breakdown),
+        }
+
+    def turn_usage(self) -> dict[str, Any]:
+        """Host-owned shared budget and recovery counters across the whole agent tree."""
         root = self.root
         with root._budget_lock:
-            return {"lm_calls": root._llm_calls_used, "sandbox_errors": root._sandbox_errors}
+            return self._usage_unlocked()
 
     def list_workspace_files(self) -> list[str]:
         """List regular files under the Session workspace as sorted relative paths.
@@ -703,6 +855,15 @@ class DaytonaSandboxManager:
             raise RuntimeError("Workspace file changed or could not be downloaded")
         return content
 
+    def stat_workspace_file(self, rel_path: str) -> dict[str, Any]:
+        """Return size and SHA-256 without downloading content, with the same 25 MB and path checks."""
+        clean_path = _workspace_relative_path(rel_path)
+        sandbox = self.ensure_sandbox()
+        metadata = self._workspace_files_metadata(
+            sandbox, [clean_path], create_parents=False, max_bytes=25_000_000, include_digest=True
+        )[0]
+        return {"path": clean_path, "size_bytes": metadata["size"], "sha256": metadata["sha256"]}
+
     def read_workspace_file_to_path(self, rel_path: str, local_path: str | Path, *, max_bytes: int = 25_000_000) -> int:
         """Download a workspace file to disk through Daytona's path overload."""
         if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 25_000_000:
@@ -725,42 +886,131 @@ class DaytonaSandboxManager:
         max_bytes: int | None = None,
     ) -> dict[str, Any]:
         """Check a Volume path remotely before using Daytona's file-transfer API."""
-        path_b64 = base64.b64encode(rel_path.encode("utf-8")).decode("ascii")
-        create_clause = "os.makedirs(parent,exist_ok=True)\n" if create_parents else ""
-        read_clause = "if not os.path.isfile(target): raise FileNotFoundError('workspace file is unavailable')\n"
+        return self._workspace_files_metadata(sandbox, [rel_path], create_parents=create_parents, max_bytes=max_bytes)[
+            0
+        ]
+
+    def _workspace_files_metadata(
+        self,
+        sandbox: Any,
+        rel_paths: list[str],
+        *,
+        create_parents: bool,
+        max_bytes: int | None = None,
+        include_digest: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Check Volume paths remotely in one call, in order, before using Daytona's file-transfer API."""
+        paths_b64 = base64.b64encode(json.dumps(rel_paths).encode("utf-8")).decode("ascii")
+        create_clause = " os.makedirs(parent,exist_ok=True)\n" if create_parents else ""
+        read_clause = " if not os.path.isfile(target): raise FileNotFoundError('workspace file is unavailable')\n"
         if create_parents:
             read_clause = (
-                "if os.path.exists(target) and not os.path.isfile(target): "
+                " if os.path.exists(target) and not os.path.isfile(target): "
                 "raise ValueError('workspace target is not a file')\n"
             )
-        size_clause = "size=os.path.getsize(target) if os.path.isfile(target) else None\n"
+        size_clause = " size=os.path.getsize(target) if os.path.isfile(target) else None\n"
         if max_bytes is not None:
-            size_clause += f"if size>{max_bytes}: raise ValueError('workspace file exceeds size limit')\n"
+            size_clause += f" if size>{max_bytes}: raise ValueError('workspace file exceeds size limit')\n"
+        result_clause = " return {'size':size}\n"
+        if include_digest:
+            result_clause = (
+                " digest=hashlib.sha256()\n"
+                " count=0\n"
+                " with open(target,'rb') as handle:\n"
+                "  before=os.fstat(handle.fileno())\n"
+                "  for block in iter(lambda: handle.read(1048576),b''):\n"
+                "   count+=len(block)\n"
+                "   if count>size: raise ValueError('workspace file changed while inspected')\n"
+                "   digest.update(block)\n"
+                "  after=os.fstat(handle.fileno())\n"
+                " if count!=size or before.st_size!=size or "
+                "(before.st_mtime_ns,before.st_ctime_ns)!=(after.st_mtime_ns,after.st_ctime_ns):\n"
+                "  raise ValueError('workspace file changed while inspected')\n"
+                " return {'size':size,'sha256':digest.hexdigest()}\n"
+            )
         code = (
-            "import base64,json,os\n"
+            "import base64,hashlib,json,os\n"
             "root=os.path.realpath('/workspace')\n"
-            "relative=base64.b64decode('" + path_b64 + "').decode('utf-8')\n"
-            "parts=relative.split('/')\n"
-            "parent=root\n"
-            "for part in parts[:-1]:\n"
-            " parent=os.path.join(parent,part)\n"
-            " if os.path.islink(parent): raise ValueError('workspace path may not traverse symbolic links')\n"
-            " if os.path.exists(parent) and not os.path.isdir(parent): "
+            "def check(relative):\n"
+            " parts=relative.split('/')\n"
+            " parent=root\n"
+            " for part in parts[:-1]:\n"
+            "  parent=os.path.join(parent,part)\n"
+            "  if os.path.islink(parent): raise ValueError('workspace path may not traverse symbolic links')\n"
+            "  if os.path.exists(parent) and not os.path.isdir(parent): "
             "raise ValueError('workspace parent is not a directory')\n"
-            "if os.path.commonpath((root,os.path.realpath(parent))) != root: "
-            "raise ValueError('invalid workspace path')\n" + create_clause + "target=os.path.join(parent,parts[-1])\n"
-            "if os.path.islink(target): raise ValueError('workspace target may not be a symbolic link')\n"
-            "if os.path.commonpath((root,parent)) != root: raise ValueError('invalid workspace path')\n"
+            " if os.path.commonpath((root,os.path.realpath(parent))) != root: "
+            "raise ValueError('invalid workspace path')\n" + create_clause + " target=os.path.join(parent,parts[-1])\n"
+            " if os.path.islink(target): raise ValueError('workspace target may not be a symbolic link')\n"
+            " if os.path.commonpath((root,parent)) != root: raise ValueError('invalid workspace path')\n"
             + read_clause
             + size_clause
-            + "print(json.dumps({'size':size}))"
+            + result_clause
+            + "relatives=json.loads(base64.b64decode('"
+            + paths_b64
+            + "').decode('utf-8'))\n"
+            "print(json.dumps([check(relative) for relative in relatives]))"
         )
         metadata = json.loads(self._remote_exec(sandbox, code))
-        if not isinstance(metadata, dict) or (
-            metadata.get("size") is not None and not isinstance(metadata["size"], int)
+        if (
+            not isinstance(metadata, list)
+            or len(metadata) != len(rel_paths)
+            or not all(
+                isinstance(item, dict)
+                and (item.get("size") is None or type(item["size"]) is int)
+                and (
+                    not include_digest
+                    or (
+                        type(item.get("size")) is int
+                        and item["size"] >= 0
+                        and isinstance(item.get("sha256"), str)
+                        and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is not None
+                    )
+                )
+                for item in metadata
+            )
         ):
             raise RuntimeError("Invalid workspace file metadata")
         return metadata
+
+    def read_workspace_files(self, rel_paths: list[str], *, max_total_bytes: int = 100_000_000) -> dict[str, bytes]:
+        """Read several workspace files with one remote check and one batched download.
+
+        Every path gets the same symlink, containment, and size checks as `read_workspace_file`.
+        """
+        clean_paths = [_workspace_relative_path(path) for path in rel_paths]
+        if not clean_paths:
+            return {}
+        sandbox = self.ensure_sandbox()
+        metadata = self._workspace_files_metadata(sandbox, clean_paths, create_parents=False, max_bytes=25_000_000)
+        if sum(item["size"] for item in metadata) > max_total_bytes:
+            raise ValueError("Workspace batch exceeds the transfer quota")
+        responses = with_retries(
+            lambda: sandbox.fs.download_files(
+                [FileDownloadRequest(source=f"/workspace/{path}") for path in clean_paths], 1800
+            )
+        )
+        by_source = {response.source: response for response in responses}
+        contents: dict[str, bytes] = {}
+        for path, item in zip(clean_paths, metadata, strict=True):
+            response = by_source.get(f"/workspace/{path}")
+            content = getattr(response, "result", None)
+            if response is None or response.error or not isinstance(content, bytes) or len(content) != item["size"]:
+                raise RuntimeError(f"Workspace file changed or could not be downloaded: {path}")
+            contents[path] = content
+        return contents
+
+    def write_workspace_files(self, files: dict[str, bytes]) -> None:
+        """Write several validated files beneath this Session's Volume with one check and one upload."""
+        clean = {_workspace_relative_path(path): content for path, content in files.items()}
+        if not clean:
+            return
+        if any(not isinstance(content, bytes) or len(content) > 25_000_000 for content in clean.values()):
+            raise ValueError("Workspace files must be bytes of at most 25 MB")
+        sandbox = self.ensure_sandbox()
+        self._workspace_files_metadata(sandbox, list(clean), create_parents=True)
+        uploads = [FileUpload(source=content, destination=f"/workspace/{path}") for path, content in clean.items()]
+        with_retries(lambda: sandbox.fs.upload_files(uploads, timeout=1800))
 
     def interpreter_factory(
         self,
@@ -782,7 +1032,12 @@ class DaytonaSandboxManager:
                     manager = active.allocate_child(input_paths=list(captured_input_paths))
             else:
                 manager = self
-            return DaytonaInterpreter(manager=manager, tools=dict(tools or {}), owns_manager=active is not None)
+            return DaytonaInterpreter(
+                manager=manager,
+                tools=dict(tools or {}),
+                owns_manager=active is not None,
+                native_input_paths=captured_input_paths,
+            )
 
         create.execution_instructions = (  # ty: ignore[unresolved-attribute]
             "Python runs in Daytona with /workspace and workspace helper. "

@@ -24,19 +24,19 @@ def test_databricks_mlflow_configuration_requires_governed_trace_storage() -> No
     with pytest.raises(ValueError, match="Unity Catalog"):
         FleetSettings(
             mlflow_mode="databricks",
-            mlflow_tracking_uri="databricks",
-            mlflow_trace_catalog="",
-            mlflow_trace_schema="",
-            mlflow_tracing_sql_warehouse_id="",
+            mlflow_databricks_tracking_uri="databricks",
+            mlflow_databricks_trace_catalog="",
+            mlflow_databricks_trace_schema="",
+            mlflow_databricks_tracing_sql_warehouse_id="",
         )
 
     configured = FleetSettings(
         mlflow_mode="databricks",
-        mlflow_tracking_uri="databricks",
-        mlflow_experiment_name="/Shared/fleet-rlm",
-        mlflow_trace_catalog="fleet",
-        mlflow_trace_schema="traces",
-        mlflow_tracing_sql_warehouse_id="warehouse-id",
+        mlflow_databricks_tracking_uri="databricks",
+        mlflow_databricks_experiment_name="/Shared/fleet-rlm",
+        mlflow_databricks_trace_catalog="fleet",
+        mlflow_databricks_trace_schema="traces",
+        mlflow_databricks_tracing_sql_warehouse_id="warehouse-id",
     )
     assert configured.mlflow_experiment_name == "/Shared/fleet-rlm"
 
@@ -68,13 +68,14 @@ def test_unity_gateway_models_use_native_dspy_engine_and_credentials(monkeypatch
         "cache": False,
         "num_retries": 3,
     }
-    assert root_lm.kwargs == gateway_options
+    # config/fleet.toml caps root output (RLM reasoning runaway) and leaves sub provider-controlled.
+    assert root_lm.kwargs == {**gateway_options, "max_tokens": 16384}
     assert sub_lm.kwargs == gateway_options
     # config/fleet.toml gives GEPA reflection the DSPy-recommended temperature and output budget.
     reflection_options = {**gateway_options, "temperature": 1.0, "max_tokens": 32000}
     assert reflection_lm.kwargs == reflection_options
     assert calls == [
-        ("openai/uscentral.ai_gateway.deepseek-v4-1-flash-service", gateway_options),
+        ("openai/uscentral.ai_gateway.deepseek-v4-1-flash-service", {**gateway_options, "max_tokens": 16384}),
         ("openai/system.ai.claude-haiku-5-5", gateway_options),
         ("openai/system.ai.claude-sonnet-5-5", reflection_options),
     ]
@@ -153,11 +154,10 @@ def test_unity_gateway_models_require_token_and_https_base_url() -> None:
         )
 
 
-def test_fleet_prefixed_mlflow_environment_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLEET_MLFLOW_TRACKING_URI", "sqlite:///fleet-test.db")
+def test_profile_specific_mlflow_environment_ignores_sdk_destination(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FLEET_MLFLOW_LOCAL_PORT", "5002")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks")
-    monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "fleet-test")
+    monkeypatch.setenv("FLEET_MLFLOW_LOCAL_EXPERIMENT_NAME", "fleet-test")
     settings = FleetSettings(_env_file=None)
-
-    assert settings.mlflow_tracking_uri == "sqlite:///fleet-test.db"
+    assert settings.mlflow_tracking_uri == "http://127.0.0.1:5002"
     assert settings.mlflow_experiment_name == "fleet-test"

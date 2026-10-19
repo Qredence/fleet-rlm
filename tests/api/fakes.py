@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -16,7 +17,7 @@ from fleet_rlm.workspace import validate_session_id
 
 
 class FakeManager(SimpleNamespace):
-    def __init__(self, **overrides: Any) -> None:
+    def __init__(self, *, notes: list[dict[str, str]] | None = None, **overrides: Any) -> None:
         defaults: dict[str, Any] = {
             "event_callback": None,
             "_cancelled": threading.Event(),
@@ -29,13 +30,28 @@ class FakeManager(SimpleNamespace):
             "turn_timeout_seconds": 900,
             "list_workspace_files": lambda: [],
             "read_workspace_file": lambda _path: b"",
-            "list_learned_notes": lambda: [],
             "write_learned_note": lambda *_args, **_kwargs: None,
             "reset_turn_budget": lambda: None,
             "end_turn": lambda: None,
             "cancel_turn": lambda: None,
         }
         super().__init__(**{**defaults, **overrides})
+        if "stat_workspace_file" not in overrides:
+            self.stat_workspace_file = self._stat_file
+        if "turn_inputs" not in overrides:
+            # Derived from the other fakes so tests that only fake listing, contents, or notes stay consistent.
+            self.turn_inputs = lambda: {
+                "digests": {
+                    path: hashlib.sha256(self.read_workspace_file(path)).hexdigest()
+                    for path in self.list_workspace_files()
+                },
+                "notes": notes or [],
+                "environment": "",
+            }
+
+    def _stat_file(self, path: str) -> dict[str, Any]:
+        content = self.read_workspace_file(path)
+        return {"path": path, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
 
 def store_with(**overrides: Any) -> SimpleNamespace:

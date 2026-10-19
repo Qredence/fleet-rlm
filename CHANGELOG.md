@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Evaluation CLI diagnostics name the selected MLflow backend's supported experiment
+  setting instead of a retired environment variable.
+- Generation usage derives missing totals from complete per-call input/output
+  receipts before native DSPy rollup, keeping trace spans and stream events aligned
+  without double-counting or combining incomplete receipts into an invented total.
+
+- The shipped root LM caps output at `max_tokens = 16384` (`[llm.root]`), bounding runaway
+  reasoning on the RLM route. Measured effect on the Pi-digit task is not yet verified live.
+- Selected dataset handles cross native Flex's JSON boundary through DSPy's
+  custom-type restoration, retaining native RLM's one-time file-view setup and
+  the existing persisted descriptor. Metadata checks no longer download files.
+- Output-compliance diagnostics judge complete bounded task/answer fields and
+  reject incomplete evidence; diagnostic assessment version is now v5.
+- API shutdown still attempts owned Store closure and trace flushing after a
+  registry cleanup failure. Explicit invalid `fleet serve --port` values are
+  rejected instead of silently using the default port.
+
 ### Added
 
 - `DELETE /sessions/{session_id}` stops a Session's sandbox, releases its lease, and drops its
@@ -22,6 +41,28 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Native nested code-agent manifests now reflect their permitted child inputs.
+  Root traces and Turn records distinguish retained artifacts from content
+  created or modified during the Turn. TypeSafe decision usage is receipted on
+  manual spans, with missing totals derived from known input/output counts.
+- Shared instructions request explicit imports and a short submission action;
+  these are model guidance rather than enforced latency guarantees.
+- Turn preparation gathers file digests, shared notes, and a probed sandbox environment line
+  (Python version, installed/missing numeric libraries, the int-to-str digit limit) in one
+  remote exec, and Skill sync uploads changed files in one batch. Only selected replays
+  download file bytes, and they must match the digest. The environment line is appended to
+  `memory_summary` as a hint for code agents; avoiding redundant probes remains
+  model-dependent behavior.
+- Child input copy validates, downloads, and uploads all files in one batch per side (4
+  Daytona operations instead of 4 per file). Input receipts are recorded only after the whole
+  batch lands.
+- Shared learned notes are deduplicated (word-overlap ≥ 0.5 with a newer note) and capped at
+  eight, and are labelled as never a verification reference. `STOPPING_RULES` now says a
+  value that only matches a note is unverified. This changes the baseline FleetTask
+  instructions, so evidence measured against the previous baseline is not comparable.
+- `STOPPING_RULES` treats validating a method on known values as the supporting check for its
+  target and forbids recomputing the target with different parameters (another baseline
+  instruction change).
 - Session routes that need the Session lock (mode, context, memory, Skills, workspace files, model
   selection) now answer **409** after 2s instead of holding a threadpool worker for the whole Turn.
 - Sandbox state is refreshed from Daytona before each Turn, so a sandbox auto-stopped while idle is

@@ -6,7 +6,7 @@ import mlflow
 import pytest
 from pydantic import AliasChoices
 
-from fleet_rlm.config import FleetSettings, get_settings
+from fleet_rlm.config import RETIRED_MLFLOW_ENV, FleetSettings, get_settings
 
 
 def _setting_env_names() -> set[str]:
@@ -27,11 +27,9 @@ def mlflow_test_uri(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
-    for name in _setting_env_names() | {"MLFLOW_EXPERIMENT_ID", "MLFLOW_EXPERIMENT_NAME"}:
+    for name in _setting_env_names() | RETIRED_MLFLOW_ENV | {"MLFLOW_EXPERIMENT_ID"}:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setitem(FleetSettings.model_config, "env_file", None)
-    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
-    monkeypatch.setenv("FLEET_MLFLOW_TRACKING_URI", mlflow_test_uri)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_test_uri)
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
     # A test that forgets its database fake fails fast instead of reaching a real local Postgres.

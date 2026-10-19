@@ -4,7 +4,7 @@ Fleet exposes a FastAPI application with the following routes:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Return status and application version. |
+| `GET` | `/health` | Return status, application version, and initialized MLflow destination. |
 | `GET` | `/sessions` | List persisted sessions (up to 100). |
 | `GET` | `/models?scope=system.ai` | Discover authorized chat-capable Unity Gateway model services (up to 1000). |
 | `DELETE` | `/sessions/{session_id}` | Stop the session sandbox and release its runtime and lease; history is kept. 404 without a runtime, 409 during a Turn. |
@@ -25,6 +25,11 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/memory?q=...` | Retrieve scoped memories. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/memory/{memory_id}` | Create/review/update/delete memories. |
 | `POST` | `/skills/push?session_id=...` | Synchronize validated local user Skills. |
+
+The `/health` MLflow metadata includes `workspace_host`, the resolved non-secret
+Databricks tracking workspace URL (`null` for local tracking). API reuse and
+evaluation preflight compare it along with the experiment and trace destination.
+Named tracking profiles resolve their own workspace rather than the model gateway host.
 
 Routes that change or read workspace, context, memory, Skill, mode, or model state take the
 session lock. While a Turn holds it they answer `409` after two seconds rather than queueing.
@@ -109,6 +114,23 @@ or 180-second execution-read limit. They wait for completion or cancellation;
 the shared `FLEET_TURN_TIMEOUT_SECONDS` watchdog still bounds the whole turn.
 Closing a stream requests remote cancellation; it does not merely abandon a
 local Python future. Reconnection is not an automatic side-effect retry.
+
+New completion events and their persisted idempotent outcomes also include
+host-owned `lm_calls`, `sandbox_errors`, `submit_rejections`, and
+`budget_breakdown`. The legacy `lm_calls` name means shared budget units rather
+than visible model requests. Breakdown keys are `generation_query`, `routing`,
+`skill_selection`, and `other_decisions`; their values sum to `lm_calls`.
+`sandbox_errors` counts remote Python failures, while `submit_rejections` counts
+blocking host rejections. Missing counters in historical outcomes remain unknown.
+`budget_update` events include the same current counters and breakdown.
+`repl_output.outcome` distinguishes `remote_code_error` from
+`ungrounded_submit_rejected`, so a host rejection is not displayed as a remote
+Python failure during recovery.
+
+`learned_note_warning` carries a `namespace`, `field` (`learned_skill_note`),
+and bounded `figures` list. It does not block submission. Existing
+`ungrounded_submit` events describe substantive-output rejections or acceptance
+after the retry cap. Learned-note warnings do not establish note correctness.
 
 Workspace writes accept exactly one of `content` (UTF-8 text) or
 `content_base64`. Reads return bytes with an attachment disposition. Mode and

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import dspy
-from dspy.adapters import ChatAdapter
+from dspy import ChatAdapter
 from dspy.primitives.facade import SHIM_SETUP
 from dspy.utils import DummyLM
 

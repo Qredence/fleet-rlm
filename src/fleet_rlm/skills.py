@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+import mlflow
 import yaml
+from mlflow.entities import SpanType
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -351,10 +353,12 @@ class SkillManager:
             " elif os.path.lexists(path): raise ValueError('Existing Skill path is not a regular file: '+rel)\n"
             "print(json.dumps(result))"
         )
-        try:
-            existing = json.loads(self.sandbox_mgr.exec_remote_python(inspection_code) or "{}")
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError("Could not inspect existing session Skills before synchronization") from exc
+        with mlflow.start_span(name="skills.inspect_remote", span_type=SpanType.TOOL) as span:
+            span.set_attribute("file_count", len(staged_files))
+            try:
+                existing = json.loads(self.sandbox_mgr.exec_remote_python(inspection_code) or "{}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("Could not inspect existing session Skills before synchronization") from exc
         if not isinstance(existing, dict):
             raise ValueError("Existing session Skill manifest is invalid")
         changed = {
@@ -366,11 +370,15 @@ class SkillManager:
         conflicts = sorted(changed - bundled_paths)
         if conflicts:
             raise ValueError("Skill sync conflicts with existing session files: " + ", ".join(conflicts))
-        for relative, content in staged_files:
-            if relative not in existing or relative in changed:
-                if relative in changed:
-                    _LOGGER.info("Updating bundled Skill file %s in the session workspace", relative)
-                self.sandbox_mgr.write_workspace_file(relative, content)
+        for relative in sorted(changed):
+            _LOGGER.info("Updating bundled Skill file %s in the session workspace", relative)
+        # One validated batch upload instead of a check and an upload per file.
+        uploads = {
+            relative: content for relative, content in staged_files if relative not in existing or relative in changed
+        }
+        with mlflow.start_span(name="skills.upload", span_type=SpanType.TOOL) as span:
+            span.set_attributes({"file_count": len(uploads), "byte_count": sum(map(len, uploads.values()))})
+            self.sandbox_mgr.write_workspace_files(uploads)
         return count
 
     def export_volume_skills_to_local(self) -> list[str]:

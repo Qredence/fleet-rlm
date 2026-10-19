@@ -817,6 +817,11 @@ class VolumePostgresHarness:
                 "route": turn_record.get("route", ""),
                 "learned_skill_note": turn_record.get("learned_skill_note", ""),
                 "artifacts": artifacts,
+                **{
+                    key: turn_record[key]
+                    for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
+                    if key in turn_record
+                },
             }
             if turn_record.get("trace_id"):
                 result["trace_id"] = turn_record["trace_id"]

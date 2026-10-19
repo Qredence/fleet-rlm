@@ -11,7 +11,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import dspy
-from dspy.utils.exceptions import AdapterParseError
+from dspy import AdapterParseError
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
 from fleet_rlm.engine.signatures import ChildTask

@@ -2,8 +2,67 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from fleet_rlm import cli
 from fleet_rlm.config import FleetSettings
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536])
+def test_serve_rejects_invalid_explicit_ports_before_starting_a_server(monkeypatch, capsys, port):
+    settings = FleetSettings(_env_file=None)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(
+        cli.uvicorn, "run", lambda *_args, **_kwargs: pytest.fail("invalid settings must not start a server")
+    )
+    with pytest.raises(SystemExit) as error:
+        cli.main(["serve", "--port", str(port)])
+    assert error.value.code == 2
+    assert "invalid configuration" in capsys.readouterr().err
+
+
+def test_serve_validates_and_applies_explicit_bind_settings(monkeypatch):
+    settings = FleetSettings(_env_file=None)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    captured = {}
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kwargs: captured.update(app=app, **kwargs))
+    cli.main(["serve", "--host", "localhost", "--port", "12345"])
+    assert (captured["host"], captured["port"]) == ("localhost", 12345)
+    assert captured["app"].state.settings.configuration()["sources"]["port"] == "explicit"
+
+
+@pytest.mark.parametrize("backend", ["local", "databricks"])
+def test_eval_missing_experiment_diagnostic_names_selected_profile(monkeypatch, backend):
+    import mlflow
+
+    from fleet_rlm.config import MlflowTarget
+
+    # Validated settings reject empty names; exercise the defensive boundary with a double.
+    settings = SimpleNamespace(
+        mlflow_target=lambda: MlflowTarget(backend, "offline", "runtime", "", "opt"),
+        mlflow_descriptor=lambda **_kwargs: {},
+        mlflow_tracing_sql_warehouse_id="offline",
+    )
+    monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
+    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: None)
+    with pytest.raises(SystemExit) as error:
+        cli._eval_command(SimpleNamespace(eval_command="run", url="http://test"), settings)
+    message = str(error.value)
+    assert f"FLEET_MLFLOW_{backend.upper()}_EVAL_EXPERIMENT_NAME" in message
+    assert "FLEET_MLFLOW_EVAL_EXPERIMENT_NAME" not in message
+
+
+@pytest.mark.parametrize("backend", ["local", "databricks"])
+def test_eval_rejects_empty_selected_experiment_before_external_work(monkeypatch, capsys, backend):
+    monkeypatch.setenv(f"FLEET_MLFLOW_{backend.upper()}_EVAL_EXPERIMENT_NAME", "")
+    monkeypatch.setattr(
+        cli.launcher, "mlflow_is_healthy", lambda *_args: pytest.fail("invalid settings must not probe MLflow")
+    )
+    monkeypatch.setattr(cli, "_eval_command", lambda *_args: pytest.fail("invalid settings must not evaluate"))
+    with pytest.raises(SystemExit) as error:
+        cli.main(["eval", "dataset", "--mlflow", backend])
+    assert error.value.code == 2
+    assert "invalid configuration" in capsys.readouterr().err
 
 
 def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_collection(monkeypatch, capsys):
@@ -17,12 +76,14 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
         mlflow_target=lambda: MlflowTarget("local", "file:///tmp/mlruns", "runtime", "eval", "opt"),
         judge_environment=lambda: {"OPENAI_API_BASE": "https://gateway.example/v1", "OPENAI_API_KEY": "gateway-key"},
         fleet_judge_model="databricks:/judge",
+        mlflow_descriptor=lambda **_kwargs: {},
     )
     monkeypatch.setenv("OPENAI_API_BASE", "https://stale-provider.example/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "stale-key")
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(mlflow, "set_experiment", lambda _name: SimpleNamespace(experiment_id="eval-id"))
     captured = {}
+    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: None)
 
     def evaluate(_cases, **kwargs):
         import os
@@ -47,7 +108,8 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
 def test_eval_label_cli_accepts_critical_and_explicit_unpin(monkeypatch) -> None:
     captured = []
     settings = FleetSettings(_env_file=None)
-    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: True)
     monkeypatch.setattr(cli, "_eval_command", lambda args, _settings: captured.append(args))
 
     cli.main(["eval", "label", "tr-1", "--value", "42", "--critical"])
@@ -119,7 +181,8 @@ def test_eval_label_syncs_selected_replay_labels_to_configured_lakebase(monkeypa
 def test_trace_verify_command_routes_scope_to_the_trace_handler(monkeypatch) -> None:
     captured = []
     settings = FleetSettings(_env_file=None)
-    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: True)
     monkeypatch.setattr(cli, "_trace_verify_command", lambda args, _settings: captured.append(args))
 
     cli.main(["trace", "verify", "trace:/catalog.schema/id", "--scope", "optimization"])

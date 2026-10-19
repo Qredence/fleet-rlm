@@ -98,6 +98,69 @@ def test_rich_cli_renders_versioned_event_payload(monkeypatch: pytest.MonkeyPatc
     assert "Versioned result" in rendered
 
 
+def test_shared_turn_events_update_state_and_tracker_under_the_supplied_lock(monkeypatch):
+    import threading
+
+    state = commands.SessionState()
+    tracker = render.TurnTracker()
+    lock = threading.Lock()
+    original = render.TurnTracker.ingest
+
+    def ingest(self, event):
+        assert lock.locked()
+        original(self, event)
+
+    monkeypatch.setattr(render.TurnTracker, "ingest", ingest)
+    events = [
+        {"event": "triage_decision", "turn_id": "turn-1", "payload": {"mode": "rlm", "route": "rlm"}},
+        {"event": "turn_complete", "payload": {"answer": "Done", "trace_id": "trace-1"}},
+    ]
+    body = ': heartbeat\n\ndata: broken\n\ndata: {"payload": []}\n\n' + "".join(
+        f"data: {json.dumps(event)}\n\n" for event in events
+    )
+    response = httpx.Response(200, content=body)
+    received = list(app._turn_events(response, state, tracker, lock=lock))
+    assert received == [None, None, *events]
+    assert (state.mode, state.last_turn_id, state.last_trace_id) == ("rlm", "turn-1", "trace-1")
+    assert tracker.terminal_event["answer"] == "Done"
+    assert not lock.locked()
+
+
+def test_shared_turn_stream_cancellation_leaves_outcome_unknown_and_closes_response():
+    import threading
+
+    cancelled = threading.Event()
+    closed = []
+    submitted = []
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b'data: {"event":"turn_status"}\n\n'
+            yield b'data: {"event":"turn_complete","trace_id":"must-not-consume"}\n\n'
+
+        def close(self):
+            closed.append(True)
+
+    def handle(request):
+        submitted.append(json.loads(request.content))
+        return httpx.Response(200, stream=Stream())
+
+    state = commands.SessionState(record_replay=True)
+    tracker = render.TurnTracker()
+    with (
+        httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client,
+        app._request_turn(client, "session-1", "Do work", state) as response,
+    ):
+        events = app._turn_events(response, state, tracker, cancelled=cancelled.is_set)
+        assert next(events) == {"event": "turn_status"}
+        cancelled.set()
+        assert list(events) == []
+    assert tracker.terminal_event is None and not state.last_trace_id
+    assert closed == [True]
+    assert submitted[0]["task"] == "Do work" and submitted[0]["record_replay"] is True
+    assert len(submitted[0]["idempotency_key"]) == 32
+
+
 def test_memory_and_trace_commands_use_session_history_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     requests: list[httpx.Request] = []
 
@@ -156,6 +219,17 @@ def test_terminal_statuses_are_rendered_truthfully(
     render.render_event(event)
 
     assert expected in output.getvalue()
+
+
+def test_host_rejection_is_distinct_from_remote_python_errors_in_the_tracker():
+    tracker = render.TurnTracker()
+    tracker.ingest({"event": "ungrounded_submit", "rejected": True, "figures": ["426880"]})
+    tracker.ingest(
+        {"event": "repl_output", "execution_id": "host", "error": True, "outcome": "ungrounded_submit_rejected"}
+    )
+    assert tracker.submit_rejections == 1 and tracker.sandbox_errors == 0
+    tracker.ingest({"event": "repl_output", "execution_id": "remote", "error": True, "outcome": "remote_code_error"})
+    assert tracker.submit_rejections == tracker.sandbox_errors == 1
 
 
 @pytest.mark.parametrize(
@@ -305,17 +379,19 @@ def test_optimize_passes_its_arguments_to_fleet_optimize(monkeypatch) -> None:
 
     calls: list[list[str]] = []
     monkeypatch.setattr(commands.subprocess, "run", lambda command, **_kwargs: calls.append(command))
-    ctx = SimpleNamespace(session_id="sess_tui")
+    ctx = SimpleNamespace(session_id="sess_tui", state=commands.SessionState())
     commands.COMMANDS["/optimize"].run(ctx, "--approve 'sess_tui-abc'")
     commands.COMMANDS["/optimize"].run(ctx, "")
-    assert calls[0][-5:] == [
+    assert calls[0][-7:] == [
         "optimize",
         "--session",
         "sess_tui",
         "--approve",
         "sess_tui-abc",
+        "--mlflow",
+        "local",
     ]
-    assert calls[1][-3:] == ["optimize", "--session", "sess_tui"]
+    assert calls[1][-5:] == ["optimize", "--session", "sess_tui", "--mlflow", "local"]
 
 
 def test_turn_tracker_pairs_repl_cells_and_preserves_user_toggle_across_completion() -> None:
@@ -356,7 +432,7 @@ def test_turn_tracker_pairs_repl_cells_and_preserves_user_toggle_across_completi
     tracker.ingest({"event": "repl_code", "execution_id": "task-3", "phase": "task", "code": "raise ValueError()"})
     cell3 = tracker.items[-1]
     assert cell3.expanded is True
-    assert tracker.handle_key("3") is True
+    assert tracker.toggle_repl_index(3) is True
     assert cell3.expanded is False and cell3.user_toggled is True
     tracker.ingest(
         {"event": "repl_output", "execution_id": "task-3", "phase": "task", "error": True, "error_type": "ValueError"}
@@ -364,7 +440,7 @@ def test_turn_tracker_pairs_repl_cells_and_preserves_user_toggle_across_completi
     assert cell3.expanded is False
 
 
-def test_turn_tracker_shortcuts_and_confidence_bar() -> None:
+def test_turn_tracker_toggles_and_confidence_bar() -> None:
     tracker = render.TurnTracker()
     # An orphan_deleted event at Turn start must not hijack the 'root' alias.
     tracker.ingest({"event": "orphan_deleted", "sandbox_id": "sbx-orphan", "agent_id": "orphan-99"})
@@ -402,10 +478,10 @@ def test_turn_tracker_shortcuts_and_confidence_bar() -> None:
     assert thinking.agent_label == "root" and repl_cell.agent_label == "root"
     assert thinking.expanded is False and repl_cell.expanded is False
 
-    assert tracker.handle_key("\x14") is True and thinking.expanded is True
-    assert tracker.handle_key("\x0f") is True and repl_cell.expanded is True
-    assert tracker.handle_key("a") is True and thinking.expanded is False and repl_cell.expanded is False
-    assert tracker.handle_key("a") is True and thinking.expanded is True and repl_cell.expanded is True
+    assert tracker.toggle_thinking() is True and thinking.expanded is True
+    assert tracker.toggle_latest_repl() is True and repl_cell.expanded is True
+    assert tracker.toggle_all() is True and thinking.expanded is False and repl_cell.expanded is False
+    assert tracker.toggle_all() is True and thinking.expanded is True and repl_cell.expanded is True
 
     # An in-flight running REPL cell transitions to 'cancelled' when the Turn is cancelled.
     tracker.ingest(
@@ -628,6 +704,18 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
                 await pilot.pause(0.05)
                 assert repl_item.expanded is False
 
+                # Exercise the active Textual bindings rather than a separate key dispatcher.
+                state.last_tracker.ingest({"event": "lm_end", "reasoning": "Supporting check complete."})
+                tui._refresh_last_turn_widget()
+                await pilot.pause(0.05)
+                thinking = state.last_tracker.items[-1]
+                await pilot.press("ctrl+t")
+                assert thinking.expanded is True
+                await pilot.press("alt+a")
+                assert all(item.expanded for item in state.last_tracker.items)
+                await pilot.press("alt+a")
+                assert all(not item.expanded for item in state.last_tracker.items)
+
                 # Pressing Ctrl+C once clears input and arms exit; pressing Ctrl+C a second time exits.
                 inp.value = "draft text"
                 await pilot.press("ctrl+c")
@@ -640,5 +728,52 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
             # Reloading history in a fresh session preserves multi-line pasted prompts as single entries.
             reloaded = app.FleetTextualApp(client, "sess_fs", commands.SessionState())
             assert reloaded._history_entries[-1] == multiline_prompt
+
+    asyncio.run(scenario())
+
+
+def test_fullscreen_cancellation_closes_the_active_response_without_claiming_completion(monkeypatch, tmp_path):
+    import asyncio
+    import threading
+
+    monkeypatch.chdir(tmp_path)
+    closed = threading.Event()
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b'data: {"event":"repl_code","execution_id":"active","code":"work()"}\n\n'
+            assert closed.wait(5), "the client did not close the active response"
+            yield b'data: {"event":"turn_complete","answer":"must-not-consume"}\n\n'
+
+        def close(self):
+            closed.set()
+
+    def handle(request):
+        if request.url.path.endswith("/config"):
+            return httpx.Response(200, json={})
+        return httpx.Response(200, stream=Stream())
+
+    async def scenario():
+        state = commands.SessionState()
+        with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
+            tui = app.FleetTextualApp(client, "session-cancel", state)
+            async with tui.run_test(size=(100, 30)) as pilot:
+                tui.submit_text("Run work")
+                for _ in range(50):
+                    await pilot.pause(0.02)
+                    if state.last_tracker and state.last_tracker.items:
+                        break
+                assert tui._turn_active and tui._active_response is not None
+                assert state.last_tracker.items[0].status == "running"
+                await pilot.press("ctrl+c")
+                for _ in range(50):
+                    await pilot.pause(0.02)
+                    if not tui._turn_active:
+                        break
+                assert closed.is_set() and not tui._turn_active
+                assert tui._active_response is None
+                assert state.last_tracker.items[0].status == "cancelled"
+                assert state.last_tracker.terminal_event == {"event": "interrupted"}
+                assert tui.is_running
 
     asyncio.run(scenario())

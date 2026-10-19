@@ -9,28 +9,11 @@ from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 from typing import Any
 
-import dspy
-from dspy.utils.callback import ACTIVE_CALL_ID, BaseCallback
+from dspy.utils.callback import ACTIVE_CALL_ID
 
+from fleet_rlm.lm_usage import LMUsageCallback
 from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, DaytonaSandboxManager
-
-
-def _usage_summary(entry: dict[str, Any]) -> dict[str, Any]:
-    """Numeric token counts for one LM call, including reasoning tokens when the provider reports them."""
-    details = entry.get("completion_tokens_details")
-    reasoning = (
-        details.get("reasoning_tokens") if isinstance(details, dict) else getattr(details, "reasoning_tokens", None)
-    )
-    found = {
-        "prompt_tokens": entry.get("prompt_tokens"),
-        "completion_tokens": entry.get("completion_tokens"),
-        "total_tokens": entry.get("total_tokens"),
-        "reasoning_tokens": reasoning,
-    }
-    return {
-        key: value for key, value in found.items() if isinstance(value, (int, float)) and not isinstance(value, bool)
-    }
 
 
 def _reasoning_text(outputs: Any) -> str:
@@ -40,7 +23,7 @@ def _reasoning_text(outputs: Any) -> str:
     return activity_text(reasoning) if isinstance(reasoning, str) else ""
 
 
-class SSERuntimeCallback(BaseCallback):
+class SSERuntimeCallback(LMUsageCallback):
     """Send bounded activity metadata to the active SSE stream."""
 
     def __init__(
@@ -50,6 +33,7 @@ class SSERuntimeCallback(BaseCallback):
         manager: DaytonaSandboxManager | None = None,
     ):
         """Bind the callback to the SSE stream's event loop and queue."""
+        super().__init__()
         self.loop = loop
         self.queue = queue
         self.manager = manager
@@ -58,7 +42,6 @@ class SSERuntimeCallback(BaseCallback):
         self._pending_lock = threading.Lock()
         self._calls: dict[str, dict[str, Any]] = {}
         self._calls_lock = threading.Lock()
-        self._usage_starts: dict[str, tuple[Any, str, int]] = {}
 
     def close(self) -> None:
         """Stop accepting events and cancel emits still waiting on the consumer."""
@@ -130,31 +113,15 @@ class SSERuntimeCallback(BaseCallback):
         # Predictor outputs can contain private reasoning; report status, never harvest them.
         self._end("module", call_id, exception)
 
-    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
+    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         """Emit an LM-start event and record where this call's usage tracking begins."""
         model = str(getattr(instance, "model", "unknown"))
-        # DSPy's own tracker (set up per module call) receives this call's usage; remember where it stood.
-        tracker = dspy.settings.usage_tracker
-        if tracker is not None:
-            with self._calls_lock:
-                self._usage_starts[call_id] = (tracker, model, len(tracker.usage_data.get(model, [])))
+        super().on_lm_start(call_id, instance, inputs)
         self._start("lm", call_id, model=model[:150])
 
     def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:
-        """Emit an LM-end event with reasoning when present and usage when attributable.
-
-        Usage is reported only when this call's tracker entry can be isolated from concurrent calls.
-        """
-        usage: dict[str, Any] = {}
-        with self._calls_lock:
-            start = self._usage_starts.pop(call_id, None)
-        if start is not None and exception is None:
-            tracker, model, index = start
-            new_entries = tracker.usage_data.get(model, [])[index:]
-            # Exactly one new entry is this call's; more means a concurrent call shared the tracker, so say nothing
-            # rather than attribute another call's tokens.
-            if len(new_entries) == 1:
-                usage = _usage_summary(new_entries[0])
+        """Emit numeric usage from the same isolated tracker that annotates the LM span."""
+        usage = self.finish_usage(call_id)
         # Reasoning is streamed on purpose (operator decision). Module outputs are still never harvested.
         reasoning = _reasoning_text(outputs)
         self._end(

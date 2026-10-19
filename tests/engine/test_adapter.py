@@ -7,8 +7,8 @@ from threading import Barrier
 
 import dspy
 import pytest
+from dspy import AdapterParseError, LMUnexpectedError
 from dspy.primitives.facade import SandboxLM
-from dspy.utils.exceptions import AdapterParseError, LMUnexpectedError
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
 

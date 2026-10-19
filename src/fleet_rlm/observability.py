@@ -11,9 +11,10 @@ from typing import Any
 
 import mlflow
 
-_PRIVATE_KEY = re.compile(
-    r"password|secret|token|authorization|cookie|api.?key|credential|reasoning|thought|scratchpad", re.I
-)
+_CREDENTIAL_KEY = r"password|secret|token|authorization|cookie|api.?key|credential"
+_PRIVATE_KEY = re.compile(rf"{_CREDENTIAL_KEY}|reasoning|thought|scratchpad", re.I)
+# Traces keep reasoning text for debugging; activity streams and judge inputs still redact it.
+_TRACE_PRIVATE_KEY = re.compile(rf"{_CREDENTIAL_KEY}|thought|scratchpad", re.I)
 _CREDENTIAL = re.compile(
     r"(?i)(bearer\s+)[\w.\-]+|"
     r"((?:[\w-]*(?:password|secret|token|api[_-]?key)[\w-]*)[\"']?\s*[:=]\s*[\"']?)([^\s,;\"']+)"
@@ -101,7 +102,7 @@ def trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
         for key, child in islice(value.items(), _TRACE_NODE_LIMIT):
             name = str(key)[:100]
             result[name] = (
-                "[redacted]" if _PRIVATE_KEY.search(name) else trace_value(child, nodes=nodes, depth=depth + 1)
+                "[redacted]" if _TRACE_PRIVATE_KEY.search(name) else trace_value(child, nodes=nodes, depth=depth + 1)
             )
         if len(value) > _TRACE_NODE_LIMIT:
             result["…"] = "[truncated]"
@@ -149,7 +150,7 @@ def configure_mlflow_observability(
     trace_table_prefix: str = "",
     tracing_sql_warehouse_id: str = "",
 ) -> str | None:
-    """Enable DSPy tracing in MLflow without making tracking a serving dependency."""
+    """Configure the MLflow destination and DSPy tracing, returning the initialized experiment ID."""
     if tracking_uri:
         mlflow.set_tracking_uri(tracking_uri)
     # DSPy autolog captures nested prompts and tool payloads; sanitize those spans before export.

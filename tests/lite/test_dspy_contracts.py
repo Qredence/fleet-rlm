@@ -21,6 +21,7 @@ def manager():
     return SimpleNamespace(
         consume_budget=lambda n=1: counts.append(n),
         check_turn=lambda: None,
+        emit=lambda *_args, **_kwargs: None,
         sub_lm=lambda prompt: [prompt.upper()],
         replies=replies,
         counts=counts,
@@ -200,7 +201,7 @@ def test_routing_regression_cases_cover_each_effective_route():
 
 @pytest.mark.parametrize("finish", ["recovery", "extraction", "failure"])
 def test_installed_rlm_lifecycle_promotes_only_a_valid_completed_invocation(finish):
-    from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
+    from dspy import CodeExecutionError, FinalOutput
     from dspy.primitives.facade import SHIM_SETUP
 
     events = []

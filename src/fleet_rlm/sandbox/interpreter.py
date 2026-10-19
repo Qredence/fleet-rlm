@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+import inspect
 import json
 import keyword
 import logging
@@ -12,17 +13,21 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from typing import Any, ClassVar
 
 import dspy
 import mlflow
 from mlflow.entities import SpanType
+from pydantic_core import to_jsonable_python
 
 from fleet_rlm.dspy_support import decision_evidence, without_mlflow_dspy_callback
 from fleet_rlm.engine.signatures import item_decision
+from fleet_rlm.lm_usage import decision_usage
 from fleet_rlm.observability import activity_preview, activity_text
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
+from fleet_rlm.workspace import _child_input_path
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,10 +65,14 @@ class DaytonaInterpreter:
         manager: DaytonaSandboxManager,
         tools: dict[str, Callable[..., Any]] | None = None,
         owns_manager: bool = False,
+        native_input_paths: tuple[str, ...] | None = None,
     ):
         """Create an interpreter with a fresh namespace and validated bridged tool names."""
         self.manager = manager
         self.owns_manager = owns_manager
+        self.native_input_paths = (
+            tuple(_child_input_path(path) for path in native_input_paths) if native_input_paths is not None else None
+        )
         self.tools = dict(tools or {})
         reserved = {
             "__builtins__",
@@ -93,6 +102,7 @@ class DaytonaInterpreter:
         # Figures this namespace's inputs and executions have shown the model, for the SUBMIT check.
         self._observed: set[float] = set()
         self._ungrounded_rejections = 0
+        self._code_agent_handles: set[str] = set()
 
     def start(self) -> None:
         """Start the sandbox and bootstrap this namespace once; raise if already shut down."""
@@ -108,9 +118,36 @@ class DaytonaInterpreter:
         children: list[Any] = []
         token = _NATIVE_CHILDREN.set(children)
         try:
+            if tool_name == "__dspy_call__" and kwargs.get("handle") in self._code_agent_handles:
+                inputs = kwargs.get("inputs")
+                if isinstance(inputs, dict) and isinstance(inputs.get("workspace_manifest"), str):
+                    # Native code agents get fresh sandboxes with files/ and skills/, not
+                    # the root's artifact/memory inventory. Do not advertise inaccessible paths.
+                    paths = sorted(
+                        path
+                        for path in self.manager.list_workspace_files()
+                        if path.startswith("skills/")
+                        or (
+                            path.startswith("files/")
+                            if self.native_input_paths is None
+                            else path in self.native_input_paths
+                        )
+                    )
+                    kwargs = {
+                        **kwargs,
+                        "inputs": {
+                            **inputs,
+                            "workspace_manifest": ", ".join(f"/workspace/{path}" for path in paths)
+                            or "/workspace/files (empty)",
+                        },
+                    }
             value = self.tools[tool_name](*args, **kwargs)
-            if hasattr(self.manager, "check_turn"):
-                self.manager.check_turn()
+            if tool_name == "__dspy_construct__" and isinstance(value, str):
+                self._code_agent_handles.discard(value)
+                cls = getattr(dspy, str(kwargs.get("kind", "")), None)
+                if cls is not None and "interpreter_factory" in inspect.signature(cls.__init__).parameters:
+                    self._code_agent_handles.add(value)
+            self.manager.check_turn()
             for child in children:
                 child.collect_child_artifacts()
             return value
@@ -134,14 +171,13 @@ class DaytonaInterpreter:
         details = {"call_id": call_id, "tool": tool_name, "source": "sandbox_bridge", "namespace": self.ns_id}
         # Facade calls and semantic LM queries return predictor internals, not tool evidence.
         predictor_call = str(tool_name).startswith("__dspy_") or tool_name in {"llm_query", "llm_query_batched"}
-        if hasattr(self.manager, "emit"):
-            self.manager.emit(
-                "tool_start",
-                **details,
-                inputs="[predictor payload omitted]"
-                if predictor_call
-                else activity_preview({"args": args, "kwargs": kwargs}),
-            )
+        self.manager.emit(
+            "tool_start",
+            **details,
+            inputs="[predictor payload omitted]"
+            if predictor_call
+            else activity_preview({"args": args, "kwargs": kwargs}),
+        )
         active_token = _ACTIVE_MANAGER.set(self.manager)
         try:
             if not isinstance(args, list) or not isinstance(kwargs, dict):
@@ -153,24 +189,22 @@ class DaytonaInterpreter:
                 value = self._invoke_tool(tool_name, args, kwargs)
             else:
                 raise KeyError(f"Unknown bridged tool: {tool_name}")
-            if hasattr(self.manager, "emit"):
-                self.manager.emit(
-                    "tool_end",
-                    **details,
-                    ok=True,
-                    duration_ms=round((time.monotonic() - started) * 1000),
-                    output="[predictor payload omitted]" if predictor_call else activity_preview(value),
-                )
+            self.manager.emit(
+                "tool_end",
+                **details,
+                ok=True,
+                duration_ms=round((time.monotonic() - started) * 1000),
+                output="[predictor payload omitted]" if predictor_call else activity_preview(value),
+            )
             return {"value": value}
         except Exception as exc:
-            if hasattr(self.manager, "emit"):
-                self.manager.emit(
-                    "tool_end",
-                    **details,
-                    ok=False,
-                    error_type=type(exc).__name__,
-                    duration_ms=round((time.monotonic() - started) * 1000),
-                )
+            self.manager.emit(
+                "tool_end",
+                **details,
+                ok=False,
+                error_type=type(exc).__name__,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
             return {"error": str(exc)[:2000]}
         finally:
             _ACTIVE_MANAGER.reset(active_token)
@@ -222,7 +256,7 @@ class DaytonaInterpreter:
             or len(set(choices)) != len(choices)
         ):
             raise ValueError("Invalid Jev batch inputs")
-        self.manager.consume_budget(len(items))
+        self.manager.consume_budget(len(items), category="other_decisions")
         return self._run_jev_batch(items, question, choices)
 
     # Interpreter APIs every namespace has; registered tools with other names go to _invoke_tool.
@@ -245,7 +279,10 @@ class DaytonaInterpreter:
             callbacks = without_mlflow_dspy_callback(callbacks)
         with mlflow.start_span(name="jev_batch_decisions", span_type=SpanType.LLM) as span:
             span.set_inputs({"item_count": len(items), "question": activity_text(question), "choices": choices})
-            with dspy.context(lm=active_lm, disable_history=True, callbacks=callbacks):
+            with (
+                dspy.context(lm=active_lm, disable_history=True, callbacks=callbacks),
+                decision_usage(span) if active_lm is self.manager.jev_lm else nullcontext(),
+            ):
                 predictions = predictor.batch(examples, num_threads=min(8, len(items)))
             results: list[dict[str, Any]] = []
             for item, prediction in zip(items, predictions, strict=True):
@@ -268,20 +305,37 @@ class DaytonaInterpreter:
         rejections keeps a legitimate answer from blocking the Turn; past the cap it is accepted and flagged.
         """
         typed = _figures(code)
-        submitted = _figures(json.dumps(final, default=str))
-        ungrounded = sorted(
-            literal
-            for literal, value in submitted.items()
-            if literal in typed and not _grounded(literal, value, self._observed)
-        )
+
+        def unseen(value: Any) -> list[str]:
+            return sorted(
+                literal
+                for literal, number in _figures(json.dumps(value, default=str)).items()
+                if literal in typed and not _grounded(literal, number, self._observed)
+            )
+
+        substantive = final
+        if isinstance(final, dict) and "learned_skill_note" in final:
+            substantive = {key: value for key, value in final.items() if key != "learned_skill_note"}
+            note_figures = unseen(final["learned_skill_note"])
+            if note_figures:
+                span.set_attribute(
+                    "learned_note_warning", {"field": "learned_skill_note", "figures": note_figures[:20]}
+                )
+                self.manager.emit(
+                    "learned_note_warning",
+                    namespace=self.ns_id,
+                    field="learned_skill_note",
+                    figures=note_figures[:20],
+                )
+        ungrounded = unseen(substantive)
         if not ungrounded:
             return
         rejected = self._ungrounded_rejections < _MAX_UNGROUNDED_REJECTIONS
         span.set_attribute("ungrounded_submit", True)
-        if hasattr(self.manager, "emit"):
-            self.manager.emit("ungrounded_submit", namespace=self.ns_id, figures=ungrounded[:20], rejected=rejected)
+        self.manager.emit("ungrounded_submit", namespace=self.ns_id, figures=ungrounded[:20], rejected=rejected)
         if rejected:
             self._ungrounded_rejections += 1
+            self.manager.record_submit_rejection()
             span.set_attribute("outcome", "ungrounded_submit_rejected")
             raise error_type(
                 f"SUBMIT rejected: figures {ungrounded[:20]} were typed, not taken from sandbox output. "
@@ -294,6 +348,10 @@ class DaytonaInterpreter:
             raise ValueError("Interpreter code exceeds the 1 MB size limit")
         if variables is not None and not isinstance(variables, dict):
             raise TypeError("Interpreter variables must be an object")
+        # Native Flex uses DSPy Type serializers and restores their original host
+        # objects at facade calls. Do not replace unsupported objects with str().
+        if variables is not None:
+            variables = to_jsonable_python(variables)
         self.start()
         from dspy.primitives.facade import SHIM_SETUP
 
@@ -302,17 +360,15 @@ class DaytonaInterpreter:
         started = time.monotonic()
         if phase == "task" and variables:
             self._observe(json.dumps(variables, default=str))
-        if hasattr(self.manager, "check_turn"):
-            self.manager.check_turn()
-        if hasattr(self.manager, "emit"):
-            self.manager.emit(
-                "repl_code",
-                code=activity_text(code),
-                namespace=self.ns_id,
-                execution_id=execution_id,
-                phase=phase,
-            )
-        from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
+        self.manager.check_turn()
+        self.manager.emit(
+            "repl_code",
+            code=activity_text(code),
+            namespace=self.ns_id,
+            execution_id=execution_id,
+            phase=phase,
+        )
+        from dspy import CodeExecutionError, FinalOutput
 
         response: dict[str, Any] = {}
         with mlflow.start_span(name="sandbox.exec", span_type=SpanType.TOOL) as span:
@@ -335,6 +391,8 @@ class DaytonaInterpreter:
                 response = self.manager.run_namespace(self, payload)
                 span.set_outputs(
                     {
+                        "skill_activity": response.get("skill_activity", []),
+                        "skill_activity_truncated": response.get("skill_activity_truncated", False),
                         "stdout": activity_text(str(response.get("stdout", ""))),
                         "stderr": activity_text(str(response.get("stderr", ""))),
                         "value": activity_preview(
@@ -345,13 +403,14 @@ class DaytonaInterpreter:
                 )
                 span.set_attribute("transport_retries", response.get("transport_retries", 0))
                 if response.get("error"):
+                    response["outcome"] = "remote_code_error"
                     span.set_attribute("outcome", "remote_code_error")
-                    if hasattr(self.manager, "record_sandbox_error"):
-                        self.manager.record_sandbox_error()
+                    self.manager.record_sandbox_error()
                     span.set_attribute("remote_error_type", response.get("error_type", "PythonError"))
                     output = str(response.get("stdout", "")) + str(response.get("stderr", ""))
                     raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")
                 span.set_attribute("outcome", "completed")
+                response["outcome"] = "completed"
                 if response.get("final") is not None:
                     if phase == "task":
                         self._check_grounded_submit(code, response["final"], span, CodeExecutionError)
@@ -360,6 +419,8 @@ class DaytonaInterpreter:
                     return response["value"]
                 return (str(response.get("stdout", "")) + str(response.get("stderr", "")))[-20_000:].strip() or None
             except Exception as exc:
+                if isinstance(exc, CodeExecutionError) and response.get("outcome") == "completed":
+                    response["outcome"] = "ungrounded_submit_rejected"
                 response.update(error=True, error_type=response.get("error_type") or type(exc).__name__)
                 span.set_attribute("transport_retries", getattr(exc, "transport_retries", 0))
                 if not isinstance(exc, CodeExecutionError):
@@ -375,26 +436,27 @@ class DaytonaInterpreter:
                         )
                     )
                     span.set_attribute("outcome", outcome)
+                    response["outcome"] = outcome
                 raise
             finally:
                 if phase == "task":
                     self._observe(f"{response.get('stdout', '')}\n{response.get('value', '')}")
                 span.set_attribute("host_calls", self._host_calls - host_calls_before)
-                if hasattr(self.manager, "emit"):
-                    self.manager.emit(
-                        "repl_output",
-                        namespace=self.ns_id,
-                        execution_id=execution_id,
-                        phase=phase,
-                        duration_ms=round((time.monotonic() - started) * 1000),
-                        stdout=activity_text(str(response.get("stdout", ""))),
-                        stderr=activity_text(str(response.get("stderr", ""))),
-                        value=activity_preview(
-                            response.get("final") if response.get("final") is not None else response.get("value")
-                        ),
-                        error=bool(response.get("error")) or not response,
-                        error_type=response.get("error_type"),
-                    )
+                self.manager.emit(
+                    "repl_output",
+                    namespace=self.ns_id,
+                    execution_id=execution_id,
+                    phase=phase,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                    stdout=activity_text(str(response.get("stdout", ""))),
+                    stderr=activity_text(str(response.get("stderr", ""))),
+                    value=activity_preview(
+                        response.get("final") if response.get("final") is not None else response.get("value")
+                    ),
+                    error=bool(response.get("error")) or not response,
+                    error_type=response.get("error_type"),
+                    outcome=response.get("outcome"),
+                )
 
     def shutdown(self) -> None:
         """Drop this namespace and release the manager once; later calls are no-ops."""

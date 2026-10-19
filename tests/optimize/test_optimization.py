@@ -564,6 +564,11 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
     evidence = {"incumbent_digest": "", "configuration_digest": "current"}
     manifest = _manifest(candidate, "s1-1", _evaluation())
     manifest = replace(manifest, dependencies=evidence)
+    from fleet_rlm.optimize.scorers import SCORER_VERSION
+
+    legacy = replace(manifest, dependencies={**evidence, "scorer": "fleet-metric-v5"})
+    with pytest.raises(ValueError, match="stale"):
+        approve_candidate(candidate, legacy, active, evidence={**evidence, "scorer": SCORER_VERSION})
     with pytest.raises(ValueError, match="stale"):
         approve_candidate(candidate, manifest, active, evidence={**evidence, "configuration_digest": "changed"})
     approve_candidate(candidate, manifest, active, evidence=evidence)
@@ -645,7 +650,7 @@ def test_metric_binds_the_explicit_judge_instead_of_serving_lm() -> None:
     with dspy.context(lm=serving):
         result = fleet_metric(
             dspy.Example(task="13*17", answer="221"),
-            dspy.Prediction(answer="221", lm_calls=2, sandbox_errors=0),
+            dspy.Prediction(answer="221", lm_calls=2, sandbox_errors=0, submit_rejections=0),
             judge_lm=judge,
         )
     assert result.score == 1.0

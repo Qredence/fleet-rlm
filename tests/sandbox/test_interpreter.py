@@ -9,19 +9,126 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import dspy
 import pytest
-from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
+from dspy import CodeExecutionError, FinalOutput
 
 import fleet_rlm.sandbox.interpreter as interpreter_module
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
+from fleet_rlm.workspace import WorkspaceDataset
 
 STOPPED: list[str] = []
+
+
+@pytest.mark.parametrize("route", ["rlm", "flex"])
+def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, route, monkeypatch):
+    """Exercise the real Fleet dispatch, native DSPy bridge, and remote runtime without providers."""
+    import hashlib
+
+    from pydantic_core import to_jsonable_python
+
+    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.signatures import FleetTask, Route
+
+    raw = b"__FILE_BODY_ONLY__,value\none,11\ntwo,17\n"
+    sandbox.fs.upload_file(raw, "/workspace/files/selected.csv")
+    dataset = WorkspaceDataset("files/selected.csv", "selected CSV", len(raw), hashlib.sha256(raw).hexdigest())
+    serialized = []
+    assignments = []
+    transported = []
+    original_serialize = WorkspaceDataset.to_sandbox
+    original_assignment = WorkspaceDataset.sandbox_assignment
+
+    def serialize(self):
+        serialized.append(self)
+        return original_serialize(self)
+
+    def assign(self, name, data):
+        assignments.append((self, name))
+        return original_assignment(self, name, data)
+
+    monkeypatch.setattr(WorkspaceDataset, "to_sandbox", serialize)
+    monkeypatch.setattr(WorkspaceDataset, "sandbox_assignment", assign)
+    manager = manager_on(sandbox)
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: ["files/selected.csv"])
+
+    class RecordingInterpreter(DaytonaInterpreter):
+        def execute(self, code, variables=None):
+            transported.append(json.dumps(to_jsonable_python(variables or {})))
+            return super().execute(code, variables)
+
+    def echo(value: str) -> str:
+        return value
+
+    factory = lambda: RecordingInterpreter(manager)  # noqa: E731
+    lm = dspy.utils.DummyLM(
+        [
+            {
+                "reasoning": "Read the sandbox file",
+                "code": "assert 'view_id' not in globals()\nview_id = id(context)\n"
+                "subtotal = sum(int(line.split(',')[1]) for line in list(context.lines())[1:])\nprint(subtotal)",
+            },
+            {
+                "reasoning": "Reuse the computed value",
+                "code": "assert id(context) == view_id\nSUBMIT(answer=str(subtotal), learned_skill_note='')",
+            },
+        ]
+        * 2
+    )
+    engine = AdaptiveFleetEngine(manager, lm, lm)
+    if route == "flex":
+        engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
+    else:
+        engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=3)
+    with dspy.context(disable_history=True):
+        for _ in range(2):
+            prediction = engine._execute(Route(route), "files/selected.csv", "", "Sum the values", "", "", dataset)
+            assert prediction.answer == "28" and prediction.route == route
+            assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
+    assert serialized == [dataset, dataset]
+    assert assignments == [(dataset, "context"), (dataset, "context")]
+    assert not any("__FILE_BODY_ONLY__" in payload for payload in transported)
+    assert len(dataset.rlm_preview(40)) <= 40
+    assert manager.turn_usage()["submit_rejections"] == manager.turn_usage()["sandbox_errors"] == 0
+    assert lm.history == []
+
+
+@pytest.mark.parametrize("route", ["rlm", "flex"])
+@pytest.mark.parametrize("failure", ["missing", "changed"])
+def test_dataset_initialization_failure_closes_native_interpreters(sandbox, route, failure, monkeypatch):
+    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.signatures import FleetTask, Route
+
+    if failure == "changed":
+        sandbox.fs.upload_file(b"changed", "/workspace/files/selected.txt")
+    dataset = WorkspaceDataset("files/selected.txt", sha256="0" * 64)
+    manager = manager_on(sandbox)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "list_workspace_files",
+        lambda _self: ["files/selected.txt"] if failure == "changed" else [],
+    )
+    lm = dspy.utils.DummyLM([])
+    engine = AdaptiveFleetEngine(manager, lm, lm)
+
+    def echo(value: str) -> str:
+        return value
+
+    factory = lambda: DaytonaInterpreter(manager)  # noqa: E731
+    if route == "flex":
+        engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
+    else:
+        engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory)
+    with pytest.raises(dspy.CodeInterpreterError, match=r"source changed|FileNotFoundError"):
+        engine._execute(Route(route), "", "", "Read the selected file", "", "", dataset)
+    assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
+    assert lm.history == []
 
 
 def manager_on(sandbox, events=None, name="interp-test") -> DaytonaSandboxManager:
@@ -75,6 +182,37 @@ def test_host_tools_run_in_the_interpreters_dspy_context(sandbox):
     assert interpreter.execute("check_active_lm()") is True
 
 
+@pytest.mark.parametrize("selected", [None, ("artifacts/prior.txt",), ("/workspace/artifacts/prior.txt",)])
+def test_native_code_agent_manifest_matches_child_copy_policy(sandbox, monkeypatch, selected):
+    manager = manager_on(sandbox)
+    paths = ["files/source.txt", "skills/check/SKILL.md", "artifacts/prior.txt", "memory/private.txt"]
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: paths)
+    received = []
+    interpreter = DaytonaInterpreter(manager, native_input_paths=selected)
+    interpreter.tools.update(
+        {
+            "__dspy_construct__": lambda **kwargs: kwargs["attr_name"],
+            "__dspy_call__": lambda **kwargs: received.append(kwargs) or {},
+        }
+    )
+    interpreter._invoke_tool("__dspy_construct__", [], {"kind": "RLM", "attr_name": "agent"})
+    inputs = {"workspace_manifest": ", ".join(f"/workspace/{p}" for p in paths), "task": "read inputs"}
+    original = dict(inputs)
+    interpreter._invoke_tool("__dspy_call__", [], {"handle": "agent", "inputs": inputs})
+    expected = (
+        ["files/source.txt", "skills/check/SKILL.md"]
+        if selected is None
+        else ["artifacts/prior.txt", "skills/check/SKILL.md"]
+    )
+    assert received[-1]["inputs"]["workspace_manifest"] == ", ".join(f"/workspace/{p}" for p in expected)
+    assert inputs == original
+    assert received[-1]["inputs"]["task"] == "read inputs"
+    # Reusing a handle for a host-only predictor must not rewrite its inputs.
+    interpreter._invoke_tool("__dspy_construct__", [], {"kind": "Predict", "attr_name": "agent"})
+    interpreter._invoke_tool("__dspy_call__", [], {"handle": "agent", "inputs": inputs})
+    assert received[-1]["inputs"] == original
+
+
 def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch):
     from mlflow.entities import SpanType
 
@@ -86,11 +224,55 @@ def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch
 
     assert interpreter.execute("lookup() + lookup()") == 34
 
-    [span] = spans
+    [span] = [span for span in spans if span["name"] == "sandbox.exec"]
     assert (span["name"], span["span_type"], span["open"]) == ("sandbox.exec", SpanType.TOOL, False)
     assert span["attributes"]["host_calls"] == 2
     assert span["attributes"]["phase"] == "task" and span["attributes"]["namespace"] == interpreter.ns_id
     assert span["attributes"]["outcome"] == "completed"
+    names = [item["name"] for item in spans]
+    assert "sandbox.provision" in names and "sandbox.namespace_prepare" in names
+    prepared = next(item for item in spans if item["name"] == "sandbox.namespace_prepare")
+    assert prepared["attributes"]["namespace"] == interpreter.ns_id
+    assert prepared["attributes"]["agent_id"] == interpreter.manager.agent_id
+    assert prepared["outputs"]["completed"] is True
+
+
+def test_sandbox_skill_receipts_reach_the_progressive_disclosure_scorer(sandbox, monkeypatch):
+    from fleet_rlm.observability import sanitize_trace_span
+    from fleet_rlm.optimize.scorers import _skill_feedback_scorer
+
+    recorded = []
+    monkeypatch.setattr(
+        interpreter_module.mlflow, "start_span", lambda name, span_type: recording_span(recorded, name, span_type)
+    )
+    interpreter = DaytonaInterpreter(manager_on(sandbox))
+    interpreter.execute("save_skill('example', 'Use for examples', 'Example instructions')")
+    # A helper returning successfully remains visible even if later code in the cell fails.
+    with pytest.raises(CodeExecutionError):
+        interpreter.execute("use_skill('example')\nraise ValueError('later failure')")
+    spans = [
+        SimpleNamespace(**{**item, "span_id": str(i), "parent_id": "root"})
+        for i, item in enumerate(recorded)
+        if item["name"] == "sandbox.exec"
+    ]
+    for span in spans:
+        span.set_outputs = lambda value, target=span: setattr(target, "outputs", value)
+        sanitize_trace_span(span)
+    spans.insert(
+        0,
+        SimpleNamespace(name="fleet_turn", parent_id=None, inputs={"task": "Use a Skill"}, outputs={"answer": "Done"}),
+    )
+    trace = SimpleNamespace(search_spans=lambda: spans)
+    contexts = []
+
+    def judge(**kwargs):
+        contexts.append(kwargs)
+        return SimpleNamespace(value=True, rationale="Actual helper executions were reviewed.")
+
+    assert _skill_feedback_scorer(judge)(trace=trace).value is True
+    activity = contexts[0]["inputs"]["skill_activity"]
+    assert [item["helper_receipts"][0]["helper"] for item in activity] == ["save_skill", "use_skill"]
+    assert all(item["helper_receipts"][0]["completed"] for item in activity)
 
 
 def test_bridge_and_execution_events_show_evidence_and_hide_secrets(sandbox):
@@ -129,7 +311,8 @@ def test_a_failing_host_tool_raises_in_the_sandbox_and_is_reported(sandbox):
 
 
 def test_a_lost_transport_stops_the_turn_without_replay(sandbox, monkeypatch):
-    manager = manager_on(sandbox)
+    events = []
+    manager = manager_on(sandbox, events)
     interpreter = DaytonaInterpreter(manager)
     interpreter.execute("x = 1")
     runs = sandbox.code_interpreter.run_calls
@@ -143,6 +326,7 @@ def test_a_lost_transport_stops_the_turn_without_replay(sandbox, monkeypatch):
     assert manager._cancelled.is_set() and STOPPED[-1] == sandbox.id
     assert sandbox.code_interpreter.run_calls == runs
     assert manager._contexts == {}
+    assert events[-1]["outcome"] == "transport_uncertain"
 
 
 def test_an_expired_deadline_prevents_execution(sandbox):
@@ -184,10 +368,11 @@ def test_a_remote_code_error_marks_the_real_mlflow_span(tmp_path):
 import mlflow
 from types import SimpleNamespace
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
-from dspy.primitives.code_interpreter import CodeExecutionError
+from dspy import CodeExecutionError
 mlflow.set_experiment('execution-test')
 manager = SimpleNamespace(run_namespace=lambda *_a: {
-    'error': True, 'error_type': 'ValueError', 'stderr': 'ValueError: verification_probe'})
+    'error': True, 'error_type': 'ValueError', 'stderr': 'ValueError: verification_probe'},
+    check_turn=lambda: None, emit=lambda *_a, **_kw: None, record_sandbox_error=lambda: None)
 interpreter = DaytonaInterpreter(manager)
 interpreter.start = lambda: None
 with mlflow.start_span(name='execution-test') as root:
@@ -258,3 +443,63 @@ def test_ungrounded_submit_is_accepted_and_flagged_after_the_rejection_cap(sandb
     assert isinstance(final, FinalOutput)
     flags = [event["rejected"] for event in events if event["event"] == "ungrounded_submit"]
     assert flags == [True, True, False]
+
+
+@pytest.mark.parametrize("positional", [False, True], ids=["keyword", "positional"])
+def test_should_accept_note_constants_without_weakening_substantive_grounding(sandbox, positional):
+    events = []
+    manager = manager_on(sandbox, events)
+    interpreter = DaytonaInterpreter(manager)
+    interpreter.output_fields = [{"name": "findings"}, {"name": "learned_skill_note"}]
+    interpreter.execute("result = 17\nprint(result)")
+    submit = "SUBMIT(result, note)" if positional else "SUBMIT(findings=result, learned_skill_note=note)"
+    final = interpreter.execute('note = "Use precision 200 and constant 10005"\n' + submit)
+    assert final.output["findings"] == 17
+    [warning] = [event for event in events if event["event"] == "learned_note_warning"]
+    assert warning["field"] == "learned_skill_note" and warning["figures"] == ["10005", "200"]
+    assert manager.turn_usage()["submit_rejections"] == 0
+    with pytest.raises(CodeExecutionError, match="SUBMIT rejected"):
+        interpreter.execute("SUBMIT(findings='unverified 426880', learned_skill_note='')")
+    assert manager.turn_usage()["submit_rejections"] == 1
+    assert manager.turn_usage()["sandbox_errors"] == 0
+    [output] = [event for event in events if event["event"] == "repl_output" and event.get("error")]
+    assert output["outcome"] == "ungrounded_submit_rejected"
+    assert interpreter._ungrounded_rejections == 1
+    with pytest.raises(CodeExecutionError, match="ValueError"):
+        interpreter.execute("raise ValueError('remote failure')")
+    assert events[-1]["outcome"] == "remote_code_error"
+    assert manager.turn_usage()["sandbox_errors"] == manager.turn_usage()["submit_rejections"] == 1
+
+
+def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sandbox):
+    """Native Evaluate/RLM contract over recorded output; no claim of improved live model behavior."""
+    from dspy.primitives.facade import SandboxLM
+
+    from fleet_rlm.engine.signatures import STOPPING_RULES
+
+    fixture = json.loads((Path(__file__).parents[1] / "fixtures/pi_digit_trace.json").read_text())
+    events = []
+    manager = manager_on(sandbox, events)
+    # The scripted observation is captured evidence, not a fresh computation of pi.
+    lm = dspy.utils.DummyLM(
+        [
+            {"reasoning": "Use the captured execution output", "code": f"print({fixture['captured_stdout']!r})"},
+            {
+                "reasoning": "Submit the observed result",
+                "code": f"SUBMIT(answer='5', learned_skill_note={fixture['learned_note']!r})",
+            },
+        ]
+    )
+    signature = dspy.Signature("task -> answer, learned_skill_note").with_instructions(STOPPING_RULES)
+    rlm = dspy.RLM(signature, interpreter_factory=lambda: DaytonaInterpreter(manager), max_iters=3)
+    example = dspy.Example(task=fixture["task"], answer=fixture["answer"]).with_inputs("task")
+    with dspy.context(lm=SandboxLM(lm, manager.consume_budget), disable_history=True):
+        result = dspy.Evaluate(devset=[example], metric=dspy.evaluate.answer_exact_match, num_threads=1)(rlm)
+    assert result.score == 100
+    prediction = result.results[0][1]
+    assert len(prediction.trajectory) == 2
+    assert manager.turn_usage()["lm_calls"] == 2
+    assert manager.turn_usage()["submit_rejections"] == manager.turn_usage()["sandbox_errors"] == 0
+    assert any(event["event"] == "learned_note_warning" for event in events)
+    assert lm.history == []
+    assert fixture["neighborhood"][10] == fixture["answer"]

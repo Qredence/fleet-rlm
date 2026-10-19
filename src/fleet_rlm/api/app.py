@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
@@ -19,7 +18,6 @@ from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.session import SessionRuntimeRegistry
 from fleet_rlm.store import Store
 
-_LOGGER = logging.getLogger("fleet_rlm.api")
 VERSION = version("fleet-rlm")
 
 
@@ -46,25 +44,30 @@ def create_app(
             if initialize_db
             else None
         )
-        if initialize_db and application.state.store is not None:
-            try:
-                await asyncio.to_thread(application.state.store.initialize)
-            finally:
-                await asyncio.to_thread(application.state.store.close_migration_pool)
-        application.state.mlflow_experiment_id = (
-            await asyncio.to_thread(_configure_tracing, resolved) if configure_observability else None
-        )
-        application.state.session_registry = SessionRuntimeRegistry(resolved, application.state.store)
         try:
+            if initialize_db and application.state.store is not None:
+                try:
+                    await asyncio.to_thread(application.state.store.initialize)
+                finally:
+                    await asyncio.to_thread(application.state.store.close_migration_pool)
+            application.state.mlflow_experiment_id = (
+                await asyncio.to_thread(_configure_tracing, resolved) if configure_observability else None
+            )
+            application.state.session_registry = SessionRuntimeRegistry(resolved, application.state.store)
             yield
         finally:
-            await asyncio.to_thread(application.state.session_registry.close)
-            if application.state.store is not None and store is None:
-                await asyncio.to_thread(application.state.store.close)
-            if application.state.mlflow_experiment_id:
-                # uvicorn re-raises SIGTERM after a graceful stop, which skips atexit and MLflow's exit-time flush.
-                with suppress(Exception):
-                    await asyncio.to_thread(mlflow.flush_trace_async_logging)
+            try:
+                if application.state.session_registry is not None:
+                    await asyncio.to_thread(application.state.session_registry.close)
+            finally:
+                try:
+                    if application.state.store is not None and store is None:
+                        await asyncio.to_thread(application.state.store.close)
+                finally:
+                    if application.state.mlflow_experiment_id:
+                        # uvicorn re-raises SIGTERM after graceful stop, skipping MLflow's exit-time flush.
+                        with suppress(Exception):
+                            await asyncio.to_thread(mlflow.flush_trace_async_logging)
 
     app = FastAPI(title="Fleet-RLM Lite API", version=VERSION, lifespan=lifespan)
     app.state.settings = resolved
@@ -74,7 +77,15 @@ def create_app(
 
     @app.get("/health", response_model=Health, tags=["health"])
     def health() -> dict:
-        return {"status": "ok", "version": VERSION}
+        return {
+            "status": "ok",
+            "version": VERSION,
+            "mlflow": {
+                **resolved.mlflow_descriptor(),
+                "experiment_id": app.state.mlflow_experiment_id,
+                "ready": app.state.mlflow_experiment_id is not None,
+            },
+        }
 
     for router in (
         sessions.router,
@@ -87,17 +98,16 @@ def create_app(
     return app
 
 
-def _configure_tracing(settings: FleetSettings) -> str | None:
+def _configure_tracing(settings: FleetSettings) -> str:
     target = settings.mlflow_target()
-    if target.mode == "local" and target.tracking_uri.startswith("http") and not mlflow_is_healthy(target.tracking_uri):
-        _LOGGER.warning(
-            "Local MLflow is not reachable at %s; tracing is off. Start it with `fleet cli` "
-            "or set FLEET_MLFLOW_MODE=databricks.",
-            target.tracking_uri,
+    settings.prepare_mlflow_auth()
+    if target.mode == "local" and not mlflow_is_healthy(target.tracking_uri):
+        raise RuntimeError(
+            f"Local MLflow is not reachable at {target.tracking_uri}; start it with `fleet cli` "
+            "or start an MLflow server separately before using `fleet serve`."
         )
-        return None
     try:
-        return configure_mlflow_observability(
+        experiment_id = configure_mlflow_observability(
             target.experiment_name,
             target.tracking_uri,
             trace_catalog=settings.mlflow_trace_catalog,
@@ -106,5 +116,10 @@ def _configure_tracing(settings: FleetSettings) -> str | None:
             tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
         )
     except Exception as exc:
-        _LOGGER.warning("MLflow tracing could not be configured (%s)", type(exc).__name__)
-        return None
+        raise RuntimeError(
+            f"Could not initialize {target.mode} MLflow experiment {target.experiment_name!r} "
+            f"({type(exc).__name__}); check tracking access and experiment configuration."
+        ) from None
+    if not experiment_id:
+        raise RuntimeError("MLflow initialization did not return an experiment ID")
+    return experiment_id

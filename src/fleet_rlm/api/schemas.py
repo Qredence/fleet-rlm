@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,11 +71,34 @@ class ModelRequest(_Request):
 # Responses
 
 
+class MlflowTraceLocation(BaseModel):
+    """Unity Catalog location associated with the runtime experiment."""
+
+    catalog: str
+    schema_: str = Field(alias="schema")
+    table_prefix: str
+
+
+class MlflowHealth(BaseModel):
+    """Non-secret, initialized tracking destination for process reuse checks."""
+
+    mode: Literal["local", "databricks"]
+    tracking_uri: str
+    workspace_host: str | None = None
+    experiment_name: str
+    eval_experiment_name: str
+    optimization_experiment_name: str
+    trace_location: MlflowTraceLocation | None = None
+    experiment_id: str | None = None
+    ready: bool
+
+
 class Health(BaseModel):
-    """Service status and version."""
+    """Service status, version, and effective MLflow destination."""
 
     status: str
     version: str
+    mlflow: MlflowHealth
 
 
 class SessionSummary(BaseModel):

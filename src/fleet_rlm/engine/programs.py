@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import xml.etree.ElementTree as ElementTree
+from contextlib import nullcontext
+from functools import partial
 from typing import Any
 
 import dspy
@@ -12,8 +13,7 @@ import mlflow
 from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence
-from fleet_rlm.dspy_support import without_mlflow_dspy_callback as _without_mlflow_dspy_callback
+from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence, without_mlflow_dspy_callback
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
 from fleet_rlm.engine.signatures import (
     TRIAGE_CRITERIA,
@@ -24,6 +24,7 @@ from fleet_rlm.engine.signatures import (
     TurnTriage,
     parse_route,
 )
+from fleet_rlm.lm_usage import decision_usage, usage_callbacks
 from fleet_rlm.observability import activity_text
 from fleet_rlm.optimize.artifacts import CompiledProgramFile
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -119,9 +120,10 @@ class AdaptiveFleetEngine(dspy.Module):
         """Run one Turn, attaching the execution evidence and turn usage that scoring reads."""
         owns_turn = not self.sandbox_mgr.root._deadline
         try:
-            prediction = self._run_turn(
-                workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
-            )
+            with dspy.context(callbacks=usage_callbacks(list(dspy.settings.callbacks))):
+                prediction = self._run_turn(
+                    workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
+                )
             # Replace any candidate-provided evidence with observations from the host manager.
             prediction["execution_evidence"] = self._execution_evidence()
             # The metric scores efficiency from these, so evaluation and GEPA see the same numbers.
@@ -178,8 +180,8 @@ class AdaptiveFleetEngine(dspy.Module):
         if mode not in {"rlm", "flex", "hybrid"}:
             raise ValueError("Invalid execution mode")
         if isinstance(context, WorkspaceDataset):
-            raw = self.sandbox_mgr.read_workspace_file(context.workspace_path)
-            if context.sha256 and hashlib.sha256(raw).hexdigest() != context.sha256:
+            metadata = self.sandbox_mgr.stat_workspace_file(context.workspace_path)
+            if context.sha256 and metadata["sha256"] != context.sha256:
                 raise ValueError("Dataset source changed; select the new revision")
         route = self._route(mode, task, workspace_manifest, skills_catalog, context)
         skills_catalog = self._select_skills(task, skills_catalog, route)
@@ -191,17 +193,17 @@ class AdaptiveFleetEngine(dspy.Module):
         if self.jev_lm is None or route is Route.DIRECT or not skills:
             return skills_catalog
         try:
-            self.sandbox_mgr.consume_budget(len(skills))
+            self.sandbox_mgr.consume_budget(len(skills), category="skill_selection")
             examples = [
                 dspy.Example(task=task, skill_name=name, skill_description=description).with_inputs(
                     "task", "skill_name", "skill_description"
                 )
                 for name, description in skills
             ]
-            callbacks = _without_mlflow_dspy_callback(list(dspy.settings.callbacks))
+            callbacks = without_mlflow_dspy_callback(list(dspy.settings.callbacks))
             with mlflow.start_span(name="typesafe_skill_selection", span_type=SpanType.LLM) as span:
                 span.set_inputs({"task": activity_text(task), "skills": [name for name, _ in skills]})
-                with dspy.context(lm=self.jev_lm, callbacks=callbacks):
+                with dspy.context(lm=self.jev_lm, callbacks=callbacks), decision_usage(span):
                     predictions = self.skill_selector.batch(examples, num_threads=min(8, len(examples)))
                 decisions = []
                 for (name, _), prediction in zip(skills, predictions, strict=True):
@@ -232,7 +234,7 @@ class AdaptiveFleetEngine(dspy.Module):
     def _route(self, mode: str, task: str, workspace_manifest: str, skills_catalog: str, context: Any) -> Route:
         """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""
         route = Route.FLEX
-        route_lm = self.jev_lm or self._metered_sub
+        route_lm = self.jev_lm or SandboxLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
         triage_inputs = {
             "task": task,
             "workspace_manifest": workspace_manifest,
@@ -248,9 +250,9 @@ class AdaptiveFleetEngine(dspy.Module):
                 summary = f"Session mode {mode} selects this route without hybrid triage."
             else:
                 if self.jev_lm is not None:
-                    self.sandbox_mgr.consume_budget()
+                    self.sandbox_mgr.consume_budget(category="routing")
                 callbacks = (
-                    _without_mlflow_dspy_callback(list(dspy.settings.callbacks))
+                    without_mlflow_dspy_callback(list(dspy.settings.callbacks))
                     if self.jev_lm is not None
                     else list(dspy.settings.callbacks)
                 )
@@ -260,7 +262,10 @@ class AdaptiveFleetEngine(dspy.Module):
                     span_type=SpanType.LLM if self.jev_lm is not None else SpanType.CHAIN,
                 ) as span:
                     span.set_inputs({name: activity_text(value) for name, value in triage_inputs.items()})
-                    with dspy.context(lm=route_lm, callbacks=callbacks):
+                    with (
+                        dspy.context(lm=route_lm, callbacks=callbacks),
+                        decision_usage(span) if self.jev_lm is not None else nullcontext(),
+                    ):
                         decision = self.triage(**triage_inputs).route
                     evidence = decision_evidence(decision, route_lm)
                     # An unknown or missing label takes the bounded RLM path.
@@ -314,6 +319,8 @@ class AdaptiveFleetEngine(dspy.Module):
             return dspy.Prediction(answer=answer, learned_skill_note="", route=route.value)
 
         agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
+        if route is Route.FLEX and isinstance(context, WorkspaceDataset):
+            context = context.flex_input()
         with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
             prediction = agent(
                 workspace_manifest=workspace_manifest,

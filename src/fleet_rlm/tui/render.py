@@ -165,6 +165,7 @@ class TurnTracker:
     completion_tokens: int = 0
     reasoning_tokens: int = 0
     sandbox_errors: int = 0
+    submit_rejections: int = 0
     cancelling: bool = False
     items: list[CollapsibleItem] = field(default_factory=list)
     notices: list[RenderableType] = field(default_factory=list)
@@ -395,7 +396,8 @@ class TurnTracker:
             val = event.get("value")
             item.value = str(val) if val not in (None, "null") else None
             if has_error:
-                self.sandbox_errors += 1
+                if event.get("outcome") in (None, "remote_code_error"):
+                    self.sandbox_errors += 1
                 if not item.user_toggled:
                     item.expanded = True
             elif not item.user_toggled:
@@ -409,17 +411,23 @@ class TurnTracker:
             if self.max_llm_calls and self.lm_calls >= self.max_llm_calls:
                 self.notices.append(
                     Text(
-                        f"Model-call budget full; no calls remain: {self.lm_calls}/{self.max_llm_calls}",
+                        f"Shared budget full; no calls remain: {self.lm_calls}/{self.max_llm_calls} units",
                         style="yellow",
                     )
                 )
         elif event_type == "ungrounded_submit":
+            if event.get("rejected"):
+                self.submit_rejections += 1
             verdict = "rejected; the agent must compute them" if event.get("rejected") else "accepted after retries"
             self.notices.append(
                 Text(
                     f"SUBMIT with figures not seen in sandbox output ({verdict}): {event.get('figures')}",
                     style="yellow",
                 )
+            )
+        elif event_type == "learned_note_warning":
+            self.notices.append(
+                Text(f"Unreviewed learned note: figures need verification: {event.get('figures')}", style="yellow")
             )
         elif event_type == "agent_spawn":
             agent_id = str(event.get("agent_id") or "")
@@ -465,6 +473,10 @@ class TurnTracker:
             self.cancelling = True
             self.notices.append(Text("Cancellation requested; stopping remote execution…", style="yellow"))
         elif event_type in {"turn_complete", "turn_cancelled", "error"}:
+            for name in ("lm_calls", "sandbox_errors", "submit_rejections"):
+                value = event.get(name)
+                if type(value) is int and value >= 0:
+                    setattr(self, name, value)
             self.terminal_event = event
             self.finished_at = time.monotonic()
             self.sandbox_status = None
@@ -544,18 +556,6 @@ class TurnTracker:
         self._tick += 1
         return True
 
-    def handle_key(self, key: str) -> bool:
-        """Handle a single-key shortcut (`e`/Ctrl+O, `a`, `t`/Ctrl+T, `0`-`9`)."""
-        if key in {"e", "E", "\x0f"}:
-            return self.toggle_latest_repl()
-        if key in {"a", "A"}:
-            return self.toggle_all()
-        if key in {"t", "T", "\x14"}:
-            return self.toggle_thinking()
-        if len(key) == 1 and key.isdigit():
-            return self.toggle_repl_index(int(key))
-        return False
-
     def elapsed_seconds(self) -> float:
         """Return the Turn's elapsed wall time in seconds."""
         end = self.finished_at if self.finished_at is not None else time.monotonic()
@@ -565,9 +565,9 @@ class TurnTracker:
         """Build the live status footer (or final Turn receipt summary when finished)."""
         elapsed = f"{self.elapsed_seconds():.1f}s"
         budget = (
-            f"{self.lm_calls}/{self.max_llm_calls} calls"
+            f"{self.lm_calls}/{self.max_llm_calls} budget units"
             if self.max_llm_calls
-            else (f"{self.lm_calls} calls" if self.lm_calls else "")
+            else (f"{self.lm_calls} budget units" if self.lm_calls else "")
         )
         total_tok = self.prompt_tokens + self.completion_tokens
         tokens = f"{total_tok:,} tok" if total_tok else ""
@@ -776,13 +776,17 @@ def render_event(event: dict[str, Any]) -> None:
         CONSOLE.print(
             f"[yellow]SUBMIT with figures not seen in sandbox output ({verdict}):[/yellow] {event.get('figures')}"
         )
+    elif event_type == "learned_note_warning":
+        CONSOLE.print(
+            Text(f"Unreviewed learned note: figures need verification: {event.get('figures')}", style="yellow")
+        )
     elif event_type == "budget_update":
         calls = event.get("lm_calls")
         maximum = event.get("max_llm_calls")
         if isinstance(calls, int) and isinstance(maximum, int) and calls >= maximum:
-            CONSOLE.print(f"[yellow]Model-call budget full; no calls remain:[/yellow] {calls}/{maximum}")
+            CONSOLE.print(f"[yellow]Shared budget full; no calls remain:[/yellow] {calls}/{maximum} units")
         else:
-            CONSOLE.print(f"[dim]LM calls: {calls}/{maximum}[/dim]")
+            CONSOLE.print(f"[dim]Budget units: {calls}/{maximum}[/dim]")
     elif event_type == "sandbox_resuming":
         state = event.get("state") or "stopped"
         CONSOLE.print(f"[yellow]  ↻ Resuming {state} Daytona sandbox…[/yellow] {identity}")

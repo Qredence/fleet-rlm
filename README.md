@@ -104,10 +104,12 @@ running on that port, the client connects and leaves it running. Pass `--url` to
 connect to a specific server without starting one, or run `uv run fleet serve`
 separately.
 
-The default MLflow mode is Databricks. Pass `--mlflow local` to start a local
-MLflow server under `.fleet/mlflow`, or `--mlflow env` to use the configured
-tracking URI. Reuse the Session ID to continue saved work; omit `--session` to
-create a new short ID.
+`uv run fleet cli` starts local MLflow with persistent data under `.fleet/mlflow`.
+Use `uv run fleet cli databricks` for Databricks managed MLflow and Unity Catalog
+trace storage. Configure the two destinations in `[mlflow.local]` and
+`[mlflow.databricks]` in `config/fleet.toml`. Standalone commands accept
+`--mlflow local|databricks` and default to local; they require an existing
+tracking server. See the [CLI reference](docs/reference/cli.md).
 
 ### 4. Work with a file
 

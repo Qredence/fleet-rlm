@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import dspy
+import pytest
 
 
 def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> None:
@@ -61,7 +62,7 @@ def test_lm_end_event_reports_usage_from_dspys_tracker() -> None:
     lm = SimpleNamespace(model="openai/m")
     with dspy.context(usage_tracker=tracker):
         callback.on_lm_start("c1", lm, {})
-        tracker.add_usage(
+        dspy.settings.usage_tracker.add_usage(
             "openai/m",
             {
                 "prompt_tokens": 40,
@@ -79,6 +80,25 @@ def test_lm_end_event_reports_usage_from_dspys_tracker() -> None:
     }
 
 
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_lm_end_event_derives_total_and_rolls_up_once(fails) -> None:
+    from dspy.utils.usage_tracker import UsageTracker
+
+    callback, events = _usage_callback()
+    parent = UsageTracker()
+    with dspy.context(usage_tracker=parent):
+        callback.on_lm_start("call", SimpleNamespace(model="model"), {})
+        dspy.settings.usage_tracker.add_usage("model", {"prompt_tokens": 12, "completion_tokens": 5})
+        callback.on_lm_end("call", None, RuntimeError("failed") if fails else None)
+        assert dspy.settings.usage_tracker is parent
+    assert events[-1]["event"] == "lm_end"
+    assert events[-1]["ok"] is not fails
+    assert events[-1]["usage"] == {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
+    assert parent.get_total_tokens()["model"]["total_tokens"] == 17
+    assert len(parent.usage_data["model"]) == 1
+    assert callback._usage_scopes == {}
+
+
 def test_lm_end_event_streams_provider_reasoning_redacted() -> None:
     callback, events = _usage_callback()
 
@@ -89,23 +109,35 @@ def test_lm_end_event_streams_provider_reasoning_redacted() -> None:
     assert "reasoning" not in events[-1]
 
 
-def test_lm_end_event_skips_usage_when_a_concurrent_call_shared_the_tracker() -> None:
+def test_lm_end_event_isolates_usage_between_concurrent_tasks() -> None:
+    import asyncio
+
     from dspy.utils.usage_tracker import UsageTracker
 
     callback, events = _usage_callback()
-    tracker = UsageTracker()
-    lm = SimpleNamespace(model="openai/m")
-    with dspy.context(usage_tracker=tracker):
-        callback.on_lm_start("c1", lm, {})
-        callback.on_lm_start("c2", lm, {})
-        tracker.add_usage("openai/m", {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
-        tracker.add_usage("openai/m", {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10})
-        callback.on_lm_end("c1", ["a"], None)
-        callback.on_lm_end("c2", ["b"], None)
-    assert all("usage" not in event for event in events if event["event"] == "lm_end")
+    parent = UsageTracker()
+
+    async def call(call_id, count):
+        callback.on_lm_start(call_id, SimpleNamespace(model="openai/m"), {})
+        await asyncio.sleep(0)
+        dspy.settings.usage_tracker.add_usage(
+            "openai/m", {"prompt_tokens": count, "completion_tokens": count, "total_tokens": 2 * count}
+        )
+        callback.on_lm_end(call_id, ["answer"], None)
+
+    async def run():
+        with dspy.context(usage_tracker=parent):
+            await asyncio.gather(call("c1", 1), call("c2", 5))
+            assert dspy.settings.usage_tracker is parent
+
+    asyncio.run(run())
+    usages = {event["call_id"]: event["usage"]["total_tokens"] for event in events if event["event"] == "lm_end"}
+    assert usages == {"c1": 2, "c2": 10}
+    assert parent.get_total_tokens()["openai/m"]["total_tokens"] == 12
+    assert callback._usage_scopes == {}
 
 
-def test_lm_end_event_omits_usage_without_a_tracker_or_on_failure() -> None:
+def test_lm_end_event_omits_usage_when_provider_reports_none() -> None:
     callback, events = _usage_callback()
     callback.on_lm_start("c1", SimpleNamespace(model="openai/m"), {})
     callback.on_lm_end("c1", ["x"], None)

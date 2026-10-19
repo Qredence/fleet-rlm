@@ -3,35 +3,65 @@
 The `fleet` command has these modes:
 
 ```bash
-uv run fleet cli [--session SESSION_ID] [--url URL] [--mlflow local|env]
-                 [--mlflow-port 5001] [--mlflow-experiment fleet-rlm-dev] [--startup-timeout 180]
-uv run fleet serve [--host 127.0.0.1] [--port 8000]
-uv run fleet eval dataset|run|label
-uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization]
+uv run fleet cli [databricks] [--mlflow local|databricks] [--session SESSION_ID] [--url URL]
+                 [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
+uv run fleet serve [--host 127.0.0.1] [--port 8000] [--mlflow local|databricks]
+uv run fleet eval dataset|run|label ... [--mlflow local|databricks]
+uv run fleet optimize --session SESSION_ID ... [--mlflow local|databricks]
+uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
 ```
 
-For Databricks operations with credentials in `.env`, use
-`uv run --env-file .env fleet ...` so SDK authentication receives them. For
-evaluation, follow the [evaluation canary runbook](../runbooks/evaluation-canary.md):
-the server must use the evaluation experiment and UC prefix before executing
-the task. `fleet eval run` prints recovery identifiers, uses fresh Sessions per
-invocation, and exits unsuccessfully on incomplete collection or scoring.
+Every command defaults to local MLflow. `uv run fleet cli databricks` is the
+shorthand for `uv run fleet cli --mlflow databricks`. The command selects the
+backend; environment variables override values only inside that backend.
+Conflicting selectors are errors, and `--mlflow env` has been retired.
 
-`cli` is the one-command entry point. Unless `--url` is given, it starts the API
-server, waits for its `/health`, opens the interactive Rich client, and stops the
-server when the client exits:
+`cli` starts the API server, waits for readiness, opens the terminal client,
+and stops services it owns when the client exits:
 
-- **MLflow** (`--mlflow env`, the default): the configured tracking destination.
-  `--mlflow local` starts a local MLflow server on
-  `127.0.0.1:{--mlflow-port}` with SQLite storage under `.fleet/mlflow`. The API server it
-  starts traces to experiment `--mlflow-experiment` via environment overrides; `.env` is
-  not modified. `--mlflow env` starts no MLflow server and leaves the configured tracking URI.
-- **API server**: `python -m fleet_rlm.cli serve` on the configured host and port, logging
-  to `.fleet/logs/server.log` (MLflow logs to `.fleet/logs/mlflow.log`).
-- A healthy API server already on that port is reused and left running. `--url`
-  connects to that server only.
-- A service that exits or is not ready within `--startup-timeout` seconds aborts the
-  launch, prints the end of its log, and exits non-zero.
+- Local MLflow starts at `127.0.0.1:5001` by default, storing SQLite metadata
+  and artifacts under `.fleet/mlflow`. Configure its port/data directory and
+  three experiments in `[mlflow.local]`. Data survives shutdown.
+- Databricks mode starts no tracking server. It uses `[mlflow.databricks]`,
+  including the workspace experiments and Unity Catalog trace destinations.
+  For the default `databricks` URI, Fleet supplies the configured `.env`
+  `DATABRICKS_HOST` and `DATABRICKS_TOKEN` to MLflow SDK authentication.
+  `databricks://<profile>` keeps explicit SDK profile selection.
+- `--mlflow-port` overrides the local port and is rejected for Databricks.
+  `--mlflow-experiment` overrides the selected runtime experiment.
+- A healthy API already on the configured port is reused only if its MLflow
+  backend, tracking URI, experiments, and trace location match. `--url` starts
+  nothing and performs the same check. Unknown metadata, unready tracing, or
+  a mismatch aborts the connection. Stop the existing server or choose a
+  different `FLEET_PORT` when switching destinations.
+- Tracking initialization failure aborts API startup. A service that exits or
+  misses `--startup-timeout` aborts the launch and reports its log. Logs are
+  `.fleet/logs/server.log` and `.fleet/logs/mlflow.log`.
+- The launcher stops the API first to flush traces, then its owned MLflow
+  process. Reused services remain running. During shutdown, further Ctrl-C
+  presses cannot interrupt service cleanup. An uncaught Ctrl-C during startup
+  or client operation exits with status 130 without a traceback after cleanup.
+
+Standalone `serve`, `eval`, `optimize`, and `trace` commands connect to an
+existing tracking server. For local operation, keep `fleet cli` running or
+start MLflow separately using the same port/storage configuration:
+
+```bash
+mkdir -p .fleet/mlflow
+uv run mlflow server --host 127.0.0.1 --port 5001 \
+  --backend-store-uri sqlite:///$PWD/.fleet/mlflow/mlflow.db \
+  --default-artifact-root "$PWD/.fleet/mlflow/artifacts"
+```
+
+`fleet eval run` checks its API destination before creating work. The API must
+trace into the selected evaluation experiment and, for Databricks, its evaluation
+UC prefix. Follow the [evaluation canary runbook](../runbooks/evaluation-canary.md).
+The command prints recovery identifiers and exits unsuccessfully on incomplete
+collection or scoring. A successful startup does not guarantee later asynchronous
+trace export; use `trace verify` for explicit readback.
+
+Local MLflow changes tracking and artifact storage. Models, Daytona, judges,
+and PostgreSQL retain their separately configured services and credentials.
 
 `serve` starts only the FastAPI server. If `--session` is omitted, the client generates
 a short session ID.
@@ -58,7 +88,8 @@ Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
 `/optimize [args]` runs `fleet optimize --session <this session> [args]`.
-It compiles and gates a GEPA candidate from self-contained, explicitly selected
+It inherits the session’s MLflow backend and effective profile settings; a conflicting
+`--mlflow` argument is rejected. It compiles and gates a GEPA candidate from self-contained, explicitly selected
 Turn snapshots with approved gold labels; it does not automatically score
 historical traces. Traces without a matching immutable Lakebase snapshot are
 skipped. It requires at least 8 examples from 3 source groups, as well as the

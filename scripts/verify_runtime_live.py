@@ -32,7 +32,11 @@ def main() -> None:
     parser.add_argument("--snapshot", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--local-postgres", action="store_true", help="Use disposable Orb PostgreSQL on port 55432")
-    parser.add_argument("--trace", action="store_true", help="Capture traces in disposable local MLflow storage")
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Capture traces in a unique experiment on the configured local MLflow server (must be running)",
+    )
     parser.add_argument("--output", type=Path, help="Report path (default: .scratch/runtime-validation/<run>.json)")
     args = parser.parse_args()
     if not args.live:
@@ -57,8 +61,7 @@ def main() -> None:
         compiled_program_dir=str(run_dir / "compiled"),
         local_skills_dir=str(run_dir / "skills"),
         mlflow_mode="local",
-        mlflow_tracking_uri=f"sqlite:///{(run_dir / 'mlflow.db').resolve()}",
-        mlflow_experiment_name=f"runtime-acceptance-{uuid.uuid4().hex[:12]}",
+        mlflow_local_experiment_name=f"runtime-acceptance-{uuid.uuid4().hex[:12]}",
         typesafe_api_key="",
         execution_mode="rlm",
         max_upload_bytes=25_000_000,

@@ -71,10 +71,21 @@ def test_trace_span_sanitization_redacts_secret_fields_and_bounds_content():
     assert len(span.outputs["answer"]) < memory_and_eval._TRACE_STRING_LIMIT + 100
 
 
+def test_trace_shows_reasoning_text_but_streams_still_redact_it() -> None:
+    import fleet_rlm.observability as memory_and_eval
+
+    cleaned = memory_and_eval.trace_value(
+        {"reasoning_content": "Plan: use api_key=hidden", "api_key": "value"},
+        nodes=[0],
+    )
+    assert cleaned == {"reasoning_content": "Plan: use api_key=[redacted]", "api_key": "[redacted]"}
+    assert '"reasoning_content": "[redacted]"' in memory_and_eval.activity_preview({"reasoning_content": "private"})
+
+
 def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
-    import fleet_rlm.engine.programs as memory_and_eval
+    from fleet_rlm.dspy_support import without_mlflow_dspy_callback
 
     mlflow_callback = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
     sse_callback = object()
 
-    assert memory_and_eval._without_mlflow_dspy_callback([mlflow_callback, sse_callback]) == [sse_callback]
+    assert without_mlflow_dspy_callback([mlflow_callback, sse_callback]) == [sse_callback]

@@ -7,6 +7,21 @@ import pytest
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
+@pytest.fixture(autouse=True)
+def _batches_use_single_file_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests fake per-file transfers; route the batched child copy through those fakes."""
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_files",
+        lambda self, paths, **_limits: {path: self.read_workspace_file(path) for path in paths},
+    )
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "write_workspace_files",
+        lambda self, files: [self.write_workspace_file(path, data) for path, data in files.items()] and None,
+    )
+
+
 def _manager() -> DaytonaSandboxManager:
     return DaytonaSandboxManager("key", "org", "volume", "session-a")
 
@@ -143,7 +158,7 @@ def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypat
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_selected)
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager: (manager, tools, owns_manager),
+        lambda *, manager, tools, owns_manager, native_input_paths: (manager, tools, owns_manager, native_input_paths),
     )
     captured = ["files/first.txt"]
     factory = root.interpreter_factory(input_paths=captured)
@@ -157,6 +172,7 @@ def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypat
     assert received == [["files/first.txt"]]
     assert result[0] is root
     assert result[2] is True
+    assert result[3] == ("files/first.txt",)
 
 
 def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,7 +189,7 @@ def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pyte
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_default)
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager: (manager, tools, owns_manager),
+        lambda *, manager, tools, owns_manager, native_input_paths: (manager, tools, owns_manager, native_input_paths),
     )
     factory = root.interpreter_factory()
     token = interpreter._ACTIVE_MANAGER.set(active)
@@ -190,7 +206,7 @@ def test_factory_without_active_root_keeps_existing_manager(monkeypatch: pytest.
     root = _manager()
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager: (manager, tools, owns_manager),
+        lambda *, manager, tools, owns_manager, native_input_paths: (manager, tools, owns_manager, native_input_paths),
     )
 
     result = root.interpreter_factory(input_paths=["files/input.txt"])()

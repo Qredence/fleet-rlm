@@ -1014,12 +1014,15 @@ components:
         version:
           type: string
           title: Version
+        mlflow:
+          $ref: '#/components/schemas/MlflowHealth'
       type: object
       required:
       - status
       - version
+      - mlflow
       title: Health
-      description: Service status and version.
+      description: Service status, version, and effective MLflow destination.
     History:
       properties:
         session_id:
@@ -1114,6 +1117,71 @@ components:
       - memory_id
       title: MemorySaved
       description: Acknowledgement of a saved memory entry.
+    MlflowHealth:
+      properties:
+        mode:
+          type: string
+          enum:
+          - local
+          - databricks
+          title: Mode
+        tracking_uri:
+          type: string
+          title: Tracking Uri
+        workspace_host:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Host
+        experiment_name:
+          type: string
+          title: Experiment Name
+        eval_experiment_name:
+          type: string
+          title: Eval Experiment Name
+        optimization_experiment_name:
+          type: string
+          title: Optimization Experiment Name
+        trace_location:
+          anyOf:
+          - $ref: '#/components/schemas/MlflowTraceLocation'
+          - type: 'null'
+        experiment_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Experiment Id
+        ready:
+          type: boolean
+          title: Ready
+      type: object
+      required:
+      - mode
+      - tracking_uri
+      - experiment_name
+      - eval_experiment_name
+      - optimization_experiment_name
+      - ready
+      title: MlflowHealth
+      description: Non-secret, initialized tracking destination for process reuse checks.
+    MlflowTraceLocation:
+      properties:
+        catalog:
+          type: string
+          title: Catalog
+        schema:
+          type: string
+          title: Schema
+        table_prefix:
+          type: string
+          title: Table Prefix
+      type: object
+      required:
+      - catalog
+      - schema
+      - table_prefix
+      title: MlflowTraceLocation
+      description: Unity Catalog location associated with the runtime experiment.
     Mode:
       properties:
         mode:

@@ -4,7 +4,7 @@
 # FLEET_TYPESAFE_API_KEY and FLEET_DATABASE_URL belong in .env/environment.
 # FLEET_DATABASE_MIGRATION_URL is an optional secret-only DDL-role DSN.
 [config]
-schema_version = 3
+schema_version = 4
 
 [runtime]
 execution_mode = "hybrid"
@@ -16,9 +16,11 @@ max_active_children = 4
 max_active_sessions = 64
 linked_children = true
 
-# Native lm15 is fixed. Omitted max_tokens/temperature remain provider-controlled.
+# Native lm15 is fixed. Omitted max_tokens/temperature remain provider-controlled, except the
+# root cap, which bounds runaway reasoning; a capped response fails the format check and is re-asked once.
 [llm.root]
 model = "openai/system.ai.deepseek-v4-1-flash"
+max_tokens = 16384
 num_retries = 3
 cache = false
 
@@ -56,11 +58,16 @@ local_skills_dir = ".fleet/skills"
 lakebase_endpoint = ""
 database_schema = "fleet_rlm_lite"
 
-[mlflow]
-# local: traces, eval and optimizer runs go to the 127.0.0.1 server `fleet cli` starts.
-# In local mode databricks:// URIs and /workspace experiment paths from .env are ignored.
-# databricks: use tracking_uri plus the Unity Catalog trace_* settings and warehouse ID.
-mode = "databricks"
+# Local MLflow is managed by `fleet cli`. Standalone commands connect to it.
+[mlflow.local]
+port = 5001
+data_dir = ".fleet/mlflow"
+experiment_name = "fleet-rlm-dev"
+eval_experiment_name = "fleet-rlm-eval"
+optimization_experiment_name = "fleet-rlm-gepa"
+
+# Select with `fleet cli databricks` or --mlflow databricks.
+[mlflow.databricks]
 tracking_uri = "databricks"
 experiment_name = "/Shared/fleet-rlm-runtime"
 eval_experiment_name = "/Shared/fleet-rlm-eval"

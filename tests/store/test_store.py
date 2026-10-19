@@ -322,8 +322,14 @@ def test_harness_rejects_an_invalid_workspace_listing_before_any_sql_runs():
 def test_harness_reports_artifacts_and_records_the_completion_without_reading_files():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    usage = {
+        "lm_calls": 4,
+        "sandbox_errors": 1,
+        "submit_rejections": 2,
+        "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
+    }
     artifacts = _harness(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
-        "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1"}
+        "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1", **usage}
     )
     assert artifacts == ["artifacts/out.txt"]
     (session_id,), kwargs = calls[0]
@@ -331,6 +337,7 @@ def test_harness_reports_artifacts_and_records_the_completion_without_reading_fi
     turn_id, result = kwargs["completion"]
     assert turn_id == "t1" and result["trace_id"] == "tr-1" and result["artifacts"] == ["artifacts/out.txt"]
     assert json.loads(kwargs["turn_record_json"])["route"] == "flex"
+    assert {key: result[key] for key in usage} == usage
 
 
 def test_claim_turn_refuses_a_key_reused_for_another_task():

@@ -2,7 +2,7 @@
 
 Fleet configuration is provided by `FleetSettings` in
 `src/fleet_rlm/config.py`. Non-secret defaults are loaded from
-`config/fleet.toml` schema 3; process environment and `.env` override them.
+`config/fleet.toml` schema 4; process environment and `.env` override them.
 Unknown TOML keys fail startup; unrelated environment variables are ignored. Prefer the `FLEET_`-prefixed
 names below. A few common unprefixed aliases are accepted as noted in the
 implementation. Keep credentials in a local `.env` or secret manager, never in
@@ -40,18 +40,22 @@ source control.
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
 | `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |
-| `FLEET_MLFLOW_MODE` | `databricks` | `databricks` is the default for runtime, evaluation, and optimization; set `local` explicitly for local-only MLflow. |
-| `FLEET_MLFLOW_TRACKING_URI` | `databricks` | MLflow tracking destination. `MLFLOW_TRACKING_URI` is also accepted. |
-| `FLEET_MLFLOW_EXPERIMENT_NAME` | `/Shared/fleet-rlm-runtime` | Runtime trace experiment. `MLFLOW_EXPERIMENT_NAME` is also accepted. |
-| `FLEET_MLFLOW_TRACE_CATALOG` | `uscentral` | Unity Catalog catalog for runtime traces. |
-| `FLEET_MLFLOW_TRACE_SCHEMA` | `fleet_observability` | Unity Catalog schema for runtime traces. |
-| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` | `fleet_rlm_runtime` | Runtime trace table prefix. |
-| `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | configured warehouse ID | SQL warehouse ID for Databricks tracing. |
-| `FLEET_MLFLOW_EVAL_EXPERIMENT_NAME` | `/Shared/fleet-rlm-eval` | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
-| `FLEET_MLFLOW_OPTIMIZATION_EXPERIMENT_NAME` | `/Shared/fleet-rlm-gepa` | Experiment for GEPA runs and candidate artifacts. |
-| `FLEET_MLFLOW_OPTIMIZATION_TRACE_SCHEMA` | `fleet_gepa` | Unity Catalog schema for optimization traces. |
-| `FLEET_MLFLOW_OPTIMIZATION_TRACE_TABLE_PREFIX` | `fleet_rlm_gepa` | Optimization trace table prefix. |
-| `FLEET_MLFLOW_EVAL_TRACE_TABLE_PREFIX` | `fleet_rlm_eval` | Unity Catalog trace table prefix for evaluation. |
+| `FLEET_MLFLOW_LOCAL_PORT` | `5001` | Loopback MLflow port; the tracking URI is derived from it. |
+| `FLEET_MLFLOW_LOCAL_DATA_DIR` | `.fleet/mlflow` | Persistent SQLite and artifact directory for the managed local server. |
+| `FLEET_MLFLOW_LOCAL_EXPERIMENT_NAME` | `fleet-rlm-dev` | Local runtime experiment. |
+| `FLEET_MLFLOW_LOCAL_EVAL_EXPERIMENT_NAME` | `fleet-rlm-eval` | Local evaluation experiment. |
+| `FLEET_MLFLOW_LOCAL_OPTIMIZATION_EXPERIMENT_NAME` | `fleet-rlm-gepa` | Local GEPA experiment. |
+| `FLEET_MLFLOW_DATABRICKS_TRACKING_URI` | `databricks` | Databricks tracking URI: `databricks` or `databricks://<profile>`. |
+| `FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME` | `/Shared/fleet-rlm-runtime` | Runtime trace experiment. |
+| `FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG` | `uscentral` | Unity Catalog catalog for runtime traces. |
+| `FLEET_MLFLOW_DATABRICKS_TRACE_SCHEMA` | `fleet_observability` | Unity Catalog schema for runtime traces. |
+| `FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX` | `fleet_rlm_runtime` | Runtime trace table prefix. |
+| `FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID` | configured warehouse ID | SQL warehouse ID for Databricks tracing. |
+| `FLEET_MLFLOW_DATABRICKS_EVAL_EXPERIMENT_NAME` | `/Shared/fleet-rlm-eval` | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
+| `FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_EXPERIMENT_NAME` | `/Shared/fleet-rlm-gepa` | Experiment for GEPA runs and candidate artifacts. |
+| `FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_TRACE_SCHEMA` | `fleet_gepa` | Unity Catalog schema for optimization traces. |
+| `FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_TRACE_TABLE_PREFIX` | `fleet_rlm_gepa` | Optimization trace table prefix. |
+| `FLEET_MLFLOW_DATABRICKS_EVAL_TRACE_TABLE_PREFIX` | `fleet_rlm_eval` | Unity Catalog trace table prefix for evaluation. |
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |
@@ -60,13 +64,14 @@ Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
 validation; it does not authenticate callers. The API has no authentication.
 
-`databricks` is the default MLflow mode. Runtime traces, evaluation, and GEPA
-use distinct experiments; the optimization experiment uses the `fleet_gepa`
-Unity Catalog schema. The checked-in `/Shared/...` names are portable defaults;
-set environment overrides when using an existing workspace experiment. `fleet
-cli` starts a local MLflow server only when `FLEET_MLFLOW_MODE=local`. In that
-explicit local mode, Databricks URIs and absolute workspace experiment names
-are ignored. `GET /sessions/{id}/config` reports the effective destination.
+Local MLflow is the default for all commands. Select Databricks with
+`fleet cli databricks` or `--mlflow databricks` on standalone commands.
+The selected backend is an explicit command choice, never an environment default.
+`[mlflow.local]` and `[mlflow.databricks]` keep their values independent.
+`fleet cli` manages the local server; standalone commands require it to be
+running. Tracking initialization failure prevents API readiness. `/health`
+reports the non-secret tracking destination and initialized experiment ID without
+acquiring a Session; clients check it before reusing a server.
 
 Databricks mode requires a `databricks` tracking URI, a Unity Catalog catalog,
 runtime and optimization schemas, a SQL warehouse ID, and absolute workspace
@@ -75,7 +80,9 @@ traces but writes optimization runs to its separate experiment.
 
 Authentication is client-specific. MLflow uses the Databricks SDK identity
 selected by its tracking URI (default auth for `databricks`, or the named SDK
-profile in `databricks://<profile>`); Unity Gateway requests use the static
+profile in `databricks://<profile>`). For the default URI, Fleet supplies
+`DATABRICKS_HOST` and `DATABRICKS_TOKEN` from its resolved settings to the SDK,
+including values from `.env`. Unity Gateway requests use the static
 `DATABRICKS_TOKEN` value and Fleet does not refresh it in-process; Lakebase uses
 the PostgreSQL identity in `FLEET_DATABASE_URL` for runtime queries and session
 leases. These settings can therefore resolve to different principals. Databricks
@@ -145,8 +152,27 @@ environment, explicit constructor/CLI overrides. The default path is
 environment-only operation. Set `FLEET_CONFIG` in process environment to select
 another file; an explicit missing/unreadable file is an error. There is no parent
 search, environment interpolation or hot reload. Every file must declare
-`[config] schema_version = 3`. The checked-in TOML lists the supported tables;
+`[config] schema_version = 4`. The checked-in TOML lists the supported tables;
 `FleetSettings` owns one explicit mapping and validates every value.
+
+### Migrating MLflow configuration from schema 3
+
+1. Set `[config] schema_version = 4`. Move the old flat `[mlflow]` destination
+   keys into `[mlflow.databricks]`; remove `mode` and add `[mlflow.local]` as
+   shown in the checked-in config.
+2. Rename old `FLEET_MLFLOW_*` destination variables to
+   `FLEET_MLFLOW_DATABRICKS_*` or `FLEET_MLFLOW_LOCAL_*`, according to their
+   destination. Local tracking uses `FLEET_MLFLOW_LOCAL_PORT` rather than a URI.
+   Remove `FLEET_MLFLOW_MODE`; choose the backend in the command.
+3. Remove raw `MLFLOW_TRACKING_URI` / `MLFLOW_EXPERIMENT_NAME` from `.env`, moving
+   their intended values to the corresponding backend-specific names. Fleet
+   rejects these old `.env` settings and old Fleet environment names with a
+   migration error. Raw SDK process variables are overwritten by explicit MLflow
+   initialization and cleared from owned subprocesses; they do not select a backend.
+   Leave credentials and unrelated MLflow settings intact.
+
+The configuration digest includes the selected backend and both profiles.
+Existing GEPA approval evidence with a different identity requires reevaluation.
 
 Blank dotenv values are intentional overrides, including disabling shared notes.
 Leave optional non-secret overrides commented out rather than inserting blank
@@ -169,8 +195,10 @@ Each `[llm.root]`, `[llm.sub]`, `[llm.reflection]` supports `model`, optional
 `max_tokens` (positive integer), optional `temperature` (finite 0–2), `num_retries`
 (0–10), and `cache` (boolean). Environment equivalents include
 `FLEET_ROOT_MAX_TOKENS`, `FLEET_ROOT_TEMPERATURE`, `FLEET_ROOT_NUM_RETRIES`, and
-`FLEET_ROOT_CACHE`, with SUB/REFLECTION counterparts. Omitted generation options
-stay provider-controlled. Provider compatibility still requires live verification.
+`FLEET_ROOT_CACHE`, with SUB/REFLECTION counterparts. The shipped `[llm.root]` sets
+`max_tokens = 16384` to bound runaway reasoning; a capped response that lacks its output
+fields is re-asked once. Other omitted generation options stay provider-controlled.
+Provider compatibility still requires live verification.
 Native `lm15` remains fixed; no backend setting or per-model deadline is added.
 
 The checked-in values are provisional baselines, not optimized claims. Root/sub

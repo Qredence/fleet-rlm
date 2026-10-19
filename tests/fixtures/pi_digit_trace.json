@@ -1,0 +1,28 @@
+{
+  "trace_id": "tr-e60ebd3bf370e42a8d5e724925de964b",
+  "purpose": "Sanitized diagnostic fixture; no selected immutable replay and no independent gold assessment",
+  "task": "Tell me the 1492252th digits after the decimal point of Pi",
+  "answer": "5",
+  "neighborhood": "867705214653621709715",
+  "captured_stdout": "digit at position 1492252 : 5\nneighborhood: 867705214653621709715\ninteger truncation digit: 5\n",
+  "learned_note": "mp.dps = n + 200; use math.isqrt(10005 * 10**(2*PREC)) with constant 426880",
+  "historical_note_defect": "The accepted note changed executed ** exponentiation to ^, which is Python XOR",
+  "timeline_seconds": {
+    "rlm_start": 8.258,
+    "child_bootstrap_start": 43.185,
+    "first_check_complete": 106.999,
+    "remote_error_complete": 149.122,
+    "corrected_check_complete": 169.857,
+    "submit_rejected": 176.557,
+    "submit_accepted": 196.501,
+    "turn_complete": 215.546
+  },
+  "observed_counts": {
+    "generation_requests": 6,
+    "routing_decisions": 1,
+    "skill_decisions": 3,
+    "lm_calls": 10,
+    "sandbox_errors": 1,
+    "submit_rejections": 1
+  }
+}

@@ -76,6 +76,24 @@ selects one route from the single vocabulary `direct` / `flex` / `rlm`
 labels. The triage label is the route that runs; there is no mapping step.
 Dataset tasks cannot take a context-free direct answer path. Dataset handles
 carry source digests and bounded previews; files stay in the sandbox.
+Context selection, file stat, and pre-execution revision checks calculate size
+and SHA-256 remotely, with the existing 25 MB limit and path checks. They do not
+download file contents just to obtain metadata.
+
+`WorkspaceDataset` implements the public `dspy.SandboxSerializable` contract.
+Native RLM serializes the metadata and reconstructs a `WorkspaceDatasetView`
+once per invocation; the view persists across that invocation's REPL iterations.
+It is a file-backed view, not an eager load of the whole dataset. Flex uses a small
+`dspy.Type` wrapper so its native facade can restore the host handle before an
+inner RLM runs the same four serialization hooks. The wrapper avoids a collision
+between the existing dataset `description` field and DSPy's `Type.description()`.
+The public dataset constructor and persisted four-field descriptor remain unchanged.
+
+DSPy 3.4.1's facade (`SandboxLM`, `SHIM_SETUP`), callback call identity, usage
+tracker, and GEPA proposer/component enumeration remain version-sensitive
+integration points without equivalent top-level exports. They are covered by
+native contract tests; upgrades must revalidate them. Public exports are used
+for serialization, interpreter results/errors, parsing errors, and usage scopes.
 
 DSPy's in-REPL facade constructs host-mediated predictors and agents. Fresh
 nested RLM interpreters allocate real child sandboxes, linked to the session
@@ -108,6 +126,10 @@ deadlines, cancellation, and budget exhaustion propagate without format retries.
 or network sandbox policy. All generated Python still runs under Daytona's
 deployment policy. Native facade-created RLMs retain the compatibility policy
 of copying the current parent's `files/` and `skills/`, not its artifacts/memory.
+Their `workspace_manifest` is rebuilt at the host bridge from permitted child
+inputs, so it does not advertise root-only artifacts. Explicit factory inputs
+remain selected, with ambient Skills included; host-only predictors keep their
+original inputs.
 
 `DaytonaInterpreter` exposes `output_fields`, which DSPy's RLM fills per run, so
 the sandbox `SUBMIT` takes the signature's output fields positionally or by
@@ -116,7 +138,15 @@ keyword (not both), as DSPy's own interpreters do. The host also rejects a
 shown by an execution or input (compared at the typed precision); the model gets
 the rejection as iteration feedback. Figures computed from variables pass. After
 two rejections per namespace the output is accepted and flagged as
-`ungrounded_submit` on the `sandbox.exec` span and as a stream event.
+`ungrounded_submit` on the `sandbox.exec` span and as a stream event. The explicit
+`learned_skill_note` field produces a nonblocking `learned_note_warning` instead;
+all substantive fields retain the guard. Numeric matching is a heuristic, not
+proof of provenance or formula correctness. Notes may be empty and remain
+unreviewed hints; the instructions forbid using a note or memory value as the
+known reference for a supporting check. Shared notes reach the memory summary
+newest first, with near-duplicate summaries dropped and at most eight kept. Shared instructions request submission after one supporting
+check, reuse of computed values, and exact executed syntax in notes; compliance
+is evaluated model behavior, not a host-enforced completion guarantee.
 
 The optimization runner curates approved gold answers, groups by source lineage,
 and uses fresh disposable runtimes for each GEPA/evaluation example. Native DSPy
@@ -198,15 +228,57 @@ with bounded redacted code/output, identity, host-call count, and outcome. Remot
 errors mark that span as failed even when DSPy corrects the error and completes
 the Turn. Overlapping outer Flex orchestration spans must not be added to child
 execution durations. Root spans record the resolved mode and Turn deadline.
+Child preparation, sandbox provisioning/resume, input copying, and namespace
+preparation have separate lifecycle spans with lineage and numeric transfer
+metadata. Child input transfer contains separate `sandbox.input_read` and
+`sandbox.input_write` spans with source/target lineage and byte/file counts;
+failures preserve cleanup and do not publish partial receipts. Turn preparation
+separates context loading, Skill synchronization, workspace inputs, reviewed
+memories, and catalog generation. Replay reads/capture, persistence, and shared
+note writes also have dedicated spans. These record timing without capturing
+file contents or credentials. These expose overhead without changing sandbox isolation or retries.
+Per-call native DSPy usage scopes feed both MLflow LM spans and streamed usage;
+their native rollup preserves module totals without summing nested spans twice.
+Missing usage and monetary cost remain unknown.
+Sandbox Skill helpers also return bounded invocation receipts on `sandbox.exec`,
+including failed invocations. These make actual activation, resource reads,
+script calls, and Skill saves visible to diagnostics without TypeSafe selection.
+Receipts record helper/Skill names and return status, not bodies or script arguments;
+they do not establish script exit status or instruction compliance.
+TypeSafe decision groups use separate native usage scopes and annotate their
+manual spans. DSPy 3.4.1 supplies input/output decision counts without totals;
+Fleet derives a total only when both counts are reported and rolls the entries
+into native module tracking once. Failed calls retain any reported usage.
+
+The root trace and persisted Turn record contain `artifact_changes`, comparing
+pre-Turn digests with bounded host-collected artifact evidence. Entries distinguish
+created, modified, retained, and deleted content; incomplete evidence leaves
+unobserved inputs unknown. Unchanged bytes cannot prove a new write. The public
+`artifacts` list remains the Session inventory, including retained files.
+
+The host records `lm_calls` as shared budget units, including routing and Skill
+decisions, with a `budget_breakdown` (`generation_query`, `routing`,
+`skill_selection`, `other_decisions`). `sandbox_errors` counts remote Python
+failures; `submit_rejections` separately counts blocking host rejections. These
+counters cover the whole child tree and accompany root outputs and persisted
+completion events. The same host evidence drives efficiency scoring.
 
 ## Validated process configuration and decision evidence
 
-`config/fleet.toml` schema 3 supplies non-secret defaults to `FleetSettings`.
+`config/fleet.toml` schema 4 supplies non-secret defaults to `FleetSettings`.
 Precedence is defaults, TOML, `.env`, environment, then explicit overrides.
 `FLEET_CONFIG` selects another file through process environment only. Credentials
 and the PostgreSQL DSN remain environment-only. The loader rejects legacy/unknown
-keys and invalid files rather than accepting inactive settings. Configuration is
+keys and invalid files rather than accepting inactive settings. MLflow has separate local and Databricks profiles; command selection precedes
+backend validation. `fleet cli` manages local tracking by default, while
+`fleet cli databricks` selects managed MLflow with Unity Catalog tracing.
+Tracking initialization must succeed before readiness. `/health` exposes its
+non-secret destination so clients reject incompatible API reuse without
+acquiring a Session. Configuration is
 frozen at startup; persisted Session mode/model selections remain overrides.
+API shutdown attempts registry cleanup, closure of its owned Store, and trace
+flushing independently, even when an earlier cleanup raises. Injected Stores
+remain the caller's responsibility; trace flushing is best effort.
 `/config` reports effective safe values, sources and digest. A general editor and
 hot reload are not implemented. Root traces record the effective configuration.
 

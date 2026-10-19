@@ -34,7 +34,9 @@ def test_stopping_rules_have_one_source():
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     factory = DaytonaSandboxManager("key", "org", "volume", "sess_sig").interpreter_factory()
-    assert STOPPING_RULES in FleetTask.instructions
+    assert STOPPING_RULES.strip()
+    assert FleetTask.instructions.count(STOPPING_RULES) == 1
+    assert factory.execution_instructions.count(STOPPING_RULES) == 1
     assert factory.execution_instructions.endswith(STOPPING_RULES)
 
 

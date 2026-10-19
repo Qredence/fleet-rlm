@@ -33,7 +33,33 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
 def test_health_reports_the_package_version():
     client, _ = client_for()
     with client:
-        assert client.get("/health").json() == {"status": "ok", "version": "0.8.0"}
+        health = client.get("/health").json()
+        assert (health["status"], health["version"]) == ("ok", "0.8.0")
+        assert health["mlflow"]["mode"] == "local"
+        assert health["mlflow"]["ready"] is False
+
+
+def test_context_selection_and_workspace_stat_use_remote_metadata_without_downloading():
+    import hashlib
+
+    digest = hashlib.sha256(b"selected").hexdigest()
+    manager = FakeManager(
+        stat_workspace_file=lambda path: {"path": path, "size_bytes": 8, "sha256": digest},
+        read_workspace_file=lambda _path: pytest.fail("metadata must not download file contents"),
+    )
+    client, _ = client_for(runtime_with(sandbox_mgr=manager))
+    with client:
+        selected = client.put("/sessions/s1/context", json={"path": "files/selected.csv", "description": "selected"})
+        stat = client.get("/sessions/s1/workspace/stat/files/selected.csv")
+        descriptor = client.get("/sessions/s1/config").json()["context"]
+    assert selected.status_code == stat.status_code == 200
+    assert selected.json() == stat.json() == {"path": "files/selected.csv", "size_bytes": 8, "sha256": digest}
+    assert descriptor == {
+        "workspace_path": "files/selected.csv",
+        "description": "selected",
+        "size_bytes": 8,
+        "sha256": digest,
+    }
 
 
 def test_an_invalid_session_id_is_a_422_before_any_runtime_is_built():

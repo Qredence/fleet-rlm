@@ -10,7 +10,7 @@ from typing import Any
 
 import dspy
 import pytest
-from dspy.utils.exceptions import AdapterParseError
+from dspy import AdapterParseError
 
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -93,6 +93,31 @@ def _answering_engine() -> AdaptiveFleetEngine:
         answer="computed", learned_skill_note=""
     )
     return engine
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_dataset_revision_check_uses_remote_stat_before_execution(monkeypatch, changed):
+    from fleet_rlm.workspace import WorkspaceDataset
+
+    engine = _answering_engine()
+    inspected = []
+
+    def metadata(_self, path):
+        inspected.append(path)
+        return {"size_bytes": 8, "sha256": ("b" if changed else "a") * 64}
+
+    monkeypatch.setattr(DaytonaSandboxManager, "stat_workspace_file", metadata)
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda *_args: pytest.fail("no dataset download"))
+    dataset = WorkspaceDataset("files/selected.csv", size_bytes=8, sha256="a" * 64)
+    try:
+        if changed:
+            with pytest.raises(ValueError, match="Dataset source changed"):
+                engine._run_turn("", "", "read", "", "", dataset, "rlm")
+        else:
+            assert engine._run_turn("", "", "read", "", "", dataset, "rlm").answer == "computed"
+        assert inspected == ["files/selected.csv"]
+    finally:
+        engine.sandbox_mgr.end_turn()
 
 
 def test_evidence_collection_failure_keeps_the_answer_and_marks_evidence_incomplete(monkeypatch) -> None:
@@ -338,7 +363,7 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
     monkeypatch.setattr(
         DaytonaSandboxManager,
         "consume_budget",
-        lambda _self, count=1: seen.__setitem__("budget", seen["budget"] + count),
+        lambda _self, count=1, **_kwargs: seen.__setitem__("budget", seen["budget"] + count),
     )
     monkeypatch.setattr(
         DaytonaSandboxManager,
@@ -380,12 +405,26 @@ def test_skill_selection_failure_keeps_the_catalog_but_budget_exhaustion_ends_th
     monkeypatch.setattr(engine.skill_selector, "batch", broken)
     assert engine._select_skills("task", CATALOG, seen["route"].RLM) == CATALOG
 
-    def exhausted(_self, _count=1):
+    def exhausted(_self, _count=1, **_kwargs):
         raise RuntimeError("Shared RLM budget exhausted (3 calls)")
 
     monkeypatch.setattr(DaytonaSandboxManager, "consume_budget", exhausted)
     with pytest.raises(RuntimeError, match="budget exhausted"):
         engine._select_skills("task", CATALOG, seen["route"].RLM)
+
+
+def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch) -> None:
+    engine, seen = _selecting_engine(monkeypatch, set())
+    charged: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "consume_budget",
+        lambda _self, count=1, *, category="generation_query": charged.append((count, category)),
+    )
+    engine.triage = lambda **_kwargs: SimpleNamespace(route="flex")
+
+    assert engine._route("hybrid", "task", "", CATALOG, None) is seen["route"].FLEX
+    assert charged == [(1, "routing")]
 
 
 def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -> None:

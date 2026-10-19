@@ -16,6 +16,8 @@ from pathlib import Path
 
 import httpx
 
+from fleet_rlm.config import FleetSettings
+
 MLFLOW_HOST = "127.0.0.1"
 STATE_DIR = Path(".fleet")
 
@@ -49,8 +51,38 @@ class LaunchPlan:
     start_api: bool = False
     start_mlflow: bool = False
     mlflow_url: str | None = None
+    mlflow_mode: str = "local"
+    mlflow_data_dir: str = ".fleet/mlflow"
     api_env: dict[str, str] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
+
+
+def verify_api_destination(url: str, expected: dict) -> None:
+    """Reject unknown or mismatched tracking destinations without acquiring a Session."""
+    try:
+        response = httpx.get(f"{url.rstrip('/')}/health", timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+        actual = payload.get("mlflow") if isinstance(payload, dict) else None
+    except (httpx.HTTPError, ValueError) as exc:
+        raise LaunchError(f"Could not verify the API MLflow destination at {url} ({type(exc).__name__}).") from None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("status") != "ok"
+        or not isinstance(actual, dict)
+        or actual.get("ready") is not True
+        or not actual.get("experiment_id")
+    ):
+        raise LaunchError(
+            f"API at {url} has no ready MLflow destination metadata; restart it with the current Fleet version."
+        )
+    if any(actual.get(key) != value for key, value in expected.items()):
+        raise LaunchError(
+            f"API MLflow destination mismatch at {url}: requested {expected['mode']} "
+            f"({expected['experiment_name']}); server reports {actual.get('mode')} "
+            f"({actual.get('experiment_name')}). Stop that server or select another FLEET_PORT. "
+            "For evaluation, configure the server runtime experiment and trace prefix for evaluation."
+        )
 
 
 def plan_launch(
@@ -58,33 +90,30 @@ def plan_launch(
     url: str | None,
     host: str,
     port: int,
-    mlflow_mode: str,
-    mlflow_port: int,
-    mlflow_experiment: str,
+    settings: FleetSettings,
     api_healthy: Callable[[str], bool] | None = None,
     mlflow_healthy: Callable[[str], bool] | None = None,
 ) -> LaunchPlan:
-    """Decide what to start. An explicit URL, or an API already running at host:port, is never replaced."""
-    if url:
-        return LaunchPlan(api_url=url.rstrip("/"))
+    """Start owned services, or reuse an API only after checking its destination."""
+    target = settings.mlflow_target()
     api_healthy = api_healthy or api_is_healthy
     mlflow_healthy = mlflow_healthy or mlflow_is_healthy
-    api_url = f"http://{host}:{port}"
-    if api_healthy(api_url):
-        notes = [f"Reusing the API server already running at {api_url}."]
-        if mlflow_mode == "local":
-            notes.append("Local MLflow settings apply only to servers `fleet cli` starts itself.")
-        return LaunchPlan(api_url=api_url, notes=tuple(notes))
-    if mlflow_mode != "local":
-        return LaunchPlan(api_url=api_url, start_api=True)
-    mlflow_url = f"http://{MLFLOW_HOST}:{mlflow_port}"
+    api_url = url.rstrip("/") if url else f"http://{host}:{port}"
+    if url or api_healthy(api_url):
+        verify_api_destination(api_url, settings.mlflow_descriptor())
+        return LaunchPlan(api_url=api_url, notes=(f"Reusing the API server already running at {api_url}.",))
+    environment = settings.mlflow_environment()
+    if target.mode == "databricks":
+        return LaunchPlan(api_url=api_url, start_api=True, api_env=environment, mlflow_mode="databricks")
+    mlflow_url = target.tracking_uri
     reuse = mlflow_healthy(mlflow_url)
     return LaunchPlan(
         api_url=api_url,
         start_api=True,
         start_mlflow=not reuse,
         mlflow_url=mlflow_url,
-        api_env={"FLEET_MLFLOW_TRACKING_URI": mlflow_url, "FLEET_MLFLOW_EXPERIMENT_NAME": mlflow_experiment},
+        mlflow_data_dir=settings.mlflow_local_data_dir,
+        api_env=environment,
         notes=(f"Reusing the MLflow server already running at {mlflow_url}.",) if reuse else (),
     )
 
@@ -103,6 +132,8 @@ class ManagedProcess:
         """Start the command in its own session, appending its output to log_path."""
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         environment = {**os.environ, "MLFLOW_DISABLE_AGENT_HINT": "1", **self.env}
+        for key in ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_ID"):
+            environment.pop(key, None)
         with self.log_path.open("ab") as log:
             self._process = subprocess.Popen(
                 self.command,
@@ -162,14 +193,26 @@ class ManagedProcess:
 def _api_process(plan: LaunchPlan, host: str, port: int) -> ManagedProcess:
     return ManagedProcess(
         "API server",
-        [sys.executable, "-m", "fleet_rlm.cli", "serve", "--host", host, "--port", str(port)],
+        [
+            sys.executable,
+            "-m",
+            "fleet_rlm.cli",
+            "serve",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--mlflow",
+            plan.mlflow_mode,
+        ],
         STATE_DIR / "logs" / "server.log",
         env=plan.api_env,
     )
 
 
-def _mlflow_process(mlflow_port: int) -> ManagedProcess:
-    data = (STATE_DIR / "mlflow").resolve()
+def _mlflow_process(mlflow_port: int, data_dir: str) -> ManagedProcess:
+    data = Path(data_dir).resolve()
+    data.mkdir(parents=True, exist_ok=True)
     return ManagedProcess(
         "MLflow server",
         [
@@ -204,8 +247,17 @@ def running_services(
     started: list[ManagedProcess] = []
 
     def cleanup() -> None:
-        while started:
-            started.pop().stop()
+        # A second Ctrl-C must not interrupt wait() and abandon owned services.
+        handlers = {}
+        if threading.current_thread() is threading.main_thread():
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                handlers[sig] = signal.signal(sig, signal.SIG_IGN)
+        try:
+            while started:
+                started.pop().stop()
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
 
     atexit.register(cleanup)
     previous_handler = None
@@ -215,8 +267,8 @@ def running_services(
         for note in plan.notes:
             log(note)
         if plan.start_mlflow and plan.mlflow_url:
-            mlflow_process = _mlflow_process(mlflow_port)
-            log(f"Starting MLflow server at {plan.mlflow_url} (data in {STATE_DIR / 'mlflow'}) ...")
+            mlflow_process = _mlflow_process(mlflow_port, plan.mlflow_data_dir)
+            log(f"Starting MLflow server at {plan.mlflow_url} (data in {plan.mlflow_data_dir}) ...")
             mlflow_process.start()
             started.append(mlflow_process)
             waited = mlflow_process.wait_ready(lambda: mlflow_is_healthy(plan.mlflow_url or ""), startup_timeout)
@@ -230,7 +282,9 @@ def running_services(
             log(f"API server ready in {waited:.0f}s (log: {api_process.log_path}).")
         yield plan
     finally:
-        cleanup()
-        atexit.unregister(cleanup)
-        if previous_handler is not None:
-            signal.signal(signal.SIGTERM, previous_handler)
+        try:
+            cleanup()
+        finally:
+            atexit.unregister(cleanup)
+            if previous_handler is not None:
+                signal.signal(signal.SIGTERM, previous_handler)

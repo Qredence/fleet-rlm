@@ -38,8 +38,8 @@ def workspace_stat(rel_path: str, runtime: Runtime) -> dict:
         translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404),
         session_lock(runtime),
     ):
-        content = runtime.sandbox_mgr.read_workspace_file(rel_path)
-    return {"path": rel_path, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+        metadata = runtime.sandbox_mgr.stat_workspace_file(rel_path)
+    return {"path": rel_path, "size_bytes": metadata["size_bytes"], "sha256": metadata["sha256"]}
 
 
 @router.get("/sessions/{session_id}/workspace/files/{rel_path:path}", response_class=FileResponse, responses=LOCKED)

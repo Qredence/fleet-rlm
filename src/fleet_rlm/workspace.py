@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
-from dspy.primitives.sandbox_serializable import SandboxSerializable
+from dspy import SandboxSerializable, Type
+from pydantic import ConfigDict, GetCoreSchemaHandler
+from pydantic_core import CoreSchema
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-_NAMESPACE_RE = re.compile(r"^ns_[a-f0-9]{8}$")
 _ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
 
 
@@ -171,7 +173,7 @@ workspace = Workspace()
 
 @dataclass(frozen=True)
 class WorkspaceDataset(SandboxSerializable):
-    """A content-addressed, bounded-preview handle to a session file."""
+    """A content-addressed file handle injected once per native RLM invocation."""
 
     workspace_path: str
     description: str = ""
@@ -185,12 +187,25 @@ class WorkspaceDataset(SandboxSerializable):
         if self.size_bytes < 0 or len(self.description) > 2000:
             raise ValueError("Invalid dataset metadata")
 
+    def to_descriptor(self) -> dict[str, str | int]:
+        """Persist the original four-field descriptor, independently of sandbox serialization."""
+        return {
+            "workspace_path": self.workspace_path,
+            "description": self.description,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+        }
+
+    def flex_input(self) -> SandboxSerializable:
+        """Use native Flex custom-type restoration without changing this dataclass's public contract."""
+        return _FlexDatasetInput(dataset=self)
+
     def sandbox_setup(self) -> str:
-        """Return the import the sandbox needs before sandbox_assignment runs."""
+        """Import JSON; Fleet's interpreter preamble already installs WorkspaceDatasetView."""
         return "import json"
 
     def to_sandbox(self) -> bytes:
-        """Serialize this handle to JSON bytes for the sandbox."""
+        """Serialize metadata as UTF-8 bytes; the source file stays in the workspace."""
         return json.dumps(
             {
                 "path": self.workspace_path,
@@ -198,7 +213,7 @@ class WorkspaceDataset(SandboxSerializable):
                 "size_bytes": self.size_bytes,
                 "sha256": self.sha256,
             }
-        ).encode()
+        ).encode("utf-8")
 
     def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
         """Return sandbox code that binds var_name to a WorkspaceDatasetView built from data_expr."""
@@ -214,3 +229,35 @@ class WorkspaceDataset(SandboxSerializable):
     def __str__(self) -> str:
         """Return the same summary as rlm_preview."""
         return self.rlm_preview()
+
+
+class _FlexDatasetInput(Type, SandboxSerializable):
+    """Flex restores this host object before an inner RLM invokes the dataset's four native hooks.
+
+    The wrapper keeps DSPy's Type.description() separate from the existing
+    WorkspaceDataset.description field. Only the metadata marker crosses Flex;
+    the file-backed view is constructed by the RLM in its own interpreter.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    dataset: WorkspaceDataset
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        """Use Type's model schema, rather than SandboxSerializable's pass-through field schema."""
+        return handler(source_type)
+
+    def format(self) -> str:
+        return "WorkspaceDataset:" + json.dumps(self.dataset.to_descriptor(), sort_keys=True, separators=(",", ":"))
+
+    def sandbox_setup(self) -> str:
+        return self.dataset.sandbox_setup()
+
+    def to_sandbox(self) -> bytes:
+        return self.dataset.to_sandbox()
+
+    def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+        return self.dataset.sandbox_assignment(var_name, data_expr)
+
+    def rlm_preview(self, max_chars: int = 500) -> str:
+        return self.dataset.rlm_preview(max_chars)

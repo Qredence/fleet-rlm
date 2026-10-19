@@ -35,8 +35,8 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
             assert "paths=json.loads" in code
             return json.dumps(self.existing)
 
-        def write_workspace_file(self, relative_path: str, content: bytes) -> None:
-            self.writes.append((relative_path, content))
+        def write_workspace_files(self, files: dict[str, bytes]) -> None:
+            self.writes.extend(files.items())
 
     sandbox = RecordingSandbox()
     with pytest.raises(ValueError, match=r"skills/ledger-audit/existing.txt"):
@@ -85,8 +85,9 @@ class _VolumeDouble:
     def exec_remote_python(self, _code: str) -> str:
         return json.dumps(self.existing)
 
-    def write_workspace_file(self, relative_path: str, content: bytes) -> None:
-        self.writes[relative_path] = content
+    def write_workspace_files(self, files: dict[str, bytes]) -> None:
+        self.batches = getattr(self, "batches", 0) + 1
+        self.writes.update(files)
 
 
 def test_bundled_skills_ship_valid_and_sync_with_local_overrides(tmp_path: Path) -> None:
@@ -126,3 +127,13 @@ def test_a_changed_bundled_skill_replaces_the_session_copy_but_user_edits_still_
     with pytest.raises(ValueError, match=r"skills/mine/SKILL\.md"):
         SkillManager(sandbox, local, bundled).sync_local_skills_to_volume()  # type: ignore[arg-type]
     assert sandbox.writes == {}
+
+
+def test_skill_sync_uploads_every_new_file_in_one_batch() -> None:
+    from fleet_rlm.skills import BUNDLED_SKILLS_DIR, SkillManager
+
+    volume = _VolumeDouble()
+    SkillManager(volume, None, BUNDLED_SKILLS_DIR).sync_local_skills_to_volume()  # type: ignore[arg-type]
+
+    assert volume.batches == 1
+    assert len(volume.writes) >= 3

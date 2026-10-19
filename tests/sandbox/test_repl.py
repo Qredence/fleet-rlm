@@ -73,6 +73,46 @@ def test_errors_and_submit_are_reported(sandbox):
     assert final["final"] == {"answer": 42, "note": "done"}
 
 
+def test_skill_receipts_follow_actual_helper_calls_and_survive_later_errors(sandbox):
+    context = repl.create_context(sandbox)
+    created = run(
+        sandbox,
+        context,
+        "save_skill('example', 'Use for example tasks', 'Read the reference', "
+        "scripts={'check.py': 'print(17)'}, references={'notes.md': 'example reference'})",
+    )
+    assert created["skill_activity"] == [{"helper": "save_skill", "skill": "example", "completed": True}]
+    # Aliases and keyword arguments still call the instrumented helper; source text alone is not evidence.
+    used = run(
+        sandbox, context, "activate = use_skill\nactivate(name='example')\nrun_skill_script('example', 'check.py')"
+    )
+    assert used["skill_activity"] == [
+        {"helper": "use_skill", "skill": "example", "completed": True},
+        {"helper": "run_skill_script", "skill": "example", "completed": True},
+    ]
+    failed = run(sandbox, context, "read_skill_reference('example', 'references/notes.md')\nuse_skill('missing')")
+    assert failed["error"] is True
+    assert failed["skill_activity"] == [
+        {"helper": "read_skill_reference", "skill": "example", "completed": True},
+        {"helper": "use_skill", "skill": "missing", "completed": False},
+    ]
+    empty = run(sandbox, context, "# use_skill('example')\n'run_skill_script'\nif False: use_skill('example')")
+    assert empty["skill_activity"] == []
+    assert not empty["skill_activity_truncated"]
+    discovery = run(sandbox, context, "for _ in range(25): list_skills()\nuse_skill('example')")
+    assert discovery["skill_activity"] == [{"helper": "use_skill", "skill": "example", "completed": True}]
+    assert not discovery["skill_activity_truncated"]
+
+
+def test_skill_receipts_are_bounded_and_preserved_by_submit(sandbox):
+    context = repl.create_context(sandbox)
+    run(sandbox, context, "save_skill('example', 'Use for examples', 'Example instructions')")
+    result = run(sandbox, context, "for _ in range(25): use_skill('example')\nSUBMIT(answer='done')")
+    assert result["final"] == {"answer": "done"}
+    assert len(result["skill_activity"]) == 20
+    assert result["skill_activity_truncated"] is True
+
+
 @pytest.mark.parametrize(
     "code,expected",
     [

@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Generator, Iterable
-from contextlib import contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import quote
@@ -37,6 +37,7 @@ from textual.widgets import Static, TextArea
 
 import fleet_rlm.tui.commands as commands_mod
 import fleet_rlm.tui.render as render_mod
+from fleet_rlm.config import FleetSettings
 from fleet_rlm.tui.commands import (
     COMMANDS,
     MODES,
@@ -129,6 +130,39 @@ def _parse_sse_line(line: str, state: SessionState) -> tuple[dict[str, Any] | No
     if payload.get("event") == "triage_decision" and payload.get("mode"):
         state.mode = str(payload["mode"])
     return event, False
+
+
+def _request_turn(
+    client: httpx.Client, session_id: str, task: str, state: SessionState
+) -> AbstractContextManager[httpx.Response]:
+    """Open the shared Turn HTTP contract; the caller owns response lifetime and cancellation."""
+    return client.stream(
+        "POST",
+        f"/sessions/{quote(session_id, safe='')}/turn",
+        json={"task": task, "idempotency_key": uuid.uuid4().hex, "record_replay": state.record_replay},
+    )
+
+
+def _turn_events(
+    response: httpx.Response,
+    state: SessionState,
+    tracker: TurnTracker,
+    *,
+    lock: AbstractContextManager[Any] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> Generator[dict[str, Any] | None, None, None]:
+    """Update shared Turn state from SSE, yielding events or None for malformed data lines."""
+    for line in response.iter_lines():
+        if cancelled is not None and cancelled():
+            break
+        with lock if lock is not None else nullcontext():
+            event, malformed = _parse_sse_line(line, state)
+            if event is not None:
+                tracker.ingest(event)
+        if malformed:
+            yield None
+        elif event is not None:
+            yield event
 
 
 def _interpolate_gradient(width: int) -> Text:
@@ -1123,34 +1157,22 @@ class FleetTextualApp(App[None]):
         self.refresh_chrome()
 
         def worker() -> None:
-            terminal_event = False
             try:
-                with self.client.stream(
-                    "POST",
-                    f"/sessions/{quote(self.session_id, safe='')}/turn",
-                    json={
-                        "task": task_text,
-                        "idempotency_key": uuid.uuid4().hex,
-                        "record_replay": self.state.record_replay,
-                    },
-                ) as response:
+                with _request_turn(self.client, self.session_id, task_text, self.state) as response:
                     self._active_response = response
                     response.raise_for_status()
-                    for line in response.iter_lines():
-                        if self._cancel_requested:
-                            break
-                        with self._lock:
-                            event, malformed = _parse_sse_line(line, self.state)
-                        if malformed:
+                    for event in _turn_events(
+                        response,
+                        self.state,
+                        tracker,
+                        lock=self._lock,
+                        cancelled=lambda: self._cancel_requested,
+                    ):
+                        if event is None:
                             self.call_from_thread(self.append_markup, "[yellow]Ignoring malformed SSE event.[/yellow]")
                             continue
-                        if event is None:
-                            continue
-                        terminal_event |= event.get("event") in {"turn_complete", "turn_cancelled", "error"}
-                        with self._lock:
-                            tracker.ingest(event)
                         self._notify_turn_update(turn_widget, scroll=True)
-                if self._cancel_requested and not terminal_event:
+                if self._cancel_requested and tracker.terminal_event is None:
                     with self._lock:
                         tracker.finished_at = time.monotonic()
                         tracker.finalize_running_items("cancelled")
@@ -1159,7 +1181,7 @@ class FleetTextualApp(App[None]):
                         "[yellow]Turn stream closed; server cancels on disconnect. "
                         "Check /history for outcome.[/yellow]",
                     )
-                elif not terminal_event:
+                elif tracker.terminal_event is None:
                     with self._lock:
                         tracker.finished_at = time.monotonic()
                         tracker.finalize_running_items("interrupted")
@@ -1186,7 +1208,7 @@ class FleetTextualApp(App[None]):
                         "[yellow]Turn stream closed; server cancels on disconnect. "
                         "Check /history for outcome.[/yellow]",
                     )
-                elif not terminal_event:
+                elif tracker.terminal_event is None:
                     self.call_from_thread(self.append_markup, f"[red]Turn stream failed:[/red] {type(exc).__name__}")
             finally:
                 self._active_response = None
@@ -1202,10 +1224,10 @@ class FleetTextualApp(App[None]):
         threading.Thread(target=worker, name="fleet-textual-turn", daemon=True).start()
 
 
-def run_interactive_cli(base_url: str, session_id: str) -> None:
+def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettings | None = None) -> None:
     """Connect to the API and run the Textual full-screen chat TUI (or non-TTY fallback) until exit."""
     validate_session_id(session_id)
-    state = SessionState()
+    state = SessionState(mlflow_settings=settings)
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
         if sys.stdin.isatty() and CONSOLE.is_terminal:
             FleetTextualApp(client, session_id, state).run()
@@ -1235,28 +1257,14 @@ def run_interactive_cli(base_url: str, session_id: str) -> None:
             tracker = TurnTracker()
             state.last_tracker = tracker
             try:
-                terminal_event = False
-                with client.stream(
-                    "POST",
-                    f"/sessions/{quote(session_id, safe='')}/turn",
-                    json={
-                        "task": user_input,
-                        "idempotency_key": uuid.uuid4().hex,
-                        "record_replay": state.record_replay,
-                    },
-                ) as response:
+                with _request_turn(client, session_id, user_input, state) as response:
                     response.raise_for_status()
-                    for line in response.iter_lines():
-                        event, malformed = _parse_sse_line(line, state)
-                        if malformed:
+                    for event in _turn_events(response, state, tracker):
+                        if event is None:
                             CONSOLE.print("[yellow]Ignoring malformed SSE event.[/yellow]")
                             continue
-                        if event is None:
-                            continue
-                        terminal_event |= event.get("event") in {"turn_complete", "turn_cancelled", "error"}
-                        tracker.ingest(event)
                         render_event(event)
-                if not terminal_event:
+                if tracker.terminal_event is None:
                     CONSOLE.print(
                         "[yellow]Stream ended without a final outcome. Check /history before retrying.[/yellow]"
                     )

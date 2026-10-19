@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -18,6 +19,7 @@ import httpx
 from rich.panel import Panel
 from rich.text import Text
 
+from fleet_rlm.config import FleetSettings
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
 MODES = ("rlm", "flex", "hybrid")
@@ -27,6 +29,7 @@ MODES = ("rlm", "flex", "hybrid")
 class SessionState:
     """Client-side view of the active Session's mode, models, context, replay flag, and latest Turn."""
 
+    mlflow_settings: FleetSettings | None = field(default=None, repr=False)
     mode: str = "hybrid"
     root_model: str = ""
     sub_model: str = ""
@@ -449,13 +452,39 @@ def _optimize(ctx: Context, arg: str) -> None:
     except ValueError as exc:
         CONSOLE.print(f"[red]Invalid /optimize arguments:[/red] {exc}")
         return
-    command = [sys.executable, "-m", "fleet_rlm.cli", "optimize", "--session", ctx.session_id, *extra]
+    settings = ctx.state.mlflow_settings
+    backend = settings.mlflow_mode if settings is not None else "local"
+    for index, value in enumerate(extra):
+        selected = (
+            (extra[index + 1] if index + 1 < len(extra) else "")
+            if value == "--mlflow"
+            else (value.split("=", 1)[1] if value.startswith("--mlflow=") else None)
+        )
+        if selected is not None and selected != backend:
+            CONSOLE.print("[red]/optimize must use the session's MLflow backend.[/red]")
+            return
+    command = [
+        sys.executable,
+        "-m",
+        "fleet_rlm.cli",
+        "optimize",
+        "--session",
+        ctx.session_id,
+        *extra,
+        "--mlflow",
+        backend,
+    ]
+    environment = dict(os.environ)
+    for key in ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_ID"):
+        environment.pop(key, None)
+    if settings is not None:
+        environment.update(settings.mlflow_environment())
     if getattr(getattr(ctx, "state", None), "fullscreen", False):
-        completed = subprocess.run(command, check=False, capture_output=True, text=True)
+        completed = subprocess.run(command, check=False, capture_output=True, text=True, env=environment)
         output = (completed.stdout or "") + (completed.stderr or "")
         CONSOLE.print(Panel(output.strip() or "(no output)", title="Optimization run"))
         return
-    subprocess.run(command, check=False)
+    subprocess.run(command, check=False, env=environment)
 
 
 _MODE_OPTIONS = dict.fromkeys(MODES)

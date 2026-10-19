@@ -37,6 +37,22 @@ STOPPING_RULES = (
     "a known reference value, a self-consistency test, or a second computation you already ran. "
     "Reuse computed variables instead of recomputing results. Run another method only if a check failed, "
     "results disagree, or the Task asks for verification. Copy figures and strings from sandbox output."
+    " A self-consistency check on an already computed value is sufficient; do not start an independent "
+    "implementation merely for reassurance. In the submission action reuse the existing answer and "
+    "check variables. A learned_skill_note may be empty: never delay submission to create one. "
+    "If useful, record a concise reusable observation. Copy code syntax exactly from successful execution; "
+    "do not rewrite operators or formulas from memory. Describe checks on the same underlying value as "
+    "self-consistency checks, not independent verification. Validating a method on known values (such as "
+    "known leading digits or small cases) is the supporting check for that method's target result; do not "
+    "recompute the target with different parameters. Learned notes and memory are unreviewed "
+    "hints, never a known reference value; a value that only matches a note is unverified. "
+    "Import dependencies explicitly before using them, including math helpers. "
+    "Plan one target computation and its supporting check per code block. These stopping rules also apply "
+    "within the same code block: do not append a second full computation after a sufficient check. "
+    "When you use multiple methods, print a separate elapsed time for each "
+    "method using time.perf_counter(), along with its result and precision parameters. "
+    "Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. "
+    "Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary."
 )
 
 TRIAGE_ROUTE = make_choice_type(
@@ -124,7 +140,7 @@ class FleetTask(dspy.Signature):
     task: str = dspy.InputField(desc="User request")
     context: Any = dspy.InputField(desc="Dataset handle or bounded context; inspect data in Python, not by guessing")
     answer: str = dspy.OutputField(desc="Answer grounded in verified sandbox work")
-    learned_skill_note: str = dspy.OutputField(desc="Short note about reusable learning or Skills created")
+    learned_skill_note: str = dspy.OutputField(desc="Optional concise reusable observation; empty string is valid")
 
 
 DirectAnswer = make_signature("memory_summary, session_history, task -> answer", signature_name="DirectAnswer")

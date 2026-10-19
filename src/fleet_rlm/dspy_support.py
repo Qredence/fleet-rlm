@@ -6,9 +6,8 @@ import math
 import re
 from typing import Any
 
-from dspy import ChatAdapter, Signature
+from dspy import AdapterParseError, ChatAdapter, Signature
 from dspy.experimental import Choice
-from dspy.utils.exceptions import AdapterParseError
 from pydantic import BaseModel
 
 

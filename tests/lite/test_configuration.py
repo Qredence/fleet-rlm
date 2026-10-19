@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pydantic import AliasChoices, ValidationError
+from pydantic import ValidationError
 
 from fleet_rlm.config import FleetSettings
 
@@ -14,22 +14,13 @@ from fleet_rlm.config import FleetSettings
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    names = {"FLEET_CONFIG"}
-    for name, field in FleetSettings.model_fields.items():
-        names.add(name.upper())
-        if isinstance(field.validation_alias, str):
-            names.add(field.validation_alias)
-        elif isinstance(field.validation_alias, AliasChoices):
-            names.update(field.validation_alias.choices)
-    for name in names:
-        monkeypatch.delenv(name, raising=False)
     # These tests exercise .env precedence from a private tmp_path working directory.
     monkeypatch.setitem(FleetSettings.model_config, "env_file", ".env")
 
 
 def toml(text):
     Path("config").mkdir(exist_ok=True)
-    Path("config/fleet.toml").write_text("[config]\nschema_version = 3\n" + text)
+    Path("config/fleet.toml").write_text("[config]\nschema_version = 4\n" + text)
 
 
 def test_sources_and_aliases_have_one_precedence(monkeypatch):
@@ -54,7 +45,7 @@ def test_optional_default_file_and_explicit_path(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="existing TOML"):
         FleetSettings(_env_file=None)
     p = tmp_path / "selected.toml"
-    p.write_text('[config]\nschema_version=3\n[runtime]\nexecution_mode="rlm"')
+    p.write_text('[config]\nschema_version=4\n[runtime]\nexecution_mode="rlm"')
     monkeypatch.setenv("FLEET_CONFIG", str(p))
     assert FleetSettings(_env_file=None).execution_mode == "rlm"
 
@@ -86,7 +77,7 @@ def test_invalid_toml_fails_without_echoing_values(content):
 
 def test_schema_and_parse_errors(monkeypatch):
     monkeypatch.setenv("FLEET_CONFIG", "file.toml")
-    for text in ("x=[", "[config]\nschema_version=2", "[config]\nschema_version=3\nextra=1"):
+    for text in ("x=[", "[config]\nschema_version=2", "[config]\nschema_version=4\nextra=1"):
         Path("file.toml").write_text(text)
         with pytest.raises(ValueError):
             FleetSettings(_env_file=None)
@@ -106,6 +97,18 @@ def test_role_settings_are_passed_without_provider_controlled_options(monkeypatc
     assert "temperature" not in calls[1][1]
     assert "max_tokens" not in calls[2][1]
     assert all(kwargs["engine"] == "lm15" for _, kwargs in calls)
+
+
+def test_shipped_defaults_cap_root_output_but_not_sub(monkeypatch):
+    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+    monkeypatch.setenv("FLEET_CONFIG", str(shipped))
+    calls = []
+    monkeypatch.setattr("fleet_rlm.config.dspy.LM", lambda model, **kwargs: calls.append((model, kwargs)))
+    FleetSettings(
+        _env_file=None, databricks_host="https://example.invalid", databricks_token="credential-marker"
+    ).build_lms()
+    assert calls[0][1]["max_tokens"] == 16384
+    assert "max_tokens" not in calls[1][1]
 
 
 def test_public_configuration_omits_credentials_and_tracks_session_override():
@@ -193,7 +196,7 @@ def test_validation_errors_hide_input_values():
     assert "credential-marker" not in str(error.value)
 
 
-@pytest.mark.parametrize("field", ["databricks_host", "fleet_llm_base_url", "mlflow_tracking_uri"])
+@pytest.mark.parametrize("field", ["databricks_host", "fleet_llm_base_url", "mlflow_databricks_tracking_uri"])
 def test_public_urls_cannot_expose_credentials(field):
     with pytest.raises(ValidationError) as error:
         FleetSettings(_env_file=None, **{field: "https://user:credential-marker@example.invalid"})
@@ -257,47 +260,39 @@ def test_cli_reports_invalid_configuration_without_traceback(monkeypatch, capsys
     get_settings.cache_clear()
     assert exit_info.value.code == 2
     err = capsys.readouterr().err
-    assert err.startswith("fleet: error: invalid configuration: ")
+    assert "fleet: error: invalid configuration: " in err
     assert field in err
     assert "Traceback" not in err
 
 
 def test_local_mlflow_mode_ignores_databricks_targets(monkeypatch):
-    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks://profile")
-    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "/Users/someone/fleet")
-    monkeypatch.setenv("FLEET_MLFLOW_EVAL_EXPERIMENT_NAME", "/Users/someone/fleet-eval")
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACKING_URI", "databricks://profile")
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME", "/Users/someone/fleet")
     target = FleetSettings(_env_file=None).mlflow_target()
     assert target == ("local", "http://127.0.0.1:5001", "fleet-rlm-dev", "fleet-rlm-eval", "fleet-rlm-gepa")
 
 
 def test_local_mlflow_mode_keeps_local_targets(monkeypatch):
-    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
-    monkeypatch.setenv("FLEET_MLFLOW_TRACKING_URI", "sqlite:///local.db")
-    monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "mine")
+    monkeypatch.setenv("FLEET_MLFLOW_LOCAL_PORT", "5002")
+    monkeypatch.setenv("FLEET_MLFLOW_LOCAL_EXPERIMENT_NAME", "mine")
     target = FleetSettings(_env_file=None).mlflow_target()
-    assert (target.tracking_uri, target.experiment_name) == ("sqlite:///local.db", "mine")
+    assert (target.tracking_uri, target.experiment_name) == ("http://127.0.0.1:5002", "mine")
 
 
 def test_databricks_mlflow_mode_is_validated_only_when_selected(monkeypatch):
-    monkeypatch.setenv("FLEET_MLFLOW_MODE", "local")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks://profile")
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", "")
     assert FleetSettings(_env_file=None).mlflow_target().mode == "local"
-    monkeypatch.setenv("FLEET_MLFLOW_MODE", "databricks")
-    monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "")
     with pytest.raises(ValidationError, match="Unity Catalog"):
-        FleetSettings(_env_file=None)
-    monkeypatch.delenv("FLEET_MLFLOW_TRACE_CATALOG")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+        FleetSettings(_env_file=None, mlflow_mode="databricks")
+    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG")
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACKING_URI", "http://127.0.0.1:5001")
     with pytest.raises(ValidationError, match="databricks tracking URI"):
-        FleetSettings(_env_file=None)
+        FleetSettings(_env_file=None, mlflow_mode="databricks")
 
 
-def test_checked_in_configuration_defaults_to_databricks(monkeypatch):
-    monkeypatch.delenv("FLEET_MLFLOW_MODE", raising=False)
-    monkeypatch.delenv("FLEET_MLFLOW_TRACKING_URI", raising=False)
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    target = FleetSettings(_env_file=None).mlflow_target()
+def test_configuration_defaults_to_local_and_keeps_databricks_available():
+    assert FleetSettings(_env_file=None).mlflow_target().mode == "local"
+    target = FleetSettings(_env_file=None, mlflow_mode="databricks").mlflow_target()
     assert target.mode == "databricks"
     assert target.experiment_name.startswith("/")
     assert target.optimization_experiment_name.startswith("/")

@@ -13,6 +13,7 @@ and it is concatenated after other helper code, so it must not use ``from __futu
 import ast
 import builtins
 import contextlib
+import functools
 import io
 import json
 import keyword
@@ -46,6 +47,7 @@ RESERVED_NAMES = {
 # DSPy Flex lists these existing interpreter APIs as registered tools.
 REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
 SKILL_HELPERS = ("list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill")
+MAX_SKILL_RECEIPTS = 20
 
 HOST_CALL_TIMEOUT_SECONDS = 600.0
 
@@ -133,6 +135,31 @@ def _make_tool(tool_name: str) -> Any:
     return tool
 
 
+def _receipt_skill_helper(name: str, helper: Any) -> Any:
+    """Record actual helper invocations, excluding instruction bodies, arguments, and results."""
+    if name == "list_skills":
+        return helper
+
+    @functools.wraps(helper)
+    def invoke(*args: Any, **kwargs: Any) -> Any:
+        skill = args[0] if args else kwargs.get("name")
+        receipt = {"helper": name, "skill": skill[:64] if isinstance(skill, str) else None, "completed": False}
+        try:
+            value = helper(*args, **kwargs)
+            receipt["completed"] = True
+            return value
+        finally:
+            with _WRITE_LOCK:
+                receipts = _STATE.get("skill_activity")
+                if receipts is not None:
+                    if len(receipts) < MAX_SKILL_RECEIPTS:
+                        receipts.append(receipt)
+                    else:
+                        _STATE["skill_activity_truncated"] = True
+
+    return invoke
+
+
 def _submit(**kwargs: Any) -> None:
     raise FinalOutput(kwargs)
 
@@ -162,7 +189,9 @@ def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
         ),
         "SUBMIT": _submit,
     }
-    namespace.update({name: context_globals[name] for name in SKILL_HELPERS if name in context_globals})
+    namespace.update(
+        {name: _receipt_skill_helper(name, context_globals[name]) for name in SKILL_HELPERS if name in context_globals}
+    )
     if "workspace" in context_globals:
         namespace.update(
             workspace=context_globals["workspace"], WorkspaceDatasetView=context_globals["WorkspaceDatasetView"]
@@ -203,6 +232,8 @@ def _invalid_bindings(variables: Any, tools: Any) -> bool:
 
 
 def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = None) -> dict[str, Any]:
+    _STATE["skill_activity"] = []
+    _STATE["skill_activity_truncated"] = False
     if not isinstance(code, str) or len(code.encode("utf-8")) > MAX_CODE:
         return {"error": True, "error_type": "ValueError", "stderr": "invalid or oversized code"}
     if _invalid_bindings(variables, tools):
@@ -265,6 +296,8 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
         }
     if output.truncated or errors.truncated:
         result["truncated"] = True
+    result["skill_activity"] = _STATE["skill_activity"]
+    result["skill_activity_truncated"] = _STATE["skill_activity_truncated"]
     return result
 
 

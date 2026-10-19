@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -81,7 +79,7 @@ def session_config(runtime: Runtime, settings: Settings) -> dict:
     return {
         "mode": runtime.execution_mode,
         "models": {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model},
-        "context": asdict(runtime.context) if runtime.context else None,
+        "context": runtime.context.to_descriptor() if runtime.context else None,
         "configuration": runtime_configuration(settings, runtime),
         "limits": {
             "lm_calls": manager.max_llm_calls,
@@ -125,7 +123,7 @@ def set_mode(session_id: str, body: ModeRequest, runtime: Runtime) -> dict:
     The current context is saved with the mode.
     """
     with translate("Session runtime is unavailable", invalid="Invalid Session ID or mode"), session_lock(runtime):
-        context = asdict(runtime.context) if runtime.context else None
+        context = runtime.context.to_descriptor() if runtime.context else None
         runtime.harness.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
         runtime.set_mode(body.mode)
     return {"mode": body.mode}
@@ -155,18 +153,18 @@ def select_context(session_id: str, body: ContextRequest, runtime: Runtime) -> d
     The response reports the file's size and SHA-256 digest.
     """
     with translate("Context selection is unavailable", invalid="Invalid context selection"), session_lock(runtime):
-        content = runtime.sandbox_mgr.read_workspace_file(body.path)
+        metadata = runtime.sandbox_mgr.stat_workspace_file(body.path)
         context = WorkspaceDataset(
             workspace_path=body.path,
             description=body.description,
-            size_bytes=len(content),
-            sha256=hashlib.sha256(content).hexdigest(),
+            size_bytes=metadata["size_bytes"],
+            sha256=metadata["sha256"],
         )
         runtime.harness.store.save_runtime_settings(
-            session_id, {"mode": runtime.execution_mode, "context": asdict(context)}
+            session_id, {"mode": runtime.execution_mode, "context": context.to_descriptor()}
         )
         runtime.context = context
-    return {"path": body.path, "size_bytes": len(content), "sha256": context.sha256}
+    return {"path": body.path, "size_bytes": context.size_bytes, "sha256": context.sha256}
 
 
 @router.delete("/sessions/{session_id}/context", response_model=Status, responses=LOCKED)

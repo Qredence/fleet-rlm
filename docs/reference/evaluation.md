@@ -44,12 +44,55 @@ traces without sending another Turn.
 
 `build_mlflow_scorer_suite(judge_model, judge_lm=None)` returns:
 
-- MLflow judges: `RelevanceToQuery`, `RetrievalGroundedness`, and two
-  `Guidelines` rubrics (sandbox verification, Skill progressive disclosure).
-- `rlm_trajectory_efficiency`: penalizes model calls beyond three and sandbox
-  tracebacks. Model calls are counted by `SpanType.LLM`, not span names.
+- MLflow judges: `RelevanceToQuery`, `RetrievalGroundedness`, and versioned
+  Fleet rubrics for route suitability, execution verification, tool integrity,
+  output instruction compliance, and Skill progressive disclosure.
+- `jev_routing_efficiency_judge`: LLM judgment of whether the selected route fit
+  the task. This is separate from `jev_routing_efficiency`, the deterministic
+  budget-efficiency score.
+- `execution_evidence_diagnostics`: one structured judgment emits both
+  `sandbox_verification_discipline` and `tool_execution_integrity`. It receives
+  a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
+  lineage, status, outcome, code, stdout, stderr, and return values (including
+  `SUBMIT` payloads), with bounded redaction. These assessments use
+  `fleet-trace-assessments-v5`. It does not ask the judge to
+  reconstruct evidence from a serialized full trace. Execution rationales cite
+  real sandbox span IDs; malformed results, placeholder rationales, or unknown
+  citations are scorer errors. The evidence summary includes at most eight
+  execution spans; a trace with more spans fails scoring rather than judging an
+  incomplete subset.
+  Use this validated suite with `mlflow.genai.evaluate` for these two assessment names. A
+  server-registered `{{ trace }}` judge with the same names has none of these
+  checks and can record a pass for a rationale that cites nothing.
+- `stopping_discipline`: judges actual computation code and execution output,
+  including redundant methods within one code block. One target computation
+  plus a supporting check is sufficient; failed checks, disagreement, or an
+  explicit request for verification justify more work.
+  Bootstrap is excluded. Up to eight task execution spans and 12,000 characters
+  of code per span are supported; truncated evidence fails scoring. The judge
+  must cite a supplied execution span when one exists. This is a diagnostic,
+  not a GEPA objective or a host-enforced stopping guarantee. It adds one judge
+  call per scored trace; no scoring call runs during an ordinary serving Turn.
+- `output_instruction_compliance`: evaluates the complete redacted user request
+  and final answer, up to 20,000 characters each. It does not replace the middle
+  of either field with a preview. Missing, empty, oversized, or already truncated
+  evidence produces a scorer error before any judge call. Diagnostic version
+  `fleet-trace-assessments-v5` invalidates comparisons with earlier partial-text
+  judgments; the shared `fleet-metric-v6` and GEPA objectives are unchanged.
+- `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
+  actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
+  cover `use_skill`, `read_skill_reference`, `run_skill_script`, and `save_skill`,
+  even without TypeSafe selection. Each `sandbox.exec` holds at most 20 receipts
+  with helper name, Skill name, and whether the helper returned, plus an explicit
+  truncation flag. Bodies, script arguments, and results are excluded. A returned
+  helper does not prove script exit status or compliance with its instructions.
+  Catalog listing and code that merely mentions a helper do not activate this
+  scorer; it is skipped when no applicable activity or claim is present.
+- `rlm_trajectory_efficiency`: applies the shared efficiency formula to the
+  host-recorded `fleet_turn` output. Nested predictor/model spans and tracebacks
+  are not counted as additional calls or failures.
 - `jev_routing_efficiency`: rewards fast paths without RLM/Flex and bounded
-  RLM/Flex runs.
+  RLM/Flex runs, using host-recorded budget units rather than wrapper spans.
 - `route_correctness`: compares the turn's reported `route` (`direct`, `flex`,
   `rlm`) with the `route` expectation on a labeled case. It returns no value
   when a case has no gold route.
@@ -60,8 +103,19 @@ Retrieval groundedness is applied only to traces containing a `RETRIEVER`
 span. Inapplicable custom scorers return `None`, which MLflow skips, instead of
 logging null feedback without an error. Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
-Current scoring uses `fleet-metric-v5`; changed definitions invalidate earlier
-feedback and candidate approval evidence.
+The GEPA objective uses `fleet-metric-v6`; changes to that metric invalidate
+earlier metric feedback and candidate approval evidence.
+
+Trace diagnostic rubric changes use the independent
+`fleet.trace_scorer_version` plus MLflow scorer name/version metadata. They do not change
+`fleet-metric-v6` or GEPA candidate identity. The code-based Fleet suite is the
+source for Fleet-managed evaluations; historical and manually created MLflow
+assessments remain in the trace as audit history. Re-score a saved trace with
+`score_evaluation_traces` to add new assessments without executing its Turn,
+then filter feedback by `mlflow.assessment.sourceRunId` to inspect that scoring
+run alone.
+These custom code-based scorers run in offline evaluation; they are not
+automatically registered for production monitoring.
 
 ## Metrics
 
@@ -78,7 +132,7 @@ Its components are:
 - DSPy predictor instructions and generated Flex source.
 
 Every metric scores the Turn's final prediction (`answer`, `route`, `lm_calls`,
-`sandbox_errors`) against the example. Each one applies only when its input exists:
+`sandbox_errors`, `submit_rejections`) against the example. Each one applies only when its input exists:
 
 | Objective | Applies when | Score |
 |---|---|---|
@@ -87,7 +141,7 @@ Every metric scores the Turn's final prediction (`answer`, `route`, `lm_calls`,
 | `route` | gold `route` labelled | 1 if the Turn took that route |
 | `artifact_correctness` | structured artifact gold | 1 if content and required Daytona verification match |
 | `delegation_correctness` | structured child gold | 1 if child count, inputs, success and promoted hashes match |
-| `efficiency` | always | Measured execution efficiency; it contributes only after all applicable correctness checks pass |
+| `efficiency` | explicit host usage counters | Measured execution efficiency; it contributes only after all applicable correctness checks pass |
 
 `fleet_metric(gold, pred, trace=None, pred_name=None, pred_trace=None, *, judge_lm)`
 returns `dspy.Prediction(score, feedback, objective_scores)`. `quality` is the
@@ -97,6 +151,41 @@ artifact/delegation checks. `score` is zero if quality is below 1; otherwise it 
 An empty answer scores zero without calling the judge. The feedback lists each
 check and its reason, adds the expected answer, and names the component GEPA is
 tuning during reflection.
+
+`lm_calls` retains its public name and counts shared budget units: requested
+generation/query completions, routing decisions, Skill decisions, and other
+metered decisions. It is not a count of visible provider requests. The diagnostic
+`budget_breakdown` categories sum to this counter. `sandbox_errors` counts remote
+Python failures; `submit_rejections` counts blocking host submission rejections.
+Learned-note warnings carry no penalty. Efficiency is:
+
+```text
+max(0, 1 - 0.015 * max(0, lm_calls - 3)
+         - 0.15 * (sandbox_errors + submit_rejections))
+```
+
+All three counters must be explicit nonnegative integers. Missing legacy rejection
+counts are unknown, not zero: efficiency is omitted, `usage_available` is zero,
+and no efficiency credit or promotion evidence is granted. Existing feedback and
+candidate evidence must be reevaluated under v6; old traces remain inspectable.
+Latency and token usage remain diagnostic rather than weighted objectives.
+
+### Trace regression boundary
+
+Trace `tr-e60ebd3bf370e42a8d5e724925de964b` has a sanitized diagnostic fixture
+in `tests/fixtures/pi_digit_trace.json`. It returned `5`, with first supporting
+checks complete at 106.999 seconds and Turn completion at 215.546 seconds.
+Six generations plus one route and three Skill decisions explain ten budget
+units. It recovered from one Python error and one submission rejection.
+The accepted learned note substituted Python XOR (`^`) for executed exponentiation
+(`**`). Historical stored notes are not rewritten by this remediation.
+
+The fixture is captured execution evidence, not independently assessed gold or
+an approved replay: this Turn did not select immutable replay capture. Scripted
+RLM/Evaluate tests verify the submission contract without recomputing pi or
+demonstrating improved live stopping. Claims about latency, stopping compliance,
+or note fidelity require a separately authorized paired experiment with saved
+trace IDs, correctness checks, usage, lifecycle timings, and a spend cap.
 
 GEPA splits data by source group and searches on train/dev. Holdout is excluded
 from search and evaluated only afterward. Each candidate and the incumbent run
@@ -155,7 +244,8 @@ manifest, file digests, whether replay capture was selected, and the snapshot
 digest. Capture is off by default. A selected Turn stores an immutable snapshot
 in `fleet_lite_replay_snapshots` in the same transaction as successful Turn
 completion. It contains bounded exact workspace file bytes, conversation history,
-memory, selected dataset handle, Skills catalog and revision, execution mode,
+memory (including the captured sandbox environment hint), selected dataset handle,
+Skills catalog and revision, execution mode,
 non-secret configuration, timeout, and Fleet version. Total workspace input is
 limited to 8 MB; oversized
 selected Turns fail before model execution. Snapshot bytes remain in Lakebase;
@@ -193,6 +283,20 @@ PII detector; verify with synthetic canaries before live Databricks trace export
 
 Each `fleet_turn` trace records `request_preview` and `response_preview`
 (first 200 characters of the task and answer) for the MLflow trace list.
+
+Root outputs also carry host-derived `artifact_changes`: `created`, `modified`,
+`retained`, `deleted`, or `unknown` when evidence is incomplete, with before/after
+SHA-256 values. The existing `artifacts` list is the Session inventory, not a list
+of files produced by that Turn. This diagnostic does not change scoring or gold
+approval semantics. Prior answers in history and unreviewed learned notes remain
+program inputs; a continuation with those inputs does not measure unseen-task
+performance.
+Fixed-size host usage counters precede artifact metadata in root outputs so
+artifact-heavy Turns retain scoring evidence under trace sanitization limits.
+
+Manual TypeSafe routing, Skill-selection, and batched-decision spans record
+reported token counts. A total is derived only when both input and output are
+known, and native DSPy tracking includes that usage once alongside generation.
 
 ## RLM-scale cases
 
@@ -236,3 +340,10 @@ configuration. Keep context and model inputs fixed, capture configuration digest
 and report correctness, calls and latency separately. Root/sub token candidates
 16384/8192 are adopted only if the documented acceptance gates pass; otherwise
 retain provider-controlled settings. ReAnchor remains deferred; native GEPA integration is covered by the offline and live canaries.
+
+Stopping instructions apply within generated code blocks as well as between
+REPL actions. When multiple computation methods are used, the agent is
+instructed to print each method's elapsed time and precision parameters.
+Parameters retained in learned notes should be printed with the result;
+omitting them from the note is also valid. These are model instructions;
+offline contract tests do not establish live compliance or latency gains.
