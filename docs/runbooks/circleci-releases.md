@@ -74,7 +74,7 @@ classes, parallelism, schedules, or notifications.
   Production approval additionally requires the reviewed source UUID
   `bc6f50e9-09b0-43f9-8549-55c942fd3f84`; pipeline parameters cannot override it.
   GitHub App organizations must not assume OAuth security-group features are available.
-- [ ] Put an separately issued CircleCI API token under the initially selected owner `zachary@qredence.ai` in `CIRCLECI_READ_TOKEN` in the
+- [ ] Put a separately issued CircleCI API token under the initially selected owner `zachary@qredence.ai` in `CIRCLECI_READ_TOKEN` in the
   production publisher context. The script only uses it for workflow/job reads;
   verify the token's actual platform permissions rather than assuming its variable
   name makes it read-only. Do not use a developer's local CLI token implicitly.

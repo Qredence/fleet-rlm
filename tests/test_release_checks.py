@@ -391,9 +391,12 @@ def github_bundle(bundle, monkeypatch):
     def get(url, **_kwargs):
         if "/git/ref/" in url:
             return {"object": {"type": "commit", "sha": state["sha"]}}
+        if "/releases?" in url:
+            return state.get("listed_releases", [])
         if not state["exists"]:
             return None
         return {
+            "tag_name": "v0.8.0",
             "assets": [{"name": name} for name in state["assets"]],
             "draft": False,
             "prerelease": False,
@@ -457,6 +460,17 @@ def test_github_recovers_exact_tag_without_release(github_bundle):
     release.github_release(path, directory, path.parent / "github.json")
     creates = [call for call in calls if call[1] == "create"]
     assert len(creates) == 1 and "--verify-tag" in creates[0]
+
+
+def test_github_draft_release_prevents_duplicate_creation(github_bundle):
+    path, directory, state, calls = github_bundle
+    state["exists"] = False
+    state["listed_releases"] = [{"tag_name": "v0.8.0", "draft": True, "prerelease": False}]
+
+    with pytest.raises(SystemExit, match="draft or prerelease"):
+        release.github_release(path, directory, path.parent / "github.json")
+
+    assert not any(call[1] == "create" for call in calls)
 
 
 def test_manifest_rejects_changed_release_inputs(bundle, monkeypatch):

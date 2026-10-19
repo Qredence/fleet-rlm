@@ -69,8 +69,10 @@ def test_token_scope_and_cleanup(app, monkeypatch):
 
 
 def test_token_revoked_when_finalization_fails(app):
-    with pytest.raises(RuntimeError, match="failure"), release_auth.github_app_token():
-        raise RuntimeError("failure")
+    # Keep exception suppression separate so CodeQL can follow the cleanup assertion.
+    with pytest.raises(RuntimeError, match="failure"):  # noqa: SIM117
+        with release_auth.github_app_token():
+            raise RuntimeError("failure")
     assert app["revoked"] == 1
 
 

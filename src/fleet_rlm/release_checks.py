@@ -477,6 +477,19 @@ def _finalize_github_release(path: Path, directory: Path, receipt: Path, manifes
     headers = {"Authorization": f"Bearer {token}"}
     base = f"https://api.github.com/repos/{REPOSITORY}"
     existing = _get(f"{base}/releases/tags/{tag}", headers=headers, absent=True)
+    if existing is None:
+        # The by-tag endpoint omits drafts. Search the authenticated listing before creating.
+        page = 1
+        while True:
+            listed = _get(f"{base}/releases?per_page=100&page={page}", headers=headers)
+            matching = [item for item in listed if item.get("tag_name") == tag]
+            if matching:
+                if any(item.get("draft") or item.get("prerelease") for item in matching):
+                    raise SystemExit("an unpublished draft or prerelease exists for this tag; inspect it manually")
+                raise SystemExit("GitHub release listing contains a matching tag missing from the by-tag lookup")
+            if len(listed) < 100:
+                break
+            page += 1
     ref = _get(f"{base}/git/ref/tags/{tag}", headers=headers, absent=True)
     if ref is not None:
         obj = ref["object"]
