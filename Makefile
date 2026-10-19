@@ -1,6 +1,6 @@
 PYTHON_SOURCES := src/fleet_rlm tests scripts
 
-.PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke precommit-run
+.PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run
 
 help:
 	@echo "Fleet-RLM Lite development targets:"
@@ -72,7 +72,8 @@ check-security:
 
 check-release:
 	@test -n "$$FLEET_RELEASE_VERSION" && test -n "$$FLEET_RELEASE_SHA" || (echo "FLEET_RELEASE_VERSION and FLEET_RELEASE_SHA are required" && exit 2)
-	uv run --locked python scripts/release_checks.py preflight --version "$$FLEET_RELEASE_VERSION" --sha "$$FLEET_RELEASE_SHA"
+	@test -n "$$CIRCLE_BRANCH" && test -n "$$CIRCLE_SHA1" || (echo "CIRCLE_BRANCH and CIRCLE_SHA1 are required" && exit 2)
+	uv run --locked python scripts/release_checks.py preflight --version "$$FLEET_RELEASE_VERSION" --sha "$$FLEET_RELEASE_SHA" --branch "$$CIRCLE_BRANCH" --pipeline-sha "$$CIRCLE_SHA1"
 
 build-release:
 	@test -n "$$FLEET_RELEASE_VERSION" || (echo "FLEET_RELEASE_VERSION is required" && exit 2)
@@ -80,10 +81,16 @@ build-release:
 	uv build
 	uv run --locked python scripts/release_checks.py verify-artifacts --version "$$FLEET_RELEASE_VERSION" --dist dist
 	uv run --locked twine check dist/fleet_rlm-*
+	uv run --locked python scripts/release_checks.py create-manifest --dist dist
+	uv run --locked python scripts/release_checks.py verify-manifest --dist dist
 
 verify-release-artifacts:
 	@test -n "$$FLEET_RELEASE_VERSION" || (echo "FLEET_RELEASE_VERSION is required" && exit 2)
 	uv run --locked python scripts/release_checks.py verify-artifacts --version "$$FLEET_RELEASE_VERSION" --dist dist
+	uv run --locked python scripts/release_checks.py verify-manifest --dist dist
+
+release-manifest-check:
+	uv run --locked python scripts/release_checks.py verify-manifest --dist dist
 
 release-smoke:
 	@test -n "$$FLEET_RELEASE_VERSION" || (echo "FLEET_RELEASE_VERSION is required" && exit 2)

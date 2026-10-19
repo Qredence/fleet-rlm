@@ -1,6 +1,9 @@
 version: 2.1
 
 parameters:
+  run_ci:
+    type: boolean
+    default: false
   run_python314:
     type: boolean
     default: false
@@ -14,58 +17,186 @@ parameters:
     type: string
     default: ""
 
+commands:
+  install-uv:
+    steps:
+      - run:
+          name: Install pinned uv
+          command: |
+            curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+  restore-uv-cache:
+    parameters:
+      python-version:
+        type: string
+    steps:
+      - restore_cache:
+          keys:
+            - v1-uv-{{ arch }}-<< parameters.python-version >>-0.12.21-{{ checksum "uv.lock" }}
+  save-uv-cache:
+    parameters:
+      python-version:
+        type: string
+    steps:
+      - save_cache:
+          key: v1-uv-{{ arch }}-<< parameters.python-version >>-0.12.21-{{ checksum "uv.lock" }}
+          paths:
+            - ~/.cache/uv
+  setup-python:
+    parameters:
+      python-version:
+        type: string
+      use-cache:
+        type: boolean
+        default: true
+    steps:
+      - checkout
+      - install-uv
+      - when:
+          condition: << parameters.use-cache >>
+          steps:
+            - restore-uv-cache:
+                python-version: << parameters.python-version >>
+      - run:
+          name: Install locked project dependencies
+          command: uv sync --locked --dev --python << parameters.python-version >>
+      - when:
+          condition: << parameters.use-cache >>
+          steps:
+            - save-uv-cache:
+                python-version: << parameters.python-version >>
+
 jobs:
-  quality:
+  static-checks:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
+    steps:
+      - setup-python:
+          python-version: "3.12"
+      - run:
+          name: Lint, formatting, typing, docs, and API contract
+          command: make lint format-check typecheck check-docs api-check
+
+  test-python:
     parameters:
       python-version:
         type: string
     docker:
       - image: cimg/python:<< parameters.python-version >>
-    environment:
-      UV_VERSION: "0.12.21"
+    resource_class: medium
+    parallelism: 1
     steps:
-      - checkout
+      - setup-python:
+          python-version: << parameters.python-version >>
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
+          name: Run non-live tests
+          command: |
+            mkdir -p test-results
+            uv run --locked pytest --junitxml=test-results/junit.xml
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+          destination: test-results
+
+  list-smarter-tests:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
+    steps:
+      - setup-python:
+          python-version: "3.12"
       - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python << parameters.python-version >>
+          name: Select Python 3.12 test atoms for dynamic parallelism
+          command: circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key
+
+  test-python-312:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
+    parallelism: 2
+    steps:
+      - setup-python:
+          python-version: "3.12"
       - run:
-          name: Run non-live quality checks
-          command: make check
+          name: Run impacted Python 3.12 tests or the full main-branch suite
+          command: |
+            mkdir -p test-results
+            circleci testsuite run "ci tests"
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+          destination: test-results
+
+  package-check:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
+    steps:
+      - setup-python:
+          python-version: "3.12"
+      - run:
+          name: Build and verify distributions, then smoke-test the wheel
+          command: |
+            version=$(uv run --locked python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+            FLEET_RELEASE_VERSION="$version" make build-release
+            FLEET_RELEASE_VERSION="$version" make release-smoke
+      - store_artifacts:
+          path: dist
+          destination: distributions
 
   security:
     docker:
       - image: cimg/python:3.12
+    resource_class: medium
     steps:
-      - checkout
+      - setup-python:
+          python-version: "3.12"
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Audit every locked runtime and development dependency
+          name: Audit locked runtime and development dependencies
           command: make check-security
 
   quality-gate:
     docker:
       - image: cimg/base:current
+    resource_class: small
     steps:
-      - run: echo "All supported Python versions and the locked dependency audit passed."
+      - run:
+          name: Required aggregate quality status
+          command: echo "All CircleCI quality jobs passed."
+
+  validate-release-request:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    steps:
+      - run:
+          name: Validate workflow parameters and release branch
+          command: |
+            if [ "$CIRCLE_BRANCH" != main ]; then
+              echo "Manual CI, Python 3.14, and releases are restricted to main." >&2
+              exit 1
+            fi
+            if [ "<< pipeline.parameters.run_release >>" = true ] && [ "<< pipeline.parameters.run_python314 >>" = true ]; then
+              echo "A release and the Python 3.14 probe cannot run together." >&2
+              exit 1
+            fi
+            if [ "<< pipeline.parameters.run_release >>" = true ] && { [ -z "<< pipeline.parameters.release_version >>" ] || [ -z "<< pipeline.parameters.release_sha >>" ]; }; then
+              echo "Release version and source SHA are required." >&2
+              exit 1
+            fi
 
   python314-probe:
     docker:
       - image: cimg/python:3.14
+    resource_class: medium
     steps:
       - checkout
+      - install-uv
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Probe lockfile dependencies on Python 3.14 (informational)
+          name: Probe locked dependencies and tests on Python 3.14 (informational)
           command: |
             set +e
             uv export --locked --all-groups --no-emit-project --format requirements.txt --output-file /tmp/fleet-requirements.txt
@@ -83,111 +214,116 @@ jobs:
               status=$?
             fi
             if [ "$status" -ne 0 ]; then
-              echo "INFO: Python 3.14 compatibility probe did not pass (exit $status); this job is informational and does not affect the required gate."
+              echo "INFO: Python 3.14 probe did not pass (exit $status); this job is informational."
             fi
             exit 0
 
   release-preflight:
     docker:
       - image: cimg/python:3.12
-    parameters:
-      release-version:
-        type: string
-      release-sha:
-        type: string
+    resource_class: medium
     environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
-      FLEET_RELEASE_SHA: << parameters.release-sha >>
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
     steps:
-      - checkout
+      - setup-python:
+          python-version: "3.12"
+          use-cache: false
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Validate release version and source SHA
+          name: Validate release version, source SHA, and main branch
           command: make check-release
 
   build-release:
     docker:
       - image: cimg/python:3.12
-    parameters:
-      release-version:
-        type: string
+    resource_class: medium
     environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
     steps:
-      - checkout
+      - setup-python:
+          python-version: "3.12"
+          use-cache: false
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Build and verify release distributions once
+          name: Build, verify, and checksum release distributions once
           command: make build-release
       - persist_to_workspace:
           root: .
           paths:
             - dist
+      - store_artifacts:
+          path: dist
+          destination: release-distributions
 
   publish-testpypi:
     docker:
       - image: cimg/python:3.12
+    resource_class: medium
     steps:
       - attach_workspace:
           at: .
       - run:
-          name: Publish distributions to TestPyPI with CircleCI OIDC
+          name: Verify and publish distributions to TestPyPI with OIDC
           command: |
+            cd dist
+            sha256sum -c SHA256SUMS
             python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
-            twine upload --repository testpypi dist/fleet_rlm-*
+            twine upload --repository testpypi fleet_rlm-*
 
   smoke-test-testpypi:
-    docker:
-      - image: cimg/python:3.12
     parameters:
       release-version:
         type: string
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
     environment:
       FLEET_RELEASE_VERSION: << parameters.release-version >>
     steps:
       - checkout
+      - attach_workspace:
+          at: .
+      - install-uv
       - run:
-          name: Install uv
-          command: curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-      - run:
-          name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
-      - run:
-          name: Export the locked runtime environment
+          name: Export the locked runtime dependency set
           command: uv export --locked --no-dev --no-emit-project --format requirements.txt --python 3.12 --output-file /tmp/fleet-smoke-requirements.txt
       - run:
-          name: Install the exact TestPyPI release and verify public entry points
+          name: Download TestPyPI wheel and verify it matches the built artifact
           command: |
-            uv run --locked -- python scripts/release_checks.py smoke --version "$FLEET_RELEASE_VERSION" --index-url https://test.pypi.org/simple --requirements /tmp/fleet-smoke-requirements.txt
+            mkdir -p /tmp/fleet-testpypi
+            python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --index-url https://test.pypi.org/simple --dest /tmp/fleet-testpypi "fleet-rlm==$FLEET_RELEASE_VERSION"
+            built_wheel=$(basename dist/fleet_rlm-"$FLEET_RELEASE_VERSION"-*.whl)
+            downloaded_wheel=$(basename /tmp/fleet-testpypi/fleet_rlm-"$FLEET_RELEASE_VERSION"-*.whl)
+            expected=$(awk -v file="$built_wheel" '$2 == file {print $1}' dist/SHA256SUMS)
+            test -n "$expected"
+            printf '%s  %s\n' "$expected" "/tmp/fleet-testpypi/$downloaded_wheel" | sha256sum -c -
+      - run:
+          name: Smoke-test that exact TestPyPI wheel
+          command: |
+            downloaded_wheel=$(find /tmp/fleet-testpypi -maxdepth 1 -name 'fleet_rlm-*.whl' -print -quit)
+            uv run --locked -- python scripts/release_checks.py smoke --version "$FLEET_RELEASE_VERSION" --wheel "$downloaded_wheel" --requirements /tmp/fleet-smoke-requirements.txt
 
   publish-pypi:
     docker:
       - image: cimg/python:3.12
+    resource_class: medium
     steps:
       - attach_workspace:
           at: .
       - run:
-          name: Publish distributions to PyPI with CircleCI OIDC
+          name: Verify and publish the same distributions to PyPI with OIDC
           command: |
+            cd dist
+            sha256sum -c SHA256SUMS
             python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
-            twine upload dist/fleet_rlm-*
+            twine upload fleet_rlm-*
 
   github-release:
-    docker:
-      - image: cimg/python:3.12
     parameters:
       release-version:
         type: string
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
     environment:
       FLEET_RELEASE_VERSION: << parameters.release-version >>
     steps:
@@ -195,66 +331,85 @@ jobs:
       - attach_workspace:
           at: .
       - run:
-          name: Create version tag and GitHub release
+          name: Create versioned GitHub release from verified artifacts
           command: |
+            cd dist
+            sha256sum -c SHA256SUMS
             command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
             test -n "${GH_TOKEN:-}" || { echo "GH_TOKEN is required from the restricted release context"; exit 1; }
             if gh release view "v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub release already exists"; exit 1; fi
             if git ls-remote --exit-code --tags origin "refs/tags/v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub tag already exists"; exit 1; fi
-            gh release create "v$FLEET_RELEASE_VERSION" dist/fleet_rlm-* --target "$CIRCLE_SHA1" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --generate-notes
+            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$CIRCLE_SHA1" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --generate-notes
 
 workflows:
   required-ci:
-    when: (pipeline.event.name == "push" and pipeline.git.branch == "main") or pipeline.event.name == "pull_request" or (pipeline.parameters.run_release and pipeline.git.branch == "main") or (pipeline.parameters.run_python314 and pipeline.git.branch == "main")
+    when: (pipeline.event.name == "push" and pipeline.git.branch == "main") or pipeline.event.name == "pull_request" or (pipeline.parameters.run_ci and pipeline.git.branch == "main") or (pipeline.parameters.run_release and pipeline.git.branch == "main")
     jobs:
-      - quality:
-          name: quality-python-<< matrix.python-version >>
+      - static-checks
+      - test-python:
+          name: test-python-<< matrix.python-version >>
           matrix:
-            alias: supported-python
             parameters:
-              python-version: ["3.11", "3.12", "3.13"]
+              python-version: ["3.11", "3.13"]
+      - list-smarter-tests
+      - test-python-312:
+          requires:
+            - list-smarter-tests
+      - package-check
       - security
       - quality-gate:
           name: quality
           requires:
-            - quality-python-3.11
-            - quality-python-3.12
-            - quality-python-3.13
+            - static-checks
+            - test-python-3.11
+            - test-python-312
+            - test-python-3.13
+            - package-check
             - security
+      - validate-release-request:
+          filters: pipeline.parameters.run_release or pipeline.parameters.run_python314 or pipeline.parameters.run_ci
       - release-preflight:
-          release-version: << pipeline.parameters.release_version >>
-          release-sha: << pipeline.parameters.release_sha >>
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
+          filters: pipeline.parameters.run_release
           requires:
             - quality
+            - validate-release-request
       - build-release:
-          release-version: << pipeline.parameters.release_version >>
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
+          filters: pipeline.parameters.run_release
           requires:
             - release-preflight
       - publish-testpypi:
           context: fleet-testpypi-trusted-publishing
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
+          filters: pipeline.parameters.run_release
           requires:
             - build-release
       - smoke-test-testpypi:
           release-version: << pipeline.parameters.release_version >>
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
+          filters: pipeline.parameters.run_release
           requires:
             - publish-testpypi
       - publish-pypi:
           context: fleet-pypi-trusted-publishing
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
+          filters: pipeline.parameters.run_release
           requires:
             - smoke-test-testpypi
       - github-release:
           release-version: << pipeline.parameters.release_version >>
           context: fleet-github-release
-          filters: pipeline.parameters.run_release and pipeline.git.branch == "main"
+          filters: pipeline.parameters.run_release
           requires:
             - publish-pypi
 
   python314-manual:
     when: pipeline.parameters.run_python314 and pipeline.git.branch == "main"
     jobs:
-      - python314-probe
+      - validate-release-request
+      - python314-probe:
+          requires:
+            - validate-release-request
+
+experimental:
+  dynamic-parallelism:
+    test-python-312:
+      key: ci-tests-parallelism-key
+      min: 1
+      max: 2

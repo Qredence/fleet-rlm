@@ -1,0 +1,43 @@
+---
+name: ci tests
+discover: find tests -type f -name 'test_*.py' -print | sed -E 's#^tests/#tests.#; s#/#.#g; s#\.py$##' | sort
+run: |
+  test_paths=""
+  for atom in << test.atoms >>; do
+    module_path="$(printf '%s' "$atom" | tr . /)"
+    test_paths="$test_paths $module_path.py"
+  done
+  mkdir -p test-results
+  uv run --locked pytest -q --junitxml="<< outputs.junit >>" $test_paths
+file-mapper: |
+  for atom in << test.atoms >>; do
+    test_path="$(printf '%s' "$atom" | tr . /).py"
+    printf 'TA:%s\n%s\n\n' "$atom" "$test_path"
+  done > "<< outputs.circleci-list >>"
+analysis: |
+  set +e
+  test_atom="<< test.atoms >>"
+  test_path="$(printf '%s' "$test_atom" | tr . /).py"
+  coverage_file="$(mktemp)"
+  lcov_file="<< outputs.lcov >>"
+  mkdir -p "$(dirname "$lcov_file")"
+  COVERAGE_FILE="$coverage_file" uv run --locked coverage run --branch \
+    --source=src/fleet_rlm -m pytest -q "$test_path"
+  test_status=$?
+  COVERAGE_FILE="$coverage_file" uv run --locked coverage lcov -o "$lcov_file"
+  report_status=$?
+  rm -f "$coverage_file"
+  if [ "$test_status" -ne 0 ]; then exit "$test_status"; fi
+  exit "$report_status"
+outputs:
+  junit: test-results/junit.xml
+options:
+  test-impact-analysis: true
+  dynamic-test-splitting: true
+  max-auto-rerun: 1
+  full-test-run-paths:
+    - pyproject.toml
+    - uv.lock
+    - Makefile
+    - tests/**
+    - .circleci/**
