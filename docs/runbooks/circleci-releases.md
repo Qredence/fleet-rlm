@@ -26,9 +26,15 @@ As of 2026-10-19, repository validation is separate from account activation:
 | Auto-cancellation | Disabled project-wide to avoid interrupting a publishing transaction |
 | Main required check | Still `Python quality gate`, strict, GitHub app ID `15368` |
 | Release contexts | Created and restrictions verified; credential and publisher setup remains pending |
-| TestPyPI/PyPI trusted publishers | Not verified; no publication performed |
-| New workflow acceptance | Pending deployment of this config and authorized CI acceptance cases |
-| Entitlements and monthly budget | Performance / Startup verified in the account UI; project budget not agreed; no paid feature or recurring workload enabled |
+| TestPyPI/PyPI trusted publishers | Blocked: production PyPI publisher form offers no CircleCI provider; no publication performed |
+| New workflow acceptance | First PR quality matrix passed; non-main context probes denied before execution; remaining acceptance pending |
+| Entitlements and activation budget | Performance / Startup verified; activation cap 2,000 credits, ten validation pipelines and one release pipeline; recurring workloads deferred |
+
+On 2026-10-19, the production PyPI publisher form lists GitHub, GitLab, Google,
+and ActiveState, but no CircleCI option. CircleCI documents the integration as
+Preview. Resolve provider availability before production enablement; do not
+substitute a persistent registry token. The existing Actions publisher remains
+unchanged while this blocker is unresolved.
 
 CircleCI's `only-build-prs` preset corresponds to PR opens/updates/reopens,
 default-branch pushes, and tag pushes. The YAML rejects tag-only workflows.
