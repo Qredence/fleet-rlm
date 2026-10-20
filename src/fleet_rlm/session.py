@@ -227,6 +227,7 @@ class SessionRuntimeRegistry:
             max_active_children=settings.max_active_children,
             turn_timeout_seconds=settings.turn_timeout_seconds,
             linked_children=settings.linked_children,
+            digest_stall_seconds=settings.daytona_digest_stall_seconds,
         )
         assert self.store is not None
         harness = VolumePostgresHarness(self.store, sandbox_mgr)

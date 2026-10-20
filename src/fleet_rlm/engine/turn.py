@@ -23,6 +23,7 @@ from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.engine.signatures import Route
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
+from fleet_rlm.sandbox.digests import unhashed_digest_size
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT
 from fleet_rlm.store import IdempotencyConflictError
 
@@ -294,7 +295,12 @@ def _prepare_inputs(
         with mlflow.start_span(name="turn.replay_files", span_type=SpanType.CHAIN):
             for path in files:
                 content = runtime.sandbox_mgr.read_workspace_file(path)
-                if hashlib.sha256(content).hexdigest() != context_files[path]:
+                digest, recorded = hashlib.sha256(content).hexdigest(), context_files[path]
+                # A capped digest records only size and mtime; the replay bytes supply the real hash.
+                capped_size = unhashed_digest_size(recorded)
+                if capped_size is not None and capped_size == len(content):
+                    context_files[path] = recorded = digest
+                if digest != recorded:
                     raise ValueError(f"Workspace file changed while the Turn was prepared: {path}")
                 replay_bytes += len(content)
                 if replay_bytes > MAX_REPLAY_FILE_BYTES:

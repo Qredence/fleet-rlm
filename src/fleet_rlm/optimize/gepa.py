@@ -191,6 +191,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             max_active_children=settings.max_active_children,
             turn_timeout_seconds=settings.turn_timeout_seconds,
             linked_children=settings.linked_children,
+            digest_stall_seconds=settings.daytona_digest_stall_seconds,
             disposable=True,
         )
         descriptor, program_path = tempfile.mkstemp(prefix="fleet-optimization-", suffix=".json")

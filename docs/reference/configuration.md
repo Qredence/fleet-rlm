@@ -19,6 +19,7 @@ source control.
 | `FLEET_DAYTONA_VOLUME_ID` | empty | Daytona Volume ID. |
 | `FLEET_DAYTONA_SNAPSHOT` | `fleet-rlm-base` | Daytona snapshot name. |
 | `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes. Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
+| `FLEET_DAYTONA_DIGEST_STALL_SECONDS` | `120` | Seconds the per-Turn workspace digest may go without progress before it is stopped as stuck (10–3600). There is no overall time limit, and unchanged files reuse a cached SHA-256. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
 | `FLEET_SUB_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Code fallback for the sub-model. The checked-in `config/fleet.toml` instead selects `openai/system.ai.deepseek-v4-1-flash` for both root and sub roles. |

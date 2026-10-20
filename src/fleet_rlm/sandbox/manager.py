@@ -35,6 +35,7 @@ from fleet_rlm.config import validate_shared_notes_subpath
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
+from fleet_rlm.sandbox.digests import DIGEST_STALL_SECONDS, digests_code, run_watched_python
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
 from fleet_rlm.workspace import (
     _child_input_path,
@@ -50,19 +51,6 @@ _LOGGER = logging.getLogger(__name__)
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
 
 # Remote code fragments; each binds one variable so a Turn can gather them in a single exec.
-_DIGESTS_CODE = (
-    "import hashlib,json,os\n"
-    "digests={}\n"
-    "for base,dirs,files in os.walk('/workspace',followlinks=False):\n"
-    " dirs[:]=[name for name in dirs if not os.path.islink(os.path.join(base,name))]\n"
-    " for name in files:\n"
-    "  path=os.path.join(base,name)\n"
-    "  if os.path.islink(path) or not os.path.isfile(path): continue\n"
-    "  digest=hashlib.sha256()\n"
-    "  with open(path,'rb') as handle:\n"
-    "   for block in iter(lambda: handle.read(1048576), b''): digest.update(block)\n"
-    "  digests[os.path.relpath(path,'/workspace')]=digest.hexdigest()\n"
-)
 # Probed rather than configured: the snapshot is user-selectable (FLEET_DAYTONA_SNAPSHOT).
 _ENVIRONMENT_MODULES = ("numpy", "pandas", "scipy", "mpmath", "sympy", "gmpy2", "polars", "pyarrow", "sklearn")
 _ENVIRONMENT_CODE = (
@@ -159,6 +147,7 @@ class DaytonaSandboxManager:
     linked_children: bool = True
     disposable: bool = False
     shared_notes_subpath: str = ""
+    digest_stall_seconds: float = DIGEST_STALL_SECONDS
     event_callback: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     parent: DaytonaSandboxManager | None = field(default=None, repr=False)
     agent_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
@@ -674,6 +663,23 @@ class DaytonaSandboxManager:
             raise ValueError("Remote maintenance code exceeds the size limit")
         return self._remote_exec(self.ensure_sandbox(), code)
 
+    def exec_remote_python_watched(self, code: str) -> str:
+        """Run long maintenance Python as a detached sandbox process, stopped only if its progress stalls.
+
+        Unlike `exec_remote_python` there is no overall time limit: the code reports progress through
+        `_fleet_progress(phase, files, nbytes, dirs=...)`, and the run is killed and fails only when that progress
+        has not changed for `digest_stall_seconds`, or when the Turn is cancelled or past its deadline.
+        """
+        if len(code.encode("utf-8")) > 1_000_000:
+            raise ValueError("Remote maintenance code exceeds the size limit")
+        sandbox = self.ensure_sandbox()
+        return run_watched_python(
+            lambda source, timeout: self._remote_exec(sandbox, source, timeout=timeout),
+            code,
+            stall_seconds=self.digest_stall_seconds,
+            check=self.check_turn,
+        )
+
     def write_learned_note(self, turn_id: str, note: str, trace_id: str | None = None) -> str | None:
         """Write one Turn's note as an unreviewed file on the shared mount; None when skipped."""
         if not self.shared_notes_subpath or not note.strip():
@@ -698,19 +704,21 @@ class DaytonaSandboxManager:
         return path
 
     def turn_inputs(self, notes_limit: int = 20) -> dict[str, Any]:
-        """Gather a Turn's remote inputs in one exec: file digests, shared notes, and the environment.
+        """Gather a Turn's remote inputs in one watched run: file digests, shared notes, and the environment.
 
         Digests follow `list_workspace_files` (symbolic links skipped, never traversed) and are required;
-        notes are optional hints, so an unreadable mount yields none instead of failing the Turn.
+        notes are optional hints, so an unreadable mount yields none instead of failing the Turn. The run has
+        no time limit, only a stall window; unchanged files reuse their cached SHA-256 (see `digests`).
         """
         with_notes = bool(self.shared_notes_subpath) and 1 <= notes_limit <= 50
         code = (
-            _DIGESTS_CODE
+            digests_code()
             + _ENVIRONMENT_CODE
             + (_notes_code(notes_limit) if with_notes else "notes = []\n")
-            + "print(json.dumps({'digests': digests, 'notes': notes, 'environment': environment}, sort_keys=True))"
+            + "print(json.dumps({'digests': digests, 'digest_stats': digest_stats, 'notes': notes, "
+            "'environment': environment}, sort_keys=True))"
         )
-        result = json.loads(self.exec_remote_python(code) or "{}")
+        result = json.loads(self.exec_remote_python_watched(code) or "{}")
         digests = result.get("digests") if isinstance(result, dict) else None
         if not isinstance(digests, dict) or not all(
             isinstance(path, str) and isinstance(digest, str) for path, digest in digests.items()
@@ -718,11 +726,31 @@ class DaytonaSandboxManager:
             raise RuntimeError("Invalid workspace digest listing")
         if result.get("notes") is None:
             _LOGGER.warning("Shared learned notes were unavailable for Session %s", self.session_id)
-        environment = result.get("environment")
+        environment = result.get("environment") if isinstance(result.get("environment"), str) else ""
+        raw_stats = result.get("digest_stats") if isinstance(result.get("digest_stats"), dict) else {}
+        counts = {name: raw_stats.get(name) if type(raw_stats.get(name)) is int else 0 for name in ("hashed", "cached")}
+        truncated = raw_stats.get("truncated") is True
+        unhashed = raw_stats.get("unhashed") if type(raw_stats.get("unhashed")) is int else 0
+        if truncated or unhashed:
+            _LOGGER.warning(
+                "Workspace digest for Session %s was capped: %d files listed%s, %d recorded by size and mtime only",
+                self.session_id,
+                len(digests),
+                " (listing truncated)" if truncated else "",
+                unhashed,
+            )
+        if truncated:
+            # The manifest lists only these files; tell the model the workspace holds more.
+            note = (
+                f"Workspace listing truncated: only the first {len(digests)} files (artifacts/ first, then sorted "
+                "by path) are listed; walk /workspace to find the rest."
+            )
+            environment = f"{environment} {note}" if environment else note
         return {
             "digests": digests,
+            "digest_stats": {"truncated": truncated, "unhashed": unhashed, "files": len(digests), **counts},
             "notes": _valid_notes(result.get("notes")),
-            "environment": environment if isinstance(environment, str) else "",
+            "environment": environment,
         }
 
     def reset_turn_budget(self) -> None:

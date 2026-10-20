@@ -49,6 +49,7 @@ _TOML_FIELDS = {
     "decision": {"model": "typesafe_model"},
     "daytona": {
         "snapshot": "fleet_daytona_snapshot",
+        "digest_stall_seconds": "daytona_digest_stall_seconds",
         "org_id": "fleet_daytona_org_id",
         "volume_id": "fleet_daytona_volume_id",
         "auto_stop_minutes": "daytona_auto_stop_minutes",
@@ -289,6 +290,16 @@ class FleetSettings(BaseSettings):
     databricks_host: str = Field(default="", validation_alias="DATABRICKS_HOST")
     databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
     fleet_llm_base_url: str = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
+    daytona_digest_stall_seconds: float = Field(
+        default=120.0,
+        ge=10,
+        le=3600,
+        validation_alias="FLEET_DAYTONA_DIGEST_STALL_SECONDS",
+        description=(
+            "Seconds the per-Turn workspace digest may go without progress before it is stopped as stuck. "
+            "There is no overall time limit; a slow but advancing digest is never cut off."
+        ),
+    )
     daytona_auto_stop_minutes: int = Field(
         default=30,
         ge=1,
