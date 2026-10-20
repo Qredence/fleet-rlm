@@ -226,6 +226,7 @@ class DaytonaSandboxManager:
     _sandbox: Any = field(default=None, init=False, repr=False)
     _client: Daytona | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+    _activity: repl.ExecutionTracker = field(default_factory=repl.ExecutionTracker, init=False, repr=False)
     _budget_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _llm_calls_used: int = field(default=0, init=False, repr=False)
     _sandbox_errors: int = field(default=0, init=False, repr=False)
@@ -544,6 +545,7 @@ class DaytonaSandboxManager:
                 root._stops_settled.clear()
         try:
             with_retries(lambda: client.stop(sandbox, timeout=60))
+            root._activity.observe_alive(False)  # stopped on purpose; the next ensure_sandbox resumes it
         finally:
             with root._budget_lock:
                 root._stops_in_flight -= 1
@@ -607,7 +609,31 @@ class DaytonaSandboxManager:
         """Trace provisioning/resume, including the provider state check on a reused sandbox."""
         with self._lifecycle_span("sandbox.provision") as span:
             span.set_attribute("action", "reuse" if self._sandbox is not None else "create")
-            return self._ensure_sandbox()
+            try:
+                sandbox = self._ensure_sandbox()
+            except SandboxUnavailableError:
+                self._activity.observe_alive(False)
+                raise
+            # Created, or resumed after a provider state refresh: the provider has just reported it usable.
+            self._activity.observe_alive(True)
+            return sandbox
+
+    def sandbox_activity(self, *, include_children: bool = True) -> repl.SandboxActivity:
+        """Whether code is executing in this agent's sandbox (and since when), and whether it is alive.
+
+        Cheap and thread-safe: it reads local state only, never the Daytona API and never the manager lock,
+        so it can be called from any thread at any rate. `busy` covers `run_code` executions from
+        `run_namespace`. `alive` is the last verdict the manager already had: a create or resume (True), a
+        liveness poll during an execution (every `repl.LIVENESS_POLL_SECONDS`), a lost or unavailable sandbox
+        (False), or a stop by `cancel_turn`/`shutdown` (False); None before the first one. With
+        `include_children`, executions in child sandboxes (recursively) count as busy and as output, while
+        `alive` stays this sandbox's own.
+        """
+        own = self._activity.snapshot()
+        if not include_children:
+            return own
+        children = self._children.copy().values()  # an atomic copy; never iterate the live dict
+        return repl.merge_activity(own, [child.sandbox_activity() for child in children])
 
     def _ensure_sandbox(self) -> Any:
         """Create or resume this agent's sandbox, returning the live handle.
@@ -777,6 +803,7 @@ class DaytonaSandboxManager:
                 on_call=interpreter.answer_host_call,
                 timeout=max(1, int(remaining)),
                 alive=functools.partial(_sandbox_alive, sandbox),
+                tracker=self._activity,
             )
         except BaseException as exc:
             self.check_turn()  # a deadline or cancellation explains the failure
@@ -1217,6 +1244,7 @@ class DaytonaSandboxManager:
             self._sandbox = None
             self._contexts.clear()
             self._interpreters.clear()
+            self._activity.observe_alive(False)
             for interpreter in interpreters:
                 interpreter._closed = True
         if sandbox is not None and client is not None:
