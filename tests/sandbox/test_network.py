@@ -10,6 +10,7 @@ import inspect
 import logging
 import threading
 import warnings
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -226,7 +227,7 @@ def fresh_policy_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "_NETWORK_POLICY_WARNED", False)
-    monkeypatch.setattr(manager_module, "_NETWORK_PROBED_SANDBOXES", set())
+    monkeypatch.setattr(manager_module, "_NETWORK_PROBED_SANDBOXES", OrderedDict())
 
 
 def _policy_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -512,3 +513,81 @@ def test_no_policy_skips_the_probe(monkeypatch, tmp_path) -> None:
     client = _ProbeClient(SimpleNamespace(id="sb", state="started"))
     root = _probed_root(monkeypatch, tmp_path, client, network_block_all=False)
     assert root._network_probe_thread is None and client.gets == []
+
+
+def test_the_policy_refresh_runs_outside_the_manager_lock(monkeypatch, tmp_path, caplog) -> None:
+    returned = SimpleNamespace(id="sb", state="started", network_block_all=None, domain_allow_list=None)
+    root: DaytonaSandboxManager | None = None
+    lock_free: list[bool] = []
+
+    def refresh_data() -> None:
+        assert root is not None
+        result: list[bool] = []
+
+        def try_lock() -> None:
+            acquired = root._lock.acquire(timeout=1)
+            result.append(acquired)
+            if acquired:
+                root._lock.release()
+
+        probe = threading.Thread(target=try_lock)
+        probe.start()
+        probe.join(5)
+        lock_free.append(bool(result and result[0]))
+        returned.network_block_all = True
+
+    returned.refresh_data = refresh_data
+    monkeypatch.chdir(tmp_path)
+    root = DaytonaSandboxManager("key", "org", "volume", "net")
+    _created_params(root, returned)
+    assert root.ensure_sandbox() is returned
+    assert lock_free == [True]  # another thread could take the lock while the provider was refreshed
+    assert _policy_warnings(caplog) == []
+
+
+def test_a_sandbox_adopted_after_an_uncertain_create_is_verified_and_probed(monkeypatch, tmp_path, caplog) -> None:
+    adopted = _cached_root_sandbox("root-adopted")
+    client = _ProbeClient(adopted)
+    client.list = lambda _query: [adopted]  # type: ignore[method-assign]
+    client.create = lambda _params: pytest.fail("an uncertain create must be adopted, never repeated")  # type: ignore[method-assign]
+    monkeypatch.chdir(tmp_path)
+    root = DaytonaSandboxManager("key", "org", "volume", "net")
+    root._client = client
+    root._creation_pending = True
+    assert root.ensure_sandbox() is adopted
+    _finish_probe(root)
+    assert [probe[0] for probe in client.probes] == ["root-adopted"]
+    assert len(_enforcement_warnings(caplog)) == 1
+    assert _policy_warnings(caplog) == []  # adopted handle reports block-all: verified, nothing to warn
+    # Reusing the adopted handle later is not a new sandbox: no second probe.
+    first = root._network_probe_thread
+    assert root.ensure_sandbox() is adopted and root._network_probe_thread is first
+
+
+def test_the_probed_sandbox_set_is_bounded(monkeypatch) -> None:
+    from fleet_rlm.sandbox import manager as manager_module
+
+    monkeypatch.setattr(manager_module, "_NETWORK_PROBED_MAX", 3)
+    root = DaytonaSandboxManager("key", "org", "volume", "net")
+    for index in range(10):
+        assert root._claim_network_probe(SimpleNamespace(id=f"sb-{index}")) is True
+    assert list(manager_module._NETWORK_PROBED_SANDBOXES) == ["sb-7", "sb-8", "sb-9"]  # oldest evicted
+    assert root._claim_network_probe(SimpleNamespace(id="sb-9")) is False  # still remembered
+
+
+def test_a_rebuilt_or_shut_down_root_is_forgotten(monkeypatch, tmp_path) -> None:
+    from fleet_rlm.sandbox import manager as manager_module
+
+    client = _ProbeClient(_cached_root_sandbox("root-1"))
+    root = _probed_root(monkeypatch, tmp_path, client)
+    _finish_probe(root)
+    assert "root-1" in manager_module._NETWORK_PROBED_SANDBOXES
+    with root._lock:
+        root._discard_unavailable_sandbox("destroyed")
+    assert "root-1" not in manager_module._NETWORK_PROBED_SANDBOXES
+    client.created = _cached_root_sandbox("root-2")
+    assert root.ensure_sandbox().id == "root-2"
+    _finish_probe(root)
+    assert "root-2" in manager_module._NETWORK_PROBED_SANDBOXES
+    root.shutdown()
+    assert len(manager_module._NETWORK_PROBED_SANDBOXES) == 0

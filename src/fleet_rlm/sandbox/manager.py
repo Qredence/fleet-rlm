@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -191,8 +192,11 @@ def _create_definitely_failed(exc: BaseException) -> bool:
 
 _NETWORK_POLICY_WARNED = False
 _NETWORK_POLICY_WARNED_LOCK = threading.Lock()
-# Root sandbox ids whose egress block has already been probed in this process.
-_NETWORK_PROBED_SANDBOXES: set[str] = set()
+# Root sandbox ids whose egress block has already been probed in this process, oldest first. Bounded: an id is
+# forgotten when its manager discards (rebuild) or shuts down the sandbox, and the oldest ids are evicted beyond
+# _NETWORK_PROBED_MAX, so a long-lived server does not grow it forever. Forgetting only risks one extra probe.
+_NETWORK_PROBED_SANDBOXES: OrderedDict[str, None] = OrderedDict()
+_NETWORK_PROBED_MAX = 1024
 _NETWORK_PROBED_LOCK = threading.Lock()
 NETWORK_PROBE_TIMEOUT_SECONDS = 10
 _NETWORK_PROBE_CODE = (
@@ -682,8 +686,17 @@ class DaytonaSandboxManager:
         with _NETWORK_PROBED_LOCK:
             if not sandbox_id or sandbox_id in _NETWORK_PROBED_SANDBOXES:
                 return False
-            _NETWORK_PROBED_SANDBOXES.add(sandbox_id)
+            _NETWORK_PROBED_SANDBOXES[sandbox_id] = None
+            while len(_NETWORK_PROBED_SANDBOXES) > _NETWORK_PROBED_MAX:
+                _NETWORK_PROBED_SANDBOXES.popitem(last=False)
         return True
+
+    @staticmethod
+    def _forget_network_probe(sandbox: Any) -> None:
+        """Drop a sandbox id this process no longer uses (rebuilt or shut down) from the probed set."""
+        sandbox_id = str(getattr(sandbox, "id", "") or "")
+        with _NETWORK_PROBED_LOCK:
+            _NETWORK_PROBED_SANDBOXES.pop(sandbox_id, None)
 
     def _start_network_probe(self, sandbox: Any) -> None:
         """Run the claimed egress probe on a daemon thread so neither the create nor the first Turn waits on it.
@@ -835,24 +848,32 @@ class DaytonaSandboxManager:
             raise RuntimeError("A previous Turn's sandbox stop did not finish")
         self.check_turn()
         with self._lock:
-            sandbox, created = self._ensure_sandbox_locked()
+            sandbox, how = self._ensure_sandbox_locked()
+            # New to this manager: created, rebuilt, or adopted after an uncertain create.
+            fresh = how != "reused"
             # Claimed under the lock so a concurrent caller cannot probe the same id twice.
-            probe = created and self._claim_network_probe(sandbox)
+            probe = fresh and self._claim_network_probe(sandbox)
+        if fresh:  # outside the lock: the check may refresh the handle from the provider
+            self._verify_network_policy(sandbox)
         if probe:  # after the root lock is released, before the Turn check: nothing waits on it
             self._start_network_probe(sandbox)
-        if created:
+        if how == "created":
             self.check_turn()
             self.emit("sandbox_ready", depth=self.depth)
         return sandbox
 
-    def _ensure_sandbox_locked(self) -> tuple[Any, bool]:
-        """`_ensure_sandbox` under `_lock`: the live handle and whether it was just created (or rebuilt)."""
+    def _ensure_sandbox_locked(self) -> tuple[Any, str]:
+        """`_ensure_sandbox` under `_lock`: the live handle and how it was obtained.
+
+        "created" (a new or rebuilt sandbox), "adopted" (the single labelled match of an uncertain create), or
+        "reused" (the handle this manager already had, resumed if needed).
+        """
         if self._client is None:
             self._client = _shared_daytona_client(self.api_key, self.org_id)
         if self._sandbox is not None:
             try:
                 self._resume_if_needed()
-                return self._sandbox, False
+                return self._sandbox, "reused"
             except SandboxUnavailableError as exc:
                 if self.parent is not None:
                     raise
@@ -866,7 +887,8 @@ class DaytonaSandboxManager:
             self._sandbox = matches[0]
             self._record_allocation("ready")
             self._creation_pending = False
-            return self._ensure_sandbox_locked()
+            sandbox, _ = self._ensure_sandbox_locked()  # resumes the adopted sandbox if needed
+            return sandbox, "adopted"
         if self.parent is None:
             self.reconcile_allocations()
         child = self.parent is not None
@@ -888,8 +910,7 @@ class DaytonaSandboxManager:
             raise
         self._creation_pending = False
         self._record_allocation("ready")
-        self._verify_network_policy(self._sandbox)
-        return self._sandbox, True
+        return self._sandbox, "created"
 
     def create_params(self, *, linked_sandbox: str | None = None) -> CreateSandboxFromSnapshotParams:
         """Daytona create parameters for this agent's sandbox.
@@ -924,6 +945,8 @@ class DaytonaSandboxManager:
         self.emit("sandbox_rebuilding", state=state)
         self._sandbox = None
         self._contexts.clear()
+        if sandbox is not None:
+            self._forget_network_probe(sandbox)
         if sandbox is not None and client is not None and state in {"error", "build_failed"}:
             try:
                 with_retries(lambda: client.delete(sandbox, timeout=60))
@@ -1457,6 +1480,8 @@ class DaytonaSandboxManager:
             self._activity.observe_alive(False)
             for interpreter in interpreters:
                 interpreter._closed = True
+        if sandbox is not None:
+            self._forget_network_probe(sandbox)
         if sandbox is not None and client is not None:
             try:
                 if self.parent is not None or self.disposable:
