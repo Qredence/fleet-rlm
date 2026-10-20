@@ -53,6 +53,8 @@ _TOML_FIELDS = {
         "volume_id": "fleet_daytona_volume_id",
         "auto_stop_minutes": "daytona_auto_stop_minutes",
         "root_auto_delete_minutes": "daytona_root_auto_delete_minutes",
+        "network_block_all": "daytona_network_block_all",
+        "domain_allow_list": "daytona_domain_allow_list",
         "shared_notes_subpath": "fleet_shared_notes_subpath",
     },
     "storage": {
@@ -158,6 +160,36 @@ def validate_root_auto_delete_minutes(value: int) -> int:
     if type(value) is not int or (value != -1 and value < 1):
         raise ValueError("root auto-delete minutes must be -1 (never) or a positive number of minutes")
     return value
+
+
+_ALLOWED_DOMAIN = re.compile(r"(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}")
+
+
+def validate_domain_allow_list(value: Any) -> str:
+    """Return a normalized, comma-separated Daytona domain allow list ("" when empty).
+
+    Entries are hostnames or `*.` wildcards: no scheme, path, port, or IP literal; at most 100 (Daytona's limit).
+    """
+    if isinstance(value, (list, tuple)):
+        entries = list(value)
+    elif isinstance(value, str):
+        entries = value.split(",")
+    else:
+        raise ValueError("domain allow list must be a comma-separated string or a list of domains")
+    domains: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError("domain allow list entries must be strings")
+        domain = entry.strip().lower()
+        if not domain:
+            continue
+        if _ALLOWED_DOMAIN.fullmatch(domain) is None or len(domain) > 253:
+            raise ValueError(f"invalid domain allow list entry: {domain[:80]!r}")
+        if domain not in domains:
+            domains.append(domain)
+    if len(domains) > 100:
+        raise ValueError("domain allow list may hold at most 100 domains")
+    return ",".join(domains)
 
 
 def validate_shared_notes_subpath(value: str) -> str:
@@ -314,6 +346,19 @@ class FleetSettings(BaseSettings):
         ),
     )
 
+    daytona_network_block_all: bool = Field(
+        default=True,
+        validation_alias="FLEET_DAYTONA_NETWORK_BLOCK_ALL",
+        description="Block all outbound network from sandboxes; the host bridge does not need it.",
+    )
+    daytona_domain_allow_list: str = Field(
+        default="",
+        validation_alias="FLEET_DAYTONA_DOMAIN_ALLOW_LIST",
+        description=(
+            "Comma-separated domains (or *.wildcards) sandboxes may reach. Non-empty replaces block-all "
+            "with this allow list (Daytona treats the two as mutually exclusive)."
+        ),
+    )
     fleet_root_model: str = "openai/system.ai.deepseek-v4-1-flash"
     fleet_sub_model: str = "openai/system.ai.claude-sonnet-5-5"
     fleet_reflection_model: str = "openai/system.ai.claude-haiku-5-5"
@@ -498,6 +543,12 @@ class FleetSettings(BaseSettings):
     def root_auto_delete_is_not_immediate(cls, value: int) -> int:
         """Refuse 0, which would make Daytona delete the warm root sandbox on every auto-stop."""
         return validate_root_auto_delete_minutes(value)
+
+    @field_validator("daytona_domain_allow_list", mode="before")
+    @classmethod
+    def domain_allow_list_is_valid(cls, value: Any) -> str:
+        """Normalize a TOML array or comma-separated string into Daytona's comma-separated domain list."""
+        return validate_domain_allow_list(value)
 
     @field_validator("fleet_database_schema")
     @classmethod

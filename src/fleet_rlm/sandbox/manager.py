@@ -44,7 +44,11 @@ from daytona.common.errors import (
 )
 from mlflow.entities import SpanType
 
-from fleet_rlm.config import validate_root_auto_delete_minutes, validate_shared_notes_subpath
+from fleet_rlm.config import (
+    validate_domain_allow_list,
+    validate_root_auto_delete_minutes,
+    validate_shared_notes_subpath,
+)
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
@@ -180,6 +184,28 @@ def _create_definitely_failed(exc: BaseException) -> bool:
     return isinstance(status, int) and 400 <= status < 500 and status != 408
 
 
+_NETWORK_POLICY_WARNED = False
+_NETWORK_POLICY_WARNED_LOCK = threading.Lock()
+
+
+def _domains(value: Any) -> frozenset[str]:
+    return frozenset(item.strip().lower() for item in str(value or "").split(",") if item.strip())
+
+
+def _reported_network_policy(sandbox: Any) -> tuple[Any, Any]:
+    return getattr(sandbox, "network_block_all", None), getattr(sandbox, "domain_allow_list", None)
+
+
+def _warn_network_policy_once(message: str, *args: Any) -> None:
+    """Log the network-policy WARNING at most once per process; later sandboxes are not re-reported."""
+    global _NETWORK_POLICY_WARNED
+    with _NETWORK_POLICY_WARNED_LOCK:
+        if _NETWORK_POLICY_WARNED:
+            return
+        _NETWORK_POLICY_WARNED = True
+    _LOGGER.warning(message, *args)
+
+
 class SandboxUnavailableError(RuntimeError):
     """The provider reports the sandbox failed, destroyed, or missing; it cannot be resumed."""
 
@@ -215,6 +241,9 @@ class DaytonaSandboxManager:
     linked_children: bool = True
     disposable: bool = False
     shared_notes_subpath: str = ""
+    # Outbound network: blocked by default. A non-empty allow list replaces block-all (Daytona rejects both).
+    network_block_all: bool = True
+    domain_allow_list: str = ""
     event_callback: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     parent: DaytonaSandboxManager | None = field(default=None, repr=False)
     agent_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
@@ -254,6 +283,7 @@ class DaytonaSandboxManager:
             raise ValueError("max_llm_calls must be positive")
         validate_shared_notes_subpath(self.shared_notes_subpath)
         validate_root_auto_delete_minutes(self.root_auto_delete_minutes)
+        self.domain_allow_list = validate_domain_allow_list(self.domain_allow_list)
         self._stops_settled.set()
 
     @property
@@ -360,6 +390,8 @@ class DaytonaSandboxManager:
                 max_llm_calls=root.max_llm_calls,
                 parent=self,
                 linked_children=root.linked_children,
+                network_block_all=root.network_block_all,
+                domain_allow_list=root.domain_allow_list,
             )
             root._children[child.agent_id] = child
             root._allocations += 1
@@ -605,6 +637,60 @@ class DaytonaSandboxManager:
             )
         return mounts
 
+    def network_params(self) -> dict[str, Any]:
+        """Daytona firewall create parameters: block-all, an allow list, or (both off) the tier default.
+
+        Daytona treats network_block_all, domain_allow_list, and network_allow_list as mutually exclusive
+        (a conflicting create is a 400), so at most one is sent. The REPL bridge (run_code and file
+        transfer) reaches the sandbox through Daytona's toolbox, not sandbox egress, and keeps working.
+        """
+        if self.domain_allow_list:
+            return {"domain_allow_list": self.domain_allow_list}
+        return {"network_block_all": True} if self.network_block_all else {}
+
+    def _verify_network_policy(self, sandbox: Any) -> None:
+        """Warn (once per process) when a created sandbox does not report the requested network policy.
+
+        The create response (SandboxDto, daytona 0.224.0) carries network_block_all and domain_allow_list;
+        if they are absent the handle is refreshed once. Per-sandbox policies only take effect on Daytona
+        Tier 3/4 organizations; on Tier 1/2 the organization policy wins. Never fails the create.
+        """
+        expected = self.network_params()
+        if not expected:
+            return
+        setting = (
+            "FLEET_DAYTONA_DOMAIN_ALLOW_LIST" if "domain_allow_list" in expected else "FLEET_DAYTONA_NETWORK_BLOCK_ALL"
+        )
+        try:
+            block_all, allow_list = _reported_network_policy(sandbox)
+            refresh = getattr(sandbox, "refresh_data", None)
+            if block_all is None and allow_list is None and callable(refresh):
+                refresh()
+                block_all, allow_list = _reported_network_policy(sandbox)
+        except Exception as exc:
+            block_all = allow_list = None
+            _LOGGER.debug("Could not read the sandbox network policy (%s)", type(exc).__name__)
+        if "domain_allow_list" in expected:
+            applied = _domains(allow_list) == _domains(expected["domain_allow_list"]) and not block_all
+        else:
+            applied = block_all is True
+        if applied:
+            return
+        observed = (
+            "is not reported by Daytona"
+            if block_all is None and allow_list is None
+            else f"is not in effect (Daytona reports network_block_all={block_all!r}, domain_allow_list={allow_list!r})"
+        )
+        _warn_network_policy_once(
+            "Daytona sandbox %s: the requested network policy %s=%s %s. Per-sandbox network policies require a "
+            "Daytona Tier 3 or Tier 4 organization; on Tier 1/2 the organization-level policy applies instead, "
+            "so sandbox egress may not be restricted as configured. Reported once per process.",
+            getattr(sandbox, "id", "?"),
+            setting,
+            expected.get("domain_allow_list", "true"),
+            observed,
+        )
+
     def ensure_sandbox(self) -> Any:
         """Trace provisioning/resume, including the provider state check on a reused sandbox."""
         with self._lifecycle_span("sandbox.provision") as span:
@@ -689,6 +775,7 @@ class DaytonaSandboxManager:
                 raise
             self._creation_pending = False
             self._record_allocation("ready")
+            self._verify_network_policy(self._sandbox)
             self.check_turn()
             self.emit("sandbox_ready", depth=self.depth)
             return self._sandbox
@@ -712,6 +799,7 @@ class DaytonaSandboxManager:
             ephemeral=ephemeral,
             auto_delete_interval=0 if ephemeral else self.root_auto_delete_minutes,
             ttl_minutes=max(30, turn_minutes + 10) if child else None,
+            **self.network_params(),
             labels={
                 "fleet_session": self.session_id,
                 "fleet_agent": self.agent_id,

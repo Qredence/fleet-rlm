@@ -47,6 +47,13 @@ model = "jev-1.14.0"
 [daytona]
 snapshot = "fleet-rlm-base"
 auto_stop_minutes = 30
+# Sandbox egress is blocked; packages model code needs belong in the snapshot, not PyPI.
+# Per-sandbox network policies need a Daytona Tier 3 or Tier 4 organization. On Tier 1/2 the
+# organization-level policy wins; Fleet logs a WARNING (once per process) when a sandbox does not
+# report the requested policy.
+# A non-empty, comma-separated domain_allow_list (e.g. "example.com,*.example.org") replaces block-all.
+network_block_all = true
+domain_allow_list = ""
 shared_notes_subpath = "shared/learned-notes"
 # Set org_id/volume_id here or FLEET_DAYTONA_ORG_ID/FLEET_DAYTONA_VOLUME_ID.
 # The historical volume_name = "fleet-rlm-architecture" was NOT a Volume ID.
