@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import subprocess
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,10 +19,12 @@ from fleet_rlm.release_checks import (
     download_pypi_wheel,
     preflight,
     pypi_canary,
+    recovery_preflight,
     send_pypi_canary_failure,
     validate_webhook_context,
     verify_artifacts,
     verify_manifest,
+    verify_pypi_artifacts,
     verify_registry_wheel,
 )
 
@@ -54,6 +59,54 @@ def test_release_preflight_rejects_circleci_sha_mismatch() -> None:
         pytest.raises(SystemExit, match="does not match CircleCI pipeline SHA"),
     ):
         preflight(_version(), sha, "main", "b" * 40)
+
+
+def test_recovery_preflight_accepts_published_source_ancestor() -> None:
+    source_sha = "a" * 40
+    pipeline_sha = "b" * 40
+    outputs = [
+        subprocess.CompletedProcess(args=["git", "rev-parse"], returncode=0, stdout=pipeline_sha, stderr=""),
+        subprocess.CompletedProcess(args=["git", "merge-base"], returncode=0, stdout="", stderr=""),
+        subprocess.CompletedProcess(
+            args=["git", "show"], returncode=0, stdout='[project]\nversion = "0.8.0"\n', stderr=""
+        ),
+    ]
+    with (
+        patch("fleet_rlm.release_checks.subprocess.run", side_effect=outputs),
+        patch("fleet_rlm.release_checks._version", side_effect=AssertionError("main version is irrelevant")),
+    ):
+        recovery_preflight("0.8.0", source_sha, "main", pipeline_sha)
+
+
+def test_recovery_preflight_rejects_non_ancestor_source() -> None:
+    source_sha = "a" * 40
+    pipeline_sha = "b" * 40
+    outputs = [
+        subprocess.CompletedProcess(args=["git", "rev-parse"], returncode=0, stdout=pipeline_sha, stderr=""),
+        subprocess.CompletedProcess(args=["git", "merge-base"], returncode=1, stdout="", stderr=""),
+    ]
+    with (
+        patch("fleet_rlm.release_checks.subprocess.run", side_effect=outputs),
+        pytest.raises(SystemExit, match="not an ancestor of main"),
+    ):
+        recovery_preflight("0.8.0", source_sha, "main", pipeline_sha)
+
+
+def test_recovery_preflight_rejects_source_version_mismatch() -> None:
+    source_sha = "a" * 40
+    pipeline_sha = "b" * 40
+    outputs = [
+        subprocess.CompletedProcess(args=["git", "rev-parse"], returncode=0, stdout=pipeline_sha, stderr=""),
+        subprocess.CompletedProcess(args=["git", "merge-base"], returncode=0, stdout="", stderr=""),
+        subprocess.CompletedProcess(
+            args=["git", "show"], returncode=0, stdout='[project]\nversion = "0.7.11"\n', stderr=""
+        ),
+    ]
+    with (
+        patch("fleet_rlm.release_checks.subprocess.run", side_effect=outputs),
+        pytest.raises(SystemExit, match="does not define fleet-rlm version"),
+    ):
+        recovery_preflight("0.8.0", source_sha, "main", pipeline_sha)
 
 
 def test_artifact_verification_requires_wheel_and_sdist(tmp_path: Path) -> None:
@@ -117,6 +170,90 @@ def test_registry_wheel_rejects_wrong_version(tmp_path: Path) -> None:
     wheel.write_bytes(b"wheel")
     with pytest.raises(SystemExit, match="unexpected wheel"):
         verify_registry_wheel("0.8.0", wheel, tmp_path / "SHA256SUMS")
+
+
+def test_pypi_all_artifacts_must_match_manifest(tmp_path: Path) -> None:
+    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
+    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+    create_manifest(tmp_path)
+    hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (wheel, sdist)}
+    with patch("fleet_rlm.release_checks.urllib.request.urlopen") as response:
+        response.return_value.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "info": {"version": "0.8.0"},
+                "urls": [{"filename": name, "digests": {"sha256": digest}} for name, digest in hashes.items()],
+            }
+        ).encode()
+        verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+        response.return_value.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "info": {"version": "0.8.0"},
+                "urls": [{"filename": name, "digests": {"sha256": "0" * 64}} for name in hashes],
+            }
+        ).encode()
+        with pytest.raises(SystemExit, match="does not match the release manifest"):
+            verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+
+
+def test_pypi_artifact_verification_retries_transient_errors_and_missing_files(tmp_path: Path) -> None:
+    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
+    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+    create_manifest(tmp_path)
+    hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (wheel, sdist)}
+
+    def response(files: list[str]):
+        payload = {
+            "info": {"version": "0.8.0"},
+            "urls": [{"filename": name, "digests": {"sha256": hashes[name]}} for name in files],
+        }
+        return io.BytesIO(json.dumps(payload).encode())
+
+    with (
+        patch(
+            "fleet_rlm.release_checks.urllib.request.urlopen",
+            side_effect=[
+                urllib.error.HTTPError("https://pypi.org", 503, "unavailable", {}, None),
+                response([wheel.name]),
+                response([wheel.name, sdist.name]),
+            ],
+        ) as urlopen,
+        patch("fleet_rlm.release_checks.time.sleep") as sleep,
+    ):
+        verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+
+    assert urlopen.call_count == 3
+    assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
+
+
+def test_pypi_artifact_checksum_mismatch_fails_without_retry(tmp_path: Path) -> None:
+    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
+    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+    create_manifest(tmp_path)
+    payload = {
+        "info": {"version": "0.8.0"},
+        "urls": [
+            {"filename": wheel.name, "digests": {"sha256": "0" * 64}},
+            {"filename": sdist.name, "digests": {"sha256": hashlib.sha256(sdist.read_bytes()).hexdigest()}},
+        ],
+    }
+    with (
+        patch(
+            "fleet_rlm.release_checks.urllib.request.urlopen",
+            return_value=io.BytesIO(json.dumps(payload).encode()),
+        ) as urlopen,
+        patch("fleet_rlm.release_checks.time.sleep") as sleep,
+        pytest.raises(SystemExit, match="checksum does not match"),
+    ):
+        verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+
+    urlopen.assert_called_once()
+    sleep.assert_not_called()
 
 
 def test_pypi_download_uses_only_the_public_pypi_index(tmp_path: Path) -> None:
@@ -195,6 +332,7 @@ def test_canary_failure_sends_circleci_validation_signal(tmp_path: Path) -> None
     manifest.write_text("unused by mocked canary\n")
     with (
         patch("fleet_rlm.release_checks.download_pypi_wheel", return_value=tmp_path / "candidate.whl"),
+        patch("fleet_rlm.release_checks.verify_pypi_artifacts"),
         patch("fleet_rlm.release_checks.verify_registry_wheel"),
         patch("fleet_rlm.release_checks.smoke", side_effect=RuntimeError("smoke failed")),
         patch("fleet_rlm.release_checks.send_pypi_canary_failure") as signal,
@@ -212,6 +350,7 @@ def test_successful_pypi_canary_does_not_emit_a_failure_signal(tmp_path: Path) -
     manifest.write_text("unused by mocked canary\n")
     with (
         patch("fleet_rlm.release_checks.download_pypi_wheel", return_value=tmp_path / "candidate.whl"),
+        patch("fleet_rlm.release_checks.verify_pypi_artifacts"),
         patch("fleet_rlm.release_checks.verify_registry_wheel"),
         patch("fleet_rlm.release_checks.smoke"),
         patch("fleet_rlm.release_checks.send_pypi_canary_failure") as signal,
