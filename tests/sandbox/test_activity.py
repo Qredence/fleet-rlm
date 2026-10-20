@@ -73,6 +73,7 @@ def test_an_idle_manager_reports_nothing_running_and_unknown_liveness() -> None:
         busy_since_monotonic=None,
         alive=None,
         alive_checked_at=None,
+        alive_checked_monotonic=None,
         last_output_at=None,
         last_output_monotonic=None,
     )
@@ -100,6 +101,7 @@ def test_a_running_execution_is_busy_with_its_start_and_output_times(monkeypatch
         while root.sandbox_activity().alive_checked_at == checked and time.monotonic() < deadline:
             time.sleep(0.01)
         assert (root.sandbox_activity().alive_checked_at or 0) > (checked or 0)
+        assert (root.sandbox_activity().alive_checked_monotonic or 0) > (activity.alive_checked_monotonic or 0)
     finally:
         sandbox.release.set()
         thread.join(5)

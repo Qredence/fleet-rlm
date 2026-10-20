@@ -89,6 +89,7 @@ class SandboxActivity:
     busy_since_monotonic: float | None
     alive: bool | None  # last known liveness; None until first observed
     alive_checked_at: float | None  # wall clock of that observation
+    alive_checked_monotonic: float | None  # monotonic clock of that observation
     last_output_at: float | None  # wall clock of the latest stdout chunk from any execution
     last_output_monotonic: float | None
 
@@ -105,7 +106,7 @@ class ExecutionTracker:
         self._running: dict[int, tuple[float, float]] = {}
         self._next = 0
         self._alive: bool | None = None
-        self._alive_at: float | None = None
+        self._alive_at: tuple[float, float] | None = None  # (wall, monotonic)
         self._output: tuple[float, float] | None = None
 
     def begin(self) -> int:
@@ -123,7 +124,7 @@ class ExecutionTracker:
     def observe_alive(self, alive: bool) -> None:
         """Record a liveness verdict the caller already has; never queries the provider."""
         with self._lock:
-            self._alive, self._alive_at = alive, time.time()
+            self._alive, self._alive_at = alive, (time.time(), time.monotonic())
 
     def observe_output(self) -> None:
         """Record that an execution just wrote to stdout."""
@@ -141,7 +142,8 @@ class ExecutionTracker:
                 busy_since=oldest[0] if oldest else None,
                 busy_since_monotonic=oldest[1] if oldest else None,
                 alive=self._alive,
-                alive_checked_at=self._alive_at,
+                alive_checked_at=self._alive_at[0] if self._alive_at else None,
+                alive_checked_monotonic=self._alive_at[1] if self._alive_at else None,
                 last_output_at=self._output[0] if self._output else None,
                 last_output_monotonic=self._output[1] if self._output else None,
             )
@@ -164,6 +166,7 @@ def merge_activity(own: SandboxActivity, others: list[SandboxActivity]) -> Sandb
         busy_since_monotonic=oldest.busy_since_monotonic if oldest else None,
         alive=own.alive,
         alive_checked_at=own.alive_checked_at,
+        alive_checked_monotonic=own.alive_checked_monotonic,
         last_output_at=output.last_output_at if output else None,
         last_output_monotonic=output.last_output_monotonic if output else None,
     )
