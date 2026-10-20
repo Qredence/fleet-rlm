@@ -226,8 +226,8 @@ def _stalled(
     Never before the first `lm_start`, never while a model call or a `spawn_agent`/`spawn_agents` call is
     open (the model runs on the host and children run in their own sandboxes, so the root reports
     nothing), and never without a readable sandbox activity. A root sandbox lost during this Turn stalls
-    it even while another tool call is open; otherwise an open tool call (host-side) or running sandbox
-    code, with or without output, is never a stall. The Turn timeout bounds those.
+    it even while another tool call is open; otherwise an open tool call (host-side), running sandbox
+    code, or host-side sandbox I/O, with or without output, is never a stall. The Turn timeout bounds those.
     """
     if beat.last_event_at is None or beat.open_lm_calls or beat.open_spawn_calls or activity is None:
         return False
@@ -236,7 +236,10 @@ def _stalled(
         return True
     if beat.open_tool_calls:
         return False
-    return not activity.busy and now - beat.last_event_at >= limit
+    # host_io_busy (host-side Daytona work: remote exec, file transfers, artifact collection) arrives with #632;
+    # getattr keeps this working on a SandboxActivity that does not have it yet.
+    working = activity.busy or getattr(activity, "host_io_busy", False)
+    return not working and now - beat.last_event_at >= limit
 
 
 async def _acquire(runtime: SessionRuntime) -> bool:

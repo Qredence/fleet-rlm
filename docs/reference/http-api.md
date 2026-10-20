@@ -92,7 +92,7 @@ never counts). It never flags a Turn while a model call or a `spawn_agent`/`spaw
 runs on the host and child agents run in their own sandboxes, so the root sandbox reports nothing), or
 when the sandbox's activity cannot be read. Otherwise the Turn is stalled when its root sandbox was
 lost during the Turn, even while another tool call is open, or when no tool call is open, no sandbox
-code is running, and no `lm_start`/`lm_end`/`tool_start`/`tool_end` callback has arrived for
+code or host-side sandbox I/O (remote exec, file transfers, artifact collection) is running, and no `lm_start`/`lm_end`/`tool_start`/`tool_end` callback has arrived for
 `FLEET_TURN_STALL_SECONDS` (default 300). Running sandbox code is never a stall, with or without
 output; `FLEET_TURN_TIMEOUT_SECONDS` still bounds every case above. A stalled Turn is cancelled like a
 disconnect and its stream ends with an `error` event carrying `code: "turn_stalled"`; the Session

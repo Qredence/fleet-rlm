@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextvars
+import dataclasses
 import hashlib
 import json
 import threading
@@ -1125,6 +1126,19 @@ def test_a_lost_sandbox_verdict_from_before_the_turn_is_not_a_stall(traced, monk
     )
 
     events = harness.turn(_lm_call, jump=0)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert not harness.cancelled.is_set()
+
+
+def test_host_side_sandbox_io_is_never_a_stall_even_when_silent_past_the_limit(traced, monkeypatch):
+    def activity(clock: _Clock) -> SimpleNamespace:
+        # A stand-in until SandboxActivity gains host_io_busy (#632): not executing code, but transferring files.
+        return SimpleNamespace(**dataclasses.asdict(_activity(clock, busy=False, alive=True)), host_io_busy=True)
+
+    harness = _StallHarness(traced, monkeypatch, activity=activity)
+
+    events = harness.turn(_lm_call)
 
     assert _outcome(events) == ("turn_complete", None)
     assert not harness.cancelled.is_set()
