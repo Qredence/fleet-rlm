@@ -14,7 +14,8 @@ import logging
 import random
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -45,6 +46,15 @@ def is_transient(exc: BaseException) -> bool:
         return True
     status = exc.status_code if isinstance(exc, DaytonaError) else None
     return isinstance(status, int) and status >= 500
+
+
+def retry_worst_case_seconds(attempt_seconds: float) -> float:
+    """Longest `with_retries` can take when every attempt runs for `attempt_seconds` and fails transiently.
+
+    Each of the `_RETRY_ATTEMPTS` attempts, plus the largest jittered backoff (1.5x base) between them.
+    """
+    backoff = sum(_RETRY_BASE_SECONDS * (2**attempt) * 1.5 for attempt in range(_RETRY_ATTEMPTS - 1))
+    return _RETRY_ATTEMPTS * attempt_seconds + backoff
 
 
 def with_retries(operation: Callable[[], _T], *, before_retry: Callable[[], None] | None = None) -> _T:
@@ -92,6 +102,10 @@ class SandboxActivity:
     alive_checked_monotonic: float | None  # monotonic clock of that observation
     last_output_at: float | None  # wall clock of the latest stdout chunk from any execution
     last_output_monotonic: float | None
+    # Host-side Daytona work for this sandbox (remote exec, file transfers, artifact collection). Tracked
+    # apart from `busy`, which only means model code is running; host IO never starts the liveness poll.
+    host_io_busy: bool = False
+    host_io_since_monotonic: float | None = None  # monotonic start of the oldest in-flight host IO operation
 
 
 class ExecutionTracker:
@@ -108,6 +122,31 @@ class ExecutionTracker:
         self._alive: bool | None = None
         self._alive_at: tuple[float, float] | None = None  # (wall, monotonic)
         self._output: tuple[float, float] | None = None
+        self._host_io: dict[int, float] = {}  # token -> monotonic start
+
+    def begin_host_io(self) -> int:
+        """Record a host-side Daytona operation (exec, transfer) as in flight; returns the token for `end_host_io`.
+
+        Counted per token, so overlapping operations work. It does not touch `busy` or the liveness poll.
+        """
+        with self._lock:
+            self._next += 1
+            self._host_io[self._next] = time.monotonic()
+            return self._next
+
+    def end_host_io(self, token: int) -> None:
+        """Record the host-side operation as finished (returned or failed)."""
+        with self._lock:
+            self._host_io.pop(token, None)
+
+    @contextmanager
+    def host_io(self) -> Generator[None]:
+        """`begin_host_io`/`end_host_io` around a block, ending it even when the block raises."""
+        token = self.begin_host_io()
+        try:
+            yield
+        finally:
+            self.end_host_io(token)
 
     def begin(self) -> int:
         """Record an execution as in flight; returns the token for `end`."""
@@ -146,6 +185,8 @@ class ExecutionTracker:
                 alive_checked_monotonic=self._alive_at[1] if self._alive_at else None,
                 last_output_at=self._output[0] if self._output else None,
                 last_output_monotonic=self._output[1] if self._output else None,
+                host_io_busy=bool(self._host_io),
+                host_io_since_monotonic=min(self._host_io.values()) if self._host_io else None,
             )
 
 
@@ -169,6 +210,11 @@ def merge_activity(own: SandboxActivity, others: list[SandboxActivity]) -> Sandb
         alive_checked_monotonic=own.alive_checked_monotonic,
         last_output_at=output.last_output_at if output else None,
         last_output_monotonic=output.last_output_monotonic if output else None,
+        host_io_busy=any(view.host_io_busy for view in views),
+        host_io_since_monotonic=min(
+            (view.host_io_since_monotonic for view in views if view.host_io_since_monotonic is not None),
+            default=None,
+        ),
     )
 
 
