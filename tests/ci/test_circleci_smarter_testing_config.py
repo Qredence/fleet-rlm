@@ -109,3 +109,4 @@ def test_pypi_release_requires_webhook_preflight_and_canary_validation() -> None
         if isinstance(step, dict) and "run" in step
     )
     assert "pypi-canary" in canary_command
+    assert "uv run --python 3.12 --no-project python scripts/release_checks.py pypi-canary" in canary_command

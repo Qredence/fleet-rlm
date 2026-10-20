@@ -385,7 +385,7 @@ jobs:
           name: Download, verify, and smoke-test the PyPI candidate
           command: |
             mkdir -p test-results
-            PYTHONPATH=src python scripts/release_checks.py pypi-canary \
+            PYTHONPATH=src uv run --python 3.12 --no-project python scripts/release_checks.py pypi-canary \
               --version "$FLEET_RELEASE_VERSION" \
               --manifest dist/SHA256SUMS \
               --requirements /tmp/fleet-pypi-canary-requirements.txt \
