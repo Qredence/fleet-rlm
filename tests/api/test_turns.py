@@ -798,3 +798,78 @@ def test_a_turn_on_the_pool_sees_the_request_context_and_streams_usage_and_tool_
     assert events[4]["payload"]["agent_id"] == "root-agent"
     assert "found invoice" in json.dumps(events[4]["output"])
     assert not runtime.turn_lock.locked()
+
+
+def _strict_json(text: str) -> Any:
+    """Parse JSON the way browsers do: NaN and Infinity are not JSON."""
+
+    def reject(constant: str) -> Any:
+        raise ValueError(f"non-standard JSON constant {constant}")
+
+    return json.loads(text, parse_constant=reject)
+
+
+def test_non_finite_floats_in_activity_stream_as_valid_json_and_the_turn_still_completes(traced):
+    def engine(**_kwargs):
+        callback = traced["callbacks"][-1]
+        assert isinstance(callback, SSERuntimeCallback)
+        callback.emit(
+            {
+                "event": "tool_end",
+                "call_id": "tool-1",
+                "score": float("nan"),
+                "bounds": [float("inf"), float("-inf")],
+            }
+        )
+        return SimpleNamespace(answer="done", route="rlm")
+
+    runtime = runtime_with(engine=engine)
+    client, _ = client_for(runtime)
+
+    def post():
+        with client:
+            return client.post("/sessions/session-a/turn", json={"task": "score it"})
+
+    response = _within(10, post)
+    data = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
+    events = [_strict_json(line) for line in data]
+    assert [event["event"] for event in events] == ["turn_status", "tool_end", "turn_complete"]
+    # FastAPI >= 0.143.3 serializes non-finite floats as null instead of the invalid NaN/Infinity tokens.
+    assert events[1]["score"] is None and events[1]["payload"]["score"] is None
+    assert events[1]["bounds"] == [None, None]
+    assert not runtime.turn_lock.locked()
+
+
+def test_a_bare_null_turn_body_is_a_422_and_never_runs_a_turn(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("a rejected request must not start a Turn")
+
+    monkeypatch.setattr(turns_route, "run_turn", forbidden)
+    runtime = runtime_with()
+    client, _ = client_for(runtime)
+
+    response = client.post("/sessions/session-a/turn", content=b"null", headers={"content-type": "application/json"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body"]
+    assert not runtime.turn_lock.locked()
+
+
+@pytest.mark.usefixtures("traced")
+def test_an_explicit_null_is_accepted_on_optional_turn_fields_and_rejected_on_record_replay():
+    runtime = runtime_with(engine=lambda **_kwargs: SimpleNamespace(answer="done", route="direct"))
+    client, _ = client_for(runtime)
+
+    def post():
+        with client:
+            accepted = client.post("/sessions/session-a/turn", json={"task": "hi", "idempotency_key": None})
+            rejected = client.post("/sessions/session-a/turn", json={"task": "hi", "record_replay": None})
+            return accepted, rejected
+
+    accepted, rejected = _within(10, post)
+    assert accepted.status_code == 200
+    assert [event["event"] for event in events_of(accepted)] == ["turn_status", "turn_complete"]
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"][0]["loc"] == ["body", "record_replay"]
+    assert rejected.json()["detail"][0]["type"] == "bool_type"
+    assert not runtime.turn_lock.locked()
