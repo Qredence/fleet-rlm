@@ -27,7 +27,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from fleet_rlm.sandbox.digests import DIGEST_STALL_SECONDS
+# Default seconds the per-Turn workspace digest may go without progress (FLEET_DAYTONA_DIGEST_STALL_SECONDS).
+DIGEST_STALL_SECONDS = 120.0
 
 _SECRET_FIELDS = {
     "fleet_database_url",

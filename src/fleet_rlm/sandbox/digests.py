@@ -16,13 +16,13 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from fleet_rlm.config import DIGEST_STALL_SECONDS
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES
 
 # Safety limits only: time is bounded by the stall watch, not by these.
 DIGEST_MAX_FILES = 5_000
 # A file too large to replay is not worth hashing either: a replay of it fails the snapshot limit first.
 DIGEST_MAX_FILE_BYTES = MAX_REPLAY_FILE_BYTES
-DIGEST_STALL_SECONDS = 120.0  # default; FleetSettings.daytona_digest_stall_seconds overrides it
 DIGEST_POLL_SECONDS = 2.0
 DIGEST_LAUNCH_WAIT_SECONDS = 2.0  # a small workspace finishes inside the launch exec itself
 _CONTROL_EXEC_TIMEOUT = 30  # bound for each tiny launch/poll/kill exec, never for the walk itself
