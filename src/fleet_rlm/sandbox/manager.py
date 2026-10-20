@@ -53,10 +53,16 @@ SANDBOX_TRANSPORT = "daytona_code_interpreter"
 # Remote code fragments; each binds one variable so a Turn can gather them in a single exec.
 # Probed rather than configured: the snapshot is user-selectable (FLEET_DAYTONA_SNAPSHOT).
 _ENVIRONMENT_MODULES = ("numpy", "pandas", "scipy", "mpmath", "sympy", "gmpy2", "polars", "pyarrow", "sklearn")
+# Defines a no-op `_fleet_progress` when the snippet runs outside the watched digest runner.
+_PROGRESS_FALLBACK_CODE = "try: _fleet_progress\nexcept NameError:\n def _fleet_progress(*_args,**_kwargs): pass\n"
+
+# Reports progress per module, so the digest stall watch sees a slow environment probe advancing.
 _ENVIRONMENT_CODE = (
-    "import importlib.metadata,importlib.util,platform,sys\n"
+    _PROGRESS_FALLBACK_CODE + "import importlib.metadata,importlib.util,platform,sys\n"
     "found=[]\n"
-    f"for module in {_ENVIRONMENT_MODULES!r}:\n"
+    "_fleet_progress('environment',0,force=True)\n"
+    f"for _index,module in enumerate({_ENVIRONMENT_MODULES!r},1):\n"
+    " _fleet_progress('environment',_index)\n"
     " if importlib.util.find_spec(module) is None: continue\n"
     " try: found.append(module+' '+importlib.metadata.version('scikit-learn' if module=='sklearn' else module))\n"
     " except importlib.metadata.PackageNotFoundError: found.append(module)\n"
@@ -66,25 +72,37 @@ _ENVIRONMENT_CODE = (
     "+'; not installed: '+(', '.join(missing) or 'none')"
     "+('; call sys.set_int_max_str_digits(0) before converting integers over 4300 digits to str'"
     " if hasattr(sys,'set_int_max_str_digits') else '')+'.'\n"
+    "_fleet_progress('after_environment',len(found),force=True)\n"
 )
 
 
 def _notes_code(limit: int) -> str:
-    """Bind `notes`: newest-first `{file, summary}` rows from the shared mount, empty when unreadable."""
+    """Bind `notes`: newest-first `{file, summary}` rows from the shared mount, empty when unreadable.
+
+    Progress is reported for every note stat'ed and every note read, so thousands of notes on a slow Volume
+    are seen by the digest stall watch as advancing rather than stuck.
+    """
     return (
-        "import json, os\n"
+        _PROGRESS_FALLBACK_CODE + "import json, os\n"
         "notes = []\n"
         "try:\n"
         "    if os.path.ismount('/learned'):\n"
-        "        names = [name for name in os.listdir('/learned') if name.endswith('.md')]\n"
-        "        names.sort(key=lambda name: os.stat(os.path.join('/learned', name)).st_mtime, reverse=True)\n"
-        f"        for name in names[:{limit}]:\n"
+        "        _fleet_progress('notes', 0, force=True)\n"
+        "        _dated = []\n"
+        "        for name in os.listdir('/learned'):\n"
+        "            if not name.endswith('.md'): continue\n"
+        "            _dated.append((os.stat(os.path.join('/learned', name)).st_mtime, name))\n"
+        "            _fleet_progress('notes', len(_dated))\n"
+        "        _dated.sort(key=lambda item: item[0], reverse=True)\n"
+        f"        for _count, (_mtime, name) in enumerate(_dated[:{limit}], 1):\n"
         "            with open(os.path.join('/learned', name), encoding='utf-8', errors='replace') as handle:\n"
         "                head = [handle.readline() for _ in range(8)]\n"
         "            lines = [line[len('summary: '):].strip() for line in head if line.startswith('summary: ')]\n"
         "            notes.append({'file': name, 'summary': (lines[0] if lines else '')[:120]})\n"
+        "            _fleet_progress('notes_read', _count)\n"
         "except OSError:\n"
         "    notes = None\n"
+        "_fleet_progress('after_notes', len(notes or ()), force=True)\n"
     )
 
 

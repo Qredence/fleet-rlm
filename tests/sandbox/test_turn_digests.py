@@ -341,3 +341,69 @@ def test_the_stall_window_is_configurable(monkeypatch) -> None:
         monkeypatch.setenv("FLEET_DAYTONA_DIGEST_STALL_SECONDS", bad)
         with pytest.raises(ValueError):
             FleetSettings()
+
+
+# --- the notes and environment steps report progress too ----------------------------------------------------------
+
+
+def _slow_notes_code(learned: Path, *, delay: float, limit: int = 20) -> str:
+    from fleet_rlm.sandbox.manager import _notes_code
+
+    shim = (
+        "import os,time\n"
+        "_real_stat=os.stat\n"
+        "def _slow_stat(path,*args,**kwargs):\n"
+        f" if str(path).startswith({str(learned)!r}): time.sleep({delay})\n"
+        " return _real_stat(path,*args,**kwargs)\n"
+        "os.stat=_slow_stat\n"
+        "os.path.ismount=lambda path: True\n"
+    )
+    return shim + _notes_code(limit).replace("'/learned'", repr(str(learned))) + "print(json.dumps(notes))"
+
+
+def _learned(tmp_path: Path, count: int) -> Path:
+    learned = tmp_path / "learned"
+    learned.mkdir()
+    for index in range(count):
+        note = learned / f"note-{index:04d}.md"
+        note.write_text(f"---\nsummary: note {index}\n---\nbody\n", encoding="utf-8")
+        os.utime(note, (1_000_000 + index, 1_000_000 + index))
+    return learned
+
+
+def test_a_long_notes_step_that_keeps_progressing_is_not_flagged_as_stalled(tmp_path) -> None:
+    learned = _learned(tmp_path, 60)
+    started = time.monotonic()
+    # 60 slow stats take ~3 s, three times the stall window; each one reports progress.
+    out = _run(tmp_path, _slow_notes_code(learned, delay=0.05, limit=3), stall_seconds=1.0)
+    assert time.monotonic() - started >= 2.5
+    assert [row["file"] for row in json.loads(out)] == ["note-0059.md", "note-0058.md", "note-0057.md"]
+
+
+def test_a_notes_step_that_hangs_is_still_flagged_as_stalled(tmp_path) -> None:
+    learned = _learned(tmp_path, 2)
+    with pytest.raises(WorkspaceDigestStalledError):
+        _run(tmp_path, _slow_notes_code(learned, delay=60), stall_seconds=1.0)
+
+
+def test_the_notes_and_environment_steps_run_standalone_without_the_watched_runner(tmp_path) -> None:
+    from fleet_rlm.sandbox.manager import _ENVIRONMENT_CODE
+
+    learned = _learned(tmp_path, 2)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        exec(_ENVIRONMENT_CODE + "print(environment)", {})
+    assert out.getvalue().startswith("Sandbox environment: Python ")
+    done = subprocess.run(
+        [sys.executable, "-c", _slow_notes_code(learned, delay=0)], capture_output=True, text=True, timeout=30
+    )
+    assert done.returncode == 0, done.stderr
+    assert [row["summary"] for row in json.loads(done.stdout)] == ["note 1", "note 0"]
+
+
+def test_the_turn_input_code_reports_progress_for_environment_and_notes() -> None:
+    from fleet_rlm.sandbox.manager import _ENVIRONMENT_CODE, _notes_code
+
+    assert "_fleet_progress('environment'" in _ENVIRONMENT_CODE
+    notes = _notes_code(20)
+    assert "_fleet_progress('notes', len(_dated))" in notes and "_fleet_progress('notes_read'" in notes
