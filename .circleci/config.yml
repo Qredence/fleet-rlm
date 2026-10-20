@@ -10,6 +10,9 @@ parameters:
   run_release:
     type: boolean
     default: false
+  skip_testpypi:
+    type: boolean
+    default: false
   release_version:
     type: string
     default: ""
@@ -271,12 +274,18 @@ jobs:
     docker:
       - image: cimg/python:3.12
     resource_class: medium
+    environment:
+      FLEET_SKIP_TESTPYPI: << pipeline.parameters.skip_testpypi >>
     steps:
       - attach_workspace:
           at: .
       - run:
           name: Verify and publish distributions to TestPyPI with OIDC
           command: |
+            if [ "$FLEET_SKIP_TESTPYPI" = "true" ]; then
+              echo "Skipping TestPyPI for this explicitly requested direct-to-PyPI release."
+              exit 0
+            fi
             cd dist
             sha256sum -c SHA256SUMS
             python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
@@ -291,6 +300,7 @@ jobs:
     resource_class: medium
     environment:
       FLEET_RELEASE_VERSION: << parameters.release-version >>
+      FLEET_SKIP_TESTPYPI: << pipeline.parameters.skip_testpypi >>
     steps:
       - checkout
       - attach_workspace:
@@ -302,6 +312,10 @@ jobs:
       - run:
           name: Download TestPyPI wheel and verify it matches the built artifact
           command: |
+            if [ "$FLEET_SKIP_TESTPYPI" = "true" ]; then
+              echo "Skipping TestPyPI download for this explicitly requested direct-to-PyPI release."
+              exit 0
+            fi
             mkdir -p /tmp/fleet-testpypi
             env PIP_CONFIG_FILE=/dev/null PIP_EXTRA_INDEX_URL= python -m pip download --disable-pip-version-check --no-cache-dir --no-deps --only-binary=:all: --index-url https://test.pypi.org/simple --dest /tmp/fleet-testpypi "fleet-rlm==$FLEET_RELEASE_VERSION"
             built_wheel=$(basename dist/fleet_rlm-"$FLEET_RELEASE_VERSION"-*.whl)
@@ -312,6 +326,10 @@ jobs:
       - run:
           name: Smoke-test that exact TestPyPI wheel
           command: |
+            if [ "$FLEET_SKIP_TESTPYPI" = "true" ]; then
+              echo "No TestPyPI wheel was requested for this release."
+              exit 0
+            fi
             downloaded_wheel=$(find /tmp/fleet-testpypi -maxdepth 1 -name 'fleet_rlm-*.whl' -print -quit)
             uv run --locked -- python scripts/release_checks.py smoke --version "$FLEET_RELEASE_VERSION" --wheel "$downloaded_wheel" --requirements /tmp/fleet-smoke-requirements.txt
 

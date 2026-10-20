@@ -126,6 +126,14 @@ circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY
   --param release_sha=<full-main-commit-sha>
 ```
 
+The TestPyPI rehearsal is enabled by default. When the TestPyPI service cannot
+accept CircleCI OIDC tokens, a maintainer may explicitly request a direct
+PyPI-only publication by adding `--param skip_testpypi=true`. This skips only
+the TestPyPI upload and smoke test; it retains the quality gate, SHA preflight,
+single manifest-verified build, PyPI-only canary, validation, and gated GitHub
+release. Use this path only after reviewing the extra risk of publishing
+without the TestPyPI rehearsal.
+
 The required quality jobs complete first. The release then validates checkout
 SHA and branch, builds the wheel and source archive once, writes a SHA-256
 manifest, publishes to TestPyPI, downloads the candidate wheel from TestPyPI,
