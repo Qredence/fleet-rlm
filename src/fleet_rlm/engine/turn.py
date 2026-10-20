@@ -188,18 +188,12 @@ def run_turn(
         emit(completion)
     except Exception as exc:
         _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
-        was_stalled = stalled is not None and stalled.is_set()
-        cancelled = was_stalled or manager._cancelled.is_set()
-        if was_stalled:
-            failure: dict[str, Any] = stalled_outcome(turn_id)
+        if stalled is not None and stalled.is_set():
+            cancelled, failure = True, stalled_outcome(turn_id)
         else:
-            failure = {
-                "event": "turn_cancelled" if cancelled else "error",
-                "request_id": turn_id,
-                "error": str(exc)
-                if isinstance(exc, IdempotencyConflictError)
-                else f"The Turn failed (request {turn_id}).",
-            }
+            cancelled = manager._cancelled.is_set()
+            message = str(exc) if isinstance(exc, IdempotencyConflictError) else f"The Turn failed (request {turn_id})."
+            failure = {"event": "turn_cancelled" if cancelled else "error", "request_id": turn_id, "error": message}
         if trace_id:
             failure["trace_id"] = trace_id
         with suppress(Exception):
