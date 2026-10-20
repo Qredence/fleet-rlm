@@ -408,3 +408,34 @@ def test_attach_treats_an_empty_browser_file_input_as_missing():
     assert response.json()["detail"][0]["loc"] == ["body", "file"]
     assert response.json()["detail"][0]["type"] == "missing"
     assert uploaded == []
+
+
+def test_attach_accepts_a_named_zero_byte_file():
+    uploaded: list[tuple[str, bytes]] = []
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            write_workspace_file_from_path=lambda rel_path, path: (
+                uploaded.append((rel_path, Path(path).read_bytes())) or f"/workspace/{rel_path}"
+            )
+        ),
+    )
+    client, _ = client_for(runtime)
+    # A chosen file that happens to be empty: a real filename, zero bytes of content. Unlike an unselected input,
+    # this is a legitimate upload and must not be treated as missing.
+    boundary = "fleet-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename="empty.txt"\r\n'
+        "Content-Type: text/plain\r\n\r\n\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+
+    response = client.post(
+        "/sessions/session-a/attach",
+        content=body,
+        headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"mounted_path": "/workspace/files/empty.txt", "rel_path": "files/empty.txt"}
+    assert uploaded == [("files/empty.txt", b"")]
