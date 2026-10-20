@@ -29,7 +29,7 @@ from fleet_rlm.api.schemas import (
     TurnStatus,
 )
 from fleet_rlm.session import SessionRuntime, runtime_configuration
-from fleet_rlm.workspace import WorkspaceDataset
+from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 router = APIRouter(tags=["sessions"])
 memory_router = APIRouter(tags=["memory"])
@@ -130,17 +130,18 @@ def set_mode(session_id: str, body: ModeRequest, runtime: Runtime) -> dict:
 
 
 @router.get("/sessions/{session_id}/history", response_model=History)
-def get_history(session_id: str, runtime: Runtime) -> dict:
-    """Return a Session's stored Turns."""
+def get_history(session_id: str, store: StoreDep) -> dict:
+    """Return a Session's stored Turns without claiming its runtime lease."""
     with translate("Session history is unavailable", invalid="Invalid Session ID"):
-        return {"session_id": session_id, "turns": runtime.harness.store.history(session_id)}
+        session_id = validate_session_id(session_id)
+        return {"session_id": session_id, "turns": store.history(session_id)}
 
 
 @router.get("/sessions/{session_id}/turns/{turn_id}", response_model=TurnStatus)
-def turn_status(turn_id: str, runtime: Runtime) -> dict:
-    """Return one Turn's recorded status, or 404 when the Turn is unknown."""
+def turn_status(session_id: str, turn_id: str, store: StoreDep) -> dict:
+    """Return one durable Turn status, or 404 when the Turn is unknown."""
     with translate("Turn status is unavailable", invalid="Invalid session or turn ID"):
-        result = runtime.harness.turn_status(turn_id)
+        result = store.turn_status(validate_session_id(session_id), validate_session_id(turn_id))
     if result is None:
         raise HTTPException(status_code=404, detail="Turn was not found")
     return result

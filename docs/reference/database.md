@@ -44,6 +44,9 @@ intents retain idempotency keys and terminal outcomes; uncertain running turns
 are not automatically replayed. Runtime settings retain selected mode and
 dataset revision. A session advisory lock prevents two workers from owning
 one session runtime at once and holds one database connection until close.
+Turn history and status reads use the shared pool and do not take the lease.
+A worker that loses the lease evicts the stale runtime and rebuilds it on the
+next request once any draining Turn finishes.
 Mode and context changes take effect in the live runtime only after their
 settings have been saved successfully.
 

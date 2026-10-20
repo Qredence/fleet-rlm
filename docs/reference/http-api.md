@@ -17,8 +17,8 @@ Fleet exposes a FastAPI application with the following routes:
 | `POST` | `/sessions/{session_id}/turn` | Run a Turn and stream progress as SSE. |
 | `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `rlm`, `flex`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
-| `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history. |
-| `GET` | `/sessions/{session_id}/turns/{turn_id}` | Recover a durable running/terminal turn outcome without replaying it. |
+| `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
+| `GET` | `/sessions/{session_id}/turns/{turn_id}` | Recover a durable running/terminal turn outcome directly from Postgres without replaying it; available while another worker owns the Session. |
 | `GET` | `/sessions/{session_id}/workspace/tree` | List workspace paths. |
 | `GET` | `/sessions/{session_id}/workspace/stat/{rel_path}` | Get a file's size and SHA-256. |
 | `GET`, `PUT`, `DELETE` | `/sessions/{session_id}/workspace/files/{rel_path}` | Download/write/delete workspace files. |
@@ -92,6 +92,10 @@ can recover that same outcome rather than looking up the retry's preparation ID.
 A completed outcome commits in the same transaction as files and turn history;
 a lost response or later delivery failure cannot downgrade that durable completion.
 A PostgreSQL advisory lease rejects a second worker owning the same session.
+The lease covers Turn execution and mutations. History and Turn status are
+durable reads that use the shared pool and do not take it, so they remain
+available from any worker. A worker that loses its lease evicts the stale
+runtime and rebuilds it on the next request once any draining Turn finishes.
 
 Events include `version`, `session_id`, `turn_id`, agent/parent/sandbox IDs,
 monotonic per-stream `seq`, timestamp, and `payload`. Flat payload fields remain

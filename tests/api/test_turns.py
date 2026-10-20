@@ -414,15 +414,15 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
         raise AssertionError("a replayed turn must not run the engine")
 
     runtime = runtime_with(
-        harness=FakeHarness(
-            claim_turn=lambda *_args: prior,
-            turn_status=lambda turn_id: (
-                {**prior, "updated_at": "2026-10-16T00:00:00"} if turn_id == "original-turn" else None
-            ),
-        ),
+        harness=FakeHarness(claim_turn=lambda *_args: prior),
         engine=never,
     )
-    client, _ = client_for(runtime)
+    store = store_with(
+        turn_status=lambda _session, turn_id: (
+            {**prior, "updated_at": "2026-10-16T00:00:00"} if turn_id == "original-turn" else None
+        )
+    )
+    client, _ = client_for(runtime, store=store)
     with client:
         response = client.post("/sessions/s1/turn", json={"task": "same task", "idempotency_key": "same-key"})
         outcomes = [event for event in events_of(response) if event["event"] in {"turn_complete", "error"}]

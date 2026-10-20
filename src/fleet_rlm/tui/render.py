@@ -17,6 +17,7 @@ from rich.text import Text
 CONSOLE = Console()
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 _OMITTED_PAYLOADS = frozenset({None, "", "null", "{}", "[predictor payload omitted]", '"[predictor payload omitted]"'})
+TURN_PERSISTED = "Turn persisted to Session history."
 
 
 def _extract_http_detail(response: httpx.Response) -> str:
@@ -643,7 +644,7 @@ def _terminal_renderables(event: dict[str, Any]) -> list[RenderableType]:
             out.append(Text.from_markup(f"[yellow]Artifacts:[/yellow] {event['artifacts']}"))
         if event.get("trace_id"):
             out.append(Text.from_markup(f"[dim]MLflow trace ID:[/dim] {event['trace_id']}"))
-        out.append(Text.from_markup("[green]Turn persisted to Session history.[/green]"))
+        out.append(Text.from_markup(f"[green]{TURN_PERSISTED}[/green]"))
     elif event_type == "turn_cancelled":
         out.append(
             Text.from_markup(

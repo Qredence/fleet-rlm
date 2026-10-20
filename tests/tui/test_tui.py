@@ -683,6 +683,13 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
                     await pilot.pause(0.03)
                     if not tui._turn_active:
                         break
+                tui._refresh_last_turn_widget()
+                await pilot.pause(0.05)
+                answer_output = io.StringIO()
+                Console(file=answer_output, width=100).print(tui.query_one(app._TurnWidget)._answer_static.content)
+                rendered_answer = answer_output.getvalue()
+                assert "Total is 323." in rendered_answer
+                assert "Turn persisted to Session history." in rendered_answer
                 assert submitted_tasks == [multiline_prompt]
 
                 assert state.last_tracker is not None

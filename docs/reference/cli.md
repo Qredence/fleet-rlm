@@ -66,11 +66,14 @@ and PostgreSQL retain their separately configured services and credentials.
 `serve` starts only the FastAPI server. If `--session` is omitted, the client generates
 a short session ID.
 
-When MLflow tracing is configured, the Rich client prints a trace ID delivered
-with the completed Turn. `/trace` looks for an ID in the saved `/history`
-records. Older or untraced turns may have no ID; the client reports that explicitly.
-A completed Turn is reported as persisted only
-after the server has successfully synchronized it to Session history.
+When MLflow tracing is configured, the client prints a trace ID delivered
+with the completed Turn. The Textual Turn card and the non-TTY Rich fallback
+also print `Turn persisted to Session history.` after the server commits the
+Turn. `/trace` looks for an ID in the saved `/history` records, and
+`/turn <turn-id>` reads the durable Turn status. Older or untraced turns may
+have no ID; the client reports that explicitly. A completed Turn is reported
+as persisted only after the server has successfully synchronized it to Session
+history.
 
 `fleet trace verify <trace-id>` flushes pending async writes and checks that a
 stored trace can be read with its spans. Use `--scope evaluation` or

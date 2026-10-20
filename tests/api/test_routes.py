@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fakes import FakeHarness, FakeManager, api_settings, client_for, engine_with, runtime_with, store_with
 
+from fleet_rlm.api.deps import get_registry
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -219,9 +220,53 @@ def test_workspace_write_requires_exactly_one_content_field():
 
 
 def test_turn_status_is_404_for_an_unknown_turn():
-    client, _ = client_for(runtime_with())
+    client, _ = client_for(store=store_with())
     with client:
         assert client.get("/sessions/s1/turns/unknown").status_code == 404
+
+
+def test_history_and_turn_status_read_the_durable_store_without_a_runtime():
+    store = store_with(
+        history=lambda _session: [{"turn_id": "turn-1", "answer": "stored"}],
+        turn_status=lambda _session, turn_id: (
+            {
+                "turn_id": turn_id,
+                "status": "completed",
+                "result": {"answer": "stored"},
+                "updated_at": "2026-10-20T00:00:00",
+            }
+            if turn_id == "turn-1"
+            else None
+        ),
+    )
+    client, app = client_for(store=store)
+    app.dependency_overrides[get_registry] = lambda: pytest.fail("durable reads must not build a runtime")
+    with client:
+        history = client.get("/sessions/session-1/history")
+        status = client.get("/sessions/session-1/turns/turn-1")
+        missing = client.get("/sessions/session-1/turns/missing")
+    assert history.status_code == 200
+    assert history.json() == {
+        "session_id": "session-1",
+        "turns": [{"turn_id": "turn-1", "answer": "stored"}],
+    }
+    assert status.status_code == 200
+    assert status.json() == {
+        "turn_id": "turn-1",
+        "status": "completed",
+        "result": {"answer": "stored"},
+        "updated_at": "2026-10-20T00:00:00",
+    }
+    assert missing.status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/sessions/session-1/history", "/sessions/session-1/turns/turn-1"])
+def test_durable_reads_need_storage(path):
+    client, _ = client_for()
+    with client:
+        response = client.get(path)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Session storage is unavailable"}
 
 
 def test_session_listing_needs_storage():

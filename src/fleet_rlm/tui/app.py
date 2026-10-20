@@ -485,6 +485,7 @@ class _TurnWidget(Vertical):
                     art.append("\nArtifacts: ", style="bold #fbbf24")
                     art.append(", ".join(str(a) for a in ev["artifacts"]), style="#d4d4d8")
                     body_parts.append(art)
+                body_parts.append(Text(f"\n{render_mod.TURN_PERSISTED}", style="#34d399"))
             elif ev_type == "turn_cancelled":
                 body_parts.append(
                     Text(f"Turn cancelled: {ev.get('error', 'Cancellation confirmed.')}", style="bold #fbbf24")
@@ -1228,6 +1229,8 @@ def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettin
     """Connect to the API and run the Textual full-screen chat TUI (or non-TTY fallback) until exit."""
     validate_session_id(session_id)
     state = SessionState(mlflow_settings=settings)
+    # FastAPI's SSE routing emits a `: ping` keepalive every 15 seconds while the Turn
+    # generator is idle, so the 300-second read timeout is only a safety net.
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
         if sys.stdin.isatty() and CONSOLE.is_terminal:
             FleetTextualApp(client, session_id, state).run()

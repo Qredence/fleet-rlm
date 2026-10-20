@@ -227,7 +227,7 @@ paths:
       tags:
       - sessions
       summary: Get History
-      description: Return a Session's stored Turns.
+      description: Return a Session's stored Turns without claiming its runtime lease.
       operationId: get_history_sessions__session_id__history_get
       parameters:
       - name: session_id
@@ -254,21 +254,21 @@ paths:
       tags:
       - sessions
       summary: Turn Status
-      description: Return one Turn's recorded status, or 404 when the Turn is unknown.
+      description: Return one durable Turn status, or 404 when the Turn is unknown.
       operationId: turn_status_sessions__session_id__turns__turn_id__get
       parameters:
-      - name: turn_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Turn Id
       - name: session_id
         in: path
         required: true
         schema:
           type: string
           title: Session Id
+      - name: turn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Turn Id
       responses:
         '200':
           description: Successful Response

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -19,6 +20,7 @@ from fleet_rlm.store import Store
 from fleet_rlm.store.db import VolumePostgresHarness
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
+_LOGGER = logging.getLogger("fleet_rlm.session")
 _EVICT_WAIT_SECONDS = 2.0
 _LEASE_MONITOR_JOIN_SECONDS = 5.0
 
@@ -154,24 +156,58 @@ class SessionRuntimeRegistry:
         self.jev_lm: Any = None
         self._sessions: dict[str, SessionRuntime] = {}
         self._lock = threading.Lock()
+        # Serializes first use, eviction, and lease-loss recovery. The fast path only takes `_lock`.
+        self._rebuild_lock = threading.RLock()
 
     def get(self, session_id: str) -> SessionRuntime:
-        """Return the Session's runtime, validating its id and building it on first use."""
+        """Return the Session's runtime, rebuilding it after a lost ownership lease."""
         session_id = validate_session_id(session_id)
         with self._lock:
             runtime = self._sessions.get(session_id)
-            if runtime is not None:
-                runtime.assert_lease_held()
+            if runtime is not None and not runtime.lease_lost.is_set():
                 return runtime
-            if len(self._sessions) >= self.settings.max_active_sessions:
-                raise RuntimeError("The maximum number of active Sessions has been reached")
-            if self.store is None:
-                raise RuntimeError("Session storage is not configured")
-            if self.root_lm is None:
-                self.root_lm, self.sub_lm, _, self.jev_lm = self.settings.build_lms()
+            if runtime is None:
+                self._check_capacity_locked()
+
+        # Only first use and recovery take this path. `_build` runs outside `_lock` so unrelated
+        # Sessions keep using their cached runtimes while a new sandbox starts or a stale one shuts
+        # down; `_rebuild_lock` serializes every slow path, `evict`, and `close`.
+        with self._rebuild_lock:
+            with self._lock:
+                runtime = self._sessions.get(session_id)
+                if runtime is not None and not runtime.lease_lost.is_set():
+                    return runtime
+                if runtime is None:
+                    self._check_capacity_locked()
+            if runtime is not None:
+                _LOGGER.warning(
+                    "Session %s ownership lease was lost; evicting its stale runtime",
+                    session_id,
+                )
+                try:
+                    self._evict_locked(session_id)
+                except TimeoutError as exc:
+                    _LOGGER.warning(
+                        "Session %s ownership lease was lost; a Turn is still draining",
+                        session_id,
+                    )
+                    raise RuntimeError(
+                        "Session ownership lease was lost while a Turn is still draining; retry when it completes"
+                    ) from exc
+            with self._lock:
+                if self.store is None:
+                    raise RuntimeError("Session storage is not configured")
+                if self.root_lm is None:
+                    self.root_lm, self.sub_lm, _, self.jev_lm = self.settings.build_lms()
             runtime = self._build(session_id)
-            self._sessions[session_id] = runtime
+            with self._lock:
+                self._sessions[session_id] = runtime
             return runtime
+
+    def _check_capacity_locked(self) -> None:
+        """Refuse a new Session when the registry is full. The caller holds `_lock`."""
+        if len(self._sessions) >= self.settings.max_active_sessions:
+            raise RuntimeError("The maximum number of active Sessions has been reached")
 
     def _build(self, session_id: str) -> SessionRuntime:
         settings = self.settings
@@ -243,6 +279,11 @@ class SessionRuntimeRegistry:
         Stored history is untouched, and the next request rebuilds the runtime.
         """
         session_id = validate_session_id(session_id)
+        with self._rebuild_lock:
+            return self._evict_locked(session_id)
+
+    def _evict_locked(self, session_id: str) -> bool:
+        """Evict one runtime. The caller must hold `_rebuild_lock`."""
         with self._lock:
             runtime = self._sessions.get(session_id)
         if runtime is None:
@@ -265,15 +306,16 @@ class SessionRuntimeRegistry:
 
     def close(self) -> None:
         """Shut down every Session sandbox, then release each lease."""
-        with self._lock:
-            runtimes = tuple(self._sessions.values())
-            for runtime in runtimes:
-                runtime.lease_lost.set()
-            self._sessions.clear()
-        try:
-            if runtimes:
-                with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
-                    list(pool.map(lambda runtime: runtime.sandbox_mgr.shutdown(), runtimes))
-        finally:
-            for runtime in runtimes:
-                runtime.close_lease()
+        with self._rebuild_lock:
+            with self._lock:
+                runtimes = tuple(self._sessions.values())
+                for runtime in runtimes:
+                    runtime.lease_lost.set()
+                self._sessions.clear()
+            try:
+                if runtimes:
+                    with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
+                        list(pool.map(lambda runtime: runtime.sandbox_mgr.shutdown(), runtimes))
+            finally:
+                for runtime in runtimes:
+                    runtime.close_lease()

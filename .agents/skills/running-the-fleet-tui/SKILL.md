@@ -1,6 +1,6 @@
 ---
 name: running-the-fleet-tui
-description: Drive the current Fleet Lite interactive Rich CLI and verify its persisted MLflow traces.
+description: Drive the current Fleet Lite terminal client (Textual or Rich fallback) and verify its persisted MLflow traces.
 ---
 
 # Running the Fleet Lite terminal client
@@ -24,17 +24,24 @@ FLEET_PORT=8001 uv run fleet cli --session verification-UNIQUE --mlflow-experime
 
 The launcher starts API/MLflow services as needed. Existing services are left
 running. Logs are `.fleet/logs/server.log` and `.fleet/logs/mlflow.log`; local
-MLflow data is `.fleet/mlflow`. Wait for the `fleet>` prompt before input.
+MLflow data is `.fleet/mlflow`. Wait for the Textual composer
+(`What would you like to do?`) or, in the non-TTY Rich fallback, the `fleet>`
+prompt before input. Textual uses the alternate screen, so wait for the
+composer or `Turn summary` rather than the shell prompt before snapshotting.
 Do not use retired Node-TUI headers, footers, or `cli --port` arguments.
 
 ## Exercise and verify
 
-Use `/config`, `/mode rlm`, `/mode flex`, and ordinary task text. Read Python
-code/output panels and the final answer. A successful turn prints its trace ID
-and `Turn persisted to Session history.` Use `/history` and `/trace` to verify.
-During a running turn, Ctrl+C closes the stream and requests remote cancellation;
-while editing, Ctrl+C clears input. Do not use Escape as a cancellation command.
-After cancellation, check durable state before retrying: disconnect is not rollback.
+Use `/config`, `/mode rlm`, `/mode flex`, and ordinary task text. In the
+Textual client, press `Ctrl+O` or click a `▸` step to expand Daytona Python
+code/output; the Rich fallback prints those panels inline. Read the Python
+code/output and the final answer. A successful turn shows its trace ID and
+`Turn persisted to Session history.` in the Textual Turn card; the Rich
+fallback prints the same line. Use `/history`, `/turn <turn-id>`, and `/trace`
+to verify durable state. During a running turn, Ctrl+C closes the stream and
+requests remote cancellation; while editing, Ctrl+C clears input. Do not use
+Escape as a cancellation command. After cancellation, check durable state
+before retrying: disconnect is not rollback.
 
 Fetch complete traces using MLflow CLI/API while the tracking server is available.
 Use their recorded session/trace IDs, not an assumed experiment ID or old database

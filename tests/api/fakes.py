@@ -57,6 +57,7 @@ class FakeManager(SimpleNamespace):
 def store_with(**overrides: Any) -> SimpleNamespace:
     defaults: dict[str, Any] = {
         "history": lambda _session: [],
+        "turn_status": lambda _session, _turn: None,
         "save_runtime_settings": lambda *_args: None,
         "finish_turn": lambda *_args: None,
     }
@@ -128,9 +129,18 @@ def api_settings(**values: Any) -> FleetSettings:
 
 
 def client_for(
-    runtime: SessionRuntime | None = None, *, settings: FleetSettings | None = None, **registry: Any
+    runtime: SessionRuntime | None = None,
+    *,
+    settings: FleetSettings | None = None,
+    store: Any = None,  # A SimpleNamespace fake, not a real Store instance.
+    **registry: Any,
 ) -> tuple[TestClient, Any]:
-    app = create_app(settings=settings or api_settings(), initialize_db=False, configure_observability=False)
+    app = create_app(
+        settings=settings or api_settings(),
+        initialize_db=False,
+        configure_observability=False,
+        store=store,
+    )
     if runtime is not None:
         fake = FakeRegistry(runtime, **registry)
         app.dependency_overrides[get_registry] = lambda: fake
