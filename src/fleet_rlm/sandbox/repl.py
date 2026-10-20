@@ -8,6 +8,7 @@ own threads so the websocket keeps reading, and replies go back through ``fs.upl
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import random
@@ -28,6 +29,9 @@ _PREAMBLE_TIMEOUT_SECONDS = 60
 # A host tool that never answers (lost reply upload, hung tool) fails the sandbox call after this long
 # instead of stalling the execution until the Turn watchdog stops the sandbox.
 HOST_CALL_TIMEOUT_SECONDS = 600.0
+# While `run_code` blocks, the sandbox's provider state is polled this often; a lost sandbox fails the
+# execution promptly instead of leaving the websocket waiting for the execution timeout.
+LIVENESS_POLL_SECONDS = 5.0
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_SECONDS = 0.5
 
@@ -64,6 +68,10 @@ class ExecutionOutcomeUnknownError(RuntimeError):
     """Remote work may have executed; the Turn must not replay it."""
 
     transport_retries: int = 0
+
+
+class SandboxLostError(ExecutionOutcomeUnknownError):
+    """The sandbox was stopped, destroyed, or deleted while an execution was running in it."""
 
 
 @cache
@@ -108,18 +116,27 @@ class _Protocol:
         self.result: dict[str, Any] | None = None
         self._buffer = ""
         self._workers: list[threading.Thread] = []
+        self._lock = threading.Lock()
+        self._finished = False
 
     def feed(self, message: Any) -> None:
-        self._buffer += message.output
-        *lines, self._buffer = self._buffer.split("\n")
-        for line in lines:
-            self._line(line)
+        with self._lock:
+            # An abandoned run_code thread may still deliver output after the execution was given up.
+            if self._finished:
+                return
+            self._buffer += message.output
+            *lines, self._buffer = self._buffer.split("\n")
+            for line in lines:
+                self._line(line)
 
     def finish(self) -> None:
-        if self._buffer:
-            self._line(self._buffer)
-            self._buffer = ""
-        for worker in self._workers:
+        with self._lock:
+            self._finished = True
+            if self._buffer:
+                self._line(self._buffer)
+                self._buffer = ""
+            workers = tuple(self._workers)
+        for worker in workers:
             worker.join(timeout=5)
 
     def _line(self, line: str) -> None:
@@ -151,16 +168,23 @@ def run(
     *,
     on_call: Callable[[dict[str, Any]], dict[str, Any]],
     timeout: int,
+    alive: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run one execution in `context`; return the runtime's result dict.
 
     Raises the SDK's error when the transport fails; the caller decides whether the outcome is known.
+    With `alive`, the sandbox is polled while the execution runs and `SandboxLostError` is raised as
+    soon as it reports False, rather than waiting for the websocket or the execution timeout.
     """
     protocol = _Protocol(sandbox, on_call)
     payload = {"host_call_timeout": min(HOST_CALL_TIMEOUT_SECONDS, timeout), **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
+
+    def execute() -> Any:
+        return sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)
+
     try:
-        execution = sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)
+        execution = execute() if alive is None else _run_watched(execute, alive)
     finally:
         protocol.finish()
     if protocol.result is not None:
@@ -174,3 +198,30 @@ def run(
             "error_type": execution.error.name or "PythonError",
         }
     raise ExecutionOutcomeUnknownError("The sandbox interpreter returned no result")
+
+
+def _run_watched(execute: Callable[[], _T], alive: Callable[[], bool]) -> _T:
+    """Run a blocking `run_code` on a worker thread, polling `alive` until it returns or the sandbox is lost.
+
+    A lost execution's thread is abandoned, never retried; it ends when the SDK call fails or times out.
+    """
+    outcome: dict[str, Any] = {}
+    done = threading.Event()
+
+    def target() -> None:
+        try:
+            outcome["value"] = execute()
+        except BaseException as exc:
+            outcome["error"] = exc
+        finally:
+            done.set()
+
+    # The SDK calls on_stdout on this thread; keep the caller's DSPy and MLflow context.
+    context = contextvars.copy_context()
+    threading.Thread(target=context.run, args=(target,), name="fleet-run-code", daemon=True).start()
+    while not done.wait(LIVENESS_POLL_SECONDS):
+        if not alive():
+            raise SandboxLostError("The sandbox was lost while the execution was running")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]

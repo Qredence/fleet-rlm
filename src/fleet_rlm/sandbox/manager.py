@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -29,9 +30,21 @@ from daytona import (
     ListSandboxesQuery,
     VolumeMount,
 )
+from daytona.common.errors import (
+    DaytonaAuthenticationError,
+    DaytonaBadRequestError,
+    DaytonaConflictError,
+    DaytonaConnectionError,
+    DaytonaError,
+    DaytonaForbiddenError,
+    DaytonaNotFoundError,
+    DaytonaRateLimitError,
+    DaytonaTimeoutError,
+    DaytonaUnprocessableEntityError,
+)
 from mlflow.entities import SpanType
 
-from fleet_rlm.config import validate_shared_notes_subpath
+from fleet_rlm.config import validate_root_auto_delete_minutes, validate_shared_notes_subpath
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
@@ -108,6 +121,8 @@ def _valid_notes(rows: Any) -> list[dict[str, str]]:
 _RESUMABLE_STATES = frozenset({"stopped", "archived", "paused"})
 _SETTLING_STATES = frozenset({"stopping", "archiving", "pausing", "starting", "resuming", "restoring", "creating"})
 _FAILED_STATES = frozenset({"error", "build_failed", "destroyed", "destroying"})
+# States in which a running execution can no longer be alive; "missing" means the provider has no such sandbox.
+_LOST_STATES = _FAILED_STATES | _RESUMABLE_STATES | frozenset({"stopping", "archiving", "pausing", "missing"})
 _STATE_POLL_SECONDS = 1.0
 _STATE_SETTLE_SECONDS = 90.0
 
@@ -133,6 +148,46 @@ def _sandbox_state(sandbox: Any) -> str:
     return str(getattr(state, "value", state) or "").lower()
 
 
+def _sandbox_alive(sandbox: Any) -> bool:
+    """Whether an execution in `sandbox` can still be running; an unreadable state counts as alive."""
+    try:
+        return _sandbox_state(sandbox) not in _LOST_STATES
+    except DaytonaNotFoundError:
+        return False
+    except Exception:
+        return True  # a failed poll is not evidence of loss; the execution timeout still bounds the wait
+
+
+# Rejections that prove the provider created nothing: a retry is a fresh create, never a duplicate.
+_DEFINITE_CREATE_FAILURES = (
+    DaytonaBadRequestError,
+    DaytonaAuthenticationError,
+    DaytonaForbiddenError,
+    DaytonaNotFoundError,
+    DaytonaConflictError,
+    DaytonaUnprocessableEntityError,
+    DaytonaRateLimitError,
+)
+
+
+def _create_definitely_failed(exc: BaseException) -> bool:
+    """True for client-side validation and 4xx rejections; timeouts, transport and 5xx errors stay uncertain."""
+    if isinstance(exc, (DaytonaTimeoutError, DaytonaConnectionError)):
+        return False
+    if isinstance(exc, _DEFINITE_CREATE_FAILURES):
+        return True
+    status = exc.status_code if isinstance(exc, DaytonaError) else None
+    return isinstance(status, int) and 400 <= status < 500 and status != 408
+
+
+class SandboxUnavailableError(RuntimeError):
+    """The provider reports the sandbox failed, destroyed, or missing; it cannot be resumed."""
+
+    def __init__(self, sandbox_id: str, state: str) -> None:
+        super().__init__(f"Sandbox {sandbox_id} is in state {state!r} and cannot be resumed")
+        self.state = state
+
+
 _ACTIVE_MANAGER: contextvars.ContextVar[Any] = contextvars.ContextVar("fleet_active_manager", default=None)
 _NATIVE_CHILDREN: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
     "fleet_native_children", default=None
@@ -149,6 +204,7 @@ class DaytonaSandboxManager:
     session_id: str
     snapshot: str = "fleet-rlm-base"
     auto_stop_minutes: int = 30
+    root_auto_delete_minutes: int = 7 * 24 * 60
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
     max_llm_calls: int = 150
@@ -184,6 +240,9 @@ class DaytonaSandboxManager:
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
     _contexts: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _creation_pending: bool = field(default=False, init=False, repr=False)
+    # cancel_turn stops the root outside `_lock`; new remote work waits until no such stop is in flight.
+    _stops_in_flight: int = field(default=0, init=False, repr=False)
+    _stops_settled: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate identity, budgets, and the shared-notes subpath before any sandbox work."""
@@ -193,6 +252,8 @@ class DaytonaSandboxManager:
         if self.max_llm_calls < 1:
             raise ValueError("max_llm_calls must be positive")
         validate_shared_notes_subpath(self.shared_notes_subpath)
+        validate_root_auto_delete_minutes(self.root_auto_delete_minutes)
+        self._stops_settled.set()
 
     @property
     def root(self) -> DaytonaSandboxManager:
@@ -470,17 +531,31 @@ class DaytonaSandboxManager:
         root.emit("cancellation_requested")
         for child in tuple(root._children.values()):
             child.shutdown()
-        # Stopping the root interrupts remote Python, including a running infinite loop.
+        # Stopping the root interrupts remote Python, including a running infinite loop. The stop can take
+        # up to a minute per attempt, so it runs outside the lock: callers waiting on the manager (a
+        # reconnecting stream, a new Turn) see the cancellation instead of queueing behind the provider.
         with root._lock:
-            if root._sandbox is not None and root._client is not None:
-                client, sandbox = root._client, root._sandbox
-                with_retries(lambda: client.stop(sandbox, timeout=60))
-                root._contexts.clear()
+            client, sandbox = root._client, root._sandbox
+            if sandbox is None or client is None:
+                return
+            root._contexts.clear()  # contexts die with the stop
+            with root._budget_lock:
+                root._stops_in_flight += 1
+                root._stops_settled.clear()
+        try:
+            with_retries(lambda: client.stop(sandbox, timeout=60))
+        finally:
+            with root._budget_lock:
+                root._stops_in_flight -= 1
+                if root._stops_in_flight == 0:
+                    root._stops_settled.set()
+
+    def _allocation_path(self) -> Path:
+        return Path(".fleet/allocations") / f"{self.agent_id}.json"
 
     def _record_allocation(self, status: str) -> None:
-        directory = Path(".fleet/allocations")
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{self.agent_id}.json"
+        path = self._allocation_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(
             json.dumps(
@@ -538,54 +613,97 @@ class DaytonaSandboxManager:
         """Create or resume this agent's sandbox, returning the live handle.
 
         A pending create is adopted only when exactly one matching sandbox exists, so creates never duplicate.
+        A root sandbox the provider reports failed, destroyed, or missing is rebuilt from the snapshot with the
+        same Volume mounts (Session state lives on the Volume); a child's raises.
         """
+        self.check_turn()
+        # A cancellation's stop may not have reached the provider yet; never start work it would then kill.
+        if not self.root._stops_settled.wait(_STATE_SETTLE_SECONDS):
+            raise RuntimeError("A previous Turn's sandbox stop did not finish")
         self.check_turn()
         with self._lock:
             if self._client is None:
                 self._client = _shared_daytona_client(self.api_key, self.org_id)
-            created = False
-            if self._sandbox is None:
-                self.check_turn()
-                if self._creation_pending:
-                    query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
-                    matches = with_retries(functools.partial(self._list_sandboxes, query))
-                    if len(matches) != 1:
-                        raise RuntimeError("Sandbox allocation outcome is uncertain; refusing a duplicate create")
-                    self._sandbox = matches[0]
-                    self._record_allocation("ready")
-                    self._creation_pending = False
-                    return self.ensure_sandbox()
-                if self.parent is None:
-                    self.reconcile_allocations()
-                child = self.parent is not None
-                root_sandbox = self.root.ensure_sandbox() if child else None
-                params = CreateSandboxFromSnapshotParams(
-                    snapshot=self.snapshot,
-                    language="python",
-                    volumes=self.volume_mounts(child=child),
-                    auto_stop_interval=self.auto_stop_minutes,
-                    linked_sandbox=root_sandbox.id if root_sandbox is not None and self.linked_children else None,
-                    ephemeral=child or self.disposable,
-                    auto_delete_interval=0 if child or self.disposable else -1,
-                    ttl_minutes=30 if child else 120,
-                    labels={
-                        "fleet_session": self.session_id,
-                        "fleet_agent": self.agent_id,
-                        "fleet_parent": self.parent.agent_id if child else "root",
-                    },
-                )
-                self.emit("sandbox_provisioning")
-                self._record_allocation("requested")
-                self._creation_pending = True
-                self._sandbox = self._client.create(params)
-                self._creation_pending = False
+            if self._sandbox is not None:
+                try:
+                    self._resume_if_needed()
+                    return self._sandbox
+                except SandboxUnavailableError as exc:
+                    if self.parent is not None:
+                        raise
+                    self._discard_unavailable_sandbox(exc.state)
+            self.check_turn()
+            if self._creation_pending:
+                query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
+                matches = with_retries(functools.partial(self._list_sandboxes, query))
+                if len(matches) != 1:
+                    raise RuntimeError("Sandbox allocation outcome is uncertain; refusing a duplicate create")
+                self._sandbox = matches[0]
                 self._record_allocation("ready")
-                self.check_turn()
-                self.emit("sandbox_ready", depth=self.depth)
-                created = True
-            if not created:
-                self._resume_if_needed()
+                self._creation_pending = False
+                return self.ensure_sandbox()
+            if self.parent is None:
+                self.reconcile_allocations()
+            child = self.parent is not None
+            root_sandbox = self.root.ensure_sandbox() if child else None
+            params = self.create_params(
+                linked_sandbox=root_sandbox.id if root_sandbox is not None and self.linked_children else None
+            )
+            self.emit("sandbox_provisioning")
+            self._record_allocation("requested")
+            self._creation_pending = True
+            try:
+                self._sandbox = self._client.create(params)
+            except BaseException as exc:
+                # Only an uncertain outcome (timeout, transport, 5xx) may have created a sandbox; a definite
+                # rejection must not leave every later call refusing a "duplicate" create.
+                if _create_definitely_failed(exc):
+                    self._creation_pending = False
+                    self._allocation_path().unlink(missing_ok=True)
+                raise
+            self._creation_pending = False
+            self._record_allocation("ready")
+            self.check_turn()
+            self.emit("sandbox_ready", depth=self.depth)
             return self._sandbox
+
+    def create_params(self, *, linked_sandbox: str | None = None) -> CreateSandboxFromSnapshotParams:
+        """Daytona create parameters for this agent's sandbox.
+
+        A child is ephemeral and bounded by a TTL that outlives the Turn deadline, and its auto-stop never
+        fires inside a Turn. A non-disposable root has no TTL; Daytona deletes it after it has been stopped
+        for `root_auto_delete_minutes`, and the next Turn rebuilds it from the snapshot.
+        """
+        child = self.parent is not None
+        ephemeral = child or self.disposable
+        turn_minutes = math.ceil(self.root.turn_timeout_seconds / 60)
+        return CreateSandboxFromSnapshotParams(
+            snapshot=self.snapshot,
+            language="python",
+            volumes=self.volume_mounts(child=child),
+            auto_stop_interval=max(self.auto_stop_minutes, turn_minutes + 5) if child else self.auto_stop_minutes,
+            linked_sandbox=linked_sandbox,
+            ephemeral=ephemeral,
+            auto_delete_interval=0 if ephemeral else self.root_auto_delete_minutes,
+            ttl_minutes=max(30, turn_minutes + 10) if child else None,
+            labels={
+                "fleet_session": self.session_id,
+                "fleet_agent": self.agent_id,
+                "fleet_parent": self.parent.agent_id if self.parent is not None else "root",
+            },
+        )
+
+    def _discard_unavailable_sandbox(self, state: str) -> None:
+        """Forget a failed root sandbox so it is rebuilt; best-effort delete one that still exists. Holds `_lock`."""
+        sandbox, client = self._sandbox, self._client
+        self.emit("sandbox_rebuilding", state=state)
+        self._sandbox = None
+        self._contexts.clear()
+        if sandbox is not None and client is not None and state in {"error", "build_failed"}:
+            try:
+                with_retries(lambda: client.delete(sandbox, timeout=60))
+            except Exception:
+                _LOGGER.warning("Could not delete failed Daytona sandbox %s before rebuilding", sandbox.id)
 
     def _list_sandboxes(self, query: ListSandboxesQuery) -> list[Any]:
         assert self._client is not None
@@ -599,16 +717,23 @@ class DaytonaSandboxManager:
         """
         sandbox = self._sandbox
         assert sandbox is not None and self._client is not None
-        state = _sandbox_state(sandbox)
+
+        def state_of() -> str:
+            try:
+                return _sandbox_state(sandbox)
+            except DaytonaNotFoundError:
+                return "missing"
+
+        state = state_of()
         deadline = time.monotonic() + _STATE_SETTLE_SECONDS
         while state in _SETTLING_STATES:
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Sandbox {sandbox.id} did not settle from state {state!r}")
             time.sleep(_STATE_POLL_SECONDS)
             self.check_turn()
-            state = _sandbox_state(sandbox)
-        if state in _FAILED_STATES:
-            raise RuntimeError(f"Sandbox {sandbox.id} is in state {state!r} and cannot be resumed")
+            state = state_of()
+        if state in _FAILED_STATES or state == "missing":
+            raise SandboxUnavailableError(sandbox.id, state)
         if state in _RESUMABLE_STATES:
             span = mlflow.get_current_active_span()
             if span is not None:
@@ -646,7 +771,12 @@ class DaytonaSandboxManager:
         remaining = self.root._deadline - time.monotonic() if self.root._deadline else self.root.turn_timeout_seconds
         try:
             result = repl.run(
-                sandbox, context, payload, on_call=interpreter.answer_host_call, timeout=max(1, int(remaining))
+                sandbox,
+                context,
+                payload,
+                on_call=interpreter.answer_host_call,
+                timeout=max(1, int(remaining)),
+                alive=functools.partial(_sandbox_alive, sandbox),
             )
         except BaseException as exc:
             self.check_turn()  # a deadline or cancellation explains the failure

@@ -203,12 +203,45 @@ def test_ensure_sandbox_waits_for_a_settling_sandbox_before_starting_it(monkeypa
     assert sandbox.refreshes == 3 and calls == ["start"]
 
 
-def test_ensure_sandbox_refuses_a_failed_sandbox() -> None:
+@pytest.mark.parametrize("state", ["error", "build_failed", "destroyed"])
+def test_ensure_sandbox_rebuilds_a_failed_root_sandbox(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, state: str
+) -> None:
+    monkeypatch.chdir(tmp_path)  # the allocation journal is cwd-relative
+    sandbox = _RemoteSandbox("started", state)
+    rebuilt = SimpleNamespace(id="sandbox-rebuilt", state="started")
+    created: list[Any] = []
+    deleted: list[Any] = []
+    manager, calls = _manager_with(
+        sandbox,
+        create=lambda params: created.append(params) or rebuilt,
+        delete=lambda target, **_kwargs: deleted.append(target),
+        list=lambda _query: [],
+    )
+    events: list[dict[str, Any]] = []
+    manager.event_callback = events.append
+    assert manager.ensure_sandbox() is rebuilt
+    assert calls == [] and manager._contexts == {}
+    assert [(mount.mount_path, mount.subpath) for mount in created[0].volumes] == [
+        ("/workspace", "sessions/state-test")
+    ]
+    assert created[0].snapshot == manager.snapshot and created[0].labels["fleet_agent"] == manager.agent_id
+    # A destroyed sandbox is already gone; an errored one still exists and is deleted best-effort.
+    assert deleted == ([] if state == "destroyed" else [sandbox])
+    assert {"event": "sandbox_rebuilding", "state": state, "sandbox_id": "sandbox-remote"}.items() <= next(
+        event for event in events if event["event"] == "sandbox_rebuilding"
+    ).items()
+
+
+def test_ensure_sandbox_refuses_a_failed_child_sandbox() -> None:
+    root = DaytonaSandboxManager("key", "org", "volume", "state-test")
+    child = DaytonaSandboxManager("key", "org", "volume", "state-test", parent=root)
     sandbox = _RemoteSandbox("started", "error")
-    manager, calls = _manager_with(sandbox)
-    with pytest.raises(RuntimeError, match="error"):
-        manager.ensure_sandbox()
-    assert calls == []
+    child._sandbox = sandbox
+    child._client = SimpleNamespace(create=lambda _params: pytest.fail("a failed child must not be rebuilt"))
+    with pytest.raises(RuntimeError, match="'error' and cannot be resumed"):
+        child.ensure_sandbox()
+    assert child._sandbox is sandbox
 
 
 def test_ensure_sandbox_does_not_touch_a_running_sandbox() -> None:
