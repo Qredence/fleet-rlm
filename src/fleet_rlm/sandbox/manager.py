@@ -52,7 +52,7 @@ from fleet_rlm.config import (
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
-from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, retry_worst_case_seconds, with_retries
 from fleet_rlm.workspace import (
     _child_input_path,
     _workspace_relative_path,
@@ -129,6 +129,11 @@ _FAILED_STATES = frozenset({"error", "build_failed", "destroyed", "destroying"})
 _LOST_STATES = _FAILED_STATES | _RESUMABLE_STATES | frozenset({"stopping", "archiving", "pausing", "missing"})
 _STATE_POLL_SECONDS = 1.0
 _STATE_SETTLE_SECONDS = 90.0
+# Per-attempt provider timeout for a sandbox stop (cancel_turn and shutdown).
+_STOP_TIMEOUT_SECONDS = 60
+# How long a new Turn waits for an in-flight stop: the worst case of every retried stop attempt timing out,
+# plus margin for the SDK returning after its own timeout. Derived from the retry settings, never shorter.
+_STOP_SETTLE_SECONDS = retry_worst_case_seconds(_STOP_TIMEOUT_SECONDS) + 30.0
 
 _DAYTONA_CLIENTS: dict[tuple[str, str], Daytona] = {}
 _DAYTONA_CLIENTS_LOCK = threading.Lock()
@@ -517,7 +522,11 @@ class DaytonaSandboxManager:
         """Observe actual workspace bytes before teardown, never model-provided receipts."""
         from fleet_rlm.optimize.evidence import collect_artifacts
 
-        artifacts = collect_artifacts(self) if self._sandbox is not None else {"complete": True, "files": {}}
+        if self._sandbox is not None:
+            with self._activity.host_io():  # artifact transfers are host IO, not model code
+                artifacts = collect_artifacts(self)
+        else:
+            artifacts = {"complete": True, "files": {}}
         with self.root._budget_lock:
             children = json.loads(json.dumps(list(self.root._child_receipts.values())))
         return {
@@ -589,7 +598,7 @@ class DaytonaSandboxManager:
                 root._stops_in_flight += 1
                 root._stops_settled.clear()
         try:
-            with_retries(lambda: client.stop(sandbox, timeout=60))
+            with_retries(lambda: client.stop(sandbox, timeout=_STOP_TIMEOUT_SECONDS))
             root._activity.observe_alive(False)  # stopped on purpose; the next ensure_sandbox resumes it
         finally:
             with root._budget_lock:
@@ -803,7 +812,9 @@ class DaytonaSandboxManager:
         liveness poll during an execution (every `repl.LIVENESS_POLL_SECONDS`), a lost or unavailable sandbox
         (False), or a stop by `cancel_turn`/`shutdown` (False); None before the first one. With
         `include_children`, executions in child sandboxes (recursively) count as busy and as output, while
-        `alive` stays this sandbox's own.
+        `alive` stays this sandbox's own. `host_io_busy` is separate from `busy`: it is True while the host runs
+        Daytona work for this sandbox (remote exec, file transfers, artifact collection), with
+        `host_io_since_monotonic` the start of the oldest such operation; children's host IO counts too.
         """
         own = self._activity.snapshot()
         if not include_children:
@@ -820,7 +831,7 @@ class DaytonaSandboxManager:
         """
         self.check_turn()
         # A cancellation's stop may not have reached the provider yet; never start work it would then kill.
-        if not self.root._stops_settled.wait(_STATE_SETTLE_SECONDS):
+        if not self.root._stops_settled.wait(_STOP_SETTLE_SECONDS):
             raise RuntimeError("A previous Turn's sandbox stop did not finish")
         self.check_turn()
         with self._lock:
@@ -962,10 +973,12 @@ class DaytonaSandboxManager:
         command = (
             "python3 -c 'import base64; exec(compile(base64.b64decode(\"" + encoded + '"), "<fleet-remote>", "exec"))\''
         )
-        if retry:
-            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout))
-        else:
-            result = sandbox.process.exec(command, timeout=timeout)
+        # Host-side Daytona work: reported as host_io_busy, never as busy (model code) and never polled for liveness.
+        with self._activity.host_io():
+            if retry:
+                result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout))
+            else:
+                result = sandbox.process.exec(command, timeout=timeout)
         if getattr(result, "exit_code", 0) != 0:
             raise RuntimeError("Remote Daytona command failed")
         return getattr(result, "result", "") or ""
@@ -1039,7 +1052,9 @@ class DaytonaSandboxManager:
             "---",
         ]
         sandbox = self.ensure_sandbox()
-        with_retries(lambda: sandbox.fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60))
+        with self._activity.host_io():
+            content = "\n".join([*header, body, ""]).encode("utf-8")
+            with_retries(lambda: sandbox.fs.upload_file(content, path, timeout=60))
         return path
 
     def turn_inputs(self, notes_limit: int = 20) -> dict[str, Any]:
@@ -1169,7 +1184,8 @@ class DaytonaSandboxManager:
             raise ValueError("Workspace file exceeds the 25 MB limit")
         sandbox = self.ensure_sandbox()
         self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
-        with_retries(lambda: sandbox.fs.upload_file(content, f"/workspace/{clean_path}", timeout=1800))
+        with self._activity.host_io():
+            with_retries(lambda: sandbox.fs.upload_file(content, f"/workspace/{clean_path}", timeout=1800))
         return f"/workspace/{clean_path}"
 
     def write_workspace_file_from_path(self, rel_path: str, local_path: str | Path) -> str:
@@ -1181,7 +1197,8 @@ class DaytonaSandboxManager:
             raise ValueError("Workspace file exceeds the 25 MB limit")
         sandbox = self.ensure_sandbox()
         self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
-        with_retries(lambda: sandbox.fs.upload_file(str(source), f"/workspace/{clean_path}", timeout=1800))
+        with self._activity.host_io():
+            with_retries(lambda: sandbox.fs.upload_file(str(source), f"/workspace/{clean_path}", timeout=1800))
         return f"/workspace/{clean_path}"
 
     def read_workspace_file(self, rel_path: str, *, max_bytes: int = 25_000_000) -> bytes:
@@ -1195,7 +1212,8 @@ class DaytonaSandboxManager:
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
         # The SDK's download_file is positional-only at runtime (an *args overload); keep the timeout positional.
-        content = with_retries(lambda: sandbox.fs.download_file(f"/workspace/{clean_path}", 1800))
+        with self._activity.host_io():
+            content = with_retries(lambda: sandbox.fs.download_file(f"/workspace/{clean_path}", 1800))
         if not isinstance(content, bytes) or len(content) != metadata["size"]:
             raise RuntimeError("Workspace file changed or could not be downloaded")
         return content
@@ -1217,7 +1235,8 @@ class DaytonaSandboxManager:
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
         destination = Path(local_path)
-        with_retries(lambda: sandbox.fs.download_file(f"/workspace/{clean_path}", str(destination), 1800))
+        with self._activity.host_io():
+            with_retries(lambda: sandbox.fs.download_file(f"/workspace/{clean_path}", str(destination), 1800))
         if not destination.is_file() or destination.stat().st_size != metadata["size"]:
             raise RuntimeError("Workspace file changed or could not be downloaded")
         return metadata["size"]
@@ -1330,11 +1349,12 @@ class DaytonaSandboxManager:
         metadata = self._workspace_files_metadata(sandbox, clean_paths, create_parents=False, max_bytes=25_000_000)
         if sum(item["size"] for item in metadata) > max_total_bytes:
             raise ValueError("Workspace batch exceeds the transfer quota")
-        responses = with_retries(
-            lambda: sandbox.fs.download_files(
-                [FileDownloadRequest(source=f"/workspace/{path}") for path in clean_paths], 1800
+        with self._activity.host_io():
+            responses = with_retries(
+                lambda: sandbox.fs.download_files(
+                    [FileDownloadRequest(source=f"/workspace/{path}") for path in clean_paths], 1800
+                )
             )
-        )
         by_source = {response.source: response for response in responses}
         contents: dict[str, bytes] = {}
         for path, item in zip(clean_paths, metadata, strict=True):
@@ -1355,7 +1375,8 @@ class DaytonaSandboxManager:
         sandbox = self.ensure_sandbox()
         self._workspace_files_metadata(sandbox, list(clean), create_parents=True)
         uploads = [FileUpload(source=content, destination=f"/workspace/{path}") for path, content in clean.items()]
-        with_retries(lambda: sandbox.fs.upload_files(uploads, timeout=1800))
+        with self._activity.host_io():
+            with_retries(lambda: sandbox.fs.upload_files(uploads, timeout=1800))
 
     def interpreter_factory(
         self,
@@ -1402,7 +1423,8 @@ class DaytonaSandboxManager:
         sandbox = self.ensure_sandbox()
         # The remote check rejects symbolic links; Daytona's file API does not report them.
         self._workspace_file_metadata(sandbox, clean, create_parents=False)
-        with_retries(lambda: sandbox.fs.delete_file(f"/workspace/{clean}"))
+        with self._activity.host_io():
+            with_retries(lambda: sandbox.fs.delete_file(f"/workspace/{clean}"))
 
     def _register_interpreter(self, interpreter: DaytonaInterpreter) -> None:
         with self._lock:
@@ -1460,7 +1482,7 @@ class DaytonaSandboxManager:
                         self.root._children.pop(self.agent_id, None)
                     self.emit("sandbox_deleted", sandbox_id=sandbox.id)
                 else:
-                    with_retries(lambda: client.stop(sandbox, timeout=60))
+                    with_retries(lambda: client.stop(sandbox, timeout=_STOP_TIMEOUT_SECONDS))
             except Exception:
                 _LOGGER.warning("Daytona Session sandbox stop failed")
                 if self.parent is not None:

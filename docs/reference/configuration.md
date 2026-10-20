@@ -22,6 +22,7 @@ source control.
 | `FLEET_DAYTONA_NETWORK_BLOCK_ALL` | `true` | Block all outbound network from sandboxes. The host bridge (`llm_query`, tools, file transfer) does not use sandbox egress. `false` with an empty allow list falls back to the Daytona tier default. |
 | `FLEET_DAYTONA_DOMAIN_ALLOW_LIST` | empty | Comma-separated domains or `*.` wildcards sandboxes may reach. Non-empty replaces block-all, since Daytona rejects both together. At most 100 entries. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
+| `FLEET_DAYTONA_ROOT_AUTO_DELETE_MINUTES` | `10080` | Minutes a stopped, non-disposable root sandbox is kept before Daytona deletes it (7 days). `-1` keeps it forever; `0` is refused. TOML `[daytona] root_auto_delete_minutes`. A deleted root sandbox is rebuilt from the snapshot on the next Turn; Session state lives on the Volume. Child sandboxes are bounded to the Turn instead. |
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
 | `FLEET_SUB_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Code fallback for the sub-model. The checked-in `config/fleet.toml` instead selects `openai/system.ai.deepseek-v4-1-flash` for both root and sub roles. |
 | `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-haiku-5-5` | Code fallback for GEPA reflection. The checked-in `config/fleet.toml` selects the same route, with temperature 1.0 and max tokens 32000. Relative model strength is an evaluation hypothesis, not established by configuration. |

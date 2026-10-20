@@ -333,3 +333,59 @@ def test_cancel_turn_stops_the_root_sandbox_without_holding_the_manager_lock() -
     assert not worker.is_alive()
     assert ensured.wait(5)
     root.end_turn()
+
+
+def test_a_configured_root_auto_delete_reaches_the_root_create_params(monkeypatch) -> None:
+    from fleet_rlm import session as session_module
+
+    captured: dict[str, Any] = {}
+
+    class _StopError(Exception):
+        pass
+
+    def capture(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        raise _StopError
+
+    monkeypatch.setenv("FLEET_DAYTONA_ROOT_AUTO_DELETE_MINUTES", "4321")
+    settings = FleetSettings(_env_file=None)
+    assert settings.daytona_root_auto_delete_minutes == 4321
+    monkeypatch.setattr(session_module, "DaytonaSandboxManager", capture)
+    with pytest.raises(_StopError):
+        session_module.SessionRuntimeRegistry(settings, None)._build("life")
+    assert captured["root_auto_delete_minutes"] == 4321
+    credentials = {"api_key": "key", "org_id": "org", "volume_id": "volume"}  # settings carry none in tests
+    params = DaytonaSandboxManager(**{**captured, **credentials}).create_params()
+    assert params.auto_delete_interval == 4321
+    assert _sdk_request_body(params).auto_delete_interval == 4321
+
+
+def test_the_wait_for_an_in_flight_stop_covers_every_retried_stop_attempt() -> None:
+    from fleet_rlm.sandbox import manager as manager_module
+
+    attempts, base = repl._RETRY_ATTEMPTS, repl._RETRY_BASE_SECONDS
+    worst = attempts * manager_module._STOP_TIMEOUT_SECONDS + sum(base * 2**n * 1.5 for n in range(attempts - 1))
+    assert repl.retry_worst_case_seconds(manager_module._STOP_TIMEOUT_SECONDS) == pytest.approx(worst)
+    assert manager_module._STOP_SETTLE_SECONDS >= worst >= 180
+
+
+def test_the_stop_wait_follows_the_retry_settings(monkeypatch) -> None:
+    monkeypatch.setattr(repl, "_RETRY_ATTEMPTS", 5)
+    assert repl.retry_worst_case_seconds(60) >= 300
+
+
+def test_a_new_turn_waits_for_a_slow_stop_longer_than_the_old_90_seconds() -> None:
+    from fleet_rlm.sandbox import manager as manager_module
+
+    root = _root()
+    waits: list[float] = []
+
+    class _Settled:
+        def wait(self, timeout: float) -> bool:
+            waits.append(timeout)
+            return False
+
+    root._stops_settled = _Settled()  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="stop did not finish"):
+        root.ensure_sandbox()
+    assert waits == [manager_module._STOP_SETTLE_SECONDS] and waits[0] > 180
