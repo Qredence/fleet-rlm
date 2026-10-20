@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
+import threading
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +18,8 @@ from dspy import AdapterParseError
 from fakes import FakeHarness, FakeManager, client_for, runtime_with, store_with
 
 import fleet_rlm.api.app as api_app
+import fleet_rlm.api.deps as api_deps
+import fleet_rlm.api.routes.turns as turns_route
 import fleet_rlm.engine.turn as turn_module
 from fleet_rlm.api.events import SSERuntimeCallback
 from fleet_rlm.replay import decode_snapshot
@@ -563,3 +568,163 @@ def test_should_trace_preparation_and_persistence_under_the_turn(traced):
     ):
         assert parents[name] == "turn.prepare_inputs"
     assert parents["turn.commit"] == parents["turn.write_learned_note"] == "fleet_turn"
+
+
+def _within(seconds: float, call):
+    """Run `call` on a thread and fail instead of hanging when it does not return in time."""
+    result: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            result["value"] = call()
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            result["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), f"did not finish within {seconds}s"
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+
+@pytest.mark.parametrize("failure", ["worker_raises", "worker_returns_silently"])
+def test_a_turn_stream_ends_with_an_error_when_the_worker_never_reports_done(monkeypatch, failure):
+    def broken_turn(*_args, **_kwargs):
+        if failure == "worker_raises":
+            raise RuntimeError("cleanup failed before the end marker")
+
+    monkeypatch.setattr(turns_route, "run_turn", broken_turn)
+    runtime = runtime_with()
+    client, _ = client_for(runtime)
+
+    def post():
+        with client:
+            return client.post("/sessions/session-a/turn", json={"task": "anything"})
+
+    response = _within(10, post)
+    events = events_of(response)
+    assert response.status_code == 200
+    assert [event["event"] for event in events] == ["turn_status", "error"]
+    assert "The Turn failed" in events[1]["payload"]["error"]
+    assert "cleanup failed" not in response.text
+    assert not runtime.turn_lock.locked()
+
+
+@pytest.mark.usefixtures("traced")
+def test_a_failing_sandbox_cleanup_still_ends_the_stream_after_the_outcome():
+    threads: list[str] = []
+
+    def engine(**_kwargs):
+        threads.append(threading.current_thread().name)
+        return SimpleNamespace(answer="hello", route="direct")
+
+    def broken_end_turn():
+        raise RuntimeError("sandbox went away")
+
+    runtime = runtime_with(sandbox_mgr=FakeManager(end_turn=broken_end_turn), engine=engine)
+    client, _ = client_for(runtime)
+
+    def post():
+        with client:
+            return client.post("/sessions/session-a/turn", json={"task": "hello"})
+
+    response = _within(10, post)
+    assert [event["event"] for event in events_of(response)] == ["turn_status", "turn_complete"]
+    assert not runtime.turn_lock.locked()
+    # Turns run on their own pool, never on the loop's default executor that cancellation uses.
+    assert threads and threads[0].startswith("fleet-turn")
+
+
+@pytest.mark.usefixtures("traced")
+def test_a_second_turn_on_a_busy_session_gets_a_prompt_409(monkeypatch):
+    monkeypatch.setattr(api_deps, "_LOCK_WAIT_SECONDS", 0.05)
+
+    def never(**_kwargs):
+        raise AssertionError("a Turn on a busy Session must not run")
+
+    runtime = runtime_with(engine=never)
+    runtime.turn_lock.acquire()
+    client, app = client_for(runtime)
+    try:
+        with client:
+            started = time.monotonic()
+            response = client.post("/sessions/session-a/turn", json={"task": "second"})
+            elapsed = time.monotonic() - started
+    finally:
+        runtime.turn_lock.release()
+    assert response.status_code == 409
+    assert "Turn" in response.json()["detail"]
+    assert elapsed < 2
+    assert "409" in app.openapi()["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]
+
+
+@pytest.mark.usefixtures("traced")
+def test_a_client_disconnect_mid_turn_cancels_it_and_releases_the_lock():
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def cancel_turn() -> None:
+        manager._cancelled.set()
+
+    def engine(**_kwargs):
+        started.set()
+        try:
+            if not manager._cancelled.wait(10):
+                raise AssertionError("the disconnect never cancelled the Turn")
+            raise RuntimeError("cancelled by the sandbox")
+        finally:
+            stopped.set()
+
+    manager = FakeManager(cancel_turn=cancel_turn)
+    runtime = runtime_with(sandbox_mgr=manager, engine=engine)
+    _, app = client_for(runtime)
+    body = json.dumps({"task": "long running"}).encode()
+    sent: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        disconnected = asyncio.Event()
+        delivered = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            await disconnected.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict[str, Any]) -> None:
+            sent.append(message)
+
+        async def disconnect_once_running() -> None:
+            await asyncio.to_thread(started.wait, 10)
+            disconnected.set()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/sessions/session-a/turn",
+            "raw_path": b"/sessions/session-a/turn",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"content-type", b"application/json"), (b"host", b"test")],
+            "client": ("testclient", 50000),
+            "server": ("test", 80),
+            "state": {},
+        }
+        async with app.router.lifespan_context(app):
+            trigger = asyncio.create_task(disconnect_once_running())
+            await asyncio.wait_for(app(scope, receive, send), timeout=15)
+            await trigger
+
+    asyncio.run(drive())
+    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 200
+    assert manager._cancelled.is_set()
+    # The response ended only after the cancelled Turn drained, and then released the Session.
+    assert stopped.is_set()
+    assert not runtime.turn_lock.locked()

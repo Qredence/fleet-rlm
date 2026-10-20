@@ -195,9 +195,12 @@ def run_turn(
             runtime.harness.store.finish_turn(session_id, turn_id, "cancelled" if cancelled else "failed", failure)
         emit(failure)
     finally:
-        manager.end_turn()
-        manager.event_callback = previous_event_callback
-        emit({"event": "done"})
+        try:
+            manager.end_turn()
+        finally:
+            # The stream's end marker must survive a failing sandbox cleanup.
+            manager.event_callback = previous_event_callback
+            emit({"event": "done"})
 
 
 def _replayed(prior: dict[str, Any]) -> dict[str, Any]:

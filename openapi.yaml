@@ -800,8 +800,9 @@ paths:
       description: 'Run one Turn and stream its activity as Server-Sent Events.
 
 
-        The Turn runs on a worker thread; a client disconnect cancels it and waits for sandbox work to
-        drain.'
+        The stream always ends with one outcome event.
+
+        A client disconnect cancels the Turn; the Session stays locked until sandbox work has drained.'
       operationId: stream_turn_sessions__session_id__turn_post
       parameters:
       - name: session_id
@@ -835,6 +836,8 @@ paths:
                     minimum: 0
               schema:
                 type: string
+        '409':
+          description: A Turn or workspace change holds the Session lock; retry when it completes
         '422':
           description: Validation Error
           content:
