@@ -44,7 +44,11 @@ from daytona.common.errors import (
 )
 from mlflow.entities import SpanType
 
-from fleet_rlm.config import validate_root_auto_delete_minutes, validate_shared_notes_subpath
+from fleet_rlm.config import (
+    DEFAULT_ROOT_AUTO_DELETE_MINUTES,
+    validate_root_auto_delete_minutes,
+    validate_shared_notes_subpath,
+)
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
@@ -153,12 +157,18 @@ def _sandbox_state(sandbox: Any) -> str:
     return str(getattr(state, "value", state) or "").lower()
 
 
+def _provider_state(sandbox: Any) -> str:
+    """`_sandbox_state`, with a sandbox the provider no longer has reported as "missing"."""
+    try:
+        return _sandbox_state(sandbox)
+    except DaytonaNotFoundError:
+        return "missing"
+
+
 def _sandbox_alive(sandbox: Any) -> bool:
     """Whether an execution in `sandbox` can still be running; an unreadable state counts as alive."""
     try:
-        return _sandbox_state(sandbox) not in _LOST_STATES
-    except DaytonaNotFoundError:
-        return False
+        return _provider_state(sandbox) not in _LOST_STATES
     except Exception:
         return True  # a failed poll is not evidence of loss; the execution timeout still bounds the wait
 
@@ -209,7 +219,7 @@ class DaytonaSandboxManager:
     session_id: str
     snapshot: str = "fleet-rlm-base"
     auto_stop_minutes: int = 30
-    root_auto_delete_minutes: int = 7 * 24 * 60
+    root_auto_delete_minutes: int = DEFAULT_ROOT_AUTO_DELETE_MINUTES
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
     max_llm_calls: int = 150
@@ -754,21 +764,14 @@ class DaytonaSandboxManager:
         """
         sandbox = self._sandbox
         assert sandbox is not None and self._client is not None
-
-        def state_of() -> str:
-            try:
-                return _sandbox_state(sandbox)
-            except DaytonaNotFoundError:
-                return "missing"
-
-        state = state_of()
+        state = _provider_state(sandbox)
         deadline = time.monotonic() + _STATE_SETTLE_SECONDS
         while state in _SETTLING_STATES:
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Sandbox {sandbox.id} did not settle from state {state!r}")
             time.sleep(_STATE_POLL_SECONDS)
             self.check_turn()
-            state = state_of()
+            state = _provider_state(sandbox)
         if state in _FAILED_STATES or state == "missing":
             raise SandboxUnavailableError(sandbox.id, state)
         if state in _RESUMABLE_STATES:
@@ -863,9 +866,9 @@ class DaytonaSandboxManager:
             f"summary: {summary}",
             "---",
         ]
+        content = "\n".join([*header, body, ""]).encode("utf-8")
         sandbox = self.ensure_sandbox()
         with self._activity.host_io():
-            content = "\n".join([*header, body, ""]).encode("utf-8")
             with_retries(lambda: sandbox.fs.upload_file(content, path, timeout=60))
         return path
 

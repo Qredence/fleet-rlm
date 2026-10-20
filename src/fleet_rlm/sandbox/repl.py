@@ -111,8 +111,8 @@ class SandboxActivity:
 class ExecutionTracker:
     """Thread-safe record of in-flight executions, the last liveness verdict, and the latest stdout.
 
-    Fed by `run` (begin/end and stdout), by `_run_watched`'s liveness polls, and by the manager's own
-    create/resume/stop/loss events; `snapshot()` only reads this state.
+    Fed by `run` (begin/end and stdout), by `_run_watched`'s liveness polls, by the manager's host IO
+    (`host_io`), and by its own create/resume/stop/loss events; `snapshot()` only reads this state.
     """
 
     def __init__(self) -> None:
@@ -124,15 +124,20 @@ class ExecutionTracker:
         self._output: tuple[float, float] | None = None
         self._host_io: dict[int, float] = {}  # token -> monotonic start
 
+    def _new_token(self) -> int:
+        """A token unique across executions and host IO operations. Caller holds `_lock`."""
+        self._next += 1
+        return self._next
+
     def begin_host_io(self) -> int:
         """Record a host-side Daytona operation (exec, transfer) as in flight; returns the token for `end_host_io`.
 
         Counted per token, so overlapping operations work. It does not touch `busy` or the liveness poll.
         """
         with self._lock:
-            self._next += 1
-            self._host_io[self._next] = time.monotonic()
-            return self._next
+            token = self._new_token()
+            self._host_io[token] = time.monotonic()
+            return token
 
     def end_host_io(self, token: int) -> None:
         """Record the host-side operation as finished (returned or failed)."""
@@ -151,9 +156,9 @@ class ExecutionTracker:
     def begin(self) -> int:
         """Record an execution as in flight; returns the token for `end`."""
         with self._lock:
-            self._next += 1
-            self._running[self._next] = (time.time(), time.monotonic())
-            return self._next
+            token = self._new_token()
+            self._running[token] = (time.time(), time.monotonic())
+            return token
 
     def end(self, token: int) -> None:
         """Record the execution as finished (returned, failed, or abandoned)."""
