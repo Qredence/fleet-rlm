@@ -310,7 +310,8 @@ class AdaptiveFleetEngine(dspy.Module):
         context: Any,
     ) -> dspy.Prediction:
         if route is Route.DIRECT:
-            with dspy.context(lm=self._metered_root):
+            # The same format recovery as the RLM and Flex paths: one re-ask, never DSPy's JSON fallback.
+            with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
                 answer = self.direct_cot(
                     memory_summary=memory_summary,
                     session_history=session_history,
