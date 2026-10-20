@@ -51,11 +51,13 @@ def run_turn(
     callback: Any,
     emit: Emit,
     record_replay: bool = False,
-    stalled: threading.Event | None = None,
+    watchdog_fired: threading.Event | None = None,
 ) -> None:
     """Run one Turn for a Session, claiming its id and emitting progress events through emit.
 
-    `stalled` is set by the stream's watchdog before it cancels the Turn, so the stored outcome says why.
+    `watchdog_fired` is set by the stream's stall watchdog before it cancels the Turn, so the stored outcome
+    says why. If the Turn completes normally in the same instant the watchdog fires, the stream may show
+    `turn_stalled` while the stored record says completed; the window is a single check and is accepted.
     """
     manager = runtime.sandbox_mgr
     previous_event_callback = manager.event_callback
@@ -188,8 +190,9 @@ def run_turn(
         emit(completion)
     except Exception as exc:
         _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
-        if stalled is not None and stalled.is_set():
-            cancelled, failure = True, stalled_outcome(turn_id)
+        if watchdog_fired is not None and watchdog_fired.is_set():
+            cancelled = True
+            failure = stalled_outcome(turn_id)
         else:
             cancelled = manager._cancelled.is_set()
             message = str(exc) if isinstance(exc, IdempotencyConflictError) else f"The Turn failed (request {turn_id})."

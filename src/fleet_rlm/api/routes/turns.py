@@ -110,7 +110,7 @@ async def stream_turn(
     turn_started = _clock()  # monotonic; a liveness verdict observed before this is left over from an earlier Turn
     turn_id = uuid.uuid4().hex
     envelope = Envelope(session_id, turn_id, runtime.sandbox_mgr)
-    stall = threading.Event()  # set before the watchdog's cancel, so the worker stores turn_stalled
+    watchdog_fired = threading.Event()  # set before the watchdog's cancel, so the worker stores turn_stalled
     # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
     # in them, so the Turn runs in a copy of the request's context.
     context = contextvars.copy_context()
@@ -127,7 +127,7 @@ async def stream_turn(
         callback=callback,
         emit=callback.emit,
         record_replay=req.record_replay,
-        stalled=stall,
+        watchdog_fired=watchdog_fired,
     )
     worker = asyncio.wrap_future(job)
     getter: asyncio.Future[dict[str, Any]] | None = None
@@ -151,7 +151,7 @@ async def stream_turn(
             pending = getter.done() or not queue.empty()
             if connected and not reported and not pending and not worker.done() and loop.time() >= next_stall_check:
                 next_stall_check = loop.time() + _STALL_CHECK_SECONDS
-                if _stalled(
+                if _is_stalled(
                     callback.heartbeat(),
                     _sandbox_activity(runtime),
                     now=_clock(),
@@ -159,12 +159,12 @@ async def stream_turn(
                     turn_started=turn_started,
                 ):
                     _LOGGER.warning("Turn %s stalled; cancelling it", turn_id)
-                    stall.set()
+                    watchdog_fired.set()
                     cancel_sent = True
                     await _cancel(runtime)
-                    stalled = envelope.wrap(stalled_outcome(turn_id))
+                    outcome = envelope.wrap(stalled_outcome(turn_id))
                     reported = True
-                    yield ServerSentEvent(data=stalled, id=str(stalled["seq"]))
+                    yield ServerSentEvent(data=outcome, id=str(outcome["seq"]))
                     break
             if getter.done():
                 event: dict[str, Any] | None = getter.result()
@@ -221,7 +221,7 @@ def _sandbox_activity(runtime: SessionRuntime) -> SandboxActivity | None:
         return None
 
 
-def _stalled(
+def _is_stalled(
     beat: Heartbeat, activity: SandboxActivity | None, *, now: float, limit: float, turn_started: float
 ) -> bool:
     """Whether the Turn has stalled: its sandbox was lost, or it is idle and its callbacks went silent.

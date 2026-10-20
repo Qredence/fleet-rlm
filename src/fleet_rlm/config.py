@@ -153,6 +153,10 @@ def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
     return result
 
 
+# Seven days: how long a stopped root sandbox is kept before Daytona deletes it, unless configured.
+DEFAULT_ROOT_AUTO_DELETE_MINUTES = 7 * 24 * 60
+
+
 def validate_root_auto_delete_minutes(value: int) -> int:
     """Return a root sandbox auto-delete interval: -1 (never) or a positive number of minutes."""
     if type(value) is not int or (value != -1 and value < 1):
@@ -304,7 +308,7 @@ class FleetSettings(BaseSettings):
         validation_alias=AliasChoices("FLEET_DAYTONA_AUTO_STOP_MINUTES", "DAYTONA_AUTO_STOP_MINUTES"),
     )
     daytona_root_auto_delete_minutes: int = Field(
-        default=7 * 24 * 60,
+        default=DEFAULT_ROOT_AUTO_DELETE_MINUTES,
         ge=-1,
         le=365 * 24 * 60,
         validation_alias="FLEET_DAYTONA_ROOT_AUTO_DELETE_MINUTES",

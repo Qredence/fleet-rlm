@@ -50,12 +50,12 @@ def _manager(sandbox: _Sandbox, *, parent: DaytonaSandboxManager | None = None) 
     return manager
 
 
-def _start(manager: DaytonaSandboxManager, outcome: dict[str, Any]) -> threading.Thread:
-    interpreter = SimpleNamespace(ns_id="ns", answer_host_call=lambda _call: {})
+def _in_thread(operation: Any, outcome: dict[str, Any]) -> threading.Thread:
+    """Run `operation` on a daemon thread, storing its return value or exception in `outcome`."""
 
     def target() -> None:
         try:
-            outcome["result"] = manager.run_namespace(interpreter, {"code": "work()"})  # type: ignore[arg-type]
+            outcome["result"] = operation()
         except BaseException as exc:
             outcome["error"] = exc
 
@@ -64,52 +64,41 @@ def _start(manager: DaytonaSandboxManager, outcome: dict[str, Any]) -> threading
     return thread
 
 
+def _start(manager: DaytonaSandboxManager, outcome: dict[str, Any]) -> threading.Thread:
+    interpreter = SimpleNamespace(ns_id="ns", answer_host_call=lambda _call: {})
+    return _in_thread(lambda: manager.run_namespace(interpreter, {"code": "work()"}), outcome)  # type: ignore[arg-type]
+
+
 def test_an_idle_manager_reports_nothing_running_and_unknown_liveness() -> None:
     activity = DaytonaSandboxManager("key", "org", "volume", "activity").sandbox_activity()
-    assert activity == SandboxActivity(
-        busy=False,
-        executions=0,
-        busy_since=None,
-        busy_since_monotonic=None,
-        alive=None,
-        alive_checked_at=None,
-        alive_checked_monotonic=None,
-        last_output_at=None,
-        last_output_monotonic=None,
-    )
+    assert activity == SandboxActivity(busy=False, alive=None, alive_checked_monotonic=None, host_io_busy=False)
 
 
-def test_a_running_execution_is_busy_with_its_start_and_output_times(monkeypatch) -> None:
+def test_a_running_execution_is_busy_and_its_liveness_is_polled(monkeypatch) -> None:
     monkeypatch.setattr(repl, "LIVENESS_POLL_SECONDS", 0.01)
     sandbox = _Sandbox("root-sb")
     root = _manager(sandbox)
     root.reset_turn_budget()
     outcome: dict[str, Any] = {}
-    before_wall, before_mono = time.time(), time.monotonic()
     thread = _start(root, outcome)
     try:
         assert sandbox.running.wait(5)
         activity = root.sandbox_activity()
-        assert activity.busy and activity.executions == 1
-        assert before_wall <= (activity.busy_since or 0) <= time.time()
-        assert before_mono <= (activity.busy_since_monotonic or 0) <= time.monotonic()
-        assert activity.alive is True and activity.alive_checked_at is not None  # from ensure_sandbox
-        assert activity.last_output_monotonic is not None and activity.last_output_monotonic >= before_mono
+        assert activity.busy and not activity.host_io_busy
+        assert activity.alive is True and activity.alive_checked_monotonic is not None  # from ensure_sandbox
         # The liveness poll keeps refreshing the verdict while the execution runs.
-        checked = activity.alive_checked_at
+        checked = activity.alive_checked_monotonic
         deadline = time.monotonic() + 5
-        while root.sandbox_activity().alive_checked_at == checked and time.monotonic() < deadline:
+        while root.sandbox_activity().alive_checked_monotonic == checked and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert (root.sandbox_activity().alive_checked_at or 0) > (checked or 0)
-        assert (root.sandbox_activity().alive_checked_monotonic or 0) > (activity.alive_checked_monotonic or 0)
+        assert (root.sandbox_activity().alive_checked_monotonic or 0) > (checked or 0)
     finally:
         sandbox.release.set()
         thread.join(5)
         root.end_turn()
     assert outcome["result"]["stdout"] == "done"
     after = root.sandbox_activity()
-    assert not after.busy and after.executions == 0 and after.busy_since is None
-    assert after.alive is True and after.last_output_monotonic is not None
+    assert not after.busy and after.alive is True
 
 
 def test_querying_never_calls_daytona_and_never_takes_the_manager_lock(monkeypatch) -> None:
@@ -176,10 +165,8 @@ def test_child_executions_count_toward_the_root_but_liveness_stays_the_roots(mon
         assert sandbox.running.wait(5)
         child._activity.observe_alive(False)  # a child verdict never becomes the root's
         combined, own = root.sandbox_activity(), root.sandbox_activity(include_children=False)
-        assert combined.busy and combined.executions == 1 and combined.alive is True
-        assert combined.busy_since == child.sandbox_activity().busy_since
-        assert combined.last_output_at == child.sandbox_activity().last_output_at
-        assert not own.busy and own.executions == 0 and own.last_output_at is None
+        assert combined.busy and combined.alive is True
+        assert not own.busy and own.alive is True
     finally:
         sandbox.release.set()
         thread.join(5)
@@ -201,19 +188,16 @@ def test_a_stop_marks_the_sandbox_not_alive_until_it_is_resumed() -> None:
     assert root.sandbox_activity().alive is False
 
 
-def test_overlapping_executions_report_the_oldest_start() -> None:
+def test_overlapping_executions_stay_busy_until_the_last_ends() -> None:
     tracker = ExecutionTracker()
     first = tracker.begin()
-    time.sleep(0.01)
     second = tracker.begin()
-    oldest = tracker.snapshot()
-    assert oldest.executions == 2
+    assert tracker.snapshot().busy
     tracker.end(first)
-    newer = tracker.snapshot()
-    assert newer.executions == 1 and (newer.busy_since_monotonic or 0) > (oldest.busy_since_monotonic or 0)
+    assert tracker.snapshot().busy
     tracker.end(second)
     tracker.end(second)  # ending twice is harmless
-    assert tracker.snapshot().executions == 0
+    assert not tracker.snapshot().busy
 
 
 def test_the_tracker_is_thread_safe() -> None:
@@ -224,7 +208,6 @@ def test_the_tracker_is_thread_safe() -> None:
         try:
             for _ in range(2000):
                 token = tracker.begin()
-                tracker.observe_output()
                 tracker.observe_alive(True)
                 tracker.snapshot()
                 tracker.end(token)
@@ -236,7 +219,7 @@ def test_the_tracker_is_thread_safe() -> None:
         thread.start()
     for thread in threads:
         thread.join(30)
-    assert errors == [] and tracker.snapshot().executions == 0
+    assert errors == [] and not tracker.snapshot().busy
 
 
 def test_run_without_a_tracker_is_unchanged(monkeypatch) -> None:
@@ -275,15 +258,7 @@ class _HostIOSandbox(_Sandbox):
 
 def _while_blocked(sandbox: _HostIOSandbox, operation: Any) -> tuple[threading.Thread, dict[str, Any]]:
     outcome: dict[str, Any] = {}
-
-    def target() -> None:
-        try:
-            outcome["result"] = operation()
-        except BaseException as exc:
-            outcome["error"] = exc
-
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
+    thread = _in_thread(operation, outcome)
     assert sandbox.in_host_io.wait(5)
     return thread, outcome
 
@@ -292,14 +267,11 @@ def test_a_remote_exec_is_host_io_not_busy_and_starts_no_liveness_poll(monkeypat
     monkeypatch.setattr(repl, "LIVENESS_POLL_SECONDS", 0.01)
     sandbox = _HostIOSandbox("root-sb")
     root = _manager(sandbox)
-    before = time.monotonic()
     thread, outcome = _while_blocked(sandbox, lambda: root.exec_remote_python("print('ok')"))
     try:
         activity = root.sandbox_activity()
         assert activity.host_io_busy is True
-        assert (activity.host_io_since_monotonic or 0) >= before
-        # busy/executions/busy_since keep meaning "model code is running".
-        assert not activity.busy and activity.executions == 0 and activity.busy_since_monotonic is None
+        assert not activity.busy  # busy keeps meaning "model code is running"
         refreshes, checked = sandbox.refreshes, activity.alive_checked_monotonic
         time.sleep(0.2)  # 20 poll intervals: host IO must not start the liveness poll
         assert sandbox.refreshes == refreshes
@@ -309,7 +281,7 @@ def test_a_remote_exec_is_host_io_not_busy_and_starts_no_liveness_poll(monkeypat
         thread.join(5)
     assert outcome == {"result": "ok"}
     after = root.sandbox_activity()
-    assert not after.host_io_busy and after.host_io_since_monotonic is None
+    assert not after.host_io_busy
 
 
 def test_a_file_upload_is_host_io_and_a_failed_one_still_ends(monkeypatch) -> None:
@@ -320,7 +292,7 @@ def test_a_file_upload_is_host_io_and_a_failed_one_still_ends(monkeypatch) -> No
     thread, outcome = _while_blocked(sandbox, lambda: root.write_workspace_file("files/a.txt", b"x"))
     try:
         activity = root.sandbox_activity()
-        assert activity.host_io_busy and not activity.busy and activity.executions == 0
+        assert activity.host_io_busy and not activity.busy
     finally:
         sandbox.release.set()
         thread.join(5)
@@ -356,13 +328,10 @@ def test_artifact_collection_is_host_io(monkeypatch) -> None:
 def test_host_io_is_counted_so_overlapping_operations_work() -> None:
     tracker = ExecutionTracker()
     first = tracker.begin_host_io()
-    start = tracker.snapshot().host_io_since_monotonic
     second = tracker.begin_host_io()
     tracker.end_host_io(first)
     activity = tracker.snapshot()
-    assert activity.host_io_busy and activity.host_io_since_monotonic is not None
-    assert activity.host_io_since_monotonic >= (start or 0)  # the oldest still-open operation
-    assert not activity.busy and activity.executions == 0
+    assert activity.host_io_busy and not activity.busy  # still open: the second operation
     tracker.end_host_io(second)
     assert not tracker.snapshot().host_io_busy
     with pytest.raises(RuntimeError), tracker.host_io():
@@ -377,8 +346,7 @@ def test_host_io_in_a_child_counts_for_the_root_without_making_it_busy() -> None
     token = child._activity.begin_host_io()
     try:
         merged = root.sandbox_activity()
-        assert merged.host_io_busy and merged.host_io_since_monotonic is not None
-        assert not merged.busy and merged.executions == 0
+        assert merged.host_io_busy and not merged.busy
         assert not root.sandbox_activity(include_children=False).host_io_busy
     finally:
         child._activity.end_host_io(token)

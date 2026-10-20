@@ -98,7 +98,7 @@ def test_child_ttl_and_auto_stop_outlive_the_turn_deadline(turn_timeout, auto_st
 def test_root_has_no_ttl_and_a_configurable_auto_delete(turn_timeout: int) -> None:
     params = _root(turn_timeout_seconds=turn_timeout).create_params()
     assert params.ttl_minutes is None and "ttl_minutes" not in params.model_dump(exclude_none=True)
-    assert params.ephemeral is False and params.auto_delete_interval == 7 * 24 * 60
+    assert params.ephemeral is False and params.auto_delete_interval == 10080  # 7 days
     assert params.auto_stop_interval == 30
     assert _root(root_auto_delete_minutes=60).create_params().auto_delete_interval == 60
     assert _root(root_auto_delete_minutes=-1).create_params().auto_delete_interval == -1

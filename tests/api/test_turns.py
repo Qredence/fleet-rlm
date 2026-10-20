@@ -918,14 +918,8 @@ def _activity(
     observed = None if alive is None else (clock.now if checked == "now" else checked)
     return SandboxActivity(
         busy=busy,
-        executions=int(busy),
-        busy_since=time.time() if busy else None,
-        busy_since_monotonic=clock.now if busy else None,
         alive=alive,
-        alive_checked_at=None if observed is None else time.time(),
         alive_checked_monotonic=observed,
-        last_output_at=None,
-        last_output_monotonic=None,
         host_io_busy=host_io_busy,
     )
 
@@ -947,13 +941,13 @@ class _StallHarness:  # `activity` takes the heartbeat clock and returns a Sandb
         monkeypatch.setattr(turns_route, "_clock", self.clock)
         monkeypatch.setattr(turns_route, "_STALL_CHECK_SECONDS", 0.01)
         self.checks = 0
-        stalled = turns_route._stalled
+        stalled = turns_route._is_stalled
 
         def counted(*args, **kwargs):
             self.checks += 1
             return stalled(*args, **kwargs)
 
-        monkeypatch.setattr(turns_route, "_stalled", counted)
+        monkeypatch.setattr(turns_route, "_is_stalled", counted)
         self.traced = traced
         self.cancelled = threading.Event()
         self.cancels = 0
@@ -1208,7 +1202,7 @@ def test_an_outcome_queued_when_a_check_is_due_is_delivered_not_replaced_by_a_st
         harness.checks += 1
         return outcome_queued.is_set()
 
-    monkeypatch.setattr(turns_route, "_stalled", stalled)
+    monkeypatch.setattr(turns_route, "_is_stalled", stalled)
 
     def script(callback: SSERuntimeCallback) -> None:
         _lm_call(callback)
