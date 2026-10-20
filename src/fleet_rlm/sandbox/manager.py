@@ -157,8 +157,17 @@ def _sandbox_state(sandbox: Any) -> str:
     refresh = getattr(sandbox, "refresh_data", None)
     if callable(refresh):
         refresh()
-    state = getattr(sandbox, "state", None)
+    return _state_name(getattr(sandbox, "state", None))
+
+
+def _state_name(state: Any) -> str:
+    """A provider state (enum or string) as a lowercase name ("" when unknown)."""
     return str(getattr(state, "value", state) or "").lower()
+
+
+def _sandbox_id(sandbox: Any) -> str:
+    """The sandbox id as a string ("" when the handle has none)."""
+    return str(getattr(sandbox, "id", "") or "")
 
 
 def _provider_state(sandbox: Any) -> str:
@@ -286,6 +295,7 @@ class DaytonaSandboxManager:
     _client: Daytona | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
     _activity: repl.ExecutionTracker = field(default_factory=repl.ExecutionTracker, init=False, repr=False)
+    # The latest egress-probe thread; kept only so tests can join it. Production code never reads it.
     _network_probe_thread: threading.Thread | None = field(default=None, init=False, repr=False)
     _budget_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _llm_calls_used: int = field(default=0, init=False, repr=False)
@@ -693,7 +703,7 @@ class DaytonaSandboxManager:
         """
         if self.parent is not None or self.network_params() != {"network_block_all": True}:
             return False
-        sandbox_id = str(getattr(sandbox, "id", "") or "")
+        sandbox_id = _sandbox_id(sandbox)
         with _NETWORK_PROBED_LOCK:
             if not sandbox_id or sandbox_id in _NETWORK_PROBED_SANDBOXES:
                 return False
@@ -705,7 +715,7 @@ class DaytonaSandboxManager:
     @staticmethod
     def _forget_network_probe(sandbox: Any) -> None:
         """Drop a sandbox id this process no longer uses (rebuilt or shut down) from the probed set."""
-        sandbox_id = str(getattr(sandbox, "id", "") or "")
+        sandbox_id = _sandbox_id(sandbox)
         with _NETWORK_PROBED_LOCK:
             _NETWORK_PROBED_SANDBOXES.pop(sandbox_id, None)
 
@@ -715,7 +725,7 @@ class DaytonaSandboxManager:
         Never raises: a thread that cannot start is logged at debug. The thread copies the caller's contextvars
         and never takes the manager lock.
         """
-        sandbox_id = str(getattr(sandbox, "id", "") or "")
+        sandbox_id = _sandbox_id(sandbox)
         client = self._client
         try:
             thread = threading.Thread(
@@ -738,38 +748,30 @@ class DaytonaSandboxManager:
         organization. The exec is bounded and never retried.
         """
         try:
-            try:
-                sandbox = client.get(sandbox_id)
-                state = getattr(sandbox, "state", None)
-                state = str(getattr(state, "value", state) or "").lower()
-                if state in _LOST_STATES:
-                    _LOGGER.debug("Network enforcement probe skipped: sandbox %s is %s", sandbox_id, state)
-                    return
-                outcome = self._remote_exec(
-                    sandbox, _NETWORK_PROBE_CODE, timeout=NETWORK_PROBE_TIMEOUT_SECONDS, retry=False
-                ).strip()
-            except DaytonaNotFoundError:
-                _LOGGER.debug("Network enforcement probe skipped: sandbox %s no longer exists", sandbox_id)
+            sandbox = client.get(sandbox_id)
+            state = _state_name(getattr(sandbox, "state", None))
+            if state in _LOST_STATES:
+                _LOGGER.debug("Network enforcement probe skipped: sandbox %s is %s", sandbox_id, state)
                 return
-            except Exception as exc:
-                _LOGGER.debug(
-                    "Network enforcement probe did not run in sandbox %s (%s)", sandbox_id, type(exc).__name__
-                )
-                return
-            if outcome == "connected":
-                _LOGGER.warning(
-                    "NETWORK BLOCKING IS NOT ENFORCED in Daytona sandbox %s: FLEET_DAYTONA_NETWORK_BLOCK_ALL=true was "
-                    "requested, but the sandbox reached 1.1.1.1:443. Per-sandbox network policies require a Daytona "
-                    "Tier 3 or Tier 4 organization; this is likely a Tier 1/2 org whose organization-level policy "
-                    "wins. Model code in this sandbox has outbound network access.",
-                    sandbox_id,
-                )
-            else:
-                _LOGGER.debug(
-                    "Network blocking is enforced in sandbox %s (probe: %s)", sandbox_id, outcome or "no output"
-                )
-        except BaseException:  # a background diagnostic must never surface anywhere
-            _LOGGER.debug("Network enforcement probe for sandbox %s failed", sandbox_id, exc_info=True)
+            outcome = self._remote_exec(
+                sandbox, _NETWORK_PROBE_CODE, timeout=NETWORK_PROBE_TIMEOUT_SECONDS, retry=False
+            ).strip()
+        except DaytonaNotFoundError:
+            _LOGGER.debug("Network enforcement probe skipped: sandbox %s no longer exists", sandbox_id)
+            return
+        except BaseException as exc:  # a background diagnostic must never surface anywhere
+            _LOGGER.debug("Network enforcement probe did not run in sandbox %s (%s)", sandbox_id, type(exc).__name__)
+            return
+        if outcome == "connected":
+            _LOGGER.warning(
+                "NETWORK BLOCKING IS NOT ENFORCED in Daytona sandbox %s: FLEET_DAYTONA_NETWORK_BLOCK_ALL=true was "
+                "requested, but the sandbox reached 1.1.1.1:443. Per-sandbox network policies require a Daytona "
+                "Tier 3 or Tier 4 organization; this is likely a Tier 1/2 org whose organization-level policy "
+                "wins. Model code in this sandbox has outbound network access.",
+                sandbox_id,
+            )
+        else:
+            _LOGGER.debug("Network blocking is enforced in sandbox %s (probe: %s)", sandbox_id, outcome or "no output")
 
     def _verify_network_policy(self, sandbox: Any) -> None:
         """Warn (once per process) when a created sandbox does not report the requested network policy.
