@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import functools
 import hashlib
 import json
+import math
 import os
 import platform
 import tempfile
@@ -21,6 +23,7 @@ from typing import Any
 import dspy
 import mlflow
 from dspy.teleprompt.gepa import InstructionProposer
+from dspy.utils.callback import BaseCallback
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
@@ -56,20 +59,104 @@ class SplitScore:
     seconds: float
 
 
-def score_split(program: dspy.Module, examples: list[dspy.Example], metric: Any, threads: int) -> SplitScore:
-    """Score every example with ``dspy.Evaluate``; a rollout that raises scores 0.0 and counts as an error."""
+class EvaluationAbortedError(RuntimeError):
+    """A split had more failed rollouts than its error limit allows, so it was not scored."""
+
+
+DEFAULT_ERROR_SHARE = 0.2
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorLimit:
+    """How many failed rollouts a split may have and still be scored: a share of the split, optionally capped."""
+
+    share: float = DEFAULT_ERROR_SHARE
+    cap: int | None = None
+
+    def allowed(self, examples: int) -> int:
+        """The largest error count that still yields a score for a split of `examples`."""
+        allowed = math.floor(self.share * examples)
+        return allowed if self.cap is None else min(allowed, self.cap)
+
+
+DEFAULT_ERROR_LIMIT = ErrorLimit()
+
+
+class _RolloutErrors(BaseCallback):
+    """Counts rollouts that raised, in the program or in the metric; dspy.Evaluate scores those `failure_score`.
+
+    The program's own top-level calls are matched by instance through DSPy's module callbacks, so the
+    program is evaluated unwrapped (its state and MLflow logging are unchanged).
+    """
+
+    def __init__(self, program: dspy.Module) -> None:
+        super().__init__()
+        self.program = program
+        self.count = 0
+        self._calls: set[str] = set()
+        self._lock = threading.Lock()
+
+    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
+        if instance is self.program:
+            with self._lock:
+                self._calls.add(call_id)
+
+    def on_module_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
+        with self._lock:
+            if call_id in self._calls:
+                self._calls.discard(call_id)
+                self.count += exception is not None
+
+    def metric(self, metric: Any) -> Any:
+        """Wrap `metric` so a scoring failure counts as an error too."""
+
+        @functools.wraps(metric)
+        def counted(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return metric(*args, **kwargs)
+            except Exception:
+                with self._lock:
+                    self.count += 1
+                raise
+
+        return counted
+
+
+def score_split(
+    program: dspy.Module,
+    examples: list[dspy.Example],
+    metric: Any,
+    threads: int,
+    limit: ErrorLimit = DEFAULT_ERROR_LIMIT,
+) -> SplitScore:
+    """Score every example with ``dspy.Evaluate``; a rollout that raises scores 0.0 and counts as an error.
+
+    More errors than `limit` allows stops the evaluation early and raises `EvaluationAbortedError`, so a broken
+    run is never reported as a near-zero score.
+    """
     started = time.perf_counter()
-    result = dspy.Evaluate(
-        devset=examples,
-        metric=metric,
-        num_threads=threads,
-        failure_score=0.0,
-        max_errors=len(examples) + 1,
-        provide_traceback=False,
-    )(program)
+    allowed = limit.allowed(len(examples))
+    counter = _RolloutErrors(program)
+    try:
+        with dspy.context(callbacks=[*dspy.settings.callbacks, counter]):
+            result = dspy.Evaluate(
+                devset=examples,
+                metric=counter.metric(metric),
+                num_threads=threads,
+                failure_score=0.0,
+                # Evaluate cancels the remaining rollouts once this many have raised.
+                max_errors=allowed + 1,
+                provide_traceback=False,
+            )(program)
+    except Exception as exc:
+        if counter.count <= allowed:
+            raise
+        raise EvaluationAbortedError(
+            f"Evaluation stopped after {counter.count} failed rollouts out of {len(examples)} "
+            f"(at most {allowed} allowed); the split was not scored."
+        ) from exc
     scores = [float(score) for _, _, score in result.results]
-    # Evaluate substitutes an empty Prediction for a rollout that raised.
-    errors = sum(1 for _, prediction, _ in result.results if "answer" not in prediction)
+    errors = counter.count
     critical_scores = [
         float((getattr(score, "objective_scores", None) or {}).get("quality", float(score)))
         for example, _prediction, score in result.results
@@ -96,10 +183,16 @@ def score_split(program: dspy.Module, examples: list[dspy.Example], metric: Any,
 
 
 def score_stage(
-    program: dspy.Module, devset: list[dspy.Example], holdout: list[dspy.Example], metric: Any, threads: int
+    program: dspy.Module,
+    devset: list[dspy.Example],
+    holdout: list[dspy.Example],
+    metric: Any,
+    threads: int,
+    limit: ErrorLimit = DEFAULT_ERROR_LIMIT,
 ) -> dict[str, Any]:
     """Score the dev and holdout splits and return the combined metrics for one GEPA stage."""
-    dev, held = score_split(program, devset, metric, threads), score_split(program, holdout, metric, threads)
+    dev = score_split(program, devset, metric, threads, limit)
+    held = score_split(program, holdout, metric, threads, limit)
     return {
         "dev": dev.mean,
         "holdout": held.mean,
@@ -325,6 +418,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--validation-ratio", type=float, default=0.35)
     parser.add_argument(
+        "--max-eval-error-share",
+        type=float,
+        default=DEFAULT_ERROR_SHARE,
+        help="validation stops when more than this share of a split's rollouts fail (default 0.2)",
+    )
+    parser.add_argument(
+        "--max-eval-errors",
+        type=int,
+        help="also cap the failed rollouts a validation split may have and still be scored",
+    )
+    parser.add_argument(
         "--approve",
         metavar="VERSION",
         help="install a passing candidate evaluated against the current incumbent and configuration",
@@ -338,6 +442,10 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         parser.error("--threads must be between 1 and 32")
     if args.max_metric_calls is not None and args.max_metric_calls < 1:
         parser.error("--max-metric-calls must be positive")
+    if not 0 <= args.max_eval_error_share <= 1:
+        parser.error("--max-eval-error-share must be between 0 and 1")
+    if args.max_eval_errors is not None and args.max_eval_errors < 0:
+        parser.error("--max-eval-errors must not be negative")
     if args.approve:
         version = args.approve
         if Path(version).name != version or not version.startswith(session_id + "-"):
@@ -451,12 +559,14 @@ def _compile(args: argparse.Namespace, settings: FleetSettings, store: Store, se
         incumbent_validation = IsolatedFleetProgram(template, validation_factory)
         candidate_validation = IsolatedFleetProgram(optimized.program, validation_factory)
         paired = {"baseline": [], "candidate": []}
+        # A split over its error limit raises EvaluationAbortedError here, before any gate or saved candidate.
+        limit = ErrorLimit(args.max_eval_error_share, args.max_eval_errors)
         for pass_index in range(VALIDATION_PASSES):
             # Alternate order to reduce systematic warmup/order effects.
             order = ("baseline", "candidate") if pass_index % 2 == 0 else ("candidate", "baseline")
             for stage in order:
                 program = incumbent_validation if stage == "baseline" else candidate_validation
-                paired[stage].append(score_stage(program, devset, holdout, metric, args.threads))
+                paired[stage].append(score_stage(program, devset, holdout, metric, args.threads, limit))
         evaluation: dict[str, Any] = {
             "policy_version": APPROVAL_POLICY_VERSION,
             **{stage: summarize_passes(passes) for stage, passes in paired.items()},
