@@ -235,13 +235,16 @@ jobs:
 
   validate-pypi-webhook-context:
     docker:
-      - image: cimg/python:3.12
+      - image: cimg/base:current
     resource_class: small
     steps:
-      - checkout
       - run:
           name: Require the Smart Deployments webhook credential before publishing
-          command: PYTHONPATH=src python3.12 scripts/release_checks.py validate-webhook-context
+          command: |
+            if [ -z "${CIRCLECI_VALIDATION_WEBHOOK_TOKEN:-}" ]; then
+              echo "CIRCLECI_VALIDATION_WEBHOOK_TOKEN is required for PyPI release validation." >&2
+              exit 1
+            fi
 
   build-release:
     docker:
