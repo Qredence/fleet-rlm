@@ -1,8 +1,10 @@
 # CircleCI CI and release runbook
 
 CircleCI project `rlm` for `Qredence/fleet-rlm` runs the required quality
-pipeline from `.circleci/config.yml`. The current required pipeline definition
-is `build-and-test` (`fe82e142-4105-421e-a525-eb47298d5e7a`).
+pipeline from `.circleci/config.yml`. Its CircleCI project slug is
+`circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf`. The current required
+pipeline definition is `build-and-test`
+(`fe82e142-4105-421e-a525-eb47298d5e7a`).
 
 ## Manual runs
 
@@ -11,11 +13,11 @@ repository checkout. Manual CI and compatibility probes are restricted to
 `main`:
 
 ```bash
-circleci pipeline run --project gh/Qredence/fleet-rlm \
+circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
   --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
   --param run_ci=true
 
-circleci pipeline run --project gh/Qredence/fleet-rlm \
+circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
   --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
   --param run_python314=true
 ```
@@ -118,7 +120,7 @@ and that the intended commit is on `main`. Set the requested version and the
 full 40-character commit SHA to that exact `main` commit:
 
 ```bash
-circleci pipeline run --project gh/Qredence/fleet-rlm \
+circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
   --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
   --param run_release=true \
   --param release_version=0.8.0 \
