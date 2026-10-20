@@ -168,10 +168,31 @@ release with `--param skip_testpypi=true` only after reviewing the added risk of
 omitting that rehearsal. This flag skips only TestPyPI upload and smoke; it does
 not skip the PyPI artifact checksum, isolated PyPI canary, release validation,
 or GitHub release gate. A PyPI upload failure before acceptance leaves the
-version unpublished. If the upload succeeds but the canary fails, stop: inspect
-the deploy record and PyPI files, manually yank the defective release, then
-publish a corrected follow-up version. Do not retry or overwrite version
-`0.8.0`.
+version unpublished. If a canary fails because the published package is
+defective, inspect the deploy record and PyPI files, manually yank the release,
+then publish a corrected follow-up version. Do not rerun the normal release
+pipeline for a version already on PyPI.
+
+If publication succeeded but the canary job failed before inspecting the
+artifact (for example, an interpreter or CI setup error), use the no-upload
+recovery workflow. It is restricted to `main`, requires the published source
+SHA to be an ancestor of the current commit, rebuilds from that exact source
+SHA, and verifies both PyPI file digests against the rebuilt manifest. The
+recovery has no registry upload job; it runs a fresh canary and validation
+window before creating the GitHub release. For the 0.8.0 recovery, use the SHA
+that produced the published files:
+
+```bash
+circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
+  --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
+  --param run_pypi_recovery=true \
+  --param release_version=0.8.0 \
+  --param release_sha=a8163c3564b4561b9258af97f16e2a7e0f76c8ae
+```
+
+The recovery creates a separate deployment record, so its validation result is
+visible independently from the first attempt. If the rebuild does not match all
+published PyPI hashes, it stops before creating a GitHub release.
 
 ## Migration and recovery
 

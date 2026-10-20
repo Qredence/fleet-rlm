@@ -40,6 +40,29 @@ def preflight(version: str, sha: str, branch: str, pipeline_sha: str) -> None:
     sys.stdout.write(f"Release preflight passed for fleet-rlm {version} at {actual}\n")
 
 
+def recovery_preflight(version: str, sha: str, branch: str, pipeline_sha: str) -> None:
+    """Validate a no-upload recovery against an already-published source commit."""
+    if not version or version != _version():
+        raise SystemExit(f"requested version {version!r} does not match pyproject.toml ({_version()})")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        raise SystemExit("--sha must be a full 40-character source commit SHA")
+    if branch != "main":
+        raise SystemExit("release recovery is restricted to the main branch")
+    actual = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    if actual.lower() != pipeline_sha.lower():
+        raise SystemExit(f"checked-out HEAD {actual} does not match CircleCI pipeline SHA ({pipeline_sha})")
+    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", sha, actual], check=False)
+    if ancestor.returncode != 0:
+        raise SystemExit(f"recovery source SHA {sha} is not an ancestor of main commit {actual}")
+    source_project = subprocess.run(
+        ["git", "show", f"{sha}:pyproject.toml"], check=True, capture_output=True, text=True
+    ).stdout
+    source_version = re.search(r'(?ms)^\[project\]\s.*?^version\s*=\s*"([^"]+)"', source_project)
+    if source_version is None or source_version.group(1) != version:
+        raise SystemExit(f"source SHA {sha} does not define fleet-rlm version {version}")
+    sys.stdout.write(f"Recovery preflight passed for published fleet-rlm {version} from {sha}\n")
+
+
 def verify_artifacts(version: str, directory: Path) -> None:
     """Require exactly one matching wheel and source archive."""
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:[a-zA-Z0-9.+-]*)?", version):
@@ -103,6 +126,35 @@ def verify_registry_wheel(version: str, wheel: Path, manifest: Path) -> None:
     actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
     if actual != expected:
         raise SystemExit(f"PyPI wheel checksum does not match the release manifest: {wheel.name}")
+
+
+def verify_pypi_artifacts(version: str, manifest: Path) -> None:
+    """Verify every published wheel and sdist against the release manifest."""
+    verify_manifest(manifest.parent)
+    expected = {
+        match.group(2): match.group(1)
+        for line in manifest.read_text().splitlines()
+        if (match := re.fullmatch(r"([0-9a-f]{64})  (fleet_rlm-[^/]+(?:\.whl|\.tar\.gz))", line))
+    }
+    request = urllib.request.Request(
+        f"https://pypi.org/pypi/fleet-rlm/{version}/json",
+        headers={"Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read())
+    if payload.get("info", {}).get("version") != version:
+        raise SystemExit(f"PyPI returned metadata for an unexpected fleet-rlm version: {version}")
+    published = {
+        entry["filename"]: entry.get("digests", {}).get("sha256")
+        for entry in payload.get("urls", [])
+        if entry.get("filename", "").startswith(f"fleet_rlm-{version}")
+    }
+    if set(published) != set(expected):
+        raise SystemExit("PyPI release files do not match the built release manifest")
+    for filename, digest in expected.items():
+        if published[filename] != digest:
+            raise SystemExit(f"PyPI artifact checksum does not match the release manifest: {filename}")
+    sys.stdout.write(f"All PyPI artifacts match the release manifest for fleet-rlm {version}\n")
 
 
 def validate_webhook_context(token: str | None) -> None:
@@ -190,6 +242,7 @@ def pypi_canary(version: str, manifest: Path, requirements: Path, token: str) ->
     try:
         deadline = time.monotonic() + 15 * 60
         with tempfile.TemporaryDirectory(prefix="fleet-pypi-canary-") as temp:
+            verify_pypi_artifacts(version, manifest)
             wheel = download_pypi_wheel(version, Path(temp), deadline)
             verify_registry_wheel(version, wheel, manifest)
             smoke(version, "https://pypi.org/simple", wheel, requirements, deadline=deadline)
@@ -268,6 +321,11 @@ def main() -> None:
     check.add_argument("--sha", required=True)
     check.add_argument("--branch", required=True)
     check.add_argument("--pipeline-sha", required=True)
+    recovery = commands.add_parser("recovery-preflight")
+    recovery.add_argument("--version", required=True)
+    recovery.add_argument("--sha", required=True)
+    recovery.add_argument("--branch", required=True)
+    recovery.add_argument("--pipeline-sha", required=True)
     artifacts = commands.add_parser("verify-artifacts")
     artifacts.add_argument("--version", required=True)
     artifacts.add_argument("--dist", type=Path, required=True)
@@ -290,6 +348,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "preflight":
         preflight(args.version, args.sha, args.branch, args.pipeline_sha)
+    elif args.command == "recovery-preflight":
+        recovery_preflight(args.version, args.sha, args.branch, args.pipeline_sha)
     elif args.command == "verify-artifacts":
         verify_artifacts(args.version, args.dist)
     elif args.command == "create-manifest":
