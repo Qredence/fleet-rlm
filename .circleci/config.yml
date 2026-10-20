@@ -675,7 +675,7 @@ workflows:
       - release-validation-recovery:
           filters: pipeline.parameters.run_pypi_recovery
           requires:
-            - pypi-canary-recovery
+            - plan-pypi-recovery
       - github-release-recovery:
           release-version: << pipeline.parameters.release_version >>
           release-sha: << pipeline.parameters.release_sha >>

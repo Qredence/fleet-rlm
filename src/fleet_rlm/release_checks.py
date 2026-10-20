@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import venv
 from pathlib import Path
@@ -42,8 +43,8 @@ def preflight(version: str, sha: str, branch: str, pipeline_sha: str) -> None:
 
 def recovery_preflight(version: str, sha: str, branch: str, pipeline_sha: str) -> None:
     """Validate a no-upload recovery against an already-published source commit."""
-    if not version or version != _version():
-        raise SystemExit(f"requested version {version!r} does not match pyproject.toml ({_version()})")
+    if not version:
+        raise SystemExit("release recovery requires a version")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
         raise SystemExit("--sha must be a full 40-character source commit SHA")
     if branch != "main":
@@ -128,8 +129,8 @@ def verify_registry_wheel(version: str, wheel: Path, manifest: Path) -> None:
         raise SystemExit(f"PyPI wheel checksum does not match the release manifest: {wheel.name}")
 
 
-def verify_pypi_artifacts(version: str, manifest: Path) -> None:
-    """Verify every published wheel and sdist against the release manifest."""
+def verify_pypi_artifacts(version: str, manifest: Path, deadline: float | None = None) -> None:
+    """Verify published files against the release manifest, retrying PyPI propagation delays."""
     verify_manifest(manifest.parent)
     expected = {
         match.group(2): match.group(1)
@@ -140,21 +141,46 @@ def verify_pypi_artifacts(version: str, manifest: Path) -> None:
         f"https://pypi.org/pypi/fleet-rlm/{version}/json",
         headers={"Accept": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=15) as response:
-        payload = json.loads(response.read())
-    if payload.get("info", {}).get("version") != version:
-        raise SystemExit(f"PyPI returned metadata for an unexpected fleet-rlm version: {version}")
-    published = {
-        entry["filename"]: entry.get("digests", {}).get("sha256")
-        for entry in payload.get("urls", [])
-        if entry.get("filename", "").startswith(f"fleet_rlm-{version}")
-    }
-    if set(published) != set(expected):
-        raise SystemExit("PyPI release files do not match the built release manifest")
-    for filename, digest in expected.items():
-        if published[filename] != digest:
-            raise SystemExit(f"PyPI artifact checksum does not match the release manifest: {filename}")
-    sys.stdout.write(f"All PyPI artifacts match the release manifest for fleet-rlm {version}\n")
+    last_error: Exception | None = None
+    for attempt in range(5):
+        timeout = 15.0 if deadline is None else min(15.0, deadline - time.monotonic())
+        if timeout <= 0:
+            raise SystemExit(f"PyPI did not expose all fleet-rlm {version} artifacts before the canary deadline")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+            last_error = error
+        else:
+            if payload.get("info", {}).get("version") != version:
+                raise SystemExit(f"PyPI returned metadata for an unexpected fleet-rlm version: {version}")
+            published = {
+                entry["filename"]: entry.get("digests", {}).get("sha256")
+                for entry in payload.get("urls", [])
+                if entry.get("filename", "").startswith(f"fleet_rlm-{version}")
+            }
+            unexpected = set(published) - set(expected)
+            if unexpected:
+                raise SystemExit("PyPI release files do not match the built release manifest")
+            for filename, digest in published.items():
+                if digest != expected[filename]:
+                    raise SystemExit(f"PyPI artifact checksum does not match the release manifest: {filename}")
+            if set(published) == set(expected):
+                sys.stdout.write(f"All PyPI artifacts match the release manifest for fleet-rlm {version}\n")
+                return
+            last_error = RuntimeError("PyPI has not exposed every release file yet")
+
+        if attempt == 4:
+            break
+        delay = min(5 * (2**attempt), 60)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= delay:
+                break
+            delay = min(delay, remaining)
+        time.sleep(delay)
+
+    raise SystemExit(f"Could not verify fleet-rlm {version} on PyPI after bounded retries: {last_error}")
 
 
 def validate_webhook_context(token: str | None) -> None:
@@ -242,7 +268,7 @@ def pypi_canary(version: str, manifest: Path, requirements: Path, token: str) ->
     try:
         deadline = time.monotonic() + 15 * 60
         with tempfile.TemporaryDirectory(prefix="fleet-pypi-canary-") as temp:
-            verify_pypi_artifacts(version, manifest)
+            verify_pypi_artifacts(version, manifest, deadline)
             wheel = download_pypi_wheel(version, Path(temp), deadline)
             verify_registry_wheel(version, wheel, manifest)
             smoke(version, "https://pypi.org/simple", wheel, requirements, deadline=deadline)

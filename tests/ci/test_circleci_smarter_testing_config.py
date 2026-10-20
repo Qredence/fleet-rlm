@@ -130,7 +130,8 @@ def test_pypi_recovery_rechecks_existing_artifact_without_uploading() -> None:
     assert by_name["plan-pypi-recovery"]["requires"] == ["build-release-recovery", "validate-pypi-webhook-context"]
     assert by_name["pypi-canary"]["filters"] == "pipeline.parameters.run_pypi_recovery"
     assert set(by_name["pypi-canary"]["requires"]) == {"build-release-recovery", "plan-pypi-recovery"}
-    assert by_name["release-validation-recovery"]["requires"] == ["pypi-canary-recovery"]
+    assert by_name["release-validation-recovery"]["requires"] == ["plan-pypi-recovery"]
+    assert by_name["pypi-canary"]["requires"] == ["build-release-recovery", "plan-pypi-recovery"]
     assert set(by_name["github-release-recovery"]["requires"]) == {
         "release-validation-recovery",
         "pypi-canary-recovery",

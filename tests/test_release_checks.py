@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -69,7 +71,10 @@ def test_recovery_preflight_accepts_published_source_ancestor() -> None:
             args=["git", "show"], returncode=0, stdout='[project]\nversion = "0.8.0"\n', stderr=""
         ),
     ]
-    with patch("fleet_rlm.release_checks.subprocess.run", side_effect=outputs):
+    with (
+        patch("fleet_rlm.release_checks.subprocess.run", side_effect=outputs),
+        patch("fleet_rlm.release_checks._version", side_effect=AssertionError("main version is irrelevant")),
+    ):
         recovery_preflight("0.8.0", source_sha, "main", pipeline_sha)
 
 
@@ -190,6 +195,65 @@ def test_pypi_all_artifacts_must_match_manifest(tmp_path: Path) -> None:
         ).encode()
         with pytest.raises(SystemExit, match="does not match the release manifest"):
             verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+
+
+def test_pypi_artifact_verification_retries_transient_errors_and_missing_files(tmp_path: Path) -> None:
+    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
+    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+    create_manifest(tmp_path)
+    hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (wheel, sdist)}
+
+    def response(files: list[str]):
+        payload = {
+            "info": {"version": "0.8.0"},
+            "urls": [{"filename": name, "digests": {"sha256": hashes[name]}} for name in files],
+        }
+        return io.BytesIO(json.dumps(payload).encode())
+
+    with (
+        patch(
+            "fleet_rlm.release_checks.urllib.request.urlopen",
+            side_effect=[
+                urllib.error.HTTPError("https://pypi.org", 503, "unavailable", {}, None),
+                response([wheel.name]),
+                response([wheel.name, sdist.name]),
+            ],
+        ) as urlopen,
+        patch("fleet_rlm.release_checks.time.sleep") as sleep,
+    ):
+        verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+
+    assert urlopen.call_count == 3
+    assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
+
+
+def test_pypi_artifact_checksum_mismatch_fails_without_retry(tmp_path: Path) -> None:
+    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
+    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+    create_manifest(tmp_path)
+    payload = {
+        "info": {"version": "0.8.0"},
+        "urls": [
+            {"filename": wheel.name, "digests": {"sha256": "0" * 64}},
+            {"filename": sdist.name, "digests": {"sha256": hashlib.sha256(sdist.read_bytes()).hexdigest()}},
+        ],
+    }
+    with (
+        patch(
+            "fleet_rlm.release_checks.urllib.request.urlopen",
+            return_value=io.BytesIO(json.dumps(payload).encode()),
+        ) as urlopen,
+        patch("fleet_rlm.release_checks.time.sleep") as sleep,
+        pytest.raises(SystemExit, match="checksum does not match"),
+    ):
+        verify_pypi_artifacts("0.8.0", tmp_path / "SHA256SUMS")
+
+    urlopen.assert_called_once()
+    sleep.assert_not_called()
 
 
 def test_pypi_download_uses_only_the_public_pypi_index(tmp_path: Path) -> None:

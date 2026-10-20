@@ -178,8 +178,10 @@ artifact (for example, an interpreter or CI setup error), use the no-upload
 recovery workflow. It is restricted to `main`, requires the published source
 SHA to be an ancestor of the current commit, rebuilds from that exact source
 SHA, and verifies both PyPI file digests against the rebuilt manifest. The
-recovery has no registry upload job; it runs a fresh canary and validation
-window before creating the GitHub release. For the 0.8.0 recovery, use the SHA
+canary retries transient PyPI metadata errors and file-visibility delays within
+its deadline; an actual checksum mismatch fails immediately. The recovery has
+no registry upload job; it opens the validation window alongside the fresh
+canary before creating the GitHub release. For the 0.8.0 recovery, use the SHA
 that produced the published files:
 
 ```bash
