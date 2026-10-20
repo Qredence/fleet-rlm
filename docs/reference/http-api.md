@@ -86,6 +86,18 @@ includes the recorded `trace_id`. Failures produce a sanitized `error` event
 (which also carries the `trace_id` when tracing is configured) followed by stream completion. Every stream ends with exactly one outcome event: if the Turn's worker
 stops without reporting one, the server sends a sanitized `error`. The connection may emit SSE comment keep-alives.
 
+A stall watchdog stops a Turn that has stopped making progress. It reads only local state every
+five seconds and stays off until the Turn's first `lm_start` (workspace hashing during preparation
+never counts). It never flags a Turn while a model call or a `spawn_agent`/`spawn_agents` call is open (the model
+runs on the host and child agents run in their own sandboxes, so the root sandbox reports nothing), or
+when the sandbox's activity cannot be read. Otherwise the Turn is stalled when its root sandbox was
+lost during the Turn, even while another tool call is open, or when no tool call is open, no sandbox
+code is running, and no `lm_start`/`lm_end`/`tool_start`/`tool_end` callback has arrived for
+`FLEET_TURN_STALL_SECONDS` (default 300). Running sandbox code is never a stall, with or without
+output; `FLEET_TURN_TIMEOUT_SECONDS` still bounds every case above. A stalled Turn is cancelled like a
+disconnect and its stream ends with an `error` event carrying `code: "turn_stalled"`; the Session
+stays locked until the cancelled work has drained.
+
 Sessions run one Turn at a time; a second Turn on a busy Session gets `409` after two seconds. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.
 An optional idempotency key persists intent before execution. Completed requests

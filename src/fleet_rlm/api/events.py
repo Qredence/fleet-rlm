@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
+from dataclasses import dataclass
 from typing import Any
 
 from dspy.utils.callback import ACTIVE_CALL_ID
@@ -23,6 +25,23 @@ def _reasoning_text(outputs: Any) -> str:
     return activity_text(reasoning) if isinstance(reasoning, str) else ""
 
 
+@dataclass(frozen=True)
+class Heartbeat:
+    """The Turn's callback clock: when model/tool activity last happened and what is still open.
+
+    `last_event_at` is on the callback's clock (monotonic by default) and is None until the first
+    `lm_start`, so Turn preparation (workspace hashing) never counts toward a stall.
+    """
+
+    last_event_at: float | None
+    open_lm_calls: int
+    open_spawn_calls: int  # open spawn_agent(s) calls: child agents, whose work the root sandbox does not see
+    open_tool_calls: int  # every other open tool call
+
+
+SPAWN_TOOLS = frozenset({"spawn_agent", "spawn_agents"})  # child delegation, single and batch
+
+
 class SSERuntimeCallback(LMUsageCallback):
     """Send bounded activity metadata to the active SSE stream."""
 
@@ -31,8 +50,9 @@ class SSERuntimeCallback(LMUsageCallback):
         loop: asyncio.AbstractEventLoop,
         queue: asyncio.Queue[dict[str, Any]],
         manager: DaytonaSandboxManager | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ):
-        """Bind the callback to the SSE stream's event loop and queue."""
+        """Bind the callback to the SSE stream's event loop and queue; `clock` times the stall heartbeat."""
         super().__init__()
         self.loop = loop
         self.queue = queue
@@ -42,6 +62,32 @@ class SSERuntimeCallback(LMUsageCallback):
         self._pending_lock = threading.Lock()
         self._calls: dict[str, dict[str, Any]] = {}
         self._calls_lock = threading.Lock()
+        # One callback per Turn, so the heartbeat and its open-call counts start fresh each Turn.
+        self._clock = clock
+        self._beat_lock = threading.Lock()
+        self._last_event_at: float | None = None
+        self._open: dict[str, str] = {}  # call_id -> "lm" | "spawn" | "tool", so an end closes its own start
+
+    def heartbeat(self) -> Heartbeat:
+        """Snapshot the callback clock; cheap and thread-safe."""
+        with self._beat_lock:
+            groups = list(self._open.values())
+            return Heartbeat(self._last_event_at, groups.count("lm"), groups.count("spawn"), groups.count("tool"))
+
+    def _beat(self, call_id: str, group: str | None) -> None:
+        """Record a start (`group` given) or an end (`group` None) on the heartbeat clock.
+
+        Recorded before the emit, which can block on backpressure. Calls are tracked by call_id, so an end
+        without a matching start changes nothing and no count can go below zero. The clock starts at the
+        first lm_start.
+        """
+        with self._beat_lock:
+            if group is None:
+                self._open.pop(call_id, None)
+            else:
+                self._open[call_id] = group
+            if self._last_event_at is not None or group == "lm":
+                self._last_event_at = self._clock()
 
     def close(self) -> None:
         """Stop accepting events and cancel emits still waiting on the consumer."""
@@ -115,12 +161,14 @@ class SSERuntimeCallback(LMUsageCallback):
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         """Emit an LM-start event and record where this call's usage tracking begins."""
+        self._beat(call_id, "lm")
         model = str(getattr(instance, "model", "unknown"))
         super().on_lm_start(call_id, instance, inputs)
         self._start("lm", call_id, model=model[:150])
 
     def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:
         """Emit numeric usage from the same isolated tracker that annotates the LM span."""
+        self._beat(call_id, None)
         usage = self.finish_usage(call_id)
         # Reasoning is streamed on purpose (operator decision). Module outputs are still never harvested.
         reasoning = _reasoning_text(outputs)
@@ -134,10 +182,12 @@ class SSERuntimeCallback(LMUsageCallback):
 
     def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         """Emit a tool-start event with the tool name and a bounded input preview."""
+        tool = str(getattr(instance, "name", instance.__class__.__name__))[:100]
+        self._beat(call_id, "spawn" if tool in SPAWN_TOOLS else "tool")
         self._start(
             "tool",
             call_id,
-            tool=str(getattr(instance, "name", instance.__class__.__name__))[:100],
+            tool=tool,
             source="dspy",
             inputs=activity_preview(inputs),
         )
@@ -149,6 +199,7 @@ class SSERuntimeCallback(LMUsageCallback):
         exception: BaseException | None = None,
     ) -> None:
         """Emit a tool-end event with a bounded output preview."""
+        self._beat(call_id, None)
         self._end("tool", call_id, exception, output=activity_preview(outputs))
 
     def emit(self, payload: dict[str, Any]) -> None:

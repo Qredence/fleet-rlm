@@ -6,6 +6,7 @@ import asyncio
 import contextvars
 import logging
 import threading
+import time
 import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
@@ -18,9 +19,10 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from fleet_rlm.api import deps
 from fleet_rlm.api.deps import LOCKED, Runtime, Settings
-from fleet_rlm.api.events import Envelope, SSERuntimeCallback
+from fleet_rlm.api.events import Envelope, Heartbeat, SSERuntimeCallback
 from fleet_rlm.api.schemas import TurnRequest
 from fleet_rlm.engine.turn import run_turn
+from fleet_rlm.sandbox.repl import SandboxActivity
 from fleet_rlm.session import SessionRuntime
 
 router = APIRouter(tags=["turns"])
@@ -31,6 +33,9 @@ _LOCK_POLL_SECONDS = 0.05
 # lock waits, or lifespan cleanup. Each Session runs at most one Turn, so this bounds concurrent Sessions.
 TURN_WORKERS = 16
 _OUTCOMES = frozenset({"turn_complete", "error", "turn_cancelled"})
+# The stall watchdog reads local state only (the callback clock and the sandbox's activity snapshot).
+_STALL_CHECK_SECONDS = 5.0
+_clock = time.monotonic  # the heartbeat clock; tests replace it to cross the stall limit without sleeping
 
 
 def create_turn_executor() -> ThreadPoolExecutor:
@@ -76,7 +81,11 @@ TurnLock = Annotated[None, Depends(hold_turn_lock)]
     response_class=EventSourceResponse,
     responses={
         200: {
-            "description": "Server-Sent Events for Turn status, activity, completion, or failure.",
+            "description": (
+                "Server-Sent Events for Turn status, activity, completion, or failure. An `error` event with "
+                "`code: turn_stalled` means the stall watchdog stopped the Turn: its sandbox was lost, or no "
+                "model/tool activity happened for FLEET_TURN_STALL_SECONDS while no code was running."
+            ),
             "content": {"text/event-stream": {"schema": {"type": "string"}}},
         },
         **LOCKED,
@@ -97,7 +106,8 @@ async def stream_turn(
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
-    callback = SSERuntimeCallback(loop, queue, runtime.sandbox_mgr)
+    callback = SSERuntimeCallback(loop, queue, runtime.sandbox_mgr, clock=_clock)
+    turn_started = _clock()  # monotonic; a liveness verdict observed before this is left over from an earlier Turn
     turn_id = uuid.uuid4().hex
     envelope = Envelope(session_id, turn_id, runtime.sandbox_mgr)
     # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
@@ -122,14 +132,39 @@ async def stream_turn(
     connected = True
     finished = False
     reported = False
+    next_stall_check = loop.time() + _STALL_CHECK_SECONDS
     try:
         status = envelope.wrap({"event": "turn_status", "phase": "preparation"})
         yield ServerSentEvent(data=status, id=str(status["seq"]))
         while True:
             getter = getter or asyncio.ensure_future(queue.get())
             done, _ = await asyncio.wait(
-                {getter, worker}, timeout=_DISCONNECT_POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED
+                {getter, worker},
+                timeout=min(_DISCONNECT_POLL_SECONDS, _STALL_CHECK_SECONDS),
+                return_when=asyncio.FIRST_COMPLETED,
             )
+            if connected and not reported and not worker.done() and loop.time() >= next_stall_check:
+                next_stall_check = loop.time() + _STALL_CHECK_SECONDS
+                if _stalled(
+                    callback.heartbeat(),
+                    _sandbox_activity(runtime),
+                    now=_clock(),
+                    limit=settings.turn_stall_seconds,
+                    turn_started=turn_started,
+                ):
+                    _LOGGER.warning("Turn %s stalled; cancelling it", turn_id)
+                    await _cancel(runtime)
+                    stalled = envelope.wrap(
+                        {
+                            "event": "error",
+                            "code": "turn_stalled",
+                            "request_id": turn_id,
+                            "error": f"The Turn stalled and was stopped (request {turn_id}).",
+                        }
+                    )
+                    reported = True
+                    yield ServerSentEvent(data=stalled, id=str(stalled["seq"]))
+                    break
             if getter.done():
                 event: dict[str, Any] | None = getter.result()
             elif worker in done:
@@ -169,6 +204,39 @@ async def stream_turn(
                     await _cancel(runtime)
                 await asyncio.wait({worker})
         _log_failure(job, turn_id)
+
+
+def _sandbox_activity(runtime: SessionRuntime) -> SandboxActivity | None:
+    """The Session sandbox's local activity snapshot, or None when it cannot be read (unknown)."""
+    probe = getattr(runtime.sandbox_mgr, "sandbox_activity", None)
+    if probe is None:
+        return None
+    try:
+        return probe()
+    except Exception:
+        _LOGGER.debug("Sandbox activity could not be read; treating it as unknown", exc_info=True)
+        return None
+
+
+def _stalled(
+    beat: Heartbeat, activity: SandboxActivity | None, *, now: float, limit: float, turn_started: float
+) -> bool:
+    """Whether the Turn has stalled: its sandbox was lost, or it is idle and its callbacks went silent.
+
+    Never before the first `lm_start`, never while a model call or a `spawn_agent`/`spawn_agents` call is
+    open (the model runs on the host and children run in their own sandboxes, so the root reports
+    nothing), and never without a readable sandbox activity. A root sandbox lost during this Turn stalls
+    it even while another tool call is open; otherwise an open tool call (host-side) or running sandbox
+    code, with or without output, is never a stall. The Turn timeout bounds those.
+    """
+    if beat.last_event_at is None or beat.open_lm_calls or beat.open_spawn_calls or activity is None:
+        return False
+    checked = activity.alive_checked_monotonic  # same clock as `now`; None means the verdict's age is unknown
+    if activity.alive is False and checked is not None and checked >= turn_started:
+        return True
+    if beat.open_tool_calls:
+        return False
+    return not activity.busy and now - beat.last_event_at >= limit
 
 
 async def _acquire(runtime: SessionRuntime) -> bool:
