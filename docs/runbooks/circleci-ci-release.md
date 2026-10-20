@@ -59,14 +59,12 @@ environment, and version to match the planned deployment.
 
 Before running a release, create the CircleCI Deploys validation webhook and
 add its token as `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` in the
-`fleet-pypi-validation-webhook` context. The context is already created and is
-restricted to the `rlm` project, `main`, pipelines that are not API-triggered,
-and jobs that are not SSH reruns. CircleCI combines these restrictions, so all
-must pass. As of 2026-10-20, the context exists but does not yet contain the
-webhook token. The `validate-pypi-webhook-context` job checks for the credential
-before any package publication, so release requests fail closed until it is
-added. Never put the webhook token in the repository, a project-wide
-environment variable, or a job log.
+`fleet-pypi-validation-webhook` context. The context is restricted to the
+`rlm` project, `main`, pipelines that are not API-triggered, and jobs that are
+not SSH reruns. CircleCI combines these restrictions, so all must pass. The
+`validate-pypi-webhook-context` job checks for the credential before any
+package publication. Never put the webhook token in the repository, a
+project-wide environment variable, or a job log.
 
 Automatic rollback is explicitly disabled for this release job. PyPI package
 uploads cannot be undone by the configured CircleCI `rollback-pipeline`; if
@@ -145,7 +143,18 @@ corresponding context; constrain the repository and `refs/heads/main`. The
 `fleet-github-release` context must hold a narrowly scoped `GH_TOKEN` for this
 repository. The `fleet-pypi-validation-webhook` context must contain the
 CircleCI-generated `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` and be restricted to the
-project and authorized maintainers. Do not add long-lived PyPI upload tokens.
+project and authorized maintainers. Confirm that the target index currently
+accepts CircleCI as a trusted-publishing issuer before attempting a release.
+Do not add long-lived PyPI upload tokens.
+
+If TestPyPI rejects token exchange with `unknown trusted publishing issuer`,
+the registry does not recognize the CircleCI OIDC provider. This happens before
+any upload; verify that the requested version is absent from TestPyPI, then
+stop. Adding or editing project publisher claims cannot fix an unrecognized
+issuer. Check the current CircleCI/PyPI trusted-publishing support status and
+contact the index maintainers if needed. Resume the same release SHA only after
+issuer support is confirmed and the TestPyPI version is still absent. Do not
+switch to long-lived upload tokens without a separate explicit decision.
 
 ## Migration and recovery
 
