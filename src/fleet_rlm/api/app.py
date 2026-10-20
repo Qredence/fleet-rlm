@@ -34,6 +34,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         # The pool opens in the background so a cold Lakebase connect does not block startup.
+        application.state.turn_executor = turns.create_turn_executor()
         application.state.store = store or (
             Store.open(
                 resolved.fleet_database_url,
@@ -56,6 +57,8 @@ def create_app(
             application.state.session_registry = SessionRuntimeRegistry(resolved, application.state.store)
             yield
         finally:
+            # Queued Turns must not start during shutdown; running ones end when their sandboxes close.
+            application.state.turn_executor.shutdown(wait=False, cancel_futures=True)
             try:
                 if application.state.session_registry is not None:
                     await asyncio.to_thread(application.state.session_registry.close)
@@ -73,6 +76,7 @@ def create_app(
     app.state.settings = resolved
     app.state.store = store
     app.state.session_registry = None
+    app.state.turn_executor = None
     app.state.mlflow_experiment_id = None
 
     @app.get("/health", response_model=Health, tags=["health"])

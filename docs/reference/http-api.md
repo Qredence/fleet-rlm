@@ -33,6 +33,8 @@ Named tracking profiles resolve their own workspace rather than the model gatewa
 
 Routes that change or read workspace, context, memory, Skill, mode, or model state take the
 session lock. While a Turn holds it they answer `409` after two seconds rather than queueing.
+`POST /sessions/{session_id}/turn` takes the same lock and answers `409` the same way when another Turn
+or workspace change is running; it holds the lock until the stream ends and the Turn has drained.
 
 There is no caller authentication. The service binds to loopback by default;
 binding elsewhere does not add authentication. Only use on a trusted host or
@@ -81,9 +83,10 @@ numeric `prompt_tokens`, `completion_tokens`, `total_tokens`, and, when the prov
 `turn_complete` with `answer`, `route`, optional `learned_skill_note`, and an
 `artifacts` list. When MLflow tracing is configured, the completion event also
 includes the recorded `trace_id`. Failures produce a sanitized `error` event
-(which also carries the `trace_id` when tracing is configured) followed by stream completion. The connection may emit SSE comment keep-alives.
+(which also carries the `trace_id` when tracing is configured) followed by stream completion. Every stream ends with exactly one outcome event: if the Turn's worker
+stops without reporting one, the server sends a sanitized `error`. The connection may emit SSE comment keep-alives.
 
-Sessions serialize their own Turns while a run is in progress. Session IDs are
+Sessions run one Turn at a time; a second Turn on a busy Session gets `409` after two seconds. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.
 An optional idempotency key persists intent before execution. Completed requests
 replay their recorded outcome; failed/uncertain requests do not replay side effects.
