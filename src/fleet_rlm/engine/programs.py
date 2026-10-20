@@ -309,20 +309,18 @@ class AdaptiveFleetEngine(dspy.Module):
         session_history: str,
         context: Any,
     ) -> dspy.Prediction:
-        if route is Route.DIRECT:
-            # The same format recovery as the RLM and Flex paths: one re-ask, never DSPy's JSON fallback.
-            with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
+        agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
+        if route is Route.FLEX and isinstance(context, WorkspaceDataset):
+            context = context.flex_input()
+        # Every route gets the same format recovery: one re-ask, never DSPy's JSON fallback.
+        with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
+            if route is Route.DIRECT:
                 answer = self.direct_cot(
                     memory_summary=memory_summary,
                     session_history=session_history,
                     task=task,
                 ).answer
-            return dspy.Prediction(answer=answer, learned_skill_note="", route=route.value)
-
-        agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
-        if route is Route.FLEX and isinstance(context, WorkspaceDataset):
-            context = context.flex_input()
-        with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
+                return dspy.Prediction(answer=answer, learned_skill_note="", route=route.value)
             prediction = agent(
                 workspace_manifest=workspace_manifest,
                 skills_catalog=skills_catalog,

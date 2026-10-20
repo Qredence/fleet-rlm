@@ -11,6 +11,7 @@ from typing import Any
 import dspy
 import pytest
 from dspy import AdapterParseError
+from scripted_lm import ScriptedLM
 
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -447,23 +448,6 @@ def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -
     assert engine.triage.signature.instructions == "Older approved triage instructions."
 
 
-class _ScriptedRootLM(dspy.utils.DummyLM):
-    """Returns raw completions through DSPy's real call and parse path, recording the active adapter."""
-
-    def __init__(self, responses: list[str]):
-        super().__init__([{"raw": response} for response in responses])
-        self.adapters: list[Any] = []
-        self.prompts: list[str] = []
-
-    def forward(self, prompt=None, messages=None, **kwargs):
-        self.adapters.append(dspy.settings.adapter)
-        self.prompts.append(json.dumps(messages))
-        return super().forward(prompt=prompt, messages=messages, **kwargs)
-
-    def _format_answer_fields(self, fields):
-        return fields["raw"]
-
-
 def _direct_answer(root_lm: dspy.BaseLM) -> dspy.Prediction:
     from fleet_rlm.engine.signatures import Route
 
@@ -478,7 +462,7 @@ _VALID_DIRECT = "[[ ## reasoning ## ]]\nSix sevens.\n\n[[ ## answer ## ]]\n42\n\
 def test_the_direct_route_runs_under_the_fleet_chat_adapter() -> None:
     from fleet_rlm.dspy_support import FleetRLMChatAdapter
 
-    lm = _ScriptedRootLM([_VALID_DIRECT])
+    lm = ScriptedLM([_VALID_DIRECT])
 
     prediction = _direct_answer(lm)
 
@@ -487,7 +471,7 @@ def test_the_direct_route_runs_under_the_fleet_chat_adapter() -> None:
 
 
 def test_a_direct_answer_parse_failure_is_re_asked_once_without_a_json_fallback() -> None:
-    recovered = _ScriptedRootLM(["not in the field format", _VALID_DIRECT])
+    recovered = ScriptedLM(["not in the field format", _VALID_DIRECT])
 
     assert _direct_answer(recovered).answer == "42"
     assert len(recovered.prompts) == 2
@@ -495,7 +479,7 @@ def test_a_direct_answer_parse_failure_is_re_asked_once_without_a_json_fallback(
 
     # A second unparseable reply ends there: exactly two calls (the original and one re-ask), so no third call
     # through DSPy's JSONAdapter fallback, even with a third reply available.
-    failing = _ScriptedRootLM(["not in the field format"] * 3)
+    failing = ScriptedLM(["not in the field format"] * 3)
     with pytest.raises(AdapterParseError):
         _direct_answer(failing)
     assert len(failing.prompts) == 2
