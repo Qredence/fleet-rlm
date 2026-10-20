@@ -96,7 +96,10 @@ code or host-side sandbox I/O (remote exec, file transfers, artifact collection)
 `FLEET_TURN_STALL_SECONDS` (default 300). Running sandbox code is never a stall, with or without
 output; `FLEET_TURN_TIMEOUT_SECONDS` still bounds every case above. A stalled Turn is cancelled like a
 disconnect and its stream ends with an `error` event carrying `code: "turn_stalled"`; the Session
-stays locked until the cancelled work has drained.
+stays locked until the cancelled work has drained. Events already queued for the stream are always
+delivered before a check, so an outcome that arrives just as a check is due is never replaced by
+`turn_stalled`. A stalled Turn is stored with status `cancelled` and its `turn_stalled` outcome, so
+retrying it with the same `idempotency_key` replays that `error` without running the Turn again.
 
 Sessions run one Turn at a time; a second Turn on a busy Session gets `409` after two seconds. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.

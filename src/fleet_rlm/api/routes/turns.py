@@ -21,7 +21,7 @@ from fleet_rlm.api import deps
 from fleet_rlm.api.deps import LOCKED, Runtime, Settings
 from fleet_rlm.api.events import Envelope, Heartbeat, SSERuntimeCallback
 from fleet_rlm.api.schemas import TurnRequest
-from fleet_rlm.engine.turn import run_turn
+from fleet_rlm.engine.turn import run_turn, stalled_outcome
 from fleet_rlm.sandbox.repl import SandboxActivity
 from fleet_rlm.session import SessionRuntime
 
@@ -110,6 +110,7 @@ async def stream_turn(
     turn_started = _clock()  # monotonic; a liveness verdict observed before this is left over from an earlier Turn
     turn_id = uuid.uuid4().hex
     envelope = Envelope(session_id, turn_id, runtime.sandbox_mgr)
+    stall = threading.Event()  # set before the watchdog's cancel, so the worker stores turn_stalled
     # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
     # in them, so the Turn runs in a copy of the request's context.
     context = contextvars.copy_context()
@@ -126,12 +127,14 @@ async def stream_turn(
         callback=callback,
         emit=callback.emit,
         record_replay=req.record_replay,
+        stalled=stall,
     )
     worker = asyncio.wrap_future(job)
     getter: asyncio.Future[dict[str, Any]] | None = None
     connected = True
     finished = False
     reported = False
+    cancel_sent = False
     next_stall_check = loop.time() + _STALL_CHECK_SECONDS
     try:
         status = envelope.wrap({"event": "turn_status", "phase": "preparation"})
@@ -143,7 +146,10 @@ async def stream_turn(
                 timeout=min(_DISCONNECT_POLL_SECONDS, _STALL_CHECK_SECONDS),
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if connected and not reported and not worker.done() and loop.time() >= next_stall_check:
+            # Events already queued go out first: an outcome queued while the worker is still in its cleanup, or a
+            # backlog from a slow reader (which also blocks the worker in emit), is progress, not a stall.
+            pending = getter.done() or not queue.empty()
+            if connected and not reported and not pending and not worker.done() and loop.time() >= next_stall_check:
                 next_stall_check = loop.time() + _STALL_CHECK_SECONDS
                 if _stalled(
                     callback.heartbeat(),
@@ -153,15 +159,10 @@ async def stream_turn(
                     turn_started=turn_started,
                 ):
                     _LOGGER.warning("Turn %s stalled; cancelling it", turn_id)
+                    stall.set()
+                    cancel_sent = True
                     await _cancel(runtime)
-                    stalled = envelope.wrap(
-                        {
-                            "event": "error",
-                            "code": "turn_stalled",
-                            "request_id": turn_id,
-                            "error": f"The Turn stalled and was stopped (request {turn_id}).",
-                        }
-                    )
+                    stalled = envelope.wrap(stalled_outcome(turn_id))
                     reported = True
                     yield ServerSentEvent(data=stalled, id=str(stalled["seq"]))
                     break
@@ -175,6 +176,7 @@ async def stream_turn(
             else:
                 if connected and await request.is_disconnected():
                     connected = False
+                    cancel_sent = True
                     await _cancel(runtime)
                 continue
             getter = None
@@ -184,6 +186,7 @@ async def stream_turn(
             reported = reported or event.get("event") in _OUTCOMES
             if connected and await request.is_disconnected():
                 connected = False
+                cancel_sent = True
                 await _cancel(runtime)
             if connected:
                 wrapped = envelope.wrap(event)
@@ -200,7 +203,7 @@ async def stream_turn(
         # Shielded: the response may be tearing down, but the lock must outlive the sandbox work.
         with anyio.CancelScope(shield=True):
             if not job.cancel() and not job.done():
-                if not finished:
+                if not finished and not cancel_sent:
                     await _cancel(runtime)
                 await asyncio.wait({worker})
         _log_failure(job, turn_id)
@@ -236,9 +239,9 @@ def _stalled(
         return True
     if beat.open_tool_calls:
         return False
-    # host_io_busy (host-side Daytona work: remote exec, file transfers, artifact collection) arrives with #632;
-    # getattr keeps this working on a SandboxActivity that does not have it yet.
-    working = activity.busy or getattr(activity, "host_io_busy", False)
+    # busy is model code in the sandbox; host_io_busy is host-side Daytona work (remote exec, file transfers,
+    # artifact collection), which the liveness poll does not see.
+    working = activity.busy or activity.host_io_busy
     return not working and now - beat.last_event_at >= limit
 
 
