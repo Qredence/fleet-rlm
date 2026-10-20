@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from daytona import CreateSandboxFromSnapshotParams, Daytona
+from daytona.common.errors import DaytonaTimeoutError
 from emulator import emulated_sandbox
 
 from fleet_rlm.config import FleetSettings
@@ -220,6 +221,7 @@ def fresh_policy_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "_NETWORK_POLICY_WARNED", False)
+    monkeypatch.setattr(manager_module, "_NETWORK_PROBED_SANDBOXES", set())
 
 
 def _policy_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -302,3 +304,97 @@ def test_the_sdk_sandbox_exposes_the_policy_fields_checked() -> None:
     source = inspect.getsource(Sandbox)
     assert "self.network_block_all: bool | None = (" in source
     assert "self.domain_allow_list: str | None = sandbox_dto.domain_allow_list" in source
+
+
+def _probe_runner(monkeypatch, outcome: str | BaseException) -> list[tuple[str, Any, Any]]:
+    """Answer the enforcement probe's remote exec with `outcome`; record (sandbox id, timeout, retry)."""
+    probes: list[tuple[str, Any, Any]] = []
+
+    def remote_exec(_self, sandbox, code, *, timeout=None, retry=True):
+        assert "create_connection(('1.1.1.1', 443), timeout=2)" in code
+        probes.append((sandbox.id, timeout, retry))
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", remote_exec)
+    return probes
+
+
+def _enforcement_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "WARNING" and "NOT ENFORCED" in record.getMessage()
+    ]
+
+
+def _blocked_root_sandbox(sandbox_id: str = "root-sb") -> SimpleNamespace:
+    return SimpleNamespace(id=sandbox_id, state="started", network_block_all=True, domain_allow_list=None)
+
+
+def test_a_root_sandbox_that_reaches_the_internet_warns_loudly(monkeypatch, tmp_path, caplog) -> None:
+    probes = _probe_runner(monkeypatch, "connected\n")
+    _create_root(monkeypatch, tmp_path, _blocked_root_sandbox())
+    assert probes == [("root-sb", 10, False)]  # bounded, never retried
+    (message,) = _enforcement_warnings(caplog)
+    assert "FLEET_DAYTONA_NETWORK_BLOCK_ALL" in message and "Tier 3 or Tier 4" in message and "root-sb" in message
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    ["blocked ConnectionRefusedError\n", "blocked TimeoutError\n", DaytonaTimeoutError("probe exec timed out")],
+    ids=["refused", "timeout", "exec_timeout"],
+)
+def test_a_blocked_or_unanswered_probe_does_not_warn(monkeypatch, tmp_path, caplog, outcome) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="fleet_rlm.sandbox.manager")
+    probes = _probe_runner(monkeypatch, outcome)
+    root = _create_root(monkeypatch, tmp_path, _blocked_root_sandbox())
+    assert len(probes) == 1 and root._sandbox.id == "root-sb"
+    assert _enforcement_warnings(caplog) == []
+    debug = [record.getMessage() for record in caplog.records if record.levelname == "DEBUG"]
+    assert any("enforced" in line or "did not run" in line for line in debug)
+
+
+def test_the_probe_runs_once_per_root_sandbox_id(monkeypatch, tmp_path, caplog) -> None:
+    probes = _probe_runner(monkeypatch, "connected")
+    root = _create_root(monkeypatch, tmp_path, _blocked_root_sandbox("root-1"))
+    root._verify_network_policy(root._sandbox)
+    root._probe_network_enforcement(root._sandbox)  # same id again: skipped
+    # A rebuilt root is a new sandbox id and is probed once more.
+    root._sandbox = None
+    rebuilt = _blocked_root_sandbox("root-2")
+    root._client.create = lambda _params: rebuilt
+    assert root.ensure_sandbox() is rebuilt
+    assert [probe[0] for probe in probes] == ["root-1", "root-2"]
+    assert len(_enforcement_warnings(caplog)) == 2
+
+
+def test_child_sandboxes_are_never_probed(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    probes = _probe_runner(monkeypatch, "connected")
+    root = DaytonaSandboxManager("key", "org", "volume", "net")
+    root._sandbox = _blocked_root_sandbox("root-existing")  # already running: not created here
+    root._client = SimpleNamespace(list=lambda _query: [])
+    child = DaytonaSandboxManager("key", "org", "volume", "net", parent=root)
+    child._client = SimpleNamespace(
+        create=lambda _params: SimpleNamespace(id="child-sb", network_block_all=True, domain_allow_list=None),
+        list=lambda _query: [],
+    )
+    assert child.ensure_sandbox().id == "child-sb"
+    assert probes == []
+
+
+def test_an_allow_list_skips_the_ip_probe(monkeypatch, tmp_path) -> None:
+    probes = _probe_runner(monkeypatch, "connected")
+    returned = SimpleNamespace(id="sb", state="started", network_block_all=False, domain_allow_list="example.com")
+    _create_root(monkeypatch, tmp_path, returned, domain_allow_list="example.com")
+    assert probes == []
+
+
+def test_no_policy_skips_the_probe(monkeypatch, tmp_path) -> None:
+    probes = _probe_runner(monkeypatch, "connected")
+    _create_root(monkeypatch, tmp_path, SimpleNamespace(id="sb", state="started"), network_block_all=False)
+    assert probes == []

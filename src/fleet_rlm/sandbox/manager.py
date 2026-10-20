@@ -186,6 +186,18 @@ def _create_definitely_failed(exc: BaseException) -> bool:
 
 _NETWORK_POLICY_WARNED = False
 _NETWORK_POLICY_WARNED_LOCK = threading.Lock()
+# Root sandbox ids whose egress block has already been probed in this process.
+_NETWORK_PROBED_SANDBOXES: set[str] = set()
+_NETWORK_PROBED_LOCK = threading.Lock()
+NETWORK_PROBE_TIMEOUT_SECONDS = 10
+_NETWORK_PROBE_CODE = (
+    "import socket\n"
+    "try:\n"
+    " socket.create_connection(('1.1.1.1', 443), timeout=2).close()\n"
+    " print('connected')\n"
+    "except Exception as exc:\n"
+    " print('blocked ' + type(exc).__name__)\n"
+)
 
 
 def _domains(value: Any) -> frozenset[str]:
@@ -648,6 +660,38 @@ class DaytonaSandboxManager:
             return {"domain_allow_list": self.domain_allow_list}
         return {"network_block_all": True} if self.network_block_all else {}
 
+    def _probe_network_enforcement(self, sandbox: Any) -> None:
+        """Once per root sandbox id, check from inside the sandbox that block-all is really enforced.
+
+        Only for block-all (an allow list holds domains, so an IP probe proves nothing). A connection to
+        1.1.1.1:443 means Daytona did not apply the block, typically on a Tier 1/2 organization. The exec is
+        bounded and never retried; any failure to run the probe is logged at debug and never fails the create.
+        """
+        if self.network_params() != {"network_block_all": True}:
+            return
+        sandbox_id = str(getattr(sandbox, "id", ""))
+        with _NETWORK_PROBED_LOCK:
+            if not sandbox_id or sandbox_id in _NETWORK_PROBED_SANDBOXES:
+                return
+            _NETWORK_PROBED_SANDBOXES.add(sandbox_id)
+        try:
+            outcome = self._remote_exec(
+                sandbox, _NETWORK_PROBE_CODE, timeout=NETWORK_PROBE_TIMEOUT_SECONDS, retry=False
+            ).strip()
+        except Exception as exc:
+            _LOGGER.debug("Network enforcement probe did not run in sandbox %s (%s)", sandbox_id, type(exc).__name__)
+            return
+        if outcome == "connected":
+            _LOGGER.warning(
+                "NETWORK BLOCKING IS NOT ENFORCED in Daytona sandbox %s: FLEET_DAYTONA_NETWORK_BLOCK_ALL=true was "
+                "requested, but the sandbox reached 1.1.1.1:443. Per-sandbox network policies require a Daytona "
+                "Tier 3 or Tier 4 organization; this is likely a Tier 1/2 org whose organization-level policy "
+                "wins. Model code in this sandbox has outbound network access.",
+                sandbox_id,
+            )
+        else:
+            _LOGGER.debug("Network blocking is enforced in sandbox %s (probe: %s)", sandbox_id, outcome or "no output")
+
     def _verify_network_policy(self, sandbox: Any) -> None:
         """Warn (once per process) when a created sandbox does not report the requested network policy.
 
@@ -776,6 +820,8 @@ class DaytonaSandboxManager:
             self._creation_pending = False
             self._record_allocation("ready")
             self._verify_network_policy(self._sandbox)
+            if self.parent is None:
+                self._probe_network_enforcement(self._sandbox)
             self.check_turn()
             self.emit("sandbox_ready", depth=self.depth)
             return self._sandbox

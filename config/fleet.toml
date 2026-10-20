@@ -51,6 +51,8 @@ auto_stop_minutes = 30
 # Per-sandbox network policies need a Daytona Tier 3 or Tier 4 organization. On Tier 1/2 the
 # organization-level policy wins; Fleet logs a WARNING (once per process) when a sandbox does not
 # report the requested policy.
+# With block-all, each new root sandbox is also probed once (connect to 1.1.1.1:443, 10 s bound);
+# a successful connection logs a WARNING that blocking is NOT enforced.
 # A non-empty, comma-separated domain_allow_list (e.g. "example.com,*.example.org") replaces block-all.
 network_block_all = true
 domain_allow_list = ""
