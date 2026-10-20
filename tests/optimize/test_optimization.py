@@ -627,10 +627,17 @@ def _tasks(count: int) -> list[dspy.Example]:
         (workflow.ErrorLimit(share=0.0), 10, 0),
         (workflow.ErrorLimit(cap=0), 10, 0),
         (workflow.ErrorLimit(share=0.5, cap=3), 10, 3),
+        (workflow.ErrorLimit(), 1, 0),  # never every example: a 1-example split that fails still aborts
+        (workflow.ErrorLimit(share=1.0), 4, 3),
     ],
 )
 def test_error_limit_allows_at_least_one_error_for_any_positive_share(limit, examples, allowed) -> None:
     assert limit.allowed(examples) == allowed
+
+
+def test_a_one_example_split_that_fails_aborts() -> None:
+    with pytest.raises(workflow.EvaluationAbortedError):
+        workflow.score_split(_Rollouts({"t0"}), _tasks(1), lambda *_: 1.0, 1)
 
 
 def test_a_single_flaky_rollout_does_not_abort_a_small_split() -> None:

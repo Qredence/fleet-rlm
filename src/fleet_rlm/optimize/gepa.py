@@ -76,10 +76,12 @@ class ErrorLimit:
     def allowed(self, examples: int) -> int:
         """The largest error count that still yields a score for a split of `examples`.
 
-        Any positive share allows at least one error, so a single flaky call never aborts a small split;
-        a share of 0 allows none. The optional cap applies last.
+        Any positive share allows at least one error, so a single flaky call never aborts a small split, but
+        never every example, so a split that fails completely still aborts; a share of 0 allows none. The
+        optional cap applies last.
         """
-        allowed = max(1, math.floor(self.share * examples)) if self.share > 0 else 0
+        allowed = min(examples - 1, max(1, math.floor(self.share * examples))) if self.share > 0 else 0
+        allowed = max(allowed, 0)
         return allowed if self.cap is None else min(allowed, self.cap)
 
 
