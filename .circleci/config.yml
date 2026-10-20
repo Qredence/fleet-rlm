@@ -233,6 +233,16 @@ jobs:
           name: Validate release version, source SHA, and main branch
           command: make check-release
 
+  validate-pypi-webhook-context:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Require the Smart Deployments webhook credential before publishing
+          command: PYTHONPATH=src python scripts/release_checks.py validate-webhook-context
+
   build-release:
     docker:
       - image: cimg/python:3.12
@@ -290,7 +300,7 @@ jobs:
           name: Download TestPyPI wheel and verify it matches the built artifact
           command: |
             mkdir -p /tmp/fleet-testpypi
-            python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --index-url https://test.pypi.org/simple --dest /tmp/fleet-testpypi "fleet-rlm==$FLEET_RELEASE_VERSION"
+            env PIP_CONFIG_FILE=/dev/null PIP_EXTRA_INDEX_URL= python -m pip download --disable-pip-version-check --no-cache-dir --no-deps --only-binary=:all: --index-url https://test.pypi.org/simple --dest /tmp/fleet-testpypi "fleet-rlm==$FLEET_RELEASE_VERSION"
             built_wheel=$(basename dist/fleet_rlm-"$FLEET_RELEASE_VERSION"-*.whl)
             downloaded_wheel=$(basename /tmp/fleet-testpypi/fleet_rlm-"$FLEET_RELEASE_VERSION"-*.whl)
             expected=$(awk -v file="$built_wheel" '$2 == file {print $1}' dist/SHA256SUMS)
@@ -306,16 +316,78 @@ jobs:
     docker:
       - image: cimg/python:3.12
     resource_class: medium
+    environment:
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
     steps:
       - attach_workspace:
           at: .
       - run:
-          name: Verify and publish the same distributions to PyPI with OIDC
+          name: Plan the PyPI deployment, publish the verified artifacts, and mark it running
           command: |
             cd dist
             sha256sum -c SHA256SUMS
+            circleci run release plan fleet-rlm-pypi \
+              --environment-name=pypi \
+              --component-name=fleet-rlm \
+              --target-version="$FLEET_RELEASE_VERSION"
             python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
             twine upload fleet_rlm-*
+            circleci run release update fleet-rlm-pypi --status=running
+      - run:
+          name: Mark failed PyPI publication in CircleCI deployment tracking
+          command: circleci run release update fleet-rlm-pypi --status=FAILED --failure-reason="PyPI publication step failed"
+          when: on_fail
+
+  pypi-canary:
+    parameters:
+      release-version:
+        type: string
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
+    environment:
+      FLEET_RELEASE_VERSION: << parameters.release-version >>
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - install-uv
+      - run:
+          name: Export locked runtime dependencies for the isolated canary
+          command: uv export --locked --no-dev --no-emit-project --format requirements.txt --python 3.12 --output-file /tmp/fleet-pypi-canary-requirements.txt
+      - run:
+          name: Download, verify, and smoke-test the PyPI candidate
+          command: |
+            mkdir -p test-results
+            PYTHONPATH=src python scripts/release_checks.py pypi-canary \
+              --version "$FLEET_RELEASE_VERSION" \
+              --manifest dist/SHA256SUMS \
+              --requirements /tmp/fleet-pypi-canary-requirements.txt \
+              2>&1 | tee test-results/pypi-canary.log
+          environment:
+            PYTHONUNBUFFERED: "1"
+      - store_artifacts:
+          path: test-results
+          destination: pypi-canary
+
+  release-validation:
+    type: release
+    plan_name: fleet-rlm-pypi
+    validation:
+      enabled: true
+      evaluation_time: 20m
+      auto_rollback_on_failure: false
+      webhooks:
+        - name: pypi_canary
+          provider: custom
+          data_points:
+            component_name: request.component_name
+            version: request.version
+            env: request.env
+            signal_name: request.signal_name
+            criteria: request.alert_transition
+          fail_when: 'criteria == "triggered"'
+          max_failures: 1
 
   github-release:
     parameters:
@@ -368,11 +440,15 @@ workflows:
             - security
       - validate-release-request:
           filters: pipeline.parameters.run_release or pipeline.parameters.run_python314 or pipeline.parameters.run_ci
+      - validate-pypi-webhook-context:
+          context: fleet-pypi-validation-webhook
+          filters: pipeline.parameters.run_release
       - release-preflight:
           filters: pipeline.parameters.run_release
           requires:
             - quality
             - validate-release-request
+            - validate-pypi-webhook-context
       - build-release:
           filters: pipeline.parameters.run_release
           requires:
@@ -392,12 +468,23 @@ workflows:
           filters: pipeline.parameters.run_release
           requires:
             - smoke-test-testpypi
+      - release-validation:
+          filters: pipeline.parameters.run_release
+          requires:
+            - publish-pypi
+      - pypi-canary:
+          release-version: << pipeline.parameters.release_version >>
+          context: fleet-pypi-validation-webhook
+          filters: pipeline.parameters.run_release
+          requires:
+            - publish-pypi
       - github-release:
           release-version: << pipeline.parameters.release_version >>
           context: fleet-github-release
           filters: pipeline.parameters.run_release
           requires:
-            - publish-pypi
+            - release-validation
+            - pypi-canary
 
   python314-manual:
     when: pipeline.parameters.run_python314 and pipeline.git.branch == "main"

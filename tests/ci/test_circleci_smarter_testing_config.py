@@ -51,3 +51,45 @@ def test_quality_aggregates_both_full_matrix_and_smarter_testing_jobs() -> None:
         "min": 1,
         "max": 2,
     }
+
+
+def test_pypi_release_requires_webhook_preflight_and_canary_validation() -> None:
+    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
+    workflow_jobs = config["workflows"]["required-ci"]["jobs"]
+    by_name = {
+        name: options
+        for item in workflow_jobs
+        for name, options in (item.items() if isinstance(item, dict) else [(item, {})])
+    }
+
+    assert "validate-pypi-webhook-context" in by_name["release-preflight"]["requires"]
+    assert "quality" in by_name["release-preflight"]["requires"]
+    assert by_name["pypi-canary"]["context"] == "fleet-pypi-validation-webhook"
+    assert by_name["pypi-canary"]["requires"] == ["publish-pypi"]
+    assert set(by_name["github-release"]["requires"]) == {"release-validation", "pypi-canary"}
+
+    validation = config["jobs"]["release-validation"]
+    assert validation["type"] == "release"
+    assert validation["plan_name"] == "fleet-rlm-pypi"
+    assert validation["validation"]["auto_rollback_on_failure"] is False
+    assert validation["validation"]["webhooks"][0]["name"] == "pypi_canary"
+    assert validation["validation"]["webhooks"][0]["provider"] == "custom"
+
+    publish_command = config["jobs"]["publish-pypi"]["steps"][1]["run"]["command"]
+    assert "circleci run release plan fleet-rlm-pypi" in publish_command
+    assert "--environment-name=pypi" in publish_command
+    assert "--component-name=fleet-rlm" in publish_command
+    assert '--target-version="$FLEET_RELEASE_VERSION"' in publish_command
+
+    testpypi_command = config["jobs"]["smoke-test-testpypi"]["steps"][4]["run"]["command"]
+    assert "https://test.pypi.org/simple" in testpypi_command
+    assert "PIP_CONFIG_FILE=/dev/null" in testpypi_command
+    assert "PIP_EXTRA_INDEX_URL=" in testpypi_command
+    assert "--no-cache-dir" in testpypi_command
+
+    canary_command = "\n".join(
+        step["run"]["command"]
+        for step in config["jobs"]["pypi-canary"]["steps"]
+        if isinstance(step, dict) and "run" in step
+    )
+    assert "pypi-canary" in canary_command

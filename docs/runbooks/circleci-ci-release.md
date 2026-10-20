@@ -27,24 +27,51 @@ Python range (`>=3.11,<3.14`).
 
 CircleCI Project Settings for `rlm` currently reports Smart Deployments as
 **Configured** (checked 2026-10-20). Treat this as project-level setup status;
-it does not demonstrate that this repository's releases are being validated
-against live monitoring signals.
+the project has existing `fleet-rlm` / `pypi` deployment history, and the
+release workflow now adds package-specific validation. A running Fleet service
+is not the target: the canary verifies that the published Python package can be
+downloaded and used by a consumer.
 
-The release workflow below publishes a Python library to TestPyPI and PyPI and
-creates a GitHub release. It does not deploy a running Fleet service, define a
-runtime environment, or provide an application rollback target. Do not add
-deploy markers or release validation to package publication: registry upload
-success cannot establish application health, and yanking a bad package remains
-the documented recovery path.
+The `publish-pypi` job plans a deployment named `fleet-rlm-pypi` for component
+`fleet-rlm`, environment `pypi`, and the requested release version. After the
+PyPI upload succeeds, it marks that deployment `running`. The typed
+`release-validation` job opens a 20-minute validation window while
+`pypi-canary` downloads the exact version exclusively from `https://pypi.org/simple`,
+checks its wheel digest against `dist/SHA256SUMS`, installs the locked runtime
+dependencies, and runs the package CLI/API smoke checks in isolation. The
+canary retries PyPI visibility for a bounded number of attempts and its total
+work is capped at 15 minutes so a failed check can report during the
+validation window. GitHub release creation requires both the canary job and
+successful CircleCI release validation.
 
-Wire Smart Deployments into the CircleCI workflow that deploys a Fleet
-application when that target exists. Select deploy tracking until a monitor
-can send authenticated validation webhooks for the application's component,
-environment, and version. Enable continuous validation only after confirming
-those signals and reviewing the evaluation policy. Test the deploy marker,
-validation result, and rollback path against a non-production target before
-relying on automated rollback. CircleCI's [Smart Deployments setup guide](https://circleci.com/docs/guides/deploy/set-up-smart-deployments/) describes
-the guided setup, monitor webhook requirements, and generated configuration.
+The canary emits a `pypi_canary` custom-provider failure signal only when the
+download, digest verification, or smoke check fails. The signal includes the
+matching component, environment, and version, and the canary job also fails so
+the direct GitHub release dependency blocks even if validation delivery is
+misconfigured. A successful canary emits no failure signal and the job passes.
+If CircleCI cannot accept a failure signal, the canary job fails and blocks the
+GitHub release.
+CircleCI's [release validation guide](https://circleci.com/docs/guides/deploy/set-up-release-validation-manually/)
+requires the signal name to match the configured webhook and the component,
+environment, and version to match the planned deployment.
+
+Before running a release, create a CircleCI Deploys webhook secret and add it
+as `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` in a `fleet-pypi-validation-webhook`
+context. Restrict that context to the `rlm` project and authorized maintainers;
+the workflow only requests it for the main-branch canary. As of 2026-10-20,
+that context was not present in the Qredence CircleCI context list. The
+`validate-pypi-webhook-context` job checks for the credential before any
+package publication, so release requests fail closed until the context exists.
+Never put the webhook token in the repository, a project-wide environment
+variable, or a job log.
+
+Automatic rollback is explicitly disabled for this release job. PyPI package
+uploads cannot be undone by the configured CircleCI `rollback-pipeline`; if
+the canary fails after upload, do not rerun or overwrite the version. Inspect
+the deploy record and PyPI files, manually yank the defective release, then
+publish a corrected follow-up version. CircleCI validation and deployment
+markers are described in its [Smart Deployments overview](https://circleci.com/docs/guides/deploy/smart-deployments-overview/)
+and [configuration reference](https://circleci.com/docs/guides/deploy/release-validation-reference/).
 
 ## Smarter Testing
 
@@ -101,9 +128,11 @@ circleci pipeline run --project gh/Qredence/fleet-rlm \
 The required quality jobs complete first. The release then validates checkout
 SHA and branch, builds the wheel and source archive once, writes a SHA-256
 manifest, publishes to TestPyPI, downloads the candidate wheel from TestPyPI,
-checks its digest against the build, and installs it in isolation. On success,
-CircleCI publishes the same manifest-verified files to PyPI and creates the
-GitHub release.
+checks its digest against the build, and installs it in isolation. It then
+plans and publishes the same manifest-verified files to PyPI, marks the package
+release as running in CircleCI, and runs the PyPI-only canary during release
+validation. CircleCI creates the GitHub release only after validation and the
+canary both pass.
 
 CircleCI contexts `fleet-testpypi-trusted-publishing` and
 `fleet-pypi-trusted-publishing` must be restricted to the project, authorized
@@ -111,7 +140,9 @@ maintainers, `main`, and jobs without SSH reruns. Register distinct PyPI trusted
 publishers for the project, CircleCI organization, pipeline definition, and
 corresponding context; constrain the repository and `refs/heads/main`. The
 `fleet-github-release` context must hold a narrowly scoped `GH_TOKEN` for this
-repository. Do not add long-lived PyPI upload tokens.
+repository. The `fleet-pypi-validation-webhook` context must contain the
+CircleCI-generated `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` and be restricted to the
+project and authorized maintainers. Do not add long-lived PyPI upload tokens.
 
 ## Migration and recovery
 

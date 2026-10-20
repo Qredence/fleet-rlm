@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
 import venv
 from pathlib import Path
 
@@ -84,7 +87,135 @@ def verify_manifest(directory: Path) -> None:
             raise SystemExit(f"release checksum mismatch for {archive.name}")
 
 
-def smoke(version: str, index_url: str, wheel: Path | None, requirements: Path | None) -> None:
+def verify_registry_wheel(version: str, wheel: Path, manifest: Path) -> None:
+    """Require a registry-downloaded wheel to match the built release manifest."""
+    if not wheel.is_file() or not wheel.name.startswith(f"fleet_rlm-{version}-") or not wheel.name.endswith(".whl"):
+        raise SystemExit(f"PyPI returned an unexpected wheel for fleet-rlm {version}: {wheel.name}")
+    verify_manifest(manifest.parent)
+    entries = {
+        match.group(2): match.group(1)
+        for line in manifest.read_text().splitlines()
+        if (match := re.fullmatch(r"([0-9a-f]{64})  (fleet_rlm-[^/]+(?:\.whl|\.tar\.gz))", line))
+    }
+    expected = entries.get(wheel.name)
+    if expected is None:
+        raise SystemExit(f"PyPI wheel {wheel.name} is not present in the release checksum manifest")
+    actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    if actual != expected:
+        raise SystemExit(f"PyPI wheel checksum does not match the release manifest: {wheel.name}")
+
+
+def validate_webhook_context(token: str | None) -> None:
+    """Refuse to publish unless the validation webhook credential is configured."""
+    if not token or not token.strip():
+        raise SystemExit("CIRCLECI_VALIDATION_WEBHOOK_TOKEN is required for PyPI release validation")
+
+
+def _run_with_deadline(command: list[str], deadline: float | None, *, env: dict[str, str] | None = None) -> None:
+    timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
+    subprocess.run(command, check=True, timeout=timeout, env=env)
+
+
+def download_pypi_wheel(version: str, destination: Path, deadline: float | None = None) -> Path:
+    """Download only from the public PyPI index, ignoring pip index overrides."""
+    environment = os.environ.copy()
+    environment["PIP_CONFIG_FILE"] = os.devnull
+    for key in (
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_FIND_LINKS",
+        "UV_INDEX_URL",
+        "UV_EXTRA_INDEX_URL",
+    ):
+        environment.pop(key, None)
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "--disable-pip-version-check",
+        "--no-cache-dir",
+        "--no-deps",
+        "--only-binary=:all:",
+        "--index-url",
+        "https://pypi.org/simple",
+        "--dest",
+        str(destination),
+        f"fleet-rlm=={version}",
+    ]
+    for attempt in range(5):
+        try:
+            _run_with_deadline(command, deadline, env=environment)
+            break
+        except subprocess.CalledProcessError:
+            if attempt == 4:
+                raise
+            delay = 5 * (2**attempt)
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= delay:
+                    raise
+                delay = min(delay, remaining)
+            time.sleep(delay)
+    wheels = list(destination.glob("fleet_rlm-*.whl"))
+    if len(wheels) != 1:
+        raise SystemExit(f"expected one fleet-rlm {version} wheel from PyPI, found {len(wheels)}")
+    return wheels[0]
+
+
+def send_pypi_canary_failure(version: str, token: str) -> None:
+    """Send a matching Smart Deployments failure signal for the PyPI canary."""
+    payload = {
+        "provider": "custom",
+        "component_name": "fleet-rlm",
+        "env": "pypi",
+        "signal_name": "pypi_canary",
+        "version": version,
+        "alert_transition": "triggered",
+    }
+    request = urllib.request.Request(
+        "https://circleci.com/api/v3/deploy/hooks/d0fc62ae-1f4a-4037-8ccb-d357adfdfda6/validate",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        if not 200 <= response.status < 300:
+            raise RuntimeError(f"CircleCI rejected the PyPI canary failure signal (HTTP {response.status})")
+
+
+def pypi_canary(version: str, manifest: Path, requirements: Path, token: str) -> None:
+    """Smoke-test the public PyPI artifact and signal failed health to CircleCI."""
+    validate_webhook_context(token)
+    try:
+        deadline = time.monotonic() + 15 * 60
+        with tempfile.TemporaryDirectory(prefix="fleet-pypi-canary-") as temp:
+            wheel = download_pypi_wheel(version, Path(temp), deadline)
+            verify_registry_wheel(version, wheel, manifest)
+            smoke(version, "https://pypi.org/simple", wheel, requirements, deadline=deadline)
+    except (Exception, SystemExit) as error:
+        try:
+            send_pypi_canary_failure(version, token)
+        except Exception as signal_error:
+            raise SystemExit(
+                "PyPI canary failed and CircleCI could not receive its validation signal; "
+                "the release is blocked. Inspect both errors in the job log."
+            ) from signal_error
+        sys.stdout.write(
+            f"PyPI canary failed for fleet-rlm {version}; sent the pypi_canary validation signal "
+            f"to CircleCI ({type(error).__name__}); blocking the GitHub release.\n"
+        )
+        raise SystemExit(f"PyPI canary failed for fleet-rlm {version}; release blocked") from None
+
+
+def smoke(
+    version: str,
+    index_url: str,
+    wheel: Path | None,
+    requirements: Path | None,
+    *,
+    deadline: float | None = None,
+) -> None:
     """Install a release candidate in isolation and exercise its public entry points."""
     with tempfile.TemporaryDirectory(prefix="fleet-release-smoke-") as temp:
         env_dir = Path(temp) / "venv"
@@ -92,7 +223,7 @@ def smoke(version: str, index_url: str, wheel: Path | None, requirements: Path |
         python = env_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         pip = [str(python), "-m", "pip", "install", "--disable-pip-version-check"]
         if requirements is not None:
-            subprocess.run([*pip, "--requirement", str(requirements.resolve())], check=True)
+            _run_with_deadline([*pip, "--requirement", str(requirements.resolve())], deadline)
         command = [str(python), "-m", "pip", "install", "--disable-pip-version-check"]
         command.append("--no-deps")
         if wheel is None:
@@ -107,9 +238,11 @@ def smoke(version: str, index_url: str, wheel: Path | None, requirements: Path |
             )
         else:
             command.append(str(wheel.resolve()))
-        subprocess.run(command, check=True)
-        subprocess.run([str(env_dir / ("Scripts/fleet.exe" if os.name == "nt" else "bin/fleet")), "--help"], check=True)
-        subprocess.run(
+        _run_with_deadline(command, deadline)
+        _run_with_deadline(
+            [str(env_dir / ("Scripts/fleet.exe" if os.name == "nt" else "bin/fleet")), "--help"], deadline
+        )
+        _run_with_deadline(
             [
                 str(python),
                 "-c",
@@ -121,7 +254,7 @@ def smoke(version: str, index_url: str, wheel: Path | None, requirements: Path |
                 "assert '/health' in schema['paths']",
                 version,
             ],
-            check=True,
+            deadline,
         )
     sys.stdout.write(f"Release package smoke test passed for fleet-rlm {version}\n")
 
@@ -147,6 +280,13 @@ def main() -> None:
     smoke_parser.add_argument("--index-url", default="https://test.pypi.org/simple")
     smoke_parser.add_argument("--wheel", type=Path)
     smoke_parser.add_argument("--requirements", type=Path)
+    canary = commands.add_parser("pypi-canary")
+    canary.add_argument("--version", required=True)
+    canary.add_argument("--manifest", type=Path, required=True)
+    canary.add_argument("--requirements", type=Path, required=True)
+    canary.add_argument("--webhook-token", default=os.environ.get("CIRCLECI_VALIDATION_WEBHOOK_TOKEN"))
+    webhook = commands.add_parser("validate-webhook-context")
+    webhook.add_argument("--webhook-token", default=os.environ.get("CIRCLECI_VALIDATION_WEBHOOK_TOKEN"))
     args = parser.parse_args()
     if args.command == "preflight":
         preflight(args.version, args.sha, args.branch, args.pipeline_sha)
@@ -156,6 +296,10 @@ def main() -> None:
         create_manifest(args.dist)
     elif args.command == "verify-manifest":
         verify_manifest(args.dist)
+    elif args.command == "pypi-canary":
+        pypi_canary(args.version, args.manifest, args.requirements, args.webhook_token or "")
+    elif args.command == "validate-webhook-context":
+        validate_webhook_context(args.webhook_token)
     else:
         smoke(args.version, args.index_url, args.wheel, args.requirements)
 
