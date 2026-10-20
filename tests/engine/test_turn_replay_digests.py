@@ -1,4 +1,4 @@
-"""Replay recording upgrades a capped (size and mtime) digest to the real SHA-256 of the bytes it stores."""
+"""Capped (size and mtime) digests: recorded as reported, and a replay of such a file hits the snapshot limit."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from fleet_rlm.engine.turn import _prepare_inputs
+from fleet_rlm.sandbox.digests import DIGEST_MAX_FILE_BYTES
 
 
 def _runtime(digests: dict[str, str], files: dict[str, bytes]) -> Any:
@@ -22,22 +23,25 @@ def _runtime(digests: dict[str, str], files: dict[str, bytes]) -> Any:
     )
 
 
-def test_a_capped_digest_is_replaced_by_the_replayed_bytes_hash() -> None:
-    files = {"files/a.txt": b"alpha", "files/b.txt": b"beta"}
+def test_a_replay_of_a_capped_file_is_refused_by_the_snapshot_limit() -> None:
+    big = b"x" * (DIGEST_MAX_FILE_BYTES + 1)  # the only size the digest walk records as unhashed
+    files = {"files/a.txt": b"alpha", "files/big.bin": big}
     digests = {
         "files/a.txt": hashlib.sha256(b"alpha").hexdigest(),
-        "files/b.txt": "unhashed:size=4:mtime_ns=123",
+        "files/big.bin": f"unhashed:size={len(big)}:mtime_ns=123",
     }
-    inputs = _prepare_inputs(_runtime(digests, files), "session-a", "task", record_replay=True)
-    assert inputs["context_files"] == {path: hashlib.sha256(data).hexdigest() for path, data in files.items()}
-    assert set(inputs["replay_files"]) == set(files)
+    with pytest.raises(ValueError, match="exceeds the 8 MB snapshot limit"):
+        _prepare_inputs(_runtime(digests, files), "session-a", "task", record_replay=True)
 
 
-def test_a_capped_digest_whose_size_changed_still_refuses_the_replay() -> None:
-    files = {"files/b.txt": b"beta-but-longer"}
+def test_a_replay_refuses_a_file_that_changed_after_its_digest() -> None:
+    files = {"files/a.txt": b"alpha-but-changed"}
     with pytest.raises(ValueError, match="changed while the Turn was prepared"):
         _prepare_inputs(
-            _runtime({"files/b.txt": "unhashed:size=4:mtime_ns=123"}, files), "session-a", "task", record_replay=True
+            _runtime({"files/a.txt": hashlib.sha256(b"alpha").hexdigest()}, files),
+            "session-a",
+            "task",
+            record_replay=True,
         )
 
 

@@ -35,7 +35,12 @@ from fleet_rlm.config import validate_shared_notes_subpath
 from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
-from fleet_rlm.sandbox.digests import DIGEST_STALL_SECONDS, digests_code, run_watched_python
+from fleet_rlm.sandbox.digests import (
+    DIGEST_STALL_SECONDS,
+    PROGRESS_FALLBACK_CODE,
+    digests_code,
+    run_watched_python,
+)
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
 from fleet_rlm.workspace import (
     _child_input_path,
@@ -48,17 +53,17 @@ if TYPE_CHECKING:
     from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 
 _LOGGER = logging.getLogger(__name__)
+# Size limit for host-generated maintenance code sent to the sandbox.
+_MAX_REMOTE_CODE_BYTES = 1_000_000
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
 
 # Remote code fragments; each binds one variable so a Turn can gather them in a single exec.
 # Probed rather than configured: the snapshot is user-selectable (FLEET_DAYTONA_SNAPSHOT).
 _ENVIRONMENT_MODULES = ("numpy", "pandas", "scipy", "mpmath", "sympy", "gmpy2", "polars", "pyarrow", "sklearn")
-# Defines a no-op `_fleet_progress` when the snippet runs outside the watched digest runner.
-_PROGRESS_FALLBACK_CODE = "try: _fleet_progress\nexcept NameError:\n def _fleet_progress(*_args,**_kwargs): pass\n"
 
 # Reports progress per module, so the digest stall watch sees a slow environment probe advancing.
 _ENVIRONMENT_CODE = (
-    _PROGRESS_FALLBACK_CODE + "import importlib.metadata,importlib.util,platform,sys\n"
+    PROGRESS_FALLBACK_CODE + "import importlib.metadata,importlib.util,platform,sys\n"
     "found=[]\n"
     "_fleet_progress('environment',0,force=True)\n"
     f"for _index,module in enumerate({_ENVIRONMENT_MODULES!r},1):\n"
@@ -83,7 +88,7 @@ def _notes_code(limit: int) -> str:
     are seen by the digest stall watch as advancing rather than stuck.
     """
     return (
-        _PROGRESS_FALLBACK_CODE + "import json, os\n"
+        PROGRESS_FALLBACK_CODE + "import json, os\n"
         "notes = []\n"
         "try:\n"
         "    if os.path.ismount('/learned'):\n"
@@ -677,7 +682,7 @@ class DaytonaSandboxManager:
 
     def exec_remote_python(self, code: str) -> str:
         """Run bounded maintenance Python in this Session's sandbox."""
-        if len(code.encode("utf-8")) > 1_000_000:
+        if len(code.encode("utf-8")) > _MAX_REMOTE_CODE_BYTES:
             raise ValueError("Remote maintenance code exceeds the size limit")
         return self._remote_exec(self.ensure_sandbox(), code)
 
@@ -688,7 +693,7 @@ class DaytonaSandboxManager:
         `_fleet_progress(phase, files, nbytes, dirs=...)`, and the run is killed and fails only when that progress
         has not changed for `digest_stall_seconds`, or when the Turn is cancelled or past its deadline.
         """
-        if len(code.encode("utf-8")) > 1_000_000:
+        if len(code.encode("utf-8")) > _MAX_REMOTE_CODE_BYTES:
             raise ValueError("Remote maintenance code exceeds the size limit")
         sandbox = self.ensure_sandbox()
         return run_watched_python(

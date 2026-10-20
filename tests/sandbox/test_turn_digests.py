@@ -27,7 +27,6 @@ from fleet_rlm.sandbox.digests import (
     WorkspaceDigestStalledError,
     digests_code,
     run_watched_python,
-    unhashed_digest_size,
 )
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
@@ -180,14 +179,6 @@ def test_the_cache_is_outside_the_workspace_and_never_listed(tmp_path) -> None:
 
 def test_the_byte_cap_matches_the_replay_snapshot_limit() -> None:
     assert DIGEST_MAX_FILE_BYTES == MAX_REPLAY_FILE_BYTES
-
-
-@pytest.mark.parametrize(
-    "value", ["unhashed:size=x:mtime_ns=1", "unhashed:size=1", "0" * 64, "", "unhashed:size=1:mtime_ns=2:extra"]
-)
-def test_only_well_formed_capped_digests_carry_a_size(value: str) -> None:
-    assert unhashed_digest_size(value) is None
-    assert unhashed_digest_size("unhashed:size=7:mtime_ns=3") == 7
 
 
 # --- the watched runner, against real local processes -------------------------------------------------------------

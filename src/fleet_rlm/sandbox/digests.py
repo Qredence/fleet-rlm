@@ -11,15 +11,17 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
-import re
 import time
 import uuid
 from collections.abc import Callable
 from typing import Any
 
+from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES
+
 # Safety limits only: time is bounded by the stall watch, not by these.
 DIGEST_MAX_FILES = 5_000
-DIGEST_MAX_FILE_BYTES = 8_000_000  # equals fleet_rlm.replay.MAX_REPLAY_FILE_BYTES
+# A file too large to replay is not worth hashing either: a replay of it fails the snapshot limit first.
+DIGEST_MAX_FILE_BYTES = MAX_REPLAY_FILE_BYTES
 DIGEST_STALL_SECONDS = 120.0  # default; FleetSettings.daytona_digest_stall_seconds overrides it
 DIGEST_POLL_SECONDS = 2.0
 DIGEST_LAUNCH_WAIT_SECONDS = 2.0  # a small workspace finishes inside the launch exec itself
@@ -34,8 +36,8 @@ _CACHE_VERSION = 1
 # times identical ("racily clean", as in git's index).
 _RACY_SECONDS = 2
 
-UNHASHED_DIGEST_PREFIX = "unhashed:"
-_UNHASHED_DIGEST = re.compile(r"unhashed:size=(\d+):mtime_ns=(\d+)")
+# Defines a no-op `_fleet_progress` when a remote snippet runs outside the watched runner.
+PROGRESS_FALLBACK_CODE = "try: _fleet_progress\nexcept NameError:\n def _fleet_progress(*_args,**_kwargs): pass\n"
 
 
 class WorkspaceDigestStalledError(RuntimeError):
@@ -44,12 +46,6 @@ class WorkspaceDigestStalledError(RuntimeError):
 
 class WorkspaceDigestFailedError(RuntimeError):
     """The sandbox digest walk exited without producing a result."""
-
-
-def unhashed_digest_size(digest: str) -> int | None:
-    """The recorded size of a capped `unhashed:` digest, or None for a real SHA-256 (or anything else)."""
-    match = _UNHASHED_DIGEST.fullmatch(digest)
-    return int(match.group(1)) if match else None
 
 
 def digests_code(
@@ -67,10 +63,7 @@ def digests_code(
     defines it; the code also runs standalone.
     """
     return (
-        "import hashlib,json,os,time\n"
-        "try: _fleet_progress\n"
-        "except NameError:\n"
-        " def _fleet_progress(*_args,**_kwargs): pass\n"
+        PROGRESS_FALLBACK_CODE + "import hashlib,json,os,time\n"
         "digests={}\n"
         "digest_stats={'hashed':0,'cached':0,'unhashed':0,'truncated':False}\n"
         "_root='/workspace'\n"

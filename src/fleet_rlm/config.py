@@ -27,6 +27,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fleet_rlm.sandbox.digests import DIGEST_STALL_SECONDS
+
 _SECRET_FIELDS = {
     "fleet_database_url",
     "fleet_database_migration_url",
@@ -291,7 +293,7 @@ class FleetSettings(BaseSettings):
     databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
     fleet_llm_base_url: str = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
     daytona_digest_stall_seconds: float = Field(
-        default=120.0,
+        default=DIGEST_STALL_SECONDS,
         ge=10,
         le=3600,
         validation_alias="FLEET_DAYTONA_DIGEST_STALL_SECONDS",
