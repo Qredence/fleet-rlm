@@ -57,15 +57,16 @@ CircleCI's [release validation guide](https://circleci.com/docs/guides/deploy/se
 requires the signal name to match the configured webhook and the component,
 environment, and version to match the planned deployment.
 
-Before running a release, create a CircleCI Deploys webhook secret and add it
-as `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` in a `fleet-pypi-validation-webhook`
-context. Restrict that context to the `rlm` project and authorized maintainers;
-the workflow only requests it for the main-branch canary. As of 2026-10-20,
-that context was not present in the Qredence CircleCI context list. The
-`validate-pypi-webhook-context` job checks for the credential before any
-package publication, so release requests fail closed until the context exists.
-Never put the webhook token in the repository, a project-wide environment
-variable, or a job log.
+Before running a release, create the CircleCI Deploys validation webhook and
+add its token as `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` in the
+`fleet-pypi-validation-webhook` context. The context is already created and is
+restricted to the `rlm` project, `main`, pipelines that are not API-triggered,
+and jobs that are not SSH reruns. CircleCI combines these restrictions, so all
+must pass. As of 2026-10-20, the context exists but does not yet contain the
+webhook token. The `validate-pypi-webhook-context` job checks for the credential
+before any package publication, so release requests fail closed until it is
+added. Never put the webhook token in the repository, a project-wide
+environment variable, or a job log.
 
 Automatic rollback is explicitly disabled for this release job. PyPI package
 uploads cannot be undone by the configured CircleCI `rollback-pipeline`; if
