@@ -619,6 +619,25 @@ def _tasks(count: int) -> list[dspy.Example]:
     return [dspy.Example(task=f"t{index}").with_inputs("task") for index in range(count)]
 
 
+@pytest.mark.parametrize(
+    ("limit", "examples", "allowed"),
+    [
+        (workflow.ErrorLimit(), 3, 1),  # 20% of 3 floors to 0, but a positive share allows one
+        (workflow.ErrorLimit(), 10, 2),
+        (workflow.ErrorLimit(share=0.0), 10, 0),
+        (workflow.ErrorLimit(cap=0), 10, 0),
+        (workflow.ErrorLimit(share=0.5, cap=3), 10, 3),
+    ],
+)
+def test_error_limit_allows_at_least_one_error_for_any_positive_share(limit, examples, allowed) -> None:
+    assert limit.allowed(examples) == allowed
+
+
+def test_a_single_flaky_rollout_does_not_abort_a_small_split() -> None:
+    result = workflow.score_split(_Rollouts({"t1"}), _tasks(3), lambda *_: 1.0, 1)
+    assert result.errors == 1 and result.scores.count(0.0) == 1
+
+
 def test_score_split_stops_early_and_raises_when_every_rollout_fails() -> None:
     examples = _tasks(10)
     program = _Rollouts({example.task for example in examples})
