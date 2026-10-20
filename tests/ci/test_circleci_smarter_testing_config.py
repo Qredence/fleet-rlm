@@ -82,6 +82,11 @@ def test_pypi_release_requires_webhook_preflight_and_canary_validation() -> None
     assert validation["validation"]["webhooks"][0]["provider"] == "custom"
 
     publish_command = config["jobs"]["publish-pypi"]["steps"][1]["run"]["command"]
+    publish_job = next(job["publish-pypi"] for job in workflow_jobs if isinstance(job, dict) and "publish-pypi" in job)
+    assert publish_job["context"] == "fleet-pypi-upload-token"
+    assert '"${PYPI_API_TOKEN:-}"' in publish_command
+    assert 'TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN"' in publish_command
+    assert "twine upload --non-interactive fleet_rlm-*" in publish_command
     assert "circleci run release plan fleet-rlm-pypi" in publish_command
     assert "--environment-name=pypi" in publish_command
     assert "--component-name=fleet-rlm" in publish_command

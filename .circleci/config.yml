@@ -347,12 +347,17 @@ jobs:
           command: |
             cd dist
             sha256sum -c SHA256SUMS
+            if [ -z "${PYPI_API_TOKEN:-}" ]; then
+              echo "PYPI_API_TOKEN is required in the restricted PyPI upload context." >&2
+              exit 1
+            fi
             circleci run release plan fleet-rlm-pypi \
               --environment-name=pypi \
               --component-name=fleet-rlm \
               --target-version="$FLEET_RELEASE_VERSION"
             python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
-            twine upload fleet_rlm-*
+            TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" \
+              twine upload --non-interactive fleet_rlm-*
             circleci run release update fleet-rlm-pypi --status=running
       - run:
           name: Mark failed PyPI publication in CircleCI deployment tracking
@@ -485,7 +490,7 @@ workflows:
           requires:
             - publish-testpypi
       - publish-pypi:
-          context: fleet-pypi-trusted-publishing
+          context: fleet-pypi-upload-token
           filters: pipeline.parameters.run_release
           requires:
             - smoke-test-testpypi

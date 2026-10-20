@@ -143,26 +143,35 @@ release as running in CircleCI, and runs the PyPI-only canary during release
 validation. CircleCI creates the GitHub release only after validation and the
 canary both pass.
 
-CircleCI contexts `fleet-testpypi-trusted-publishing` and
-`fleet-pypi-trusted-publishing` must be restricted to the project, authorized
-maintainers, `main`, and jobs without SSH reruns. Register distinct PyPI trusted
-publishers for the project, CircleCI organization, pipeline definition, and
-corresponding context; constrain the repository and `refs/heads/main`. The
-`fleet-github-release` context must hold a narrowly scoped `GH_TOKEN` for this
-repository. The `fleet-pypi-validation-webhook` context must contain the
-CircleCI-generated `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` and be restricted to the
-project and authorized maintainers. Confirm that the target index currently
-accepts CircleCI as a trusted-publishing issuer before attempting a release.
-Do not add long-lived PyPI upload tokens.
+The `publish-pypi` job uses the `fleet-pypi-upload-token` CircleCI context. Add
+`PYPI_API_TOKEN` there using a PyPI API token scoped only to the `fleet-rlm`
+project. Restrict this context to the `rlm` project, `main`, non-API pipeline
+triggers, and jobs without SSH reruns; the workflow attaches it only to
+`publish-pypi`. The token is passed to Twine through its standard
+`TWINE_USERNAME=__token__` and `TWINE_PASSWORD` variables and is never written
+to the repository or printed. Revoke and replace it in PyPI and CircleCI if it
+is exposed. This long-lived token is the fallback for CircleCI's currently
+unsupported PyPI trusted-publishing issuer; remove it only after a verified
+OIDC release path is available.
+
+The `fleet-testpypi-trusted-publishing` context remains reserved for TestPyPI
+OIDC. The `fleet-github-release` context must hold a narrowly scoped `GH_TOKEN`
+for this repository. The `fleet-pypi-validation-webhook` context must contain
+the CircleCI-generated `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` and be restricted to
+the `rlm` project, `main`, non-API pipeline triggers, and jobs without SSH
+reruns.
 
 If TestPyPI rejects token exchange with `unknown trusted publishing issuer`,
-the registry does not recognize the CircleCI OIDC provider. This happens before
-any upload; verify that the requested version is absent from TestPyPI, then
-stop. Adding or editing project publisher claims cannot fix an unrecognized
-issuer. Check the current CircleCI/PyPI trusted-publishing support status and
-contact the index maintainers if needed. Resume the same release SHA only after
-issuer support is confirmed and the TestPyPI version is still absent. Do not
-switch to long-lived upload tokens without a separate explicit decision.
+the registry does not recognize CircleCI's OIDC provider. That happens before
+any upload. Confirm the requested version is absent from TestPyPI and run the
+release with `--param skip_testpypi=true` only after reviewing the added risk of
+omitting that rehearsal. This flag skips only TestPyPI upload and smoke; it does
+not skip the PyPI artifact checksum, isolated PyPI canary, release validation,
+or GitHub release gate. A PyPI upload failure before acceptance leaves the
+version unpublished. If the upload succeeds but the canary fails, stop: inspect
+the deploy record and PyPI files, manually yank the defective release, then
+publish a corrected follow-up version. Do not retry or overwrite version
+`0.8.0`.
 
 ## Migration and recovery
 
