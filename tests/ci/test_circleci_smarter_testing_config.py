@@ -68,6 +68,11 @@ def test_pypi_release_requires_webhook_preflight_and_canary_validation() -> None
     assert by_name["pypi-canary"]["requires"] == ["publish-pypi"]
     assert set(by_name["github-release"]["requires"]) == {"release-validation", "pypi-canary"}
 
+    webhook_guard = config["jobs"]["validate-pypi-webhook-context"]
+    assert webhook_guard["docker"][0]["image"] == "cimg/python:3.12"
+    webhook_command = webhook_guard["steps"][1]["run"]["command"]
+    assert "python3.12 scripts/release_checks.py validate-webhook-context" in webhook_command
+
     validation = config["jobs"]["release-validation"]
     assert validation["type"] == "release"
     assert validation["plan_name"] == "fleet-rlm-pypi"

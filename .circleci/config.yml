@@ -241,7 +241,7 @@ jobs:
       - checkout
       - run:
           name: Require the Smart Deployments webhook credential before publishing
-          command: PYTHONPATH=src python scripts/release_checks.py validate-webhook-context
+          command: PYTHONPATH=src python3.12 scripts/release_checks.py validate-webhook-context
 
   build-release:
     docker:
