@@ -46,6 +46,7 @@ from daytona.common.errors import (
 from mlflow.entities import SpanType
 
 from fleet_rlm.config import (
+    DEFAULT_ROOT_AUTO_DELETE_MINUTES,
     validate_domain_allow_list,
     validate_root_auto_delete_minutes,
     validate_shared_notes_subpath,
@@ -132,6 +133,8 @@ _STATE_POLL_SECONDS = 1.0
 _STATE_SETTLE_SECONDS = 90.0
 # Per-attempt provider timeout for a sandbox stop (cancel_turn and shutdown).
 _STOP_TIMEOUT_SECONDS = 60
+# Per-attempt provider timeout for a sandbox delete (orphan reconcile, failed-root rebuild, child shutdown).
+_DELETE_TIMEOUT_SECONDS = 60
 # How long a new Turn waits for an in-flight stop: the worst case of every retried stop attempt timing out,
 # plus margin for the SDK returning after its own timeout. Derived from the retry settings, never shorter.
 _STOP_SETTLE_SECONDS = retry_worst_case_seconds(_STOP_TIMEOUT_SECONDS) + 30.0
@@ -158,12 +161,18 @@ def _sandbox_state(sandbox: Any) -> str:
     return str(getattr(state, "value", state) or "").lower()
 
 
+def _provider_state(sandbox: Any) -> str:
+    """`_sandbox_state`, with a sandbox the provider no longer has reported as "missing"."""
+    try:
+        return _sandbox_state(sandbox)
+    except DaytonaNotFoundError:
+        return "missing"
+
+
 def _sandbox_alive(sandbox: Any) -> bool:
     """Whether an execution in `sandbox` can still be running; an unreadable state counts as alive."""
     try:
-        return _sandbox_state(sandbox) not in _LOST_STATES
-    except DaytonaNotFoundError:
-        return False
+        return _provider_state(sandbox) not in _LOST_STATES
     except Exception:
         return True  # a failed poll is not evidence of loss; the execution timeout still bounds the wait
 
@@ -251,7 +260,7 @@ class DaytonaSandboxManager:
     session_id: str
     snapshot: str = "fleet-rlm-base"
     auto_stop_minutes: int = 30
-    root_auto_delete_minutes: int = 7 * 24 * 60
+    root_auto_delete_minutes: int = DEFAULT_ROOT_AUTO_DELETE_MINUTES
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
     max_llm_calls: int = 150
@@ -642,7 +651,9 @@ class DaytonaSandboxManager:
                 continue
             query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": record["agent_id"]})
             for sandbox in with_retries(functools.partial(self._list_sandboxes, query)):
-                with_retries(functools.partial(self._client.delete, sandbox, wait=True, timeout=60))
+                with_retries(
+                    functools.partial(self._client.delete, sandbox, wait=True, timeout=_DELETE_TIMEOUT_SECONDS)
+                )
                 self.emit("orphan_deleted", sandbox_id=sandbox.id, agent_id=record["agent_id"])
             path.unlink()
 
@@ -824,8 +835,9 @@ class DaytonaSandboxManager:
         `run_namespace`. `alive` is the last verdict the manager already had: a create or resume (True), a
         liveness poll during an execution (every `repl.LIVENESS_POLL_SECONDS`), a lost or unavailable sandbox
         (False), or a stop by `cancel_turn`/`shutdown` (False); None before the first one. With
-        `include_children`, executions in child sandboxes (recursively) count as busy and as output, while
-        `alive` stays this sandbox's own. `host_io_busy` is separate from `busy`: it is True while the host runs
+        `include_children`, executions in child sandboxes count as busy and as output (every child, at any
+        depth, is registered flat in `root._children`, so one level covers them all), while `alive` stays this
+        sandbox's own. `host_io_busy` is separate from `busy`: it is True while the host runs
         Daytona work for this sandbox (remote exec, file transfers, artifact collection), with
         `host_io_since_monotonic` the start of the oldest such operation; children's host IO counts too.
         """
@@ -833,7 +845,7 @@ class DaytonaSandboxManager:
         if not include_children:
             return own
         children = self._children.copy().values()  # an atomic copy; never iterate the live dict
-        return repl.merge_activity(own, [child.sandbox_activity() for child in children])
+        return repl.merge_activity(own, [child.sandbox_activity(include_children=False) for child in children])
 
     def _ensure_sandbox(self) -> Any:
         """Create or resume this agent's sandbox, returning the live handle.
@@ -949,7 +961,7 @@ class DaytonaSandboxManager:
             self._forget_network_probe(sandbox)
         if sandbox is not None and client is not None and state in {"error", "build_failed"}:
             try:
-                with_retries(lambda: client.delete(sandbox, timeout=60))
+                with_retries(lambda: client.delete(sandbox, timeout=_DELETE_TIMEOUT_SECONDS))
             except Exception:
                 _LOGGER.warning("Could not delete failed Daytona sandbox %s before rebuilding", sandbox.id)
 
@@ -965,21 +977,14 @@ class DaytonaSandboxManager:
         """
         sandbox = self._sandbox
         assert sandbox is not None and self._client is not None
-
-        def state_of() -> str:
-            try:
-                return _sandbox_state(sandbox)
-            except DaytonaNotFoundError:
-                return "missing"
-
-        state = state_of()
+        state = _provider_state(sandbox)
         deadline = time.monotonic() + _STATE_SETTLE_SECONDS
         while state in _SETTLING_STATES:
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Sandbox {sandbox.id} did not settle from state {state!r}")
             time.sleep(_STATE_POLL_SECONDS)
             self.check_turn()
-            state = state_of()
+            state = _provider_state(sandbox)
         if state in _FAILED_STATES or state == "missing":
             raise SandboxUnavailableError(sandbox.id, state)
         if state in _RESUMABLE_STATES:
@@ -1074,9 +1079,9 @@ class DaytonaSandboxManager:
             f"summary: {summary}",
             "---",
         ]
+        content = "\n".join([*header, body, ""]).encode("utf-8")
         sandbox = self.ensure_sandbox()
         with self._activity.host_io():
-            content = "\n".join([*header, body, ""]).encode("utf-8")
             with_retries(lambda: sandbox.fs.upload_file(content, path, timeout=60))
         return path
 
@@ -1501,8 +1506,8 @@ class DaytonaSandboxManager:
                         self.emit("workspace_cleanup_failed", sandbox_id=sandbox.id)
                     # A stopped or failed sandbox cannot run workspace cleanup,
                     # but must still be deleted and confirmed by the provider.
-                    with_retries(lambda: client.delete(sandbox, timeout=60, wait=True))
-                    (Path(".fleet/allocations") / f"{self.agent_id}.json").unlink(missing_ok=True)
+                    with_retries(lambda: client.delete(sandbox, timeout=_DELETE_TIMEOUT_SECONDS, wait=True))
+                    self._allocation_path().unlink(missing_ok=True)
                     with self.root._budget_lock:
                         self.root._children.pop(self.agent_id, None)
                     self.emit("sandbox_deleted", sandbox_id=sandbox.id)

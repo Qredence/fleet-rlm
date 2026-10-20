@@ -50,18 +50,23 @@ def _manager(sandbox: _Sandbox, *, parent: DaytonaSandboxManager | None = None) 
     return manager
 
 
-def _start(manager: DaytonaSandboxManager, outcome: dict[str, Any]) -> threading.Thread:
-    interpreter = SimpleNamespace(ns_id="ns", answer_host_call=lambda _call: {})
+def _in_thread(operation: Any, outcome: dict[str, Any]) -> threading.Thread:
+    """Run `operation` on a daemon thread, storing its return value or exception in `outcome`."""
 
     def target() -> None:
         try:
-            outcome["result"] = manager.run_namespace(interpreter, {"code": "work()"})  # type: ignore[arg-type]
+            outcome["result"] = operation()
         except BaseException as exc:
             outcome["error"] = exc
 
     thread = threading.Thread(target=target, daemon=True)
     thread.start()
     return thread
+
+
+def _start(manager: DaytonaSandboxManager, outcome: dict[str, Any]) -> threading.Thread:
+    interpreter = SimpleNamespace(ns_id="ns", answer_host_call=lambda _call: {})
+    return _in_thread(lambda: manager.run_namespace(interpreter, {"code": "work()"}), outcome)  # type: ignore[arg-type]
 
 
 def test_an_idle_manager_reports_nothing_running_and_unknown_liveness() -> None:
@@ -275,15 +280,7 @@ class _HostIOSandbox(_Sandbox):
 
 def _while_blocked(sandbox: _HostIOSandbox, operation: Any) -> tuple[threading.Thread, dict[str, Any]]:
     outcome: dict[str, Any] = {}
-
-    def target() -> None:
-        try:
-            outcome["result"] = operation()
-        except BaseException as exc:
-            outcome["error"] = exc
-
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
+    thread = _in_thread(operation, outcome)
     assert sandbox.in_host_io.wait(5)
     return thread, outcome
 
