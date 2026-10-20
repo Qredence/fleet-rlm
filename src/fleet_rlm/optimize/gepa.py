@@ -80,8 +80,7 @@ class ErrorLimit:
         never every example, so a split that fails completely still aborts; a share of 0 allows none. The
         optional cap applies last.
         """
-        allowed = min(examples - 1, max(1, math.floor(self.share * examples))) if self.share > 0 else 0
-        allowed = max(allowed, 0)
+        allowed = max(0, min(examples - 1, max(1, math.floor(self.share * examples)))) if self.share > 0 else 0
         return allowed if self.cap is None else min(allowed, self.cap)
 
 
@@ -128,6 +127,10 @@ class _RolloutErrors(BaseCallback):
         return counted
 
 
+def _objective_scores(score: object) -> dict[str, float]:
+    return getattr(score, "objective_scores", None) or {}
+
+
 def score_split(
     program: dspy.Module,
     examples: list[dspy.Example],
@@ -162,25 +165,21 @@ def score_split(
             f"(at most {allowed} allowed); the split was not scored."
         ) from exc
     scores = [float(score) for _, _, score in result.results]
-    errors = counter.count
     critical_scores = [
-        float((getattr(score, "objective_scores", None) or {}).get("quality", float(score)))
+        float(_objective_scores(score).get("quality", float(score)))
         for example, _prediction, score in result.results
         if getattr(example, "critical", False) is True
     ]
     objective_names = {"quality", "usage_available"}
     for _, _, score in result.results:
-        objective_names.update((getattr(score, "objective_scores", None) or {}).keys())
+        objective_names.update(_objective_scores(score).keys())
     objectives = {
-        name: sum(
-            float((getattr(score, "objective_scores", None) or {}).get(name, 0.0)) for _, _, score in result.results
-        )
-        / len(examples)
+        name: sum(float(_objective_scores(score).get(name, 0.0)) for _, _, score in result.results) / len(examples)
         for name in objective_names
     }
     return SplitScore(
         sum(scores) / max(1, len(scores)),
-        errors,
+        counter.count,
         scores,
         critical_scores,
         objectives,
@@ -427,7 +426,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--max-eval-error-share",
         type=float,
         default=DEFAULT_ERROR_SHARE,
-        help="validation stops when more than this share of a split's rollouts fail (default 0.2)",
+        help="validation stops when more than this share of a split's rollouts fail (default %(default)s)",
     )
     parser.add_argument(
         "--max-eval-errors",

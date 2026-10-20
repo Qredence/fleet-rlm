@@ -675,6 +675,17 @@ def test_score_split_with_errors_within_the_limit_still_scores_and_counts_them()
         workflow.score_split(_Rollouts({"t3", "t7"}), examples, lambda *_: 1.0, 1, workflow.ErrorLimit(cap=1))
 
 
+def _compile_args() -> SimpleNamespace:
+    return SimpleNamespace(
+        validation_ratio=0.35,
+        max_metric_calls=4,
+        gepa_budget="light",
+        threads=1,
+        max_eval_error_share=0.2,
+        max_eval_errors=None,
+    )
+
+
 def test_an_aborted_validation_split_never_reaches_the_promotion_gate(monkeypatch, tmp_path):
     from contextlib import nullcontext
 
@@ -705,14 +716,7 @@ def test_an_aborted_validation_split_never_reaches_the_promotion_gate(monkeypatc
     monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kw: nullcontext())
     monkeypatch.setattr(workflow.mlflow, "set_tags", lambda *_args, **_kw: None)
     store = SimpleNamespace(runtime_settings=lambda _session: {})
-    args = SimpleNamespace(
-        validation_ratio=0.35,
-        max_metric_calls=4,
-        gepa_budget="light",
-        threads=1,
-        max_eval_error_share=0.2,
-        max_eval_errors=None,
-    )
+    args = _compile_args()
 
     with pytest.raises(workflow.EvaluationAbortedError):
         workflow._compile(args, settings, store, "s1", settings.mlflow_target())
@@ -933,14 +937,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(monke
     monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kw: nullcontext())
     for name in ("set_tags", "log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
         monkeypatch.setattr(workflow.mlflow, name, lambda *_args, **_kw: None)
-    args = SimpleNamespace(
-        validation_ratio=0.35,
-        max_metric_calls=4,
-        gepa_budget="light",
-        threads=1,
-        max_eval_error_share=0.2,
-        max_eval_errors=None,
-    )
+    args = _compile_args()
     workflow._compile(args, settings, store, "s1", settings.mlflow_target())
     assert measured == [False, True, True, False, False, True]
     assert all(config.fleet_root_model == "openai/deployed-root" for config in factories)
