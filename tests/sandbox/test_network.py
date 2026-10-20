@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import contextvars
+import functools
 import importlib.metadata
 import inspect
+import logging
+import threading
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +16,7 @@ from typing import Any
 
 import pytest
 from daytona import CreateSandboxFromSnapshotParams, Daytona
-from daytona.common.errors import DaytonaTimeoutError
+from daytona.common.errors import DaytonaNotFoundError, DaytonaTimeoutError
 from emulator import emulated_sandbox
 
 from fleet_rlm.config import FleetSettings
@@ -306,19 +311,75 @@ def test_the_sdk_sandbox_exposes_the_policy_fields_checked() -> None:
     assert "self.domain_allow_list: str | None = sandbox_dto.domain_allow_list" in source
 
 
-def _probe_runner(monkeypatch, outcome: str | BaseException) -> list[tuple[str, Any, Any]]:
-    """Answer the enforcement probe's remote exec with `outcome`; record (sandbox id, timeout, retry)."""
-    probes: list[tuple[str, Any, Any]] = []
+class _ProbeClient:
+    """A Daytona client whose `get` returns a fresh handle; the probe's `process.exec` answers with `outcome`."""
 
-    def remote_exec(_self, sandbox, code, *, timeout=None, retry=True):
+    def __init__(self, created: Any, outcome: str | BaseException = "connected\n", *, state: str = "started") -> None:
+        self.created = created
+        self.outcome = outcome
+        self.state = state
+        self.gate: threading.Event | None = None
+        self.entered = threading.Event()
+        self.probes: list[tuple[str, Any, str]] = []
+        self.gets: list[str] = []
+
+    def create(self, _params: Any) -> Any:
+        return self.created
+
+    def list(self, _query: Any) -> list[Any]:
+        return []
+
+    def get(self, sandbox_id: str) -> Any:
+        self.gets.append(sandbox_id)
+        if isinstance(self.outcome, DaytonaNotFoundError):
+            raise self.outcome
+        return SimpleNamespace(
+            id=sandbox_id, state=self.state, process=SimpleNamespace(exec=functools.partial(self._exec, sandbox_id))
+        )
+
+    def _exec(self, sandbox_id: str, command: str, *, timeout: Any = None) -> Any:
+        code = base64.b64decode(command.split('b64decode("')[1].split('")')[0]).decode()
         assert "create_connection(('1.1.1.1', 443), timeout=2)" in code
-        probes.append((sandbox.id, timeout, retry))
-        if isinstance(outcome, BaseException):
-            raise outcome
-        return outcome
+        self.probes.append((sandbox_id, timeout, threading.current_thread().name))
+        self.entered.set()
+        if self.gate is not None:
+            assert self.gate.wait(10)
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return SimpleNamespace(exit_code=0, result=self.outcome)
 
-    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", remote_exec)
-    return probes
+
+class _NoREPL:
+    """The cached handle: the probe must never run in the REPL session or exec through it."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"probe touched the cached sandbox handle: {name}")
+
+
+def _cached_root_sandbox(sandbox_id: str = "root-sb") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=sandbox_id,
+        state="started",
+        network_block_all=True,
+        domain_allow_list=None,
+        process=_NoREPL(),
+        code_interpreter=_NoREPL(),
+    )
+
+
+def _probed_root(monkeypatch, tmp_path, client: _ProbeClient, **settings: Any) -> DaytonaSandboxManager:
+    monkeypatch.chdir(tmp_path)
+    root = DaytonaSandboxManager("key", "org", "volume", "net", **settings)
+    root._client = client
+    assert root.ensure_sandbox() is client.created
+    return root
+
+
+def _finish_probe(root: DaytonaSandboxManager) -> None:
+    thread = root._network_probe_thread
+    assert thread is not None and thread.daemon
+    thread.join(10)
+    assert not thread.is_alive()
 
 
 def _enforcement_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -329,16 +390,44 @@ def _enforcement_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
-def _blocked_root_sandbox(sandbox_id: str = "root-sb") -> SimpleNamespace:
-    return SimpleNamespace(id=sandbox_id, state="started", network_block_all=True, domain_allow_list=None)
-
-
 def test_a_root_sandbox_that_reaches_the_internet_warns_loudly(monkeypatch, tmp_path, caplog) -> None:
-    probes = _probe_runner(monkeypatch, "connected\n")
-    _create_root(monkeypatch, tmp_path, _blocked_root_sandbox())
-    assert probes == [("root-sb", 10, False)]  # bounded, never retried
+    client = _ProbeClient(_cached_root_sandbox())
+    root = _probed_root(monkeypatch, tmp_path, client)
+    _finish_probe(root)
+    # A separate process.exec on a freshly fetched handle, on a background thread, bounded, never retried.
+    assert client.gets == ["root-sb"]
+    assert client.probes == [("root-sb", 10, "fleet-network-probe-root-sb")]
     (message,) = _enforcement_warnings(caplog)
     assert "FLEET_DAYTONA_NETWORK_BLOCK_ALL" in message and "Tier 3 or Tier 4" in message and "root-sb" in message
+
+
+def test_create_and_the_first_turn_never_wait_on_a_slow_probe(monkeypatch, tmp_path, caplog) -> None:
+    client = _ProbeClient(_cached_root_sandbox())
+    client.gate = threading.Event()
+    marker: contextvars.ContextVar[str] = contextvars.ContextVar("marker", default="unset")
+    marker.set("turn-context")
+    seen: list[str] = []
+    original_exec = client._exec
+
+    def exec_in_context(*args: Any, **kwargs: Any) -> Any:
+        seen.append(marker.get())
+        return original_exec(*args, **kwargs)
+
+    client._exec = exec_in_context  # type: ignore[method-assign]
+    root = _probed_root(monkeypatch, tmp_path, client)  # returns while the probe is still blocked
+    try:
+        assert client.entered.wait(10)
+        assert root._network_probe_thread is not None and root._network_probe_thread.is_alive()
+        assert _enforcement_warnings(caplog) == []
+        # The probe holds no manager lock: the next ensure (the first Turn's code) proceeds right away.
+        assert root._lock.acquire(timeout=1)
+        root._lock.release()
+        assert root.ensure_sandbox() is client.created
+    finally:
+        client.gate.set()
+    _finish_probe(root)
+    assert seen == ["turn-context"]  # contextvars were copied into the probe thread
+    assert len(_enforcement_warnings(caplog)) == 1
 
 
 @pytest.mark.parametrize(
@@ -347,54 +436,79 @@ def test_a_root_sandbox_that_reaches_the_internet_warns_loudly(monkeypatch, tmp_
     ids=["refused", "timeout", "exec_timeout"],
 )
 def test_a_blocked_or_unanswered_probe_does_not_warn(monkeypatch, tmp_path, caplog, outcome) -> None:
-    import logging
-
     caplog.set_level(logging.DEBUG, logger="fleet_rlm.sandbox.manager")
-    probes = _probe_runner(monkeypatch, outcome)
-    root = _create_root(monkeypatch, tmp_path, _blocked_root_sandbox())
-    assert len(probes) == 1 and root._sandbox.id == "root-sb"
+    client = _ProbeClient(_cached_root_sandbox(), outcome)
+    root = _probed_root(monkeypatch, tmp_path, client)
+    _finish_probe(root)
+    assert len(client.probes) == 1 and root._sandbox.id == "root-sb"
     assert _enforcement_warnings(caplog) == []
     debug = [record.getMessage() for record in caplog.records if record.levelname == "DEBUG"]
     assert any("enforced" in line or "did not run" in line for line in debug)
 
 
+@pytest.mark.parametrize("gone", ["not_found", "destroyed"])
+def test_a_sandbox_gone_before_the_probe_runs_is_logged_at_debug(monkeypatch, tmp_path, caplog, gone) -> None:
+    caplog.set_level(logging.DEBUG, logger="fleet_rlm.sandbox.manager")
+    if gone == "not_found":
+        client = _ProbeClient(_cached_root_sandbox(), DaytonaNotFoundError("gone"))
+    else:
+        client = _ProbeClient(_cached_root_sandbox(), state="destroyed")
+    root = _probed_root(monkeypatch, tmp_path, client)
+    _finish_probe(root)
+    assert client.probes == [] and _enforcement_warnings(caplog) == []
+    debug = [record.getMessage() for record in caplog.records if record.levelname == "DEBUG"]
+    assert any("probe skipped" in line and "root-sb" in line for line in debug)
+
+
+def test_the_probe_never_raises_into_anything(monkeypatch, tmp_path, caplog) -> None:
+    caplog.set_level(logging.DEBUG, logger="fleet_rlm.sandbox.manager")
+    raised: list[BaseException] = []
+    monkeypatch.setattr(threading, "excepthook", lambda args: raised.append(args.exc_value))
+    client = _ProbeClient(_cached_root_sandbox())
+    client.get = lambda _sandbox_id: (_ for _ in ()).throw(KeyboardInterrupt())  # type: ignore[method-assign]
+    root = _probed_root(monkeypatch, tmp_path, client)
+    _finish_probe(root)
+    assert raised == [] and _enforcement_warnings(caplog) == []
+
+
 def test_the_probe_runs_once_per_root_sandbox_id(monkeypatch, tmp_path, caplog) -> None:
-    probes = _probe_runner(monkeypatch, "connected")
-    root = _create_root(monkeypatch, tmp_path, _blocked_root_sandbox("root-1"))
-    root._verify_network_policy(root._sandbox)
-    root._probe_network_enforcement(root._sandbox)  # same id again: skipped
+    client = _ProbeClient(_cached_root_sandbox("root-1"))
+    root = _probed_root(monkeypatch, tmp_path, client)
+    _finish_probe(root)
+    first_thread = root._network_probe_thread
+    assert root._claim_network_probe(root._sandbox) is False  # same id again: skipped
+    assert root.ensure_sandbox().id == "root-1" and root._network_probe_thread is first_thread
     # A rebuilt root is a new sandbox id and is probed once more.
     root._sandbox = None
-    rebuilt = _blocked_root_sandbox("root-2")
-    root._client.create = lambda _params: rebuilt
-    assert root.ensure_sandbox() is rebuilt
-    assert [probe[0] for probe in probes] == ["root-1", "root-2"]
+    client.created = _cached_root_sandbox("root-2")
+    assert root.ensure_sandbox().id == "root-2"
+    _finish_probe(root)
+    assert [probe[0] for probe in client.probes] == ["root-1", "root-2"]
     assert len(_enforcement_warnings(caplog)) == 2
 
 
 def test_child_sandboxes_are_never_probed(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    probes = _probe_runner(monkeypatch, "connected")
     root = DaytonaSandboxManager("key", "org", "volume", "net")
-    root._sandbox = _blocked_root_sandbox("root-existing")  # already running: not created here
-    root._client = SimpleNamespace(list=lambda _query: [])
+    root._sandbox = _cached_root_sandbox("root-existing")  # already running: not created here
+    root._client = _ProbeClient(root._sandbox)
     child = DaytonaSandboxManager("key", "org", "volume", "net", parent=root)
-    child._client = SimpleNamespace(
-        create=lambda _params: SimpleNamespace(id="child-sb", network_block_all=True, domain_allow_list=None),
-        list=lambda _query: [],
-    )
+    child_client = _ProbeClient(SimpleNamespace(id="child-sb", network_block_all=True, domain_allow_list=None))
+    child._client = child_client
     assert child.ensure_sandbox().id == "child-sb"
-    assert probes == []
+    assert child._claim_network_probe(child._sandbox) is False
+    assert child._network_probe_thread is None and root._network_probe_thread is None
+    assert child_client.probes == [] and child_client.gets == []
 
 
 def test_an_allow_list_skips_the_ip_probe(monkeypatch, tmp_path) -> None:
-    probes = _probe_runner(monkeypatch, "connected")
     returned = SimpleNamespace(id="sb", state="started", network_block_all=False, domain_allow_list="example.com")
-    _create_root(monkeypatch, tmp_path, returned, domain_allow_list="example.com")
-    assert probes == []
+    client = _ProbeClient(returned)
+    root = _probed_root(monkeypatch, tmp_path, client, domain_allow_list="example.com")
+    assert root._network_probe_thread is None and client.gets == []
 
 
 def test_no_policy_skips_the_probe(monkeypatch, tmp_path) -> None:
-    probes = _probe_runner(monkeypatch, "connected")
-    _create_root(monkeypatch, tmp_path, SimpleNamespace(id="sb", state="started"), network_block_all=False)
-    assert probes == []
+    client = _ProbeClient(SimpleNamespace(id="sb", state="started"))
+    root = _probed_root(monkeypatch, tmp_path, client, network_block_all=False)
+    assert root._network_probe_thread is None and client.gets == []
