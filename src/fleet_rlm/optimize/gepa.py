@@ -183,6 +183,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             session_id=namespace,
             snapshot=settings.fleet_daytona_snapshot,
             auto_stop_minutes=settings.daytona_auto_stop_minutes,
+            root_auto_delete_minutes=settings.daytona_root_auto_delete_minutes,
             sub_lm=sub_lm,
             jev_lm=jev_lm,
             max_llm_calls=settings.max_llm_calls_per_turn,
