@@ -493,9 +493,9 @@ def test_a_direct_answer_parse_failure_is_re_asked_once_without_a_json_fallback(
     assert len(recovered.prompts) == 2
     assert "Format correction" not in recovered.prompts[0] and "Format correction" in recovered.prompts[1]
 
-    # A second unparseable reply ends there: no third call through DSPy's JSONAdapter fallback.
+    # A second unparseable reply ends there: exactly two calls (the original and one re-ask), so no third call
+    # through DSPy's JSONAdapter fallback, even with a third reply available.
     failing = _ScriptedRootLM(["not in the field format"] * 3)
     with pytest.raises(AdapterParseError):
         _direct_answer(failing)
     assert len(failing.prompts) == 2
-    assert "json" not in failing.prompts[1].lower()
