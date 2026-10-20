@@ -460,6 +460,12 @@ class TurnTracker:
             state = event.get("state") or "stopped"
             self.sandbox_status = f"Resuming {state} sandbox ({agent_label})…"
             self.notices.append(Text(f"↻ Resuming {state} Daytona sandbox ({agent_label})…", style="yellow"))
+        elif event_type == "sandbox_rebuilding":
+            state = event.get("state") or "lost"
+            self.sandbox_status = f"Rebuilding sandbox ({agent_label})…"
+            self.notices.append(
+                Text(f"↻ Rebuilding {state} Daytona sandbox from the snapshot ({agent_label})…", style="yellow")
+            )
         elif event_type == "sandbox_ready":
             self.sandbox_status = None
         elif event_type == "sandbox_deleting":
@@ -791,6 +797,9 @@ def render_event(event: dict[str, Any]) -> None:
     elif event_type == "sandbox_resuming":
         state = event.get("state") or "stopped"
         CONSOLE.print(f"[yellow]  ↻ Resuming {state} Daytona sandbox…[/yellow] {identity}")
+    elif event_type == "sandbox_rebuilding":
+        state = event.get("state") or "lost"
+        CONSOLE.print(f"[yellow]  ↻ Rebuilding {state} Daytona sandbox from the snapshot…[/yellow] {identity}")
     elif event_type == "orphan_deleted":
         CONSOLE.print(f"[dim]  ✓ Deleted orphaned sandbox {event.get('sandbox_id') or 'unknown'} ({identity})[/dim]")
     elif event_type == "cancellation_requested":

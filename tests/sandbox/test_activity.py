@@ -7,7 +7,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-import pytest  # noqa: F401
+import pytest
 from daytona.common.errors import DaytonaConnectionError
 
 from fleet_rlm.sandbox import repl
@@ -249,3 +249,137 @@ def test_run_without_a_tracker_is_unchanged(monkeypatch) -> None:
     sandbox = SimpleNamespace(code_interpreter=SimpleNamespace(run_code=run_code))
     result = repl.run(sandbox, object(), {"code": "1"}, on_call=lambda _c: {}, timeout=5, alive=lambda: True)
     assert result == {"stdout": "ok"}
+
+
+class _HostIOSandbox(_Sandbox):
+    """A started sandbox whose remote exec and file transfers block until released."""
+
+    def __init__(self, sandbox_id: str) -> None:
+        super().__init__(sandbox_id)
+        self.in_host_io = threading.Event()
+        self.process = SimpleNamespace(exec=self._exec)
+        self.fs = SimpleNamespace(upload_file=self._upload_file)
+        self.block_exec = True
+
+    def _exec(self, command: str, timeout: int | None = None) -> Any:  # noqa: ARG002
+        if self.block_exec:
+            self.in_host_io.set()
+            assert self.release.wait(30)
+            return SimpleNamespace(exit_code=0, result="ok")
+        return SimpleNamespace(exit_code=0, result='[{"size": null}]')  # workspace metadata for one path
+
+    def _upload_file(self, *_args: Any, **_kwargs: Any) -> None:
+        self.in_host_io.set()
+        assert self.release.wait(30)
+
+
+def _while_blocked(sandbox: _HostIOSandbox, operation: Any) -> tuple[threading.Thread, dict[str, Any]]:
+    outcome: dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            outcome["result"] = operation()
+        except BaseException as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    assert sandbox.in_host_io.wait(5)
+    return thread, outcome
+
+
+def test_a_remote_exec_is_host_io_not_busy_and_starts_no_liveness_poll(monkeypatch) -> None:
+    monkeypatch.setattr(repl, "LIVENESS_POLL_SECONDS", 0.01)
+    sandbox = _HostIOSandbox("root-sb")
+    root = _manager(sandbox)
+    before = time.monotonic()
+    thread, outcome = _while_blocked(sandbox, lambda: root.exec_remote_python("print('ok')"))
+    try:
+        activity = root.sandbox_activity()
+        assert activity.host_io_busy is True
+        assert (activity.host_io_since_monotonic or 0) >= before
+        # busy/executions/busy_since keep meaning "model code is running".
+        assert not activity.busy and activity.executions == 0 and activity.busy_since_monotonic is None
+        refreshes, checked = sandbox.refreshes, activity.alive_checked_monotonic
+        time.sleep(0.2)  # 20 poll intervals: host IO must not start the liveness poll
+        assert sandbox.refreshes == refreshes
+        assert root.sandbox_activity().alive_checked_monotonic == checked
+    finally:
+        sandbox.release.set()
+        thread.join(5)
+    assert outcome == {"result": "ok"}
+    after = root.sandbox_activity()
+    assert not after.host_io_busy and after.host_io_since_monotonic is None
+
+
+def test_a_file_upload_is_host_io_and_a_failed_one_still_ends(monkeypatch) -> None:
+    monkeypatch.setattr(repl, "LIVENESS_POLL_SECONDS", 0.01)
+    sandbox = _HostIOSandbox("root-sb")
+    sandbox.block_exec = False  # the metadata check answers at once; the upload blocks
+    root = _manager(sandbox)
+    thread, outcome = _while_blocked(sandbox, lambda: root.write_workspace_file("files/a.txt", b"x"))
+    try:
+        activity = root.sandbox_activity()
+        assert activity.host_io_busy and not activity.busy and activity.executions == 0
+    finally:
+        sandbox.release.set()
+        thread.join(5)
+    assert outcome == {"result": "/workspace/files/a.txt"}
+    assert not root.sandbox_activity().host_io_busy
+
+    def broken_upload(*_args: Any, **_kwargs: Any) -> None:
+        raise ValueError("upload refused")
+
+    sandbox.fs.upload_file = broken_upload
+    with pytest.raises(ValueError, match="upload refused"):
+        root.write_workspace_file("files/b.txt", b"y")
+    assert not root.sandbox_activity().host_io_busy
+
+
+def test_artifact_collection_is_host_io(monkeypatch) -> None:
+    from fleet_rlm.optimize import evidence
+
+    sandbox = _HostIOSandbox("root-sb")
+    root = _manager(sandbox)
+    seen: list[repl.SandboxActivity] = []
+
+    def collect(manager: DaytonaSandboxManager) -> dict[str, Any]:
+        seen.append(manager.sandbox_activity())
+        return {"complete": True, "files": {}}
+
+    monkeypatch.setattr(evidence, "collect_artifacts", collect)
+    assert root.execution_evidence()["artifacts"] == {"complete": True, "files": {}}
+    assert seen and seen[0].host_io_busy and not seen[0].busy
+    assert not root.sandbox_activity().host_io_busy
+
+
+def test_host_io_is_counted_so_overlapping_operations_work() -> None:
+    tracker = ExecutionTracker()
+    first = tracker.begin_host_io()
+    start = tracker.snapshot().host_io_since_monotonic
+    second = tracker.begin_host_io()
+    tracker.end_host_io(first)
+    activity = tracker.snapshot()
+    assert activity.host_io_busy and activity.host_io_since_monotonic is not None
+    assert activity.host_io_since_monotonic >= (start or 0)  # the oldest still-open operation
+    assert not activity.busy and activity.executions == 0
+    tracker.end_host_io(second)
+    assert not tracker.snapshot().host_io_busy
+    with pytest.raises(RuntimeError), tracker.host_io():
+        assert tracker.snapshot().host_io_busy
+        raise RuntimeError("boom")
+    assert not tracker.snapshot().host_io_busy
+
+
+def test_host_io_in_a_child_counts_for_the_root_without_making_it_busy() -> None:
+    root = _manager(_Sandbox("root-sb"))
+    child = _manager(_Sandbox("child-sb"), parent=root)
+    token = child._activity.begin_host_io()
+    try:
+        merged = root.sandbox_activity()
+        assert merged.host_io_busy and merged.host_io_since_monotonic is not None
+        assert not merged.busy and merged.executions == 0
+        assert not root.sandbox_activity(include_children=False).host_io_busy
+    finally:
+        child._activity.end_host_io(token)
+    assert not root.sandbox_activity().host_io_busy

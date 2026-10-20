@@ -507,6 +507,7 @@ def test_bootstrap_omitted_payloads_and_sandbox_resuming_render_cleanly(monkeypa
 
     for event in (
         {"event": "sandbox_resuming", "state": "paused", "agent_id": "root-1"},
+        {"event": "sandbox_rebuilding", "state": "destroyed", "agent_id": "root-1"},
         {"event": "orphan_deleted", "sandbox_id": "sbx-old", "agent_id": "child-9"},
         {"event": "repl_code", "phase": "bootstrap", "code": "VERY_LONG_SHIM_SETUP = 1", "execution_id": "b1"},
         {"event": "repl_output", "phase": "bootstrap", "duration_ms": 14, "execution_id": "b1"},
@@ -534,6 +535,7 @@ def test_bootstrap_omitted_payloads_and_sandbox_resuming_render_cleanly(monkeypa
 
     rendered = output.getvalue()
     assert "Resuming paused Daytona sandbox" in rendered
+    assert "Rebuilding destroyed Daytona sandbox from the snapshot" in rendered
     assert "Deleted orphaned sandbox sbx-old" in rendered
     assert "Python bootstrap · Daytona" in rendered
     assert "VERY_LONG_SHIM_SETUP" not in rendered
@@ -784,3 +786,12 @@ def test_fullscreen_cancellation_closes_the_active_response_without_claiming_com
                 assert tui.is_running
 
     asyncio.run(scenario())
+
+
+def test_turn_tracker_shows_a_sandbox_rebuild_as_status_and_notice() -> None:
+    tracker = render.TurnTracker()
+    tracker.ingest({"event": "sandbox_rebuilding", "state": "error", "agent_id": "root-1"})
+    assert tracker.sandbox_status is not None and tracker.sandbox_status.startswith("Rebuilding sandbox")
+    assert any("Rebuilding error Daytona sandbox" in getattr(notice, "plain", "") for notice in tracker.notices)
+    tracker.ingest({"event": "sandbox_ready", "agent_id": "root-1"})
+    assert tracker.sandbox_status is None

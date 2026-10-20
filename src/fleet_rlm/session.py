@@ -219,6 +219,7 @@ class SessionRuntimeRegistry:
             session_id=session_id,
             snapshot=settings.fleet_daytona_snapshot,
             auto_stop_minutes=settings.daytona_auto_stop_minutes,
+            root_auto_delete_minutes=settings.daytona_root_auto_delete_minutes,
             sub_lm=self.sub_lm,
             jev_lm=self.jev_lm,
             max_llm_calls=settings.max_llm_calls_per_turn,
