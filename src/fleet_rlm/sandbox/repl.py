@@ -89,40 +89,31 @@ class SandboxLostError(ExecutionOutcomeUnknownError):
 class SandboxActivity:
     """A point-in-time view of what is running in a sandbox, built from local state only (no Daytona call).
 
-    Wall-clock fields are `time.time()` seconds; `*_monotonic` fields are `time.monotonic()` seconds, for
-    measuring durations in the same process.
+    Exactly what the Turn stall watchdog reads; `alive_checked_monotonic` is `time.monotonic()` seconds.
     """
 
     busy: bool  # at least one run_code execution is in flight
-    executions: int  # how many are in flight
-    busy_since: float | None  # wall clock start of the oldest in-flight execution
-    busy_since_monotonic: float | None
     alive: bool | None  # last known liveness; None until first observed
-    alive_checked_at: float | None  # wall clock of that observation
     alive_checked_monotonic: float | None  # monotonic clock of that observation
-    last_output_at: float | None  # wall clock of the latest stdout chunk from any execution
-    last_output_monotonic: float | None
     # Host-side Daytona work for this sandbox (remote exec, file transfers, artifact collection). Tracked
     # apart from `busy`, which only means model code is running; host IO never starts the liveness poll.
     host_io_busy: bool = False
-    host_io_since_monotonic: float | None = None  # monotonic start of the oldest in-flight host IO operation
 
 
 class ExecutionTracker:
-    """Thread-safe record of in-flight executions, the last liveness verdict, and the latest stdout.
+    """Thread-safe record of in-flight executions and host IO, and the last liveness verdict.
 
-    Fed by `run` (begin/end and stdout), by `_run_watched`'s liveness polls, by the manager's host IO
-    (`host_io`), and by its own create/resume/stop/loss events; `snapshot()` only reads this state.
+    Fed by `run` (begin/end), by `_run_watched`'s liveness polls, by the manager's host IO (`host_io`), and
+    by its own create/resume/stop/loss events; `snapshot()` only reads this state.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._running: dict[int, tuple[float, float]] = {}
+        self._running: set[int] = set()
+        self._host_io: set[int] = set()
         self._next = 0
         self._alive: bool | None = None
-        self._alive_at: tuple[float, float] | None = None  # (wall, monotonic)
-        self._output: tuple[float, float] | None = None
-        self._host_io: dict[int, float] = {}  # token -> monotonic start
+        self._alive_checked: float | None = None  # monotonic
 
     def _new_token(self) -> int:
         """A token unique across executions and host IO operations. Caller holds `_lock`."""
@@ -136,13 +127,13 @@ class ExecutionTracker:
         """
         with self._lock:
             token = self._new_token()
-            self._host_io[token] = time.monotonic()
+            self._host_io.add(token)
             return token
 
     def end_host_io(self, token: int) -> None:
         """Record the host-side operation as finished (returned or failed)."""
         with self._lock:
-            self._host_io.pop(token, None)
+            self._host_io.discard(token)
 
     @contextmanager
     def host_io(self) -> Generator[None]:
@@ -157,69 +148,38 @@ class ExecutionTracker:
         """Record an execution as in flight; returns the token for `end`."""
         with self._lock:
             token = self._new_token()
-            self._running[token] = (time.time(), time.monotonic())
+            self._running.add(token)
             return token
 
     def end(self, token: int) -> None:
         """Record the execution as finished (returned, failed, or abandoned)."""
         with self._lock:
-            self._running.pop(token, None)
+            self._running.discard(token)
 
     def observe_alive(self, alive: bool) -> None:
         """Record a liveness verdict the caller already has; never queries the provider."""
         with self._lock:
-            self._alive, self._alive_at = alive, (time.time(), time.monotonic())
-
-    def observe_output(self) -> None:
-        """Record that an execution just wrote to stdout."""
-        now = (time.time(), time.monotonic())
-        with self._lock:
-            self._output = now
+            self._alive, self._alive_checked = alive, time.monotonic()
 
     def snapshot(self) -> SandboxActivity:
         """The current activity, read under the lock."""
         with self._lock:
-            oldest = min(self._running.values(), key=lambda start: start[1]) if self._running else None
             return SandboxActivity(
                 busy=bool(self._running),
-                executions=len(self._running),
-                busy_since=oldest[0] if oldest else None,
-                busy_since_monotonic=oldest[1] if oldest else None,
                 alive=self._alive,
-                alive_checked_at=self._alive_at[0] if self._alive_at else None,
-                alive_checked_monotonic=self._alive_at[1] if self._alive_at else None,
-                last_output_at=self._output[0] if self._output else None,
-                last_output_monotonic=self._output[1] if self._output else None,
+                alive_checked_monotonic=self._alive_checked,
                 host_io_busy=bool(self._host_io),
-                host_io_since_monotonic=min(self._host_io.values()) if self._host_io else None,
             )
 
 
 def merge_activity(own: SandboxActivity, others: list[SandboxActivity]) -> SandboxActivity:
     """Combine a sandbox's activity with its children's: busy if any is; liveness stays the sandbox's own."""
     views = [own, *others]
-    running = [view for view in views if view.busy]
-    oldest = min(running, key=lambda view: view.busy_since_monotonic or 0.0) if running else None
-    output = max(
-        (view for view in views if view.last_output_monotonic is not None),
-        key=lambda view: view.last_output_monotonic or 0.0,
-        default=None,
-    )
     return SandboxActivity(
-        busy=bool(running),
-        executions=sum(view.executions for view in views),
-        busy_since=oldest.busy_since if oldest else None,
-        busy_since_monotonic=oldest.busy_since_monotonic if oldest else None,
+        busy=any(view.busy for view in views),
         alive=own.alive,
-        alive_checked_at=own.alive_checked_at,
         alive_checked_monotonic=own.alive_checked_monotonic,
-        last_output_at=output.last_output_at if output else None,
-        last_output_monotonic=output.last_output_monotonic if output else None,
         host_io_busy=any(view.host_io_busy for view in views),
-        host_io_since_monotonic=min(
-            (view.host_io_since_monotonic for view in views if view.host_io_since_monotonic is not None),
-            default=None,
-        ),
     )
 
 
@@ -325,30 +285,23 @@ def run(
     Raises the SDK's error when the transport fails; the caller decides whether the outcome is known.
     With `alive`, the sandbox is polled while the execution runs and `SandboxLostError` is raised as
     soon as it reports False, rather than waiting for the websocket or the execution timeout. With
-    `tracker`, the execution is recorded as in flight until it returns or fails, every stdout chunk and
-    liveness verdict is noted, and a lost sandbox is recorded as not alive.
+    `tracker`, the execution is recorded as in flight until it returns or fails, every liveness verdict is
+    noted, and a lost sandbox is recorded as not alive.
     """
     protocol = _Protocol(sandbox, on_call)
     payload = {"host_call_timeout": min(HOST_CALL_TIMEOUT_SECONDS, timeout), **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
 
-    on_stdout = protocol.feed
-    if tracker is not None:
+    if tracker is not None and alive is not None:
+        poll = alive
 
-        def on_stdout(chunk: Any) -> None:
-            tracker.observe_output()
-            protocol.feed(chunk)
-
-        if alive is not None:
-            poll = alive
-
-            def alive() -> bool:
-                verdict = poll()
-                tracker.observe_alive(verdict)
-                return verdict
+        def alive() -> bool:
+            verdict = poll()
+            tracker.observe_alive(verdict)
+            return verdict
 
     def execute() -> Any:
-        return sandbox.code_interpreter.run_code(code, context=context, on_stdout=on_stdout, timeout=timeout)
+        return sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)
 
     token = tracker.begin() if tracker is not None else 0
     try:

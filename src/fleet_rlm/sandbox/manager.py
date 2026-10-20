@@ -830,18 +830,17 @@ class DaytonaSandboxManager:
             return sandbox
 
     def sandbox_activity(self, *, include_children: bool = True) -> repl.SandboxActivity:
-        """Whether code is executing in this agent's sandbox (and since when), and whether it is alive.
+        """Whether code is executing in this agent's sandbox, whether host IO is, and whether it is alive.
 
         Cheap and thread-safe: it reads local state only, never the Daytona API and never the manager lock,
         so it can be called from any thread at any rate. `busy` covers `run_code` executions from
         `run_namespace`. `alive` is the last verdict the manager already had: a create or resume (True), a
         liveness poll during an execution (every `repl.LIVENESS_POLL_SECONDS`), a lost or unavailable sandbox
         (False), or a stop by `cancel_turn`/`shutdown` (False); None before the first one. With
-        `include_children`, executions in child sandboxes count as busy and as output (every child, at any
-        depth, is registered flat in `root._children`, so one level covers them all), while `alive` stays this
-        sandbox's own. `host_io_busy` is separate from `busy`: it is True while the host runs
-        Daytona work for this sandbox (remote exec, file transfers, artifact collection), with
-        `host_io_since_monotonic` the start of the oldest such operation; children's host IO counts too.
+        `include_children`, executions and host IO in child sandboxes count too (every child, at any depth, is
+        registered flat in `root._children`, so one level covers them all), while `alive` stays this sandbox's
+        own. `host_io_busy` is separate from `busy`: it is True while the host runs Daytona work for this
+        sandbox (remote exec, file transfers, artifact collection).
         """
         own = self._activity.snapshot()
         if not include_children:
