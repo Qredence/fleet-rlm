@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import hashlib
 import json
 import threading
@@ -727,4 +728,73 @@ def test_a_client_disconnect_mid_turn_cancels_it_and_releases_the_lock():
     assert manager._cancelled.is_set()
     # The response ended only after the cancelled Turn drained, and then released the Session.
     assert stopped.is_set()
+    assert not runtime.turn_lock.locked()
+
+
+_REQUEST_MARKER: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_marker", default=None)
+
+
+class _MarksRequestContext:
+    """ASGI middleware that sets a contextvar for the request, the way tracing or DSPy context would."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        token = _REQUEST_MARKER.set("request-context")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _REQUEST_MARKER.reset(token)
+
+
+def test_a_turn_on_the_pool_sees_the_request_context_and_streams_usage_and_tool_events(monkeypatch, traced):
+    from dspy.utils.usage_tracker import UsageTracker
+
+    seen: dict[str, Any] = {}
+    real_run_turn = turns_route.run_turn
+
+    def recording_run_turn(*args, **kwargs):
+        seen["run_turn"] = _REQUEST_MARKER.get()
+        seen["thread"] = threading.current_thread().name
+        return real_run_turn(*args, **kwargs)
+
+    def engine(**_kwargs):
+        seen["engine"] = _REQUEST_MARKER.get()
+        callback = traced["callbacks"][-1]
+        assert isinstance(callback, SSERuntimeCallback)
+        with dspy.context(usage_tracker=UsageTracker()):
+            callback.on_lm_start("lm-1", SimpleNamespace(model="openai/m"), {})
+            dspy.settings.usage_tracker.add_usage("openai/m", {"prompt_tokens": 7, "completion_tokens": 3})
+            callback.on_lm_end("lm-1", ["answer"], None)
+        callback.on_tool_start("tool-1", SimpleNamespace(name="lookup"), {"query": "invoice 17"})
+        callback.on_tool_end("tool-1", {"result": "found invoice"}, None)
+        return SimpleNamespace(answer="done", route="rlm")
+
+    monkeypatch.setattr(turns_route, "run_turn", recording_run_turn)
+    runtime = runtime_with(sandbox_mgr=FakeManager(agent_id="root-agent", parent=None), engine=engine)
+    client, app = client_for(runtime)
+    app.add_middleware(_MarksRequestContext)
+
+    def post():
+        with client:
+            return client.post("/sessions/session-a/turn", json={"task": "find the invoice"})
+
+    response = _within(10, post)
+    events = events_of(response)
+    assert seen["thread"].startswith("fleet-turn")
+    assert seen["run_turn"] == seen["engine"] == "request-context"
+    assert [event["event"] for event in events] == [
+        "turn_status",
+        "lm_start",
+        "lm_end",
+        "tool_start",
+        "tool_end",
+        "turn_complete",
+    ]
+    lm_end = events[2]
+    assert lm_end["usage"] == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+    assert events[4]["tool"] == "lookup" and events[4]["ok"] is True
+    assert events[4]["payload"]["agent_id"] == "root-agent"
+    assert "found invoice" in json.dumps(events[4]["output"])
     assert not runtime.turn_lock.locked()

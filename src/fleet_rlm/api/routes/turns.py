@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import threading
 import uuid
@@ -99,7 +100,11 @@ async def stream_turn(
     callback = SSERuntimeCallback(loop, queue, runtime.sandbox_mgr)
     turn_id = uuid.uuid4().hex
     envelope = Envelope(session_id, turn_id, runtime.sandbox_mgr)
+    # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
+    # in them, so the Turn runs in a copy of the request's context.
+    context = contextvars.copy_context()
     job = _turn_executor(request).submit(
+        context.run,
         run_turn,
         runtime,
         settings,
