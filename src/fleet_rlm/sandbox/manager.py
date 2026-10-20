@@ -131,6 +131,8 @@ _STATE_POLL_SECONDS = 1.0
 _STATE_SETTLE_SECONDS = 90.0
 # Per-attempt provider timeout for a sandbox stop (cancel_turn and shutdown).
 _STOP_TIMEOUT_SECONDS = 60
+# Per-attempt provider timeout for a sandbox delete (orphan reconcile, failed-root rebuild, child shutdown).
+_DELETE_TIMEOUT_SECONDS = 60
 # How long a new Turn waits for an in-flight stop: the worst case of every retried stop attempt timing out,
 # plus margin for the SDK returning after its own timeout. Derived from the retry settings, never shorter.
 _STOP_SETTLE_SECONDS = retry_worst_case_seconds(_STOP_TIMEOUT_SECONDS) + 30.0
@@ -603,7 +605,9 @@ class DaytonaSandboxManager:
                 continue
             query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": record["agent_id"]})
             for sandbox in with_retries(functools.partial(self._list_sandboxes, query)):
-                with_retries(functools.partial(self._client.delete, sandbox, wait=True, timeout=60))
+                with_retries(
+                    functools.partial(self._client.delete, sandbox, wait=True, timeout=_DELETE_TIMEOUT_SECONDS)
+                )
                 self.emit("orphan_deleted", sandbox_id=sandbox.id, agent_id=record["agent_id"])
             path.unlink()
 
@@ -645,8 +649,9 @@ class DaytonaSandboxManager:
         `run_namespace`. `alive` is the last verdict the manager already had: a create or resume (True), a
         liveness poll during an execution (every `repl.LIVENESS_POLL_SECONDS`), a lost or unavailable sandbox
         (False), or a stop by `cancel_turn`/`shutdown` (False); None before the first one. With
-        `include_children`, executions in child sandboxes (recursively) count as busy and as output, while
-        `alive` stays this sandbox's own. `host_io_busy` is separate from `busy`: it is True while the host runs
+        `include_children`, executions in child sandboxes count as busy and as output (every child, at any
+        depth, is registered flat in `root._children`, so one level covers them all), while `alive` stays this
+        sandbox's own. `host_io_busy` is separate from `busy`: it is True while the host runs
         Daytona work for this sandbox (remote exec, file transfers, artifact collection), with
         `host_io_since_monotonic` the start of the oldest such operation; children's host IO counts too.
         """
@@ -654,7 +659,7 @@ class DaytonaSandboxManager:
         if not include_children:
             return own
         children = self._children.copy().values()  # an atomic copy; never iterate the live dict
-        return repl.merge_activity(own, [child.sandbox_activity() for child in children])
+        return repl.merge_activity(own, [child.sandbox_activity(include_children=False) for child in children])
 
     def _ensure_sandbox(self) -> Any:
         """Create or resume this agent's sandbox, returning the live handle.
@@ -748,7 +753,7 @@ class DaytonaSandboxManager:
         self._contexts.clear()
         if sandbox is not None and client is not None and state in {"error", "build_failed"}:
             try:
-                with_retries(lambda: client.delete(sandbox, timeout=60))
+                with_retries(lambda: client.delete(sandbox, timeout=_DELETE_TIMEOUT_SECONDS))
             except Exception:
                 _LOGGER.warning("Could not delete failed Daytona sandbox %s before rebuilding", sandbox.id)
 
@@ -1291,8 +1296,8 @@ class DaytonaSandboxManager:
                         self.emit("workspace_cleanup_failed", sandbox_id=sandbox.id)
                     # A stopped or failed sandbox cannot run workspace cleanup,
                     # but must still be deleted and confirmed by the provider.
-                    with_retries(lambda: client.delete(sandbox, timeout=60, wait=True))
-                    (Path(".fleet/allocations") / f"{self.agent_id}.json").unlink(missing_ok=True)
+                    with_retries(lambda: client.delete(sandbox, timeout=_DELETE_TIMEOUT_SECONDS, wait=True))
+                    self._allocation_path().unlink(missing_ok=True)
                     with self.root._budget_lock:
                         self.root._children.pop(self.agent_id, None)
                     self.emit("sandbox_deleted", sandbox_id=sandbox.id)
