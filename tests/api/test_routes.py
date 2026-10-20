@@ -379,3 +379,32 @@ def test_deleting_a_session_without_a_runtime_is_a_404_and_a_busy_one_a_409():
 
         FakeRegistry.evict = busy
         assert client.delete("/sessions/s1").status_code == 409
+
+
+def test_attach_treats_an_empty_browser_file_input_as_missing():
+    uploaded: list[str] = []
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            write_workspace_file_from_path=lambda rel_path, _path: uploaded.append(rel_path) or f"/workspace/{rel_path}"
+        ),
+    )
+    client, _ = client_for(runtime)
+    # What a browser submits for <input type="file"> with nothing chosen: an empty filename and no content.
+    boundary = "fleet-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename=""\r\n'
+        "Content-Type: application/octet-stream\r\n\r\n\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+
+    response = client.post(
+        "/sessions/session-a/attach",
+        content=body,
+        headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "file"]
+    assert response.json()["detail"][0]["type"] == "missing"
+    assert uploaded == []
