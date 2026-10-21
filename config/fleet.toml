@@ -19,13 +19,13 @@ linked_children = true
 # Native lm15 is fixed. Omitted max_tokens/temperature remain provider-controlled, except the
 # root cap, which bounds runaway reasoning; a capped response fails the format check and is re-asked once.
 [llm.root]
-model = "openai/system.ai.deepseek-v4-1-flash"
+model = "openai/system.ai.deepseek-v4-1-flash-1017"
 max_tokens = 16384
 num_retries = 3
 cache = false
 
 [llm.sub]
-model = "openai/system.ai.deepseek-v4-1-flash"
+model = "openai/system.ai.deepseek-v4-1-flash-1017"
 num_retries = 3
 cache = false
 
@@ -82,7 +82,7 @@ optimization_trace_table_prefix = "fleet_rlm_gepa"
 
 [evaluation]
 # openai:/<service-id> judges route through the AI Gateway with DATABRICKS_TOKEN.
-judge_model = "openai:/system.ai.deepseek-v4-1-flash"
+judge_model = "openai:/system.ai.deepseek-v4-1-flash-1017"
 
 [server]
 host = "127.0.0.1"
