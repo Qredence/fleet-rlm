@@ -411,6 +411,7 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
         prepare_mlflow_auth=lambda: None,
         judge_environment=lambda: {},
         build_judge_lm=lambda: "native-dspy-judge",
+        build_jev_lm=lambda: "native-jev-lm",
         fleet_judge_model="configured-judge",
         mlflow_trace_catalog="catalog",
         mlflow_trace_schema="runtime",
@@ -425,7 +426,9 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
         evaluation, "read_evaluation_trace", lambda identity, **kwargs: reads.append((identity, kwargs)) or trace
     )
     monkeypatch.setattr(evaluation, "label_trace", lambda identity, **kwargs: labels.append((identity, kwargs)))
-    monkeypatch.setattr(scorers, "build_mlflow_scorer_suite", lambda model, lm: [f"native-suite:{model}:{lm}"])
+    monkeypatch.setattr(
+        scorers, "build_mlflow_scorer_suite", lambda model, lm, jev=None: [f"native-suite:{model}:{lm}:{jev}"]
+    )
     monkeypatch.setattr(mlflow, "start_run", lambda **_kwargs: nullcontext())
     monkeypatch.setattr(mlflow, "set_tags", lambda tags: logged.append(tags))
     monkeypatch.setattr(mlflow, "log_dict", lambda value, path: logged.append((path, value)))
@@ -434,7 +437,7 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
 
     def evaluate(*, data, scorers):
         assert data == [trace]
-        assert scorers[0] == "native-suite:configured-judge:native-dspy-judge"
+        assert scorers[0] == "native-suite:configured-judge:native-dspy-judge:native-jev-lm"
         assert scorers[-1](trace=trace).value == 1
         frame = pd.DataFrame({"benchmark_correctness/value": [1]})
         if scoring_error:

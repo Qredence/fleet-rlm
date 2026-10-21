@@ -381,7 +381,9 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
         result = mlflow.genai.evaluate(
             data=traces,
             scorers=[
-                *build_mlflow_scorer_suite(settings.fleet_judge_model, settings.build_judge_lm()),
+                *build_mlflow_scorer_suite(
+                    settings.fleet_judge_model, settings.build_judge_lm(), settings.build_jev_lm()
+                ),
                 benchmark_correctness,
             ],
         )
