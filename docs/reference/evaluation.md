@@ -42,14 +42,23 @@ traces without sending another Turn.
 
 ## Scorers
 
-`build_mlflow_scorer_suite(judge_model, judge_lm=None)` returns:
+`build_mlflow_scorer_suite(judge_model, judge_lm=None, jev_lm=None)` returns:
 
 - MLflow judges: `RelevanceToQuery`, `RetrievalGroundedness`, and versioned
   Fleet rubrics for route suitability, execution verification, tool integrity,
   output instruction compliance, and Skill progressive disclosure.
-- `jev_routing_efficiency_judge`: LLM judgment of whether the selected route fit
+- `jev_routing_efficiency_judge`: judgment of whether the selected route fit
   the task. This is separate from `jev_routing_efficiency`, the deterministic
-  budget-efficiency score.
+  budget-efficiency score. When `jev_lm` is given (`FleetSettings.build_jev_lm`,
+  a TypeSafe `jev-*` client), one System One request asks two independent
+  questions — `Noul` route suitability and a `Choice` over `direct`/`flex`/`rlm`
+  — and the verdict is the `Noul` value at threshold 0.5. The rationale is
+  derived evidence (`p(route reasonable)=…`, best-fit route, recorded
+  `lm_calls`/`sandbox_errors`), not model-written prose; the raw probability,
+  confidence, and route distribution are recorded as `fleet.jev.*` metadata.
+  Missing task, route, or nonnegative integer usage evidence returns `false`
+  without calling Jev. Without `jev_lm` the suite falls back to the generative
+  judge and records `fleet.judge_backend=generative`.
 - `execution_evidence_diagnostics`: one structured judgment emits both
   `sandbox_verification_discipline` and `tool_execution_integrity`. It receives
   a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
