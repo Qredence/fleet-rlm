@@ -78,7 +78,7 @@ traces without sending another Turn.
   of either field with a preview. Missing, empty, oversized, or already truncated
   evidence produces a scorer error before any judge call. Diagnostic version
   `fleet-trace-assessments-v5` invalidates comparisons with earlier partial-text
-  judgments; the shared `fleet-metric-v6` and GEPA objectives are unchanged.
+  judgments; the shared `fleet-metric-v8` and GEPA objectives are unchanged.
 - `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
   actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
   cover `use_skill`, `read_skill_reference`, `run_skill_script`, and `save_skill`,
@@ -103,12 +103,13 @@ Retrieval groundedness is applied only to traces containing a `RETRIEVER`
 span. Inapplicable custom scorers return `None`, which MLflow skips, instead of
 logging null feedback without an error. Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
-The GEPA objective uses `fleet-metric-v6`; changes to that metric invalidate
-earlier metric feedback and candidate approval evidence.
+The GEPA objective uses `fleet-metric-v8`; changes to that metric invalidate
+earlier metric feedback and candidate approval evidence. Candidate approval uses
+policy version 5; older evidence requires reevaluation.
 
 Trace diagnostic rubric changes use the independent
 `fleet.trace_scorer_version` plus MLflow scorer name/version metadata. They do not change
-`fleet-metric-v6` or GEPA candidate identity. The code-based Fleet suite is the
+`fleet-metric-v8` or GEPA candidate identity. The code-based Fleet suite is the
 source for Fleet-managed evaluations; historical and manually created MLflow
 assessments remain in the trace as audit history. Re-score a saved trace with
 `score_evaluation_traces` to add new assessments without executing its Turn,
@@ -124,6 +125,7 @@ including predictor instructions and generated Flex code through DSPy's built-in
 code proposer. It uses the current deployment settings, including persisted
 Session overrides. The manifest records effective model configuration for
 provenance; replay uses the current deployment configuration and credentials.
+
 Its components are:
 
 - `triage` (`TurnTriage`): route choice
@@ -167,7 +169,8 @@ max(0, 1 - 0.015 * max(0, lm_calls - 3)
 All three counters must be explicit nonnegative integers. Missing legacy rejection
 counts are unknown, not zero: efficiency is omitted, `usage_available` is zero,
 and no efficiency credit or promotion evidence is granted. Existing feedback and
-candidate evidence must be reevaluated under v6; old traces remain inspectable.
+candidate evidence must be reevaluated under `fleet-metric-v8`; old traces remain
+inspectable.
 Latency and token usage remain diagnostic rather than weighted objectives.
 
 ### Trace regression boundary
@@ -303,15 +306,11 @@ known, and native DSPy tracking includes that usage once alongside generation.
 - **Synthetic long context** (`--long-context`): whole-file counting, top-k, list, and needle tasks over
   generated logs of about 20K, 50K, 100K, and 200K characters. Gold values are computed from the log.
   `context_chars` and `answer_type` (`scalar` or `list`) are recorded so scores can be sliced by size and shape.
-- **Oolong-synth** (`--oolong N`): validation items up to 32,768 tokens of context, strided across the split with
-  at most two questions per context window. Fetched from the Hugging Face datasets-server with backoff on 429.
-- **LongCoT** (`--longcot N`): items whose gold answer is a scalar or flat list (chemistry, chess, math). The `logic`
-  domain ships no gold answer and `cs` answers are structured, so both need the official verifier and are skipped.
-
-Benchmark cases carry `review_status=benchmark` and are excluded from GEPA's curated train/dev/holdout dataset;
-run them separately with `fleet eval run`. GEPA must not train or validate on these benchmark traces.
-`expected_values_present` matches on word boundaries, so `12` does not match `120`. It is a containment check,
-not the official benchmark scoring.
+External task datasets are loaded by the [benchmark notebooks](../runbooks/benchmark-tasks.md).
+Their official verifiers run outside the Fleet package. Fleet retains its DSPy metric,
+judge suite, MLflow evaluation functions, and native GEPA/Flex optimization.
+Benchmark traces carry `review_status=benchmark` and stay outside curated optimization datasets.
+`expected_values_present` remains a generic containment check, not an official benchmark score.
 
 Critical deterministic cases are explicitly labeled by a reviewer with `fleet eval label ... --critical` and one or
 more `--value` expectations. Their complete source groups are pinned to holdout, and promotion requires every such

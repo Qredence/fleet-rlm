@@ -16,7 +16,7 @@ from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge, parse_route
 from fleet_rlm.observability import activity_preview, activity_text, trace_object
 from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
 
-SCORER_VERSION = "fleet-metric-v6"
+SCORER_VERSION = "fleet-metric-v8"
 TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v5"
 
 _MAX_EXECUTION_SPANS = 8
