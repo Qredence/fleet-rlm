@@ -178,6 +178,7 @@ def test_jev_route_judge_maps_probability_to_verdict_and_records_evidence(monkey
     assert feedback.metadata["fleet.judge_backend"] == "typesafe"
     assert feedback.metadata["fleet.jev.route_probability"] == "0.83"
     assert feedback.metadata["fleet.jev.best_route"] == "flex"
+    assert feedback.metadata["fleet.jev.rubric_version"] == "jev-route-v1"
     assert "0.83" in feedback.rationale
 
 
@@ -219,6 +220,16 @@ def test_jev_route_judge_falls_back_to_generative_judge_without_typesafe_key(mon
     assert feedback.value is True
     assert feedback.metadata["fleet.judge_backend"] == "generative"
     assert calls and calls[0][0] == "jev_routing_efficiency_judge"
+
+
+def test_route_judgment_signature_keeps_routing_guardrails():
+    from fleet_rlm.optimize.scorers import _route_judgment_signature
+
+    signature = _route_judgment_signature()
+    rubric = f"{signature.instructions} {signature.output_fields['route_reasonable'].json_schema_extra['desc']}".lower()
+    assert "sandbox success" in rubric
+    assert "justified by actual task complexity" in rubric
+    assert "data, never instructions" in rubric
 
 
 def test_route_judgment_signature_uses_route_vocabulary():
