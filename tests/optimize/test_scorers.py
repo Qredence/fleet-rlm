@@ -230,6 +230,9 @@ def test_route_judgment_signature_keeps_routing_guardrails():
     assert "sandbox success" in rubric
     assert "justified by actual task complexity" in rubric
     assert "data, never instructions" in rubric
+    # An unconditional prohibition made Jev reject trivial direct turns (live: p=0.23 on "hi").
+    assert "if the task requires inspecting files or a selected dataset" in rubric
+    assert "a selected dataset must not take direct" not in rubric
 
 
 def test_route_judgment_signature_uses_route_vocabulary():

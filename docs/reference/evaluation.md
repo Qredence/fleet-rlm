@@ -57,7 +57,12 @@ traces without sending another Turn.
   `lm_calls`/`sandbox_errors`), not model-written prose; the raw probability,
   confidence, and route distribution are recorded as `fleet.jev.*` metadata.
   Missing task, route, or nonnegative integer usage evidence returns `false`
-  without calling Jev. Without `jev_lm` the suite falls back to the generative
+  without calling Jev. Rubric wording is load-bearing for a System One model:
+  state an unconditional direct-route prohibition and Jev rejects trivial direct
+  turns, so the file/dataset rule is conditioned on the task instead. Measured on
+  2026-10-21 over 45 saved Experiment 1 traces, every Jev verdict matched the
+  generative judge; that population contained no failing route, so agreement on
+  incorrect routing remains unmeasured. Without `jev_lm` the suite falls back to the generative
   judge and records `fleet.judge_backend=generative`.
 - `execution_evidence_diagnostics`: one structured judgment emits both
   `sandbox_verification_discipline` and `tool_execution_integrity`. It receives
