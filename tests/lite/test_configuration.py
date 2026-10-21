@@ -113,9 +113,7 @@ def test_build_jev_lm_builds_the_configured_typesafe_model(monkeypatch):
             built.append((model, api_key))
 
     monkeypatch.setattr(dspy.experimental, "TypeSafe", StubTypeSafe)
-    lm = FleetSettings(
-        _env_file=None, typesafe_api_key="credential-marker", typesafe_model="jev-1.14.0"
-    ).build_jev_lm()
+    lm = FleetSettings(_env_file=None, typesafe_api_key="credential-marker", typesafe_model="jev-1.14.0").build_jev_lm()
     assert isinstance(lm, StubTypeSafe)
     assert built == [("jev-1.14.0", "credential-marker")]
 

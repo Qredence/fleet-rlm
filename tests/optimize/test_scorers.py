@@ -142,6 +142,99 @@ def test_scorer_suite_includes_route_correctness():
     assert "agent_skills_progressive_disclosure" in names
 
 
+def _route_trace(**overrides):
+    outputs = {"answer": "Done", "route": "flex", "lm_calls": 4, "sandbox_errors": 0, "submit_rejections": 0}
+    outputs.update(overrides)
+    return _trace(_span("fleet_turn", inputs={"task": "Inspect the file"}, outputs=outputs))
+
+
+def _route_judge(jev_lm="jev-sentinel"):
+    return {item.name: item for item in build_mlflow_scorer_suite("databricks:/test-judge", jev_lm=jev_lm)}[
+        "jev_routing_efficiency_judge"
+    ]
+
+
+def test_jev_route_judge_maps_probability_to_verdict_and_records_evidence(monkeypatch):
+    import fleet_rlm.optimize.scorers as scorers
+
+    calls = []
+
+    def judgment(jev_lm, state):
+        calls.append((jev_lm, state))
+        return {
+            "reasonable": True,
+            "probability": 0.83,
+            "confidence": 0.66,
+            "best_route": "flex",
+            "best_route_probabilities": {"direct": 0.1, "flex": 0.71, "rlm": 0.19},
+        }
+
+    monkeypatch.setattr(scorers, "_jev_route_judgment", judgment)
+    feedback = _route_judge()(trace=_route_trace())
+    assert feedback.value is True
+    assert calls == [
+        ("jev-sentinel", {"task": "Inspect the file", "route": "flex", "lm_calls": 4, "sandbox_errors": 0})
+    ]
+    assert feedback.metadata["fleet.judge_backend"] == "typesafe"
+    assert feedback.metadata["fleet.jev.route_probability"] == "0.83"
+    assert feedback.metadata["fleet.jev.best_route"] == "flex"
+    assert "0.83" in feedback.rationale
+
+
+def test_jev_route_judge_rejects_missing_usage_without_calling_jev(monkeypatch):
+    import fleet_rlm.optimize.scorers as scorers
+
+    calls = []
+    monkeypatch.setattr(scorers, "_jev_route_judgment", lambda *args: calls.append(args))
+    feedback = _route_judge()(trace=_route_trace(lm_calls=None))
+    assert feedback.value is False
+    assert "cannot be established" in feedback.rationale
+    assert calls == []
+
+
+def test_jev_route_judge_reports_unreported_probability(monkeypatch):
+    import fleet_rlm.optimize.scorers as scorers
+
+    monkeypatch.setattr(
+        scorers,
+        "_jev_route_judgment",
+        lambda *_args: {
+            "reasonable": False,
+            "probability": None,
+            "confidence": None,
+            "best_route": "rlm",
+            "best_route_probabilities": None,
+        },
+    )
+    feedback = _route_judge()(trace=_route_trace())
+    assert feedback.value is False
+    assert "unreported" in feedback.rationale
+    assert "None" not in feedback.rationale
+    assert "fleet.jev.route_probability" not in feedback.metadata
+
+
+def test_jev_route_judge_falls_back_to_generative_judge_without_typesafe_key(monkeypatch):
+    calls = _judge_responses(monkeypatch, {"jev_routing_efficiency_judge": (True, "Flex was reasonable.")})
+    feedback = _route_judge(jev_lm=None)(trace=_route_trace())
+    assert feedback.value is True
+    assert feedback.metadata["fleet.judge_backend"] == "generative"
+    assert calls and calls[0][0] == "jev_routing_efficiency_judge"
+
+
+def test_route_judgment_signature_uses_route_vocabulary():
+    import typing
+
+    from dspy.experimental import Noul
+
+    from fleet_rlm.engine.signatures import Route
+    from fleet_rlm.optimize.scorers import _route_judgment_signature
+
+    signature = _route_judgment_signature()
+    assert issubclass(signature.output_fields["route_reasonable"].annotation, Noul)
+    best_route = signature.output_fields["best_route"].annotation
+    assert typing.get_args(best_route.model_fields["value"].annotation) == tuple(route.value for route in Route)
+
+
 def _pi_execution_trace(*, skill_selected=False):
     root = _span(
         "fleet_turn",
