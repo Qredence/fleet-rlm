@@ -55,7 +55,7 @@ docs/superpowers/
 qa-results/
 .qoder
 plan/
-
+.factory/
 # Generated wiki (Factory artifact)
 droid-wiki/
 
@@ -67,7 +67,6 @@ outputs/
 .ai-dev-kit/
 
 # Local runtime state
-.fleet_rlm/
 .fleet-evidence/
 .factory/mission-services.yaml
 
@@ -208,7 +207,10 @@ PLANS.md
 !docs/plans/
 !docs/plans/fleet-rlm-audit-and-platform-alignment.md
 
-notebooks/
+notebooks/*
+!notebooks/oolong_benchmark.ipynb
+!notebooks/longcot_benchmark.ipynb
+docs/benchmarks/
 .databricks
 
 # chunk review context artifacts
