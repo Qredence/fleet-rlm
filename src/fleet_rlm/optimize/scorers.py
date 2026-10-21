@@ -6,7 +6,7 @@ import functools
 import json
 import math
 import re
-from typing import Any
+from typing import Any, cast
 
 import dspy
 import mlflow
@@ -324,7 +324,7 @@ def _route_judgment_signature() -> type[dspy.Signature]:
             "lm_calls": (int, dspy.InputField(desc="Host-recorded model-call budget units for the Turn.")),
             "sandbox_errors": (int, dspy.InputField(desc="Host-recorded failed sandbox executions for the Turn.")),
             "route_reasonable": (
-                Noul,
+                cast("type", Noul),
                 dspy.OutputField(
                     desc=(
                         "True when the route recorded above is a reasonable fit for the task given the recorded "
@@ -567,7 +567,7 @@ def build_mlflow_scorer_suite(
             },
         )
         feedback = _validated_bool_feedback(result, name="jev_routing_efficiency_judge")
-        feedback.metadata["fleet.judge_backend"] = "generative"
+        feedback.metadata = {**(feedback.metadata or {}), "fleet.judge_backend": "generative"}
         return feedback
 
     @scorer(name="execution_evidence_diagnostics")
