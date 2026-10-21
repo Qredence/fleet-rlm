@@ -158,11 +158,11 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
     import mlflow
 
     case = EvalCase(
-        case_id="oolong-1",
+        case_id="external-1",
         task="How many users failed?",
         expected_values=("3", "7"),
-        category="oolong_counting",
-        source_group="oolong-window-9",
+        category="external_counting",
+        source_group="external-group-9",
         files={},
         review_status="approved",
         critical=True,
@@ -180,7 +180,7 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
         "labels_of",
         lambda _trace: {
             "review_status": "approved",
-            "source_group": "oolong-window-9",
+            "source_group": "external-group-9",
             "expected_answer": "3, 7",
             "expected_values": ["3", "7"],
             "route": None,
@@ -201,7 +201,7 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
         {
             "trace_id": "tr-1",
             "review_status": "approved",
-            "source_group": "oolong-window-9",
+            "source_group": "external-group-9",
             "expected_answer": "3, 7",
             "expected_values": ["3", "7"],
             "route": None,

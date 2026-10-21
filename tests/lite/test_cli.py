@@ -97,7 +97,7 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
     monkeypatch.setattr(evaluation, "evaluate_cases", evaluate)
     with pytest.raises(SystemExit, match="recover trace tr-1"):
         cli._eval_command(
-            SimpleNamespace(eval_command="run", seed=7, oolong=0, limit=1, url="http://test", collect_only=True),
+            SimpleNamespace(eval_command="run", seed=7, limit=1, url="http://test", collect_only=True),
             settings,
         )
     assert captured["experiment_id"] == "eval-id"
