@@ -402,6 +402,22 @@ def test_incomplete_evaluation_never_reports_collection_success(monkeypatch, fai
         assert any("trace tr-1" in message for message in reports)
 
 
+def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    result = SimpleNamespace(run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [None]}))
+    received = []
+    monkeypatch.setattr(evaluation, "build_mlflow_scorer_suite", lambda *args: received.append(args) or [])
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
+    sentinel = object()
+    evaluation.score_evaluation_traces(
+        [object()], judge_model="m", judge_lm="judge-sentinel", jev_lm=sentinel, report=lambda _message: None
+    )
+    assert received == [("m", "judge-sentinel", sentinel)]
+
+
 @pytest.mark.parametrize("error", [None, "judge failed"])
 def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch, error):
     from types import SimpleNamespace

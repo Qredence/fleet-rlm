@@ -182,6 +182,7 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
             base_url=args.url,
             judge_model=settings.fleet_judge_model,
             judge_lm=settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
+            jev_lm=settings.build_jev_lm(),
             collect_only=args.collect_only,
             experiment_id=experiment.experiment_id,
             uc_location=(

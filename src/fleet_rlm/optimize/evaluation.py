@@ -328,6 +328,7 @@ def evaluate_cases(
     base_url: str,
     judge_model: str,
     judge_lm: Any = None,
+    jev_lm: Any = None,
     experiment_id: str,
     uc_location: tuple[str, str, str] | None = None,
     session_prefix: str | None = None,
@@ -401,16 +402,22 @@ def evaluate_cases(
             report(f"Case {case.case_id}: collected and labelled")
     if collect_only:
         return None
-    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, report=report)
+    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, jev_lm=jev_lm, report=report)
 
 
 def score_evaluation_traces(
-    traces: list[Any], *, judge_model: str, judge_lm: Any = None, report: Callable[[str], None] = print
+    traces: list[Any],
+    *,
+    judge_model: str,
+    judge_lm: Any = None,
+    jev_lm: Any = None,
+    report: Callable[[str], None] = print,
 ) -> Any:
     """Score already verified, labelled traces without executing their Turns again."""
     try:
         result = mlflow.genai.evaluate(
-            data=traces, scorers=[*build_mlflow_scorer_suite(judge_model, judge_lm), expected_values_present]
+            data=traces,
+            scorers=[*build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm), expected_values_present],
         )
     except Exception as exc:
         raise EvaluationError(
