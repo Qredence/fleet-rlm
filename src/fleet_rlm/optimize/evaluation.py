@@ -213,7 +213,8 @@ def label_trace(
         mlflow.log_expectation(trace_id=trace_id, name=name, value=value, source=source)
 
 
-def _parse_sse(text: str) -> list[dict[str, Any]]:
+def parse_sse(text: str) -> list[dict[str, Any]]:
+    """Decode the JSON data lines from a Fleet SSE response, ignoring malformed lines."""
     events = []
     for line in text.splitlines():
         if line.startswith("data: "):
@@ -234,7 +235,7 @@ def run_case(client: httpx.Client, case: EvalCase, session_id: str) -> dict[str,
         response.raise_for_status()
     response = client.post(f"/sessions/{session_id}/turn", json={"task": case.task, "idempotency_key": case.case_id})
     response.raise_for_status()
-    events = _parse_sse(response.text)
+    events = parse_sse(response.text)
     complete = next((event["payload"] for event in events if event.get("event") == "turn_complete"), None)
     if complete is None:
         failure = next((event for event in events if event.get("event") == "error"), {})
