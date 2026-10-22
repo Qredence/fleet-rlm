@@ -1,0 +1,20 @@
+{
+  "commands": [
+    {
+      "name": "static",
+      "run": "make lint format-check typecheck check-docs api-check"
+    },
+    {
+      "name": "tests",
+      "run": "make test"
+    },
+    {
+      "name": "build",
+      "run": "make build"
+    }
+  ],
+  "vcs": {
+    "org": "Qredence",
+    "repo": "fleet-rlm"
+  }
+}
