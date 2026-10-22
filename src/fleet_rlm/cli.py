@@ -276,7 +276,7 @@ def _trace_verify_command(args: argparse.Namespace, settings: Any) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run the backend or the interactive Rich client."""
+    """Run Fleet's server, terminal client, evaluation, tracing, or optimization commands."""
     parser = argparse.ArgumentParser(prog="fleet", description="Fleet-RLM Lite server and terminal client")
     commands = parser.add_subparsers(dest="command")
 

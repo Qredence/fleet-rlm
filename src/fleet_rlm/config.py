@@ -687,7 +687,13 @@ class FleetSettings(BaseSettings):
         return root_lm, sub_lm, reflection_lm, self.build_jev_lm()
 
     def build_jev_lm(self) -> Any | None:
-        """The TypeSafe System One client, or None when no credential is configured."""
+        """The TypeSafe System One client, or None when no credential is configured.
+
+        Raises:
+            RuntimeError: A credential is configured but the DSPy TypeSafe import fails.
+
+        TypeSafe client construction errors propagate.
+        """
         if not self.typesafe_api_key:
             return None
         try:

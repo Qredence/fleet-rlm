@@ -27,6 +27,7 @@ from fleet_rlm.workspace import validate_session_id
 
 
 def _digest(value: Any) -> str:
+    """Hash sorted-key JSON, rejecting nonfinite numbers and propagating serialization errors."""
     return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
@@ -36,11 +37,26 @@ def _same_destination(recorded: dict, expected: dict) -> bool:
 
 
 def save_json(path: Path, value: Any) -> None:
+    """Atomically replace a JSON file, creating parent directories as needed.
+
+    Serialization errors, including nonfinite numbers, and filesystem errors propagate.
+    """
     atomic_write(path, json.dumps(value, indent=2, allow_nan=False).encode() + b"\n")
 
 
 def freeze_tasks(directory: Path, cases: list[dict], metadata: dict) -> dict:
-    """Freeze the exact inputs and host-only expectations once, before execution."""
+    """Freeze the exact inputs and host-only expectations once, before execution.
+
+    Write ``bundle.json`` in a new directory and return its cases, metadata, and digest.
+    Case IDs must be valid session keys; attachments use basenames and text content.
+    Metadata must name the dataset and pin its revision to a lowercase 40-digit hex SHA.
+
+    Raises:
+        ValueError: Cases are empty, IDs repeat, or case contents or metadata are invalid.
+        FileExistsError: The bundle directory already exists.
+
+    Missing required keys, JSON serialization errors, and filesystem errors propagate.
+    """
     if not cases or len({case["case_id"] for case in cases}) != len(cases):
         raise ValueError("A benchmark requires nonempty, unique case IDs")
     for case in cases:
@@ -63,6 +79,10 @@ def freeze_tasks(directory: Path, cases: list[dict], metadata: dict) -> dict:
 
 
 def load_tasks(directory: Path) -> dict:
+    """Read ``bundle.json`` and return it after verifying its cases and metadata digest.
+
+    Raises ValueError on a digest mismatch; file, JSON, and missing-key errors propagate.
+    """
     bundle = json.loads((directory / "bundle.json").read_text())
     if bundle["digest"] != _digest({key: bundle[key] for key in ("metadata", "cases")}):
         raise ValueError("Frozen tasks changed")
@@ -70,6 +90,10 @@ def load_tasks(directory: Path) -> dict:
 
 
 def _health(client: httpx.Client) -> dict:
+    """Return Fleet's health response, requiring an OK service and ready MLflow destination.
+
+    Raise RuntimeError for failed readiness; HTTP and JSON decoding errors propagate.
+    """
     response = client.get("/health", timeout=15)
     response.raise_for_status()
     health = response.json()
@@ -79,6 +103,12 @@ def _health(client: httpx.Client) -> dict:
 
 
 def _turn(client: httpx.Client, session: str, case: dict) -> dict:
+    """Submit a task and return its outcome, model usage, and any durable Turn receipt.
+
+    Completion requires matching streamed and durable answer, route, and trace ID,
+    a nonempty trace ID, and a recognized route. Other outcomes remain uncertain
+    unless the durable Turn failed or was cancelled. HTTP and JSON readback errors propagate.
+    """
     response = client.post(f"/sessions/{session}/turn", json={"task": case["task"], "idempotency_key": case["case_id"]})
     response.raise_for_status()
     events = parse_sse(response.text)
@@ -126,7 +156,22 @@ def run_tasks(
     allow_live: bool = False,
     timeout: float = 1200,
 ) -> dict:
-    """Run each case once; incomplete receipts block continuation without replay."""
+    """Run each case once; incomplete receipts block continuation without replay.
+
+    Create sessions, attach only input files, save receipts, and attempt session cleanup.
+    Reuse completed receipts only when cleanup was released and no stop reason was saved.
+    Return the run metadata after all cases finish. ``timeout`` is the HTTP timeout in seconds;
+    ``expected_destination`` must identify the serving MLflow mode, tracking URI, and experiment name.
+
+    Raises:
+        ValueError: Live execution is disabled, the destination is incomplete, or saved run identity differs.
+        FileExistsError: A ``.running`` marker already exists, including one left by a crash.
+        RuntimeError: A receipt blocks continuation, a service check or Turn is uncertain,
+            a provider stop reason is recorded, or session cleanup is unresolved.
+
+    Per-case exceptions are saved in receipts before stopping with RuntimeError.
+    Bundle loading and filesystem errors can propagate directly.
+    """
     if not allow_live:
         raise ValueError("Set allow_live=True deliberately to spend model/Daytona resources")
     if any(not expected_destination.get(key) for key in ("mode", "tracking_uri", "experiment_name")):
@@ -214,7 +259,15 @@ def run_tasks(
 
 
 def score_tasks(bundle_dir: Path, run_dir: Path, official_score: Callable[[dict, str], float]) -> dict:
-    """Score saved answers offline, including explicit failures and unattempted cases."""
+    """Score saved answers offline, including explicit failures and unattempted cases.
+
+    Call ``official_score(case, answer)`` only for completed receipts, accepting finite scores
+    from zero through one. Verifier exceptions and invalid scores become per-case ``score_error``
+    entries. Write and return ``scores.json`` with coverage, accuracy, latency in seconds, and usage.
+    All-selected accuracy counts only scores of one as correct, using every frozen case as the denominator.
+
+    Raises ValueError if the run's bundle digest differs; bundle and receipt read errors propagate.
+    """
     rows = []
     usage: dict[str, Counter] = defaultdict(Counter)
     bundle = load_tasks(bundle_dir)
@@ -278,7 +331,19 @@ def score_tasks(bundle_dir: Path, run_dir: Path, official_score: Callable[[dict,
 
 
 def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allow_judges: bool = False) -> Any:
-    """Apply Fleet's native suite and saved official scores; partial runs are recorded, never called complete."""
+    """Apply Fleet's native suite and saved official scores; partial runs are recorded, never called complete.
+
+    Read ``scores.json``, label scored traces as benchmarks, and return the MLflow evaluation result.
+    Configure MLflow and judge credentials in this process, log source and score artifacts, and write
+    ``evaluation.json``. Saved official scores accompany each evaluation row across trace cloning.
+
+    Raises:
+        ValueError: Judge spending is disabled, bundles or tracking destinations differ,
+            destination or evaluation configuration is missing, or no scored traces are available.
+        RuntimeError: Evaluation returns no result rows or reports scorer errors; its summary is saved first.
+
+    Trace readback, labeling, model-provider, MLflow, and filesystem errors propagate.
+    """
     if not allow_judges:
         raise ValueError("Set allow_judges=True deliberately to spend evaluation model resources")
     import mlflow
@@ -356,6 +421,7 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
 
     @scorer(name="benchmark_correctness")
     def benchmark_correctness(expectations: dict[str, Any]) -> Feedback:
+        """Return the saved official score from row expectations; a missing score raises KeyError."""
         return Feedback(value=expectations["benchmark_official_score"], rationale="Pinned official benchmark verifier")
 
     if not evaluation_rows:

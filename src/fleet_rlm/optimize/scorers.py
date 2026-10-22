@@ -347,14 +347,19 @@ def _route_judgment_signature() -> type[dspy.Signature]:
 
 
 def _finite_probability(value: Any) -> float | None:
-    """Keep a provider probability only when it is a finite number."""
+    """Return a finite nonboolean number as a float without clamping, or None for other values."""
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         return None
     return float(value)
 
 
 def _jev_route_judgment(jev_lm: Any, state: dict[str, Any]) -> dict[str, Any]:
-    """Ask Jev both questions in one request and retain its probability evidence."""
+    """Ask Jev both questions in one request and retain its probability evidence.
+
+    Use ``state`` task, route, model-call count, and sandbox-error count to return the
+    thresholded suitability verdict, best route, and available finite probability evidence.
+    Record a decision span and usage; provider and prediction parsing errors propagate.
+    """
     predictor = dspy.Predict(_route_judgment_signature())
     predictor.fields = {"route_reasonable": {"threshold": JEV_ROUTE_THRESHOLD}}
     with mlflow.start_span(name="jev_route_judgment", span_type=SpanType.LLM) as span:
@@ -397,7 +402,11 @@ def _route_evidence_rationale(state: dict[str, Any], judgment: dict[str, Any]) -
 
 
 def _route_evidence_state(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the four required host-owned fields, or None when usage evidence is unusable."""
+    """Return task, normalized route, and usage counts from host evidence.
+
+    Return None for a blank task, unrecognized route, or counts that are not nonnegative
+    integers. Booleans are invalid counts; zero is allowed.
+    """
     state = {
         "task": payload.get("task"),
         "route": parse_route(payload.get("route")),
@@ -415,7 +424,11 @@ def _route_evidence_state(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _jev_route_feedback(jev_lm: Any, payload: dict[str, Any]) -> Feedback:
-    """Score route suitability with Jev, or explain why the evidence cannot establish it."""
+    """Score route suitability with Jev, or explain why the evidence cannot establish it.
+
+    Invalid task, route, or usage evidence returns false feedback without calling Jev.
+    Jev request errors propagate; successful judgments retain available probability metadata.
+    """
     state = _route_evidence_state(payload)
     if state is None:
         return _versioned_feedback(
@@ -452,7 +465,15 @@ def build_mlflow_scorer_suite(
     judge_lm: dspy.LM | None = None,
     jev_lm: Any = None,
 ) -> list[Any]:
-    """Construct Fleet's versioned MLflow diagnostic suite and optional shared Fleet metric."""
+    """Construct Fleet's versioned MLflow diagnostic suite and optional shared Fleet metric.
+
+    Args:
+        judge_model: MLflow provider/model identifier for generative diagnostics.
+        judge_lm: DSPy judge for the shared Fleet metric; None omits that metric.
+        jev_lm: TypeSafe client for route suitability; None selects the generative route judge.
+
+    Model and evidence-validation errors from the returned scorers propagate to their caller.
+    """
     groundedness = RetrievalGroundedness(model=judge_model)
     route_judge = make_judge(
         name="jev_routing_efficiency_judge",
@@ -558,6 +579,7 @@ def build_mlflow_scorer_suite(
 
     @scorer(name="jev_routing_efficiency_judge")
     def jev_routing_efficiency_judge(trace: Any) -> Feedback | None:
+        """Judge route suitability with the selected backend; return None when no trace is supplied."""
         if trace is None:
             return None
         payload, _ = _trace_evidence_context(trace)

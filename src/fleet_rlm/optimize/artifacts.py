@@ -65,7 +65,11 @@ class EvaluationGate:
 
 
 def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
-    """Recompute the policy from the three paired observations, never trust a saved verdict."""
+    """Recompute the policy from the three paired observations, never trust a saved verdict.
+
+    Return an EvaluationGate with rejection reasons for an obsolete policy version,
+    any non-None objective policy, or failed evidence and improvement checks.
+    """
     if evaluation.get("policy_version") != APPROVAL_POLICY_VERSION:
         return EvaluationGate(False, ("obsolete approval policy; reevaluate against the current incumbent",))
     # Retired dataset-specific objectives are not comparable with Fleet's metric.

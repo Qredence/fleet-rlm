@@ -340,6 +340,15 @@ def evaluate_cases(
 
     With ``collect_only`` the judge suite is skipped and the saved trace IDs support later
     explicit scoring without executing the Turns again. Returns ``None`` in that mode.
+
+    Otherwise return the MLflow evaluation result. ``judge_lm`` enables the shared Fleet metric;
+    ``jev_lm`` selects TypeSafe route judging, with generative judging used when it is None.
+    ``timeout`` is the HTTP timeout in seconds. ``uc_location`` is the expected trace
+    catalog, schema, and table prefix; when omitted, traces must match ``experiment_id``.
+
+    Raises:
+        EvaluationError: Case transport or execution fails, a trace or its labels cannot be
+            verified at the destination, or scoring fails or returns incomplete feedback.
     """
     session_prefix = session_prefix or f"eval-{uuid.uuid4().hex}"
     report(f"Evaluation run: {session_prefix} ({len(cases)} cases)")
@@ -413,7 +422,15 @@ def score_evaluation_traces(
     jev_lm: Any = None,
     report: Callable[[str], None] = print,
 ) -> Any:
-    """Score already verified, labelled traces without executing their Turns again."""
+    """Score already verified, labelled traces without executing their Turns again.
+
+    Return the MLflow evaluation result. ``judge_lm`` adds the shared Fleet metric;
+    ``jev_lm`` selects TypeSafe route judging, otherwise the generative route judge is used.
+
+    Raises:
+        EvaluationError: Scorer construction or evaluation raises, or result rows are absent,
+            expected value columns are missing, or any scorer reports an error.
+    """
     try:
         result = mlflow.genai.evaluate(
             data=traces,
