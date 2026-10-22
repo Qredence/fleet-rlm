@@ -76,6 +76,7 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
         mlflow_target=lambda: MlflowTarget("local", "file:///tmp/mlruns", "runtime", "eval", "opt"),
         judge_environment=lambda: {"OPENAI_API_BASE": "https://gateway.example/v1", "OPENAI_API_KEY": "gateway-key"},
         fleet_judge_model="databricks:/judge",
+        build_jev_lm=lambda: None,
         mlflow_descriptor=lambda **_kwargs: {},
     )
     monkeypatch.setenv("OPENAI_API_BASE", "https://stale-provider.example/v1")
@@ -97,11 +98,12 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
     monkeypatch.setattr(evaluation, "evaluate_cases", evaluate)
     with pytest.raises(SystemExit, match="recover trace tr-1"):
         cli._eval_command(
-            SimpleNamespace(eval_command="run", seed=7, oolong=0, limit=1, url="http://test", collect_only=True),
+            SimpleNamespace(eval_command="run", seed=7, limit=1, url="http://test", collect_only=True),
             settings,
         )
     assert captured["experiment_id"] == "eval-id"
     assert captured["uc_location"] is None
+    assert captured["jev_lm"] is None
     assert "Collected labelled Turns" not in capsys.readouterr().out
 
 

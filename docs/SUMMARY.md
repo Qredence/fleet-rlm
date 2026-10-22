@@ -8,6 +8,7 @@
 - [Evaluation](reference/evaluation.md)
 - [MLflow trace retention runbook](runbooks/mlflow-trace-retention.md)
 - [Evaluation canary runbook](runbooks/evaluation-canary.md)
+- [External task benchmarks](runbooks/benchmark-tasks.md)
 - [Source layout](reference/source-layout.md)
 - [Architecture](../ARCHITECTURE.md)
 - [Contributing](../CONTRIBUTING.md)
