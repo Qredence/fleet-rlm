@@ -324,7 +324,7 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
     for row in scored["cases"]:
         if "official_score" not in row:
             continue
-        trace = read_evaluation_trace(
+        read_evaluation_trace(
             row["trace_id"], experiment_id=run["service"]["mlflow"]["experiment_id"], uc_location=uc_location
         )
         case = cases[row["case_id"]]

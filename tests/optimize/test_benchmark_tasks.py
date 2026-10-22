@@ -108,7 +108,7 @@ def api(monkeypatch, *, failure=None, drift=False, unhealthy_after=False, tolera
             )
         if path.endswith("/attach") or request.method == "DELETE":
             return httpx.Response(200, json={})
-        pytest.fail(f"Unexpected request: {request.method} {path}")
+        return pytest.fail(f"Unexpected request: {request.method} {path}")
 
     original = httpx.Client
     monkeypatch.setattr(

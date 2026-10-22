@@ -69,7 +69,7 @@ traces without sending another Turn.
   a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
   lineage, status, outcome, code, stdout, stderr, and return values (including
   `SUBMIT` payloads), with bounded redaction. These assessments use
-  `fleet-trace-assessments-v5`. It does not ask the judge to
+  `fleet-trace-assessments-v6`. It does not ask the judge to
   reconstruct evidence from a serialized full trace. Execution rationales cite
   real sandbox span IDs; malformed results, placeholder rationales, or unknown
   citations are scorer errors. The evidence summary includes at most eight
@@ -91,7 +91,7 @@ traces without sending another Turn.
   and final answer, up to 20,000 characters each. It does not replace the middle
   of either field with a preview. Missing, empty, oversized, or already truncated
   evidence produces a scorer error before any judge call. Diagnostic version
-  `fleet-trace-assessments-v5` invalidates comparisons with earlier partial-text
+  `fleet-trace-assessments-v6` invalidates comparisons with earlier partial-text
   judgments; the shared `fleet-metric-v8` and GEPA objectives are unchanged.
 - `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
   actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
@@ -121,6 +121,8 @@ The GEPA objective uses `fleet-metric-v8`; changes to that metric invalidate
 earlier metric feedback and candidate approval evidence. Candidate approval uses
 policy version 5; older evidence requires reevaluation.
 
+The v6 trace-assessment identity also invalidates comparisons with the earlier
+routing rubric; Jev route probabilities retain their full precision in assessment metadata.
 Trace diagnostic rubric changes use the independent
 `fleet.trace_scorer_version` plus MLflow scorer name/version metadata. They do not change
 `fleet-metric-v8` or GEPA candidate identity. The code-based Fleet suite is the
