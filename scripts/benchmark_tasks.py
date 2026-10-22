@@ -320,7 +320,7 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
     uc_location = (
         tuple(trace_location[key] for key in ("catalog", "schema", "table_prefix")) if trace_location else None
     )
-    traces, scores_by_trace = [], {}
+    evaluation_rows = []
     for row in scored["cases"]:
         if "official_score" not in row:
             continue
@@ -350,14 +350,15 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
                 if value is not None
             },
         )
-        traces.append(trace)
-        scores_by_trace[trace.info.trace_id] = row["official_score"]
+        # MLflow may clone serving traces into the evaluation experiment. Row
+        # expectations stay attached to the example even when its trace ID changes.
+        evaluation_rows.append({"trace": trace, "expectations": {"benchmark_official_score": row["official_score"]}})
 
     @scorer(name="benchmark_correctness")
-    def benchmark_correctness(trace: Any) -> Feedback:
-        return Feedback(value=scores_by_trace[trace.info.trace_id], rationale="Pinned official benchmark verifier")
+    def benchmark_correctness(expectations: dict[str, Any]) -> Feedback:
+        return Feedback(value=expectations["benchmark_official_score"], rationale="Pinned official benchmark verifier")
 
-    if not traces:
+    if not evaluation_rows:
         raise ValueError("No completed, officially scored traces to evaluate")
     coverage = {key: scored[key] for key in ("expected", "completed", "scored")}
     with mlflow.start_run(run_name=f"benchmark-{run['run_id']}"):
@@ -379,7 +380,7 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
             context="benchmark",
         )
         result = mlflow.genai.evaluate(
-            data=traces,
+            data=evaluation_rows,
             scorers=[
                 *build_mlflow_scorer_suite(
                     settings.fleet_judge_model, settings.build_judge_lm(), settings.build_jev_lm()

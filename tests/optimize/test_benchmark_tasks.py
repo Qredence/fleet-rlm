@@ -436,9 +436,9 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
     monkeypatch.setattr(mlflow.data, "from_pandas", lambda frame, **kwargs: (frame.to_dict("records"), kwargs))
 
     def evaluate(*, data, scorers):
-        assert data == [trace]
+        assert data == [{"trace": trace, "expectations": {"benchmark_official_score": 1}}]
         assert scorers[0] == "native-suite:configured-judge:native-dspy-judge:native-jev-lm"
-        assert scorers[-1](trace=trace).value == 1
+        assert scorers[-1](expectations=data[0]["expectations"]).value == 1
         frame = pd.DataFrame({"benchmark_correctness/value": [1]})
         if scoring_error:
             frame["fleet_metric/error_message"] = ["judge failure"]
@@ -467,6 +467,63 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
     assert saved["scoring_complete"] is not scoring_error
     assert (saved["expected"], saved["completed"], saved["scored"]) == ((2, 2, 1) if partial else (1, 1, 1))
     assert logged[0]["benchmark.expected"] == str(saved["expected"])
+
+
+def test_official_scores_survive_real_mlflow_cross_experiment_cloning(tmp_path, monkeypatch, mlflow_test_uri):
+    import mlflow
+
+    from fleet_rlm.optimize import scorers
+
+    bundle, run_dir = freeze(tmp_path)
+    with monkeypatch.context() as api_patch:
+        api(api_patch)
+        bench.run_tasks(bundle, run_dir, base_url="http://fleet", expected_destination=DESTINATION, allow_live=True)
+    source = mlflow.set_experiment("benchmark-serving")
+    source_trace_ids = set()
+    expected_scores = {"task-0": 0.75, "task-1": 0.0}
+    for case_id in expected_scores:
+        with mlflow.start_span(name=case_id) as span:
+            span.set_inputs({"task": case_id})
+            span.set_outputs({"answer": "42"})
+        trace = mlflow.get_trace(span.trace_id, flush=True)
+        source_trace_ids.add(trace.info.trace_id)
+        receipt_path = run_dir / "receipts" / f"{case_id}.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["output"]["trace_id"] = trace.info.trace_id
+        bench.save_json(receipt_path, receipt)
+    descriptor = {"mode": "local", "tracking_uri": mlflow_test_uri, "experiment_name": source.name}
+    run = json.loads((run_dir / "run.json").read_text())
+    run["service"]["mlflow"].update(descriptor, experiment_id=source.experiment_id)
+    bench.save_json(run_dir / "run.json", run)
+    bench.score_tasks(bundle, run_dir, lambda case, _answer: expected_scores[case["case_id"]])
+    settings = SimpleNamespace(
+        mlflow_target=lambda: SimpleNamespace(
+            eval_experiment_name="benchmark-evaluation", tracking_uri=mlflow_test_uri
+        ),
+        mlflow_descriptor=lambda: descriptor,
+        prepare_mlflow_auth=lambda: None,
+        judge_environment=lambda: {},
+        build_judge_lm=lambda: None,
+        build_jev_lm=lambda: None,
+        fleet_judge_model="unused",
+        mlflow_trace_catalog="",
+        mlflow_trace_schema="",
+        mlflow_eval_trace_table_prefix="",
+        mlflow_tracing_sql_warehouse_id="",
+    )
+    # Exercise native trace readback, labeling, cloning and scoring without model judges.
+    monkeypatch.setattr(scorers, "build_mlflow_scorer_suite", lambda *_args: [])
+    result = bench.evaluate_saved_tasks(bundle, run_dir, settings, allow_judges=True)
+    frame = result.result_df
+    cloned_traces = [mlflow.entities.Trace.from_json(value) for value in frame["trace"]]
+    assert {trace.info.trace_id for trace in cloned_traces}.isdisjoint(source_trace_ids)
+    assert {
+        trace.data.spans[0].name: value
+        for trace, value in zip(cloned_traces, frame["benchmark_correctness/value"], strict=True)
+    } == expected_scores
+    assert not frame.filter(regex="error_message$").notna().any().any()
+    saved = json.loads((run_dir / "evaluation.json").read_text())
+    assert saved["complete"] and saved["scoring_complete"]
 
 
 def test_evaluation_refuses_a_run_without_recorded_destination(tmp_path):
