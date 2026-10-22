@@ -383,7 +383,9 @@ def evaluate_saved_tasks(bundle_dir: Path, run_dir: Path, settings: Any, *, allo
             data=evaluation_rows,
             scorers=[
                 *build_mlflow_scorer_suite(
-                    settings.fleet_judge_model, settings.build_judge_lm(), settings.build_jev_lm()
+                    settings.fleet_judge_model,
+                    settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
+                    settings.build_jev_lm(),
                 ),
                 benchmark_correctness,
             ],

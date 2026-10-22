@@ -371,10 +371,13 @@ def test_tracking_profile_mismatch_prevents_runtime_creation_and_paid_calls(tmp_
 
 
 @pytest.mark.parametrize("backend", ["local", "databricks"])
+@pytest.mark.parametrize(
+    "judge_model", ["openai:/configured-judge", "databricks:/configured-judge", "anthropic:/judge"]
+)
 @pytest.mark.parametrize("scoring_error", [False, True])
 @pytest.mark.parametrize("partial", [False, True])
 def test_evaluates_saved_traces_in_configured_experiment_without_turns(
-    tmp_path, monkeypatch, backend, scoring_error, partial
+    tmp_path, monkeypatch, backend, judge_model, scoring_error, partial
 ):
     import mlflow
     import pandas as pd
@@ -403,6 +406,11 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
     run["service"]["mlflow"].update(descriptor)
     bench.save_json(run_dir / "run.json", run)
     configured, reads, labels, inputs, logged = [], [], [], [], []
+
+    def build_judge_lm():
+        assert judge_model.startswith("openai:/")
+        return "native-dspy-judge"
+
     settings = SimpleNamespace(
         mlflow_target=lambda: SimpleNamespace(
             eval_experiment_name="configured-eval", tracking_uri=descriptor["tracking_uri"]
@@ -410,9 +418,9 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
         mlflow_descriptor=lambda: descriptor,
         prepare_mlflow_auth=lambda: None,
         judge_environment=lambda: {},
-        build_judge_lm=lambda: "native-dspy-judge",
+        build_judge_lm=build_judge_lm,
         build_jev_lm=lambda: "native-jev-lm",
-        fleet_judge_model="configured-judge",
+        fleet_judge_model=judge_model,
         mlflow_trace_catalog="catalog",
         mlflow_trace_schema="runtime",
         mlflow_eval_trace_table_prefix="evaluations",
@@ -437,7 +445,8 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
 
     def evaluate(*, data, scorers):
         assert data == [{"trace": trace, "expectations": {"benchmark_official_score": 1}}]
-        assert scorers[0] == "native-suite:configured-judge:native-dspy-judge:native-jev-lm"
+        expected_lm = "native-dspy-judge" if judge_model.startswith("openai:/") else None
+        assert scorers[0] == f"native-suite:{judge_model}:{expected_lm}:native-jev-lm"
         assert scorers[-1](expectations=data[0]["expectations"]).value == 1
         frame = pd.DataFrame({"benchmark_correctness/value": [1]})
         if scoring_error:

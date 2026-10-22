@@ -22,7 +22,7 @@ from fleet_rlm.observability import activity_preview, activity_text, trace_objec
 from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
 
 SCORER_VERSION = "fleet-metric-v8"
-TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v5"
+TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v6"
 
 _MAX_EXECUTION_SPANS = 8
 _EVIDENCE_TEXT_LIMIT = 1600
@@ -434,7 +434,7 @@ def _jev_route_feedback(jev_lm: Any, payload: dict[str, Any]) -> Feedback:
         "mlflow.assessment.scorerVersion": TRACE_ASSESSMENT_VERSION,
     }
     if judgment["probability"] is not None:
-        metadata["fleet.jev.route_probability"] = f"{judgment['probability']:.2f}"
+        metadata["fleet.jev.route_probability"] = str(judgment["probability"])
     if judgment["confidence"] is not None:
         metadata["fleet.jev.confidence"] = f"{judgment['confidence']:.2f}"
     if judgment["best_route_probabilities"] is not None:
