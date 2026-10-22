@@ -158,11 +158,11 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
     import mlflow
 
     case = EvalCase(
-        case_id="oolong-1",
+        case_id="external-1",
         task="How many users failed?",
         expected_values=("3", "7"),
-        category="oolong_counting",
-        source_group="oolong-window-9",
+        category="external_counting",
+        source_group="external-group-9",
         files={},
         review_status="approved",
         critical=True,
@@ -180,7 +180,7 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
         "labels_of",
         lambda _trace: {
             "review_status": "approved",
-            "source_group": "oolong-window-9",
+            "source_group": "external-group-9",
             "expected_answer": "3, 7",
             "expected_values": ["3", "7"],
             "route": None,
@@ -201,7 +201,7 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
         {
             "trace_id": "tr-1",
             "review_status": "approved",
-            "source_group": "oolong-window-9",
+            "source_group": "external-group-9",
             "expected_answer": "3, 7",
             "expected_values": ["3", "7"],
             "route": None,
@@ -400,6 +400,22 @@ def test_incomplete_evaluation_never_reports_collection_success(monkeypatch, fai
         assert writes == []
     if failure == "assessment":
         assert any("trace tr-1" in message for message in reports)
+
+
+def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    result = SimpleNamespace(run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [None]}))
+    received = []
+    monkeypatch.setattr(evaluation, "build_mlflow_scorer_suite", lambda *args: received.append(args) or [])
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
+    sentinel = object()
+    evaluation.score_evaluation_traces(
+        [object()], judge_model="m", judge_lm="judge-sentinel", jev_lm=sentinel, report=lambda _message: None
+    )
+    assert received == [("m", "judge-sentinel", sentinel)]
 
 
 @pytest.mark.parametrize("error", [None, "judge failed"])

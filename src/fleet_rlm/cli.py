@@ -8,7 +8,6 @@ import time
 import uuid
 from typing import Any
 
-import httpx
 import uvicorn
 from pydantic import ValidationError
 from rich.console import Console
@@ -172,28 +171,18 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
 
         if args.long_context:
             cases += benchmarks.long_context_cases()
-        if args.oolong or args.longcot:
-            with httpx.Client(follow_redirects=True) as hf:
-                if args.oolong:
-                    cases += benchmarks.oolong_cases(hf, limit=args.oolong)
-                if args.longcot:
-                    cases += benchmarks.longcot_cases(hf, per_domain=args.longcot)
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
         _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
         return
     for name, value in settings.judge_environment().items():
         os.environ[name] = value
-    if args.oolong:
-        from fleet_rlm.optimize import benchmarks
-
-        with httpx.Client(follow_redirects=True) as hf:
-            cases = benchmarks.oolong_cases(hf, limit=args.oolong)
     try:
         result = evaluation.evaluate_cases(
             cases[: args.limit] if args.limit else cases,
             base_url=args.url,
             judge_model=settings.fleet_judge_model,
             judge_lm=settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
+            jev_lm=settings.build_jev_lm(),
             collect_only=args.collect_only,
             experiment_id=experiment.experiment_id,
             uc_location=(
@@ -287,7 +276,7 @@ def _trace_verify_command(args: argparse.Namespace, settings: Any) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run the backend or the interactive Rich client."""
+    """Run Fleet's server, terminal client, evaluation, tracing, or optimization commands."""
     parser = argparse.ArgumentParser(prog="fleet", description="Fleet-RLM Lite server and terminal client")
     commands = parser.add_subparsers(dest="command")
 
@@ -321,13 +310,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     dataset.add_argument("--seed", type=int, default=7)
     dataset.add_argument("--long-context", action="store_true", help="add synthetic 20K-200K character log cases")
-    dataset.add_argument("--oolong", type=int, default=0, metavar="N", help="add N Oolong-synth benchmark cases")
-    dataset.add_argument("--longcot", type=int, default=0, metavar="N", help="add N LongCoT cases per domain")
     run = eval_commands.add_parser("run", help="run synthetic cases against a live server and score them")
     run.add_argument("--url", default=None)
     run.add_argument("--seed", type=int, default=7)
     run.add_argument("--limit", type=int, default=0, help="only run the first N cases")
-    run.add_argument("--oolong", type=int, default=0, metavar="N", help="run N Oolong-synth cases instead of synthetic")
     run.add_argument(
         "--collect-only",
         action="store_true",

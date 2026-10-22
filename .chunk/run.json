@@ -1,0 +1,13 @@
+{
+  "org_id": "d0fc62ae-1f4a-4037-8ccb-d357adfdfda6",
+  "project_id": "122b2cc9-5a9c-4b3b-88c6-9276bd5d5d98",
+  "org_type": "circleci",
+  "definitions": {
+    "dev": {
+      "definition_id": "fe82e142-4105-421e-a525-eb47298d5e7a",
+      "description": "Fleet-RLM development tasks",
+      "chunk_environment_id": null,
+      "default_branch": "main"
+    }
+  }
+}

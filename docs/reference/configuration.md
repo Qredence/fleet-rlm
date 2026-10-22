@@ -24,7 +24,7 @@ source control.
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
 | `FLEET_SUB_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Code fallback for the sub-model. The checked-in `config/fleet.toml` instead selects `openai/system.ai.deepseek-v4-1-flash` for both root and sub roles. |
 | `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-haiku-5-5` | Code fallback for GEPA reflection. The checked-in `config/fleet.toml` selects the same route, with temperature 1.0 and max tokens 32000. Relative model strength is an evaluation hypothesis, not established by configuration. |
-| `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. |
+| `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. The checked-in `config/fleet.toml` selects `openai:/system.ai.deepseek-v4-1-flash-1017`. |
 | `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |
 | `DATABRICKS_TOKEN` | empty | Databricks credential for Unity Gateway `openai/` models. |
 | `FLEET_LLM_BASE_URL` | derived from `DATABRICKS_HOST` | Optional Unity Gateway base URL override, normally `https://<workspace-host>/ai-gateway/mlflow/v1`. |

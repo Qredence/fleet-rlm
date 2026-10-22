@@ -712,15 +712,23 @@ class FleetSettings(BaseSettings):
         root_lm = self._build_lm(self.fleet_root_model, "root")
         sub_lm = self._build_lm(self.fleet_sub_model, "sub")
         reflection_lm = self._build_lm(self.fleet_reflection_model, "reflection")
+        return root_lm, sub_lm, reflection_lm, self.build_jev_lm()
 
-        jev_lm = None
-        if self.typesafe_api_key:
-            try:
-                from dspy.experimental import TypeSafe
-            except ImportError as exc:
-                raise RuntimeError("TypeSafe routing requires the DSPy 'typesafe' extra") from exc
-            jev_lm = TypeSafe(self.typesafe_model, api_key=self.typesafe_api_key)
-        return root_lm, sub_lm, reflection_lm, jev_lm
+    def build_jev_lm(self) -> Any | None:
+        """The TypeSafe System One client, or None when no credential is configured.
+
+        Raises:
+            RuntimeError: A credential is configured but the DSPy TypeSafe import fails.
+
+        TypeSafe client construction errors propagate.
+        """
+        if not self.typesafe_api_key:
+            return None
+        try:
+            from dspy.experimental import TypeSafe
+        except ImportError as exc:
+            raise RuntimeError("TypeSafe routing requires the DSPy 'typesafe' extra") from exc
+        return TypeSafe(self.typesafe_model, api_key=self.typesafe_api_key)
 
     def build_judge_lm(self) -> dspy.LM:
         """The DSPy twin of FLEET_JUDGE_MODEL: temperature zero and cached for consistent repeated judging."""
