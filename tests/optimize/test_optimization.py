@@ -446,6 +446,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             assert {path: (tmp_path / path).read_bytes() for path in files} == files
             assert built_models == ["openai/current-deployment"]
             assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
+            assert engine.sandbox_mgr.options["root_auto_delete_minutes"] == current.daytona_root_auto_delete_minutes
         finally:
             Path(engine.optimization_artifact_path).unlink(missing_ok=True)
 

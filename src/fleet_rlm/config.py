@@ -52,6 +52,7 @@ _TOML_FIELDS = {
         "org_id": "fleet_daytona_org_id",
         "volume_id": "fleet_daytona_volume_id",
         "auto_stop_minutes": "daytona_auto_stop_minutes",
+        "root_auto_delete_minutes": "daytona_root_auto_delete_minutes",
         "shared_notes_subpath": "fleet_shared_notes_subpath",
     },
     "storage": {
@@ -150,6 +151,17 @@ def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
                 raise ValueError(f"Invalid Fleet TOML setting: {table}.{key}") from None
             result[field] = value
     return result
+
+
+# Seven days: how long a stopped root sandbox is kept before Daytona deletes it, unless configured.
+DEFAULT_ROOT_AUTO_DELETE_MINUTES = 7 * 24 * 60
+
+
+def validate_root_auto_delete_minutes(value: int) -> int:
+    """Return a root sandbox auto-delete interval: -1 (never) or a positive number of minutes."""
+    if type(value) is not int or (value != -1 and value < 1):
+        raise ValueError("root auto-delete minutes must be -1 (never) or a positive number of minutes")
+    return value
 
 
 def validate_shared_notes_subpath(value: str) -> str:
@@ -294,6 +306,16 @@ class FleetSettings(BaseSettings):
         ge=1,
         le=1440,
         validation_alias=AliasChoices("FLEET_DAYTONA_AUTO_STOP_MINUTES", "DAYTONA_AUTO_STOP_MINUTES"),
+    )
+    daytona_root_auto_delete_minutes: int = Field(
+        default=DEFAULT_ROOT_AUTO_DELETE_MINUTES,
+        ge=-1,
+        le=365 * 24 * 60,
+        validation_alias="FLEET_DAYTONA_ROOT_AUTO_DELETE_MINUTES",
+        description=(
+            "Minutes a stopped, non-disposable root sandbox is kept before Daytona deletes it; -1 keeps it forever. "
+            "Session state lives on the Volume, so a deleted root sandbox is rebuilt from the snapshot."
+        ),
     )
 
     fleet_root_model: str = "openai/system.ai.deepseek-v4-1-flash"
@@ -474,6 +496,12 @@ class FleetSettings(BaseSettings):
     def shared_notes_subpath_is_relative(cls, value: str) -> str:
         """Validate the shared notes Volume subpath as relative."""
         return validate_shared_notes_subpath(value)
+
+    @field_validator("daytona_root_auto_delete_minutes")
+    @classmethod
+    def root_auto_delete_is_not_immediate(cls, value: int) -> int:
+        """Refuse 0, which would make Daytona delete the warm root sandbox on every auto-stop."""
+        return validate_root_auto_delete_minutes(value)
 
     @field_validator("fleet_database_schema")
     @classmethod

@@ -20,8 +20,9 @@ source control.
 | `FLEET_DAYTONA_SNAPSHOT` | `fleet-rlm-base` | Daytona snapshot name. |
 | `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes. Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
-| `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. The checked-in `config/fleet.toml` selects `openai/system.ai.deepseek-v4-1-flash-1017`. |
-| `FLEET_SUB_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Code fallback for the sub-model. The checked-in `config/fleet.toml` instead selects `openai/system.ai.deepseek-v4-1-flash-1017` for both root and sub roles. |
+| `FLEET_DAYTONA_ROOT_AUTO_DELETE_MINUTES` | `10080` | Minutes a stopped, non-disposable root sandbox is kept before Daytona deletes it (7 days). `-1` keeps it forever; `0` is refused. TOML `[daytona] root_auto_delete_minutes`. A deleted root sandbox is rebuilt from the snapshot on the next Turn; Session state lives on the Volume. Child sandboxes are bounded to the Turn instead. |
+| `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
+| `FLEET_SUB_MODEL` | `openai/system.ai.claude-sonnet-5-5` | Code fallback for the sub-model. The checked-in `config/fleet.toml` instead selects `openai/system.ai.deepseek-v4-1-flash` for both root and sub roles. |
 | `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-haiku-5-5` | Code fallback for GEPA reflection. The checked-in `config/fleet.toml` selects the same route, with temperature 1.0 and max tokens 32000. Relative model strength is an evaluation hypothesis, not established by configuration. |
 | `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. The checked-in `config/fleet.toml` selects `openai:/system.ai.deepseek-v4-1-flash-1017`. |
 | `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |

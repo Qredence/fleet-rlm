@@ -8,12 +8,15 @@ own threads so the websocket keeps reading, and replies go back through ``fs.upl
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import random
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from typing import Any, TypeVar
@@ -28,6 +31,9 @@ _PREAMBLE_TIMEOUT_SECONDS = 60
 # A host tool that never answers (lost reply upload, hung tool) fails the sandbox call after this long
 # instead of stalling the execution until the Turn watchdog stops the sandbox.
 HOST_CALL_TIMEOUT_SECONDS = 600.0
+# While `run_code` blocks, the sandbox's provider state is polled this often; a lost sandbox fails the
+# execution promptly instead of leaving the websocket waiting for the execution timeout.
+LIVENESS_POLL_SECONDS = 5.0
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_SECONDS = 0.5
 
@@ -40,6 +46,15 @@ def is_transient(exc: BaseException) -> bool:
         return True
     status = exc.status_code if isinstance(exc, DaytonaError) else None
     return isinstance(status, int) and status >= 500
+
+
+def retry_worst_case_seconds(attempt_seconds: float) -> float:
+    """Longest `with_retries` can take when every attempt runs for `attempt_seconds` and fails transiently.
+
+    Each of the `_RETRY_ATTEMPTS` attempts, plus the largest jittered backoff (1.5x base) between them.
+    """
+    backoff = sum(_RETRY_BASE_SECONDS * (2**attempt) * 1.5 for attempt in range(_RETRY_ATTEMPTS - 1))
+    return _RETRY_ATTEMPTS * attempt_seconds + backoff
 
 
 def with_retries(operation: Callable[[], _T], *, before_retry: Callable[[], None] | None = None) -> _T:
@@ -64,6 +79,108 @@ class ExecutionOutcomeUnknownError(RuntimeError):
     """Remote work may have executed; the Turn must not replay it."""
 
     transport_retries: int = 0
+
+
+class SandboxLostError(ExecutionOutcomeUnknownError):
+    """The sandbox was stopped, destroyed, or deleted while an execution was running in it."""
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxActivity:
+    """A point-in-time view of what is running in a sandbox, built from local state only (no Daytona call).
+
+    Exactly what the Turn stall watchdog reads; `alive_checked_monotonic` is `time.monotonic()` seconds.
+    """
+
+    busy: bool  # at least one run_code execution is in flight
+    alive: bool | None  # last known liveness; None until first observed
+    alive_checked_monotonic: float | None  # monotonic clock of that observation
+    # Host-side Daytona work for this sandbox (remote exec, file transfers, artifact collection). Tracked
+    # apart from `busy`, which only means model code is running; host IO never starts the liveness poll.
+    host_io_busy: bool = False
+
+
+class ExecutionTracker:
+    """Thread-safe record of in-flight executions and host IO, and the last liveness verdict.
+
+    Fed by `run` (begin/end), by `_run_watched`'s liveness polls, by the manager's host IO (`host_io`), and
+    by its own create/resume/stop/loss events; `snapshot()` only reads this state.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._running: set[int] = set()
+        self._host_io: set[int] = set()
+        self._next = 0
+        self._alive: bool | None = None
+        self._alive_checked: float | None = None  # monotonic
+
+    def _new_token(self) -> int:
+        """A token unique across executions and host IO operations. Caller holds `_lock`."""
+        self._next += 1
+        return self._next
+
+    def begin_host_io(self) -> int:
+        """Record a host-side Daytona operation (exec, transfer) as in flight; returns the token for `end_host_io`.
+
+        Counted per token, so overlapping operations work. It does not touch `busy` or the liveness poll.
+        """
+        with self._lock:
+            token = self._new_token()
+            self._host_io.add(token)
+            return token
+
+    def end_host_io(self, token: int) -> None:
+        """Record the host-side operation as finished (returned or failed)."""
+        with self._lock:
+            self._host_io.discard(token)
+
+    @contextmanager
+    def host_io(self) -> Generator[None]:
+        """`begin_host_io`/`end_host_io` around a block, ending it even when the block raises."""
+        token = self.begin_host_io()
+        try:
+            yield
+        finally:
+            self.end_host_io(token)
+
+    def begin(self) -> int:
+        """Record an execution as in flight; returns the token for `end`."""
+        with self._lock:
+            token = self._new_token()
+            self._running.add(token)
+            return token
+
+    def end(self, token: int) -> None:
+        """Record the execution as finished (returned, failed, or abandoned)."""
+        with self._lock:
+            self._running.discard(token)
+
+    def observe_alive(self, alive: bool) -> None:
+        """Record a liveness verdict the caller already has; never queries the provider."""
+        with self._lock:
+            self._alive, self._alive_checked = alive, time.monotonic()
+
+    def snapshot(self) -> SandboxActivity:
+        """The current activity, read under the lock."""
+        with self._lock:
+            return SandboxActivity(
+                busy=bool(self._running),
+                alive=self._alive,
+                alive_checked_monotonic=self._alive_checked,
+                host_io_busy=bool(self._host_io),
+            )
+
+
+def merge_activity(own: SandboxActivity, others: list[SandboxActivity]) -> SandboxActivity:
+    """Combine a sandbox's activity with its children's: busy if any is; liveness stays the sandbox's own."""
+    views = [own, *others]
+    return SandboxActivity(
+        busy=any(view.busy for view in views),
+        alive=own.alive,
+        alive_checked_monotonic=own.alive_checked_monotonic,
+        host_io_busy=any(view.host_io_busy for view in views),
+    )
 
 
 @cache
@@ -108,18 +225,27 @@ class _Protocol:
         self.result: dict[str, Any] | None = None
         self._buffer = ""
         self._workers: list[threading.Thread] = []
+        self._lock = threading.Lock()
+        self._finished = False
 
     def feed(self, message: Any) -> None:
-        self._buffer += message.output
-        *lines, self._buffer = self._buffer.split("\n")
-        for line in lines:
-            self._line(line)
+        with self._lock:
+            # An abandoned run_code thread may still deliver output after the execution was given up.
+            if self._finished:
+                return
+            self._buffer += message.output
+            *lines, self._buffer = self._buffer.split("\n")
+            for line in lines:
+                self._line(line)
 
     def finish(self) -> None:
-        if self._buffer:
-            self._line(self._buffer)
-            self._buffer = ""
-        for worker in self._workers:
+        with self._lock:
+            self._finished = True
+            if self._buffer:
+                self._line(self._buffer)
+                self._buffer = ""
+            workers = tuple(self._workers)
+        for worker in workers:
             worker.join(timeout=5)
 
     def _line(self, line: str) -> None:
@@ -151,17 +277,38 @@ def run(
     *,
     on_call: Callable[[dict[str, Any]], dict[str, Any]],
     timeout: int,
+    alive: Callable[[], bool] | None = None,
+    tracker: ExecutionTracker | None = None,
 ) -> dict[str, Any]:
     """Run one execution in `context`; return the runtime's result dict.
 
     Raises the SDK's error when the transport fails; the caller decides whether the outcome is known.
+    With `alive`, the sandbox is polled while the execution runs and `SandboxLostError` is raised as
+    soon as it reports False, rather than waiting for the websocket or the execution timeout. With
+    `tracker`, the execution is recorded as in flight until it returns or fails, every liveness verdict is
+    noted, and a lost sandbox is recorded as not alive.
     """
     protocol = _Protocol(sandbox, on_call)
     payload = {"host_call_timeout": min(HOST_CALL_TIMEOUT_SECONDS, timeout), **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
+
+    if tracker is not None and alive is not None:
+        poll = alive
+
+        def alive() -> bool:
+            verdict = poll()
+            tracker.observe_alive(verdict)
+            return verdict
+
+    def execute() -> Any:
+        return sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)
+
+    token = tracker.begin() if tracker is not None else 0
     try:
-        execution = sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)
+        execution = execute() if alive is None else _run_watched(execute, alive)
     finally:
+        if tracker is not None:
+            tracker.end(token)
         protocol.finish()
     if protocol.result is not None:
         return protocol.result
@@ -174,3 +321,30 @@ def run(
             "error_type": execution.error.name or "PythonError",
         }
     raise ExecutionOutcomeUnknownError("The sandbox interpreter returned no result")
+
+
+def _run_watched(execute: Callable[[], _T], alive: Callable[[], bool]) -> _T:
+    """Run a blocking `run_code` on a worker thread, polling `alive` until it returns or the sandbox is lost.
+
+    A lost execution's thread is abandoned, never retried; it ends when the SDK call fails or times out.
+    """
+    outcome: dict[str, Any] = {}
+    done = threading.Event()
+
+    def target() -> None:
+        try:
+            outcome["value"] = execute()
+        except BaseException as exc:
+            outcome["error"] = exc
+        finally:
+            done.set()
+
+    # The SDK calls on_stdout on this thread; keep the caller's DSPy and MLflow context.
+    context = contextvars.copy_context()
+    threading.Thread(target=context.run, args=(target,), name="fleet-run-code", daemon=True).start()
+    while not done.wait(LIVENESS_POLL_SECONDS):
+        if not alive():
+            raise SandboxLostError("The sandbox was lost while the execution was running")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
