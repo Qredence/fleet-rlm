@@ -25,6 +25,35 @@ circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY
 The Python 3.14 probe is informational and does not change the supported
 Python range (`>=3.11,<3.14`).
 
+## Chunk tasks
+
+The Chunk CLI project configuration provides local validations through
+`chunk validate`. Run all configured checks together, or select an individual
+check:
+
+```bash
+chunk validate
+chunk validate static
+chunk validate tests
+chunk validate build
+```
+
+The `dev` task definition uses the existing `build-and-test` CircleCI pipeline.
+Cloud tasks use committed repository code on the selected branch; local
+uncommitted changes are not included. To start a task, provide an explicit
+prompt and branch:
+
+```bash
+chunk task run --definition dev --branch main \
+  --prompt "<describe the requested change and acceptance criteria>"
+```
+
+The default Chunk environment is configured in
+`.circleci/cci-agent-setup.yml`. It installs the locked development
+dependencies for Python 3.12 and does not run tests; use Chunk validation for
+that. Chunk is currently in beta and task runs consume CircleCI credits and
+model-provider tokens.
+
 ## Smart Deployments
 
 CircleCI Project Settings for `rlm` currently reports Smart Deployments as

@@ -26,7 +26,7 @@ src/fleet_rlm/
 │   ├── scorers.py     # MLflow scorers, judge suite, and the GEPA metric
 │   ├── gepa.py        # `fleet optimize`
 │   ├── evaluation.py  # Eval cases, gold labels, `fleet eval` runs
-│   └── benchmarks.py  # Long-context generators and Oolong/LongCoT adapters
+│   └── benchmarks.py  # Synthetic long-context task generators
 ├── api/
 │   ├── app.py         # create_app, lifespan, routers, health
 │   ├── deps.py        # Dependencies and route-boundary error translation

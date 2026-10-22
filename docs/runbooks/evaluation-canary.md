@@ -111,6 +111,7 @@ result = score_evaluation_traces(
     [trace],
     judge_model=settings.fleet_judge_model,
     judge_lm=settings.build_judge_lm(),
+    jev_lm=settings.build_jev_lm(),
 )
 print(result.run_id, result.metrics)
 mlflow.flush_trace_async_logging()

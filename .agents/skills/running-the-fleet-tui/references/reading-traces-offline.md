@@ -2,7 +2,7 @@
 
 The supervised client starts a local MLflow tracking server on
 `127.0.0.1:5001` and stops it when the client exits, so traces outlive the
-server only as rows in `.fleet_rlm/mlflow/mlflow.db`. Read that file directly
+server only as rows in `.fleet/mlflow/mlflow.db`. Read that file directly
 instead of pointing a client at the dead URI.
 
 Resolve the path from the repository root; `tracking_uri` needs a `sqlite:///`
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from mlflow.tracking import MlflowClient
 
-db = Path(".fleet_rlm/mlflow/mlflow.db").resolve()
+db = Path(".fleet/mlflow/mlflow.db").resolve()
 client = MlflowClient(tracking_uri=f"sqlite:///{db.as_posix()}")
 
 experiment = client.get_experiment_by_name("fleet-rlm")  # experiment_id "1"
@@ -42,7 +42,7 @@ A committed Turn carries, in rough order:
 
 A trace that stops at the preparation phases carries no trajectory to read;
 compare it with the outcome the client reported and with
-`.fleet_rlm/logs/latest.log` instead of interpreting the missing spans.
+`.fleet/logs/server.log` instead of interpreting the missing spans.
 
 ## Checks worth making
 

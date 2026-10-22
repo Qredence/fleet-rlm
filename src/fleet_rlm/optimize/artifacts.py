@@ -14,7 +14,7 @@ from typing import Any
 
 import dspy
 
-APPROVAL_POLICY_VERSION = 3
+APPROVAL_POLICY_VERSION = 5
 VALIDATION_PASSES = 3
 
 
@@ -65,9 +65,16 @@ class EvaluationGate:
 
 
 def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
-    """Recompute the policy from the three paired observations, never trust a saved verdict."""
+    """Recompute the policy from the three paired observations, never trust a saved verdict.
+
+    Return an EvaluationGate with rejection reasons for an obsolete policy version,
+    any non-None objective policy, or failed evidence and improvement checks.
+    """
     if evaluation.get("policy_version") != APPROVAL_POLICY_VERSION:
         return EvaluationGate(False, ("obsolete approval policy; reevaluate against the current incumbent",))
+    # Retired dataset-specific objectives are not comparable with Fleet's metric.
+    if evaluation.get("objective_policy") is not None:
+        return EvaluationGate(False, ("unsupported objective policy; reevaluate with Fleet metrics",))
     reasons: list[str] = []
     observations = {}
     for stage in ("baseline", "candidate"):

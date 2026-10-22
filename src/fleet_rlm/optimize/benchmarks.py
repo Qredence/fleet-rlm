@@ -1,29 +1,13 @@
-"""RLM-oriented eval cases: synthetic long-context generators and public benchmark adapters.
-
-LongCoT cases are labeled ``review_status="benchmark"`` and are held out entirely. Oolong cases are
-split by context window (see ``window_status``): two of three windows are ``approved`` and may train,
-and the rest stay ``benchmark``. GEPA must never train or validate on a ``benchmark`` case.
-"""
+"""Deterministic synthetic long-context evaluation tasks for Fleet."""
 
 from __future__ import annotations
 
-import ast
-import hashlib
-import json
 import random
-import time
 from collections import Counter
 from typing import Any
 
-import httpx
-
 from fleet_rlm.optimize.evaluation import EvalCase
 
-_HF = "https://datasets-server.huggingface.co"
-OOLONG = "oolongbench/oolong-synth"
-LONGCOT = "LongHorizonReasoning/longcot"
-# LongCoT hides gold answers for `logic`; the rest ship JSON payloads.
-LONGCOT_DOMAINS = ("cs", "chemistry", "chess", "math")
 _ACTIONS = ("login", "logout", "view", "purchase", "refund", "failed_login")
 _REGIONS = ("north", "south", "east", "west")
 
@@ -115,124 +99,4 @@ def long_context_cases(
                     context_chars=len(text),
                 )
             )
-    return cases
-
-
-def _get(client: httpx.Client, path: str, **params: Any) -> list[dict[str, Any]]:
-    """GET a datasets-server page, backing off on 429/5xx (anonymous access is rate limited)."""
-    for attempt in range(6):
-        response = client.get(f"{_HF}/{path}", params=params, timeout=120)
-        if response.status_code == 429 or response.status_code >= 500:
-            time.sleep(min(float(response.headers.get("retry-after", 2 * (attempt + 1))), 30))
-            continue
-        response.raise_for_status()
-        return response.json().get("rows", [])
-    response.raise_for_status()
-    return []
-
-
-def window_status(window_id: str) -> str:
-    """Two of every three Oolong context windows train (``approved``); the rest stay a held-out benchmark.
-
-    A stable hash of the window id keeps every question from one window on the same side, and reruns never reshuffle.
-    """
-    bucket = int(hashlib.sha256(str(window_id).encode()).hexdigest(), 16) % 3
-    return "approved" if bucket < 2 else "benchmark"
-
-
-def oolong_cases(
-    client: httpx.Client,
-    *,
-    limit: int = 24,
-    max_tokens: int = 32_768,
-    page: int = 5,
-    stride: int = 20,
-    max_pages: int = 70,
-    per_window: int = 2,
-    pause: float = 0.5,
-) -> list[EvalCase]:
-    """Oolong-synth validation items up to ``max_tokens`` of context (~4 characters per token).
-
-    Pages through ``/rows`` and filters locally: the ``/filter`` index is built lazily and can
-    answer 500 for a long time, and the split mixes sizes up to millions of tokens. Pages are
-    strided across the split and each context window contributes at most ``per_window`` questions,
-    so a sample spans context sizes and tasks instead of repeating the first window.
-    """
-    cases: dict[str, EvalCase] = {}
-    windows: Counter[int] = Counter()
-    for number in range(max_pages):
-        time.sleep(pause if number else 0)
-        rows = _get(
-            client, "rows", dataset=OOLONG, config="default", split="validation", offset=number * stride, length=page
-        )
-        if not rows:
-            break
-        for item in rows:
-            row = item["row"]
-            if item.get("truncated_cells") or int(row["context_len"]) > max_tokens:
-                continue
-            if windows[row["context_window_id"]] >= per_window:
-                continue
-            windows[row["context_window_id"]] += 1
-            try:
-                parsed = ast.literal_eval(row["answer"])
-            except (ValueError, SyntaxError):
-                parsed = row["answer"]
-            values = tuple(str(v) for v in parsed) if isinstance(parsed, (list, tuple)) else (str(parsed),)
-            case_id = f"oolong-{row['id']}"
-            cases[case_id] = EvalCase(
-                case_id=case_id,
-                task=f"The data is in files/context.txt. {row['question']}",
-                expected_values=values,
-                category=f"oolong_{row['task_group']}",
-                source_group=f"oolong-window-{row['context_window_id']}",
-                files={"files/context.txt": row["context_window_text"]},
-                review_status=window_status(row["context_window_id"]),
-                answer_type="list" if len(values) > 1 else "scalar",
-                benchmark="oolong-synth",
-            )
-            if len(cases) == limit:
-                return list(cases.values())
-    return list(cases.values())
-
-
-def _payload_values(payload: Any) -> tuple[str, ...] | None:
-    """Flat string values for scalar/list payloads; None for structured payloads we cannot match."""
-    if isinstance(payload, (str, int, float)):
-        return (str(payload),)
-    if isinstance(payload, list) and payload and all(isinstance(v, (str, int, float)) for v in payload):
-        return tuple(str(v) for v in payload)
-    return None
-
-
-def longcot_cases(
-    client: httpx.Client, *, difficulty: str = "medium", per_domain: int = 4, domains: tuple[str, ...] = LONGCOT_DOMAINS
-) -> list[EvalCase]:
-    """LongCoT items whose gold answer is a scalar or flat list (structured payloads need the official verifier)."""
-    cases = []
-    for domain in domains:
-        taken = 0
-        for item in _get(client, "rows", dataset=LONGCOT, config=domain, split=difficulty, offset=0, length=100):
-            row = item["row"]
-            try:
-                values = _payload_values(json.loads(row["answer"]))
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if values is None:
-                continue
-            cases.append(
-                EvalCase(
-                    case_id=f"longcot-{row['question_id']}",
-                    task=row["prompt"],
-                    expected_values=values,
-                    category=f"longcot_{domain}_{difficulty}",
-                    source_group=f"longcot-{row['template']}",
-                    review_status="benchmark",
-                    answer_type="list" if len(values) > 1 else "scalar",
-                    benchmark="longcot",
-                )
-            )
-            taken += 1
-            if taken == per_domain:
-                break
     return cases

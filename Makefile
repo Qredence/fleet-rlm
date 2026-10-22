@@ -65,9 +65,10 @@ check-docs:
 	uv run python scripts/check_docs.py
 
 # DiskCache 5.6.3 has no fixed upstream release; suppress only PYSEC-2026-2447.
+# pip-audit cannot hash the pinned LongCoT Git source; retain its resolved dependencies in the audit.
 check-security:
 	@set -eu; requirements=$$(mktemp); trap 'rm -f "$$requirements"' EXIT; \
-		uv export --locked --all-groups --no-emit-project --format requirements.txt --python 3.12 --output-file "$$requirements" > /dev/null; \
+		uv export --locked --all-groups --no-emit-project --no-emit-package longcot --format requirements.txt --python 3.12 --output-file "$$requirements" > /dev/null; \
 		uv run --locked -- pip-audit --requirement "$$requirements" --ignore-vuln PYSEC-2026-2447
 
 check-release:
