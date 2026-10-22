@@ -14,6 +14,8 @@ Current user and developer documentation for Fleet RLM Lite.
 - [Database](reference/database.md): Postgres tables and persistence model.
 - [MLflow trace retention](runbooks/mlflow-trace-retention.md): manual governed
   cleanup for Fleet's Unity Catalog trace tables.
+- [External task benchmarks](runbooks/benchmark-tasks.md): notebook-driven LongCoT
+  and OOLONG execution, official scoring, and saved-trace evaluation.
 - [Source layout](reference/source-layout.md): current runtime file ownership.
 
 ## Current behavior is the source of truth

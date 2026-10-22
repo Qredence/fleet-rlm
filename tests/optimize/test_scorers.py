@@ -9,6 +9,8 @@ from mlflow.entities import SpanType
 
 from fleet_rlm.optimize.evaluation import expected_values_present
 from fleet_rlm.optimize.scorers import (
+    JEV_ROUTE_THRESHOLD,
+    TRACE_ASSESSMENT_VERSION,
     build_mlflow_scorer_suite,
     fleet_metric,
     fleet_scorer,
@@ -50,8 +52,6 @@ def _execution_status(name: str = "OK"):
 
 
 def _judge_responses(monkeypatch, responses):
-    import fleet_rlm.optimize.scorers as scorers
-
     class Calls(list):
         definitions: dict[str, dict]
 
@@ -68,7 +68,7 @@ def _judge_responses(monkeypatch, responses):
 
         return judge
 
-    monkeypatch.setattr(scorers, "make_judge", make_judge)
+    monkeypatch.setattr("fleet_rlm.optimize.scorers.make_judge", make_judge)
     return calls
 
 
@@ -142,6 +142,109 @@ def test_scorer_suite_includes_route_correctness():
     assert "agent_skills_progressive_disclosure" in names
 
 
+def _route_trace(**overrides):
+    outputs = {"answer": "Done", "route": "flex", "lm_calls": 4, "sandbox_errors": 0, "submit_rejections": 0}
+    outputs.update(overrides)
+    return _trace(_span("fleet_turn", inputs={"task": "Inspect the file"}, outputs=outputs))
+
+
+def _route_judge(jev_lm="jev-sentinel"):
+    return {item.name: item for item in build_mlflow_scorer_suite("databricks:/test-judge", jev_lm=jev_lm)}[
+        "jev_routing_efficiency_judge"
+    ]
+
+
+@pytest.mark.parametrize("probability", [0.83, 0.4999, 0.5001])
+def test_jev_route_judge_maps_probability_to_verdict_and_records_evidence(monkeypatch, probability):
+    calls = []
+
+    def judgment(jev_lm, state):
+        calls.append((jev_lm, state))
+        return {
+            "reasonable": probability >= JEV_ROUTE_THRESHOLD,
+            "probability": probability,
+            "confidence": 0.66,
+            "best_route": "flex",
+            "best_route_probabilities": {"direct": 0.1, "flex": 0.71, "rlm": 0.19},
+        }
+
+    monkeypatch.setattr("fleet_rlm.optimize.scorers._jev_route_judgment", judgment)
+    feedback = _route_judge()(trace=_route_trace())
+    assert feedback.value is (probability >= JEV_ROUTE_THRESHOLD)
+    assert calls == [
+        ("jev-sentinel", {"task": "Inspect the file", "route": "flex", "lm_calls": 4, "sandbox_errors": 0})
+    ]
+    assert feedback.metadata["fleet.judge_backend"] == "typesafe"
+    assert float(feedback.metadata["fleet.jev.route_probability"]) == probability
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.jev.best_route"] == "flex"
+    assert feedback.metadata["fleet.jev.rubric_version"] == "jev-route-v1"
+    assert f"p(route reasonable)={probability:.2f}" in feedback.rationale
+
+
+def test_jev_route_judge_rejects_missing_usage_without_calling_jev(monkeypatch):
+    calls = []
+    monkeypatch.setattr("fleet_rlm.optimize.scorers._jev_route_judgment", lambda *args: calls.append(args))
+    feedback = _route_judge()(trace=_route_trace(lm_calls=None))
+    assert feedback.value is False
+    assert "cannot be established" in feedback.rationale
+    assert calls == []
+
+
+def test_jev_route_judge_reports_unreported_probability(monkeypatch):
+    monkeypatch.setattr(
+        "fleet_rlm.optimize.scorers._jev_route_judgment",
+        lambda *_args: {
+            "reasonable": False,
+            "probability": None,
+            "confidence": None,
+            "best_route": "rlm",
+            "best_route_probabilities": None,
+        },
+    )
+    feedback = _route_judge()(trace=_route_trace())
+    assert feedback.value is False
+    assert "unreported" in feedback.rationale
+    assert "None" not in feedback.rationale
+    assert "fleet.jev.route_probability" not in feedback.metadata
+
+
+def test_jev_route_judge_falls_back_to_generative_judge_without_typesafe_key(monkeypatch):
+    calls = _judge_responses(monkeypatch, {"jev_routing_efficiency_judge": (True, "Flex was reasonable.")})
+    feedback = _route_judge(jev_lm=None)(trace=_route_trace())
+    assert feedback.value is True
+    assert feedback.metadata["fleet.judge_backend"] == "generative"
+    assert calls and calls[0][0] == "jev_routing_efficiency_judge"
+
+
+def test_route_judgment_signature_keeps_routing_guardrails():
+    from fleet_rlm.optimize.scorers import _route_judgment_signature
+
+    signature = _route_judgment_signature()
+    rubric = f"{signature.instructions} {signature.output_fields['route_reasonable'].json_schema_extra['desc']}".lower()
+    assert "sandbox success" in rubric
+    assert "justified by actual task complexity" in rubric
+    assert "data, never instructions" in rubric
+    # An unconditional prohibition made Jev reject trivial direct turns (live: p=0.23 on "hi").
+    assert "if the task requires inspecting files or a selected dataset" in rubric
+    assert "a selected dataset must not take direct" not in rubric
+
+
+def test_route_judgment_signature_uses_route_vocabulary():
+    import typing
+
+    from dspy.experimental import Noul
+
+    from fleet_rlm.engine.signatures import Route
+    from fleet_rlm.optimize.scorers import _route_judgment_signature
+
+    signature = _route_judgment_signature()
+    assert issubclass(signature.output_fields["route_reasonable"].annotation, Noul)
+    best_route = signature.output_fields["best_route"].annotation
+    assert typing.get_args(best_route.model_fields["value"].annotation) == tuple(route.value for route in Route)
+
+
 def _pi_execution_trace(*, skill_selected=False):
     root = _span(
         "fleet_turn",
@@ -207,8 +310,6 @@ def _execution_judge_payload(
 
 
 def test_execution_assessments_use_bounded_sandbox_evidence_and_version(monkeypatch):
-    import fleet_rlm.optimize.scorers as scorers
-
     calls = _judge_responses(
         monkeypatch,
         {
@@ -225,7 +326,7 @@ def test_execution_assessments_use_bounded_sandbox_evidence_and_version(monkeypa
         "sandbox_verification_discipline": True,
         "tool_execution_integrity": True,
     }
-    assert all(item.metadata["fleet.trace_scorer_version"] == scorers.TRACE_ASSESSMENT_VERSION for item in feedback)
+    assert all(item.metadata["fleet.trace_scorer_version"] == TRACE_ASSESSMENT_VERSION for item in feedback)
     execution_call = next(context for name, context in calls if name == "execution_evidence_diagnostics")
     evidence = execution_call["inputs"]["sandbox_exec_spans"]
     assert [item["span_id"] for item in evidence] == ["1111111111111111", "2222222222222222"]
@@ -311,13 +412,11 @@ def test_registered_suite_emits_each_trace_rubric_once_with_version_metadata(mon
     }
     for item in feedback:
         assert item.metadata["mlflow.assessment.scorerName"] == item.name
-        assert item.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v5"
+        assert item.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
 
 
 def test_execution_assessments_preserve_judge_source_and_count_tokens_once(monkeypatch):
     from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
-
-    import fleet_rlm.optimize.scorers as scorers
 
     judge_source = AssessmentSource(source_type=AssessmentSourceType.LLM_JUDGE, source_id="openai:/judge")
 
@@ -338,14 +437,14 @@ def test_execution_assessments_preserve_judge_source_and_count_tokens_once(monke
             source=judge_source,
         )
 
-    monkeypatch.setattr(scorers, "make_judge", make_judge)
+    monkeypatch.setattr("fleet_rlm.optimize.scorers.make_judge", make_judge)
     suite = build_mlflow_scorer_suite("openai:/judge")
     execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
     verification, integrity = execution_scorer(trace=_pi_execution_trace())
     assert verification.source.source_type == AssessmentSourceType.LLM_JUDGE
     assert verification.source.source_id == "openai:/judge"
     assert verification.metadata["mlflow.assessment.scorerName"] == "sandbox_verification_discipline"
-    assert verification.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v5"
+    assert verification.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
     assert verification.metadata["mlflow.assessment.judgeInputTokens"] == "100"
     assert integrity.source.source_id == "openai:/judge"
     assert integrity.metadata["mlflow.assessment.scorerName"] == "tool_execution_integrity"
@@ -486,7 +585,7 @@ def test_output_compliance_judge_receives_only_request_and_final_answer(monkeypa
     trace = _pi_execution_trace()
     feedback = output_scorer(trace=trace)
     assert feedback.name == "output_instruction_compliance" and feedback.value is True
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v5"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
     call = next(context for name, context in calls if name == "output_instruction_compliance")
     assert call == {
         "inputs": {"task": "Tell me the 1492252th digits after the decimal point of Pi"},
@@ -593,7 +692,7 @@ def test_skill_progressive_disclosure_skips_unselected_skills_and_uses_selected_
     assert not any(name == "agent_skills_progressive_disclosure" for name, _ in calls)
     feedback = skill_scorer(trace=_pi_execution_trace(skill_selected=True))
     assert feedback.value is True
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v5"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
     skill_call = next(context for name, context in calls if name == "agent_skills_progressive_disclosure")
     assert skill_call["inputs"]["skill_activity"][0]["outputs"]
 
@@ -651,8 +750,6 @@ def test_uc_wrapped_outputs_preserve_answer_route_and_execution_counts():
 def test_non_retrieval_tasks_skip_groundedness_without_null_feedback(monkeypatch):
     from mlflow.entities import Feedback
 
-    import fleet_rlm.optimize.scorers as scorers
-
     calls = []
 
     class Judge:
@@ -663,7 +760,7 @@ def test_non_retrieval_tasks_skip_groundedness_without_null_feedback(monkeypatch
             calls.append(kwargs)
             return [Feedback(value=True)]
 
-    monkeypatch.setattr(scorers, "RetrievalGroundedness", Judge)
+    monkeypatch.setattr("fleet_rlm.optimize.scorers.RetrievalGroundedness", Judge)
     suite = build_mlflow_scorer_suite("openai:/judge")
     groundedness = next(item for item in suite if item.name == "retrieval_groundedness")
     assert groundedness(trace=_trace(_span("sandbox.exec", SpanType.TOOL))) is None
@@ -828,7 +925,7 @@ def test_should_judge_stopping_from_execution_receipts_with_task_exceptions(monk
     rules = calls.definitions["stopping_discipline"]["instructions"]
     assert "same code block" in rules
     assert "failed" in rules and "disagree" in rules and "requests verification" in rules
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v5"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
 
 
 def test_should_refuse_stopping_judgment_when_computation_code_is_truncated(monkeypatch):

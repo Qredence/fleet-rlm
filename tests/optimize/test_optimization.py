@@ -529,6 +529,16 @@ def test_promotion_gate_passes_a_dev_gain_that_holds_on_holdout() -> None:
     assert promotion_gate(_evaluation()).passed
 
 
+def test_retired_or_unknown_optimization_policy_cannot_use_the_generic_gate() -> None:
+    for policy in (3, 4):
+        evidence = _evaluation()
+        evidence["policy_version"] = policy
+        assert not promotion_gate(evidence).passed
+    evidence = _evaluation()
+    evidence["objective_policy"] = "external_experiment_v1"
+    assert not promotion_gate(evidence).passed
+
+
 @pytest.mark.parametrize("failure", ["quality", "critical", "usage", "error", "old_policy", "no_change", "passes"])
 def test_promotion_rejects_invalid_or_incomplete_evidence(failure):
     evaluation = _evaluation()
@@ -973,14 +983,3 @@ def test_relabelling_a_trace_overrides_the_earlier_label() -> None:
     older = SimpleNamespace(name="route", value="flex", create_time_ms=1)
     trace = SimpleNamespace(search_assessments=lambda **_kwargs: [newer, older])
     assert dataset.labels_of(trace) == {"route": "direct"}
-
-
-def test_oolong_windows_split_two_thirds_train_and_stay_stable() -> None:
-    from fleet_rlm.optimize.benchmarks import window_status
-
-    windows = [f"window-{index}" for index in range(300)]
-    statuses = [window_status(window) for window in windows]
-    assert statuses == [window_status(window) for window in windows]
-    approved = statuses.count("approved") / len(statuses)
-    assert 0.55 < approved < 0.8
-    assert set(statuses) == {"approved", "benchmark"}

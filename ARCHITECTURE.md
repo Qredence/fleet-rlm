@@ -24,8 +24,11 @@ connection pool, plus the harness that commits Turns; workspace files stay on th
 `engine/` holds the route vocabulary, every DSPy signature, the Turn program
 (`programs.py`) and the child-agent tools (`children.py`); `optimize/` holds
 datasets, scorers, the one `fleet_metric` and the GEPA runner (`fleet optimize`), and
-the single compiled-program loader. `skills.py` validates and synchronizes Skills. `config.py`
-defines the typed `FleetSettings` configuration.
+the single compiled-program loader. External benchmark datasets and official verifiers
+belong to development notebooks, with only shared API/receipt helpers in `scripts/`.
+The runtime and optimization policies do not depend on individual benchmark families.
+`skills.py` validates and synchronizes Skills. `config.py` defines the typed
+`FleetSettings` configuration.
 
 ## State and workspace
 
