@@ -2,7 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.8.1] - Unreleased
+
+### Added
+
+- Textual `@` suggestions find local files and directories by nested basename,
+  alongside cached workspace files. Submitting attaches selected content to unique
+  workspace paths. Directory uploads preserve structure, skip ignored/hidden files
+  and symlinks, and enforce file-count and size limits. Browsing never uploads.
+- Per-Turn `timeout_seconds` overrides and client-local `/timeout` controls. The
+  shipped deadline remains 900 seconds; explicit `0` disables only Fleet's deadline,
+  preserving Daytona's provider lifecycle bounds.
+- Advisory execution progress and status, plus recorded deadline, duration, cleanup,
+  live root identity, and snapshot provenance across traces and stored outcomes.
+- Repository-owned snapshot definition, build/verification tooling, resource preflight,
+  and observational reporting of missing optional packages.
 
 ### Fixed
 
@@ -17,6 +31,31 @@ All notable changes to this project are documented in this file.
   commands quote and parse filenames containing spaces; configuration aliases expose
   their supported submenus. Enter preserves exact workspace paths and free-form
   transfer destinations instead of replacing them with a prefix match.
+- Failure, cancellation, and deadline paths coordinate one teardown and fence late
+  successful host replies. Disconnects after an observed outcome preserve a successful
+  Turn's warm root; transport failures with unknown execution outcomes remain failures.
+- New Turns and replays with deadline policy but incomplete snapshot fields report
+  `unresolved` provenance; historical records remain readable as `pre-provenance`.
+- Nested local-path searches reuse their bounded index in one-minute windows instead
+  of rebuilding it every three seconds. Explicit-path browsing remains available.
+- Locked GitPython and OpenTelemetry dependencies are updated to patched versions
+  (3.2.1 and API/SDK 1.45.1 respectively), preserving the existing narrow audit exception.
+
+### Changed
+
+- Sandbox host-call waiting derives from the remaining Turn deadline instead of a
+  fixed 600-second cutoff. Deadline-free Turns explicitly send `run_code(timeout=0)`.
+- **Breaking:** environment/TOML snapshot selection is removed in favor of the
+  repository-owned definition. Configuration identities change; dependent GEPA
+  approval evidence requires revalidation.
+- Ruff lint and format checks include benchmark notebooks. Their path bootstrap runs
+  before configuration imports, with live execution and judging disabled by default.
+- Runtime, API, CLI, architecture, and contributor guidance now describe the current
+  lifecycle contracts; the obsolete audit plan is retired.
+
+## [0.8.0]
+
+### Fixed
 
 - Evaluation CLI diagnostics name the selected MLflow backend's supported experiment
   setting instead of a retired environment variable.
@@ -37,19 +76,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- Textual `@` suggestions find local files and directories by nested basename,
-  alongside cached workspace files. Submitting attaches selected content to unique
-  workspace paths. Directory uploads preserve structure, skip ignored/hidden files
-  and symlinks, and enforce file-count and size limits. Browsing never uploads.
-
 - `DELETE /sessions/{session_id}` stops a Session's sandbox, releases its lease, and drops its
   in-process runtime (history is kept); 404 without a runtime, 409 while a Turn runs.
 - Turn traces now carry `client_request_id` (the Turn id) and `fleet.*` tags (execution mode,
   idempotency key, configuration digest, route).
-- Sandbox host-call waiting derives from the Turn's remaining deadline instead of a fixed
-  600 s cutoff, so a bridged call never outlives a bounded Turn. A deadline-free Turn sends
-  `run_code(timeout=0)` and no Fleet component substitutes a fallback bound; Daytona's
-  provider TTL and idle bounds still apply.
+- Sandbox host calls fail with `TimeoutError` inside the sandbox after 600s (bounded by the
+  execution timeout) instead of stalling until the Turn deadline.
 - Shared learned notes: root sandboxes mount `FLEET_SHARED_NOTES_SUBPATH` (default
   `shared/learned-notes`) at `/learned`. Each committed Turn's learned note is written there
   as an unreviewed, redacted file, and later Sessions see the newest summaries in their memory
