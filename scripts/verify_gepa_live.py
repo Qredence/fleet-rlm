@@ -90,7 +90,6 @@ def main() -> None:
             settings.fleet_daytona_org_id,
             settings.fleet_daytona_volume_id,
             f"{run_id}-{len(managers)}",
-            snapshot=settings.fleet_daytona_snapshot,
             max_llm_calls=1,
             max_depth=0,
             max_children=1,

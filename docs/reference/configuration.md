@@ -17,7 +17,6 @@ source control.
 | `FLEET_DAYTONA_API_KEY` | empty | Daytona API credential. |
 | `FLEET_DAYTONA_ORG_ID` | empty | Daytona organization ID. |
 | `FLEET_DAYTONA_VOLUME_ID` | empty | Daytona Volume ID. |
-| `FLEET_DAYTONA_SNAPSHOT` | `fleet-rlm-base` | Daytona snapshot name. |
 | `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes. Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. The checked-in `config/fleet.toml` selects `openai/system.ai.deepseek-v4-1-flash-1017`. |
@@ -34,7 +33,7 @@ source control.
 | `FLEET_MAX_AGENT_DEPTH` | `3` | Maximum recursive child depth (root is zero). |
 | `FLEET_MAX_CHILD_SANDBOXES` | `8` | Total child allocations per turn. |
 | `FLEET_MAX_ACTIVE_CHILDREN` | `4` | Active child capacity; exhaustion fails immediately, avoiding a spawn/join wait cycle. |
-| `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Turn deadline enforced by a remote-stop watchdog. |
+| `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. `0` is opt-in and is not the default. |
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
@@ -144,6 +143,34 @@ reconciled when the owning session next provisions a root. Provider TTL remains
 the fallback if local state is lost. This is not a distributed global reaper.
 
 
+## Turn deadlines
+
+`FLEET_TURN_TIMEOUT_SECONDS` (TOML `[runtime] turn_timeout_seconds`) accepts exactly
+`0` or `10`–`3600` as an integer. `0` means the Turn has no Fleet wall-clock
+deadline. It is opt-in, not the default: the shipped value stays `900`. Booleans,
+floats, negatives, `1`–`9`, values above `3600`, and numeric text outside the
+environment transport are rejected before a Session runs.
+
+The deadline is resolved once at Turn start, before any work begins, with this
+precedence:
+
+| Source | Selected when |
+| --- | --- |
+| `request` | `POST /sessions/{session_id}/turn` supplies `timeout_seconds`. The terminal client's `/timeout` override is also sent this way. |
+| `configuration` | `turn_timeout_seconds` was set by TOML, `.env`, or the environment. |
+| `default` | Neither override is present, so the shipped `900` applies. |
+
+Omitting the request field or sending `null` inherits the configured value.
+Request `0` disables the Fleet deadline for that Turn. The server reports only
+`request`, `configuration`, or `default`; it never reports a command source. The
+effective source and duration are recorded on the `fleet_turn` span, the stored
+Turn, and new replay snapshots.
+
+Deadline-free is not "unbounded". Daytona's provider-owned `ttl_minutes` and
+`auto_stop_interval` still apply to every sandbox, are reported on the Turn as
+provider-owned bounds, and are neither removed nor shortened by Fleet. Only the
+Fleet wall-clock deadline is disabled.
+
 ## TOML loading and provenance
 
 Precedence, lowest to highest: built-in defaults, TOML, `.env`, process
@@ -173,6 +200,18 @@ search, environment interpolation or hot reload. Every file must declare
 
 The configuration digest includes the selected backend and both profiles.
 Existing GEPA approval evidence with a different identity requires reevaluation.
+Removing the former snapshot setting (`[daytona] snapshot` and its environment
+override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots.py`
+and cannot be selected through the environment or TOML) intentionally changes
+`configuration()`'s digest. Treat that as an intentional configuration identity
+break: prior digests identify a different configuration, so dependent GEPA approval
+evidence must be revalidated.
+
+The build command named by a snapshot preflight refusal resolves its Daytona
+credentials through the same supported settings: `FLEET_DAYTONA_API_KEY`, and
+`FLEET_DAYTONA_ORG_ID` or `[daytona] org_id`. Explicit `api_key` / `org_id`
+arguments take precedence, and an empty resolved credential fails construction
+with an error naming the missing setting instead of opening an empty-key client.
 
 Blank dotenv values are intentional overrides, including disabling shared notes.
 Leave optional non-secret overrides commented out rather than inserting blank
@@ -210,11 +249,11 @@ The small development comparison is not a general performance guarantee.
 | Legacy section | Schema-3 disposition |
 | --- | --- |
 | config/application | Schema becomes 3; application name is not a runtime setting. |
-| runtime | Turn deadline migrates; old live/lease/I/O/heartbeat controls retire. |
+| runtime | Turn deadline migrates and stays optional (`0` or `10`–`3600`); old live/lease/I/O/heartbeat controls retire. |
 | llm.root/sub | Verified role identifiers replace legacy ones; generation options are supported; credential references and per-model timeouts retire. |
 | rlm | Shared call limit moves to runtime; iteration/wrap-up/finalization/recursion/output/memory knobs are retired and are not silently mapped. |
 | storage | Upload limit moves to current supported bound; database URL stays environment-only; old data_root/artifact knobs retire. |
-| daytona | Snapshot/org/Volume IDs use supported fields; volume_name is not a Volume ID; old child-snapshot/mount settings retire. |
+| daytona | Organization and Volume IDs use supported fields; the Turn snapshot is repository-owned and not configurable; volume_name is not a Volume ID; old child-snapshot/mount settings retire. |
 | logging | Legacy logging-level control retires. |
 | mlflow | Tracking/experiment settings migrate; legacy tracing/sampling/export knobs retire. |
 | posthog/capture | Retired; no inactive telemetry or retention configuration remains. |

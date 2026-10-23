@@ -20,6 +20,9 @@ default. It stores artifact/delegation gold without changing replay snapshots.
 Migration 4 renames `fleet_lite_vfs_files` to `fleet_lite_vfs_files_retired`.
 Fleet no longer reads or writes it; the rows stay for manual recovery and the
 table can be dropped by an operator.
+Migration 5 adds `fleet_lite_sessions.environment_reported`, the durable
+once-per-Session marker for the soft `sandbox_environment_incomplete`
+observation. Existing rows default to unreported; no backfill is performed.
 The migration role owns the change; existing runtime DML grants apply.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
@@ -33,8 +36,10 @@ compatibility schema `public`, while the checked-in config selects
 `fleet_rlm_lite` for the fresh application database. The configured database
 must already exist with appropriate permissions.
 
-`fleet_lite_sessions` stores each session's timestamp, memory summary, and
-bounded turn history as JSONB. A Turn's record, memory note, optional replay
+`fleet_lite_sessions` stores each session's timestamp, memory summary, bounded
+turn history as JSONB, and the once-per-Session environment-observation marker.
+Releasing a runtime keeps the row, so reopening the Session does not repeat the
+observation. A Turn's record, memory note, optional replay
 snapshot and completion commit in one transaction; workspace file bytes are not
 copied to PostgreSQL.
 

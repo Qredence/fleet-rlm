@@ -29,8 +29,10 @@ All notable changes to this project are documented in this file.
   in-process runtime (history is kept); 404 without a runtime, 409 while a Turn runs.
 - Turn traces now carry `client_request_id` (the Turn id) and `fleet.*` tags (execution mode,
   idempotency key, configuration digest, route).
-- Sandbox host calls fail with `TimeoutError` inside the sandbox after 600s (bounded by the
-  execution timeout) instead of stalling until the Turn deadline.
+- Sandbox host-call waiting derives from the Turn's remaining deadline instead of a fixed
+  600 s cutoff, so a bridged call never outlives a bounded Turn. A deadline-free Turn sends
+  `run_code(timeout=0)` and no Fleet component substitutes a fallback bound; Daytona's
+  provider TTL and idle bounds still apply.
 - Shared learned notes: root sandboxes mount `FLEET_SHARED_NOTES_SUBPATH` (default
   `shared/learned-notes`) at `/learned`. Each committed Turn's learned note is written there
   as an unreviewed, redacted file, and later Sessions see the newest summaries in their memory

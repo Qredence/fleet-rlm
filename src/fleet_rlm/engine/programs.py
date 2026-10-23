@@ -118,7 +118,7 @@ class AdaptiveFleetEngine(dspy.Module):
         execution_mode: str | None = None,
     ) -> dspy.Prediction:
         """Run one Turn, attaching the execution evidence and turn usage that scoring reads."""
-        owns_turn = not self.sandbox_mgr.root._deadline
+        owns_turn = not self.sandbox_mgr.turn_active
         try:
             with dspy.context(callbacks=usage_callbacks(list(dspy.settings.callbacks))):
                 prediction = self._run_turn(
@@ -173,7 +173,9 @@ class AdaptiveFleetEngine(dspy.Module):
         execution_mode: str | None,
     ) -> dspy.Prediction:
         self.compiled.reload_if_changed(self)
-        if not self.sandbox_mgr.root._deadline:
+        if not self.sandbox_mgr.turn_active:
+            # Only the Turn's owner initializes the shared budgets; a Turn already started by
+            # the API stream (including a deadline-free one) must not be reset a second time.
             self.sandbox_mgr.reset_turn_budget()
         self.sandbox_mgr.check_turn()
         mode = execution_mode or self.execution_mode

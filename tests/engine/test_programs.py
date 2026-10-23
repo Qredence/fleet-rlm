@@ -81,6 +81,35 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
     assert "typesafe-test-token" not in caplog.text
 
 
+def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
+    """A Turn the API already started must not reset shared budgets or end itself in the engine."""
+    engine = _answering_engine()
+    manager = engine.sandbox_mgr
+    manager.reset_turn_budget(deadline_seconds=None, deadline_source="request")
+    calls = {"reset": 0, "end": 0}
+    original_reset = DaytonaSandboxManager.reset_turn_budget
+    original_end = DaytonaSandboxManager.end_turn
+
+    def counting_reset(self, **kwargs):
+        calls["reset"] += 1
+        return original_reset(self, **kwargs)
+
+    def counting_end(self):
+        calls["end"] += 1
+        return original_end(self)
+
+    monkeypatch.setattr(DaytonaSandboxManager, "reset_turn_budget", counting_reset)
+    monkeypatch.setattr(DaytonaSandboxManager, "end_turn", counting_end)
+
+    try:
+        prediction = engine(workspace_manifest="", memory_summary="", task="compute")
+    finally:
+        original_end(manager)
+
+    assert prediction.answer == "computed"
+    assert calls == {"reset": 0, "end": 0}
+
+
 def _answering_engine() -> AdaptiveFleetEngine:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     engine = AdaptiveFleetEngine(

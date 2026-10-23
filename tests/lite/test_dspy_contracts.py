@@ -81,12 +81,14 @@ def test_multiple_completions_reserve_each_distinct_budget_once():
 @pytest.mark.parametrize("outcome", ["success", "failed", "cancelled"])
 def test_native_child_promotion_belongs_to_successful_host_invocation(outcome):
     events = []
+    invocations = []
     m = manager()
     child_manager = SimpleNamespace(
         collect_child_artifacts=lambda: events.append("promoted"), shutdown=lambda: events.append("closed")
     )
 
     def call():
+        invocations.append("predictor")
         child = DaytonaInterpreter(child_manager, owns_manager=True)
         try:
             if outcome == "failed":
@@ -103,10 +105,18 @@ def test_native_child_promotion_belongs_to_successful_host_invocation(outcome):
         m.check_turn = cancelled
     interpreter = DaytonaInterpreter(m, tools={"predictor": call})
     m.replies.append(interpreter._handle_host_call({"id": "call", "tool": "predictor", "args": []}))
-    if outcome in {"failed", "cancelled"}:
+    if outcome == "cancelled":
+        # The pre-tool fence answers before dispatch: no tool call, no child, error reply.
+        assert invocations == []
+        assert events == []
+        assert "cancelled" in m.replies[-1]["error"]
+    elif outcome == "failed":
+        # The tool is already running when it fails; its finally block closes the child once.
+        assert invocations == ["predictor"]
         assert events == ["closed"]
         assert "error" in m.replies[-1]
     else:
+        assert invocations == ["predictor"]
         assert events == ["promoted", "closed"]
         assert "value" in m.replies[-1]
 

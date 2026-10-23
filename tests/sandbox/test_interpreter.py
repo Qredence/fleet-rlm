@@ -131,9 +131,14 @@ def test_dataset_initialization_failure_closes_native_interpreters(sandbox, rout
     assert lm.history == []
 
 
-def manager_on(sandbox, events=None, name="interp-test") -> DaytonaSandboxManager:
+def manager_on(sandbox, events=None, name="interp-test", claim=None) -> DaytonaSandboxManager:
     manager = DaytonaSandboxManager(
-        "key", "org", "volume", name, event_callback=events.append if events is not None else None
+        "key",
+        "org",
+        "volume",
+        name,
+        event_callback=events.append if events is not None else None,
+        environment_report_claim=claim,
     )
     manager._sandbox = sandbox
     manager._client = SimpleNamespace(stop=lambda stopped, **_kwargs: STOPPED.append(stopped.id))
@@ -310,6 +315,48 @@ def test_a_failing_host_tool_raises_in_the_sandbox_and_is_reported(sandbox):
     assert tool_end["ok"] is False and tool_end["error_type"] == "LookupError"
 
 
+def test_host_call_cancellation_skips_the_tool_and_returns_prompt_feedback(sandbox):
+    events: list[dict[str, Any]] = []
+    invoked: list[str] = []
+
+    def sentinel() -> None:
+        invoked.append("called")
+
+    manager = manager_on(sandbox, events)
+    manager._cancelled.set()
+    interpreter = DaytonaInterpreter(manager, tools={"sentinel": sentinel})
+    started = time.monotonic()
+    reply = interpreter.answer_host_call({"id": "call-1", "tool": "sentinel", "args": [], "kwargs": {}})
+    elapsed = time.monotonic() - started
+
+    assert invoked == []
+    assert "cancel" in reply["error"].lower()
+    assert elapsed < 1
+    assert [event["event"] for event in events] == ["tool_start", "tool_end"]
+    assert events[-1]["ok"] is False and events[-1]["error_type"] == "RuntimeError"
+
+
+def test_an_in_flight_success_after_cancellation_is_fenced_without_upload(sandbox):
+    events: list[dict[str, Any]] = []
+    manager = manager_on(sandbox, events)
+    interpreter = DaytonaInterpreter(manager)
+
+    def answer(_call: dict[str, Any]) -> dict[str, Any]:
+        manager.cancel_turn()
+        return {"value": "late answer"}
+
+    interpreter.answer_host_call = answer
+    with pytest.raises(RuntimeError, match="cancelled"):
+        manager.run_namespace(
+            interpreter,
+            {"code": "late_tool()", "variables": {}, "tools": ["late_tool"], "host_call_timeout": 0.3},
+        )
+
+    assert sandbox.fs.uploads == []
+    [fenced] = [event for event in events if event["event"] == "fenced"]
+    assert fenced["namespace"] == interpreter.ns_id
+
+
 def test_a_lost_transport_stops_the_turn_without_replay(sandbox, monkeypatch):
     events = []
     manager = manager_on(sandbox, events)
@@ -337,6 +384,22 @@ def test_an_expired_deadline_prevents_execution(sandbox):
         DaytonaInterpreter(manager).execute("42")
     assert sandbox.code_interpreter.run_calls == runs
     assert manager._cancelled.is_set()
+
+
+def test_a_sub_second_remainder_is_classified_as_a_deadline_not_transport_uncertainty(sandbox):
+    events: list[dict[str, Any]] = []
+    manager = manager_on(sandbox, events)
+    interpreter = DaytonaInterpreter(manager)
+    manager._contexts = {interpreter.ns_id: object()}  # a prepared namespace: no preamble run during the Turn
+    manager._deadline = time.monotonic() + 0.4
+    runs = sandbox.code_interpreter.run_calls
+
+    with pytest.raises(TimeoutError, match="deadline"):
+        interpreter.execute("42")
+
+    assert sandbox.code_interpreter.run_calls == runs, "no execution may start"
+    assert manager._cancelled.is_set()
+    assert events[-1]["outcome"] == "deadline", "an unrepresentable bound is not a transport failure"
 
 
 def test_shutdown_drops_the_namespace_context(sandbox):
@@ -503,3 +566,303 @@ def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sa
     assert any(event["event"] == "learned_note_warning" for event in events)
     assert lm.history == []
     assert fixture["neighborhood"][10] == fixture["answer"]
+
+
+_OBSERVED_ENVIRONMENT = (
+    "Sandbox environment: Python 3.13.13; installed: numpy 2.5.1, pandas 3.0.5, mpmath 1.4.1; "
+    "not installed: scipy, sympy, gmpy2, polars, pyarrow, sklearn; call "
+    "sys.set_int_max_str_digits(0) before converting integers over 4300 digits to str."
+)
+_OBSERVED_MISSING = ["scipy", "sympy", "gmpy2", "polars", "pyarrow", "sklearn"]
+
+
+def _environment_probe(missing: list[str], environment: str = _OBSERVED_ENVIRONMENT) -> str:
+    return json.dumps({"digests": {}, "notes": [], "environment": environment, "missing": missing}, sort_keys=True)
+
+
+def test_environment_incomplete_event_is_emitted_once_per_session(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    manager = manager_on(sandbox, events)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
+    )
+
+    turns = [manager.turn_inputs() for _ in range(3)]
+
+    observed = [event for event in events if event["event"] == "sandbox_environment_incomplete"]
+    assert len(observed) == 1
+    assert observed[0]["missing"] == _OBSERVED_MISSING
+    assert all(turn["environment"] == _OBSERVED_ENVIRONMENT for turn in turns)
+    assert manager.turn_usage()["sandbox_errors"] == 0
+
+
+def test_environment_incomplete_event_is_absent_when_nothing_is_missing(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    manager = manager_on(sandbox, events)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe([]),
+    )
+
+    inputs = manager.turn_inputs()
+
+    assert [event for event in events if event["event"] == "sandbox_environment_incomplete"] == []
+    assert inputs["environment"] == _OBSERVED_ENVIRONMENT
+
+
+def test_environment_incomplete_event_reports_a_single_absent_module_without_failing(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    manager = manager_on(sandbox, events)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe(["scipy"]),
+    )
+
+    inputs = manager.turn_inputs()
+
+    [observed] = [event for event in events if event["event"] == "sandbox_environment_incomplete"]
+    assert observed["missing"] == ["scipy"]
+    assert inputs["environment"] == _OBSERVED_ENVIRONMENT
+    assert manager.turn_usage()["sandbox_errors"] == 0
+
+
+class _DurableEnvironmentClaims:
+    """Durable Session-scope marker standing in for the Store's atomic claim."""
+
+    def __init__(self) -> None:
+        self.reported: set[str] = set()
+
+    def __call__(self, session_id: str) -> bool:
+        if session_id in self.reported:
+            return False
+        self.reported.add(session_id)
+        return True
+
+
+def test_environment_incomplete_event_survives_runtime_release_and_reopen(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    claims = _DurableEnvironmentClaims()
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
+    )
+
+    first = manager_on(sandbox, events, claim=claims)
+    first.turn_inputs()
+    # Releasing the runtime keeps the durable Session; reopening builds a manager with no
+    # in-memory flag, so only the durable marker can suppress the duplicate.
+    reopened = manager_on(sandbox, events, claim=claims)
+    reopened.turn_inputs()
+
+    observed = [event for event in events if event["event"] == "sandbox_environment_incomplete"]
+    assert len(observed) == 1
+    assert observed[0]["missing"] == _OBSERVED_MISSING
+    assert claims.reported == {"interp-test"}
+    assert first.turn_usage()["sandbox_errors"] == reopened.turn_usage()["sandbox_errors"] == 0
+
+
+def test_environment_incomplete_event_survives_a_lease_loss_rebuild(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    claims = _DurableEnvironmentClaims()
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe(["scipy"]),
+    )
+
+    manager_on(sandbox, events, claim=claims).turn_inputs()
+    rebuilt = manager_on(sandbox, events, claim=claims)
+    rebuilt.turn_inputs()
+
+    [observed] = [event for event in events if event["event"] == "sandbox_environment_incomplete"]
+    assert observed["missing"] == ["scipy"]
+    assert rebuilt.turn_usage()["sandbox_errors"] == 0
+
+
+def test_environment_incomplete_event_is_not_duplicated_after_release_but_a_new_session_emits(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    claims = _DurableEnvironmentClaims()
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
+    )
+
+    original = manager_on(sandbox, events, claim=claims)
+    original.turn_inputs()
+    released = manager_on(sandbox, events, claim=claims)
+    released.turn_inputs()
+    other_events: list[dict[str, Any]] = []
+    other = manager_on(sandbox, other_events, name="interp-other", claim=claims)
+    other.turn_inputs()
+
+    assert len([event for event in events if event["event"] == "sandbox_environment_incomplete"]) == 1
+    [other_event] = [event for event in other_events if event["event"] == "sandbox_environment_incomplete"]
+    assert other_event["missing"] == _OBSERVED_MISSING
+    assert claims.reported == {"interp-test", "interp-other"}
+
+
+def test_environment_incomplete_event_emits_nothing_when_the_durable_marker_is_already_set(sandbox, monkeypatch):
+    events: list[dict[str, Any]] = []
+    claims = _DurableEnvironmentClaims()
+    claims.reported.add("interp-test")
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "exec_remote_python",
+        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
+    )
+
+    manager_on(sandbox, events, claim=claims).turn_inputs()
+
+    assert [event for event in events if event["event"] == "sandbox_environment_incomplete"] == []
+
+
+def test_progress_scope_reports_bounded_checkpoints_through_the_existing_protocol(sandbox):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+
+    assert (
+        interpreter.execute(
+            "with progress_scope('scan workspace', expect_seconds=5) as progress:\n"
+            "    progress.checkpoint(1)\n"
+            "    progress.checkpoint(1)\n"
+            "    progress.checkpoint(9)\n"
+            "    total = 9\n"
+            "print(total)"
+        )
+        == "9"
+    )
+
+    progress = [event for event in events if event["event"] == "progress"]
+    assert [(event["scope"], event["phase"]) for event in progress] == [
+        ("scan workspace", "start"),
+        ("scan workspace", "checkpoint"),
+        ("scan workspace", "checkpoint"),
+        ("scan workspace", "exit"),
+    ]
+    assert [event["checkpoint"] for event in progress if event["phase"] == "checkpoint"] == [1, 9]
+    assert all(event["execution_id"] for event in progress)
+    allowed = {
+        "event",
+        "phase",
+        "scope",
+        "expect_seconds",
+        "checkpoint",
+        "namespace",
+        "execution_id",
+        "agent_id",
+        "parent_agent_id",
+        "sandbox_id",
+        "status",
+    }
+    assert all(set(event) <= allowed for event in progress), "no source, stdout, or arbitrary object leaks"
+    assert not any(token in json.dumps(progress) for token in ("total = 9", "%", "percent", "complete"))
+
+
+@pytest.mark.parametrize(
+    ("code", "scope_started"),
+    [
+        ("progress_scope('', 5)", False),
+        ("progress_scope('x' * 65, 5)", False),
+        ("progress_scope('ok', 0)", False),
+        ("progress_scope('ok', -1)", False),
+        ("progress_scope('ok', float('nan'))", False),
+        ("progress_scope('ok', float('inf'))", False),
+        ("progress_scope('ok', '5')", False),
+        ("progress_scope('ok', True)", False),
+        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint(-1)", True),
+        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint(1.5)", True),
+        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint('3')", True),
+        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint(True)", True),
+    ],
+)
+def test_progress_scope_rejects_invalid_input_without_emitting_a_scope(sandbox, code, scope_started):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+
+    with pytest.raises(CodeExecutionError):
+        interpreter.execute(code)
+
+    progress = [event for event in events if event["event"] == "progress"]
+    if not scope_started:
+        assert progress == [], "an invalid argument never creates a usable scope"
+    assert [event for event in progress if event["phase"] == "checkpoint"] == []
+    assert [event for event in progress if event["phase"] == "stalled"] == []
+
+
+def test_progress_scope_expectation_is_immutable_and_use_is_main_thread_only(sandbox):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+
+    result = interpreter.execute(
+        "scope = progress_scope('scan', 2)\n"
+        "try:\n"
+        "    scope.expect_seconds = 1\n"
+        "except AttributeError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise AssertionError('expectation was mutable')\n"
+        "try:\n"
+        "    scope.label = 'renamed'\n"
+        "except AttributeError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise AssertionError('label was mutable')\n"
+        "import threading\n"
+        "errors = []\n"
+        "def worker():\n"
+        "    try:\n"
+        "        progress_scope('threaded', 1)\n"
+        "    except RuntimeError as exc:\n"
+        "        errors.append(str(exc))\n"
+        "thread = threading.Thread(target=worker)\n"
+        "thread.start()\n"
+        "thread.join()\n"
+        "assert errors and 'main thread' in errors[0]\n"
+        "print(scope.expect_seconds)"
+    )
+
+    assert result == "2.0"
+    assert [event for event in events if event["event"] == "progress"] == []
+
+
+def test_nested_progress_scopes_are_independent_and_never_survive_the_cell(sandbox):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+
+    interpreter.execute(
+        "with progress_scope('outer', 10) as outer:\n"
+        "    with progress_scope('inner', 1) as inner:\n"
+        "        inner.checkpoint(1)\n"
+        "    outer.checkpoint(1)\n"
+        "print('done')"
+    )
+
+    timeline = [(event["scope"], event["phase"]) for event in events if event["event"] == "progress"]
+    assert timeline == [
+        ("outer", "start"),
+        ("inner", "start"),
+        ("inner", "checkpoint"),
+        ("inner", "exit"),
+        ("outer", "checkpoint"),
+        ("outer", "exit"),
+    ]
+    emitted = len([event for event in events if event["event"] == "progress"])
+
+    # The retained handle belongs to the previous cell: it cannot renew or emit in this one.
+    with pytest.raises(CodeExecutionError, match="ended"):
+        interpreter.execute("outer.checkpoint(2)")
+    assert [event for event in events if event["event"] == "progress"][emitted:] == []
+
+
+def test_progress_scope_cannot_be_shadowed_by_a_variable_or_earlier_cell(sandbox):
+    events: list[dict[str, Any]] = []
+    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
+
+    interpreter.execute("progress_scope = 'shadowed'")
+    assert interpreter.execute("callable(progress_scope)") is True

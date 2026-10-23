@@ -45,7 +45,6 @@ cache = false
 model = "jev-1.14.0"
 
 [daytona]
-snapshot = "fleet-rlm-base"
 auto_stop_minutes = 30
 shared_notes_subpath = "shared/learned-notes"
 # Set org_id/volume_id here or FLEET_DAYTONA_ORG_ID/FLEET_DAYTONA_VOLUME_ID.
