@@ -175,10 +175,11 @@ ignore = ["D105", "D107"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
-# Scripts and the `fleet optimize` command print operator-facing CLI output.
+# Scripts, notebooks, and `fleet optimize` intentionally print status output.
 # Tests and scripts are not documented API, so pydocstyle does not apply to them.
 [tool.ruff.lint.per-file-ignores]
 "scripts/**/*.py" = ["T201", "D"]
+"notebooks/**/*.ipynb" = ["T201"]
 "tests/**/*.py" = ["D"]
 "src/fleet_rlm/optimize/gepa.py" = ["T201"]
 "src/fleet_rlm/optimize/dataset.py" = ["T201"]

@@ -4,6 +4,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import sys
 from collections import Counter, defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
@@ -245,6 +246,27 @@ def notebook_functions(name, namespace):
             tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
             exec(compile(tree, name, "exec"), namespace)
     return namespace
+
+
+@pytest.mark.parametrize("name", ["longcot_benchmark", "oolong_benchmark"])
+@pytest.mark.parametrize("from_notebooks", [False, True])
+def test_notebook_bootstrap_resolves_scripts_before_configuration(monkeypatch, name, from_notebooks):
+    document = json.loads((ROOT / "notebooks" / f"{name}.ipynb").read_text())
+    cells = {cell["id"]: cell for cell in document["cells"]}
+    assert list(cells).index("setup") < list(cells).index("configuration")
+    monkeypatch.chdir(ROOT / "notebooks" if from_notebooks else ROOT)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    namespace = {}
+    exec(compile("".join(cells["setup"]["source"]), name, "exec"), namespace)
+    assert namespace["ROOT"] == ROOT.resolve()
+    assert sys.path[0] == str(ROOT.resolve() / "scripts")
+    configuration = ast.parse("".join(cells["configuration"]["source"]))
+    flags = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in configuration.body
+        if isinstance(node, ast.Assign) and node.targets[0].id in {"ALLOW_LIVE", "ALLOW_JUDGES"}
+    }
+    assert flags == {"ALLOW_LIVE": False, "ALLOW_JUDGES": False}
 
 
 def test_longcot_hf_join_preserves_all_domains_and_requires_prompt_identity():

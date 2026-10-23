@@ -15,7 +15,9 @@ make check-security
 
 For focused changes, run the relevant tests with `uv run pytest -q <path>` and
 the relevant Make targets. `make check` is the repository's non-live quality
-gate. It must not require Daytona, model-provider, or production credentials.
+gate. Ruff lint and format checks include `notebooks/`, matching the pre-commit
+hooks. These checks do not execute notebook cells or live benchmarks. The quality
+gate must not require Daytona, model-provider, or production credentials.
 CircleCI splits the same non-live quality gate across static checks, complete
 test runs on Python 3.11 and 3.13, a Smarter Testing pytest run on Python 3.12,
 package build and smoke checks, and one locked dependency audit. The aggregate
