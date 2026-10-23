@@ -183,9 +183,12 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     assert [event["event"] for event in events] == ["turn_status", "turn_complete", "done"]
     assert events[0]["payload"] == {"phase": "preparation"}
     payload = events[1]["payload"]
-    assert payload.pop("turn_id") == records[0]["turn_id"]
-    assert payload.pop("outcome") == "completed"
-    assert payload.pop("duration_seconds") >= 0
+    turn_id = payload.pop("turn_id")
+    outcome = payload.pop("outcome")
+    duration_seconds = payload.pop("duration_seconds")
+    assert turn_id == records[0]["turn_id"]
+    assert outcome == "completed"
+    assert duration_seconds >= 0
     assert payload == {
         "answer": "processed locally",
         "route": "flex",
@@ -451,10 +454,7 @@ def test_one_turn_joins_across_terminal_envelope_record_and_span(traced) -> None
     assert traced["outputs"]["answer"] == terminal["answer"] == turn_record["answer"]
     # Stored record and span duration are one measurement; MLflow's own span duration differs
     # only at the span boundary, within the documented tolerance.
-    assert (
-        abs(traced["attributes"]["duration_seconds"] - turn_record["duration_seconds"])
-        <= turn_module._WALL_DURATION_TOLERANCE_SECONDS
-    )
+    assert abs(traced["attributes"]["duration_seconds"] - turn_record["duration_seconds"]) <= 2.0
 
 
 def test_snapshot_provenance_survives_a_preparation_failure_after_preflight(traced, monkeypatch) -> None:

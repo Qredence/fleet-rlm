@@ -44,11 +44,6 @@ _MAX_SHARED_NOTES = 8
 _NOTE_DUPLICATE_SIMILARITY = 0.5
 # The field that carries the teardown result on the stored Turn, its span, and the terminal event.
 _CLEANUP_ATTRIBUTE = "cleanup"
-# One effective wall duration is measured with `time.monotonic()` and recorded unchanged on the
-# Turn record, the status payload, the terminal event, and a span attribute. MLflow derives its own
-# span duration from timestamps taken just outside this measurement, so the two differ only by the
-# span boundary; the documented tolerance for joining them is two seconds.
-_WALL_DURATION_TOLERANCE_SECONDS = 2.0
 # The live root provider handle id, recorded only when this Turn actually provisioned one.
 _ROOT_SANDBOX_ATTRIBUTE = "root_sandbox_id"
 # Provider-owned lifecycle bounds, surfaced unchanged and distinct from the Fleet deadline.
@@ -229,7 +224,7 @@ def run_turn(
                 if provider_bounds_attribute is not None:
                     span.set_attribute("provider_bounds", provider_bounds_attribute)
                 # One wall duration for every surface; the span attribute and the stored record are
-                # joined within `_WALL_DURATION_TOLERANCE_SECONDS` of MLflow's own span duration.
+                # joined within the documented two-second tolerance of MLflow's own span duration.
                 duration_seconds = round(time.monotonic() - started_at, 3)
                 turn_record = {
                     "task": task,

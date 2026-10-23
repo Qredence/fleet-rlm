@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from fleet_rlm.tui import local_paths, mentions
 from fleet_rlm.tui.app import FleetTextualApp, _PromptInput
 from fleet_rlm.tui.commands import COMMANDS, SessionState
 
@@ -705,7 +706,6 @@ async def test_partial_directory_upload_failure_keeps_draft_and_never_starts_a_t
 @pytest.mark.usefixtures("git_mention_project")
 def test_directory_mentions_preserve_structure_and_deduplicate_overlaps(mention):
     from fleet_rlm.tui.commands import Context
-    from fleet_rlm.tui.mentions import attach_local_mentions
 
     uploaded = []
 
@@ -717,7 +717,7 @@ def test_directory_mentions_preserve_structure_and_deduplicate_overlaps(mention)
     text = f"Review @{mention} @./src/fleet_rlm/nested @./src/fleet_rlm/__init__.py @{mention}"
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         ctx = Context(client, "directory-overlap", SessionState())
-        rewritten = attach_local_mentions(ctx, text, cancelled=lambda: False)
+        rewritten = mentions.attach_local_mentions(ctx, text, cancelled=lambda: False)
         root = uploaded[0].split("/fleet_rlm/", 1)[0] + "/fleet_rlm"
         assert rewritten == f"Review @{root} @{root}/nested @{root}/__init__.py @{root}"
         assert len(uploaded) == len(set(uploaded)) == 2
@@ -726,7 +726,6 @@ def test_directory_mentions_preserve_structure_and_deduplicate_overlaps(mention)
 @pytest.mark.parametrize("limit", ["files", "bytes"])
 @pytest.mark.usefixtures("git_mention_project")
 def test_directory_limits_refuse_before_upload_instead_of_truncating(monkeypatch, limit):
-    import fleet_rlm.tui.mentions as mentions
     from fleet_rlm.tui.commands import Context
 
     monkeypatch.setattr(mentions, "_MAX_DIRECTORY_FILES" if limit == "files" else "_MAX_DIRECTORY_BYTES", 1)
@@ -744,7 +743,6 @@ def test_directory_limits_refuse_before_upload_instead_of_truncating(monkeypatch
 @pytest.mark.usefixtures("git_mention_project")
 def test_cancelling_directory_upload_skips_remaining_files():
     from fleet_rlm.tui.commands import Context
-    from fleet_rlm.tui.mentions import attach_local_mentions
 
     uploaded = []
 
@@ -755,18 +753,16 @@ def test_cancelling_directory_upload_skips_remaining_files():
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         ctx = Context(client, "directory-cancel")
         text = "Read @src/fleet_rlm"
-        assert attach_local_mentions(ctx, text, cancelled=lambda: bool(uploaded)) == text
+        assert mentions.attach_local_mentions(ctx, text, cancelled=lambda: bool(uploaded)) == text
         assert len(uploaded) == len(ctx.state.workspace_files) == 1
 
 
 @pytest.mark.usefixtures("git_mention_project")
 def test_directory_discovery_respects_gitignore_negations(tmp_path):
-    from fleet_rlm.tui.local_paths import iter_local_files
-
     folder = tmp_path / "src" / "fleet_rlm"
     (folder / "keep.tmp").write_text("explicitly unignored")
     (tmp_path / ".gitignore").write_text("ignored/\n*.tmp\n!src/fleet_rlm/keep.tmp\n")
-    assert {path.as_posix() for path in iter_local_files(folder)} == {
+    assert {path.as_posix() for path in local_paths.iter_local_files(folder)} == {
         "__init__.py",
         "nested/settings.py",
         "keep.tmp",
@@ -775,9 +771,7 @@ def test_directory_discovery_respects_gitignore_negations(tmp_path):
 
 @pytest.mark.usefixtures("git_mention_project")
 def test_directory_upload_fails_closed_when_git_cannot_inspect_ignores(monkeypatch):
-    import fleet_rlm.tui.local_paths as local_paths
     from fleet_rlm.tui.commands import Context
-    from fleet_rlm.tui.mentions import attach_local_mentions
 
     def no_git(*_args, **_kwargs):
         raise FileNotFoundError("git is unavailable")
@@ -790,7 +784,7 @@ def test_directory_upload_fails_closed_when_git_cannot_inspect_ignores(monkeypat
         httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(unexpected)) as client,
         pytest.raises(ValueError, match="Git is required"),
     ):
-        attach_local_mentions(Context(client, "no-git"), "Read @src/fleet_rlm", cancelled=lambda: False)
+        mentions.attach_local_mentions(Context(client, "no-git"), "Read @src/fleet_rlm", cancelled=lambda: False)
 
 
 def test_directory_upload_outside_git_skips_hidden_entries_and_symlinks(monkeypatch, tmp_path):
@@ -798,7 +792,6 @@ def test_directory_upload_outside_git_skips_hidden_entries_and_symlinks(monkeypa
     import json
 
     from fleet_rlm.tui.commands import Context
-    from fleet_rlm.tui.mentions import attach_local_mentions
 
     monkeypatch.chdir(tmp_path)
     folder = tmp_path / "source code"
@@ -815,7 +808,9 @@ def test_directory_upload_outside_git_skips_hidden_entries_and_symlinks(monkeypa
         return httpx.Response(200, json={"path": path})
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
-        rewritten = attach_local_mentions(Context(client, "no-repo"), 'Read @"./source code"', cancelled=lambda: False)
+        rewritten = mentions.attach_local_mentions(
+            Context(client, "no-repo"), 'Read @"./source code"', cancelled=lambda: False
+        )
         root = next(iter(uploaded)).rsplit("/main.py", 1)[0]
         assert uploaded == {f"{root}/main.py": b"root", f"{root}/nested/main.py": b"nested"}
         assert rewritten == f'Read @"{root}"'
