@@ -538,15 +538,21 @@ jobs:
       - attach_workspace:
           at: .
       - run:
-          name: Create versioned GitHub release from verified artifacts
+          name: Create versioned GitHub release from CHANGELOG.md and verified artifacts
           command: |
+            notes_file=$(mktemp)
+            trap 'rm -f "$notes_file"' EXIT
+            PYTHONPATH=src python scripts/release_checks.py release-notes \
+              --version "$FLEET_RELEASE_VERSION" \
+              --changelog CHANGELOG.md \
+              --output "$notes_file"
             cd dist
             sha256sum -c SHA256SUMS
             command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
             test -n "${GH_TOKEN:-}" || { echo "GH_TOKEN is required from the restricted release context"; exit 1; }
             if gh release view "v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub release already exists"; exit 1; fi
             if git ls-remote --exit-code --tags origin "refs/tags/v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub tag already exists"; exit 1; fi
-            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$FLEET_RELEASE_SHA" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --generate-notes
+            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$FLEET_RELEASE_SHA" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --notes-file "$notes_file"
 
   github-release-recovery:
     parameters:
@@ -565,15 +571,21 @@ jobs:
       - attach_workspace:
           at: .
       - run:
-          name: Create versioned GitHub release from the verified existing PyPI artifacts
+          name: Create versioned GitHub release from CHANGELOG.md and verified existing PyPI artifacts
           command: |
+            notes_file=$(mktemp)
+            trap 'rm -f "$notes_file"' EXIT
+            PYTHONPATH=src python scripts/release_checks.py release-notes \
+              --version "$FLEET_RELEASE_VERSION" \
+              --changelog CHANGELOG.md \
+              --output "$notes_file"
             cd dist
             sha256sum -c SHA256SUMS
             command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
             test -n "${GH_TOKEN:-}" || { echo "GH_TOKEN is required from the restricted release context"; exit 1; }
             if gh release view "v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub release already exists"; exit 1; fi
             if git ls-remote --exit-code --tags origin "refs/tags/v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub tag already exists"; exit 1; fi
-            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$FLEET_RELEASE_SHA" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --generate-notes
+            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$FLEET_RELEASE_SHA" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --notes-file "$notes_file"
 
 workflows:
   required-ci:

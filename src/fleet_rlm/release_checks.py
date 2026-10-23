@@ -25,6 +25,24 @@ def _version() -> str:
     return match.group(1)
 
 
+def extract_changelog_notes(version: str, changelog_path: Path) -> str:
+    """Return one version's changelog body, without its top-level heading."""
+    lines = changelog_path.read_text().splitlines()
+    heading = re.compile(rf"^## \[{re.escape(version)}\](?: - .*)?$")
+    starts = [index for index, line in enumerate(lines) if heading.fullmatch(line)]
+    if not starts:
+        raise SystemExit(f"CHANGELOG.md has no section for version {version}")
+    if len(starts) != 1:
+        raise SystemExit(f"CHANGELOG.md has multiple sections for version {version}")
+
+    start = starts[0] + 1
+    end = next((index for index in range(start, len(lines)) if re.match(r"^##(?:\s|$)", lines[index])), len(lines))
+    notes = "\n".join(lines[start:end]).strip()
+    if not notes:
+        raise SystemExit(f"CHANGELOG.md section for version {version} is empty")
+    return f"{notes}\n"
+
+
 def preflight(version: str, sha: str, branch: str, pipeline_sha: str) -> None:
     """Check release inputs against the checked-out source tree."""
     if not version or version != _version():
@@ -347,6 +365,10 @@ def main() -> None:
     check.add_argument("--sha", required=True)
     check.add_argument("--branch", required=True)
     check.add_argument("--pipeline-sha", required=True)
+    release_notes = commands.add_parser("release-notes")
+    release_notes.add_argument("--version", required=True)
+    release_notes.add_argument("--changelog", type=Path, default=Path("CHANGELOG.md"))
+    release_notes.add_argument("--output", type=Path, required=True)
     recovery = commands.add_parser("recovery-preflight")
     recovery.add_argument("--version", required=True)
     recovery.add_argument("--sha", required=True)
@@ -374,6 +396,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "preflight":
         preflight(args.version, args.sha, args.branch, args.pipeline_sha)
+    elif args.command == "release-notes":
+        notes = extract_changelog_notes(args.version, args.changelog)
+        args.output.write_text(notes)
     elif args.command == "recovery-preflight":
         recovery_preflight(args.version, args.sha, args.branch, args.pipeline_sha)
     elif args.command == "verify-artifacts":

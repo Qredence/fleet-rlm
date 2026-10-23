@@ -17,6 +17,7 @@ from fleet_rlm.release_checks import (
     _version,
     create_manifest,
     download_pypi_wheel,
+    extract_changelog_notes,
     preflight,
     pypi_canary,
     recovery_preflight,
@@ -27,6 +28,39 @@ from fleet_rlm.release_checks import (
     verify_pypi_artifacts,
     verify_registry_wheel,
 )
+
+
+def test_release_notes_extract_exact_section_without_version_heading(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "## [0.8.1] - 2026-10-23\n\n### Added\n\n- New feature.\n\n## [0.8.0]\n\n- Previous feature.\n"
+    )
+
+    assert extract_changelog_notes("0.8.1", changelog) == "### Added\n\n- New feature.\n"
+
+
+def test_release_notes_reject_missing_version(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("## [0.8.0]\n\n- Existing release.\n")
+
+    with pytest.raises(SystemExit, match=r"has no section for version 0\.8\.1"):
+        extract_changelog_notes("0.8.1", changelog)
+
+
+def test_release_notes_reject_duplicate_version_sections(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("## [0.8.1]\n\n- First.\n\n## [0.8.1] - 2026-10-23\n\n- Second.\n")
+
+    with pytest.raises(SystemExit, match=r"has multiple sections for version 0\.8\.1"):
+        extract_changelog_notes("0.8.1", changelog)
+
+
+def test_release_notes_reject_empty_section(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("## [0.8.1] - 2026-10-23\n\n## [0.8.0]\n\n- Previous release.\n")
+
+    with pytest.raises(SystemExit, match=r"section for version 0\.8\.1 is empty"):
+        extract_changelog_notes("0.8.1", changelog)
 
 
 def test_release_preflight_accepts_current_version_and_commit() -> None:
