@@ -1,4 +1,4 @@
-PYTHON_SOURCES := src/fleet_rlm tests scripts
+PYTHON_SOURCES := src/fleet_rlm tests scripts notebooks
 
 .PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run
 
