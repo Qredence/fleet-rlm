@@ -1,8 +1,8 @@
 # Repository guidelines
 
-Fleet RLM Lite is the active Python application: a Rich / Prompt Toolkit client,
-FastAPI SSE server, DSPy engine, Daytona execution, PostgreSQL persistence, and
-MLflow evaluation with native DSPy GEPA optimization.
+Fleet RLM Lite is the active Python application: a Textual terminal client with
+Rich / Prompt Toolkit fallback, FastAPI SSE server, DSPy engine, Daytona execution,
+PostgreSQL persistence, and MLflow evaluation with native DSPy GEPA optimization.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries.
 Use the current source, `pyproject.toml`, and `uv.lock` as the implementation and
@@ -13,17 +13,18 @@ configuration features as current behavior.
 
 | Location | Responsibility |
 | --- | --- |
-| `src/fleet_rlm/cli.py`, `tui/` | CLI entry point and streaming terminal client |
+| `src/fleet_rlm/cli.py`, `src/fleet_rlm/tui/` | CLI entry point and streaming terminal client |
 | `src/fleet_rlm/api/` | FastAPI routes, request/response schemas, SSE events |
-| `src/fleet_rlm/config.py`, `session.py` | Typed settings and Session runtime lifecycle |
+| `src/fleet_rlm/config.py`, `src/fleet_rlm/session.py` | Typed settings and Session runtime lifecycle |
 | `src/fleet_rlm/engine/` | Turn orchestration, signatures, routing, RLM/Flex, delegation |
 | `src/fleet_rlm/sandbox/` | Daytona lifecycle, interpreter, execution transport, sandbox runtime |
-| `src/fleet_rlm/store/`, `replay.py` | Persistence, migrations, immutable replay capture and review |
+| `src/fleet_rlm/sandbox/snapshots.py` | Repository-owned snapshot definition, preflight, recorded provenance |
+| `src/fleet_rlm/store/`, `src/fleet_rlm/replay.py` | Persistence, migrations, immutable replay capture and review |
 | `src/fleet_rlm/optimize/` | Datasets, metrics, execution evidence, GEPA, validation and program artifacts |
-| `src/fleet_rlm/skills.py`, `bundled_skills/` | Skill validation, synchronization, bundled workflows |
+| `src/fleet_rlm/skills.py`, `src/fleet_rlm/bundled_skills/` | Skill validation, synchronization, bundled workflows |
 | `tests/`, `docs/`, `scripts/` | Tests, maintained documentation, development and validation tooling |
 
-Paths within a source row are relative to `src/fleet_rlm/` unless fully specified.
+All paths above are repository-relative.
 User Skills belong in `.fleet/skills/`. `.agents/skills/` is developer guidance
 and must never be configured as user Skill synchronization content.
 
@@ -36,10 +37,41 @@ and must never be configured as user Skill synchronization content.
   delegate; do not equate Flex with deterministic execution or RLM with required
   delegation.
 - Generated Python executes in Daytona. Keep credentials and host-mediated
-  tools on the server. Preserve shared Turn budgets, deadlines, child isolation,
-  cleanup, and artifact provenance.
+  tools on the server. Preserve shared Turn budgets, child isolation, cleanup
+  outcomes, and artifact provenance.
+- One terminal outcome, one teardown, teardown before acknowledgment. On
+  failure, cancellation, disconnect, or deadline expiry, set the cancellation
+  flag, fence outstanding host calls, shut down children, and stop the root
+  before emitting the terminal event and `done`. Success does not stop the root:
+  it records `cleanup=not_required` and keeps the warm REPL for the next Turn.
+  Watchdog callbacks must be generation-bound and serialized with Turn end/reset;
+  a callback from an ended Turn must not cancel its warm root or a subsequent Turn.
+- Deadline-free execution is opt-in, never the default. The shipped
+  `turn_timeout_seconds` default stays `900`; exactly `0` disables only the Fleet
+  wall-clock deadline, chosen by configuration, a Turn request, or the client-local
+  `/timeout` command. Resolution is request > configuration > default, and
+  `/timeout` is client-local state sent as a request override, never a persisted
+  Session setting. A deadline-free Turn still obeys Daytona's provider
+  `ttl_minutes` and `auto_stop_interval`; do not describe those bounds as removed.
+- The reply fence refuses only late successful host-call results, once, with a
+  bounded warning and no retry. Cancellation and error replies are always
+  delivered so the sandbox does not wait out the host-call bound. The fence does
+  not interrupt an in-flight provider request, and it must never be described as
+  stopping the child.
+- Progress and status labels (`waiting_on_host`, `progress_unknown`, `progressing`,
+  `stalled`, `interrupted`, `fenced`) are advisory observations derived from existing
+  events. Nothing in that layer may cancel, pause, retry, or shorten a Turn, and
+  uninstrumented work stays `progress_unknown` rather than becoming `stalled`.
+  Synchronize worker ingestion with SSE-loop sampling; discard pending progress
+  after a terminal outcome, and keep `done` as the final stream event.
+- The Turn snapshot is repository-owned in `sandbox/snapshots.py`, not an
+  environment or TOML setting. Preserve preflight resource floors and record the
+  provider-resolved identity; missing optional packages are observations, not failures.
 - Persist durable session data, not assumptions about live interpreter state.
-  Use the existing Store/migration mechanisms for schema changes.
+  Use the existing Store/migration mechanisms for schema changes. Historical
+  Turns and replays without snapshot provenance remain readable as `pre-provenance`.
+- The HTTP API has no built-in caller authentication. Preserve the loopback
+  default and explicit non-loopback opt-in; deployment still needs a secured boundary.
 - Use scoped `dspy.context` overrides for model/adapter settings. Preserve native
   DSPy trace, evaluation, and serialization contracts; validate compatibility
   before changing dependency versions or internal DSPy imports.
@@ -107,7 +139,13 @@ trace/run identities and recover completed work rather than replaying it blindly
 
 ## Change discipline
 
-- Preserve existing uncommitted work. Keep edits scoped to the requested task.
+- Start with `git status --short` and the existing diff. Preserve uncommitted
+  work, including deletions; keep edits scoped and do not commit it without authorization.
+- Remove code only after checking callers, persisted formats, tests, and docs.
+  Migration history, replay compatibility, and version-sensitive DSPy bridges are
+  not dead code merely because new requests do not exercise them.
+- Prefer small owning modules and one validation policy per setting. Do not add
+  compatibility aliases or speculative abstractions for an internal refactor.
 - Use four-space Python indentation and Ruff formatting/linting. Prefer existing
   abstractions and native DSPy functionality over duplicate framework logic.
 - Update documentation when public behavior changes. Describe measured results

@@ -28,6 +28,9 @@ class FakeManager(SimpleNamespace):
             "max_children": 8,
             "max_active_children": 4,
             "turn_timeout_seconds": 900,
+            "turn_active": False,
+            "snapshot_provenance": lambda: {},
+            "deadline_provenance": lambda: {"deadline_source": "default", "effective_seconds": 900},
             "list_workspace_files": lambda: [],
             "read_workspace_file": lambda _path: b"",
             "write_learned_note": lambda *_args, **_kwargs: None,
@@ -36,6 +39,37 @@ class FakeManager(SimpleNamespace):
             "cancel_turn": lambda: None,
         }
         super().__init__(**{**defaults, **overrides})
+        if "request_cancellation" not in overrides:
+            # Mirror the real manager's single-owner guard: the terminal branch, a disconnect, and
+            # a deadline all may race, and only one of them may invoke cancel_turn().
+            self._cancellation_claimed = False
+            self._teardown_done = threading.Event()
+
+            def request_cancellation() -> None:
+                if self._cancellation_claimed:
+                    self._teardown_done.wait()
+                    return
+                self._cancellation_claimed = True
+                try:
+                    self.cancel_turn()
+                finally:
+                    self._teardown_done.set()
+
+            self.request_cancellation = request_cancellation
+        if "reset_turn_budget" not in overrides:
+
+            def reset_turn_budget(
+                *, deadline_seconds: int | None = None, deadline_source: str = "configuration", **_kwargs: Any
+            ) -> None:
+                self._cancellation_claimed = False
+                self._teardown_done.clear()
+                self.turn_active = True
+                self.deadline_provenance = lambda: {
+                    "deadline_source": deadline_source,
+                    "effective_seconds": deadline_seconds,
+                }
+
+            self.reset_turn_budget = reset_turn_budget
         if "stat_workspace_file" not in overrides:
             self.stat_workspace_file = self._stat_file
         if "turn_inputs" not in overrides:

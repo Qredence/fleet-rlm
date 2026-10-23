@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import random
 import threading
 import time
@@ -23,13 +24,38 @@ from daytona.common.errors import DaytonaConnectionError, DaytonaError, DaytonaR
 _LOGGER = logging.getLogger(__name__)
 CALL_MARK = "\x1eFLEET_CALL "
 RESULT_MARK = "\x1eFLEET_RESULT "
+PROGRESS_MARK = "\x1eFLEET_PROGRESS "
 REPLY_DIR = "/tmp/fleet/replies"
 _PREAMBLE_TIMEOUT_SECONDS = 60
-# A host tool that never answers (lost reply upload, hung tool) fails the sandbox call after this long
-# instead of stalling the execution until the Turn watchdog stops the sandbox.
-HOST_CALL_TIMEOUT_SECONDS = 600.0
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_SECONDS = 0.5
+_MAX_PROGRESS_LABEL = 64
+_PROGRESS_PHASES = frozenset({"start", "checkpoint", "exit"})
+
+
+def _bounded_progress(payload: Any) -> dict[str, Any] | None:
+    """Validate one progress observation from the sandbox and keep only bounded scalar fields."""
+    if not isinstance(payload, dict):
+        return None
+    phase = payload.get("phase")
+    scope = payload.get("scope")
+    if phase not in _PROGRESS_PHASES or not isinstance(scope, str) or not scope:
+        return None
+    expectation = payload.get("expect_seconds")
+    if isinstance(expectation, bool) or not isinstance(expectation, (int, float)):
+        return None
+    if not math.isfinite(float(expectation)) or float(expectation) <= 0:
+        return None
+    checkpoint = payload.get("checkpoint")
+    if checkpoint is not None and (isinstance(checkpoint, bool) or not isinstance(checkpoint, int) or checkpoint < 0):
+        return None
+    return {
+        "phase": phase,
+        "scope": scope[:_MAX_PROGRESS_LABEL],
+        "expect_seconds": float(expectation),
+        "checkpoint": checkpoint,
+    }
+
 
 _T = TypeVar("_T")
 
@@ -64,6 +90,42 @@ class ExecutionOutcomeUnknownError(RuntimeError):
     """Remote work may have executed; the Turn must not replay it."""
 
     transport_retries: int = 0
+
+
+class ExecutionFence:
+    """Publication liveness for one sandbox execution.
+
+    One execution owns one token. Closing it is one-way: the originating Turn's cancellation and
+    the end of the execution both close it, and a later Turn can never reopen it. The reusable
+    root cancellation Event is therefore not the fence's source of truth, because a new Turn
+    clears that Event for its own work.
+    """
+
+    def __init__(self, emitter: Callable[[dict[str, Any]], None] | None = None) -> None:
+        """Open one execution's publication window on the emitter that owns it.
+
+        `emitter` is the event channel of the Turn that opened the execution. Capturing it here,
+        instead of reading the manager's mutable callback when a refusal happens, keeps a late
+        fence attributed to the execution that produced the reply rather than to a later Turn.
+        """
+        self._closed = threading.Event()
+        self.emitter = emitter
+
+    def is_open(self) -> bool:
+        """Return True while this execution may still publish a successful reply."""
+        return not self._closed.is_set()
+
+    def close(self) -> None:
+        """Stop publication for this execution forever; repeated calls are harmless."""
+        self._closed.set()
+
+
+class _PublicationFencedError(Exception):
+    """Internal control signal: a successful reply lost its execution identity before publication.
+
+    This is not a Turn outcome and never leaves the host-call worker; cancellation itself stays the
+    ordinary `RuntimeError` raised by `check_turn()`.
+    """
 
 
 @cache
@@ -102,10 +164,21 @@ def _delete_quietly(sandbox: Any, context: Any) -> None:
 class _Protocol:
     """Reassemble marker lines from streamed stdout chunks; dispatch host calls; keep the result."""
 
-    def __init__(self, sandbox: Any, on_call: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        on_call: Callable[[dict[str, Any]], dict[str, Any]],
+        *,
+        fence: ExecutionFence | None = None,
+        on_fence: Callable[[], None] | None = None,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.sandbox = sandbox
         self.on_call = on_call
         self.result: dict[str, Any] | None = None
+        self.fence = fence if fence is not None else ExecutionFence()
+        self._on_fence = on_fence
+        self._on_progress = on_progress
         self._buffer = ""
         self._workers: list[threading.Thread] = []
 
@@ -116,13 +189,22 @@ class _Protocol:
             self._line(line)
 
     def finish(self) -> None:
+        """Consume trailing output, wait up to five seconds per host-call worker, and close the success fence."""
         if self._buffer:
             self._line(self._buffer)
             self._buffer = ""
         for worker in self._workers:
             worker.join(timeout=5)
+        # The execution identity ends here. A worker the join abandoned must not publish into a
+        # later execution, so its token is closed before this execution returns.
+        self.fence.close()
 
     def _line(self, line: str) -> None:
+        """Dispatch a marker line to its result, host-call worker, or progress consumer.
+
+        Invalid progress and progress-consumer failures are dropped. Invalid result or
+        host-call JSON propagates as JSONDecodeError.
+        """
         if line.startswith(RESULT_MARK):
             self.result = json.loads(line[len(RESULT_MARK) :])
         elif line.startswith(CALL_MARK):
@@ -130,18 +212,70 @@ class _Protocol:
             worker = threading.Thread(target=self._answer, args=(call,), name="fleet-host-call", daemon=True)
             self._workers.append(worker)
             worker.start()
+        elif line.startswith(PROGRESS_MARK):
+            # Progress is observation only. A malformed marker or a failing consumer is dropped;
+            # it must never disturb the execution or the stream.
+            try:
+                progress = _bounded_progress(json.loads(line[len(PROGRESS_MARK) :]))
+                if progress is not None and self._on_progress is not None:
+                    self._on_progress(progress)
+            except Exception:
+                _LOGGER.debug("Dropped a progress observation")
 
     def _answer(self, call: dict[str, Any]) -> None:
-        reply = self.on_call(call)
+        # A host-call worker owns no Turn; nothing may escape it into the transport thread.
+        """Attempt one host reply, suppressing failures so they cannot escape the worker."""
+        try:
+            self._send_reply(call)
+        except Exception:
+            _LOGGER.warning("A host tool call worker failed before it could answer")
+
+    def _send_reply(self, call: dict[str, Any]) -> None:
+        """Upload a host reply, converting callback and serialization failures to error replies.
+
+        Only successful replies require an open execution fence. Upload failures are
+        suppressed; the sandbox keeps waiting under its host-call timeout policy.
+        """
+        try:
+            reply = self.on_call(call)
+        except Exception:
+            # Deliver an error reply rather than leaving the sandbox waiting for the full bound.
+            reply = {"error": "Host tool call failed"}
+        if not isinstance(reply, dict):
+            reply = {"error": "Host tool reply was not an object"}
+        successful = "error" not in reply
         try:
             body = json.dumps(reply, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             body = json.dumps({"error": "Host tool result is not JSON-serializable"}).encode("utf-8")
+            successful = False
+        path = f"{REPLY_DIR}/{call['id']}.json"
+
+        def upload() -> None:
+            # The fence is checked immediately before every attempt, so a retry after a transient
+            # failure cannot publish a success whose execution has since been cancelled or ended.
+            """Upload the reply, refusing a success with _PublicationFencedError when its fence is closed."""
+            if successful and not self.fence.is_open():
+                raise _PublicationFencedError
+            self.sandbox.fs.upload_file(body, path)
+
         try:
-            with_retries(lambda: self.sandbox.fs.upload_file(body, f"{REPLY_DIR}/{call['id']}.json"))
+            with_retries(upload)
+        except _PublicationFencedError:
+            self._refuse_publication()
         except Exception:
-            # The sandbox call times out (HOST_CALL_TIMEOUT_SECONDS) and the model sees the error.
+            # The sandbox call times out (host_call_timeout) and the model sees the error.
             _LOGGER.warning("Could not return a host tool result to the sandbox")
+
+    def _refuse_publication(self) -> None:
+        # One bounded warning per refused publication: no tool payload, no generated source.
+        """Report one refused success publication, suppressing observer failures."""
+        _LOGGER.warning("Fenced a successful host tool result after Turn cancellation")
+        if self._on_fence is not None:
+            try:
+                self._on_fence()
+            except Exception:
+                _LOGGER.debug("Could not report a fenced host tool result")
 
 
 def run(
@@ -150,17 +284,41 @@ def run(
     payload: dict[str, Any],
     *,
     on_call: Callable[[dict[str, Any]], dict[str, Any]],
-    timeout: int,
+    timeout: int | None,
+    fence: ExecutionFence | None = None,
+    on_fence: Callable[[], None] | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run one execution in `context`; return the runtime's result dict.
 
+    `timeout` is the Turn's remaining deadline in whole seconds, or None when the Turn is
+    deadline-free. It is forwarded to the sandbox as `host_call_timeout`, so a bridged host call
+    waits at most as long as the Turn may still run; a deadline-free Turn sends an explicit
+    absence of a bound and no component substitutes one. Daytona's `run_code` timeout is passed
+    explicitly, as 0 for a deadline-free Turn, because omitting it would leave the SDK default
+    in charge of the Turn.
+
+    `fence` is this execution's publication token. The manager closes it when the Turn is
+    cancelled; this run also closes it when the execution ends. A successful host-call result is
+    published only while the token is open, and the token is checked again before every upload
+    attempt. Error and cancellation replies are never fenced.
+
     Raises the SDK's error when the transport fails; the caller decides whether the outcome is known.
+    A context-reported Python error becomes an error result. If neither a runtime result nor a
+    context error is available, raises ExecutionOutcomeUnknownError.
     """
-    protocol = _Protocol(sandbox, on_call)
-    payload = {"host_call_timeout": min(HOST_CALL_TIMEOUT_SECONDS, timeout), **payload}
+    protocol = _Protocol(sandbox, on_call, fence=fence, on_fence=on_fence, on_progress=on_progress)
+    # The Turn's remaining deadline is the only production source of this bound. A value carried by
+    # the payload is a test seam for shortening it; nothing may substitute a fixed fallback.
+    payload = {"host_call_timeout": timeout, **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
     try:
-        execution = sandbox.code_interpreter.run_code(code, context=context, on_stdout=protocol.feed, timeout=timeout)
+        execution = sandbox.code_interpreter.run_code(
+            code,
+            context=context,
+            on_stdout=protocol.feed,
+            timeout=0 if timeout is None else timeout,
+        )
     finally:
         protocol.finish()
     if protocol.result is not None:

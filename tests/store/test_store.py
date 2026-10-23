@@ -83,10 +83,35 @@ def test_schema_keeps_the_lite_tables_separate_from_the_legacy_schema():
 
 
 def test_migration_four_retires_the_file_mirror_without_deleting_rows():
-    assert SCHEMA_VERSION == 4
+    assert dict(_SCHEMA_MIGRATIONS)[4] == (
+        "ALTER TABLE IF EXISTS fleet_lite_vfs_files RENAME TO fleet_lite_vfs_files_retired",
+    )
+
+
+def test_migration_five_records_the_environment_observation_on_the_session_row():
+    assert SCHEMA_VERSION == 5
     version, statements = _SCHEMA_MIGRATIONS[-1]
-    assert version == 4
-    assert statements == ("ALTER TABLE IF EXISTS fleet_lite_vfs_files RENAME TO fleet_lite_vfs_files_retired",)
+    assert version == 5
+    assert statements == (
+        "ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+
+def test_claim_environment_report_is_one_atomic_update_per_session():
+    store, pool = make_store([("s1",)])
+
+    assert store.claim_environment_report("s1") is True
+
+    statement, parameters = pool.conn.statements[0]
+    assert statement == (
+        "UPDATE fleet_lite_sessions SET environment_reported = TRUE "
+        "WHERE session_id = %s AND environment_reported = FALSE RETURNING session_id"
+    )
+    assert parameters == ("s1",)
+
+    store, pool = make_store([])
+    assert store.claim_environment_report("s1") is False
+    assert "RETURNING session_id" in pool.conn.statements[0][0]
 
 
 def test_review_labels_require_the_selected_immutable_replay_before_writing():
@@ -305,6 +330,188 @@ def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
     assert sql.index(next(s for s in sql if s.startswith("INSERT INTO fleet_lite_replay_snapshots"))) < sql.index(
         next(s for s in sql if s.startswith("UPDATE fleet_lite_turns SET status='completed'"))
     )
+
+
+SNAPSHOT_PROVENANCE = {
+    "snapshot_name": "fleet-rlm-python313-v10",
+    "snapshot_id": "snap-provider-1",
+    "snapshot_cpu": 4,
+    "snapshot_mem": 8,
+    "snapshot_disk": 8,
+    "snapshot_definition_digest": "b" * 64,
+}
+
+
+def test_snapshot_provenance_round_trips_into_the_turn_status_payload():
+    calls = []
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **SNAPSHOT_PROVENANCE}
+    _harness(store, []).commit_turn("s1", turn_record)
+    (session_id,), kwargs = calls[0]
+    assert session_id == "s1"
+    turn_id, result = kwargs["completion"]
+    assert turn_id == "t1"
+    assert {key: result[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
+    stored_record = json.loads(kwargs["turn_record_json"])
+    assert {key: stored_record[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
+
+
+def test_cleanup_outcome_round_trips_into_the_stored_turn_and_status_payload():
+    calls = []
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", "cleanup": "not_required"}
+    _harness(store, []).commit_turn("s1", turn_record)
+
+    turn_id, result = calls[0][1]["completion"]
+    assert turn_id == "t1"
+    assert result["cleanup"] == "not_required"
+    assert json.loads(calls[0][1]["turn_record_json"])["cleanup"] == "not_required"
+
+
+def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preserved():
+    calls = []
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    turn_record = {
+        "turn_id": "t1",
+        "answer": "5",
+        "route": "flex",
+        "outcome": "completed",
+        "deadline_source": "request",
+        "effective_seconds": None,
+        "duration_seconds": 12.5,
+        "cleanup": "not_required",
+        **SNAPSHOT_PROVENANCE,
+    }
+    _harness(store, []).commit_turn("s1", turn_record)
+
+    turn_id, result = calls[0][1]["completion"]
+    assert turn_id == "t1"
+    joined = (
+        "route",
+        "answer",
+        "outcome",
+        "deadline_source",
+        "effective_seconds",
+        "duration_seconds",
+        "cleanup",
+        *SNAPSHOT_PROVENANCE,
+    )
+    assert {key: result[key] for key in joined} == {key: turn_record[key] for key in joined}
+    assert result["effective_seconds"] is None, "a deadline-free Turn keeps an explicit null"
+    assert json.loads(calls[0][1]["turn_record_json"]) == turn_record
+
+
+def test_root_sandbox_id_round_trips_into_the_stored_turn_and_status_payload():
+    calls = []
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", "root_sandbox_id": "sandbox-7"}
+    _harness(store, []).commit_turn("s1", turn_record)
+
+    turn_id, result = calls[0][1]["completion"]
+    assert turn_id == "t1"
+    assert result["root_sandbox_id"] == "sandbox-7"
+    assert json.loads(calls[0][1]["turn_record_json"])["root_sandbox_id"] == "sandbox-7"
+
+
+def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():
+    calls = []
+    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
+    bounds = {
+        "ttl_minutes": 1440,
+        "auto_stop_interval": 60,
+        "maximum_lifespan_minutes": None,
+        "provider_owned": True,
+    }
+    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **bounds}
+    _harness(store, []).commit_turn("s1", turn_record)
+
+    turn_id, result = calls[0][1]["completion"]
+    assert turn_id == "t1"
+    assert {key: result[key] for key in bounds} == bounds
+    assert {key: json.loads(calls[0][1]["turn_record_json"])[key] for key in bounds} == bounds
+
+
+def test_snapshot_provenance_round_trips_through_the_immutable_replay():
+    from fleet_rlm.replay import decode_snapshot, encode_snapshot
+
+    snapshot = {
+        "schema_version": 1,
+        "session_id": "s1",
+        "turn_id": "t1",
+        "task": "immutable task",
+        "workspace_manifest": "/workspace/files (empty)",
+        "context_files": {},
+        "replay_files": {},
+        "skill_revision_sha256": hashlib.sha256(b"{}").hexdigest(),
+        **SNAPSHOT_PROVENANCE,
+    }
+    digest, compressed = encode_snapshot(snapshot)
+    store, pool = make_store([], [], [], [], [(digest,)], [])
+    store.commit_turn(
+        "s1",
+        turn_record_json=json.dumps(
+            {
+                "turn_id": "t1",
+                "replay_snapshot_selected": True,
+                "replay_snapshot_sha256": digest,
+                **SNAPSHOT_PROVENANCE,
+            }
+        ),
+        completion=("t1", {"event": "turn_complete", **SNAPSHOT_PROVENANCE}),
+        replay_snapshot=(digest, compressed),
+    )
+    insert_params = next(
+        params
+        for statement, params in pool.conn.statements
+        if statement.startswith("INSERT INTO fleet_lite_replay_snapshots")
+    )
+    decoded = decode_snapshot(insert_params[2], insert_params[3])
+    assert {key: decoded[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
+
+
+@pytest.mark.parametrize(
+    ("deadline_fields", "expected_state"),
+    [({}, "pre-provenance"), ({"deadline_source": "default", "effective_seconds": 900}, "unresolved")],
+)
+def test_replay_without_snapshot_provenance_is_readable(deadline_fields, expected_state):
+    from fleet_rlm.replay import decode_snapshot, encode_snapshot, selected_snapshot
+
+    historical = {
+        "schema_version": 1,
+        "session_id": "s1",
+        "turn_id": "t1",
+        "task": "recorded before provenance existed",
+        "workspace_manifest": "/workspace/files (empty)",
+        "context_files": {},
+        "replay_files": {},
+        "skill_revision_sha256": hashlib.sha256(b"{}").hexdigest(),
+    }
+    historical.update(deadline_fields)
+    digest, compressed = encode_snapshot(historical)
+    decoded = decode_snapshot(digest, compressed)
+    assert decoded == historical
+    assert not set(SNAPSHOT_PROVENANCE) & set(decoded), "reading must not backfill provenance"
+
+    store = SimpleNamespace(replay_snapshot=lambda _session, _turn: (digest, compressed))
+    loaded = selected_snapshot(store, "s1", "t1", digest)
+    assert loaded == {**historical, "provenance_state": expected_state}
+    assert not set(SNAPSHOT_PROVENANCE) & set(loaded), "reading must not backfill provenance"
+
+    review_store, _pool = make_store([(1,)])
+    review_store.replay_snapshot = lambda *_args: (digest, compressed)
+    review_store.save_review_labels(
+        "s1",
+        "t1",
+        digest,
+        review_status="approved",
+        source_group="group",
+        expected_answer="5",
+        expected_values=["5"],
+        route="flex",
+        critical=True,
+        reviewer="human",
+    )
+    assert encode_snapshot(historical) == (digest, compressed)
 
 
 def _harness(store: Any, files: list[str]) -> VolumePostgresHarness:

@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from fleet_rlm.config import validate_turn_timeout_seconds
 
 MAX_TASK_CHARS = 100_000
 
@@ -28,6 +30,25 @@ class TurnRequest(_Request):
         default=False,
         description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",
     )
+    timeout_seconds: int | None = Field(
+        default=None,
+        strict=True,
+        description=(
+            "Fleet deadline for this Turn in seconds. Omitted or null inherits the configured "
+            "value; 0 disables the Fleet deadline; otherwise the value must be 10..3600."
+        ),
+    )
+
+    @field_validator("timeout_seconds", mode="before")
+    @classmethod
+    def timeout_is_zero_or_bounded(cls, value: Any) -> int | None:
+        """Preserve None for inheritance; accept integer 0 or 10..3600 seconds.
+
+        Raise ValueError for other values, including booleans, floats, and strings.
+        """
+        if value is None:
+            return None
+        return validate_turn_timeout_seconds(value, field="timeout_seconds")
 
 
 class ModeRequest(_Request):

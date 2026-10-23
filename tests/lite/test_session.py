@@ -22,7 +22,7 @@ def test_lost_session_lease_cancels_remote_work_and_fences_runtime() -> None:
             return None
 
     runtime = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(cancel_turn=cancelled.set),
+        sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set),
         harness=SimpleNamespace(),
         skill_mgr=SimpleNamespace(),
         engine=SimpleNamespace(),
@@ -63,7 +63,7 @@ def test_a_dropped_lease_is_renewed_on_a_fresh_connection_when_the_lock_is_still
     renewed = RenewedLease()
     store = SimpleNamespace(acquire_session_lease=lambda session_id: renewed if session_id == "s1" else None)
     runtime = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(cancel_turn=cancelled.set, session_id="s1"),
+        sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set, session_id="s1"),
         harness=SimpleNamespace(store=store),
         skill_mgr=SimpleNamespace(),
         engine=SimpleNamespace(),
@@ -383,3 +383,39 @@ def test_lease_acquired_after_close_times_out_is_closed_without_publication(monk
     assert renewed_closed.is_set() and runtime.lease is None
     with pytest.raises(RuntimeError, match="ownership lease was lost"):
         runtime.assert_lease_held()
+
+
+def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(monkeypatch) -> None:
+    from fleet_rlm import session as session_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    captured: dict[str, object] = {}
+
+    class RecordingManager:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    def claim(_session_id: str) -> bool:
+        return True
+
+    store = SimpleNamespace(
+        ensure_session=lambda _session_id: None,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(execute=lambda _statement: None, close=lambda: None),
+        runtime_settings=lambda _session_id: {},
+        claim_environment_report=claim,
+    )
+    monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
+    monkeypatch.setattr(
+        session_module,
+        "VolumePostgresHarness",
+        lambda *_args: SimpleNamespace(ensure_session=lambda _session_id: None),
+    )
+    monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(session_module, "AdaptiveFleetEngine", lambda **_kwargs: SimpleNamespace())
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
+
+    runtime = registry._build("s1")
+
+    assert captured["environment_report_claim"] is claim
+    runtime.close_lease()

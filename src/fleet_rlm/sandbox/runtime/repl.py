@@ -17,6 +17,7 @@ import functools
 import io
 import json
 import keyword
+import math
 import os
 import sys
 import threading
@@ -27,11 +28,15 @@ from typing import Any
 
 CALL_MARK = "\x1eFLEET_CALL "
 RESULT_MARK = "\x1eFLEET_RESULT "
+PROGRESS_MARK = "\x1eFLEET_PROGRESS "
 REPLY_DIR = "/tmp/fleet/replies"
 WORKSPACE = "/workspace"
 MAX_BODY = 2_000_000
 MAX_CODE = 1_000_000
 MAX_CAPTURE_CHARS = 100_000
+MAX_PROGRESS_LABEL = 64
+MAX_PROGRESS_EXPECT_SECONDS = 86_400
+MAX_PROGRESS_CHECKPOINT = 2**63 - 1
 RESERVED_NAMES = {
     "__builtins__",
     "llm_query",
@@ -43,15 +48,14 @@ RESERVED_NAMES = {
     "read_skill_reference",
     "run_skill_script",
     "save_skill",
+    "progress_scope",
 }
 # DSPy Flex lists these existing interpreter APIs as registered tools.
 REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
 SKILL_HELPERS = ("list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill")
 MAX_SKILL_RECEIPTS = 20
 
-HOST_CALL_TIMEOUT_SECONDS = 600.0
-
-_STATE: dict[str, Any] = {"namespace": None, "stdout": None, "host_call_timeout": HOST_CALL_TIMEOUT_SECONDS}
+_STATE: dict[str, Any] = {"namespace": None, "stdout": None, "host_call_timeout": None}
 _WRITE_LOCK = threading.Lock()
 
 
@@ -100,23 +104,198 @@ def _emit(mark: str, payload: dict[str, Any]) -> None:
         stream.flush()
 
 
+def _progress_label(value: Any) -> str:
+    """Return a bounded, non-empty progress label or refuse the value with its rule."""
+    if not isinstance(value, str):
+        raise TypeError(f"progress_scope label must be a string, not {type(value).__name__}")
+    label = value.strip()
+    if not label:
+        raise ValueError("progress_scope label must be a non-empty string")
+    if len(label) > MAX_PROGRESS_LABEL:
+        raise ValueError(f"progress_scope label must be at most {MAX_PROGRESS_LABEL} characters")
+    return label
+
+
+def _progress_expectation(value: Any) -> float:
+    """Return a finite positive expectation in seconds; booleans and text never coerce."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"progress_scope expect_seconds must be a number, not {type(value).__name__}")
+    expectation = float(value)
+    if not math.isfinite(expectation) or expectation <= 0:
+        raise ValueError("progress_scope expect_seconds must be a finite positive number")
+    if expectation > MAX_PROGRESS_EXPECT_SECONDS:
+        raise ValueError(f"progress_scope expect_seconds must be at most {MAX_PROGRESS_EXPECT_SECONDS}")
+    return expectation
+
+
+def _emit_progress(scope: "_ProgressScope", phase: str, checkpoint: Any = None) -> None:
+    """Write one progress observation to the execution stdout; stream errors propagate."""
+    _emit(
+        PROGRESS_MARK,
+        {
+            "phase": phase,
+            "scope": scope.label,
+            "expect_seconds": scope.expect_seconds,
+            "checkpoint": checkpoint,
+        },
+    )
+
+
+class _ProgressScope:
+    """Checkpoint-only observation window: it reports, and it never acts on the cell.
+
+    The expectation is immutable, values must advance past the high-water mark to renew,
+    and a handle from an earlier cell is closed, so it can never renew a later label.
+    """
+
+    __slots__ = ("_closed", "_entered", "_expect_seconds", "_high_water", "_label")
+
+    def __init__(self, label: Any, expect_seconds: Any) -> None:
+        self._label = _progress_label(label)
+        self._expect_seconds = _progress_expectation(expect_seconds)
+        self._high_water = -1
+        self._entered = False
+        self._closed = False
+        self._require_main_thread()
+
+    @property
+    def label(self) -> str:
+        """The bounded scope label."""
+        return self._label
+
+    @property
+    def expect_seconds(self) -> float:
+        """The immutable expectation that only labels `stalled`; it changes nothing."""
+        return self._expect_seconds
+
+    def _require_main_thread(self) -> None:
+        # The interpreter worker's execution thread is this cell's main thread; a user thread never is.
+        """Raise RuntimeError when called outside the recorded execution thread."""
+        expected = _STATE.get("execution_thread")
+        if expected is not None and threading.get_ident() != expected:
+            raise RuntimeError("progress_scope is only available on the interpreter's main thread")
+
+    def _close(self) -> None:
+        """Close this scope once and emit an exit observation if it was entered."""
+        if self._closed:
+            return
+        self._closed = True
+        stack = _STATE.get("progress_stack")
+        if stack is not None and self in stack:
+            stack.remove(self)
+        if self._entered:
+            _emit_progress(self, "exit")
+
+    def __enter__(self) -> "_ProgressScope":
+        self._require_main_thread()
+        if self._closed:
+            raise RuntimeError("progress_scope has already ended")
+        if self._entered:
+            raise RuntimeError("progress_scope cannot be entered twice")
+        stack = _STATE.get("progress_stack")
+        if stack is None:
+            stack = _STATE["progress_stack"] = []
+        self._entered = True
+        stack.append(self)
+        _emit_progress(self, "start")
+        return self
+
+    def __exit__(self, *_exc: Any) -> bool:
+        self._close()
+        return False
+
+    def checkpoint(self, value: Any) -> int:
+        """Report an advancing checkpoint and return the highest accepted value.
+
+        Repeated or lower values return the existing high-water mark without renewing the
+        expectation. Values must be integers from 0 through 2**63 - 1; booleans are rejected.
+
+        Raises:
+            TypeError: The value is not an integer or is a boolean.
+            ValueError: The value is outside the allowed range.
+            RuntimeError: Called outside the execution thread, before entry, or after closure.
+        """
+        self._require_main_thread()
+        if self._closed:
+            raise RuntimeError("progress_scope has ended; checkpoints from a previous cell do not renew")
+        if not self._entered:
+            raise RuntimeError("progress_scope must be entered with 'with' before checkpoints")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"progress checkpoint must be an integer, not {type(value).__name__}")
+        if value < 0:
+            raise ValueError("progress checkpoint must be a non-negative integer")
+        if value > MAX_PROGRESS_CHECKPOINT:
+            raise ValueError(f"progress checkpoint must be at most {MAX_PROGRESS_CHECKPOINT}")
+        if value <= self._high_water:
+            # A repeated or lower value is evidence, not a fresh expectation window.
+            return self._high_water
+        self._high_water = value
+        _emit_progress(self, "checkpoint", checkpoint=value)
+        return value
+
+
+def progress_scope(label: Any, expect_seconds: Any) -> _ProgressScope:
+    """Return a context manager for advisory checkpoints; it never controls cell execution.
+
+    Enter it with `with` before calling `checkpoint`. The stripped label must contain
+    1..64 characters. `expect_seconds` must be a finite number greater than zero and
+    at most 86,400 seconds; it controls only when the host may label progress stalled.
+
+    Raises:
+        TypeError: The label is not text or the expectation is not numeric; booleans
+            are not accepted as expectations.
+        ValueError: The label or expectation is outside its allowed bounds.
+        RuntimeError: Called outside the interpreter's recorded execution thread.
+    """
+    return _ProgressScope(label, expect_seconds)
+
+
+def _close_progress_scopes() -> None:
+    """End every scope this cell opened, so no handle survives into the next cell."""
+    stack = _STATE.pop("progress_stack", None)
+    for scope in list(stack or []):
+        scope._close()
+
+
+def _host_call_limit(value: Any) -> float | None:
+    """Return a positive host-call wait in seconds as a float.
+
+    None and nonpositive values mean no bound; no fallback timeout is substituted.
+    """
+    if value is None or value <= 0:
+        return None
+    return float(value)
+
+
 def _bridge_call(tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    """Call a host tool and return its reply value, waiting under the execution's deadline policy.
+
+    A missing bound waits indefinitely; absent or partially written replies are retried.
+
+    Raises:
+        ValueError: The encoded request exceeds the body limit.
+        TimeoutError: No readable reply arrives within the host-call bound.
+        RuntimeError: The host reply contains an error.
+
+    Request-serialization and reply-removal errors propagate.
+    """
     request = {"id": uuid.uuid4().hex, "tool": tool_name, "args": args, "kwargs": kwargs}
     if len(json.dumps(request, separators=(",", ":")).encode("utf-8")) > MAX_BODY:
         raise ValueError("Host tool request exceeds the size limit")
     path = os.path.join(REPLY_DIR, request["id"] + ".json")
     _emit(CALL_MARK, request)
-    # The Turn watchdog is the outer bound; this per-call deadline turns a lost reply into an error the
-    # model can act on instead of a stall.
-    limit = float(_STATE.get("host_call_timeout") or HOST_CALL_TIMEOUT_SECONDS)
-    deadline = time.monotonic() + limit
+    # The Turn's remaining deadline is the only bound: a deadline-free Turn waits without one, and no
+    # component substitutes a fixed cutoff. The wait turns a lost reply into an error the model can act
+    # on instead of a stall once a deadline exists.
+    limit = _host_call_limit(_STATE.get("host_call_timeout"))
+    deadline = None if limit is None else time.monotonic() + limit
     delay = 0.005
     while True:
         try:
             with open(path, encoding="utf-8") as handle:
                 reply = json.load(handle)
         except (OSError, ValueError):  # absent, or the upload is still in progress
-            if time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError(f"Host tool {tool_name!r} did not reply within {limit:.0f}s") from None
             time.sleep(delay)
             delay = min(delay * 2, 0.05)
@@ -179,6 +358,7 @@ def _typed_submit(names: list[str]) -> Any:
 
 
 def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
+    """Create the persistent execution globals with workspace helpers and registered host tools."""
     context_globals = globals()
     namespace: dict[str, Any] = {
         "WORKSPACE": WORKSPACE,
@@ -188,6 +368,7 @@ def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
             "jev_decide_batched", [list(items), question, list(choices)], {}
         ),
         "SUBMIT": _submit,
+        "progress_scope": progress_scope,
     }
     namespace.update(
         {name: _receipt_skill_helper(name, context_globals[name]) for name in SKILL_HELPERS if name in context_globals}
@@ -232,8 +413,19 @@ def _invalid_bindings(variables: Any, tools: Any) -> bool:
 
 
 def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = None) -> dict[str, Any]:
+    """Execute a cell in the persistent namespace and return captured output and result metadata.
+
+    Valid variables update unreserved bindings; `outputs` names constrain SUBMIT fields.
+    Returns validation and user-code errors as result dictionaries, including the remote
+    error type when available. SUBMIT supplies `final`; otherwise the last expression
+    supplies `has_value` and a JSON-compatible `value`. Output is bounded, Skill activity
+    is recorded, and execution progress scopes are closed before returning.
+    """
     _STATE["skill_activity"] = []
     _STATE["skill_activity_truncated"] = False
+    # Scopes are execution-local: the new cell starts with none, whatever the previous cell opened.
+    _close_progress_scopes()
+    _STATE["progress_stack"] = []
     if not isinstance(code, str) or len(code.encode("utf-8")) > MAX_CODE:
         return {"error": True, "error_type": "ValueError", "stderr": "invalid or oversized code"}
     if _invalid_bindings(variables, tools):
@@ -248,6 +440,8 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
     if namespace is None:
         namespace = _STATE["namespace"] = _make_namespace(tools)
     namespace["SUBMIT"] = _typed_submit(outputs) if outputs else _submit
+    # Reserved: a user binding from an earlier cell must not shadow the progress helper.
+    namespace["progress_scope"] = progress_scope
     protected = RESERVED_NAMES | set(tools)
     for name in tools:
         if name not in RESERVED_NAMES:
@@ -298,15 +492,19 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
         result["truncated"] = True
     result["skill_activity"] = _STATE["skill_activity"]
     result["skill_activity_truncated"] = _STATE["skill_activity_truncated"]
+    # Closing here covers a cell that raised or returned while a scope was still open: the handle
+    # remains in the namespace but belongs to this execution, and the next cell starts unknown.
+    _close_progress_scopes()
     return result
 
 
 def _fleet_exec(payload_json: str) -> None:
     """Run one execution and report it as a single FLEET_RESULT line."""
     _STATE["stdout"] = sys.stdout  # the interpreter's per-run stream; markers must reach it, not the capture
+    _STATE["execution_thread"] = threading.get_ident()
     try:
         payload = json.loads(payload_json)
-        _STATE["host_call_timeout"] = payload.get("host_call_timeout") or HOST_CALL_TIMEOUT_SECONDS
+        _STATE["host_call_timeout"] = payload.get("host_call_timeout")
         result = _run(
             payload.get("code"), payload.get("variables") or {}, payload.get("tools") or [], payload.get("outputs")
         )

@@ -254,7 +254,16 @@ paths:
       tags:
       - sessions
       summary: Turn Status
-      description: Return one durable Turn status, or 404 when the Turn is unknown.
+      description: 'Return one durable Turn status, or 404 when the Turn is unknown.
+
+
+        A Turn stored before provenance existed stays readable; its result is labelled
+
+        `pre-provenance` rather than being rejected or backfilled. A Turn with recorded
+
+        deadline policy but incomplete snapshot fields is `unresolved`; all six snapshot
+
+        fields must be present for `recorded` provenance.'
       operationId: turn_status_sessions__session_id__turns__turn_id__get
       parameters:
       - name: session_id
@@ -800,9 +809,13 @@ paths:
       description: 'Run one Turn and stream its activity as Server-Sent Events.
 
 
-        The stream always ends with one outcome event.
+        The stream ends with one outcome event followed by the terminal `done` envelope when `run_turn`
 
-        A client disconnect cancels the Turn; the Session stays locked until sandbox work has drained.'
+        reached it; a worker that stops earlier still closes the stream with one terminal event.
+
+        A client disconnect cancels a Turn without an observed outcome; after an outcome it preserves
+
+        the completed Turn''s warm root. The Session stays locked until sandbox work has drained.'
       operationId: stream_turn_sessions__session_id__turn_post
       parameters:
       - name: session_id
@@ -1357,6 +1370,13 @@ components:
           description: Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed
             GEPA data.
           default: false
+        timeout_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Timeout Seconds
+          description: Fleet deadline for this Turn in seconds. Omitted or null inherits the configured
+            value; 0 disables the Fleet deadline; otherwise the value must be 10..3600.
       additionalProperties: false
       type: object
       required:

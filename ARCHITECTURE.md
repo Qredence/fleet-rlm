@@ -169,6 +169,78 @@ judge URIs are never passed as DSPy model IDs. ReAnchor is currently reported
 as skipped without a compatible calibration client. Passing unit tests is not
 evidence of provider compatibility or a measured quality improvement.
 
+## Turn termination, deadlines, and observability
+
+Four contracts govern a Turn, in dependency order.
+
+**Termination.** A Turn has one terminal outcome and one teardown. On failure,
+cancellation, disconnect, or deadline expiry, the runtime sets the cancellation
+flag, fences outstanding host calls, shuts down children, stops the root, records
+`cleanup` (`stopped`, or `unconfirmed` when the provider stop did not confirm),
+and only then emits the terminal event and `done`. Teardown is never deferred to a
+background task. A successful Turn records `cleanup=not_required` and does not stop
+the root: children were already shut down when their tool returned, and the warm
+REPL is what the next Turn reuses. A failed or cancelled Turn discards the stopped
+root, so the next Turn cold-resumes a new sandbox and loses interpreter variables.
+
+**Fence.** Every bridged host call belongs to one execution identity. A successful
+reply is published only while that identity is live; after cancellation it is
+refused once with a bounded warning and no retry, so a late result cannot land in a
+later resumed REPL. Cancellation and error replies are always delivered, so the
+sandbox never waits out the host-call bound for a message that will not come. The
+fence does not interrupt an in-flight provider request: that request finishes and
+its result is discarded.
+
+**Deadline.** One policy is resolved at Turn start and never changes mid-Turn:
+
+| Field | Values |
+| --- | --- |
+| `source` | `request` \| `configuration` \| `default` |
+| `effective_seconds` | positive integer, or `None` for no Fleet deadline |
+
+Request `timeout_seconds` beats `turn_timeout_seconds`, which beats the shipped
+default of `900`. Omission and `null` inherit; `0` disables the Fleet deadline.
+Validation is a strict integer of exactly `0` or `10`–`3600`; booleans, floats, and
+other text are rejected. The terminal `/timeout` command is client-local state that
+the client sends as `TurnRequest.timeout_seconds`, so the server records
+`source=request` and never a command source. An absolute `time.monotonic()`
+deadline propagates to child managers and copied contexts; a child never receives a
+later deadline than its parent. Deadline-free is not the shipped default and is not
+"unbounded": Daytona's provider-owned `ttl_minutes` and `auto_stop_interval` still
+apply, are reported on the Turn, and are never removed or shortened by Fleet. A
+deadline-free Turn arms no watchdog and sends `run_code(timeout=0)` explicitly; no
+Fleet component substitutes a fallback bound. Host-call waiting derives from the
+remaining deadline, so a bridged call cannot outlive a bounded Turn.
+
+**Environment.** The execution snapshot is a repository artifact defined in
+`sandbox/snapshots.py`, not an environment or TOML setting. Preflight resolves the
+repo-owned name before provisioning and refuses a missing, non-`active`, or
+below-floor snapshot with the observed values and the build command. Child
+snapshots are exempt from the Turn floors. The resolved name, provider id, cpu,
+mem, disk, and definition digest are recorded on the Turn span, the stored Turn,
+and new replay snapshots. Missing probed packages are a soft observation, not a
+Turn failure. Removing the former snapshot setting intentionally changes
+`configuration()`'s digest, so dependent GEPA approval evidence must be revalidated.
+
+Observability labels are derived from existing events. No label owns a timer, a
+polling loop, or a background task, and nothing in the label layer may act.
+
+| Label | Derived from | Acts? |
+| --- | --- | --- |
+| `waiting_on_host` | between a bridged call's `tool_start` and `tool_end` | No |
+| `progress_unknown` | no active progress scope in the current cell | No |
+| `stalled` | an active scope declared an expectation and no advancing checkpoint arrived within it | No |
+| `interrupted` | a cell ended from a provider interruption or partial-state result | No |
+| `fenced` | a late host-call reply was refused | No |
+
+A cell with no progress scope stays `progress_unknown` forever and never becomes
+`stalled`. Progress markers are the lowest-priority stream event class: when the SSE
+queue is full they are coalesced or dropped, while lifecycle transitions,
+cancellation, and the terminal `done` remain deliverable. Generated code may use the
+injected `progress_scope(label, expect_seconds=...)` helper and report strictly
+increasing integer checkpoints; checkpoints are observation counts, never
+percentages or completion claims.
+
 ## Deployment and trust boundaries
 
 The HTTP API currently has no caller authentication. It binds to `127.0.0.1`
@@ -188,7 +260,8 @@ policy.
 - `skills.py`: Skill validation and bundled plus `.fleet/skills/` synchronization.
 - `sandbox/`: Daytona sandbox lifecycle (`manager.py`), the DSPy interpreter
   (`interpreter.py`), the `run_code` transport (`repl.py`) and the sandbox-side
-  runtime (`runtime/repl.py`).
+  runtime (`runtime/repl.py`). Snapshot definitions, preflight, and provenance live
+  in `snapshots.py`.
 - `engine/`: routes and signatures (`signatures.py`), the Turn program, and child agents.
 - `store/`: PostgreSQL access and Turn commits.
 - `optimize/`: datasets, scorers, the GEPA metric and runner, compiled-program artifacts.
@@ -209,8 +282,9 @@ or retired API surfaces.
 The DSPy interpreter remains synchronous and stateful. Each Fleet namespace is
 one Daytona `code_interpreter` context (its own worker process), prepared once
 with the Skill and workspace helpers and `sandbox/runtime/repl.py`. An execution
-is one `run_code` call, bounded by the remaining Turn deadline. There is no
-in-sandbox server, token, or execution registry.
+is one `run_code` call, bounded by the remaining Turn deadline when one exists
+(`timeout=0` for a deadline-free Turn). There is no in-sandbox server, token, or
+execution registry.
 
 The sandbox reports results and host-tool calls as marker lines on stdout.
 Daytona sends every stdout write as its own websocket message and drops the

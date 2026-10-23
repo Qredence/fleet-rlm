@@ -254,10 +254,64 @@ def test_history_and_turn_status_read_the_durable_store_without_a_runtime():
     assert status.json() == {
         "turn_id": "turn-1",
         "status": "completed",
-        "result": {"answer": "stored"},
+        # A stored result without the provenance fields stays readable and is labelled, not rejected.
+        "result": {"answer": "stored", "provenance_state": "pre-provenance"},
         "updated_at": "2026-10-20T00:00:00",
     }
     assert missing.status_code == 404
+
+
+def test_turn_status_returns_the_recorded_provenance_under_the_same_turn_id():
+    result = {
+        "event": "turn_complete",
+        "answer": "5",
+        "route": "flex",
+        "outcome": "completed",
+        "deadline_source": "request",
+        "effective_seconds": None,
+        "duration_seconds": 12.5,
+        "cleanup": "not_required",
+        "snapshot_name": "fleet-rlm-python313-v10",
+        "snapshot_id": "snap-1",
+        "snapshot_cpu": 4,
+        "snapshot_mem": 8,
+        "snapshot_disk": 8,
+        "snapshot_definition_digest": "d" * 64,
+    }
+    store = store_with(
+        turn_status=lambda _session, turn_id: {
+            "turn_id": turn_id,
+            "status": "completed",
+            "result": dict(result),
+            "updated_at": "2026-10-20T00:00:00",
+        }
+    )
+    client, _ = client_for(store=store)
+    with client:
+        status = client.get("/sessions/session-1/turns/turn-1")
+    assert status.status_code == 200
+    assert status.json()["turn_id"] == "turn-1"
+    assert status.json()["result"] == {**result, "provenance_state": "recorded"}
+
+
+@pytest.mark.parametrize("partial_snapshot", [False, True])
+def test_new_failed_turn_without_resolved_snapshot_is_not_historical(partial_snapshot):
+    result = {"outcome": "failed", "deadline_source": "default", "effective_seconds": 900, "cleanup": "stopped"}
+    if partial_snapshot:
+        result["snapshot_name"] = "unresolved-snapshot"
+    store = store_with(
+        turn_status=lambda _session, turn_id: {
+            "turn_id": turn_id,
+            "status": "failed",
+            "result": result,
+            "updated_at": "2026-10-23T00:00:00",
+        }
+    )
+    client, _ = client_for(store=store)
+    with client:
+        status = client.get("/sessions/session-1/turns/turn-1")
+    assert status.status_code == 200
+    assert status.json()["result"] == {**result, "provenance_state": "unresolved"}
 
 
 @pytest.mark.parametrize("path", ["/sessions/session-1/history", "/sessions/session-1/turns/turn-1"])

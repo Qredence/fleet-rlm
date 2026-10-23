@@ -46,7 +46,16 @@ def validate_review_labels(labels: dict[str, Any], *, require_gold: bool = False
 
 
 def selected_snapshot(store: Any, session_id: str, turn_id: str, digest: str) -> dict[str, Any]:
-    """Resolve an immutable replay reference without trusting trace previews."""
+    """Resolve an immutable replay reference without trusting trace previews.
+
+    Return the validated snapshot with `provenance_state` added; historical snapshots
+    without all provenance keys remain readable as `pre-provenance`.
+
+    Raises:
+        ValueError: An identifier, digest, stored snapshot, or ownership check is invalid.
+
+    Storage errors propagate.
+    """
     validate_session_id(session_id)
     validate_session_id(turn_id)
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -57,7 +66,11 @@ def selected_snapshot(store: Any, session_id: str, turn_id: str, digest: str) ->
     snapshot = decode_snapshot(*stored)
     if snapshot.get("session_id") != session_id or snapshot.get("turn_id") != turn_id:
         raise ValueError("Replay snapshot ownership does not match its reference")
-    return snapshot
+    # Historical replays predate the provenance fields. Their bytes stay untouched; the read is
+    # labelled so a consumer can tell "recorded before provenance" from corrupt or missing data.
+    from fleet_rlm.sandbox.snapshots import provenance_state
+
+    return {**snapshot, "provenance_state": provenance_state(snapshot)}
 
 
 def encode_snapshot(snapshot: dict[str, Any]) -> tuple[str, bytes]:

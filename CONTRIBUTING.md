@@ -15,7 +15,9 @@ make check-security
 
 For focused changes, run the relevant tests with `uv run pytest -q <path>` and
 the relevant Make targets. `make check` is the repository's non-live quality
-gate. It must not require Daytona, model-provider, or production credentials.
+gate. Ruff lint and format checks include `notebooks/`, matching the pre-commit
+hooks. These checks do not execute notebook cells or live benchmarks. The quality
+gate must not require Daytona, model-provider, or production credentials.
 CircleCI splits the same non-live quality gate across static checks, complete
 test runs on Python 3.11 and 3.13, a Smarter Testing pytest run on Python 3.12,
 package build and smoke checks, and one locked dependency audit. The aggregate
@@ -49,10 +51,10 @@ CircleCI Test Insights rather than treating a green retry as proof the first
 attempt passed.
 
 CircleCI's Performance plan includes 10,000 paid Smarter Testing test atoms
-per month. The current pytest discovery yields 37 file-level test atoms, and
+per month. The current pytest discovery yields 38 file-level test atoms, and
 each Python 3.12 `circleci testsuite run` counts all discovered atoms even
-when TIA selects only some tests. That is 37 atoms per normal test-suite run;
-270 complete runs use 9,990 atoms. Track the monthly total in CircleCI before
+when TIA selects only some tests. That is 38 atoms per normal test-suite run;
+263 complete runs use 9,994 atoms. Track the monthly total in CircleCI before
 increasing the test suite or run volume. Keep paid Smart Testing features
 disabled if the expected monthly total would exceed 10,000 atoms; exceeding
 the included allowance requires a separate decision. Recount the discovered

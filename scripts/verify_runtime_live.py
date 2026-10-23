@@ -1,6 +1,6 @@
 """Explicitly authorized live acceptance using disposable DB/provider resources.
 
-Usage: uv run python scripts/verify_runtime_live.py --live --snapshot NAME --model openai/SERVICE
+Usage: uv run python scripts/verify_runtime_live.py --live --model openai/SERVICE
 Never prints credential values. Creates and drops a private PostgreSQL schema;
 creates and deletes only sandboxes labeled with this run's random session ID.
 """
@@ -24,12 +24,17 @@ from psycopg import sql
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
+from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
 
 
 def main() -> None:
+    """Run the `--live` runtime checks and save a report after attempting resource cleanup.
+
+    Creates a private database schema and provider sandboxes. Exits unsuccessfully
+    if a check, report write, or cleanup fails.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Authorize disposable credential-backed calls")
-    parser.add_argument("--snapshot", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--local-postgres", action="store_true", help="Use disposable Orb PostgreSQL on port 55432")
     parser.add_argument(
@@ -52,7 +57,6 @@ def main() -> None:
         fleet_root_model=args.model,
         fleet_sub_model=args.model,
         fleet_reflection_model=args.model,
-        fleet_daytona_snapshot=args.snapshot,
         fleet_database_url=local_database if args.local_postgres else base_settings.fleet_database_url,
         fleet_database_migration_url=local_database
         if args.local_postgres
@@ -77,7 +81,7 @@ def main() -> None:
     if not settings.fleet_database_migration_url:
         parser.error("FLEET_DATABASE_MIGRATION_URL is required for private-schema setup and cleanup")
 
-    report: dict = {"session": session, "model": args.model, "snapshot": args.snapshot, "cases": {}}
+    report: dict = {"session": session, "model": args.model, "snapshot": SNAPSHOT_NAME, "cases": {}}
     start = time.monotonic()
     provider = None
     schema_created = False

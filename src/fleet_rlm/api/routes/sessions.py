@@ -139,11 +139,22 @@ def get_history(session_id: str, store: StoreDep) -> dict:
 
 @router.get("/sessions/{session_id}/turns/{turn_id}", response_model=TurnStatus)
 def turn_status(session_id: str, turn_id: str, store: StoreDep) -> dict:
-    """Return one durable Turn status, or 404 when the Turn is unknown."""
+    """Return one durable Turn status, or 404 when the Turn is unknown.
+
+    A Turn stored before provenance existed stays readable; its result is labelled
+    `pre-provenance` rather than being rejected or backfilled. A Turn with recorded
+    deadline policy but incomplete snapshot fields is `unresolved`; all six snapshot
+    fields must be present for `recorded` provenance.
+    """
     with translate("Turn status is unavailable", invalid="Invalid session or turn ID"):
         result = store.turn_status(validate_session_id(session_id), validate_session_id(turn_id))
     if result is None:
         raise HTTPException(status_code=404, detail="Turn was not found")
+    stored = result.get("result")
+    if isinstance(stored, dict):
+        from fleet_rlm.sandbox.snapshots import provenance_state
+
+        result = {**result, "result": {**stored, "provenance_state": provenance_state(stored)}}
     return result
 
 

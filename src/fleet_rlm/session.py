@@ -53,12 +53,18 @@ class SessionRuntime:
             raise RuntimeError("Session ownership lease was lost; runtime must be rebuilt")
 
     def start_lease_monitor(self, *, interval_seconds: float = 10.0) -> None:
-        """Probe the dedicated lease connection and cancel remote work when it becomes unhealthy."""
+        """Start periodic lease probes, renewing a dropped connection before declaring ownership lost.
+
+        `interval_seconds` is the delay between probes. A failed reacquisition marks the lease
+        lost and requests Turn cancellation; cancellation failures are suppressed. Calls are
+        no-ops when no lease exists or a monitor has already been created.
+        """
         lease = self.lease
         if lease is None or self._lease_monitor is not None:
             return
 
         def monitor() -> None:
+            """Renew a dropped Session lease or mark it lost and request cancellation if renewal fails."""
             current = lease
             while not self._lease_monitor_stop.wait(interval_seconds):
                 try:
@@ -75,7 +81,7 @@ class SessionRuntime:
                         return
                     self.lease_lost.set()
                     with suppress(Exception):
-                        self.sandbox_mgr.cancel_turn()
+                        self.sandbox_mgr.request_cancellation()
                     return
                 with self._lease_lock:
                     if self._lease_monitor_stop.is_set():
@@ -210,14 +216,22 @@ class SessionRuntimeRegistry:
             raise RuntimeError("The maximum number of active Sessions has been reached")
 
     def _build(self, session_id: str) -> SessionRuntime:
+        """Build a Session runtime, acquire its storage lease, and restore saved settings.
+
+        Starts the lease monitor before returning. Raises RuntimeError when storage is not
+        configured; storage and restoration errors propagate, closing an acquired lease
+        if restoration or monitor startup fails.
+        """
         settings = self.settings
+        if self.store is None:
+            raise RuntimeError("Session storage is not configured")
+        store = self.store
         sandbox_mgr = DaytonaSandboxManager(
             api_key=settings.fleet_daytona_api_key,
             org_id=settings.fleet_daytona_org_id,
             volume_id=settings.fleet_daytona_volume_id,
             shared_notes_subpath=settings.fleet_shared_notes_subpath,
             session_id=session_id,
-            snapshot=settings.fleet_daytona_snapshot,
             auto_stop_minutes=settings.daytona_auto_stop_minutes,
             sub_lm=self.sub_lm,
             jev_lm=self.jev_lm,
@@ -227,9 +241,9 @@ class SessionRuntimeRegistry:
             max_active_children=settings.max_active_children,
             turn_timeout_seconds=settings.turn_timeout_seconds,
             linked_children=settings.linked_children,
+            environment_report_claim=store.claim_environment_report,
         )
-        assert self.store is not None
-        harness = VolumePostgresHarness(self.store, sandbox_mgr)
+        harness = VolumePostgresHarness(store, sandbox_mgr)
         runtime = SessionRuntime(
             sandbox_mgr=sandbox_mgr,
             harness=harness,
@@ -245,9 +259,9 @@ class SessionRuntimeRegistry:
             execution_mode=settings.execution_mode,
         )
         harness.ensure_session(session_id)
-        runtime.lease = self.store.acquire_session_lease(session_id)
+        runtime.lease = store.acquire_session_lease(session_id)
         try:
-            saved = self.store.runtime_settings(session_id)
+            saved = store.runtime_settings(session_id)
             if "mode" in saved:
                 runtime.set_mode(settings_for_session(settings, saved).execution_mode)
             if saved.get("models"):

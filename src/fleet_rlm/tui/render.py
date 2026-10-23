@@ -168,11 +168,19 @@ class TurnTracker:
     sandbox_errors: int = 0
     submit_rejections: int = 0
     cancelling: bool = False
+    # Advisory label derived by the server from events; it never changes the Turn's behavior.
+    status_label: str | None = None
+    status_scope: str | None = None
+    status_checkpoint: int | None = None
+    status_expect_seconds: float | None = None
     items: list[CollapsibleItem] = field(default_factory=list)
     notices: list[RenderableType] = field(default_factory=list)
     terminal_event: dict[str, Any] | None = None
     started_at: float = field(default_factory=time.monotonic)
     finished_at: float | None = None
+    # The server's recorded wall duration, once the terminal event carries it. Displaying it makes
+    # the client's elapsed time equal the stored Turn instead of a locally measured approximation.
+    server_duration_seconds: float | None = None
     _agent_aliases: dict[str, str] = field(default_factory=dict)
     _agent_depths: dict[str, int] = field(default_factory=dict)
     _active_children: set[str] = field(default_factory=set)
@@ -212,6 +220,30 @@ class TurnTracker:
         event_type = event.get("event")
         if event.get("turn_id") and not self.turn_id:
             self.turn_id = str(event["turn_id"])
+        # The server attaches the derived label to each event; the client renders it, never derives control.
+        if "status" in event:
+            raw_status = event.get("status")
+            self.status_label = str(raw_status)[:64] if isinstance(raw_status, str) and raw_status else None
+        if event_type in {"progress", "status"}:
+            scope = event.get("scope")
+            self.status_scope = scope[:64] if isinstance(scope, str) and scope else None
+            checkpoint = event.get("checkpoint")
+            self.status_checkpoint = checkpoint if type(checkpoint) is int and checkpoint >= 0 else None
+            expectation = event.get("expect_seconds")
+            self.status_expect_seconds = (
+                float(expectation)
+                if isinstance(expectation, (int, float)) and not isinstance(expectation, bool)
+                else None
+            )
+        elif event_type == "fenced":
+            self.notices.append(Text("Publication fenced; the late result was not delivered.", style="yellow"))
+        elif event_type == "done":
+            # The label is absent after `done`: the Turn has acknowledged its outcome.
+            self.status_label = None
+            self.status_scope = None
+            self.status_checkpoint = None
+            self.status_expect_seconds = None
+            return
         if event_type == "orphan_deleted":
             self.notices.append(Text(f"✓ Cleaned up orphaned sandbox {event.get('sandbox_id') or ''}", style="dim"))
             return
@@ -480,6 +512,13 @@ class TurnTracker:
                     setattr(self, name, value)
             self.terminal_event = event
             self.finished_at = time.monotonic()
+            # The terminal event carries the Turn's recorded route and wall duration; prefer them
+            # over what the client observed so the displayed values match the stored Turn.
+            if event_type == "turn_complete" and event.get("route"):
+                self.route = str(event["route"])
+            duration = event.get("duration_seconds")
+            if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0:
+                self.server_duration_seconds = float(duration)
             self.sandbox_status = None
             self.active_model = None
             self.active_module = None
@@ -558,9 +597,20 @@ class TurnTracker:
         return True
 
     def elapsed_seconds(self) -> float:
-        """Return the Turn's elapsed wall time in seconds."""
+        """Return the Turn's elapsed wall time, preferring the duration the server recorded."""
+        if self.server_duration_seconds is not None:
+            return self.server_duration_seconds
         end = self.finished_at if self.finished_at is not None else time.monotonic()
         return max(0.0, end - self.started_at)
+
+    def _status_text(self) -> str:
+        """Render the advisory label with neutral evidence: no percentage and no completion claim."""
+        parts = [self.status_label or ""]
+        if self.status_scope:
+            parts.append(self.status_scope)
+        if self.status_checkpoint is not None:
+            parts.append(f"checkpoint {self.status_checkpoint}")
+        return " · ".join(part for part in parts if part)
 
     def status_line(self) -> Text:
         """Build the live status footer (or final Turn receipt summary when finished)."""
@@ -577,8 +627,12 @@ class TurnTracker:
         metrics = " · ".join(part for part in (budget, tokens, repl_info, elapsed) if part)
 
         if self.terminal_event is not None:
+            # The recorded route joins the answer and elapsed time the terminal event reported.
+            route = self.route or self.terminal_event.get("route")
+            route_info = f"route={route}" if route else ""
+            summary = " · ".join(part for part in (route_info, metrics or elapsed) if part)
             line = Text("── Turn summary: ", style="dim")
-            line.append(metrics or elapsed, style="dim")
+            line.append(summary, style="dim")
             if self.items:
                 line.append(" · ctrl+o inspect cells", style="dim italic")
             return line
@@ -594,6 +648,10 @@ class TurnTracker:
         elif self.sandbox_status:
             activity = f"{spinner} {self.sandbox_status}"
             style = "yellow"
+        elif self.status_label:
+            # Advisory status derived from the server's event stream; it never controls the Turn.
+            activity = f"{spinner} {self._status_text()}"
+            style = "yellow" if self.status_label in {"stalled", "fenced", "interrupted"} else "cyan"
         elif running_repl is not None:
             activity = f"{spinner} Running Python #{running_repl.index} in Daytona ({running_repl.agent_label})…"
             style = "cyan"
@@ -665,6 +723,18 @@ def render_event(event: dict[str, Any]) -> None:
     identity = _identity_text(event)
     if event_type == "turn_status":
         CONSOLE.print(f"[dim]Turn: {event.get('phase', 'running')}[/dim]")
+    elif event_type == "status":
+        label = str(event.get("status") or "")
+        scope = str(event.get("scope") or "")
+        detail = f" · {scope}" if scope else ""
+        CONSOLE.print(f"[dim]Status: {label[:64]}{detail}[/dim]")
+    elif event_type == "progress":
+        scope = str(event.get("scope") or "")[:64]
+        checkpoint = event.get("checkpoint")
+        count = f" · checkpoint {checkpoint}" if type(checkpoint) is int and checkpoint >= 0 else ""
+        CONSOLE.print(f"[dim]Progress · {scope}{count}[/dim]")
+    elif event_type == "fenced":
+        CONSOLE.print("[yellow]  Publication fenced; the late result was not delivered.[/yellow]")
     elif event_type == "module_start":
         CONSOLE.print(Text(f"  → Module: {event.get('module', 'unknown')} · {identity}", style="cyan"))
     elif event_type == "lm_start":
@@ -831,3 +901,7 @@ def render_event(event: dict[str, Any]) -> None:
                 border_style="cyan",
             )
         )
+    # Status is advisory metadata attached by the server; render it without changing any behavior.
+    advisory = event.get("status")
+    if isinstance(advisory, str) and advisory and event_type not in {"status", "progress"}:
+        CONSOLE.print(f"[dim]Status: {advisory[:64]}[/dim]")

@@ -2,7 +2,58 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.8.1] - Unreleased
+
+### Added
+
+- Textual `@` suggestions find local files and directories by nested basename,
+  alongside cached workspace files. Submitting attaches selected content to unique
+  workspace paths. Directory uploads preserve structure, skip ignored/hidden files
+  and symlinks, and enforce file-count and size limits. Browsing never uploads.
+- Per-Turn `timeout_seconds` overrides and client-local `/timeout` controls. The
+  shipped deadline remains 900 seconds; explicit `0` disables only Fleet's deadline,
+  preserving Daytona's provider lifecycle bounds.
+- Advisory execution progress and status, plus recorded deadline, duration, cleanup,
+  live root identity, and snapshot provenance across traces and stored outcomes.
+- Repository-owned snapshot definition, build/verification tooling, resource preflight,
+  and observational reporting of missing optional packages.
+
+### Fixed
+
+- Textual command suggestions now scroll through all matches, keep the highlighted
+  row visible at narrow widths, and support keyboard, page-key, and mouse selection.
+  Enter completes partial choices before execution; Escape keeps the menu dismissed.
+  Rapid typing and arrow/Tab navigation stay ordered instead of accepting stale choices.
+  Cursor-only navigation refreshes `@` suggestions when returning to an earlier mention.
+- Input history preserves unsent drafts and does not reopen slash suggestions while
+  browsing. Down no longer clears a fresh draft.
+- Command menus include nested argument choices and local/workspace paths. Transfer
+  commands quote and parse filenames containing spaces; configuration aliases expose
+  their supported submenus. Enter preserves exact workspace paths and free-form
+  transfer destinations instead of replacing them with a prefix match.
+- Failure, cancellation, and deadline paths coordinate one teardown and fence late
+  successful host replies. Disconnects after an observed outcome preserve a successful
+  Turn's warm root; transport failures with unknown execution outcomes remain failures.
+- New Turns and replays with deadline policy but incomplete snapshot fields report
+  `unresolved` provenance; historical records remain readable as `pre-provenance`.
+- Nested local-path searches reuse their bounded index in one-minute windows instead
+  of rebuilding it every three seconds. Explicit-path browsing remains available.
+- Locked GitPython and OpenTelemetry dependencies are updated to patched versions
+  (3.2.1 and API/SDK 1.45.1 respectively), preserving the existing narrow audit exception.
+
+### Changed
+
+- Sandbox host-call waiting derives from the remaining Turn deadline instead of a
+  fixed 600-second cutoff. Deadline-free Turns explicitly send `run_code(timeout=0)`.
+- **Breaking:** environment/TOML snapshot selection is removed in favor of the
+  repository-owned definition. Configuration identities change; dependent GEPA
+  approval evidence requires revalidation.
+- Ruff lint and format checks include benchmark notebooks. Their path bootstrap runs
+  before configuration imports, with live execution and judging disabled by default.
+- Runtime, API, CLI, architecture, and contributor guidance now describe the current
+  lifecycle contracts; the obsolete audit plan is retired.
+
+## [0.8.0]
 
 ### Fixed
 

@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from importlib.metadata import version
@@ -21,9 +22,17 @@ import mlflow
 from mlflow.entities import SpanType
 from mlflow.entities.trace_location import MlflowExperimentLocation
 
+from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.engine.signatures import Route
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
-from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT
+from fleet_rlm.sandbox.manager import (
+    CLEANUP_NOT_REQUIRED,
+    CLEANUP_STOPPED,
+    CLEANUP_UNCONFIRMED,
+    SANDBOX_TRANSPORT,
+)
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
+from fleet_rlm.sandbox.snapshots import MAX_REFUSAL_CHARS, SnapshotUnavailableError
 from fleet_rlm.store import IdempotencyConflictError
 
 if TYPE_CHECKING:
@@ -34,6 +43,44 @@ _LOGGER = logging.getLogger(__name__)
 _TRACE_PREVIEW_CHARS = 200
 _MAX_SHARED_NOTES = 8
 _NOTE_DUPLICATE_SIMILARITY = 0.5
+# The field that carries the teardown result on the stored Turn, its span, and the terminal event.
+_CLEANUP_ATTRIBUTE = "cleanup"
+# The live root provider handle id, recorded only when this Turn actually provisioned one.
+_ROOT_SANDBOX_ATTRIBUTE = "root_sandbox_id"
+# Provider-owned lifecycle bounds, surfaced unchanged and distinct from the Fleet deadline.
+_PROVIDER_BOUND_KEYS = ("ttl_minutes", "auto_stop_interval", "maximum_lifespan_minutes", "provider_owned")
+
+
+def _provider_bounds(manager: Any) -> dict[str, Any]:
+    """Read the provider-owned bounds from the manager, or nothing when it cannot report them."""
+    reader = getattr(manager, "provider_bounds", None)
+    bounds = reader() if callable(reader) else {}
+    return bounds if isinstance(bounds, dict) else {}
+
+
+def _provider_bounds_attribute(bounds: dict[str, Any]) -> str | None:
+    """Serialize only the provider-bound fields for one bounded span attribute."""
+    values = {key: bounds[key] for key in _PROVIDER_BOUND_KEYS if key in bounds}
+    return json.dumps(values, sort_keys=True) if values else None
+
+
+def _live_sandbox_id(manager: Any) -> str | None:
+    """Return the root provider handle id, or None when nothing was provisioned."""
+    reader = getattr(manager, "live_sandbox_id", None)
+    sandbox_id = reader() if callable(reader) else reader
+    return sandbox_id if isinstance(sandbox_id, str) and sandbox_id else None
+
+
+def _turn_environment(manager: Any) -> dict[str, Any]:
+    """Snapshot, deadline, root sandbox id, and provider bounds for a Turn outcome."""
+    root_sandbox_id = _live_sandbox_id(manager)
+    return {
+        **manager.snapshot_provenance(),
+        **manager.deadline_provenance(),
+        **({_ROOT_SANDBOX_ATTRIBUTE: root_sandbox_id} if root_sandbox_id else {}),
+        **_provider_bounds(manager),
+    }
+
 
 Emit = Callable[[dict[str, Any]], None]
 
@@ -50,15 +97,38 @@ def run_turn(
     callback: Any,
     emit: Emit,
     record_replay: bool = False,
+    timeout_seconds: int | None = None,
 ) -> None:
-    """Run one Turn for a Session, claiming its id and emitting progress events through emit."""
+    """Run one Turn for a Session, claiming its id and emitting progress events through emit.
+
+    The deadline policy is resolved once, before any work starts: the request override
+    wins over configuration, which wins over the shipped default. `None` inherits and
+    `0` disables the Fleet deadline for this Turn only.
+
+    An existing idempotency claim replays its stored outcome. New work persists its
+    completion and optionally captures immutable replay inputs. Ordinary failures
+    become terminal events after teardown; success keeps the root sandbox warm.
+    Finalization and event-delivery errors can still propagate to the caller.
+    """
     manager = runtime.sandbox_mgr
+    started_at = time.monotonic()
+    policy = resolve_turn_deadline(
+        timeout_seconds,
+        settings.turn_timeout_seconds,
+        configured_source=settings.configuration_source("turn_timeout_seconds"),
+    )
     previous_event_callback = manager.event_callback
+    previous_snapshot_callback: Any = getattr(manager, "snapshot_resolved_callback", None)
     trace_id: str | None = None
+    # The single terminal outcome reported after teardown; None means this Turn completed.
+    terminal_event: dict[str, Any] | None = None
     try:
         runtime.assert_lease_held()
         manager.event_callback = emit
-        manager.reset_turn_budget()
+        manager.reset_turn_budget(
+            deadline_seconds=policy.effective_seconds,
+            deadline_source=policy.source,
+        )
         prior = runtime.harness.claim_turn(turn_id, idempotency_key or turn_id, task)
         if prior is not None:
             emit({**_replayed(prior), "turn_id": prior["turn_id"]})
@@ -67,140 +137,312 @@ def run_turn(
         # across Sessions that trace to different experiments.
         destination = MlflowExperimentLocation(mlflow_experiment_id) if mlflow_experiment_id else None
         with mlflow.start_span(name="fleet_turn", span_type=SpanType.CHAIN, trace_destination=destination) as span:
-            trace_id = getattr(span, "trace_id", None) if mlflow_experiment_id else None
-            # Keep enough context on the trace if preparation fails. The complete prepared inputs
-            # replace this small initial payload once they are available.
-            span.set_inputs({"session_id": session_id, "task": task, "turn_id": turn_id})
-            with mlflow.start_span(name="turn.prepare_inputs", span_type=SpanType.CHAIN):
-                inputs = _prepare_inputs(runtime, session_id, task, record_replay=record_replay)
-            replay_snapshot: tuple[str, bytes] | None = None
-            if record_replay:
-                from fleet_rlm.session import runtime_configuration
+            try:
+                trace_id = getattr(span, "trace_id", None) if mlflow_experiment_id else None
+                # Keep enough context on the trace if preparation fails. The complete prepared inputs
+                # replace this small initial payload once they are available.
+                span.set_inputs({"session_id": session_id, "task": task, "turn_id": turn_id})
+                # Resolved once above; a failure anywhere after this point still reports it.
+                span.set_attributes(manager.deadline_provenance())
 
-                with mlflow.start_span(name="turn.capture_replay", span_type=SpanType.CHAIN):
-                    snapshot = {
-                        "schema_version": 1,
-                        "turn_id": turn_id,
-                        "session_id": session_id,
-                        "task": task,
-                        "workspace_manifest": inputs["manifest"],
-                        "context_files": inputs["context_files"],
-                        "skill_revision_sha256": hashlib.sha256(
-                            json.dumps(
-                                {
-                                    path: digest
-                                    for path, digest in sorted(inputs["context_files"].items())
-                                    if path.startswith("skills/")
-                                },
-                                sort_keys=True,
-                                separators=(",", ":"),
-                            ).encode()
-                        ).hexdigest(),
-                        "replay_files": inputs["replay_files"],
-                        "skills_catalog": inputs["skills_catalog"],
-                        "memory_summary": inputs["memory_summary"],
-                        "session_history": inputs["session_history"],
-                        "dataset_context": (runtime.context.to_descriptor() if runtime.context is not None else None),
-                        "execution_mode": runtime.execution_mode,
-                        "turn_timeout_seconds": manager.turn_timeout_seconds,
-                        "sandbox_transport": SANDBOX_TRANSPORT,
-                        "configuration": runtime_configuration(settings, runtime),
-                        "provenance": {"fleet_rlm_version": version("fleet-rlm")},
-                    }
-                    replay_snapshot = encode_snapshot(snapshot)
-            _describe_turn(span, runtime, settings, session_id, task, turn_id, idempotency_key, inputs, replay_snapshot)
-            with dspy.context(callbacks=[*dspy.settings.callbacks, callback], disable_history=True):
-                prediction = runtime.engine(
-                    workspace_manifest=inputs["manifest"],
-                    skills_catalog=inputs["skills_catalog"],
-                    memory_summary=inputs["memory_summary"],
-                    session_history=inputs["session_history"],
-                    task=task,
-                    execution_mode=runtime.execution_mode,
-                    context=runtime.context,
+                def record_snapshot_identity(identity: Any) -> None:
+                    """Record the resolved provider snapshot provenance on the active Turn span."""
+                    span.set_attributes(identity.provenance())
+
+                # Record the identity the instant preflight resolves it. A later preparation step
+                # (replay capture, oversized payload, engine setup) may still raise, and the failure
+                # path must report the same provenance as the persisted Turn.
+                manager.snapshot_resolved_callback = record_snapshot_identity
+                resolved_identity = getattr(manager, "snapshot_identity", None)
+                if resolved_identity is not None:
+                    record_snapshot_identity(resolved_identity)
+                with mlflow.start_span(name="turn.prepare_inputs", span_type=SpanType.CHAIN):
+                    inputs = _prepare_inputs(runtime, session_id, task, record_replay=record_replay)
+                # The provider resolved this identity during preparation; every surface records
+                # these exact values rather than re-deriving them from the definition.
+                snapshot_provenance = manager.snapshot_provenance()
+                replay_snapshot: tuple[str, bytes] | None = None
+                if record_replay:
+                    from fleet_rlm.session import runtime_configuration
+
+                    with mlflow.start_span(name="turn.capture_replay", span_type=SpanType.CHAIN):
+                        snapshot = {
+                            "schema_version": 1,
+                            "turn_id": turn_id,
+                            "session_id": session_id,
+                            "task": task,
+                            "workspace_manifest": inputs["manifest"],
+                            "context_files": inputs["context_files"],
+                            "skill_revision_sha256": hashlib.sha256(
+                                json.dumps(
+                                    {
+                                        path: digest
+                                        for path, digest in sorted(inputs["context_files"].items())
+                                        if path.startswith("skills/")
+                                    },
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ).encode()
+                            ).hexdigest(),
+                            "replay_files": inputs["replay_files"],
+                            "skills_catalog": inputs["skills_catalog"],
+                            "memory_summary": inputs["memory_summary"],
+                            "session_history": inputs["session_history"],
+                            "dataset_context": (
+                                runtime.context.to_descriptor() if runtime.context is not None else None
+                            ),
+                            "execution_mode": runtime.execution_mode,
+                            "turn_timeout_seconds": manager.turn_timeout_seconds,
+                            "deadline_source": policy.source,
+                            "effective_seconds": policy.effective_seconds,
+                            "sandbox_transport": SANDBOX_TRANSPORT,
+                            **snapshot_provenance,
+                            "configuration": runtime_configuration(settings, runtime),
+                            "provenance": {"fleet_rlm_version": version("fleet-rlm")},
+                        }
+                        replay_snapshot = encode_snapshot(snapshot)
+                _describe_turn(
+                    span, runtime, settings, session_id, task, turn_id, idempotency_key, inputs, replay_snapshot
                 )
-            answer = str(prediction.answer)
-            usage = {
-                name: getattr(prediction, name, None)
-                for name in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
-            }
-            learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
-            route = str(getattr(prediction, "route", Route.RLM.value))
-            evidence = getattr(prediction, "execution_evidence", {})
-            artifact_changes = _artifact_changes(inputs["context_files"], evidence)
-            runtime.assert_lease_held()
-            turn_record = {
-                "task": task,
-                "workspace_manifest": inputs["manifest"],
-                "skills_catalog": inputs["skills_catalog"],
-                "answer": answer,
-                "route": route,
-                "learned_skill_note": learned_note,
-                "turn_id": turn_id,
-                "idempotency_key": idempotency_key,
-                "execution_mode": runtime.execution_mode,
-                "trace_id": trace_id,
-                **usage,
-                "context_files": inputs["context_files"],
-                "artifact_changes": artifact_changes,
-                "replay_snapshot_selected": record_replay,
-                "replay_snapshot_sha256": replay_snapshot[0] if replay_snapshot else None,
-            }
-            with mlflow.start_span(name="turn.commit", span_type=SpanType.CHAIN):
-                artifacts = runtime.harness.commit_turn(
-                    session_id=session_id,
-                    turn_record=turn_record,
-                    new_memory_note=learned_note,
-                    replay_snapshot=replay_snapshot,
-                )
-            _write_learned_note(runtime, turn_id, learned_note, trace_id)
-            span.set_outputs(
-                {
+                with dspy.context(callbacks=[*dspy.settings.callbacks, callback], disable_history=True):
+                    prediction = runtime.engine(
+                        workspace_manifest=inputs["manifest"],
+                        skills_catalog=inputs["skills_catalog"],
+                        memory_summary=inputs["memory_summary"],
+                        session_history=inputs["session_history"],
+                        task=task,
+                        execution_mode=runtime.execution_mode,
+                        context=runtime.context,
+                    )
+                answer = str(prediction.answer)
+                usage = {
+                    name: getattr(prediction, name, None)
+                    for name in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
+                }
+                learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
+                route = str(getattr(prediction, "route", Route.RLM.value))
+                evidence = getattr(prediction, "execution_evidence", {})
+                artifact_changes = _artifact_changes(inputs["context_files"], evidence)
+                runtime.assert_lease_held()
+                # The successful Turn deliberately keeps its warm root, so this is the handle the
+                # next Turn will reuse; record it and provider bounds alongside provenance.
+                environment = _turn_environment(manager)
+                provider_bounds_attribute = _provider_bounds_attribute(environment)
+                if provider_bounds_attribute is not None:
+                    span.set_attribute("provider_bounds", provider_bounds_attribute)
+                # One wall duration for every surface; the span attribute and the stored record are
+                # joined within the documented two-second tolerance of MLflow's own span duration.
+                duration_seconds = round(time.monotonic() - started_at, 3)
+                turn_record = {
+                    "task": task,
+                    "workspace_manifest": inputs["manifest"],
+                    "skills_catalog": inputs["skills_catalog"],
                     "answer": answer,
                     "route": route,
-                    # Keep usage and host receipts ahead of diagnostic artifact summaries.
+                    "outcome": "completed",
+                    "duration_seconds": duration_seconds,
+                    "learned_skill_note": learned_note,
+                    "turn_id": turn_id,
+                    "idempotency_key": idempotency_key,
+                    "execution_mode": runtime.execution_mode,
+                    "trace_id": trace_id,
                     **usage,
-                    "execution_evidence": evidence,
-                    "artifacts": artifacts,
+                    **environment,
+                    "context_files": inputs["context_files"],
                     "artifact_changes": artifact_changes,
+                    "replay_snapshot_selected": record_replay,
+                    "replay_snapshot_sha256": replay_snapshot[0] if replay_snapshot else None,
+                    # A completed Turn keeps its warm root sandbox for the next Turn.
+                    _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                 }
-            )
-            # Read after the engine ran: it reloads an approved program at the start of the Turn.
-            span.set_attribute(
-                "compiled_program_digest", getattr(getattr(runtime.engine, "compiled", None), "digest", "")
-            )
-            mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS], tags={"fleet.route": route})
-        completion: dict[str, Any] = {
-            "event": "turn_complete",
-            "answer": answer,
-            "route": route,
-            "learned_skill_note": learned_note,
-            "artifacts": artifacts,
-            **usage,
-        }
-        if trace_id:
-            completion["trace_id"] = trace_id
-        emit(completion)
+                with mlflow.start_span(name="turn.commit", span_type=SpanType.CHAIN):
+                    artifacts = runtime.harness.commit_turn(
+                        session_id=session_id,
+                        turn_record=turn_record,
+                        new_memory_note=learned_note,
+                        replay_snapshot=replay_snapshot,
+                    )
+                _write_learned_note(runtime, turn_id, learned_note, trace_id)
+                # The span carries the same join keys as the record, status payload, and terminal
+                # event so one turn_id resolves all four surfaces without re-deriving anything.
+                span.set_attributes(
+                    {
+                        "turn_id": turn_id,
+                        "route": route,
+                        "outcome": "completed",
+                        "duration_seconds": duration_seconds,
+                    }
+                )
+                span.set_outputs(
+                    {
+                        "turn_id": turn_id,
+                        "answer": answer,
+                        "route": route,
+                        "outcome": "completed",
+                        "duration_seconds": duration_seconds,
+                        # Keep usage and host receipts ahead of diagnostic artifact summaries.
+                        **usage,
+                        "execution_evidence": evidence,
+                        "artifacts": artifacts,
+                        "artifact_changes": artifact_changes,
+                        _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
+                    }
+                )
+                # Read after the engine ran: it reloads an approved program at the start of the Turn.
+                span.set_attribute(
+                    "compiled_program_digest", getattr(getattr(runtime.engine, "compiled", None), "digest", "")
+                )
+                mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS], tags={"fleet.route": route})
+                completion: dict[str, Any] = {
+                    "event": "turn_complete",
+                    "turn_id": turn_id,
+                    "answer": answer,
+                    "route": route,
+                    "outcome": "completed",
+                    "duration_seconds": duration_seconds,
+                    "learned_skill_note": learned_note,
+                    "artifacts": artifacts,
+                    **usage,
+                    **environment,
+                    _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
+                }
+                if trace_id:
+                    completion["trace_id"] = trace_id
+            except Exception as exc:
+                # Resolve the outcome before teardown sets `_cancelled`, then stop this Turn's work
+                # before anything is acknowledged. A completed Turn never reaches this branch.
+                terminal_event = _terminal_failure(
+                    runtime,
+                    manager,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    exc=exc,
+                    trace_id=trace_id,
+                    started_at=started_at,
+                )
+                span.set_attributes(
+                    {
+                        "turn_id": turn_id,
+                        "outcome": terminal_event["outcome"],
+                        "duration_seconds": terminal_event["duration_seconds"],
+                    }
+                )
+                span.set_attribute(_CLEANUP_ATTRIBUTE, terminal_event[_CLEANUP_ATTRIBUTE])
+                failure_bounds = _provider_bounds_attribute(terminal_event)
+                if failure_bounds is not None:
+                    span.set_attribute("provider_bounds", failure_bounds)
+                if terminal_event.get(_ROOT_SANDBOX_ATTRIBUTE):
+                    span.set_attribute(_ROOT_SANDBOX_ATTRIBUTE, terminal_event[_ROOT_SANDBOX_ATTRIBUTE])
+            else:
+                span.set_attribute(_CLEANUP_ATTRIBUTE, CLEANUP_NOT_REQUIRED)
+        if terminal_event is None:
+            emit(completion)
     except Exception as exc:
-        _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
-        cancelled = manager._cancelled.is_set()
-        failure: dict[str, Any] = {
-            "event": "turn_cancelled" if cancelled else "error",
-            "request_id": turn_id,
-            "error": str(exc) if isinstance(exc, IdempotencyConflictError) else f"The Turn failed (request {turn_id}).",
-        }
-        if trace_id:
-            failure["trace_id"] = trace_id
-        with suppress(Exception):
-            runtime.harness.store.finish_turn(session_id, turn_id, "cancelled" if cancelled else "failed", failure)
-        emit(failure)
+        terminal_event = _terminal_failure(
+            runtime,
+            manager,
+            session_id=session_id,
+            turn_id=turn_id,
+            exc=exc,
+            trace_id=trace_id,
+            started_at=started_at,
+        )
     finally:
         try:
+            # Teardown precedes acknowledgement: the terminal event and `done` follow this call.
             manager.end_turn()
         finally:
             # The stream's end marker must survive a failing sandbox cleanup.
             manager.event_callback = previous_event_callback
-            emit({"event": "done"})
+            manager.snapshot_resolved_callback = previous_snapshot_callback
+            try:
+                if terminal_event is not None:
+                    emit(terminal_event)
+            finally:
+                emit({"event": "done"})
+
+
+def _stop_terminal_turn(manager: Any) -> str:
+    """Stop a terminal Turn's sandbox work once and return the cleanup outcome it recorded.
+
+    The manager's cancellation guard makes this Turn's teardown single-owner: when a deadline,
+    transport failure, watchdog, or disconnect already claimed it, this call waits for that
+    teardown instead of invoking `cancel_turn()` a second time for the same Turn.
+    """
+    try:
+        manager.request_cancellation()
+    except Exception:
+        unconfirmed = True
+    else:
+        # A watchdog or disconnect may have run the teardown first and recorded its result.
+        unconfirmed = getattr(manager, "cleanup_outcome", None) == CLEANUP_UNCONFIRMED
+    if not unconfirmed:
+        return CLEANUP_STOPPED
+    # Bounded: a provider payload never reaches the client, the stored Turn, or the log.
+    _LOGGER.warning(
+        "Turn teardown did not confirm the root sandbox stop for Session %s",
+        getattr(manager, "session_id", "unknown"),
+    )
+    return CLEANUP_UNCONFIRMED
+
+
+def _terminal_failure(
+    runtime: SessionRuntime,
+    manager: Any,
+    *,
+    session_id: str,
+    turn_id: str,
+    exc: BaseException,
+    trace_id: str | None,
+    started_at: float,
+) -> dict[str, Any]:
+    """Resolve one failed or cancelled outcome, tear the Turn down, and store it before acknowledgment.
+
+    The cancellation classification is read before teardown because `cancel_turn()` sets
+    `_cancelled` itself. A transport failure may already have requested teardown, but its
+    unknown execution outcome remains a failure. Teardown runs once; a provider stop that
+    raises is recorded as `unconfirmed` and never truncates the stream.
+    """
+    cancelled = manager._cancelled.is_set() and not isinstance(exc, ExecutionOutcomeUnknownError)
+    # Read the live handle and provider bounds before teardown discards the handle.
+    environment = _turn_environment(manager)
+    _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
+    outcome = "cancelled" if cancelled else "failed"
+    cleanup = _stop_terminal_turn(manager)
+    # Measured after teardown so the recorded wall duration covers everything before acknowledgment.
+    duration_seconds = round(time.monotonic() - started_at, 3)
+    failure: dict[str, Any] = {
+        "event": "turn_cancelled" if cancelled else "error",
+        "turn_id": turn_id,
+        "outcome": outcome,
+        "duration_seconds": duration_seconds,
+        "request_id": turn_id,
+        "error": _failure_message(exc, turn_id),
+        _CLEANUP_ATTRIBUTE: cleanup,
+        **environment,
+    }
+    if trace_id:
+        failure["trace_id"] = trace_id
+    with suppress(Exception):
+        runtime.harness.store.finish_turn(session_id, turn_id, outcome, failure)
+    return failure
+
+
+def _failure_message(exc: BaseException, turn_id: str) -> str:
+    """Return the only failure text a client or stored Turn sees.
+
+    Snapshot preflight refusals are constructed by the repository's snapshot module
+    from the snapshot name, observed provider state/resources, the required floors,
+    and the build command, so those bounded details are explicitly safe to surface.
+    Idempotency conflicts also retain their caller-safe message.
+    All remaining exceptions stay sanitized: their text can carry file paths,
+    credentials, or provider payloads.
+    """
+    if isinstance(exc, IdempotencyConflictError):
+        return str(exc)
+    if isinstance(exc, SnapshotUnavailableError):
+        return str(exc)[:MAX_REFUSAL_CHARS]
+    return f"The Turn failed (request {turn_id})."
 
 
 def _replayed(prior: dict[str, Any]) -> dict[str, Any]:
@@ -329,9 +571,13 @@ def _describe_turn(
     inputs: dict[str, Any],
     replay_snapshot: tuple[str, bytes] | None,
 ) -> None:
+    """Record prepared input references, configuration, and sandbox provenance on the Turn trace."""
     from fleet_rlm.session import runtime_configuration
 
     configuration = runtime_configuration(settings, runtime)
+    # Preparation has provisioned (or reused) the root by now; the span records the same live
+    # handle id as the stored Turn. A Turn that never provisioned records nothing.
+    root_sandbox_id = _live_sandbox_id(runtime.sandbox_mgr)
     # The trace keeps a small integrity reference; opted-in file bytes stay in Lakebase.
     span.set_inputs(
         {
@@ -348,8 +594,11 @@ def _describe_turn(
         {
             "execution_mode": runtime.execution_mode,
             "turn_timeout_seconds": runtime.sandbox_mgr.turn_timeout_seconds,
+            **runtime.sandbox_mgr.deadline_provenance(),
             "sandbox_transport": SANDBOX_TRANSPORT,
             "configuration_digest": configuration["digest"],
+            **runtime.sandbox_mgr.snapshot_provenance(),
+            **({_ROOT_SANDBOX_ATTRIBUTE: root_sandbox_id} if root_sandbox_id else {}),
             "model_settings": {
                 name: value
                 for name, value in configuration["values"].items()
