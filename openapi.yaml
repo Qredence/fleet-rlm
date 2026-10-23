@@ -259,7 +259,11 @@ paths:
 
         A Turn stored before provenance existed stays readable; its result is labelled
 
-        `pre-provenance` rather than being rejected or backfilled.'
+        `pre-provenance` rather than being rejected or backfilled. A Turn with recorded
+
+        deadline policy but incomplete snapshot fields is `unresolved`; all six snapshot
+
+        fields must be present for `recorded` provenance.'
       operationId: turn_status_sessions__session_id__turns__turn_id__get
       parameters:
       - name: session_id
@@ -809,7 +813,9 @@ paths:
 
         reached it; a worker that stops earlier still closes the stream with one terminal event.
 
-        A client disconnect cancels the Turn; the Session stays locked until sandbox work has drained.'
+        A client disconnect cancels a Turn without an observed outcome; after an outcome it preserves
+
+        the completed Turn''s warm root. The Session stays locked until sandbox work has drained.'
       operationId: stream_turn_sessions__session_id__turn_post
       parameters:
       - name: session_id

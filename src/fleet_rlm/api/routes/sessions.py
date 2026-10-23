@@ -142,7 +142,9 @@ def turn_status(session_id: str, turn_id: str, store: StoreDep) -> dict:
     """Return one durable Turn status, or 404 when the Turn is unknown.
 
     A Turn stored before provenance existed stays readable; its result is labelled
-    `pre-provenance` rather than being rejected or backfilled.
+    `pre-provenance` rather than being rejected or backfilled. A Turn with recorded
+    deadline policy but incomplete snapshot fields is `unresolved`; all six snapshot
+    fields must be present for `recorded` provenance.
     """
     with translate("Turn status is unavailable", invalid="Invalid session or turn ID"):
         result = store.turn_status(validate_session_id(session_id), validate_session_id(turn_id))

@@ -10,6 +10,8 @@ from functools import lru_cache
 from itertools import islice
 from pathlib import Path
 
+_SEARCH_INDEX_TTL_SECONDS = 60
+
 
 def _git_files(root: Path) -> list[Path] | None:
     if not any((parent / ".git").exists() for parent in (root, *root.parents)):
@@ -91,9 +93,9 @@ def _search_index(root: Path, _generation: int) -> tuple[Path, ...]:
 
 
 def search_local_paths(fragment: str) -> list[Path]:
-    """Find nested basename matches under the working directory with a short-lived index."""
+    """Find nested basename matches with an index refreshed at most once per minute window."""
     try:
-        paths = _search_index(Path.cwd(), int(time.monotonic() // 3))
+        paths = _search_index(Path.cwd(), int(time.monotonic() // _SEARCH_INDEX_TTL_SECONDS))
     except (OSError, ValueError):
         return []  # Immediate-directory completion remains available if indexing fails.
     needle = fragment.casefold()

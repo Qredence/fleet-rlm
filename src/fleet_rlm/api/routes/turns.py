@@ -96,7 +96,8 @@ async def stream_turn(
 
     The stream ends with one outcome event followed by the terminal `done` envelope when `run_turn`
     reached it; a worker that stops earlier still closes the stream with one terminal event.
-    A client disconnect cancels the Turn; the Session stays locked until sandbox work has drained.
+    A client disconnect cancels a Turn without an observed outcome; after an outcome it preserves
+    the completed Turn's warm root. The Session stays locked until sandbox work has drained.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
@@ -150,7 +151,8 @@ async def stream_turn(
             else:
                 if connected and await request.is_disconnected():
                     connected = False
-                    await _cancel(runtime)
+                    if not reported:
+                        await _cancel(runtime)
                 continue
             getter = None
             if event is None:
@@ -159,7 +161,8 @@ async def stream_turn(
             reported = reported or event.get("event") in _OUTCOMES
             if connected and await request.is_disconnected():
                 connected = False
-                await _cancel(runtime)
+                if not reported:
+                    await _cancel(runtime)
             if connected:
                 wrapped = envelope.wrap(event)
                 yield ServerSentEvent(data=wrapped, id=str(wrapped["seq"]))
@@ -180,7 +183,7 @@ async def stream_turn(
         # Shielded: the response may be tearing down, but the lock must outlive the sandbox work.
         with anyio.CancelScope(shield=True):
             if not job.cancel() and not job.done():
-                if not finished:
+                if not finished and not reported:
                     await _cancel(runtime)
                 await asyncio.wait({worker})
         _log_failure(job, turn_id)

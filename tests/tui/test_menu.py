@@ -814,3 +814,26 @@ def test_directory_upload_outside_git_skips_hidden_entries_and_symlinks(monkeypa
         root = next(iter(uploaded)).rsplit("/main.py", 1)[0]
         assert uploaded == {f"{root}/main.py": b"root", f"{root}/nested/main.py": b"nested"}
         assert rewritten == f'Read @"{root}"'
+
+
+def test_nested_path_search_reuses_git_index_across_typing_windows(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "settings.py").write_text("content")
+    scans = []
+    clock = [61.0]
+
+    def git_files(root):
+        scans.append(root)
+        return [root.joinpath("nested/settings.py").relative_to(root)]
+
+    monkeypatch.setattr(local_paths, "_git_files", git_files)
+    monkeypatch.setattr(local_paths.time, "monotonic", lambda: clock[0])
+    for seconds in (61.0, 65.0, 90.0, 119.0):
+        clock[0] = seconds
+        paths = local_paths.search_local_paths("settings")
+        assert [path.as_posix() for path in paths] == ["nested/settings.py"]
+    assert scans == [tmp_path]
+    clock[0] = 120.0
+    local_paths.search_local_paths("settings")
+    assert scans == [tmp_path, tmp_path]

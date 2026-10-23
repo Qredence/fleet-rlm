@@ -38,8 +38,10 @@ PRE_PROVENANCE = "pre-provenance"
 
 
 def provenance_state(values: dict[str, Any]) -> str:
-    """Label a stored Turn or replay snapshot as recorded provenance or pre-provenance."""
-    return "recorded" if all(key in values for key in PROVENANCE_KEYS) else PRE_PROVENANCE
+    """Distinguish recorded, unresolved, and historical snapshot provenance."""
+    if all(key in values for key in PROVENANCE_KEYS):
+        return "recorded"
+    return "unresolved" if "deadline_source" in values else PRE_PROVENANCE
 
 
 @dataclass(frozen=True)

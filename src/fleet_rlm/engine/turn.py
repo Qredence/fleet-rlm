@@ -31,6 +31,7 @@ from fleet_rlm.sandbox.manager import (
     CLEANUP_UNCONFIRMED,
     SANDBOX_TRANSPORT,
 )
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.sandbox.snapshots import MAX_REFUSAL_CHARS, SnapshotUnavailableError
 from fleet_rlm.store import IdempotencyConflictError
 
@@ -392,10 +393,11 @@ def _terminal_failure(
     """Resolve one failed or cancelled outcome, tear the Turn down, and store it before acknowledgment.
 
     The cancellation classification is read before teardown because `cancel_turn()` sets
-    `_cancelled` itself. Teardown runs exactly once through the manager; a provider stop that
+    `_cancelled` itself. A transport failure may already have requested teardown, but its
+    unknown execution outcome remains a failure. Teardown runs once; a provider stop that
     raises is recorded as `unconfirmed` and never truncates the stream.
     """
-    cancelled = manager._cancelled.is_set()
+    cancelled = manager._cancelled.is_set() and not isinstance(exc, ExecutionOutcomeUnknownError)
     # Read the live handle and provider bounds before teardown discards the handle.
     environment = _turn_environment(manager)
     _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)

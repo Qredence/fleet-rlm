@@ -294,6 +294,26 @@ def test_turn_status_returns_the_recorded_provenance_under_the_same_turn_id():
     assert status.json()["result"] == {**result, "provenance_state": "recorded"}
 
 
+@pytest.mark.parametrize("partial_snapshot", [False, True])
+def test_new_failed_turn_without_resolved_snapshot_is_not_historical(partial_snapshot):
+    result = {"outcome": "failed", "deadline_source": "default", "effective_seconds": 900, "cleanup": "stopped"}
+    if partial_snapshot:
+        result["snapshot_name"] = "unresolved-snapshot"
+    store = store_with(
+        turn_status=lambda _session, turn_id: {
+            "turn_id": turn_id,
+            "status": "failed",
+            "result": result,
+            "updated_at": "2026-10-23T00:00:00",
+        }
+    )
+    client, _ = client_for(store=store)
+    with client:
+        status = client.get("/sessions/session-1/turns/turn-1")
+    assert status.status_code == 200
+    assert status.json()["result"] == {**result, "provenance_state": "unresolved"}
+
+
 @pytest.mark.parametrize("path", ["/sessions/session-1/history", "/sessions/session-1/turns/turn-1"])
 def test_durable_reads_need_storage(path):
     client, _ = client_for()

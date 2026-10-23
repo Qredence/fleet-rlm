@@ -106,8 +106,11 @@ and the `fleet_turn` span, and those surfaces also agree on `route`, `outcome` (
 deadline-free), `duration_seconds`, and `cleanup`. `duration_seconds` is measured once
 with a monotonic clock; MLflow derives its span duration from timestamps taken just
 outside that measurement, so the two agree within two seconds. A Turn or replay row
-written before these fields existed still loads and reports
-`provenance_state: "pre-provenance"` without backfilling absent values.
+with incomplete snapshot fields and no `deadline_source` remains readable as
+`provenance_state: "pre-provenance"`, without backfilling absent values. A newer Turn with `deadline_source` but
+incomplete snapshot fields reports `provenance_state: "unresolved"`, for example
+when snapshot preflight refused the Turn. All six snapshot fields must be present
+for `provenance_state: "recorded"`.
 The identity is recorded the
 moment preflight resolves it, so a failure in a later preparation step (for example an
 oversized replay payload) still reports the same six fields on the span, in the stored
@@ -166,8 +169,10 @@ remaining deadline, so a bridged call never outlives a bounded Turn, and only a
 bounded Turn arms the watchdog. A deadline-free Turn sends `run_code(timeout=0)`
 explicitly and no Fleet component substitutes a fallback bound, so the call waits
 until it returns or the Turn is cancelled; Daytona's provider TTL and idle bounds
-still apply. Closing a stream requests remote cancellation; it does not merely
-abandon a local Python future. Reconnection is not an automatic side-effect retry.
+still apply. Closing a stream before the server observes an outcome requests remote
+cancellation and drains the worker. After an observed outcome, disconnecting
+preserves a successful Turn's warm root while the worker finishes. Reconnection
+is not an automatic side-effect retry.
 
 New completion events and their persisted idempotent outcomes also include
 host-owned `lm_calls`, `sandbox_errors`, `submit_rejections`, and

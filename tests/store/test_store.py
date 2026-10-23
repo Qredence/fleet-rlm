@@ -469,7 +469,11 @@ def test_snapshot_provenance_round_trips_through_the_immutable_replay():
     assert {key: decoded[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
 
 
-def test_historical_replay_snapshot_is_replay_readable_without_provenance():
+@pytest.mark.parametrize(
+    ("deadline_fields", "expected_state"),
+    [({}, "pre-provenance"), ({"deadline_source": "default", "effective_seconds": 900}, "unresolved")],
+)
+def test_replay_without_snapshot_provenance_is_readable(deadline_fields, expected_state):
     from fleet_rlm.replay import decode_snapshot, encode_snapshot, selected_snapshot
 
     historical = {
@@ -482,6 +486,7 @@ def test_historical_replay_snapshot_is_replay_readable_without_provenance():
         "replay_files": {},
         "skill_revision_sha256": hashlib.sha256(b"{}").hexdigest(),
     }
+    historical.update(deadline_fields)
     digest, compressed = encode_snapshot(historical)
     decoded = decode_snapshot(digest, compressed)
     assert decoded == historical
@@ -489,7 +494,7 @@ def test_historical_replay_snapshot_is_replay_readable_without_provenance():
 
     store = SimpleNamespace(replay_snapshot=lambda _session, _turn: (digest, compressed))
     loaded = selected_snapshot(store, "s1", "t1", digest)
-    assert loaded == {**historical, "provenance_state": "pre-provenance"}
+    assert loaded == {**historical, "provenance_state": expected_state}
     assert not set(SNAPSHOT_PROVENANCE) & set(loaded), "reading must not backfill provenance"
 
     review_store, _pool = make_store([(1,)])

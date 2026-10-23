@@ -179,8 +179,9 @@ The menu follows the cursor, including when returning to an earlier mention.
 Bare names search nested paths: `@fleet_rlm` finds `@./src/fleet_rlm`.
 Relative paths start at the client's working directory; absolute and `~/` paths
 also work. Nested name matching is case-insensitive and uses a bounded,
-best-effort index refreshed every three seconds. Explicit paths remain available
-when a large tree exceeds the search window.
+best-effort index refreshed on demand in one-minute windows. New nested files
+may take up to a minute to appear in bare-name search. Explicit paths remain
+available immediately and when a large tree exceeds the search window.
 
 Choose a directory's **attach on submit** entry to select it, or its trailing-`/`
 **browse** entry to open it. Tab, Enter, and mouse selection do not upload content.

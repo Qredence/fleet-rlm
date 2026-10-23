@@ -826,14 +826,21 @@ def test_a_raising_provider_stop_records_unconfirmed_and_still_ends_the_stream(t
 
 
 @pytest.mark.usefixtures("traced")
-def test_an_unknown_execution_outcome_stays_terminal_and_tears_down_once() -> None:
+@pytest.mark.parametrize("transport_stopped", [False, True])
+def test_an_unknown_execution_outcome_stays_terminal_and_tears_down_once(transport_stopped) -> None:
     calls: list[str] = []
     stored: list[tuple[str, str, dict[str, Any]]] = []
 
     def engine(**_kwargs: Any) -> SimpleNamespace:
+        if transport_stopped:
+            manager.request_cancellation()
         raise ExecutionOutcomeUnknownError("transport lost after execution started")
 
-    manager = FakeManager(cancel_turn=lambda: calls.append("cancel_turn"))
+    def cancel_turn():
+        calls.append("cancel_turn")
+        manager._cancelled.set()
+
+    manager = FakeManager(cancel_turn=cancel_turn)
     runtime = runtime_with(
         sandbox_mgr=manager,
         harness=FakeHarness(store=_recording_store(stored)),
@@ -1528,3 +1535,70 @@ def test_deadline_provenance_matches_across_span_turn_record_and_replay(
     assert (traced["attributes"]["deadline_source"], traced["attributes"]["effective_seconds"]) == expected
     assert (snapshot["deadline_source"], snapshot["effective_seconds"]) == expected
     assert (terminal["deadline_source"], terminal["effective_seconds"]) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disconnect_at", ["outcome", "poll", "close"])
+async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypatch, disconnect_at):
+    release_worker = threading.Event()
+    worker_stopped = threading.Event()
+    calls = []
+    warm_root = object()
+
+    def cancel_turn():
+        calls.append("cancel_turn")
+        manager._cancelled.set()
+        manager._sandbox = None
+
+    def complete(*_args, emit, **_kwargs):
+        try:
+            emit({"event": "turn_complete", "answer": "hello", "cleanup": "not_required"})
+            if not release_worker.wait(5):
+                raise RuntimeError("test did not release the completed worker")
+            emit({"event": "done"})
+        finally:
+            worker_stopped.set()
+
+    disconnected = disconnect_at == "outcome"
+
+    async def is_disconnected():
+        if disconnected:
+            release_worker.set()
+        return disconnected
+
+    manager = FakeManager(_sandbox=warm_root, cancel_turn=cancel_turn)
+    runtime = runtime_with(sandbox_mgr=manager)
+    monkeypatch.setattr(turns_route, "run_turn", complete)
+    monkeypatch.setattr(turns_route, "_DISCONNECT_POLL_SECONDS", 0.01)
+    with turns_route.create_turn_executor() as executor:
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(turn_executor=executor, mlflow_experiment_id=None)),
+            is_disconnected=is_disconnected,
+        )
+        stream = turns_route.stream_turn(
+            "session-a", turns_route.TurnRequest(task="hello"), request, runtime, api_settings(), None
+        )
+        try:
+            status = await anext(stream)
+            assert status.data["event"] == "turn_status"
+            if disconnect_at == "outcome":
+                remaining = [event async for event in stream]
+                assert remaining == []
+            else:
+                completion = await anext(stream)
+                assert completion.data["event"] == "turn_complete"
+                assert completion.data["payload"]["cleanup"] == "not_required"
+                if disconnect_at == "poll":
+                    disconnected = True
+                    remaining = [event async for event in stream]
+                    assert remaining == []
+                else:
+                    asyncio.get_running_loop().call_later(0.05, release_worker.set)
+                    await stream.aclose()
+        finally:
+            release_worker.set()
+            await stream.aclose()
+    assert worker_stopped.is_set()
+    assert calls == []
+    assert not manager._cancelled.is_set()
+    assert manager._sandbox is warm_root
