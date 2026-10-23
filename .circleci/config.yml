@@ -542,7 +542,7 @@ jobs:
           command: |
             notes_file=$(mktemp)
             trap 'rm -f "$notes_file"' EXIT
-            PYTHONPATH=src python scripts/release_checks.py release-notes \
+            python scripts/release_notes.py \
               --version "$FLEET_RELEASE_VERSION" \
               --changelog CHANGELOG.md \
               --output "$notes_file"
@@ -575,7 +575,7 @@ jobs:
           command: |
             notes_file=$(mktemp)
             trap 'rm -f "$notes_file"' EXIT
-            PYTHONPATH=src python scripts/release_checks.py release-notes \
+            python scripts/release_notes.py \
               --version "$FLEET_RELEASE_VERSION" \
               --changelog CHANGELOG.md \
               --output "$notes_file"

@@ -73,7 +73,7 @@ def test_pypi_release_requires_webhook_preflight_and_canary_validation() -> None
     assert normal_canary["context"] == "fleet-pypi-validation-webhook"
     assert set(by_name["github-release"]["requires"]) == {"release-validation", "pypi-canary"}
     github_release_command = config["jobs"]["github-release"]["steps"][2]["run"]["command"]
-    assert "release_checks.py release-notes" in github_release_command
+    assert "python scripts/release_notes.py" in github_release_command
     assert '--notes-file "$notes_file"' in github_release_command
     assert "--generate-notes" not in github_release_command
 
@@ -157,7 +157,7 @@ def test_pypi_recovery_rechecks_existing_artifact_without_uploading() -> None:
 
     recovery_github_command = config["jobs"]["github-release-recovery"]["steps"][2]["run"]["command"]
     assert '--target "$FLEET_RELEASE_SHA"' in recovery_github_command
-    assert "release_checks.py release-notes" in recovery_github_command
+    assert "python scripts/release_notes.py" in recovery_github_command
     assert '--notes-file "$notes_file"' in recovery_github_command
     assert "--generate-notes" not in recovery_github_command
     assert by_name["github-release-recovery"]["context"] == "fleet-github-release"
