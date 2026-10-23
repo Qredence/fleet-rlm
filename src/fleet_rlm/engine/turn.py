@@ -104,6 +104,11 @@ def run_turn(
     The deadline policy is resolved once, before any work starts: the request override
     wins over configuration, which wins over the shipped default. `None` inherits and
     `0` disables the Fleet deadline for this Turn only.
+
+    An existing idempotency claim replays its stored outcome. New work persists its
+    completion and optionally captures immutable replay inputs. Ordinary failures
+    become terminal events after teardown; success keeps the root sandbox warm.
+    Finalization and event-delivery errors can still propagate to the caller.
     """
     manager = runtime.sandbox_mgr
     started_at = time.monotonic()
@@ -141,6 +146,7 @@ def run_turn(
                 span.set_attributes(manager.deadline_provenance())
 
                 def record_snapshot_identity(identity: Any) -> None:
+                    """Record the resolved provider snapshot provenance on the active Turn span."""
                     span.set_attributes(identity.provenance())
 
                 # Record the identity the instant preflight resolves it. A later preparation step
@@ -428,7 +434,8 @@ def _failure_message(exc: BaseException, turn_id: str) -> str:
     Snapshot preflight refusals are constructed by the repository's snapshot module
     from the snapshot name, observed provider state/resources, the required floors,
     and the build command, so those bounded details are explicitly safe to surface.
-    Every other exception stays sanitized: its text can carry file paths,
+    Idempotency conflicts also retain their caller-safe message.
+    All remaining exceptions stay sanitized: their text can carry file paths,
     credentials, or provider payloads.
     """
     if isinstance(exc, IdempotencyConflictError):
@@ -564,6 +571,7 @@ def _describe_turn(
     inputs: dict[str, Any],
     replay_snapshot: tuple[str, bytes] | None,
 ) -> None:
+    """Record prepared input references, configuration, and sandbox provenance on the Turn trace."""
     from fleet_rlm.session import runtime_configuration
 
     configuration = runtime_configuration(settings, runtime)

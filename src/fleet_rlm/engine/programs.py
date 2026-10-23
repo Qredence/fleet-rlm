@@ -172,6 +172,12 @@ class AdaptiveFleetEngine(dspy.Module):
         context: Any,
         execution_mode: str | None,
     ) -> dspy.Prediction:
+        """Execute the selected route, starting Turn budgets only when no Turn is active.
+
+        Reloads an approved program if changed and checks selected dataset integrity.
+        Raises ValueError for an invalid mode or changed dataset digest; deadline,
+        cancellation, and execution errors propagate.
+        """
         self.compiled.reload_if_changed(self)
         if not self.sandbox_mgr.turn_active:
             # Only the Turn's owner initializes the shared budgets; a Turn already started by

@@ -116,6 +116,10 @@ def validate_turn_timeout_seconds(
     Environment transports are inherently textual, so `allow_numeric_text` lets the
     settings sources that are strings convert a bare integer. Structured surfaces
     (init keywords, TOML, HTTP JSON, TUI arguments) stay strict.
+
+    Raises:
+        ValueError: The value has an invalid type or is outside the allowed range;
+            `field` identifies the setting in the error message.
     """
     if isinstance(value, str) and allow_numeric_text and re.fullmatch(r"-?[0-9]+", value):
         value = int(value)
@@ -137,6 +141,10 @@ def resolve_turn_deadline(
     `None` from the request means inherit; `0` means no Fleet deadline. The server
     reports only sources it can observe, so a client `/timeout` override arrives as
     `request` and never as a command source.
+
+    Inputs must already be validated durations in seconds. The result carries the
+    source and effective seconds, using None for no deadline. When `configured_source`
+    is `default`, the shipped duration is used regardless of `configured_seconds`.
     """
     if request_seconds is not None:
         return DeadlinePolicy("request", request_seconds if request_seconds > 0 else None)

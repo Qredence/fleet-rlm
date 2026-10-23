@@ -136,7 +136,7 @@ def _host_call_bound(remaining: float | None) -> int | None:
     representation: `0` means "no timeout" on the transport, and every positive integer is wider
     than what the Turn has left. `run_namespace` therefore admits an execution through
     `admit_execution`, which samples once and refuses such a Turn before calling this
-    helper; the helper refuses the value instead of widening it.
+    helper; the helper raises ValueError for a remainder below one second instead of widening it.
     """
     if remaining is None:
         return None
@@ -383,9 +383,13 @@ class DaytonaSandboxManager:
     def check_turn(self, *, minimum_seconds: float = 0.0) -> None:
         """Raise if the Turn was cancelled or its deadline is within `minimum_seconds`.
 
-        `minimum_seconds` is the smallest remainder the upcoming operation can honour. Expiry
+        `minimum_seconds` is the smallest remainder the upcoming operation can honor. Expiry
         marks the Turn cancelled, so the terminal path classifies and stores it as a deadline
         cancellation rather than a generic failure.
+
+        Raises:
+            RuntimeError: The Turn has already been cancelled.
+            TimeoutError: The remaining deadline is at or below the required minimum.
         """
         root = self.root
         if root._cancelled.is_set():
@@ -413,6 +417,13 @@ class DaytonaSandboxManager:
         representable and still executes; sampling the clock twice would let the two reads straddle
         the threshold (admission 1.5 s, bound 0.4 s) and turn the missing representation into a
         transport error for work that never began.
+
+        Returns:
+            Remaining seconds, or None when the Turn has no Fleet deadline.
+
+        Raises:
+            RuntimeError: The Turn was cancelled.
+            TimeoutError: Less than one second remains; the Turn is marked cancelled.
         """
         root = self.root
         if root._cancelled.is_set():
@@ -688,7 +699,22 @@ class DaytonaSandboxManager:
         }
 
     def verify_python_artifact(self, path: str, timeout_seconds: int) -> dict[str, Any]:
-        """Execute one declared entry point in Daytona, bounded by the remaining Turn deadline."""
+        """Execute one declared entry point in Daytona, bounded by the remaining Turn deadline.
+
+        `timeout_seconds` must be an integer from 1 through 60. Return the file's SHA-256,
+        process exit code, up to 65,536 stdout bytes decoded as UTF-8, and `complete`.
+        A process timeout or oversized stdout sets `complete` to False; a nonzero exit
+        code alone does not.
+
+        Raises:
+            ValueError: The artifact path, size, or verification timeout is invalid.
+            TimeoutError: The Turn deadline has expired or too little time remains.
+            RuntimeError: The Turn was cancelled.
+            ExecutionOutcomeUnknownError: Execution or result decoding failed; cancellation
+                is requested and the verification is not replayed.
+
+        Errors while reading the file before verification also propagate.
+        """
         from fleet_rlm.optimize.evidence import MAX_ARTIFACT_BYTES, artifact_path
 
         artifact_path(path)
@@ -772,7 +798,7 @@ class DaytonaSandboxManager:
         Exactly one teardown runs per Turn: a watchdog expiry, a client disconnect, and the
         terminal Turn branch may all racingly reach this method, and only the first call stops the
         provider or records an outcome. A later caller waits for the teardown in progress and
-        returns the recorded result, so acknowledgment can never precede the stop.
+        returns without repeating it, so acknowledgment can never precede the stop.
 
         Terminal entry points should call :meth:`request_cancellation` instead: it makes the
         single-invocation guarantee observable to callers, while this method keeps the
@@ -1003,7 +1029,19 @@ class DaytonaSandboxManager:
         return getattr(result, "result", "") or ""
 
     def run_namespace(self, interpreter: DaytonaInterpreter, payload: dict[str, Any]) -> dict[str, Any]:
-        """Run one execution in the interpreter's context; a lost transport stops the Turn without replay."""
+        """Run one execution in the interpreter's context without replaying uncertain work.
+
+        Reuse a prepared context when available. Return the runtime result with
+        `transport_retries=0`; remote Python errors remain in that result.
+
+        Raises:
+            TimeoutError: The Turn deadline expired or less than one whole second remains.
+            RuntimeError: The Turn was cancelled.
+            ExecutionOutcomeUnknownError: Execution transport failed or returned no result;
+                cancellation is requested unless the Turn already ended.
+
+        Provisioning and context-preparation errors propagate before execution begins.
+        """
         self.check_turn()
         sandbox = self.ensure_sandbox()
         with self._lock:
@@ -1033,6 +1071,7 @@ class DaytonaSandboxManager:
 
         def report_progress(progress: dict[str, Any]) -> None:
             # Observation only: it reports through the Turn's existing emitter and never acts.
+            """Emit advisory progress tagged with this namespace and execution identity."""
             self.emit("progress", **progress_identity, **progress)
 
         fence = self._open_execution_fence()
@@ -1144,6 +1183,13 @@ class DaytonaSandboxManager:
 
         Digests follow `list_workspace_files` (symbolic links skipped, never traversed) and are required;
         notes are optional hints, so an unreadable mount yields none instead of failing the Turn.
+        `notes_limit` enables shared notes only from 1 through 50; other values omit notes.
+        Missing optional modules may emit one advisory event per Session.
+
+        Raises:
+            RuntimeError: The workspace digest listing is malformed.
+
+        Remote execution and JSON decoding errors propagate.
         """
         with_notes = bool(self.shared_notes_subpath) and 1 <= notes_limit <= 50
         code = (
@@ -1570,10 +1616,10 @@ class DaytonaSandboxManager:
 
         Returns whether this agent's own provider cleanup is confirmed. ``True`` means the provider
         stop or delete returned (or there was nothing to clean up); ``False`` means the provider
-        call failed and the handle was retained for a later retry. Lifecycle notifications are
-        delivered best-effort, so a refused event never changes this result and never skips the
-        provider call. A local allocation-journal unlink failure is bookkeeping: it is logged once
-        and never reverses confirmation or restores an already-deleted handle.
+        call failed. Only a child retains its handle for a later retry; a root discards it.
+        Lifecycle notifications are delivered best-effort, so a refused event never changes this
+        result and never skips the provider call. A local allocation-journal unlink failure is bookkeeping:
+        it is logged once and never reverses confirmation or restores an already-deleted handle.
         """
         with self._shutdown_lock:
             return self._shutdown_locked()

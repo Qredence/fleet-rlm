@@ -117,6 +117,10 @@ class AdvisoryStatus:
             self._special = None
 
     def _ingest_progress(self, event: dict[str, Any], now: float) -> None:
+        """Track valid scope starts, advancing checkpoints, and exits using monotonic seconds.
+
+        Malformed observations are ignored; repeated or lower checkpoints do not renew a scope.
+        """
         phase = event.get("phase")
         scope = _bounded_scope(event.get("scope"))
         if scope is None:
@@ -139,6 +143,7 @@ class AdvisoryStatus:
             self._scopes.pop(key, None)
 
     def _stalled_scope(self, now: float) -> tuple[str, _ActiveScope] | None:
+        """Return the first scope at or past its expectation in monotonic seconds, or None."""
         for (_, scope), state in self._scopes.items():
             if now - state.advanced >= state.expect_seconds:
                 return scope, state
@@ -239,6 +244,12 @@ class SSERuntimeCallback(LMUsageCallback):
 
     def _emit(self, payload: dict[str, Any]) -> None:
         # Backpressure reaches the producer rather than discarding a prior outcome.
+        """Queue an annotated event from a worker; coalesce progress without blocking.
+
+        Drops events after close and non-`done` events after a terminal outcome. Other
+        queue writes wait up to 30 seconds, raising TimeoutError for a slow consumer;
+        queue or loop errors propagate, except cancellation caused by closing this callback.
+        """
         if self._closed.is_set():
             return
         now = self.clock()
@@ -276,6 +287,7 @@ class SSERuntimeCallback(LMUsageCallback):
                 self._pending.discard(future)
 
     def _progress_key(self, payload: dict[str, Any]) -> tuple[str, str] | None:
+        """Return the agent and bounded scope key, or None for an unusable scope."""
         scope = _bounded_scope(payload.get("scope"))
         if scope is None:
             return None
@@ -303,6 +315,7 @@ class SSERuntimeCallback(LMUsageCallback):
             return
 
         def deliver() -> None:
+            """Offer progress only while the stream is live, dropping it if the queue is full."""
             with self._status_lock:
                 if self._closed.is_set() or self.status.terminal:
                     return

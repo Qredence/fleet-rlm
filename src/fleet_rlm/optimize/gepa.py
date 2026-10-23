@@ -133,7 +133,11 @@ def summarize_passes(passes: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
-    """Create a fresh Daytona namespace containing only digest-verified immutable replay files."""
+    """Return a factory that builds disposable replay engines with verified immutable inputs.
+
+    Each engine receives a temporary copy of the candidate program. Serving LMs are
+    shared within this factory; callers own cleanup of returned engines and program files.
+    """
     from fleet_rlm.optimize.evidence import verification_entries
 
     verifications = {
@@ -155,6 +159,11 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             return shared[0], shared[1], shared[2]
 
     def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
+        """Restore one reviewed replay into a disposable engine using the candidate program.
+
+        Reject inconsistent replay metadata with ValueError. Failures after the temporary
+        program file is created trigger sandbox shutdown and file-removal attempts.
+        """
         snapshot = selected_snapshot(
             store, example.source_session, example.replay_turn_id, example.replay_snapshot_sha256
         )

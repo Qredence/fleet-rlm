@@ -22,6 +22,11 @@ _MENTION = re.compile(r"""(?<!\S)@(?P<path>"(?:\\.|[^"\\\n])*"?|[^\s"',;!?()\[\]
 
 
 def _decode_path(raw: str, *, partial: bool = False) -> str:
+    """Decode a bare or JSON-quoted mention path.
+
+    Raise ValueError for an invalid quoted path unless `partial` permits returning the
+    unfinished text after its opening quote.
+    """
     if raw.startswith('"'):
         try:
             value = json.loads(raw)
@@ -41,7 +46,12 @@ def format_mention(path: str) -> str:
 
 
 def mention_completions(text: str, cursor: int, workspace_files: list[str]) -> list[tuple[str, str, str]]:
-    """Complete local files/folders at the cursor, including nested basename matches."""
+    """Complete local files/folders and cached workspace paths at the cursor.
+
+    Return `(replacement_text, display_mention, description)` items. Replacements cover
+    the whole active mention while preserving surrounding prose. Bare fragments also
+    search nested basenames. Local directory-read errors are ignored; completion uploads nothing.
+    """
     active = next((match for match in _MENTION.finditer(text[:cursor]) if match.end() == cursor), None)
     if active is None:
         return []
@@ -52,6 +62,7 @@ def mention_completions(text: str, cursor: int, workspace_files: list[str]) -> l
     items: list[tuple[str, str, str]] = []
 
     def add(path: str, description: str, *, directory: bool = False) -> None:
+        """Append a formatted mention replacement while preserving text after the active mention."""
         mention = format_mention(path)
         separator = "" if directory or after[:1].isspace() else " "
         items.append((before + mention + separator + after, mention, description))
@@ -68,6 +79,7 @@ def mention_completions(text: str, cursor: int, workspace_files: list[str]) -> l
     seen: set[str] = set()
 
     def add_local(path: str) -> None:
+        """Add distinct local file or folder choices, skipping symlinks and missing paths."""
         if path in seen:
             return
         seen.add(path)
@@ -103,6 +115,12 @@ def completed_mention_cursor(text: str, cursor: int, completed: str) -> int:
 def _directory_upload_plan(
     directories: list[Path], cancelled: Callable[[], bool]
 ) -> tuple[dict[Path, str], dict[Path, str]]:
+    """Map local directories and eligible files to workspace destinations, sharing overlapping roots.
+
+    Refuse empty selections or totals above 1,000 files or 100,000,000 bytes with ValueError.
+    Cancellation returns a partial plan. Filesystem and Git-discovery errors propagate;
+    this function performs no uploads.
+    """
     roots: dict[Path, str] = {}
     files: dict[Path, str] = {}
     total_bytes = 0
@@ -137,6 +155,18 @@ def attach_local_mentions(ctx: Context, text: str, *, cancelled: Callable[[], bo
     Cached workspace mentions are not uploaded. Directories retain their structure
     under a unique workspace root, excluding ignored/hidden files and symlinks.
     Overlapping directory and file mentions share uploads within a submission.
+
+    Successful uploads update `ctx.state.workspace_files`. Cancellation returns the
+    original text, retaining any uploads already completed. Directory attachments are
+    limited to 1,000 files and 100,000,000 bytes across the submission.
+
+    Raises:
+        ValueError: A quoted path is invalid, an explicit local path is missing,
+            an attachment path contains a symlink, directory discovery fails, or a directory
+            is empty or exceeds its limits.
+
+    Filesystem, HTTP, and malformed upload-response errors propagate. Completed
+    uploads are retained if a later upload fails.
     """
     mentions: list[tuple[int, int, Path]] = []
     for match in _MENTION.finditer(text):

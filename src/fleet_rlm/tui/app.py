@@ -109,6 +109,7 @@ class _SessionCompleter(Completer):
         yield from self._base.get_completions(document, complete_event)
 
     def _local_path_completions(self, fragment: str, event: CompleteEvent) -> Iterable[Completion]:
+        """Yield local path completions with a trailing slash for directories."""
         document = Document(fragment, cursor_position=len(fragment))
         for completion in self._path_completer.get_completions(document, event):
             candidate = fragment[: len(fragment) + completion.start_position] + completion.text
@@ -123,6 +124,10 @@ class _SessionCompleter(Completer):
     def _transfer_completions(self, command: str, arguments: str, event: CompleteEvent) -> Iterable[Completion]:
         # Transfers take two paths; quote each token so a suggested filename with spaces
         # is exactly the same filename the command handler will receive.
+        """Yield quoted path arguments for `/put` or `/get` from local files or cached workspace paths.
+
+        Unclosed quotes and arguments beyond the second path yield no suggestions.
+        """
         try:
             words = shlex.split(arguments)
         except ValueError:
@@ -818,6 +823,7 @@ class FleetTextualApp(App[None]):
                 self._history_index = len(self._history_entries)
 
     def _append_history(self, text: str) -> None:
+        """Append input to history, reset draft navigation, and persist it when local file access succeeds."""
         self._history_entries.append(text)
         self._history_index = len(self._history_entries)
         self._history_draft = ""
@@ -897,6 +903,7 @@ class FleetTextualApp(App[None]):
         return right
 
     def _render_shortcut_bar(self) -> Text:
+        """Return keyboard hints for the open completion menu or the main composer."""
         bar = Text()
         pairs = [
             ("enter", "Send"),
@@ -1042,6 +1049,7 @@ class FleetTextualApp(App[None]):
             )
 
     def _current_menu_event(self, event: OptionList.OptionMessage) -> bool:
+        """Return whether the event still refers to the current suggestion at its index."""
         return (
             0 <= event.option_index < len(self._popup_items)
             and event.option_list.get_option_at_index(event.option_index) is event.option
@@ -1118,6 +1126,7 @@ class FleetTextualApp(App[None]):
                 inp.value = val[: len(val) + first.start_position] + first.text
 
     def _accept_completion(self, index: int) -> None:
+        """Fill the indexed suggestion, reset history navigation, and focus the composer at the completion."""
         inp = self.query_one("#prompt-input", _PromptInput)
         self._history_recalled = None
         self._history_index = len(self._history_entries)
@@ -1340,6 +1349,12 @@ class FleetTextualApp(App[None]):
             inp.value = text
 
     def _start_turn_stream(self, task_text: str) -> None:
+        """Start a background attachment upload and Turn stream with a new activity tracker.
+
+        Restore the draft if attachment preparation fails or is cancelled before a Turn is
+        sent. Completed uploads remain in the workspace. Stream failures update the UI
+        without claiming a server outcome when no terminal event was received.
+        """
         tracker = TurnTracker()
         self.state.last_tracker = tracker
         turn_widget = _TurnWidget(tracker)
@@ -1350,6 +1365,7 @@ class FleetTextualApp(App[None]):
         self.refresh_chrome()
 
         def worker() -> None:
+            """Prepare local attachments and consume the Turn stream, reporting failures and clearing active state."""
             stream_started = False
             try:
                 prepared_text = attach_local_mentions(

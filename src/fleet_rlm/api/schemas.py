@@ -42,7 +42,10 @@ class TurnRequest(_Request):
     @field_validator("timeout_seconds", mode="before")
     @classmethod
     def timeout_is_zero_or_bounded(cls, value: Any) -> int | None:
-        """Accept 0 or 10..3600 as an integer; booleans, floats, and strings are rejected."""
+        """Preserve None for inheritance; accept integer 0 or 10..3600 seconds.
+
+        Raise ValueError for other values, including booleans, floats, and strings.
+        """
         if value is None:
             return None
         return validate_turn_timeout_seconds(value, field="timeout_seconds")

@@ -14,6 +14,10 @@ _SEARCH_INDEX_TTL_SECONDS = 60
 
 
 def _git_files(root: Path) -> list[Path] | None:
+    """Return Git-listed relative paths after applying ignore rules, or None outside a Git tree.
+
+    Raise ValueError if Git or its ignore check fails; an empty Git listing returns [].
+    """
     if not any((parent / ".git").exists() for parent in (root, *root.parents)):
         return None
     try:
@@ -42,6 +46,7 @@ def _git_files(root: Path) -> list[Path] | None:
 
 
 def _safe_relative_file(root: Path, relative: Path) -> bool:
+    """Return whether a relative path names a regular file without hidden, parent, or symlink components."""
     if relative.is_absolute() or ".." in relative.parts or any(part.startswith(".") for part in relative.parts):
         return False
     path = root
@@ -67,6 +72,7 @@ def iter_local_files(root: Path) -> Iterator[Path]:
         return
 
     def failed(error: OSError) -> None:
+        """Propagate directory-walk errors instead of returning a partial upload listing."""
         raise error
 
     for directory, folders, names in os.walk(root, followlinks=False, onerror=failed):
@@ -80,6 +86,12 @@ def iter_local_files(root: Path) -> Iterator[Path]:
 
 @lru_cache(maxsize=4)
 def _search_index(root: Path, _generation: int) -> tuple[Path, ...]:
+    """Cache discoverable files and ancestor directories for a caller-supplied generation.
+
+    The generation changes in one-minute windows during path search. Discovery examines at most
+    20,000 eligible files and stops after an iteration exceeds 0.25 seconds; filesystem
+    and Git-discovery errors propagate.
+    """
     paths: set[Path] = set()
     started = time.monotonic()
     # Search is best-effort and bounded; explicit directory uploads are separately
@@ -93,7 +105,11 @@ def _search_index(root: Path, _generation: int) -> tuple[Path, ...]:
 
 
 def search_local_paths(fragment: str) -> list[Path]:
-    """Find nested basename matches with an index refreshed at most once per minute window."""
+    """Find case-insensitive basename substring matches under the current working directory.
+
+    Uses a bounded index refreshed on demand in one-minute windows. Sort exact matches first,
+    then prefixes, shallower paths, and path text. Return [] on filesystem or Git-discovery errors.
+    """
     try:
         paths = _search_index(Path.cwd(), int(time.monotonic() // _SEARCH_INDEX_TTL_SECONDS))
     except (OSError, ValueError):
