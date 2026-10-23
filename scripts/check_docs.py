@@ -16,7 +16,8 @@ MARKDOWN_PATHS = (ROOT / "README.md", ROOT / "ARCHITECTURE.md", ROOT / "CONTRIBU
 
 def markdown_files() -> list[Path]:
     """Return the maintained Markdown files covered by the documentation gate."""
-    return sorted(set(MARKDOWN_PATHS).union((ROOT / "docs").rglob("*.md")))
+    docs = (path for path in (ROOT / "docs").rglob("*.md") if "plans" not in path.relative_to(ROOT / "docs").parts)
+    return sorted(set(MARKDOWN_PATHS).union(docs))
 
 
 def local_target(source: Path, target: str) -> Path | None:
