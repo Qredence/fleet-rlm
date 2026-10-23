@@ -66,8 +66,14 @@ Use Python **3.11–3.13** and [uv](https://docs.astral.sh/uv/). Live execution 
 | Service | Configuration |
 | --- | --- |
 | Existing PostgreSQL database | `FLEET_DATABASE_URL` |
-| Daytona organization, Volume, and usable snapshot | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DAYTONA_VOLUME_ID`, `FLEET_DAYTONA_SNAPSHOT` |
+| Daytona organization and Volume | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DAYTONA_VOLUME_ID` |
 | Authorized Databricks Unity Gateway model services | `DATABRICKS_TOKEN`, plus `DATABRICKS_HOST` or `FLEET_LLM_BASE_URL`, and accessible model IDs |
+
+The execution snapshot is a repository-defined artifact in
+`src/fleet_rlm/sandbox/snapshots.py`; it is not configurable through `.env` or TOML.
+The pin is `fleet-rlm-python313-v13` (Python 3.13 with 4 CPUs, 8 GB memory, and
+8 GB disk). Fleet preflights it before provisioning and refuses a missing,
+inactive, or under-sized snapshot with the build command.
 
 DSPy runtime model IDs use `openai/<service-id>` through the native `lm15` engine.
 The Gateway URL must use HTTPS; Fleet does not fall back to LiteLLM. Example model
@@ -131,6 +137,7 @@ commands and Tab completion for commands and arguments.
 | --- | --- |
 | Workspace and artifacts | `/attach`, `/files`, `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/artifacts` |
 | Context and execution | `/context <path>`, `/context clear`, `/mode` |
+| Turn deadlines | `/timeout <seconds\|off\|default>` |
 | Models and configuration | `/models`, `/model root`, `/model sub`, `/config`, `/settings` |
 | Sessions and memory | `/sessions`, `/history`, `/memory [query]` |
 | Skills | `/skills`, `/skills push`, `/skills pull` |
@@ -139,6 +146,27 @@ commands and Tab completion for commands and arguments.
 Bundled Skills and user Skills from `.fleet/skills/` are synchronized into the
 workspace. An optional TypeSafe Jev backend selects relevant Skills for preloading.
 `.agents/skills/` contains developer guidance and is never user Skill content.
+
+## Turn lifecycle and observability
+
+A failing or cancelled Turn tears down its sandbox before the terminal event; a
+successful Turn keeps the warm root sandbox and records `cleanup=not_required`.
+A teardown discards the cached root handle, so the next Turn cold-resumes into a
+new sandbox.
+
+`turn_timeout_seconds` accepts exactly `0` or `10..3600` and defaults to `900`.
+`0` opts into deadline-free execution via configuration, per-Turn
+`timeout_seconds` on `POST /sessions/{id}/turn`, or the client-local
+`/timeout <seconds|off|default>` command. Resolution is request, then
+configuration, then default. Daytona `ttl_minutes` and `auto_stop_interval` still
+apply and are reported; host-call waiting derives from the remaining deadline.
+
+Labels `waiting_on_host`, `progress_unknown`, `stalled`, `interrupted`, and
+`fenced` appear in SSE and the TUI. They are advisory and never cancel, pause, or
+retry a Turn; uninstrumented work stays `progress_unknown`. Generated code can
+emit observation-only checkpoints with
+`with progress_scope("label", expect_seconds=45) as progress: progress.checkpoint(n)`.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for lifecycle ownership.
 
 ## Evaluation: what is measured
 

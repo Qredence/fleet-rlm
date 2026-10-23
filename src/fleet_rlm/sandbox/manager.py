@@ -16,7 +16,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import dspy
 import mlflow
@@ -36,6 +36,7 @@ from fleet_rlm.engine.signatures import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
+from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotIdentity, preflight
 from fleet_rlm.workspace import (
     _child_input_path,
     _workspace_relative_path,
@@ -48,6 +49,15 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
+
+# The cleanup outcome a terminal Turn records. `stopped` and `unconfirmed` are produced by the
+# manager's single teardown; `not_required` belongs to a Turn that completed and kept its root.
+CLEANUP_STOPPED = "stopped"
+CLEANUP_UNCONFIRMED = "unconfirmed"
+CLEANUP_NOT_REQUIRED = "not_required"
+
+# Distinguishes "the caller supplied no Turn policy" from an explicit `None` (deadline-free).
+_UNSET = object()
 
 # Remote code fragments; each binds one variable so a Turn can gather them in a single exec.
 _DIGESTS_CODE = (
@@ -63,7 +73,8 @@ _DIGESTS_CODE = (
     "   for block in iter(lambda: handle.read(1048576), b''): digest.update(block)\n"
     "  digests[os.path.relpath(path,'/workspace')]=digest.hexdigest()\n"
 )
-# Probed rather than configured: the snapshot is user-selectable (FLEET_DAYTONA_SNAPSHOT).
+# Probed rather than configured: the Turn snapshot and its package set are repository-owned
+# (fleet_rlm.sandbox.snapshots); only optional packages can be absent at runtime.
 _ENVIRONMENT_MODULES = ("numpy", "pandas", "scipy", "mpmath", "sympy", "gmpy2", "polars", "pyarrow", "sklearn")
 _ENVIRONMENT_CODE = (
     "import importlib.metadata,importlib.util,platform,sys\n"
@@ -110,9 +121,39 @@ _SETTLING_STATES = frozenset({"stopping", "archiving", "pausing", "starting", "r
 _FAILED_STATES = frozenset({"error", "build_failed", "destroyed", "destroying"})
 _STATE_POLL_SECONDS = 1.0
 _STATE_SETTLE_SECONDS = 90.0
+# Provider lifecycle bounds are requested, never removed: a deadline-free Turn still has them.
+_ROOT_TTL_MINUTES = 120
+_CHILD_TTL_MINUTES = 30
 
 _DAYTONA_CLIENTS: dict[tuple[str, str], Daytona] = {}
 _DAYTONA_CLIENTS_LOCK = threading.Lock()
+
+
+def _host_call_bound(remaining: float | None) -> int | None:
+    """Whole seconds a bridged host call may wait: the Turn's remainder, or None when it has none.
+
+    Truncation never waits past the deadline. A remainder below one whole second has no honest
+    representation: `0` means "no timeout" on the transport, and every positive integer is wider
+    than what the Turn has left. `run_namespace` therefore admits an execution through
+    `admit_execution`, which samples once and refuses such a Turn before calling this
+    helper; the helper refuses the value instead of widening it.
+    """
+    if remaining is None:
+        return None
+    if remaining < 1:
+        raise ValueError("A host-call bound needs at least one whole second remaining")
+    return int(remaining)
+
+
+def _provider_minutes(value: Any) -> int | None:
+    """Return a provider-reported minute bound as an integer, or None when it is absent."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
 
 
 def _shared_daytona_client(api_key: str, org_id: str) -> Daytona:
@@ -147,7 +188,7 @@ class DaytonaSandboxManager:
     org_id: str
     volume_id: str
     session_id: str
-    snapshot: str = "fleet-rlm-base"
+    snapshot: str = SNAPSHOT_NAME
     auto_stop_minutes: int = 30
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
@@ -160,14 +201,45 @@ class DaytonaSandboxManager:
     disposable: bool = False
     shared_notes_subpath: str = ""
     event_callback: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
+    # Durable once-per-Session marker owned by the Store. It must outlive a released or rebuilt
+    # runtime, so it is claimed atomically instead of relying on in-process state.
+    environment_report_claim: Callable[[str], bool] | None = field(default=None, repr=False)
+    # Called the instant preflight resolves the Turn identity, before any later preparation step
+    # can fail, so a caller can record provenance without re-deriving it.
+    snapshot_resolved_callback: Callable[[SnapshotIdentity], None] | None = field(default=None, repr=False)
     parent: DaytonaSandboxManager | None = field(default=None, repr=False)
     agent_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     _children: dict[str, DaytonaSandboxManager] = field(default_factory=dict, init=False, repr=False)
     _allocations: int = field(default=0, init=False, repr=False)
     _cancelled: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
-    _deadline: float = field(default=0, init=False, repr=False)
+    # One publication token per live execution. Cancellation closes them and nothing reopens one:
+    # the next Turn clears `_cancelled` for its own work, never these tokens.
+    _execution_fences: set[repl.ExecutionFence] = field(default_factory=set, init=False, repr=False)
+    # One teardown per Turn: the watchdog, a client disconnect, and the terminal Turn branch all
+    # reach cancel_turn(), and only the first call may stop the provider sandbox.
+    _cleanup_outcome: str | None = field(default=None, init=False, repr=False)
+    _teardown_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    # One owner per Turn for terminal cancellation. Test-and-set under `_teardown_lock`, so the
+    # watchdog, the deadline path, a client disconnect, and the terminal Turn branch cannot each
+    # invoke cancel_turn(); every loser waits for the owner's teardown and reads its outcome.
+    _cancellation_claimed: bool = field(default=False, init=False, repr=False)
+    _teardown_done: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    # Serializes every shutdown() call for this agent. A normal child completion and cancel_turn()
+    # can race for the same child; a joiner must wait for the provider cleanup it can observe.
+    _shutdown_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    # One policy per Turn, resolved before the Turn starts. `None` means the Turn has no Fleet
+    # deadline; ownership is tracked separately so a deadline-free Turn is still a real Turn.
+    _deadline: float | None = field(default=None, init=False, repr=False)
+    _deadline_source: str = field(default="default", init=False, repr=False)
+    _effective_deadline_seconds: int | None = field(default=None, init=False, repr=False)
+    # Every watchdog callback carries the generation it was armed for, so a timer from an
+    # earlier Turn can never cancel the current one.
+    _turn_lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+    _turn_generation: int = field(default=0, init=False, repr=False)
+    _turn_active: bool = field(default=False, init=False, repr=False)
     _watchdog: threading.Timer | None = field(default=None, init=False, repr=False)
     _sandbox: Any = field(default=None, init=False, repr=False)
+    _snapshot_identity: SnapshotIdentity | None = field(default=None, init=False, repr=False)
     _client: Daytona | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
     _budget_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -179,6 +251,8 @@ class DaytonaSandboxManager:
         init=False,
         repr=False,
     )
+    # One observation event per Session, not per Turn or per module: absence is context, never failure.
+    _environment_reported: bool = field(default=False, init=False, repr=False)
     _child_receipts: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
     _interpreters: dict[str, DaytonaInterpreter] = field(default_factory=dict, init=False, repr=False)
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
@@ -204,6 +278,76 @@ class DaytonaSandboxManager:
         """Return how many parents separate this agent from the root."""
         return self.parent.depth + 1 if self.parent is not None else 0
 
+    @property
+    def turn_active(self) -> bool:
+        """True while a Turn owns this manager, including a deadline-free Turn."""
+        return self.root._turn_active
+
+    @property
+    def turn_generation(self) -> int:
+        """The current Turn's generation; every watchdog callback is checked against it."""
+        return self.root._turn_generation
+
+    def deadline_provenance(self) -> dict[str, Any]:
+        """Return the Turn's resolved source and effective duration; `None` is kept explicit."""
+        root = self.root
+        return {
+            "deadline_source": root._deadline_source,
+            "effective_seconds": root._effective_deadline_seconds,
+        }
+
+    @property
+    def snapshot_identity(self) -> SnapshotIdentity | None:
+        """Return the provider identity resolved by the Turn preflight, if any."""
+        return self._snapshot_identity
+
+    def snapshot_provenance(self) -> dict[str, Any]:
+        """Return the preflight-resolved identity as flat provenance fields.
+
+        Only the root manager resolves a Turn snapshot; a child inherits it and never
+        invents a provider id, so it returns no fields.
+        """
+        identity = self._snapshot_identity
+        return identity.provenance() if identity is not None else {}
+
+    def provider_bounds(self) -> dict[str, Any]:
+        """Report the provider-owned lifecycle bounds without changing or hiding them.
+
+        These are Daytona's bounds, distinct from the Fleet deadline: a deadline-free Turn
+        still reports them. Values the provider exposed on the handle are used as reported;
+        a bound the handle does not expose falls back to the value this Turn requested, and
+        an unknown maximum lifespan stays explicitly `None`.
+        """
+        root = self.root
+        sandbox = root._sandbox
+        requested_ttl = _CHILD_TTL_MINUTES if self.parent is not None else _ROOT_TTL_MINUTES
+        ttl = _provider_minutes(getattr(sandbox, "ttl_minutes", None))
+        auto_stop = _provider_minutes(getattr(sandbox, "auto_stop_interval", None))
+        lifespan_value = getattr(sandbox, "maximum_lifespan_minutes", None)
+        if lifespan_value is None:
+            lifespan_value = getattr(sandbox, "max_lifespan_minutes", None)
+        if lifespan_value is None:
+            lifespan_value = getattr(sandbox, "lifespan_minutes", None)
+        lifespan = _provider_minutes(lifespan_value)
+        return {
+            "ttl_minutes": requested_ttl if ttl is None else ttl,
+            "auto_stop_interval": root.auto_stop_minutes if auto_stop is None else auto_stop,
+            "maximum_lifespan_minutes": lifespan,
+            # Explicit marker: these are provider-owned, not Fleet deadlines.
+            "provider_owned": True,
+        }
+
+    @property
+    def live_sandbox_id(self) -> str | None:
+        """Return the live root provider handle id, or None when nothing was provisioned.
+
+        This is the handle the Turn actually executed against, so two warm Turns can show
+        they shared one sandbox. A child reads its root's handle; a Session that never
+        provisioned reports no id rather than inventing one.
+        """
+        sandbox = self.root._sandbox
+        return getattr(sandbox, "id", None) if sandbox is not None else None
+
     def emit(self, event: str, **payload: Any) -> None:
         """Send one lifecycle event, tagged with agent lineage, to the root's callback."""
         callback = self.root.event_callback
@@ -218,14 +362,130 @@ class DaytonaSandboxManager:
                 }
             )
 
-    def check_turn(self) -> None:
-        """Raise if the Turn was cancelled or its deadline passed, marking it cancelled on timeout."""
+    def _notify(self, event: str, **payload: Any) -> None:
+        """Deliver one lifecycle notification without letting delivery failure affect teardown.
+
+        Event delivery is a side channel. A persistent stream failure must not skip a provider
+        cleanup, so each refused notification is logged once with a bounded message: the lifecycle
+        event name, the Session, and the exception type. No event payload, generated source, or
+        provider text is logged.
+        """
+        try:
+            self.emit(event, **payload)
+        except Exception as exc:
+            _LOGGER.warning(
+                "Lifecycle notification %s failed for Session %s (%s)",
+                event,
+                self.session_id,
+                type(exc).__name__,
+            )
+
+    def check_turn(self, *, minimum_seconds: float = 0.0) -> None:
+        """Raise if the Turn was cancelled or its deadline is within `minimum_seconds`.
+
+        `minimum_seconds` is the smallest remainder the upcoming operation can honour. Expiry
+        marks the Turn cancelled, so the terminal path classifies and stores it as a deadline
+        cancellation rather than a generic failure.
+        """
         root = self.root
         if root._cancelled.is_set():
             raise RuntimeError("Turn cancelled")
-        if root._deadline and time.monotonic() >= root._deadline:
-            root._cancelled.set()
-            raise TimeoutError("Turn deadline exceeded")
+        if root._deadline is not None and time.monotonic() + minimum_seconds >= root._deadline:
+            self._expire_turn()
+
+    def _expire_turn(self) -> None:
+        """Mark the Turn cancelled and stop publication, then raise the deadline error."""
+        root = self.root
+        root._cancelled.set()
+        # Publication stops the moment the deadline marks the Turn cancelled, not only when the
+        # terminal teardown later runs.
+        root._fence_executions()
+        raise TimeoutError("Turn deadline exceeded")
+
+    def admit_execution(self) -> float | None:
+        """Sample the remaining deadline once and admit one execution, or expire the Turn.
+
+        The returned remainder is the only value that may drive the execution. The transport
+        waits in whole seconds, so a positive remainder below one second has no honest bound:
+        `0` means "no timeout" and every whole positive second is wider than the Turn has left.
+        Such a Turn is expired here, with the same cancellation and publication fence as any other
+        deadline, before any execution or host call starts. A remainder of exactly one second is
+        representable and still executes; sampling the clock twice would let the two reads straddle
+        the threshold (admission 1.5 s, bound 0.4 s) and turn the missing representation into a
+        transport error for work that never began.
+        """
+        root = self.root
+        if root._cancelled.is_set():
+            raise RuntimeError("Turn cancelled")
+        remaining = self.remaining_turn_seconds()
+        if root._deadline is not None and remaining is not None and remaining < 1.0:
+            self._expire_turn()
+        return remaining
+
+    def _open_execution_fence(self) -> repl.ExecutionFence:
+        """Return this execution's publication token, already closed if the Turn is cancelled."""
+        root = self.root
+        with root._lock:
+            # Bind the Turn's current emitter now: a later Turn replaces the root's callback, so
+            # reading it at refusal time would attribute this execution's fence to that Turn.
+            fence = repl.ExecutionFence(root.event_callback)
+            if root._cancelled.is_set():
+                fence.close()
+            root._execution_fences.add(fence)
+        return fence
+
+    def _report_fence(self, fence: repl.ExecutionFence, ns_id: str) -> None:
+        """Deliver a refused publication through the emitter its execution opened with.
+
+        A closed channel is not an error: the fence itself already logged one bounded warning
+        without the tool payload or generated source, and that warning is the record. An emitter
+        that raises is reported once with a bounded message and never escapes the host-call worker.
+        """
+        emitter = fence.emitter
+        if emitter is None:
+            return
+        try:
+            emitter(
+                {
+                    "event": "fenced",
+                    "agent_id": self.agent_id,
+                    "parent_agent_id": self.parent.agent_id if self.parent else None,
+                    "sandbox_id": getattr(self._sandbox, "id", None),
+                    "namespace": ns_id,
+                }
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "Fenced observation could not be delivered for Session %s (%s)",
+                self.session_id,
+                type(exc).__name__,
+            )
+
+    def _release_execution_fence(self, fence: repl.ExecutionFence) -> None:
+        """End this execution's publication window and stop tracking its token."""
+        fence.close()
+        root = self.root
+        with root._lock:
+            root._execution_fences.discard(fence)
+
+    def _fence_executions(self) -> None:
+        """Close every live execution token so no successful reply can publish afterwards."""
+        root = self.root
+        with root._lock:
+            fences = tuple(root._execution_fences)
+        for fence in fences:
+            fence.close()
+
+    def remaining_turn_seconds(self) -> float | None:
+        """Seconds left in this Turn's deadline; None when the Turn has no Fleet deadline.
+
+        The deadline is the only source of a task-duration bound. Connection, provisioning, and
+        maintenance timeouts are separate and must never be reported as the Turn's remainder.
+        """
+        root = self.root
+        if root._deadline is not None:
+            return root._deadline - time.monotonic()
+        return None
 
     def allocate_child(self, *, input_paths: list[str] | None = None) -> DaytonaSandboxManager:
         """Trace preparation separately from generated execution, without recording file contents."""
@@ -301,6 +561,13 @@ class DaytonaSandboxManager:
             )
             root._children[child.agent_id] = child
             root._allocations += 1
+        # One absolute deadline travels down the tree. A child, or a grandchild through its
+        # child parent, never receives a later deadline than the Turn that started it.
+        child._deadline = root._deadline
+        child._deadline_source = root._deadline_source
+        child._effective_deadline_seconds = root._effective_deadline_seconds
+        child._turn_generation = root._turn_generation
+        child._turn_active = root._turn_active
         spawn_inputs = [path for path in selected_paths if path not in ambient_skills] if selected_paths else []
         child.emit("agent_spawn", depth=child.depth, **({"input_paths": spawn_inputs} if spawn_inputs else {}))
         with root._budget_lock:
@@ -428,10 +695,13 @@ class DaytonaSandboxManager:
         if not path.endswith(".py") or type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 60:
             raise ValueError("Invalid Python verification entry")
         self.check_turn()
-        remaining = self.root._deadline - time.monotonic() if self.root._deadline else 0
-        if remaining <= 1:
-            raise TimeoutError("No Turn time remains for artifact verification")
-        timeout = min(timeout_seconds, max(1, int(remaining) - 1))
+        remaining = self.remaining_turn_seconds()
+        if remaining is None:
+            timeout = timeout_seconds
+        else:
+            if remaining <= 1:
+                raise TimeoutError("No Turn time remains for artifact verification")
+            timeout = min(timeout_seconds, max(1, int(remaining) - 1))
         raw = self.read_workspace_file(path, max_bytes=MAX_ARTIFACT_BYTES)
         digest = hashlib.sha256(raw).hexdigest()
         # Only the child process executes generated code. Temporary files bound host output;
@@ -458,24 +728,112 @@ class DaytonaSandboxManager:
             result = json.loads(self._remote_exec(self.ensure_sandbox(), code, timeout=timeout + 1, retry=False))
         except Exception as exc:
             # The process transport cannot establish whether execution finished. Never replay it.
-            self.cancel_turn()
+            self.request_cancellation()
             raise ExecutionOutcomeUnknownError("Python artifact verification outcome unknown") from exc
         self.check_turn()
         return {**result, "sha256": digest}
 
+    @property
+    def cleanup_outcome(self) -> str | None:
+        """The teardown outcome recorded for the current Turn, or None before any teardown."""
+        return self.root._cleanup_outcome
+
+    def request_cancellation(self) -> bool:
+        """Claim this Turn's single terminal cancellation and run it, or wait for its owner.
+
+        Every terminal entry point goes through this guard: the terminal Turn branch, the
+        deadline and transport-failure paths, the deadline watchdog, a client disconnect, and a
+        lost Session lease. The first caller wins the test-and-set and is the only one to invoke
+        :meth:`cancel_turn`; every later caller waits until that teardown has finished and then
+        returns without invoking it again. Waiting is what keeps acknowledgment after the
+        provider stop, even when a disconnect raced the terminal branch.
+
+        Returns ``True`` for the caller that owned the teardown and ``False`` for a caller that
+        joined an already-claimed one. No exception escapes: :meth:`cancel_turn` is a
+        finalization seam and callers read :attr:`cleanup_outcome`.
+        """
+        root = self.root
+        with root._teardown_lock:
+            claimed = not root._cancellation_claimed
+            root._cancellation_claimed = True
+        if not claimed:
+            # The owner may still be stopping the provider; acknowledgment must not precede it.
+            root._teardown_done.wait()
+            return False
+        try:
+            self.cancel_turn()
+        finally:
+            root._teardown_done.set()
+        return True
+
     def cancel_turn(self) -> None:
-        """Cancel the Turn, stop child sandboxes, and stop the root sandbox to interrupt remote Python."""
+        """Cancel the Turn, stop child sandboxes, and stop the root sandbox to interrupt remote Python.
+
+        Exactly one teardown runs per Turn: a watchdog expiry, a client disconnect, and the
+        terminal Turn branch may all racingly reach this method, and only the first call stops the
+        provider or records an outcome. A later caller waits for the teardown in progress and
+        returns the recorded result, so acknowledgment can never precede the stop.
+
+        Terminal entry points should call :meth:`request_cancellation` instead: it makes the
+        single-invocation guarantee observable to callers, while this method keeps the
+        provider-level idempotence that makes a stray direct call harmless.
+
+        The lifecycle notification is a side channel. It runs before the stop so a client learns
+        the cancellation promptly, but a failing stream must never skip the teardown, and its
+        exception never escapes this method. The same holds for every child's lifecycle events:
+        delivery is guarded per notification, then the child's provider cleanup is always attempted.
+
+        Per-child outcomes are aggregated, so one failing child skips neither its siblings nor the
+        root stop. The combined outcome is written only once every attempt has run: ``stopped`` when
+        every provider cleanup returned, ``unconfirmed`` when any provider cleanup actually failed.
+        A notification failure alone never makes the outcome ``unconfirmed``, and no exception
+        escapes: callers read :attr:`cleanup_outcome`.
+        """
         root = self.root
         root._cancelled.set()
-        root.emit("cancellation_requested")
-        for child in tuple(root._children.values()):
-            child.shutdown()
-        # Stopping the root interrupts remote Python, including a running infinite loop.
-        with root._lock:
-            if root._sandbox is not None and root._client is not None:
-                client, sandbox = root._client, root._sandbox
-                with_retries(lambda: client.stop(sandbox, timeout=60))
-                root._contexts.clear()
+        # Fence outstanding host-call replies before anything else: a successful result still in
+        # flight must not publish, and each execution keeps its token closed for good.
+        root._fence_executions()
+        with root._teardown_lock:
+            root._cancellation_claimed = True
+            if root._cleanup_outcome is not None:
+                return
+            try:
+                root._notify("cancellation_requested")
+                provider_failed = False
+                for child in tuple(root._children.values()):
+                    try:
+                        confirmed = child.shutdown()
+                    except Exception as exc:
+                        # One failed child must not leave the remaining children or the root running.
+                        provider_failed = True
+                        _LOGGER.warning(
+                            "Child sandbox shutdown failed for Session %s (%s)",
+                            root.session_id,
+                            type(exc).__name__,
+                        )
+                        continue
+                    if confirmed is False:
+                        provider_failed = True
+                try:
+                    # Stopping the root interrupts remote Python, including a running infinite loop.
+                    with root._lock:
+                        if root._sandbox is not None and root._client is not None:
+                            client, sandbox = root._client, root._sandbox
+                            with_retries(lambda: client.stop(sandbox, timeout=60))
+                except Exception:
+                    provider_failed = True
+                finally:
+                    # The root is stopped, or its stop is unconfirmed and therefore lost. Either way
+                    # the cached handle is not reusable: the next Turn must cold-resume into a fresh
+                    # sandbox instead of running against this one, and no later teardown may stop it
+                    # again. Interpreter contexts belong to the discarded handle, so they go too.
+                    with root._lock:
+                        root._sandbox = None
+                        root._contexts.clear()
+                root._cleanup_outcome = CLEANUP_UNCONFIRMED if provider_failed else CLEANUP_STOPPED
+            finally:
+                root._teardown_done.set()
 
     def _record_allocation(self, status: str) -> None:
         directory = Path(".fleet/allocations")
@@ -543,6 +901,19 @@ class DaytonaSandboxManager:
         with self._lock:
             if self._client is None:
                 self._client = _shared_daytona_client(self.api_key, self.org_id)
+            if self.parent is None and self._sandbox is None:
+                # Turn snapshots must be active at 4 vCPU / 8 GiB before provisioning.
+                # Children inherit the root snapshot and are exempt from these floors.
+                self._snapshot_identity = preflight(
+                    self._client.snapshot,
+                    name=self.snapshot,
+                    api_key=self.api_key,
+                    org_id=self.org_id,
+                )
+                # Publish the identity immediately: provisioning, replay capture, or the engine may
+                # still fail, and those outcomes must keep the same provenance as the record.
+                if self.snapshot_resolved_callback is not None:
+                    self.snapshot_resolved_callback(self._snapshot_identity)
             created = False
             if self._sandbox is None:
                 self.check_turn()
@@ -567,7 +938,7 @@ class DaytonaSandboxManager:
                     linked_sandbox=root_sandbox.id if root_sandbox is not None and self.linked_children else None,
                     ephemeral=child or self.disposable,
                     auto_delete_interval=0 if child or self.disposable else -1,
-                    ttl_minutes=30 if child else 120,
+                    ttl_minutes=_CHILD_TTL_MINUTES if child else _ROOT_TTL_MINUTES,
                     labels={
                         "fleet_session": self.session_id,
                         "fleet_agent": self.agent_id,
@@ -643,20 +1014,51 @@ class DaytonaSandboxManager:
                 context = repl.create_context(sandbox)
             with self._lock:
                 self._contexts[interpreter.ns_id] = context
-        remaining = self.root._deadline - time.monotonic() if self.root._deadline else self.root.turn_timeout_seconds
+        # A deadline that expired while provisioning must stop the Turn, not execute. One clock
+        # read below decides both admission and the host-call bound; a second read could straddle
+        # one second (admission 1.5 s, bound 0.4 s) and turn a missing whole-second bound into a
+        # transport error for work that never began. A positive remainder below one whole second is
+        # exhausted too: 0 now means "no bound", so no value is both honest and not wider than the
+        # remainder. admit_execution marks the Turn cancelled and raises the deadline TimeoutError
+        # here, before any execution or host call.
+        remaining = self.admit_execution()
+        # Admission used this exact sample, so the bound is representable. Compute it before the
+        # transport region: only a failure after execution starts may become an unknown outcome.
+        timeout = _host_call_bound(remaining)
+        execution_id = payload.get("execution_id")
+        progress_identity = {
+            "namespace": interpreter.ns_id,
+            "execution_id": execution_id if isinstance(execution_id, str) else None,
+        }
+
+        def report_progress(progress: dict[str, Any]) -> None:
+            # Observation only: it reports through the Turn's existing emitter and never acts.
+            self.emit("progress", **progress_identity, **progress)
+
+        fence = self._open_execution_fence()
         try:
             result = repl.run(
-                sandbox, context, payload, on_call=interpreter.answer_host_call, timeout=max(1, int(remaining))
+                sandbox,
+                context,
+                payload,
+                on_call=interpreter.answer_host_call,
+                timeout=timeout,
+                fence=fence,
+                on_fence=lambda: self._report_fence(fence, interpreter.ns_id),
+                on_progress=report_progress,
             )
         except BaseException as exc:
             self.check_turn()  # a deadline or cancellation explains the failure
             try:
-                self.cancel_turn()  # a dead transport cannot establish rollback; stop remote work first
+                # A dead transport cannot establish rollback; the Turn's one owner stops remote work.
+                self.request_cancellation()
             except Exception:
                 _LOGGER.warning("Could not confirm remote stop after execution failure")
             if isinstance(exc, ExecutionOutcomeUnknownError):
                 raise
             raise ExecutionOutcomeUnknownError(f"Sandbox execution transport failed ({type(exc).__name__})") from exc
+        finally:
+            self._release_execution_fence(fence)
         self.check_turn()
         return {**result, "transport_retries": 0}
 
@@ -697,6 +1099,46 @@ class DaytonaSandboxManager:
         with_retries(lambda: sandbox.fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60))
         return path
 
+    def _report_incomplete_environment(self, missing: Any) -> None:
+        """Emit one soft observation per Session when probed modules are absent.
+
+        Missing packages are context, never failure: the probe already returns them in the
+        model-visible environment string, and this only records the same set once. The Store's
+        atomic claim carries the guarantee across runtime release and manager rebuilds, where
+        the in-memory flag necessarily starts over.
+        """
+        if not isinstance(missing, list):
+            return
+        modules = [module for module in missing if isinstance(module, str)]
+        if not modules:
+            return
+        root = self.root
+        with root._lock:
+            if root._environment_reported or root.event_callback is None:
+                return
+            root._environment_reported = True
+            if not root._claim_environment_report():
+                return
+            try:
+                self.emit("sandbox_environment_incomplete", missing=modules)
+            except Exception:
+                # Observability must never fail a Turn; the claim is already durable, so no retry.
+                _LOGGER.warning("Environment observation could not be delivered for Session %s", root.session_id)
+
+    def _claim_environment_report(self) -> bool:
+        """Return True only when this process may emit the Session's one environment observation.
+
+        A claim failure suppresses the event rather than risking a duplicate after a rebuild.
+        """
+        claim = self.environment_report_claim
+        if claim is None:
+            return True
+        try:
+            return bool(claim(self.session_id))
+        except Exception:
+            _LOGGER.warning("Environment observation marker is unavailable for Session %s", self.session_id)
+            return False
+
     def turn_inputs(self, notes_limit: int = 20) -> dict[str, Any]:
         """Gather a Turn's remote inputs in one exec: file digests, shared notes, and the environment.
 
@@ -708,7 +1150,8 @@ class DaytonaSandboxManager:
             _DIGESTS_CODE
             + _ENVIRONMENT_CODE
             + (_notes_code(notes_limit) if with_notes else "notes = []\n")
-            + "print(json.dumps({'digests': digests, 'notes': notes, 'environment': environment}, sort_keys=True))"
+            + "print(json.dumps({'digests': digests, 'notes': notes, "
+            "'environment': environment, 'missing': missing}, sort_keys=True))"
         )
         result = json.loads(self.exec_remote_python(code) or "{}")
         digests = result.get("digests") if isinstance(result, dict) else None
@@ -718,6 +1161,7 @@ class DaytonaSandboxManager:
             raise RuntimeError("Invalid workspace digest listing")
         if result.get("notes") is None:
             _LOGGER.warning("Shared learned notes were unavailable for Session %s", self.session_id)
+        self._report_incomplete_environment(result.get("missing"))
         environment = result.get("environment")
         return {
             "digests": digests,
@@ -725,30 +1169,77 @@ class DaytonaSandboxManager:
             "environment": environment if isinstance(environment, str) else "",
         }
 
-    def reset_turn_budget(self) -> None:
-        """Start a fresh Turn: zero the counters, clear receipts, and arm the deadline watchdog."""
+    def reset_turn_budget(
+        self,
+        *,
+        deadline_seconds: int | object | None = _UNSET,
+        deadline_source: str | None = None,
+    ) -> None:
+        """Start a fresh Turn: zero the counters, clear receipts, and apply the deadline policy.
+
+        `deadline_seconds=None` means this Turn has no Fleet deadline. When the caller omits
+        the value the manager resolves configuration itself, which is how the direct engine
+        path starts a Turn. Ownership is explicit: a deadline-free Turn still owns a
+        generation and a teardown, and arms no watchdog at all.
+        """
         root = self.root
-        root.end_turn()
-        with root._budget_lock:
-            root._llm_calls_used = 0
-            root._sandbox_errors = 0
-            root._submit_rejections = 0
-            root._budget_breakdown = dict.fromkeys(root._budget_breakdown, 0)
-            root._allocations = 0
-            root._child_receipts.clear()
-            root._cancelled.clear()
-            root._deadline = time.monotonic() + root.turn_timeout_seconds
-            root._watchdog = threading.Timer(root.turn_timeout_seconds, root.cancel_turn)
-            root._watchdog.daemon = True
-            root._watchdog.start()
+        if deadline_seconds is _UNSET:
+            seconds: int | None = root.turn_timeout_seconds
+            source = deadline_source or "configuration"
+        else:
+            seconds = cast("int | None", deadline_seconds)
+            source = deadline_source or "request"
+        effective = seconds if isinstance(seconds, int) and seconds > 0 else None
+        # Serialize the generation check and cancellation with Turn end/reset. Timer.cancel()
+        # alone cannot revoke a callback that already started on its timer thread.
+        with root._turn_lock:
+            root.end_turn()
+            # A new Turn owns a new teardown; the previous Turn's outcome and owner must never be reused.
+            with root._teardown_lock:
+                root._cleanup_outcome = None
+                root._cancellation_claimed = False
+                root._teardown_done.clear()
+            with root._budget_lock:
+                root._llm_calls_used = 0
+                root._sandbox_errors = 0
+                root._submit_rejections = 0
+                root._budget_breakdown = dict.fromkeys(root._budget_breakdown, 0)
+                root._allocations = 0
+                root._child_receipts.clear()
+                root._cancelled.clear()
+                root._turn_generation += 1
+                root._turn_active = True
+                root._deadline_source = source
+                root._effective_deadline_seconds = effective
+                if effective is None:
+                    # A deadline-free Turn has no Fleet deadline, so there is no timer to arm.
+                    # `Timer(0)` would cancel the Turn immediately and must remain impossible.
+                    root._deadline = None
+                    root._watchdog = None
+                else:
+                    root._deadline = time.monotonic() + effective
+                    generation = root._turn_generation
+                    root._watchdog = threading.Timer(effective, lambda: root._expire_generation(generation))
+                    root._watchdog.daemon = True
+                    root._watchdog.start()
+
+    def _expire_generation(self, generation: int) -> None:
+        """A watchdog callback only acts for the Turn that armed it; a stale one is a no-op."""
+        root = self.root
+        with root._turn_lock:
+            if not root._turn_active or root._turn_generation != generation:
+                return
+            root.request_cancellation()
 
     def end_turn(self) -> None:
-        """Cancel the watchdog and clear the Turn deadline."""
+        """Cancel the watchdog and clear the Turn deadline without touching provenance."""
         root = self.root
-        if root._watchdog is not None:
-            root._watchdog.cancel()
-            root._watchdog = None
-        root._deadline = 0
+        with root._turn_lock:
+            if root._watchdog is not None:
+                root._watchdog.cancel()
+                root._watchdog = None
+            root._deadline = None
+            root._turn_active = False
 
     def consume_budget(self, count: int = 1, *, category: str = "generation_query") -> None:
         """Charge shared budget units, categorized without changing admission or completion counts."""
@@ -1067,11 +1558,28 @@ class DaytonaSandboxManager:
         with self._lock:
             self._interpreters.pop(interpreter.ns_id, None)
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> bool:
         """Stop or delete this agent's sandbox after shutting down any children.
 
         A child's workspace is cleared before deletion; a root sandbox is stopped unless disposable.
+
+        Every call for the same manager is serialized on this agent's shutdown lock, so a normal
+        child completion and ``cancel_turn()`` cannot race. A caller that arrives while a provider
+        cleanup is in flight waits for it and then observes the completed result; no caller can
+        report this agent confirmed before its provider call returned.
+
+        Returns whether this agent's own provider cleanup is confirmed. ``True`` means the provider
+        stop or delete returned (or there was nothing to clean up); ``False`` means the provider
+        call failed and the handle was retained for a later retry. Lifecycle notifications are
+        delivered best-effort, so a refused event never changes this result and never skips the
+        provider call. A local allocation-journal unlink failure is bookkeeping: it is logged once
+        and never reverses confirmation or restores an already-deleted handle.
         """
+        with self._shutdown_lock:
+            return self._shutdown_locked()
+
+    def _shutdown_locked(self) -> bool:
+        """Run the provider cleanup while holding this agent's shutdown lock."""
         if self.parent is not None:
             with self.root._budget_lock:
                 receipt = self.root._child_receipts.get(self.agent_id)
@@ -1089,10 +1597,11 @@ class DaytonaSandboxManager:
             self._interpreters.clear()
             for interpreter in interpreters:
                 interpreter._closed = True
+        confirmed = True
         if sandbox is not None and client is not None:
             try:
                 if self.parent is not None or self.disposable:
-                    self.emit("sandbox_deleting", sandbox_id=sandbox.id)
+                    self._notify("sandbox_deleting", sandbox_id=sandbox.id)
                     try:
                         self._remote_exec(
                             sandbox,
@@ -1105,22 +1614,41 @@ class DaytonaSandboxManager:
                             " except FileNotFoundError: pass\n",
                         )
                     except Exception:
-                        self.emit("workspace_cleanup_failed", sandbox_id=sandbox.id)
+                        self._notify("workspace_cleanup_failed", sandbox_id=sandbox.id)
                     # A stopped or failed sandbox cannot run workspace cleanup,
                     # but must still be deleted and confirmed by the provider.
                     with_retries(lambda: client.delete(sandbox, timeout=60, wait=True))
-                    (Path(".fleet/allocations") / f"{self.agent_id}.json").unlink(missing_ok=True)
+                    self._discard_allocation_journal()
                     with self.root._budget_lock:
                         self.root._children.pop(self.agent_id, None)
-                    self.emit("sandbox_deleted", sandbox_id=sandbox.id)
+                    self._notify("sandbox_deleted", sandbox_id=sandbox.id)
                 else:
                     with_retries(lambda: client.stop(sandbox, timeout=60))
             except Exception:
+                confirmed = False
                 _LOGGER.warning("Daytona Session sandbox stop failed")
                 if self.parent is not None:
                     # Retain the handle so a later shutdown can retry deletion.
                     self._sandbox = sandbox
-                    self.emit("sandbox_cleanup_failed", sandbox_id=sandbox.id)
+                    self._notify("sandbox_cleanup_failed", sandbox_id=sandbox.id)
         elif self.parent is not None:
             with self.root._budget_lock:
                 self.root._children.pop(self.agent_id, None)
+        return confirmed
+
+    def _discard_allocation_journal(self) -> None:
+        """Remove this allocation's local journal entry after a confirmed provider deletion.
+
+        The journal is local bookkeeping, so a failure here must not reverse provider
+        confirmation, restore a deleted handle, or register as an unconfirmed cleanup. It is
+        logged once with a bounded message: the Session, the agent, and the exception type.
+        """
+        try:
+            (Path(".fleet/allocations") / f"{self.agent_id}.json").unlink(missing_ok=True)
+        except Exception as exc:
+            _LOGGER.warning(
+                "Local allocation journal unlink failed for Session %s agent %s (%s)",
+                self.session_id,
+                self.agent_id,
+                type(exc).__name__,
+            )

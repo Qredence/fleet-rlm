@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import httpx
 from rich.panel import Panel
 from rich.text import Text
 
-from fleet_rlm.config import FleetSettings
+from fleet_rlm.config import FleetSettings, validate_turn_timeout_seconds
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
 MODES = ("rlm", "flex", "hybrid")
@@ -35,6 +36,9 @@ class SessionState:
     sub_model: str = ""
     context_path: str | None = None
     record_replay: bool = False
+    # Client-local `/timeout` override: None inherits, 0 disables the Fleet deadline.
+    # It is sent as `TurnRequest.timeout_seconds` and is never stored on the Session.
+    timeout_seconds: int | None = None
     last_turn_id: str | None = None
     last_trace_id: str | None = None
     workspace_files: list[str] = field(default_factory=list)
@@ -296,7 +300,7 @@ def _stat(ctx: Context, arg: str) -> None:
 
 
 def _put(ctx: Context, arg: str) -> None:
-    args = arg.split()
+    args = shlex.split(arg)
     if not args:
         CONSOLE.print("[yellow]Usage: /put <local-path> [workspace-path][/yellow]")
         return
@@ -316,7 +320,7 @@ def _put(ctx: Context, arg: str) -> None:
 
 
 def _get(ctx: Context, arg: str) -> None:
-    args = arg.split()
+    args = shlex.split(arg)
     if not args:
         CONSOLE.print("[yellow]Usage: /get <workspace-path> [local-path][/yellow]")
         return
@@ -421,6 +425,47 @@ def _replay(ctx: Context, arg: str) -> None:
     ctx.state.record_replay = arg == "on"
     state = "enabled for subsequent Turns" if ctx.state.record_replay else "disabled"
     CONSOLE.print(f"[dim]Replay capture {state}.[/dim]")
+
+
+def _timeout(ctx: Context, arg: str) -> None:
+    """Hold a client-local deadline override for subsequent Turns in this client only."""
+    if not arg:
+        current = ctx.state.timeout_seconds
+        if current is None:
+            label = "inheriting the server configuration"
+        elif current == 0:
+            label = "off (no Fleet deadline)"
+        else:
+            label = f"{current}s"
+        CONSOLE.print(f"[cyan]Client timeout:[/cyan] {label}  [dim](use /timeout <seconds|off|default>)[/dim]")
+        return
+    if arg == "default":
+        ctx.state.timeout_seconds = None
+        CONSOLE.print("[green]Timeout override cleared:[/green] subsequent Turns inherit the server configuration.")
+        return
+    if arg == "off":
+        ctx.state.timeout_seconds = 0
+        CONSOLE.print(
+            "[green]Timeout off:[/green] subsequent Turns have no Fleet deadline; "
+            "provider TTL and idle bounds still apply."
+        )
+        return
+    if not re.fullmatch(r"[0-9]+", arg):
+        CONSOLE.print("[red]Invalid /timeout value:[/red] use an integer number of seconds, `off`, or `default`.")
+        return
+    try:
+        seconds = validate_turn_timeout_seconds(int(arg), field="/timeout")
+    except ValueError:
+        CONSOLE.print("[red]Invalid /timeout value:[/red] use 0, or a value between 10 and 3600 seconds.")
+        return
+    ctx.state.timeout_seconds = seconds
+    if seconds == 0:
+        CONSOLE.print(
+            "[green]Timeout set to 0:[/green] subsequent Turns have no Fleet deadline; "
+            "provider TTL and idle bounds still apply."
+        )
+    else:
+        CONSOLE.print(f"[green]Timeout set:[/green] subsequent Turns will request {seconds}s.")
 
 
 def _context(ctx: Context, arg: str) -> None:
@@ -536,15 +581,26 @@ COMMANDS: dict[str, Command] = {
     "/mode": Command(
         "/mode [rlm|flex|hybrid]", "inspect or change execution mode", _mode, _MODE_OPTIONS, category="Session & Models"
     ),
+    "/timeout": Command(
+        "/timeout <seconds|off|default>",
+        "set this client's Fleet deadline override for subsequent Turns (client-local)",
+        _timeout,
+        {"off": None, "default": None},
+        category="Session & Models",
+    ),
     "/config": Command(
-        "/config [mode <mode>]",
+        "/config [mode <mode>|json]",
         "inspect non-secret Session settings and limits",
         _config,
         {"mode": _MODE_OPTIONS, "json": None},
         category="Session & Models",
     ),
     "/settings": Command(
-        "/settings", "same as /config", _config, {"mode": _MODE_OPTIONS, "json": None}, category="Session & Models"
+        "/settings [mode <mode>|json]",
+        "same as /config",
+        _config,
+        {"mode": _MODE_OPTIONS, "json": None},
+        category="Session & Models",
     ),
     "/models": Command(
         "/models [catalog.schema]", "discover accessible Gateway chat services", _models, category="Session & Models"
@@ -581,6 +637,7 @@ COMMANDS: dict[str, Command] = {
         "/optimize [--max-metric-calls N | --approve VERSION]",
         "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",
         _optimize,
+        {"--max-metric-calls": None, "--approve": None},
         category="Evaluation & Traces",
     ),
 }

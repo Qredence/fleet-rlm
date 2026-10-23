@@ -51,10 +51,10 @@ CircleCI Test Insights rather than treating a green retry as proof the first
 attempt passed.
 
 CircleCI's Performance plan includes 10,000 paid Smarter Testing test atoms
-per month. The current pytest discovery yields 37 file-level test atoms, and
+per month. The current pytest discovery yields 38 file-level test atoms, and
 each Python 3.12 `circleci testsuite run` counts all discovered atoms even
-when TIA selects only some tests. That is 37 atoms per normal test-suite run;
-270 complete runs use 9,990 atoms. Track the monthly total in CircleCI before
+when TIA selects only some tests. That is 38 atoms per normal test-suite run;
+263 complete runs use 9,994 atoms. Track the monthly total in CircleCI before
 increasing the test suite or run volume. Keep paid Smart Testing features
 disabled if the expected monthly total would exceed 10,000 atoms; exceeding
 the included allowance requires a separate decision. Recount the discovered

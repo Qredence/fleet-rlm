@@ -48,7 +48,6 @@ _TOML_FIELDS = {
     "gateway": {"host": "databricks_host", "base_url": "fleet_llm_base_url"},
     "decision": {"model": "typesafe_model"},
     "daytona": {
-        "snapshot": "fleet_daytona_snapshot",
         "org_id": "fleet_daytona_org_id",
         "volume_id": "fleet_daytona_volume_id",
         "auto_stop_minutes": "daytona_auto_stop_minutes",
@@ -94,6 +93,56 @@ RETIRED_MLFLOW_ENV = {
     "MLFLOW_EXPERIMENT_NAME",
     *(f"FLEET_MLFLOW_{key.upper()}" for key in _TOML_FIELDS["mlflow.databricks"]),
 }
+# The shipped Fleet deadline. It stays finite; deadline-free execution is opt-in per Turn.
+DEFAULT_TURN_TIMEOUT_SECONDS = 900
+_TURN_TIMEOUT_RULE = "0 or between 10 and 3600 seconds"
+
+
+class DeadlinePolicy(NamedTuple):
+    """The one deadline decision for a Turn: where it came from and how long it is."""
+
+    source: str
+    effective_seconds: int | None
+
+
+def validate_turn_timeout_seconds(
+    value: Any,
+    *,
+    field: str = "turn_timeout_seconds",
+    allow_numeric_text: bool = False,
+) -> int:
+    """Accept exactly `0` or `10..3600` as an integer; reject booleans, floats, and other text.
+
+    Environment transports are inherently textual, so `allow_numeric_text` lets the
+    settings sources that are strings convert a bare integer. Structured surfaces
+    (init keywords, TOML, HTTP JSON, TUI arguments) stay strict.
+    """
+    if isinstance(value, str) and allow_numeric_text and re.fullmatch(r"-?[0-9]+", value):
+        value = int(value)
+    if type(value) is not int:
+        raise ValueError(f"{field} must be an integer: the value must be exactly {_TURN_TIMEOUT_RULE}")
+    if value != 0 and not 10 <= value <= 3600:
+        raise ValueError(f"{field} must be exactly {_TURN_TIMEOUT_RULE}")
+    return value
+
+
+def resolve_turn_deadline(
+    request_seconds: int | None,
+    configured_seconds: int,
+    *,
+    configured_source: str = "default",
+) -> DeadlinePolicy:
+    """Resolve one Turn's deadline policy: request, then configuration, then the default.
+
+    `None` from the request means inherit; `0` means no Fleet deadline. The server
+    reports only sources it can observe, so a client `/timeout` override arrives as
+    `request` and never as a command source.
+    """
+    if request_seconds is not None:
+        return DeadlinePolicy("request", request_seconds if request_seconds > 0 else None)
+    if configured_source != "default":
+        return DeadlinePolicy("configuration", configured_seconds if configured_seconds > 0 else None)
+    return DeadlinePolicy("default", DEFAULT_TURN_TIMEOUT_SECONDS)
 
 
 class MlflowTarget(NamedTuple):
@@ -253,6 +302,10 @@ class FleetSettings(BaseSettings):
             "file_changes_require_restart": True,
         }
 
+    def configuration_source(self, name: str) -> str:
+        """Return which source supplied a setting, or `default` when it was not configured."""
+        return self._configuration_sources.get(name, "default")
+
     def with_explicit_overrides(self, **values: Any) -> FleetSettings:
         """Validate CLI overrides while retaining the provenance of unchanged settings."""
         unknown = values.keys() - type(self).model_fields.keys()
@@ -285,7 +338,6 @@ class FleetSettings(BaseSettings):
         validation_alias="FLEET_SHARED_NOTES_SUBPATH",
         description="Volume subpath mounted at /learned on root sandboxes; empty disables shared notes.",
     )
-    fleet_daytona_snapshot: str = "fleet-rlm-base"
     databricks_host: str = Field(default="", validation_alias="DATABRICKS_HOST")
     databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
     fleet_llm_base_url: str = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
@@ -331,7 +383,9 @@ class FleetSettings(BaseSettings):
     max_agent_depth: int = Field(default=3, ge=0, le=8, validation_alias="FLEET_MAX_AGENT_DEPTH")
     max_child_sandboxes: int = Field(default=8, ge=0, le=64, validation_alias="FLEET_MAX_CHILD_SANDBOXES")
     max_active_children: int = Field(default=4, ge=1, le=16, validation_alias="FLEET_MAX_ACTIVE_CHILDREN")
-    turn_timeout_seconds: int = Field(default=900, ge=10, le=3600, validation_alias="FLEET_TURN_TIMEOUT_SECONDS")
+    turn_timeout_seconds: int = Field(
+        default=DEFAULT_TURN_TIMEOUT_SECONDS, validation_alias="FLEET_TURN_TIMEOUT_SECONDS"
+    )
     linked_children: bool = Field(default=True, validation_alias="FLEET_LINKED_CHILDREN")
     max_active_sessions: int = Field(
         default=64,
@@ -419,7 +473,6 @@ class FleetSettings(BaseSettings):
 
     @field_validator(
         "fleet_database_url",
-        "fleet_daytona_snapshot",
         "fleet_root_model",
         "fleet_sub_model",
         "fleet_reflection_model",
@@ -431,6 +484,16 @@ class FleetSettings(BaseSettings):
         if not normalized:
             raise ValueError("value must not be empty")
         return normalized
+
+    @field_validator("turn_timeout_seconds", mode="before")
+    @classmethod
+    def optional_turn_timeout(cls, value: Any) -> int:
+        """Accept 0 or 10..3600 as an integer, allowing numeric text only from the environment."""
+        labels = _SETTINGS_SOURCES.get() or {}
+        return validate_turn_timeout_seconds(
+            value,
+            allow_numeric_text=labels.get("turn_timeout_seconds") in {"environment", "dotenv"},
+        )
 
     @field_validator("fleet_root_model", "fleet_sub_model", "fleet_reflection_model")
     @classmethod

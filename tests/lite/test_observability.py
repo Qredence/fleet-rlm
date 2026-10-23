@@ -89,3 +89,61 @@ def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
     sse_callback = object()
 
     assert without_mlflow_dspy_callback([mlflow_callback, sse_callback]) == [sse_callback]
+
+
+def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.engine.turn as turn_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.sandbox.snapshots import DEFAULT_DEFINITION, SNAPSHOT_NAME, clear_preflight_cache, preflight
+
+    clear_preflight_cache()
+    provider = SimpleNamespace(
+        get=lambda name: SimpleNamespace(name=name, id="snap-1", state="active", cpu=4, mem=8, disk=8)
+    )
+    identity = preflight(provider, name=SNAPSHOT_NAME, api_key="key", org_id="org")
+    expected = {
+        "snapshot_name": SNAPSHOT_NAME,
+        "snapshot_id": "snap-1",
+        "snapshot_cpu": 4,
+        "snapshot_mem": 8,
+        "snapshot_disk": 8,
+        "snapshot_definition_digest": DEFAULT_DEFINITION.digest(),
+    }
+    captured: dict[str, Any] = {}
+
+    class Span:
+        def set_inputs(self, value: dict[str, Any]) -> None:
+            captured["inputs"] = value
+
+        def set_attributes(self, value: dict[str, Any]) -> None:
+            captured["attributes"] = value
+
+    monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **_kwargs: None)
+    runtime = SimpleNamespace(
+        execution_mode="hybrid",
+        configuration_overrides={},
+        engine=SimpleNamespace(root_lm=None, sub_lm=None),
+        sandbox_mgr=SimpleNamespace(
+            turn_timeout_seconds=900,
+            snapshot_provenance=identity.provenance,
+            deadline_provenance=lambda: {"deadline_source": "configuration", "effective_seconds": 900},
+        ),
+    )
+
+    turn_module._describe_turn(
+        Span(),
+        runtime,
+        FleetSettings(_env_file=None),
+        "session-a",
+        "compute a digit",
+        "turn-1",
+        None,
+        {"manifest": "/workspace/files (empty)", "context_files": {}},
+        None,
+    )
+
+    attributes = captured["attributes"]
+    assert {key: attributes[key] for key in expected} == expected
+    assert attributes["deadline_source"] == "configuration"
+    assert attributes["effective_seconds"] == 900
+    assert "definition_digest" not in attributes

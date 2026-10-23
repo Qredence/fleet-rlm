@@ -181,7 +181,6 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             org_id=settings.fleet_daytona_org_id,
             volume_id=settings.fleet_daytona_volume_id,
             session_id=namespace,
-            snapshot=settings.fleet_daytona_snapshot,
             auto_stop_minutes=settings.daytona_auto_stop_minutes,
             sub_lm=sub_lm,
             jev_lm=jev_lm,

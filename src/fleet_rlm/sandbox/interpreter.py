@@ -85,6 +85,7 @@ class DaytonaInterpreter:
             "read_skill_reference",
             "run_skill_script",
             "save_skill",
+            "progress_scope",
         }
         if any(
             not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name) or name in reserved
@@ -182,6 +183,9 @@ class DaytonaInterpreter:
         try:
             if not isinstance(args, list) or not isinstance(kwargs, dict):
                 raise ValueError("Invalid host tool arguments")
+            # Inside the conversion region: a cancelled Turn answers promptly instead of
+            # invoking the tool, and the sandbox gets an error reply rather than a hang.
+            self.manager.check_turn()
             builtin = self._BUILTINS.get(str(tool_name))
             if builtin is not None:
                 value = builtin(self, args, kwargs)
@@ -385,7 +389,12 @@ class DaytonaInterpreter:
             span.set_inputs({"code": activity_text(code)})
             host_calls_before = self._host_calls
             try:
-                payload: dict[str, Any] = {"code": code, "variables": variables or {}, "tools": list(self.tools)}
+                payload: dict[str, Any] = {
+                    "code": code,
+                    "variables": variables or {},
+                    "tools": list(self.tools),
+                    "execution_id": execution_id,
+                }
                 if self.output_fields:
                     payload["outputs"] = [field["name"] for field in self.output_fields]
                 response = self.manager.run_namespace(self, payload)

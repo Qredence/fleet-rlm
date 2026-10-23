@@ -161,6 +161,15 @@ _SCHEMA_MIGRATIONS = (
     ),
     # The Daytona Volume is the only workspace file store. Rows are kept for manual recovery.
     (4, ("ALTER TABLE IF EXISTS fleet_lite_vfs_files RENAME TO fleet_lite_vfs_files_retired",)),
+    # The environment observation is a durable Session fact. Releasing or rebuilding a runtime
+    # must not re-emit it, so the marker lives on the Session row; existing rows start unreported.
+    (
+        5,
+        (
+            "ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS "
+            "environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
+        ),
+    ),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -325,6 +334,17 @@ class Store:
             connection.execute(
                 "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
             )
+
+    @_retry_once
+    def claim_environment_report(self, session_id: str) -> bool:
+        """Record this Session's single environment observation; True only for the first claim."""
+        with self.pool.connection() as connection:
+            claimed = connection.execute(
+                "UPDATE fleet_lite_sessions SET environment_reported = TRUE "
+                "WHERE session_id = %s AND environment_reported = FALSE RETURNING session_id",
+                (session_id,),
+            ).fetchone()
+        return claimed is not None
 
     @_retry_once
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -811,6 +831,8 @@ class VolumePostgresHarness:
         artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
         completion = None
         if turn_record.get("turn_id"):
+            from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
+
             result = {
                 "event": "turn_complete",
                 "answer": turn_record.get("answer", ""),
@@ -822,9 +844,34 @@ class VolumePostgresHarness:
                     for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
                     if key in turn_record
                 },
+                # The status payload carries the same provider-resolved identity as the record.
+                **{key: turn_record[key] for key in PROVENANCE_KEYS if key in turn_record},
+                # Deadline, outcome, and wall duration join the same turn_id across the terminal
+                # event, the stored record, and the fleet_turn span. `effective_seconds=None` is
+                # preserved explicitly rather than substituted with a default.
+                **{
+                    key: turn_record[key]
+                    for key in (
+                        "deadline_source",
+                        "effective_seconds",
+                        "outcome",
+                        "duration_seconds",
+                    )
+                    if key in turn_record
+                },
             }
             if turn_record.get("trace_id"):
                 result["trace_id"] = turn_record["trace_id"]
+            # The status payload reports the same teardown outcome as the stored Turn and span.
+            if turn_record.get("cleanup"):
+                result["cleanup"] = turn_record["cleanup"]
+            # Provider-owned lifecycle bounds are surfaced unchanged; they are not Fleet limits.
+            for key in ("ttl_minutes", "auto_stop_interval", "maximum_lifespan_minutes", "provider_owned"):
+                if key in turn_record:
+                    result[key] = turn_record[key]
+            # The live root handle this Turn used, when it provisioned one.
+            if turn_record.get("root_sandbox_id"):
+                result["root_sandbox_id"] = turn_record["root_sandbox_id"]
             completion = (turn_record["turn_id"], result)
         self.store.commit_turn(
             session_id,

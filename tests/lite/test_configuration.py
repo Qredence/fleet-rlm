@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.config import FleetSettings
+from fleet_rlm.config import FleetSettings, resolve_turn_deadline
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ def test_optional_default_file_and_explicit_path(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "content",
     [
-        "[runtime]\nturn_timeout_seconds = 0",
+        "[runtime]\nturn_timeout_seconds = 9",
         '[runtime]\nturn_timeout_seconds = "900"',
         "[runtime]\nturn_timeout_seconds = true",
         "[runtime]\nwrap_up_seconds = 300",
@@ -73,6 +73,55 @@ def test_invalid_toml_fails_without_echoing_values(content):
     with pytest.raises(ValueError) as error:
         FleetSettings(_env_file=None)
     assert "credential-marker" not in str(error.value)
+
+
+@pytest.mark.parametrize("value", [0, 10, 3600])
+def test_turn_timeout_accepts_zero_or_bounded_integers(value):
+    assert FleetSettings(_env_file=None, turn_timeout_seconds=value).turn_timeout_seconds == value
+
+
+@pytest.mark.parametrize("value", [9, -1, True, 0.5, 3601, "600"])
+def test_turn_timeout_rejects_other_shapes(value):
+    with pytest.raises(ValidationError) as error:
+        FleetSettings(_env_file=None, turn_timeout_seconds=value)
+    message = str(error.value)
+    assert "turn_timeout_seconds" in message
+    assert "0 or between 10 and 3600" in message
+
+
+def test_turn_timeout_environment_text_and_zero_agree_with_toml(monkeypatch):
+    monkeypatch.setenv("FLEET_TURN_TIMEOUT_SECONDS", "0")
+    assert FleetSettings(_env_file=None).turn_timeout_seconds == 0
+    monkeypatch.setenv("FLEET_TURN_TIMEOUT_SECONDS", "600")
+    assert FleetSettings(_env_file=None).turn_timeout_seconds == 600
+    toml("[runtime]\nturn_timeout_seconds = 0")
+    monkeypatch.delenv("FLEET_TURN_TIMEOUT_SECONDS")
+    assert FleetSettings(_env_file=None).turn_timeout_seconds == 0
+
+
+@pytest.mark.parametrize("value", ["true", "0.5", '"600"', "-1", "9", "3601"])
+def test_toml_turn_timeout_stays_a_bounded_integer(value):
+    toml(f"[runtime]\nturn_timeout_seconds = {value}")
+    with pytest.raises(ValueError):
+        FleetSettings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("configured", "configured_source", "requested", "expected"),
+    [
+        (900, "default", None, ("default", 900)),
+        (1200, "toml", None, ("configuration", 1200)),
+        (1200, "environment", 600, ("request", 600)),
+        (1200, "toml", 0, ("request", None)),
+        (1200, "toml", None, ("configuration", 1200)),
+        (900, "default", 3600, ("request", 3600)),
+    ],
+)
+def test_deadline_resolution_follows_request_then_configuration_then_default(
+    configured, configured_source, requested, expected
+):
+    policy = resolve_turn_deadline(requested, configured, configured_source=configured_source)
+    assert (policy.source, policy.effective_seconds) == expected
 
 
 def test_schema_and_parse_errors(monkeypatch):
@@ -356,3 +405,30 @@ def test_gateway_discovery_filters_chat_services_and_converts_resource_names(mon
     assert settings.list_models("team.chat") == ["openai/team.chat.first", "openai/team.chat.second"]
     with pytest.raises(ValueError, match=r"catalog\.schema"):
         settings.list_models("../other")
+
+
+def test_checked_in_toml_loads_without_snapshot_setting(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+    monkeypatch.setenv("FLEET_CONFIG", str(shipped))
+    monkeypatch.delenv("FLEET_DAYTONA_SNAPSHOT", raising=False)
+    settings = FleetSettings(_env_file=None)
+    assert not hasattr(settings, "fleet_daytona_snapshot")
+    assert "fleet_daytona_snapshot" not in settings.configuration()["values"]
+    assert "snapshot" not in settings.configuration()["values"]
+
+
+def test_leftover_toml_snapshot_key_raises_unsupported_setting() -> None:
+    toml('[daytona]\nsnapshot = "fleet-rlm-python313-v10"\n')
+    with pytest.raises(ValueError, match=r"Unsupported or environment-only Fleet TOML setting: daytona\.snapshot"):
+        FleetSettings(_env_file=None)
+
+
+def test_snapshot_environment_variable_creates_no_field_or_digest_change(monkeypatch) -> None:
+    monkeypatch.delenv("FLEET_DAYTONA_SNAPSHOT", raising=False)
+    baseline = FleetSettings(_env_file=None)
+    monkeypatch.setenv("FLEET_DAYTONA_SNAPSHOT", "fleet-rlm-base")
+    overridden = FleetSettings(_env_file=None)
+    assert not hasattr(overridden, "fleet_daytona_snapshot")
+    assert "fleet_daytona_snapshot" not in overridden.configuration()["values"]
+    assert overridden.configuration()["digest"] == baseline.configuration()["digest"]
