@@ -9,6 +9,7 @@ import dspy
 import pytest
 from dspy import AdapterParseError, LMUnexpectedError
 from dspy.primitives.facade import SandboxLM
+from scripted_lm import ScriptedLM
 
 from fleet_rlm.dspy_support import FleetRLMChatAdapter
 
@@ -82,34 +83,6 @@ def test_adapter_preserves_code_and_standard_typed_parsing() -> None:
     ) == {"answer": 42}
     with pytest.raises(AdapterParseError):
         FleetRLMChatAdapter().parse(dspy.Signature("task -> answer"), "```python\nprint(42)\n```\n```")
-
-
-class ScriptedLM(dspy.utils.DummyLM):
-    """Supply raw completions while keeping DSPy's real formatting/call/parsing pipeline."""
-
-    def __init__(self, responses, barrier: Barrier | None = None):
-        super().__init__([{"raw": response} for response in responses])
-        self.calls = []
-        self.barrier = barrier
-
-    def _format_answer_fields(self, fields):
-        response = fields["raw"]
-        if isinstance(response, BaseException):
-            raise response
-        return response
-
-    def _record(self, kwargs):
-        self.calls.append(deepcopy(kwargs))
-        if self.barrier is not None and len(self.calls) == 1:
-            self.barrier.wait(timeout=10)
-
-    def __call__(self, *args, **kwargs):
-        self._record(kwargs)
-        return super().__call__(*args, **kwargs)
-
-    async def acall(self, *args, **kwargs):
-        self._record(kwargs)
-        return await super().acall(*args, **kwargs)
 
 
 def _invoke(adapter, lm, signature, *, asynchronous=False, lm_kwargs=None, demos=None, inputs=None):

@@ -11,6 +11,7 @@ from typing import Any
 import dspy
 import pytest
 from dspy import AdapterParseError
+from scripted_lm import ScriptedLM
 
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -445,3 +446,40 @@ def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -
     engine.compiled.reload_if_changed(engine)
 
     assert engine.triage.signature.instructions == "Older approved triage instructions."
+
+
+def _direct_answer(root_lm: dspy.BaseLM) -> dspy.Prediction:
+    from fleet_rlm.engine.signatures import Route
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-direct")
+    engine = AdaptiveFleetEngine(manager, root_lm, dspy.LM("openai/fleet-sub", engine="lm15", cache=False))
+    return engine._execute(Route.DIRECT, "", "", "What is 6 x 7?", "", "", None)
+
+
+_VALID_DIRECT = "[[ ## reasoning ## ]]\nSix sevens.\n\n[[ ## answer ## ]]\n42\n\n[[ ## completed ## ]]"
+
+
+def test_the_direct_route_runs_under_the_fleet_chat_adapter() -> None:
+    from fleet_rlm.dspy_support import FleetRLMChatAdapter
+
+    lm = ScriptedLM([_VALID_DIRECT])
+
+    prediction = _direct_answer(lm)
+
+    assert (prediction.answer, prediction.route) == ("42", "direct")
+    assert len(lm.adapters) == 1 and isinstance(lm.adapters[0], FleetRLMChatAdapter)
+
+
+def test_a_direct_answer_parse_failure_is_re_asked_once_without_a_json_fallback() -> None:
+    recovered = ScriptedLM(["not in the field format", _VALID_DIRECT])
+
+    assert _direct_answer(recovered).answer == "42"
+    assert len(recovered.prompts) == 2
+    assert "Format correction" not in recovered.prompts[0] and "Format correction" in recovered.prompts[1]
+
+    # A second unparseable reply ends there: exactly two calls (the original and one re-ask), so no third call
+    # through DSPy's JSONAdapter fallback, even with a third reply available.
+    failing = ScriptedLM(["not in the field format"] * 3)
+    with pytest.raises(AdapterParseError):
+        _direct_answer(failing)
+    assert len(failing.prompts) == 2
