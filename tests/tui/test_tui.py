@@ -784,3 +784,132 @@ def test_fullscreen_cancellation_closes_the_active_response_without_claiming_com
                 assert tui.is_running
 
     asyncio.run(scenario())
+
+
+def test_timeout_command_holds_a_client_local_override_and_rejects_invalid_values(monkeypatch):
+    output = io.StringIO()
+    console = Console(file=output, width=120)
+    use_console(monkeypatch, console)
+    state = commands.SessionState()
+
+    for command, expected in (("/timeout 120", 120), ("/timeout off", 0), ("/timeout default", None)):
+        assert commands.handle_command(None, command, "s1", state=state) is True
+        assert state.timeout_seconds == expected
+    assert "120s" in output.getvalue() or "request 120s" in output.getvalue()
+
+    for command in (
+        "/timeout 3601",
+        "/timeout true",
+        "/timeout 1.5",
+        "/timeout 5",
+        "/timeout -1",
+        "/timeout " + "9" * 5_000,
+    ):
+        commands.handle_command(None, command, "s1", state=state)
+    assert state.timeout_seconds is None, "an invalid argument must not change the override"
+    assert "Invalid /timeout" in output.getvalue()
+    # Another client on the same Session starts with no override.
+    assert commands.SessionState().timeout_seconds is None
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [(120, {"timeout_seconds": 120}), (0, {"timeout_seconds": 0}), (None, {})],
+)
+def test_timeout_override_is_transmitted_per_turn(override, expected):
+    submitted: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        submitted.append(json.loads(request.content))
+        return httpx.Response(200, content=b"")
+
+    state = commands.SessionState(timeout_seconds=override)
+    with (
+        httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client,
+        app._request_turn(client, "session-1", "Do work", state) as response,
+    ):
+        response.read()
+
+    if expected:
+        assert submitted[0]["timeout_seconds"] == expected["timeout_seconds"]
+    else:
+        assert "timeout_seconds" not in submitted[0]
+
+
+def test_tui_status_area_renders_advisory_labels_without_completion_claims() -> None:
+    tracker = render.TurnTracker()
+    tracker.ingest({"event": "tool_start", "call_id": "A", "tool": "lookup", "status": "waiting_on_host"})
+    assert "waiting_on_host" in tracker.status_line().plain
+
+    tracker.ingest({"event": "tool_end", "call_id": "A", "status": "progress_unknown"})
+    assert "waiting_on_host" not in tracker.status_line().plain
+
+    tracker.ingest(
+        {
+            "event": "progress",
+            "phase": "checkpoint",
+            "scope": "scan workspace",
+            "checkpoint": 9,
+            "expect_seconds": 45,
+            "status": "progressing",
+        }
+    )
+    line = tracker.status_line().plain
+    assert "progressing" in line and "scan workspace" in line and "checkpoint 9" in line
+    assert not any(token in line for token in ("%", "percent", "complete", "remaining", "ETA"))
+
+    tracker.ingest({"event": "done"})
+    assert tracker.status_label is None, "the label is absent after done"
+
+
+def test_tui_progress_evidence_does_not_leak_between_scopes() -> None:
+    tracker = render.TurnTracker()
+    tracker.ingest({"event": "progress", "scope": "first", "checkpoint": 9, "expect_seconds": 5})
+    tracker.ingest({"event": "progress", "phase": "start", "scope": "second", "expect_seconds": 10})
+    assert tracker.status_scope == "second"
+    assert tracker.status_checkpoint is None
+    assert tracker.status_expect_seconds == 10
+
+    tracker.ingest({"event": "status", "status": "progress_unknown"})
+    assert tracker.status_scope is None
+    assert tracker.status_checkpoint is None
+    assert tracker.status_expect_seconds is None
+    assert "second" not in tracker.status_line().plain
+
+
+def test_tui_displays_the_stored_route_answer_and_elapsed_time() -> None:
+    tracker = render.TurnTracker()
+    # A local clock measurement would differ; the terminal event's recorded values win.
+    tracker.started_at -= 100
+    tracker.ingest(
+        {
+            "event": "turn_complete",
+            "turn_id": "t1",
+            "answer": "5",
+            "route": "flex",
+            "duration_seconds": 12.5,
+        }
+    )
+
+    assert tracker.turn_id == "t1"
+    assert tracker.route == "flex"
+    assert tracker.terminal_event["answer"] == "5"
+    assert tracker.elapsed_seconds() == 12.5
+    summary = tracker.status_line().plain
+    assert "route=flex" in summary and "12.5s" in summary
+
+
+def test_rich_cli_renders_status_progress_and_fenced_observations(monkeypatch) -> None:
+    output = io.StringIO()
+    console = Console(file=output, width=100)
+    use_console(monkeypatch, console)
+
+    render.render_event({"event": "status", "status": "stalled", "scope": "scan workspace"})
+    render.render_event({"event": "progress", "scope": "scan workspace", "checkpoint": 9})
+    render.render_event({"event": "fenced", "namespace": "ns-1"})
+
+    rendered = output.getvalue()
+    assert "stalled" in rendered and "scan workspace" in rendered
+    assert "checkpoint 9" in rendered
+    assert "Publication fenced" in rendered
+    assert not any(token in rendered for token in ("%", "percent", "complete", "remaining", "ETA"))

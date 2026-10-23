@@ -86,7 +86,8 @@ configured tracking destination; it is not run during serving.
 Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
 `/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
-`/sessions`, `/optimize`, `/config`, `/settings`, `/models`, `/model`, and `/exit`.
+`/timeout <seconds|off|default>`, `/sessions`, `/optimize`, `/config`,
+`/settings`, `/models`, `/model`, and `/exit`.
 `/memory [query]` reads this Session's saved memories, optionally
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
@@ -150,7 +151,17 @@ Use `/replay on` to opt in to bounded immutable snapshot capture for subsequent
 Turns in this client process; `/replay off` disables it. Capture is off by default.
 
 - `/config` or `/settings`: inspect non-secret session models, mode, dataset,
-  and operator-owned resource limits. Credentials are never returned.
+  and operator-owned resource limits. Credentials are never returned. Its
+  `limits.timeout_seconds` is the server-resolved configured value; it does not
+  change when `/timeout` is used.
+- `/timeout <seconds|off|default>`: set or clear this client's deadline override
+  for subsequent Turns. `<seconds>` must be `0` or `10`–`3600`; `off` sends `0`
+  (no Fleet deadline) and `default` clears the override so Turns inherit the
+  server configuration again. The override is client-local state, transmitted as
+  `TurnRequest.timeout_seconds` on each later Turn and recorded by the server as
+  `source=request`. It never mutates the persisted Session or the server
+  configuration, and a new client against the same Session does not inherit it.
+  A deadline-free Turn still obeys Daytona's provider TTL and idle bounds.
 - `/config mode rlm` (also `/settings mode rlm`): change mode; `/mode` remains supported.
 - `/models [catalog.schema]`: discover accessible chat-capable Unity Gateway
   model services, defaulting to `system.ai`. This uses the Databricks model-services

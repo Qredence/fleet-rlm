@@ -136,10 +136,19 @@ def _request_turn(
     client: httpx.Client, session_id: str, task: str, state: SessionState
 ) -> AbstractContextManager[httpx.Response]:
     """Open the shared Turn HTTP contract; the caller owns response lifetime and cancellation."""
+    body: dict[str, Any] = {
+        "task": task,
+        "idempotency_key": uuid.uuid4().hex,
+        "record_replay": state.record_replay,
+    }
+    # Client-local `/timeout` state travels per Turn. Omitting the field inherits the
+    # server configuration; `0` explicitly disables the Fleet deadline for this Turn.
+    if state.timeout_seconds is not None:
+        body["timeout_seconds"] = state.timeout_seconds
     return client.stream(
         "POST",
         f"/sessions/{quote(session_id, safe='')}/turn",
-        json={"task": task, "idempotency_key": uuid.uuid4().hex, "record_replay": state.record_replay},
+        json=body,
     )
 
 
