@@ -36,6 +36,7 @@ source control.
 | `FLEET_MAX_CHILD_SANDBOXES` | `8` | Total child allocations per turn. |
 | `FLEET_MAX_ACTIVE_CHILDREN` | `4` | Active child capacity; exhaustion fails immediately, avoiding a spawn/join wait cycle. |
 | `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Turn deadline enforced by a remote-stop watchdog. |
+| `FLEET_TURN_STALL_SECONDS` | `300` | Stall limit (10–3600): after the first model call, a Turn whose sandbox is idle and whose model/tool callbacks are silent this long is stopped with an `error` carrying `code: "turn_stalled"`. Open model, tool, and `spawn_agent`/`spawn_agents` calls and running sandbox code never count as idle; a root sandbox lost during the Turn stalls it unless a model or `spawn_agent`/`spawn_agents` call is open. |
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |

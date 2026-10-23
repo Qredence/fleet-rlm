@@ -24,6 +24,7 @@ import fleet_rlm.api.routes.turns as turns_route
 import fleet_rlm.engine.turn as turn_module
 from fleet_rlm.api.events import SSERuntimeCallback
 from fleet_rlm.replay import decode_snapshot
+from fleet_rlm.sandbox.repl import SandboxActivity
 from fleet_rlm.store import IdempotencyConflictError
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -440,6 +441,25 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
     else:
         assert outcomes[0]["event"] == "error"
     assert traced["destinations"] == []
+
+
+@pytest.mark.usefixtures("traced")
+def test_a_retried_stalled_turn_replays_turn_stalled():
+    prior = {
+        "turn_id": "stalled-turn",
+        "status": "cancelled",
+        "result": {"event": "error", "code": "turn_stalled", "request_id": "stalled-turn", "error": "stalled"},
+    }
+    runtime = runtime_with(harness=FakeHarness(claim_turn=lambda *_args: prior))
+    client, _ = client_for(runtime)
+    with client:
+        response = client.post("/sessions/s1/turn", json={"task": "same task", "idempotency_key": "same-key"})
+    outcome = events_of(response)[-1]
+    assert (outcome["event"], outcome["payload"]["code"], outcome["turn_id"]) == (
+        "error",
+        "turn_stalled",
+        "stalled-turn",
+    )
 
 
 @pytest.mark.parametrize("configured", [True, False])
@@ -873,3 +893,333 @@ def test_an_explicit_null_is_accepted_on_optional_turn_fields_and_rejected_on_re
     assert rejected.json()["detail"][0]["loc"] == ["body", "record_replay"]
     assert rejected.json()["detail"][0]["type"] == "bool_type"
     assert not runtime.turn_lock.locked()
+
+
+# The Turn stall watchdog: a fake sandbox activity and a controllable heartbeat clock, never real 300 s waits.
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _activity(
+    clock: _Clock,
+    *,
+    busy: bool = False,
+    alive: bool | None = True,
+    checked: float | str | None = "now",
+    host_io_busy: bool = False,
+) -> SandboxActivity:
+    """A sandbox snapshot whose liveness verdict was observed `checked` (default: now) on the heartbeat clock."""
+    observed = None if alive is None else (clock.now if checked == "now" else checked)
+    return SandboxActivity(
+        busy=busy,
+        alive=alive,
+        alive_checked_monotonic=observed,
+        host_io_busy=host_io_busy,
+    )
+
+
+def _lm_call(callback: SSERuntimeCallback, call_id: str = "lm-1", *, close: bool = True) -> None:
+    callback.on_lm_start(call_id, SimpleNamespace(model="openai/m"), {})
+    if close:
+        callback.on_lm_end(call_id, ["answer"], None)
+
+
+_CHECKS_AFTER_JUMP = 5  # watchdog checks a Turn must survive after the clock jump to count as "not stalled"
+
+
+class _StallHarness:  # `activity` takes the heartbeat clock and returns a SandboxActivity
+    """One Session whose engine plays a script on the Turn's callback, may jump the clock, then idles."""
+
+    def __init__(self, traced: dict[str, Any], monkeypatch, activity=None) -> None:
+        self.clock = _Clock()
+        monkeypatch.setattr(turns_route, "_clock", self.clock)
+        monkeypatch.setattr(turns_route, "_STALL_CHECK_SECONDS", 0.01)
+        self.checks = 0
+        stalled = turns_route._is_stalled
+
+        def counted(*args, **kwargs):
+            self.checks += 1
+            return stalled(*args, **kwargs)
+
+        monkeypatch.setattr(turns_route, "_is_stalled", counted)
+        self.traced = traced
+        self.cancelled = threading.Event()
+        self.cancels = 0
+        self.lock_held_at_exit: list[bool] = []
+        probe = {} if activity is None else {"sandbox_activity": lambda **_kwargs: activity(self.clock)}
+        self.manager = FakeManager(agent_id="root-agent", parent=None, cancel_turn=self._cancel_turn, **probe)
+        self.scripts: list[Any] = []
+        self.runtime = runtime_with(sandbox_mgr=self.manager, engine=self._engine)
+        self.client, _ = client_for(self.runtime)
+
+    def _cancel_turn(self) -> None:
+        self.cancels += 1
+        self.cancelled.set()
+
+    def _engine(self, **_kwargs):
+        script, jump = self.scripts.pop(0)
+        try:
+            script(self.traced["callbacks"][-1])
+            self.clock.now += jump
+            # Idle until the watchdog has checked several times after the jump (counted, not timed, so a loaded
+            # machine cannot end the wait before a check runs); a stall's cancel ends the wait early.
+            start = self.checks
+            deadline = time.monotonic() + 10
+            while self.checks - start < _CHECKS_AFTER_JUMP and time.monotonic() < deadline:
+                if self.cancelled.wait(0.005):
+                    raise RuntimeError("cancelled by the sandbox")
+            assert self.checks - start >= _CHECKS_AFTER_JUMP, "the watchdog never checked"
+            return SimpleNamespace(answer="done", route="rlm")
+        finally:
+            self.lock_held_at_exit.append(self.runtime.turn_lock.locked())
+
+    def turn(self, script, *, jump: float = 1000.0) -> list[dict[str, Any]]:
+        """Run one Turn; the default jump is past the default FLEET_TURN_STALL_SECONDS (300)."""
+        self.cancelled.clear()
+        self.scripts.append((script, jump))
+
+        def post():
+            with self.client:
+                return self.client.post("/sessions/session-a/turn", json={"task": "work"})
+
+        response = _within(10, post)
+        assert response.status_code == 200
+        return events_of(response)
+
+
+def _outcome(events: list[dict[str, Any]]) -> tuple[str, str | None]:
+    return events[-1]["event"], events[-1].get("code")
+
+
+def test_an_idle_turn_silent_past_the_stall_limit_after_lm_start_is_stopped(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+
+    finished: list[tuple[str, dict[str, Any]]] = []
+    harness.runtime.harness.store.finish_turn = lambda _session, _turn, status, result: finished.append(
+        (status, result)
+    )
+
+    events = harness.turn(_lm_call)
+
+    assert [event["event"] for event in events] == ["turn_status", "lm_start", "lm_end", "error"]
+    # Stored with the reason, so an idempotent retry replays turn_stalled rather than a generic failure.
+    assert [(status, result["code"]) for status, result in finished] == [("cancelled", "turn_stalled")]
+    assert _outcome(events) == ("error", "turn_stalled")
+    assert events[-1]["payload"]["code"] == "turn_stalled"
+    assert harness.cancelled.is_set()
+    assert harness.cancels == 1  # the stall's cancel is not repeated when the stream closes
+    assert not harness.runtime.turn_lock.locked()
+
+
+def test_a_lost_sandbox_stalls_the_turn_without_waiting_for_the_limit(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=False))
+
+    events = harness.turn(_lm_call, jump=0)
+
+    assert _outcome(events) == ("error", "turn_stalled")
+    assert harness.cancelled.is_set()
+
+
+def test_busy_sandbox_code_is_never_a_stall_even_when_silent_past_the_limit(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=True, alive=True))
+
+    events = harness.turn(_lm_call)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert not harness.cancelled.is_set()
+
+
+def test_the_watchdog_stays_off_until_the_first_lm_start(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+
+    events = harness.turn(lambda _callback: None)
+
+    assert [event["event"] for event in events] == ["turn_status", "turn_complete"]
+    assert not harness.cancelled.is_set()
+
+
+@pytest.mark.parametrize(
+    "activity", [None, lambda clock: _activity(clock, busy=True, alive=None)], ids=["no-probe", "alive-none"]
+)
+def test_unknown_sandbox_activity_is_never_a_stall(traced, monkeypatch, activity):
+    harness = _StallHarness(traced, monkeypatch, activity=activity)
+
+    events = harness.turn(_lm_call)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert not harness.cancelled.is_set()
+
+
+def test_a_stalled_turn_releases_the_session_lock_only_after_its_work_drains(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+
+    first = harness.turn(_lm_call)
+    second = harness.turn(lambda _callback: None)
+
+    assert _outcome(first) == ("error", "turn_stalled")
+    # The cancelled engine was still holding the lock when it exited; the stream released it afterwards,
+    # so the next Turn on the same Session runs normally.
+    assert harness.lock_held_at_exit[0] is True
+    assert _outcome(second) == ("turn_complete", None)
+    assert not harness.runtime.turn_lock.locked()
+
+
+def test_an_open_lm_call_past_the_limit_is_not_a_stall_and_does_not_leak_into_the_next_turn(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+
+    # A slow model call runs on the host, where the sandbox reports nothing; its lm_end never arrives here.
+    first = harness.turn(lambda callback: _lm_call(callback, close=False))
+    second = harness.turn(_lm_call)
+
+    assert _outcome(first) == ("turn_complete", None)
+    # Each Turn has its own callback, so the missing lm_end cannot keep the next Turn's watchdog off.
+    assert _outcome(second) == ("error", "turn_stalled")
+
+
+def test_an_open_tool_call_past_the_limit_is_not_a_stall(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+
+    def script(callback: SSERuntimeCallback) -> None:
+        _lm_call(callback)
+        callback.on_tool_start("tool-1", SimpleNamespace(name="host_lookup"), {"query": "slow"})
+
+    events = harness.turn(script)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert events[-2]["event"] == "tool_start"
+    assert not harness.cancelled.is_set()
+
+
+def _open_tool(callback: SSERuntimeCallback, name: str) -> None:
+    _lm_call(callback)
+    callback.on_tool_start("tool-1", SimpleNamespace(name=name), {"task": "slow"})
+
+
+def test_an_open_tool_call_does_not_hide_a_lost_root_sandbox(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=False))
+
+    events = harness.turn(lambda callback: _open_tool(callback, "host_lookup"), jump=0)
+
+    assert events[-2]["event"] == "tool_start"
+    assert _outcome(events) == ("error", "turn_stalled")
+    assert harness.cancelled.is_set()
+
+
+@pytest.mark.parametrize("spawn_tool", ["spawn_agent", "spawn_agents"])
+def test_an_open_spawn_call_is_not_a_stall_even_when_the_root_sandbox_is_lost(traced, monkeypatch, spawn_tool):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=False))
+
+    # Child agents (single or batch) work in their own sandboxes; the root's verdict says nothing about them.
+    events = harness.turn(lambda callback: _open_tool(callback, spawn_tool))
+
+    assert events[-2]["event"] == "tool_start" and events[-2]["tool"] == spawn_tool
+    assert _outcome(events) == ("turn_complete", None)
+    assert not harness.cancelled.is_set()
+
+
+class _FailingLM(dspy.BaseLM):
+    def forward(self, prompt=None, messages=None, **kwargs):  # noqa: ARG002
+        raise RuntimeError("gateway unavailable")
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")  # BaseLM.forward is DSPy's legacy custom-LM interface
+def test_lm_and_tool_calls_that_raise_still_close_and_the_idle_turn_then_stalls(traced, monkeypatch):
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+
+    def explode(query: str) -> str:
+        """A host tool that always fails."""
+        raise RuntimeError(f"lookup failed for {query}")
+
+    def script(callback: SSERuntimeCallback) -> None:
+        # The real DSPy callback path: each call's end hook fires with the exception.
+        with dspy.context(callbacks=[callback]):
+            with pytest.raises(RuntimeError, match="gateway unavailable"):
+                _FailingLM(model="openai/failing")("hello")
+            with pytest.raises(RuntimeError, match="lookup failed"):
+                dspy.Tool(explode)(query="invoice 17")
+        beat = callback.heartbeat()
+        assert (beat.open_lm_calls, beat.open_spawn_calls, beat.open_tool_calls) == (0, 0, 0)
+
+    events = harness.turn(script)
+
+    assert [event["event"] for event in events] == [
+        "turn_status",
+        "lm_start",
+        "lm_end",
+        "tool_start",
+        "tool_end",
+        "error",
+    ]
+    assert [(e["ok"], e["error_type"]) for e in events if e["event"].endswith("_end")] == [
+        (False, "RuntimeError"),
+        (False, "RuntimeError"),
+    ]
+    # Both counts went back to zero, so the idle Turn past the limit is flagged.
+    assert _outcome(events) == ("error", "turn_stalled")
+    assert not harness.runtime.turn_lock.locked()
+
+
+@pytest.mark.parametrize("checked", [999.0, None], ids=["before-turn-start", "unknown-age"])
+def test_a_lost_sandbox_verdict_from_before_the_turn_is_not_a_stall(traced, monkeypatch, checked):
+    # The clock starts at 1000, so 999 is a verdict left over from an earlier Turn (e.g. its cancel_turn stop).
+    harness = _StallHarness(
+        traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=False, checked=checked)
+    )
+
+    events = harness.turn(_lm_call, jump=0)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert not harness.cancelled.is_set()
+
+
+def test_host_side_sandbox_io_is_never_a_stall_even_when_silent_past_the_limit(traced, monkeypatch):
+    # Not executing model code, but transferring files on the host.
+    harness = _StallHarness(
+        traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True, host_io_busy=True)
+    )
+
+    events = harness.turn(_lm_call)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert not harness.cancelled.is_set()
+
+
+def test_an_outcome_queued_when_a_check_is_due_is_delivered_not_replaced_by_a_stall(traced, monkeypatch):
+    # Every check is due and every check would find a stall, but the outcome is queued before the worker's cleanup
+    # ends: queued events go out first, so the stream reports the real outcome and nothing is cancelled.
+    harness = _StallHarness(traced, monkeypatch, activity=lambda clock: _activity(clock, busy=False, alive=True))
+    monkeypatch.setattr(turns_route, "_STALL_CHECK_SECONDS", 0.0)
+    monkeypatch.setattr(turns_route, "_DISCONNECT_POLL_SECONDS", 0.001)
+    outcome_queued = threading.Event()
+
+    def stalled(*_args, **_kwargs):
+        harness.checks += 1
+        return outcome_queued.is_set()
+
+    monkeypatch.setattr(turns_route, "_is_stalled", stalled)
+
+    def script(callback: SSERuntimeCallback) -> None:
+        _lm_call(callback)
+        put = callback.queue.put
+
+        async def put_then_flag(payload):
+            # On the event loop, in the same step as the enqueue: the stream's next iteration finds the outcome
+            # queued and a stall reported by the check.
+            await put(payload)
+            if payload.get("event") == "turn_complete":
+                outcome_queued.set()
+
+        monkeypatch.setattr(callback.queue, "put", put_then_flag)
+
+    # The worker is still cleaning up while turn_complete waits in the queue (checks are due every iteration).
+    harness.manager.end_turn = lambda: time.sleep(0.1)
+    events = harness.turn(script, jump=0)
+
+    assert _outcome(events) == ("turn_complete", None)
+    assert harness.cancels == 0

@@ -354,6 +354,8 @@ class FleetSettings(BaseSettings):
     max_child_sandboxes: int = Field(default=8, ge=0, le=64, validation_alias="FLEET_MAX_CHILD_SANDBOXES")
     max_active_children: int = Field(default=4, ge=1, le=16, validation_alias="FLEET_MAX_ACTIVE_CHILDREN")
     turn_timeout_seconds: int = Field(default=900, ge=10, le=3600, validation_alias="FLEET_TURN_TIMEOUT_SECONDS")
+    # A Turn whose sandbox is idle and whose model/tool callbacks have been silent this long is stopped.
+    turn_stall_seconds: int = Field(default=300, ge=10, le=3600, validation_alias="FLEET_TURN_STALL_SECONDS")
     linked_children: bool = Field(default=True, validation_alias="FLEET_LINKED_CHILDREN")
     max_active_sessions: int = Field(
         default=64,

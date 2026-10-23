@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from collections.abc import Callable
 from contextlib import suppress
 from importlib.metadata import version
@@ -50,8 +51,14 @@ def run_turn(
     callback: Any,
     emit: Emit,
     record_replay: bool = False,
+    watchdog_fired: threading.Event | None = None,
 ) -> None:
-    """Run one Turn for a Session, claiming its id and emitting progress events through emit."""
+    """Run one Turn for a Session, claiming its id and emitting progress events through emit.
+
+    `watchdog_fired` is set by the stream's stall watchdog before it cancels the Turn, so the stored outcome
+    says why. If the Turn completes normally in the same instant the watchdog fires, the stream may show
+    `turn_stalled` while the stored record says completed; the window is a single check and is accepted.
+    """
     manager = runtime.sandbox_mgr
     previous_event_callback = manager.event_callback
     trace_id: str | None = None
@@ -183,12 +190,13 @@ def run_turn(
         emit(completion)
     except Exception as exc:
         _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
-        cancelled = manager._cancelled.is_set()
-        failure: dict[str, Any] = {
-            "event": "turn_cancelled" if cancelled else "error",
-            "request_id": turn_id,
-            "error": str(exc) if isinstance(exc, IdempotencyConflictError) else f"The Turn failed (request {turn_id}).",
-        }
+        if watchdog_fired is not None and watchdog_fired.is_set():
+            cancelled = True
+            failure = stalled_outcome(turn_id)
+        else:
+            cancelled = manager._cancelled.is_set()
+            message = str(exc) if isinstance(exc, IdempotencyConflictError) else f"The Turn failed (request {turn_id})."
+            failure = {"event": "turn_cancelled" if cancelled else "error", "request_id": turn_id, "error": message}
         if trace_id:
             failure["trace_id"] = trace_id
         with suppress(Exception):
@@ -203,10 +211,21 @@ def run_turn(
             emit({"event": "done"})
 
 
+def stalled_outcome(turn_id: str) -> dict[str, Any]:
+    """The outcome of a Turn the stream's watchdog stopped; stored with the cancelled status and replayed as is."""
+    return {
+        "event": "error",
+        "code": "turn_stalled",
+        "request_id": turn_id,
+        "error": f"The Turn stalled and was stopped (request {turn_id}).",
+    }
+
+
 def _replayed(prior: dict[str, Any]) -> dict[str, Any]:
     """The stored outcome of an earlier attempt with the same idempotency key; never re-executed."""
-    if prior["status"] == "completed":
-        return prior["result"]
+    result = prior.get("result") or {}
+    if prior["status"] == "completed" or (prior["status"] == "cancelled" and result.get("code") == "turn_stalled"):
+        return result
     return {
         "event": "error",
         "request_id": prior["turn_id"],

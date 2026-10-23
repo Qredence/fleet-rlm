@@ -819,7 +819,9 @@ paths:
               $ref: '#/components/schemas/TurnRequest'
       responses:
         '200':
-          description: Server-Sent Events for Turn status, activity, completion, or failure.
+          description: 'Server-Sent Events for Turn status, activity, completion, or failure. An `error`
+            event with `code: turn_stalled` means the stall watchdog stopped the Turn: its sandbox was
+            lost, or no model/tool activity happened for FLEET_TURN_STALL_SECONDS while no code was running.'
           content:
             text/event-stream:
               itemSchema:
