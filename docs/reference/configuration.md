@@ -19,6 +19,8 @@ source control.
 | `FLEET_DAYTONA_VOLUME_ID` | empty | Daytona Volume ID. |
 | `FLEET_DAYTONA_SNAPSHOT` | `fleet-rlm-base` | Daytona snapshot name. |
 | `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes. Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
+| `FLEET_DAYTONA_NETWORK_BLOCK_ALL` | `true` | Block all outbound network from sandboxes. The host bridge (`llm_query`, tools, file transfer) does not use sandbox egress. `false` with an empty allow list falls back to the Daytona tier default. |
+| `FLEET_DAYTONA_DOMAIN_ALLOW_LIST` | empty | Comma-separated domains or `*.` wildcards sandboxes may reach. Non-empty replaces block-all, since Daytona rejects both together. At most 100 entries. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
 | `FLEET_DAYTONA_ROOT_AUTO_DELETE_MINUTES` | `10080` | Minutes a stopped, non-disposable root sandbox is kept before Daytona deletes it (7 days). `-1` keeps it forever; `0` is refused. TOML `[daytona] root_auto_delete_minutes`. A deleted root sandbox is rebuilt from the snapshot on the next Turn; Session state lives on the Volume. Child sandboxes are bounded to the Turn instead. |
 | `FLEET_ROOT_MODEL` | `openai/system.ai.deepseek-v4-1-flash` | Root model identifier. |
@@ -60,6 +62,8 @@ source control.
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |
+
+Sandbox network policies (`FLEET_DAYTONA_NETWORK_BLOCK_ALL`, `FLEET_DAYTONA_DOMAIN_ALLOW_LIST`) take effect only for Daytona **Tier 3 or Tier 4** organizations. On Tier 1 and Tier 2, Daytona applies the organization-level network policy and ignores per-sandbox settings. After each create, Fleet checks the network policy the sandbox reports (`network_block_all` / `domain_allow_list` on the create response, refreshed once if absent) and logs one WARNING per process when it does not match the setting. With block-all, Fleet also probes enforcement once per root sandbox (not children) after it is created or rebuilt: a short `socket.create_connection(("1.1.1.1", 443), timeout=2)` run as a separate in-sandbox process (never in the REPL session), bounded to 10 seconds. The probe runs on a background thread, so sandbox creation and the first Turn never wait for it. When it finishes, a successful connection logs a WARNING that network blocking is not enforced; a refused or timed-out connection, or a sandbox already gone, is logged at debug. The probe is skipped when `FLEET_DAYTONA_DOMAIN_ALLOW_LIST` is used, and it never fails sandbox creation or a Turn.
 
 Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
