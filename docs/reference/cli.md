@@ -146,11 +146,77 @@ Each submission has an idempotency
 key. Ctrl+C while editing clears input; Ctrl+C while streaming closes the stream
 and the server requests remote cancellation. A lost connection is not proof of
 rollback: check `/history` before retrying. An incomplete stream is labeled unknown,
-not persisted. EOF or `/exit` exits. Tab completes commands and supported arguments.
+not persisted. EOF or `/exit` exits.
+
+### Command menu and input history
+
+In the Textual client, type `/` to browse all commands or keep typing to filter them.
+Up/Down wraps through suggestions; PageUp/PageDown moves by a page. The list scrolls
+with its highlighted item, including in an 80-column terminal. Tab or clicking an
+item fills it without running it. Enter accepts an incomplete highlighted command
+or argument first; Enter on an explicitly complete command executes it. For example,
+`/ti` → Enter fills `/timeout `, another Enter chooses `off`, and a final Enter runs
+`/timeout off`. Fully typed commands such as `/config` still run directly on Enter.
+Escape closes the menu without clearing the draft; editing or Tab enables suggestions
+again. The footer shows the active menu keys and the menu shows the selection count.
+
+Argument menus include nested choices such as `/config mode rlm` and
+`/settings mode flex`, model roles, Skills actions, replay, timeout, and optimization
+flags. Model identifiers and arbitrary numeric/text arguments remain free-form;
+choosing a completion never starts optimization or another command by itself.
+`/attach` and `/put` suggest local paths and descend into directories. Workspace-path
+commands use the cached inventory populated by `/files`, `/tree`, `/attach`, and
+`/put`; `/context clear` is available even with no cached files. Enter preserves
+fully specified workspace paths and free-form transfer destinations; use Tab or
+click to explicitly expand a destination suggestion.
+`/put` and `/get` quote suggested paths containing spaces and accept quoted source
+and destination arguments. The Rich / Prompt Toolkit fallback keeps Tab completion.
+
+#### Local file and directory mentions
+
+Type `@` at a word boundary to open local and cached workspace suggestions.
+The menu follows the cursor, including when returning to an earlier mention.
+Bare names search nested paths: `@fleet_rlm` finds `@./src/fleet_rlm`.
+Relative paths start at the client's working directory; absolute and `~/` paths
+also work. Nested name matching is case-insensitive and uses a bounded,
+best-effort index refreshed every three seconds. Explicit paths remain available
+when a large tree exceeds the search window.
+
+Choose a directory's **attach on submit** entry to select it, or its trailing-`/`
+**browse** entry to open it. Tab, Enter, and mouse selection do not upload content.
+Submitting uploads local mentions before starting the Turn and rewrites them to
+`@files/...` workspace paths. Directory uploads preserve the selected directory's
+name and subtree under a unique workspace root. Standalone files get unique names;
+repeated and overlapping mentions share uploads within a submission.
+
+Directory uploads and nested search skip hidden paths, symlinks, and Git-ignored
+files, including tracked files matching ignore rules. Git working trees require
+Git; ignore-check failures block uploads. Outside Git, hidden paths and symlinks
+are still skipped. Immediate-folder browsing shows hidden names only when their
+typed prefix starts with `.`. Directory uploads refuse empty or fully excluded
+selections and selections above 1,000 files or 100 MB combined per submission;
+the server's per-file limits also apply. Selections are never silently truncated.
+
+Paths with spaces or quotes are quoted automatically: `@"./quarter report.csv"`.
+Typed existing local paths work too. Exact cached workspace mentions are reused
+without upload; use `@./files/report.csv` to distinguish a local file from cached
+`@files/report.csv`. Email addresses do not trigger mentions.
+
+Only submit files you intend to upload. Browsing reads no file contents.
+Upload failure or cancellation before the Turn preserves the draft and sends no
+Turn; completed uploads remain in the workspace. Cancellation does not interrupt
+an in-flight upload. The Rich / Prompt Toolkit fallback requires `/attach`
+instead of automatically attaching local `@` mentions.
+
+With the menu closed, Up at the first composer line browses older input and Down at
+the last line browses newer input. Returning past the newest history entry restores
+the unsent draft. Down on a fresh draft does not clear it. History recall does not
+reopen the menu; editing the recalled text or requesting Tab completion does.
+
 Use `/replay on` to opt in to bounded immutable snapshot capture for subsequent
 Turns in this client process; `/replay off` disables it. Capture is off by default.
 
-- `/config` or `/settings`: inspect non-secret session models, mode, dataset,
+- `/config` or `/settings` (add `json` for raw JSON): inspect non-secret session models, mode, dataset,
   and operator-owned resource limits. Credentials are never returned. Its
   `limits.timeout_seconds` is the server-resolved configured value; it does not
   change when `/timeout` is used.

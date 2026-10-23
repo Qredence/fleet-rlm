@@ -300,7 +300,7 @@ def _stat(ctx: Context, arg: str) -> None:
 
 
 def _put(ctx: Context, arg: str) -> None:
-    args = arg.split()
+    args = shlex.split(arg)
     if not args:
         CONSOLE.print("[yellow]Usage: /put <local-path> [workspace-path][/yellow]")
         return
@@ -320,7 +320,7 @@ def _put(ctx: Context, arg: str) -> None:
 
 
 def _get(ctx: Context, arg: str) -> None:
-    args = arg.split()
+    args = shlex.split(arg)
     if not args:
         CONSOLE.print("[yellow]Usage: /get <workspace-path> [local-path][/yellow]")
         return
@@ -589,14 +589,18 @@ COMMANDS: dict[str, Command] = {
         category="Session & Models",
     ),
     "/config": Command(
-        "/config [mode <mode>]",
+        "/config [mode <mode>|json]",
         "inspect non-secret Session settings and limits",
         _config,
         {"mode": _MODE_OPTIONS, "json": None},
         category="Session & Models",
     ),
     "/settings": Command(
-        "/settings", "same as /config", _config, {"mode": _MODE_OPTIONS, "json": None}, category="Session & Models"
+        "/settings [mode <mode>|json]",
+        "same as /config",
+        _config,
+        {"mode": _MODE_OPTIONS, "json": None},
+        category="Session & Models",
     ),
     "/models": Command(
         "/models [catalog.schema]", "discover accessible Gateway chat services", _models, category="Session & Models"
@@ -633,6 +637,7 @@ COMMANDS: dict[str, Command] = {
         "/optimize [--max-metric-calls N | --approve VERSION]",
         "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",
         _optimize,
+        {"--max-metric-calls": None, "--approve": None},
         category="Evaluation & Traces",
     ),
 }

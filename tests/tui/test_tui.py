@@ -648,7 +648,7 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
                 # typing '/mo' + Down + Tab selects the second popup item ('/models ').
                 inp.value = "/mo"
                 await pilot.pause(0.05)
-                assert tui._popup_index == 0 and tui._popup_items[0][0] == "/mode "
+                assert tui.query_one("#slash-popup").highlighted == 0 and tui._popup_items[0][0] == "/mode "
                 await pilot.press("tab")
                 await pilot.pause(0.05)
                 assert inp.value == "/mode "
@@ -656,7 +656,7 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
                 inp.value = "/mo"
                 await pilot.pause(0.05)
                 await pilot.press("down")
-                assert tui._popup_index == 1 and tui._popup_items[1][0] == "/models "
+                assert tui.query_one("#slash-popup").highlighted == 1 and tui._popup_items[1][0] == "/models "
                 await pilot.press("tab")
                 await pilot.pause(0.05)
                 assert inp.value == "/models "

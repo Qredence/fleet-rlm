@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import sys
 import threading
 import time
@@ -33,7 +34,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Static, TextArea
+from textual.widgets import OptionList, Static, TextArea
 
 import fleet_rlm.tui.commands as commands_mod
 import fleet_rlm.tui.render as render_mod
@@ -47,6 +48,7 @@ from fleet_rlm.tui.commands import (
     completion_options,
     handle_command,
 )
+from fleet_rlm.tui.mentions import attach_local_mentions, completed_mention_cursor, mention_completions
 from fleet_rlm.tui.render import (
     CONSOLE,
     CollapsibleItem,
@@ -89,9 +91,11 @@ class _SessionCompleter(Completer):
         if " " in stripped:
             cmd, _, rest = stripped.partition(" ")
             arg_text = rest.lstrip()
-            if cmd in _LOCAL_PATH_COMMANDS and " " not in arg_text:
-                sub_doc = Document(arg_text, cursor_position=len(arg_text))
-                yield from self._path_completer.get_completions(sub_doc, complete_event)
+            if cmd in {"/put", "/get"}:
+                yield from self._transfer_completions(cmd, arg_text, complete_event)
+                return
+            if cmd == "/attach":
+                yield from self._local_path_completions(arg_text, complete_event)
                 return
             if cmd in _WORKSPACE_PATH_COMMANDS and " " not in arg_text and self._state is not None:
                 candidates = list(self._state.workspace_files)
@@ -103,6 +107,44 @@ class _SessionCompleter(Completer):
                 if candidates:
                     return
         yield from self._base.get_completions(document, complete_event)
+
+    def _local_path_completions(self, fragment: str, event: CompleteEvent) -> Iterable[Completion]:
+        document = Document(fragment, cursor_position=len(fragment))
+        for completion in self._path_completer.get_completions(document, event):
+            candidate = fragment[: len(fragment) + completion.start_position] + completion.text
+            suffix = "/" if Path(candidate).expanduser().is_dir() and not candidate.endswith("/") else ""
+            yield Completion(
+                completion.text + suffix,
+                start_position=completion.start_position,
+                display=completion.display,
+                display_meta=completion.display_meta,
+            )
+
+    def _transfer_completions(self, command: str, arguments: str, event: CompleteEvent) -> Iterable[Completion]:
+        # Transfers take two paths; quote each token so a suggested filename with spaces
+        # is exactly the same filename the command handler will receive.
+        try:
+            words = shlex.split(arguments)
+        except ValueError:
+            return
+        position = len(words) if arguments.endswith(" ") else max(0, len(words) - 1)
+        if position > 1:
+            return
+        fragment = words[position] if position < len(words) else ""
+        local = (command == "/put" and position == 0) or (command == "/get" and position == 1)
+        completions = (
+            self._local_path_completions(fragment, event)
+            if local
+            else (
+                Completion(path, start_position=-len(fragment))
+                for path in (self._state.workspace_files if self._state is not None else [])
+                if path.startswith(fragment)
+            )
+        )
+        for completion in completions:
+            candidate = fragment[: len(fragment) + completion.start_position] + completion.text
+            fill = " ".join(shlex.quote(word) for word in [*words[:position], candidate])
+            yield Completion(fill, start_position=-len(arguments), display=candidate)
 
 
 def _completer(state: SessionState | None = None) -> Completer:
@@ -241,6 +283,17 @@ class _PromptInput(TextArea):
         if isinstance(app, FleetTextualApp) and app.is_running:
             app._sync_input_state(text)
 
+    @property
+    def cursor_offset(self) -> int:
+        """Return the cursor's character offset using the DocumentBase line contract."""
+        row, column = self.cursor_location
+        return sum(len(line) + len(self.document.newline) for line in self.document.lines[:row]) + column
+
+    def move_cursor_to_offset(self, offset: int) -> None:
+        """Move to a character offset without depending on a concrete document subclass."""
+        lines = self.text[:offset].split(self.document.newline)
+        self.move_cursor((len(lines) - 1, len(lines[-1])))
+
     async def _on_paste(self, event: events.Paste) -> None:
         """Insert the full pasted text (including all paragraphs and line breaks) at the cursor."""
         event.stop()
@@ -249,15 +302,30 @@ class _PromptInput(TextArea):
             self.insert(event.text)
 
     async def _on_key(self, event: events.Key) -> None:
-        """Submit on Enter; insert newline on Shift+Enter, Alt+Enter, or Ctrl+J; navigate menu/history."""
+        """Complete or submit on Enter; preserve ordered editing, menu, and history keys."""
         app = self.app
+        if isinstance(app, FleetTextualApp) and event.key in {
+            "enter",
+            "tab",
+            "escape",
+            "ctrl+c",
+            "up",
+            "down",
+            "pageup",
+            "pagedown",
+        }:
+            # Changed notifications reach the App asynchronously; navigation must see the
+            # text already inserted by preceding keys, not the last rendered suggestions.
+            app._sync_input_state(self.text)
         if event.key == "enter":
             event.stop()
             event.prevent_default()
             if isinstance(app, FleetTextualApp):
+                if app._complete_on_enter():
+                    return
                 text = self.text.strip()
                 self.value = ""
-                app.query_one("#slash-popup", Static).display = False
+                app.query_one("#slash-popup", OptionList).display = False
                 app.submit_text(text)
             return
         if event.key in {"shift+enter", "alt+enter", "ctrl+j"}:
@@ -266,7 +334,28 @@ class _PromptInput(TextArea):
             self.insert("\n")
             return
         if isinstance(app, FleetTextualApp):
-            popup_open = app.query_one("#slash-popup", Static).display and bool(app._popup_items)
+            # Keep editing/menu keys on this widget's FIFO queue. App-level priority
+            # bindings can overtake earlier arrow or printable keys in a terminal burst.
+            if event.key in {"tab", "escape", "ctrl+c"}:
+                event.stop()
+                event.prevent_default()
+                if event.key == "tab":
+                    app.action_complete_slash()
+                elif event.key == "escape":
+                    app.action_dismiss_or_cancel()
+                else:
+                    app.action_clear_or_cancel()
+                return
+            popup = app.query_one("#slash-popup", OptionList)
+            popup_open = popup.display and bool(app._popup_items)
+            if popup_open and event.key in {"pageup", "pagedown"}:
+                event.stop()
+                event.prevent_default()
+                if event.key == "pageup":
+                    popup.action_page_up()
+                else:
+                    popup.action_page_down()
+                return
             if event.key == "up" and (popup_open or self.cursor_location[0] == 0):
                 event.stop()
                 event.prevent_default()
@@ -278,6 +367,10 @@ class _PromptInput(TextArea):
                 app.action_cursor_down()
                 return
         await super()._on_key(event)
+
+
+class _CommandMenu(OptionList, can_focus=False):
+    """Scrollable suggestions; typing and keyboard navigation keep the composer focused."""
 
 
 class _StepWidget(Static):
@@ -587,11 +680,22 @@ class FleetTextualApp(App[None]):
     #slash-popup {
         display: none;
         height: auto;
-        max-height: 9;
+        max-height: 10;
         margin: 0 1;
         padding: 0 1;
         background: #1f222b;
         border: round #3f3f46;
+        scrollbar-size-vertical: 1;
+        scrollbar-color: #71717a;
+        scrollbar-background: #1f222b;
+    }
+    #slash-popup > .option-list--option {
+        padding: 0;
+    }
+    #slash-popup > .option-list--option-highlighted {
+        color: #34d399;
+        background: #272b36;
+        text-style: bold;
     }
     #bottom-chrome {
         height: auto;
@@ -662,13 +766,13 @@ class FleetTextualApp(App[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("tab", "complete_slash", "Complete", show=False, priority=True),
+        Binding("tab", "complete_slash", "Complete", show=False),
         Binding("ctrl+o", "toggle_latest_repl", "Toggle REPL", show=False, priority=True),
         Binding("ctrl+t", "toggle_thinking", "Toggle Thinking", show=False, priority=True),
         Binding("alt+a", "toggle_all", "Toggle All", show=False, priority=True),
         Binding("ctrl+k", "cycle_mode", "Cycle Mode", show=False, priority=True),
-        Binding("escape", "dismiss_or_cancel", "Cancel/Dismiss", show=False, priority=True),
-        Binding("ctrl+c", "clear_or_cancel", "Clear/Cancel", show=False, priority=True),
+        Binding("escape", "dismiss_or_cancel", "Cancel/Dismiss", show=False),
+        Binding("ctrl+c", "clear_or_cancel", "Clear/Cancel", show=False),
         Binding("ctrl+d", "quit_if_idle", "Quit", show=False, priority=True),
     ]
 
@@ -685,8 +789,10 @@ class FleetTextualApp(App[None]):
         self._active_turn_widget: _TurnWidget | None = None
         self._history_entries: list[str] = []
         self._history_index: int = 0
+        self._history_draft = ""
+        self._history_recalled: str | None = None
+        self._completion_suppressed_for: str | None = None
         self._popup_items: list[tuple[str, str, str]] = []
-        self._popup_index: int = 0
         self._last_ctrl_c: float = 0.0
         self._load_history()
 
@@ -714,6 +820,8 @@ class FleetTextualApp(App[None]):
     def _append_history(self, text: str) -> None:
         self._history_entries.append(text)
         self._history_index = len(self._history_entries)
+        self._history_draft = ""
+        self._history_recalled = None
         history_path = Path(".fleet/history") / f"{self.session_id}.txt"
         with suppress(OSError):
             history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -734,7 +842,7 @@ class FleetTextualApp(App[None]):
                 style="#71717a",
             )
             yield Static(welcome, classes="welcome-banner")
-        yield Static(id="slash-popup")
+        yield _CommandMenu(id="slash-popup", markup=False)
         with Vertical(id="bottom-chrome"):
             with Horizontal(id="composer-box"):
                 yield Static("\u203a ", id="prompt-glyph")
@@ -799,6 +907,8 @@ class FleetTextualApp(App[None]):
             ("esc", "Cancel" if self._turn_active else "Dismiss"),
             ("ctrl+c x2", "Quit"),
         ]
+        if any(popup.display for popup in self.query("#slash-popup")):
+            pairs = [("↑/↓", "Browse"), ("tab", "Complete"), ("enter", "Accept/run"), ("esc", "Close menu")]
         for idx, (key, label) in enumerate(pairs):
             if idx > 0:
                 bar.append("  ")
@@ -876,57 +986,72 @@ class FleetTextualApp(App[None]):
         stripped = val.lstrip()
         items: list[tuple[str, str, str]] = []
         if stripped.startswith("/"):
-            cmd_part, has_space, arg_part = stripped.partition(" ")
+            cmd_part, has_space, _arg_part = stripped.partition(" ")
             if not has_space:
                 for name, cmd in COMMANDS.items():
                     if name.startswith(cmd_part):
                         takes_arg = " " in cmd.usage
                         items.append((f"{name} " if takes_arg else name, cmd.usage, cmd.help))
-                for extra_name, extra_help in (("/help", "show all commands"), ("/exit", "quit the CLI")):
+                for extra_name, extra_help in (
+                    ("/help", "show all commands"),
+                    ("/exit", "quit the CLI"),
+                    ("/quit", "quit the CLI"),
+                ):
                     if extra_name.startswith(cmd_part):
                         items.append((extra_name, extra_name, extra_help))
-            elif cmd_part in _WORKSPACE_PATH_COMMANDS and self.state.workspace_files:
-                candidates = list(self.state.workspace_files)
-                if cmd_part == "/context":
-                    candidates.insert(0, "clear")
-                for cand in candidates:
-                    if cand.startswith(arg_part.lstrip()):
-                        items.append((f"{cmd_part} {cand}", f"{cmd_part} {cand}", "workspace file"))
-            elif cmd_part in COMMANDS and isinstance(COMMANDS[cmd_part].completions, dict):
-                for opt in COMMANDS[cmd_part].completions:
-                    if opt.startswith(arg_part.lstrip()):
-                        items.append((f"{cmd_part} {opt}", f"{cmd_part} {opt}", COMMANDS[cmd_part].help))
-        elif "@" in stripped and self.state.workspace_files:
-            prefix, _, after_at = stripped.rpartition("@")
-            if " " not in after_at:
-                for path in self.state.workspace_files:
-                    if path.startswith(after_at):
-                        items.append((f"{prefix}@{path} ", f"@{path}", "workspace file"))
-        return items[:8]
+            elif cmd_part in COMMANDS:
+                # Share argument/path completion with the Prompt Toolkit fallback, including
+                # nested choices such as `/config mode rlm` rather than only the first level.
+                document = Document(stripped, cursor_position=len(stripped))
+                for completion in _completer(self.state).get_completions(document, CompleteEvent()):
+                    fill = stripped[: len(stripped) + completion.start_position] + completion.text
+                    choices = COMMANDS[cmd_part].completions
+                    for word in fill.partition(" ")[2].split():
+                        choices = choices.get(word) if isinstance(choices, dict) else None
+                    if isinstance(choices, dict) and choices:
+                        fill += " "
+                    description = "local path" if cmd_part in _LOCAL_PATH_COMMANDS else COMMANDS[cmd_part].help
+                    items.append((fill, fill.rstrip(), description))
+        elif "@" in val:
+            inp = self.query_one("#prompt-input", _PromptInput)
+            cursor = inp.cursor_offset
+            items = mention_completions(val, cursor, self.state.workspace_files)
+        return items
 
     def _render_popup(self) -> None:
-        """Render `self._popup_items` into `#slash-popup` with `self._popup_index` highlighted."""
+        """Populate the native scrollable list; its highlighted option stays in view."""
         if not self.is_running:
             return
-        popup = self.query_one("#slash-popup", Static)
-        if not self._popup_items:
-            popup.display = False
-            return
-        self._popup_index = max(0, min(self._popup_index, len(self._popup_items) - 1))
-        lines = Text()
-        for idx, (_fill, usage, desc) in enumerate(self._popup_items):
-            if idx > 0:
-                lines.append("\n")
-            selected = idx == self._popup_index
-            prefix = "▸ " if selected else "  "
-            usage_style = "bold #34d399 on #272b36" if selected else "bold #f4f4f5"
-            desc_style = "#d4d4d8 on #272b36" if selected else "#71717a"
-            lines.append(prefix, style="bold #34d399" if selected else "#71717a")
-            lines.append(f"{usage:<34}", style=usage_style)
-            if desc:
-                lines.append(f" {desc}", style=desc_style)
-        popup.update(lines)
-        popup.display = True
+        popup = self.query_one("#slash-popup", OptionList)
+        popup.clear_options()
+        popup.add_options(
+            Text(f"{usage:<34} {desc}", no_wrap=True, overflow="ellipsis") for _fill, usage, desc in self._popup_items
+        )
+        popup.display = bool(self._popup_items)
+        if self._popup_items:
+            popup.highlighted = 0
+            self.call_after_refresh(popup.scroll_to_highlight)
+        self.query_one("#shortcut-bar", Static).update(self._render_shortcut_bar())
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        """Keep selection and keyboard hints legible without moving focus from the composer."""
+        if event.option_list.id == "slash-popup" and self._current_menu_event(event):
+            event.option_list.border_title = Text(self._popup_items[event.option_index][1])
+            event.option_list.border_subtitle = (
+                f"{event.option_index + 1}/{len(self._popup_items)} · ↑↓ browse · Tab/Enter choose · Esc close"
+            )
+
+    def _current_menu_event(self, event: OptionList.OptionMessage) -> bool:
+        return (
+            0 <= event.option_index < len(self._popup_items)
+            and event.option_list.get_option_at_index(event.option_index) is event.option
+        )
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Clicking a suggestion fills it without executing it or stealing input focus."""
+        if event.option_list.id == "slash-popup" and self._current_menu_event(event):
+            event.stop()
+            self._accept_completion(event.option_index)
 
     def _sync_input_state(self, val: str) -> None:
         """Sync composer height, hint pills, and the `/` or `@` suggestion popup for `val`."""
@@ -936,14 +1061,28 @@ class FleetTextualApp(App[None]):
         inp.styles.height = min(8, max(1, inp.document.line_count))
         hints = self.query_one("#composer-hints", Static)
         hints.display = not bool(val)
+        if self._history_recalled is not None and val != self._history_recalled:
+            self._history_recalled = None
+            self._history_index = len(self._history_entries)
+        if val == self._completion_suppressed_for:
+            self._popup_items = []
+            self._render_popup()
+            return
+        self._completion_suppressed_for = None
         new_items = self._compute_popup_items(val)
         if new_items != self._popup_items:
             self._popup_items = new_items
-            self._popup_index = 0
-        self._render_popup()
+            self._render_popup()
+        else:
+            self.query_one("#slash-popup", OptionList).display = bool(new_items)
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Update composer height and the floating `/` or `@` popup when text changes."""
+        if event.text_area.id == "prompt-input":
+            self._sync_input_state(event.text_area.text)
+
+    def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
+        """Keep mention suggestions aligned with the cursor even without a text edit."""
         if event.text_area.id == "prompt-input":
             self._sync_input_state(event.text_area.text)
 
@@ -964,9 +1103,11 @@ class FleetTextualApp(App[None]):
         inp = self.query_one("#prompt-input", _PromptInput)
         if not inp.has_focus:
             inp.focus()
-        if self._popup_items:
-            idx = max(0, min(self._popup_index, len(self._popup_items) - 1))
-            inp.value = self._popup_items[idx][0]
+        self._completion_suppressed_for = None
+        self._sync_input_state(inp.value)
+        popup = self.query_one("#slash-popup", OptionList)
+        if popup.display and self._popup_items:
+            self._accept_completion(popup.highlighted or 0)
             return
         val = inp.value.lstrip()
         if val.startswith("/"):
@@ -976,37 +1117,70 @@ class FleetTextualApp(App[None]):
                 first = completions[0]
                 inp.value = val[: len(val) + first.start_position] + first.text
 
+    def _accept_completion(self, index: int) -> None:
+        inp = self.query_one("#prompt-input", _PromptInput)
+        self._history_recalled = None
+        self._history_index = len(self._history_entries)
+        fill = self._popup_items[index][0]
+        cursor = len(fill)
+        if not inp.value.lstrip().startswith("/"):
+            cursor = completed_mention_cursor(inp.value, inp.cursor_offset, fill)
+        inp.value = fill
+        inp.move_cursor_to_offset(cursor)
+        self._sync_input_state(inp.value)
+        inp.focus()
+
+    def _complete_on_enter(self) -> bool:
+        """Accept incomplete suggestions first; an explicitly complete command still submits."""
+        popup = self.query_one("#slash-popup", OptionList)
+        if not popup.display or not self._popup_items:
+            return False
+        value = self.query_one("#prompt-input", _PromptInput).value.lstrip()
+        if value in COMMANDS or value in {"/help", "/exit", "/quit"}:
+            return False
+        if any(value.rstrip() == fill.rstrip() for fill, _usage, _description in self._popup_items):
+            return False
+        if value.startswith(("/put ", "/get ")):
+            with suppress(ValueError):
+                if len(shlex.split(value)) >= 3:
+                    return False  # Transfer destinations are free-form, not incomplete choices.
+        self._accept_completion(popup.highlighted or 0)
+        return True
+
     def action_cursor_up(self) -> None:
         """Navigate up in the `/` popup menu when open, or previous input history."""
         if not self.is_running:
             return
-        popup = self.query_one("#slash-popup", Static)
+        popup = self.query_one("#slash-popup", OptionList)
         if popup.display and self._popup_items:
-            self._popup_index = (self._popup_index - 1) % len(self._popup_items)
-            self._render_popup()
+            popup.action_cursor_up()
             return
         inp = self.query_one("#prompt-input", _PromptInput)
         if inp.has_focus and self._history_entries and self._history_index > 0:
+            if self._history_index == len(self._history_entries):
+                self._history_draft = inp.value
             self._history_index -= 1
-            inp.value = self._history_entries[self._history_index]
+            self._history_recalled = self._history_entries[self._history_index]
+            self._completion_suppressed_for = self._history_recalled
+            inp.value = self._history_recalled
 
     def action_cursor_down(self) -> None:
         """Navigate down in the `/` popup menu when open, or next input history."""
         if not self.is_running:
             return
-        popup = self.query_one("#slash-popup", Static)
+        popup = self.query_one("#slash-popup", OptionList)
         if popup.display and self._popup_items:
-            self._popup_index = (self._popup_index + 1) % len(self._popup_items)
-            self._render_popup()
+            popup.action_cursor_down()
             return
         inp = self.query_one("#prompt-input", _PromptInput)
-        if inp.has_focus and self._history_entries:
-            if self._history_index < len(self._history_entries) - 1:
-                self._history_index += 1
-                inp.value = self._history_entries[self._history_index]
-            else:
-                self._history_index = len(self._history_entries)
-                inp.value = ""
+        if inp.has_focus and self._history_index < len(self._history_entries):
+            self._history_index += 1
+            self._history_recalled = (
+                self._history_entries[self._history_index] if self._history_index < len(self._history_entries) else None
+            )
+            value = self._history_recalled if self._history_recalled is not None else self._history_draft
+            self._completion_suppressed_for = value
+            inp.value = value
 
     def on_key(self, event: events.Key) -> None:
         """Support Alt+1..9 REPL step toggles."""
@@ -1103,9 +1277,11 @@ class FleetTextualApp(App[None]):
     def action_dismiss_or_cancel(self) -> None:
         """Dismiss the slash popup or cancel an active Turn stream (`Escape`)."""
         if self.is_running:
-            popup = self.query_one("#slash-popup", Static)
+            popup = self.query_one("#slash-popup", OptionList)
             if popup.display:
-                popup.display = False
+                self._completion_suppressed_for = self.query_one("#prompt-input", _PromptInput).value
+                self._popup_items = []
+                self._render_popup()
                 return
         if self._turn_active:
             self.cancel_active_turn()
@@ -1126,7 +1302,7 @@ class FleetTextualApp(App[None]):
             inp = self.query_one("#prompt-input", _PromptInput)
             inp.value = ""
             self._popup_items = []
-            self.query_one("#slash-popup", Static).display = False
+            self.query_one("#slash-popup", OptionList).display = False
         self.refresh_chrome()
         self.set_timer(2.6, self.refresh_chrome)
 
@@ -1156,6 +1332,13 @@ class FleetTextualApp(App[None]):
         with suppress(Exception):
             self.call_from_thread(update_ui)
 
+    def _restore_attachment_draft(self, text: str) -> None:
+        """Keep failed attachment submissions editable without clobbering a newer draft."""
+        inp = self.query_one("#prompt-input", _PromptInput)
+        if not inp.value:
+            self._completion_suppressed_for = text
+            inp.value = text
+
     def _start_turn_stream(self, task_text: str) -> None:
         tracker = TurnTracker()
         self.state.last_tracker = tracker
@@ -1167,8 +1350,22 @@ class FleetTextualApp(App[None]):
         self.refresh_chrome()
 
         def worker() -> None:
+            stream_started = False
             try:
-                with _request_turn(self.client, self.session_id, task_text, self.state) as response:
+                prepared_text = attach_local_mentions(
+                    Context(self.client, self.session_id, self.state),
+                    task_text,
+                    cancelled=lambda: self._cancel_requested,
+                )
+                if self._cancel_requested:
+                    self.call_from_thread(
+                        self.append_markup,
+                        "[yellow]Attachment submission cancelled; no Turn was sent. "
+                        "Any completed uploads remain in the workspace.[/yellow]",
+                    )
+                    return
+                stream_started = True
+                with _request_turn(self.client, self.session_id, prepared_text, self.state) as response:
                     self._active_response = response
                     response.raise_for_status()
                     for event in _turn_events(
@@ -1220,7 +1417,13 @@ class FleetTextualApp(App[None]):
                     )
                 elif tracker.terminal_event is None:
                     self.call_from_thread(self.append_markup, f"[red]Turn stream failed:[/red] {type(exc).__name__}")
+            except (OSError, ValueError, KeyError) as exc:
+                self.call_from_thread(
+                    self.append_ansi, f"Attachment submission failed: {exc}" if not stream_started else str(exc)
+                )
             finally:
+                if not stream_started:
+                    self.call_from_thread(self._restore_attachment_draft, task_text)
                 self._active_response = None
                 with self._lock:
                     self._turn_active = False

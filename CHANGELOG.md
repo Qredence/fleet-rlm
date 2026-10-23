@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Textual command suggestions now scroll through all matches, keep the highlighted
+  row visible at narrow widths, and support keyboard, page-key, and mouse selection.
+  Enter completes partial choices before execution; Escape keeps the menu dismissed.
+  Rapid typing and arrow/Tab navigation stay ordered instead of accepting stale choices.
+  Cursor-only navigation refreshes `@` suggestions when returning to an earlier mention.
+- Input history preserves unsent drafts and does not reopen slash suggestions while
+  browsing. Down no longer clears a fresh draft.
+- Command menus include nested argument choices and local/workspace paths. Transfer
+  commands quote and parse filenames containing spaces; configuration aliases expose
+  their supported submenus. Enter preserves exact workspace paths and free-form
+  transfer destinations instead of replacing them with a prefix match.
+
 - Evaluation CLI diagnostics name the selected MLflow backend's supported experiment
   setting instead of a retired environment variable.
 - Generation usage derives missing totals from complete per-call input/output
@@ -24,6 +36,11 @@ All notable changes to this project are documented in this file.
   rejected instead of silently using the default port.
 
 ### Added
+
+- Textual `@` suggestions find local files and directories by nested basename,
+  alongside cached workspace files. Submitting attaches selected content to unique
+  workspace paths. Directory uploads preserve structure, skip ignored/hidden files
+  and symlinks, and enforce file-count and size limits. Browsing never uploads.
 
 - `DELETE /sessions/{session_id}` stops a Session's sandbox, releases its lease, and drops its
   in-process runtime (history is kept); 404 without a runtime, 409 while a Turn runs.
