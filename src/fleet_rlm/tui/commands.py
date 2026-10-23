@@ -300,6 +300,11 @@ def _stat(ctx: Context, arg: str) -> None:
 
 
 def _put(ctx: Context, arg: str) -> None:
+    """Upload a local file and cache its workspace path, defaulting to `files/<basename>`.
+
+    `arg` contains shell-quoted source and optional destination paths. Missing arguments
+    or a non-file source print a message and return; parsing, file-read, and HTTP errors propagate.
+    """
     args = shlex.split(arg)
     if not args:
         CONSOLE.print("[yellow]Usage: /put <local-path> [workspace-path][/yellow]")
@@ -320,6 +325,11 @@ def _put(ctx: Context, arg: str) -> None:
 
 
 def _get(ctx: Context, arg: str) -> None:
+    """Download a workspace file, overwriting the chosen local path or its basename by default.
+
+    `arg` contains shell-quoted workspace and optional local paths. Missing arguments
+    print usage and return; parsing, HTTP, and file-write errors propagate.
+    """
     args = shlex.split(arg)
     if not args:
         CONSOLE.print("[yellow]Usage: /get <workspace-path> [local-path][/yellow]")

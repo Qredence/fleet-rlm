@@ -147,6 +147,7 @@ def clear_preflight_cache() -> None:
 
 
 def _optional_int(value: Any) -> int | None:
+    """Convert a resource value to int, returning None on TypeError or ValueError."""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -154,6 +155,11 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _resolve_snapshot(key: tuple[str, str, str], service: Any, name: str) -> SnapshotIdentity:
+    """Read and cache an active snapshot identity that meets the repository resource floors.
+
+    Provider lookup errors are treated as a missing snapshot. Raise SnapshotUnavailableError
+    for missing, inactive, or undersized snapshots.
+    """
     try:
         snapshot = service.get(name)
     except Exception:
@@ -199,7 +205,16 @@ def preflight(
     org_id: str = "",
     refresh: bool = False,
 ) -> SnapshotIdentity:
-    """Resolve and validate a Turn snapshot before any sandbox is provisioned."""
+    """Resolve and validate a Turn snapshot before any sandbox is provisioned.
+
+    Return the provider identity with the repository definition digest. Successful
+    resolutions are cached by API key, organization, and name; `refresh` bypasses the
+    cached result. Concurrent lookups for the same key share an in-flight resolution.
+
+    Raises:
+        SnapshotUnavailableError: The snapshot is missing, not active, or below a resource
+            floor. Provider lookup errors are converted to this refusal.
+    """
     key = (api_key, org_id, name)
     with _RESOLUTIONS_LOCK:
         if not refresh and (cached := _RESOLUTIONS.get(key)) is not None:
@@ -230,6 +245,10 @@ def preflight(
 
 
 def _resolved_credentials(api_key: str | None, org_id: str | None) -> tuple[str, str]:
+    """Resolve omitted credentials from Fleet settings and strip surrounding whitespace.
+
+    Raise ValueError when either resolved credential is empty; settings errors propagate.
+    """
     if api_key is None or org_id is None:
         settings = get_settings()
         if api_key is None:
@@ -254,7 +273,17 @@ def _resolved_credentials(api_key: str | None, org_id: str | None) -> tuple[str,
 def build_snapshot(
     *, name: str = SNAPSHOT_NAME, api_key: str | None = None, org_id: str | None = None
 ) -> SnapshotIdentity:
-    """Build the repository-defined snapshot and verify it through the provider."""
+    """Build the repository-defined snapshot and verify it through the provider.
+
+    Omitted credentials come from Fleet settings; `name` overrides only the provider name.
+
+    Raises:
+        ValueError: An API key or organization is empty after credential resolution.
+        SnapshotUnavailableError: The created snapshot cannot be read, is not active,
+            or is below a resource floor.
+
+    Settings, image-building, and provider creation errors propagate.
+    """
     key, organization = _resolved_credentials(api_key, org_id)
     client = Daytona(DaytonaConfig(api_key=key, organization_id=organization))
     client.snapshot.create(
@@ -266,7 +295,17 @@ def build_snapshot(
 def verify_snapshot(
     *, name: str = SNAPSHOT_NAME, api_key: str | None = None, org_id: str | None = None
 ) -> SnapshotIdentity:
-    """Read the snapshot back from the provider and enforce the Turn state and floors."""
+    """Read the snapshot back from the provider and enforce the Turn state and floors.
+
+    Refreshes the cached identity. Omitted credentials come from Fleet settings.
+
+    Raises:
+        ValueError: An API key or organization is empty after credential resolution.
+        SnapshotUnavailableError: The snapshot lookup fails, is not active, or is below a
+            resource floor.
+
+    Settings and provider client initialization errors propagate.
+    """
     key, organization = _resolved_credentials(api_key, org_id)
     client = Daytona(DaytonaConfig(api_key=key, organization_id=organization))
     return preflight(client.snapshot, name=name, api_key=key, org_id=organization, refresh=True)

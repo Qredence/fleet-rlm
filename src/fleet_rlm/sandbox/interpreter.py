@@ -162,6 +162,10 @@ class DaytonaInterpreter:
         return self._context.copy().run(self._handle_host_call, call)
 
     def _handle_host_call(self, call: dict[str, Any]) -> dict[str, Any]:
+        """Return a bridged tool value or convert validation, cancellation, and tool errors to an error reply.
+
+        Records the host call and emits activity events. Event-delivery failures can propagate.
+        """
         with self._host_call_lock:
             self._host_calls += 1
         call_id = call.get("id")
@@ -347,7 +351,21 @@ class DaytonaInterpreter:
             )
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
-        """Run code in this namespace, rejecting code over 1 MB and non-object variables."""
+        """Run code in this namespace, rejecting code over 1 MB and non-object variables.
+
+        Return a DSPy FinalOutput for SUBMIT, otherwise the last expression's value when
+        non-None, bounded stripped stdout/stderr, or None when there is no output.
+
+        Raises:
+            ValueError: Code is not text or exceeds 1,000,000 UTF-8 bytes.
+            TypeError: Variables are supplied as a non-dictionary value.
+            dspy.CodeExecutionError: Remote Python failed or SUBMIT failed its grounding check.
+            TimeoutError: The Turn deadline prevents or interrupts execution.
+            RuntimeError: The Turn was cancelled.
+            ExecutionOutcomeUnknownError: The execution outcome cannot be established.
+
+        Serialization, setup, and event-delivery errors also propagate.
+        """
         if not isinstance(code, str) or len(code.encode("utf-8")) > 1_000_000:
             raise ValueError("Interpreter code exceeds the 1 MB size limit")
         if variables is not None and not isinstance(variables, dict):

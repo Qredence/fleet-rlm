@@ -129,7 +129,7 @@ def _progress_expectation(value: Any) -> float:
 
 
 def _emit_progress(scope: "_ProgressScope", phase: str, checkpoint: Any = None) -> None:
-    """Report one bounded progress observation; this never raises into user code."""
+    """Write one progress observation to the execution stdout; stream errors propagate."""
     _emit(
         PROGRESS_MARK,
         {
@@ -170,11 +170,13 @@ class _ProgressScope:
 
     def _require_main_thread(self) -> None:
         # The interpreter worker's execution thread is this cell's main thread; a user thread never is.
+        """Raise RuntimeError when called outside the recorded execution thread."""
         expected = _STATE.get("execution_thread")
         if expected is not None and threading.get_ident() != expected:
             raise RuntimeError("progress_scope is only available on the interpreter's main thread")
 
     def _close(self) -> None:
+        """Close this scope once and emit an exit observation if it was entered."""
         if self._closed:
             return
         self._closed = True
@@ -203,7 +205,16 @@ class _ProgressScope:
         return False
 
     def checkpoint(self, value: Any) -> int:
-        """Report a strictly increasing non-negative integer; repeats never renew the expectation."""
+        """Report an advancing checkpoint and return the highest accepted value.
+
+        Repeated or lower values return the existing high-water mark without renewing the
+        expectation. Values must be integers from 0 through 2**63 - 1; booleans are rejected.
+
+        Raises:
+            TypeError: The value is not an integer or is a boolean.
+            ValueError: The value is outside the allowed range.
+            RuntimeError: Called outside the execution thread, before entry, or after closure.
+        """
         self._require_main_thread()
         if self._closed:
             raise RuntimeError("progress_scope has ended; checkpoints from a previous cell do not renew")
@@ -224,7 +235,18 @@ class _ProgressScope:
 
 
 def progress_scope(label: Any, expect_seconds: Any) -> _ProgressScope:
-    """Open a checkpoint-only observation scope; it never cancels, pauses, or shortens the cell."""
+    """Return a context manager for advisory checkpoints; it never controls cell execution.
+
+    Enter it with `with` before calling `checkpoint`. The stripped label must contain
+    1..64 characters. `expect_seconds` must be a finite number greater than zero and
+    at most 86,400 seconds; it controls only when the host may label progress stalled.
+
+    Raises:
+        TypeError: The label is not text or the expectation is not numeric; booleans
+            are not accepted as expectations.
+        ValueError: The label or expectation is outside its allowed bounds.
+        RuntimeError: Called outside the interpreter's recorded execution thread.
+    """
     return _ProgressScope(label, expect_seconds)
 
 
@@ -236,11 +258,9 @@ def _close_progress_scopes() -> None:
 
 
 def _host_call_limit(value: Any) -> float | None:
-    """Return the host-call wait in seconds, or None when the Turn has no Fleet deadline.
+    """Return a positive host-call wait in seconds as a float.
 
-    The selection uses an `is None` check, so a supplied number is used as given instead of being
-    replaced by a fixed fallback. `0` is the transport's explicit "no timeout" value, so it means
-    no bound as well; any other positive value is the Turn's remaining deadline.
+    None and nonpositive values mean no bound; no fallback timeout is substituted.
     """
     if value is None or value <= 0:
         return None
@@ -248,6 +268,17 @@ def _host_call_limit(value: Any) -> float | None:
 
 
 def _bridge_call(tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    """Call a host tool and return its reply value, waiting under the execution's deadline policy.
+
+    A missing bound waits indefinitely; absent or partially written replies are retried.
+
+    Raises:
+        ValueError: The encoded request exceeds the body limit.
+        TimeoutError: No readable reply arrives within the host-call bound.
+        RuntimeError: The host reply contains an error.
+
+    Request-serialization and reply-removal errors propagate.
+    """
     request = {"id": uuid.uuid4().hex, "tool": tool_name, "args": args, "kwargs": kwargs}
     if len(json.dumps(request, separators=(",", ":")).encode("utf-8")) > MAX_BODY:
         raise ValueError("Host tool request exceeds the size limit")
@@ -327,6 +358,7 @@ def _typed_submit(names: list[str]) -> Any:
 
 
 def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
+    """Create the persistent execution globals with workspace helpers and registered host tools."""
     context_globals = globals()
     namespace: dict[str, Any] = {
         "WORKSPACE": WORKSPACE,
@@ -381,6 +413,14 @@ def _invalid_bindings(variables: Any, tools: Any) -> bool:
 
 
 def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = None) -> dict[str, Any]:
+    """Execute a cell in the persistent namespace and return captured output and result metadata.
+
+    Valid variables update unreserved bindings; `outputs` names constrain SUBMIT fields.
+    Returns validation and user-code errors as result dictionaries, including the remote
+    error type when available. SUBMIT supplies `final`; otherwise the last expression
+    supplies `has_value` and a JSON-compatible `value`. Output is bounded, Skill activity
+    is recorded, and execution progress scopes are closed before returning.
+    """
     _STATE["skill_activity"] = []
     _STATE["skill_activity_truncated"] = False
     # Scopes are execution-local: the new cell starts with none, whatever the previous cell opened.

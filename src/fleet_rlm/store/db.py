@@ -337,7 +337,11 @@ class Store:
 
     @_retry_once
     def claim_environment_report(self, session_id: str) -> bool:
-        """Record this Session's single environment observation; True only for the first claim."""
+        """Atomically claim this Session's environment observation.
+
+        Return True only when an existing unreported Session is updated; an unknown Session
+        or prior claim returns False. Database errors propagate.
+        """
         with self.pool.connection() as connection:
             claimed = connection.execute(
                 "UPDATE fleet_lite_sessions SET environment_reported = TRUE "
@@ -814,7 +818,18 @@ class VolumePostgresHarness:
         new_memory_note: str = "",
         replay_snapshot: tuple[str, bytes] | None = None,
     ) -> list[str]:
-        """Record a finished Turn; return the workspace artifacts it can report."""
+        """Record a finished Turn and return its sorted, unique `artifacts/` workspace paths.
+
+        Commits the record, memory note, completion payload, and optional immutable replay
+        together. `replay_snapshot` is the digest and compressed bytes selected by the record.
+
+        Raises:
+            ValueError: Replay selection metadata or digest is inconsistent, the Turn ID is
+                missing, the Session ID is invalid, the record is oversized, or a workspace
+                path is invalid.
+
+        Serialization, workspace listing, and storage errors propagate.
+        """
         if bool(turn_record.get("replay_snapshot_selected")) != (replay_snapshot is not None):
             raise ValueError("Selected replay metadata and immutable snapshot must be committed together")
         if replay_snapshot is not None and turn_record.get("replay_snapshot_sha256") != replay_snapshot[0]:

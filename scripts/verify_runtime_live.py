@@ -28,6 +28,11 @@ from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
 
 
 def main() -> None:
+    """Run the `--live` runtime checks and save a report after attempting resource cleanup.
+
+    Creates a private database schema and provider sandboxes. Exits unsuccessfully
+    if a check, report write, or cleanup fails.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Authorize disposable credential-backed calls")
     parser.add_argument("--model", required=True)

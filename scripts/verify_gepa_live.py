@@ -51,6 +51,10 @@ class AdditionProgram(dspy.Module):
 
 
 def main() -> None:
+    """Run the `--live` GEPA canary, save its report and candidate, and attempt sandbox cleanup.
+
+    Exit with status 1 when validation fails or provider cleanup is incomplete.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="authorize the bounded live canary")
     parser.add_argument("--output", type=Path, default=Path(".scratch/gepa-validation/report.json"))
@@ -85,6 +89,7 @@ def main() -> None:
     }
 
     def manager() -> DaytonaSandboxManager:
+        """Create and track a disposable sandbox manager for one canary rollout."""
         runtime = DaytonaSandboxManager(
             settings.fleet_daytona_api_key,
             settings.fleet_daytona_org_id,

@@ -53,12 +53,18 @@ class SessionRuntime:
             raise RuntimeError("Session ownership lease was lost; runtime must be rebuilt")
 
     def start_lease_monitor(self, *, interval_seconds: float = 10.0) -> None:
-        """Probe the dedicated lease connection and cancel remote work when it becomes unhealthy."""
+        """Start periodic lease probes, renewing a dropped connection before declaring ownership lost.
+
+        `interval_seconds` is the delay between probes. A failed reacquisition marks the lease
+        lost and requests Turn cancellation; cancellation failures are suppressed. Calls are
+        no-ops when no lease exists or a monitor has already been created.
+        """
         lease = self.lease
         if lease is None or self._lease_monitor is not None:
             return
 
         def monitor() -> None:
+            """Renew a dropped Session lease or mark it lost and request cancellation if renewal fails."""
             current = lease
             while not self._lease_monitor_stop.wait(interval_seconds):
                 try:
@@ -210,6 +216,12 @@ class SessionRuntimeRegistry:
             raise RuntimeError("The maximum number of active Sessions has been reached")
 
     def _build(self, session_id: str) -> SessionRuntime:
+        """Build a Session runtime, acquire its storage lease, and restore saved settings.
+
+        Starts the lease monitor before returning. Raises RuntimeError when storage is not
+        configured; storage and restoration errors propagate, closing an acquired lease
+        if restoration or monitor startup fails.
+        """
         settings = self.settings
         if self.store is None:
             raise RuntimeError("Session storage is not configured")

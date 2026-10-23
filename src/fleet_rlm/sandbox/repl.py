@@ -189,6 +189,7 @@ class _Protocol:
             self._line(line)
 
     def finish(self) -> None:
+        """Consume trailing output, wait up to five seconds per host-call worker, and close the success fence."""
         if self._buffer:
             self._line(self._buffer)
             self._buffer = ""
@@ -199,6 +200,11 @@ class _Protocol:
         self.fence.close()
 
     def _line(self, line: str) -> None:
+        """Dispatch a marker line to its result, host-call worker, or progress consumer.
+
+        Invalid progress and progress-consumer failures are dropped. Invalid result or
+        host-call JSON propagates as JSONDecodeError.
+        """
         if line.startswith(RESULT_MARK):
             self.result = json.loads(line[len(RESULT_MARK) :])
         elif line.startswith(CALL_MARK):
@@ -218,12 +224,18 @@ class _Protocol:
 
     def _answer(self, call: dict[str, Any]) -> None:
         # A host-call worker owns no Turn; nothing may escape it into the transport thread.
+        """Attempt one host reply, suppressing failures so they cannot escape the worker."""
         try:
             self._send_reply(call)
         except Exception:
             _LOGGER.warning("A host tool call worker failed before it could answer")
 
     def _send_reply(self, call: dict[str, Any]) -> None:
+        """Upload a host reply, converting callback and serialization failures to error replies.
+
+        Only successful replies require an open execution fence. Upload failures are
+        suppressed; the sandbox keeps waiting under its host-call timeout policy.
+        """
         try:
             reply = self.on_call(call)
         except Exception:
@@ -242,6 +254,7 @@ class _Protocol:
         def upload() -> None:
             # The fence is checked immediately before every attempt, so a retry after a transient
             # failure cannot publish a success whose execution has since been cancelled or ended.
+            """Upload the reply, refusing a success with _PublicationFencedError when its fence is closed."""
             if successful and not self.fence.is_open():
                 raise _PublicationFencedError
             self.sandbox.fs.upload_file(body, path)
@@ -256,6 +269,7 @@ class _Protocol:
 
     def _refuse_publication(self) -> None:
         # One bounded warning per refused publication: no tool payload, no generated source.
+        """Report one refused success publication, suppressing observer failures."""
         _LOGGER.warning("Fenced a successful host tool result after Turn cancellation")
         if self._on_fence is not None:
             try:
@@ -290,6 +304,8 @@ def run(
     attempt. Error and cancellation replies are never fenced.
 
     Raises the SDK's error when the transport fails; the caller decides whether the outcome is known.
+    A context-reported Python error becomes an error result. If neither a runtime result nor a
+    context error is available, raises ExecutionOutcomeUnknownError.
     """
     protocol = _Protocol(sandbox, on_call, fence=fence, on_fence=on_fence, on_progress=on_progress)
     # The Turn's remaining deadline is the only production source of this bound. A value carried by
