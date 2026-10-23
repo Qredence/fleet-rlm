@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.sandbox.digests import DIGEST_CACHE_PATH
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
@@ -396,8 +397,10 @@ def _run_remote_locally(tmp_path, calls):
 
     def run(_self, code: str) -> str:
         calls.append(code)
-        local = code.replace("'/workspace'", repr(str(tmp_path / "workspace"))).replace(
-            "'/learned'", repr(str(tmp_path / "learned"))
+        local = (
+            code.replace("'/workspace'", repr(str(tmp_path / "workspace")))
+            .replace("'/learned'", repr(str(tmp_path / "learned")))
+            .replace(repr(DIGEST_CACHE_PATH), repr(str(tmp_path / "cache" / "digests.json")))
         )
         # A temporary directory is not a mount point; treat the stand-in as mounted.
         local = local.replace("os.path.ismount(", "os.path.isdir(")
@@ -422,7 +425,7 @@ def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypat
     (tmp_path / "learned").mkdir()
     (tmp_path / "learned" / "s-1.md").write_text("---\nsummary: Use Chudnovsky\n---\nbody\n")
     calls: list[str] = []
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, calls))
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python_watched", _run_remote_locally(tmp_path, calls))
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
 
     inputs = manager.turn_inputs()
@@ -442,7 +445,7 @@ def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypat
 def test_turn_inputs_skips_notes_without_the_shared_mount(monkeypatch, tmp_path) -> None:
     (tmp_path / "workspace").mkdir()
     calls: list[str] = []
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, calls))
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python_watched", _run_remote_locally(tmp_path, calls))
 
     inputs = DaytonaSandboxManager("key", "org", "volume", "session-a").turn_inputs()
 
@@ -460,7 +463,7 @@ def test_turn_inputs_returns_only_the_newest_bounded_shared_notes(monkeypatch, t
         path = learned / f"note-{index}.md"
         path.write_text(f"---\nsummary: {'x' * 150}\n---\n")
         os.utime(path, (index + 1, index + 1))
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python_watched", _run_remote_locally(tmp_path, []))
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/notes")
 
     notes = manager.turn_inputs()["notes"]
@@ -475,7 +478,7 @@ def test_turn_inputs_preserves_required_inputs_when_optional_notes_are_unreadabl
     (workspace / "files/data.txt").write_bytes(b"source")
     # A directory with a note suffix cannot be opened as a note file.
     (tmp_path / "learned/unreadable.md").mkdir(parents=True)
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python_watched", _run_remote_locally(tmp_path, []))
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/notes")
 
     inputs = manager.turn_inputs()
@@ -490,7 +493,7 @@ def test_turn_inputs_preserves_required_inputs_when_optional_notes_are_unreadabl
 def test_turn_inputs_skips_notes_outside_supported_limits(monkeypatch, tmp_path, notes_limit):
     (tmp_path / "workspace").mkdir()
     calls = []
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, calls))
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python_watched", _run_remote_locally(tmp_path, calls))
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/notes")
 
     assert manager.turn_inputs(notes_limit=notes_limit)["notes"] == []
@@ -500,7 +503,7 @@ def test_turn_inputs_skips_notes_outside_supported_limits(monkeypatch, tmp_path,
 def test_turn_inputs_reject_a_malformed_digest_listing(monkeypatch) -> None:
     monkeypatch.setattr(
         DaytonaSandboxManager,
-        "exec_remote_python",
+        "exec_remote_python_watched",
         lambda _self, _code: '{"digests": {"files/a.txt": 3}, "notes": [], "environment": ""}',
     )
 
