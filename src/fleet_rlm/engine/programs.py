@@ -10,10 +10,14 @@ from typing import Any
 
 import dspy
 import mlflow
-from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, decision_evidence, without_mlflow_dspy_callback
+from fleet_rlm.dspy_support import (
+    FleetRLMChatAdapter,
+    MeteredLM,
+    decision_evidence,
+    without_mlflow_dspy_callback,
+)
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
 from fleet_rlm.engine.signatures import (
     TRIAGE_CRITERIA,
@@ -78,8 +82,8 @@ class AdaptiveFleetEngine(dspy.Module):
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
         self.optimization_context: WorkspaceDataset | None = None
-        self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
-        self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
+        self._metered_root = MeteredLM(root_lm, sandbox_mgr.consume_budget)
+        self._metered_sub = MeteredLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
         self.triage.set_criteria("route", TRIAGE_CRITERIA)
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
@@ -242,7 +246,7 @@ class AdaptiveFleetEngine(dspy.Module):
     def _route(self, mode: str, task: str, workspace_manifest: str, skills_catalog: str, context: Any) -> Route:
         """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""
         route = Route.FLEX
-        route_lm = self.jev_lm or SandboxLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
+        route_lm = self.jev_lm or MeteredLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
         triage_inputs = {
             "task": task,
             "workspace_manifest": workspace_manifest,

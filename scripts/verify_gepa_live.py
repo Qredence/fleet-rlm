@@ -17,10 +17,9 @@ from typing import Any
 
 import dspy
 from daytona import ListSandboxesQuery
-from dspy.primitives.facade import SandboxLM
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.dspy_support import FleetRLMChatAdapter
+from fleet_rlm.dspy_support import FleetRLMChatAdapter, MeteredLM
 from fleet_rlm.optimize.artifacts import IsolatedFleetProgram, digest_bytes
 from fleet_rlm.optimize.scorers import fleet_metric
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -43,7 +42,7 @@ class AdditionProgram(dspy.Module):
     def forward(self, task: str) -> dspy.Prediction:
         self.sandbox_mgr.reset_turn_budget()
         try:
-            with dspy.context(lm=SandboxLM(self.lm, self.sandbox_mgr.consume_budget), adapter=FleetRLMChatAdapter()):
+            with dspy.context(lm=MeteredLM(self.lm, self.sandbox_mgr.consume_budget), adapter=FleetRLMChatAdapter()):
                 result = self.flex_agent(task=task)
             return dspy.Prediction(answer=result.answer, **self.sandbox_mgr.turn_usage())
         finally:

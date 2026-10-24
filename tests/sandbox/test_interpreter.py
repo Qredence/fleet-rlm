@@ -536,8 +536,7 @@ def test_should_accept_note_constants_without_weakening_substantive_grounding(sa
 
 def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sandbox):
     """Native Evaluate/RLM contract over recorded output; no claim of improved live model behavior."""
-    from dspy.primitives.facade import SandboxLM
-
+    from fleet_rlm.dspy_support import MeteredLM
     from fleet_rlm.engine.signatures import STOPPING_RULES
 
     fixture = json.loads((Path(__file__).parents[1] / "fixtures/pi_digit_trace.json").read_text())
@@ -556,7 +555,7 @@ def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sa
     signature = dspy.Signature("task -> answer, learned_skill_note").with_instructions(STOPPING_RULES)
     rlm = dspy.RLM(signature, interpreter_factory=lambda: DaytonaInterpreter(manager), max_iters=3)
     example = dspy.Example(task=fixture["task"], answer=fixture["answer"]).with_inputs("task")
-    with dspy.context(lm=SandboxLM(lm, manager.consume_budget), disable_history=True):
+    with dspy.context(lm=MeteredLM(lm, manager.consume_budget), disable_history=True):
         result = dspy.Evaluate(devset=[example], metric=dspy.evaluate.answer_exact_match, num_threads=1)(rlm)
     assert result.score == 100
     prediction = result.results[0][1]
