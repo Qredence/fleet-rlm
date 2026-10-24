@@ -277,6 +277,7 @@ def test_turn_status_returns_the_recorded_provenance_under_the_same_turn_id():
         "snapshot_mem": 8,
         "snapshot_disk": 8,
         "snapshot_definition_digest": "d" * 64,
+        "snapshot_build_digest": "c" * 64,
     }
     store = store_with(
         turn_status=lambda _session, turn_id: {

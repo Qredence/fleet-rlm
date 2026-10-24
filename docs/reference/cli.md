@@ -42,6 +42,36 @@ and stops services it owns when the client exits:
   presses cannot interrupt service cleanup. An uncaught Ctrl-C during startup
   or client operation exits with status 130 without a traceback after cleanup.
 
+## Startup setup
+
+For a new local server, `fleet cli` first starts a private setup-mode FastAPI app.
+The Textual readiness checklist covers serving models, an existing PostgreSQL or
+Lakebase database, the selected local/Databricks MLflow profile, and Daytona.
+It opens automatically when checks require attention. A healthy configuration
+proceeds directly to the normal client. Checks do not run model inference, build
+snapshots, create Volumes, apply migrations, or provision experiments.
+
+Expand a section to edit missing values. Secret fields are masked; **Save .env**
+explicitly merges edits into the launch project's `.env` with mode `0600`, keeping
+unrelated entries. Process environment values stay authoritative and are shown as
+read-only. Use **Discard edits** to abandon a draft or reload externally changed values.
+Verify after saving; individual sections can also be rechecked. Select an existing Daytona Volume or explicitly
+create one; build a missing snapshot or activate an inactive one. These provider
+actions and the optional root-model inference test show a confirmation before
+starting. Long operations stream progress through FastAPI; reconnecting reads the
+existing operation rather than starting it again.
+
+**Start / Restart** shuts down the bootstrap app and starts the normal
+API/MLflow services. Normal startup applies Fleet's existing additive migrations
+and initializes tracking destinations. The checklist does not provision PostgreSQL.
+Use `/setup` from chat between Turns to edit settings and request a controlled
+restart with the same Session ID. No active Turn is interrupted by setup apply.
+For an existing API or `--url`, setup belongs to the server operator; stop the
+operator-managed server or use a different port to launch a new owned instance.
+
+Non-TTY input never prompts for setup credentials or consumes task input as setup
+answers. It reports unmet prerequisites; complete setup interactively first.
+
 Standalone `serve`, `eval`, `optimize`, and `trace` commands connect to an
 existing tracking server. For local operation, keep `fleet cli` running or
 start MLflow separately using the same port/storage configuration:
@@ -83,7 +113,7 @@ Catalog schema and table prefix; pass the fully qualified `trace:/...` ID for a
 Unity Catalog trace. This explicit operator check may issue a read to the
 configured tracking destination; it is not run during serving.
 
-Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
+Commands include `/setup`, `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
 `/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
 `/timeout <seconds|off|default>`, `/sessions`, `/optimize`, `/config`,

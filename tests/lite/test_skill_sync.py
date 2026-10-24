@@ -94,7 +94,7 @@ def test_bundled_skills_ship_valid_and_sync_with_local_overrides(tmp_path: Path)
     from fleet_rlm.skills import BUNDLED_SKILLS_DIR, parse_and_validate_skill_md
 
     bundled = sorted(path.parent.name for path in BUNDLED_SKILLS_DIR.glob("*/SKILL.md"))
-    assert bundled == ["delegation", "long-context-search", "tabular-analysis"]
+    assert bundled == ["delegation", "long-context-search", "skill-creator", "tabular-analysis"]
     for name in bundled:
         parse_and_validate_skill_md(name, (BUNDLED_SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8"))
 
@@ -104,7 +104,7 @@ def test_bundled_skills_ship_valid_and_sync_with_local_overrides(tmp_path: Path)
     (local / "delegation" / "SKILL.md").write_bytes(override)
     sandbox = _VolumeDouble()
 
-    assert SkillManager(sandbox, local).sync_local_skills_to_volume() == 3  # type: ignore[arg-type]
+    assert SkillManager(sandbox, local).sync_local_skills_to_volume() == 4  # type: ignore[arg-type]
     assert sorted(sandbox.writes) == [f"skills/{name}/SKILL.md" for name in bundled]
     assert sandbox.writes["skills/delegation/SKILL.md"] == override
 

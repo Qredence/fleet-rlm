@@ -11,6 +11,7 @@ src/fleet_rlm/
 │   ├── manager.py     # Daytona root/child sandboxes, budgets, workspace files, learned notes
 │   ├── interpreter.py # DSPy CodeInterpreter and host-tool dispatch
 │   ├── repl.py        # run_code transport and stdout bridge protocol
+│   ├── snapshots/     # Packaged definition, runtime preflight, operator operations
 │   └── runtime/repl.py # Sandbox-side namespace, output capture, and bridge
 ├── workspace.py       # Session ID and workspace path validation, serializable dataset handles
 ├── engine/
@@ -33,10 +34,12 @@ src/fleet_rlm/
 │   ├── schemas.py     # Request and response models
 │   ├── events.py      # DSPy activity callback and SSE envelope
 │   └── routes/        # sessions (+ memory, skills), workspace, turns
+├── setup/             # Configuration draft, readiness probes, serialized setup operations
 ├── session.py         # Per-Session runtime and registry
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli`
 ├── tui/
 │   ├── app.py         # Prompt loop and Turn stream reader
+│   ├── setup.py       # FastAPI-backed startup checklist
 │   ├── commands.py    # Slash-command table (dispatch, /help, completion)
 │   └── render.py      # Event rendering
 └── cli.py             # `fleet` entry point: serve, cli, optimize, eval

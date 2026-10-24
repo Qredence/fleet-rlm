@@ -339,6 +339,7 @@ SNAPSHOT_PROVENANCE = {
     "snapshot_mem": 8,
     "snapshot_disk": 8,
     "snapshot_definition_digest": "b" * 64,
+    "snapshot_build_digest": "c" * 64,
 }
 
 

@@ -1074,8 +1074,11 @@ class _RecordingClient:
 
 @pytest.fixture(autouse=True)
 def clear_snapshot_preflight_cache():
+    import importlib
+
     from fleet_rlm.config import get_settings
-    from fleet_rlm.sandbox import snapshots as snapshot_module
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
     snapshot_module.clear_preflight_cache()
     get_settings.cache_clear()
@@ -1097,12 +1100,16 @@ def _provision(
 def test_manager_snapshot_defaults_to_repo_owned_name() -> None:
     from fleet_rlm.sandbox.snapshots import BUILD_COMMAND, DEFAULT_DEFINITION, SNAPSHOT_NAME
 
-    assert SNAPSHOT_NAME == "fleet-rlm-python313-v13"
+    assert SNAPSHOT_NAME == "fleet-rlm-python313-v14"
     resources = DEFAULT_DEFINITION.resources()
     assert (resources.cpu, resources.memory, resources.disk) == (4, 8, 8)
     assert DEFAULT_DEFINITION.python_version == "3.13"
-    assert dict(DEFAULT_DEFINITION.packages) == {"numpy": "2.5.1", "pandas": "3.0.5", "mpmath": "1.4.1"}
-    assert "build_snapshot" in BUILD_COMMAND
+    packages = dict(DEFAULT_DEFINITION.packages)
+    assert packages["numpy"] == "2.5.1"
+    assert packages["pandas"] == "3.0.5"
+    assert {"matplotlib", "pillow", "openpyxl", "pypdf", "uv", "pytest", "ruff"} <= packages.keys()
+    assert not {"dspy", "gepa", "markitdown", "scipy", "scikit-learn", "pyarrow"} & packages.keys()
+    assert "/setup" in BUILD_COMMAND
     root = DaytonaSandboxManager("key", "org", "volume", "session-a")
     assert root.snapshot == SNAPSHOT_NAME
     explicit = DaytonaSandboxManager("key", "org", "volume", "session-a", snapshot="fleet-rlm-python313-v12")
@@ -1168,20 +1175,217 @@ def test_preflight_unusable_snapshot_refuses_before_creation(monkeypatch, tmp_pa
     message = str(error.value)
     assert SNAPSHOT_NAME in message
     assert f"state={state}" in message
-    assert BUILD_COMMAND in message
+    if state == "inactive":
+        assert "Activate snapshot" in message
+    elif state in {"pending", "building"}:
+        assert "wait for it to become active" in message
+    else:
+        assert BUILD_COMMAND in message
     assert snapshot_error_is_single_error(message)
     assert client.created == []
     assert manager._sandbox is None
 
 
 def test_preflight_unusable_snapshot_treats_provider_error_as_missing(monkeypatch, tmp_path) -> None:
+    from daytona import DaytonaNotFoundError
+
     from fleet_rlm.sandbox.snapshots import SnapshotUnavailableError
 
-    service = _RecordingSnapshotService(error=KeyError("fleet-rlm-python313-v10"))
+    service = _RecordingSnapshotService(error=DaytonaNotFoundError("fleet-rlm-python313-v10"))
     manager, client = _provision(monkeypatch, tmp_path, service)
     with pytest.raises(SnapshotUnavailableError, match="state=missing"):
         manager.ensure_sandbox()
     assert client.created == []
+
+
+def test_preflight_surfaces_provider_failures_and_refresh_evicts_stale_cache() -> None:
+    import importlib
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+
+    active = _SnapshotDTO(id="snap-1", state="active", cpu=4, mem=8, disk=8)
+
+    class Service:
+        result: Any = active
+        error: Exception | None = None
+
+        def get(self, _name: str) -> Any:
+            if self.error is not None:
+                raise self.error
+            return self.result
+
+    service = Service()
+    first = snapshot_module.preflight(service, api_key="key", org_id="org")
+    assert first.id == "snap-1"
+    service.error = TimeoutError("Daytona temporarily unavailable")
+    with pytest.raises(snapshot_module.SnapshotUnavailableError, match="Check Daytona access"):
+        snapshot_module.preflight(service, api_key="key", org_id="org", refresh=True)
+    with pytest.raises(snapshot_module.SnapshotUnavailableError, match="Check Daytona access"):
+        snapshot_module.preflight(service, api_key="key", org_id="org")
+
+
+def test_custom_snapshot_does_not_claim_default_recipe() -> None:
+    from fleet_rlm.sandbox.snapshots import preflight
+
+    identity = preflight(
+        _RecordingSnapshotService(_SnapshotDTO(id="custom-id", state="active", cpu=4, mem=8, disk=8)),
+        name="team-custom-image",
+        api_key="custom-key",
+        org_id="org",
+    )
+    assert identity.definition_digest is None
+    assert identity.provenance()["snapshot_definition_digest"] is None
+
+
+def test_provider_build_metadata_is_hashed_and_not_copied_to_provenance() -> None:
+    from datetime import UTC, datetime
+
+    from daytona_api_client import BuildInfo
+
+    from fleet_rlm.sandbox.snapshots import preflight
+
+    dto = _SnapshotDTO(
+        id="snap-1",
+        state="active",
+        cpu=4,
+        mem=8,
+        disk=8,
+        image_name="registry.example/fleet@sha256:abc",
+        build_info=BuildInfo(
+            dockerfile_content="FROM python:3.13",
+            context_hashes=["sha256:def"],
+            snapshot_ref="provider-build-1",
+            created_at=datetime(2026, 10, 23, tzinfo=UTC),
+            updated_at=datetime(2026, 10, 23, tzinfo=UTC),
+        ),
+    )
+    identity = preflight(_RecordingSnapshotService(dto), api_key="build-key", org_id="org")
+    assert identity.build_digest is not None
+    assert "dockerfile_content" not in identity.provenance()
+    dto.build_info.dockerfile_content = "FROM python:3.12"
+    changed = preflight(_RecordingSnapshotService(dto), api_key="build-key", org_id="org", refresh=True)
+    assert changed.build_digest != identity.build_digest
+
+
+def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
+    import importlib
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+
+    now = [100.0]
+    monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    service = _RecordingSnapshotService(_SnapshotDTO(id="old", state="active", cpu=4, mem=8, disk=8))
+    first = snapshot_module.preflight(service, api_key="key", org_id="org")
+    service.result = _SnapshotDTO(id="new", state="active", cpu=4, mem=8, disk=8)
+    now[0] += 59
+    assert snapshot_module.preflight(service, api_key="key", org_id="org") is first
+    now[0] += 1
+    assert snapshot_module.preflight(service, api_key="key", org_id="org").id == "new"
+    assert len(service.calls) == 2
+
+
+@pytest.mark.parametrize("operation", ["clear", "refresh"])
+@pytest.mark.parametrize("old_failure", [False, True])
+def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation, old_failure) -> None:
+    import importlib
+    from concurrent.futures import ThreadPoolExecutor
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    class Service:
+        def get(self, name: str) -> Any:
+            calls.append(name)
+            if len(calls) == 1:
+                started.set()
+                assert release.wait(5)
+                if old_failure:
+                    raise TimeoutError("old lookup failed")
+                return _SnapshotDTO(id="old", state="active", cpu=4, mem=8, disk=8)
+            return _SnapshotDTO(id="new", state="active", cpu=4, mem=8, disk=8)
+
+    service = Service()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(snapshot_module.preflight, service, api_key="key", org_id="org")
+        assert started.wait(5)
+        try:
+            if operation == "clear":
+                snapshot_module.clear_preflight_cache()
+            current = snapshot_module.preflight(service, api_key="key", org_id="org", refresh=operation == "refresh")
+            assert current.id == "new"
+        finally:
+            release.set()
+        if old_failure:
+            with pytest.raises(snapshot_module.SnapshotUnavailableError):
+                first.result(timeout=5)
+        else:
+            assert first.result(timeout=5).id == "old"
+    assert snapshot_module.preflight(service, api_key="key", org_id="org") is current
+    assert len(calls) == 2
+
+
+def test_concurrent_failed_preflight_releases_waiters_and_can_retry(monkeypatch) -> None:
+    import importlib
+    from concurrent.futures import ThreadPoolExecutor
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+
+    started = threading.Event()
+    joined = threading.Event()
+    release = threading.Event()
+
+    class Service:
+        calls = 0
+
+        def get(self, _name: str) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                started.set()
+                assert release.wait(5)
+                raise TimeoutError("provider unavailable")
+            return _SnapshotDTO(id="retry", state="active", cpu=4, mem=8, disk=8)
+
+    service = Service()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(snapshot_module.preflight, service, api_key="key", org_id="org")
+        assert started.wait(5)
+        flight = next(iter(snapshot_module._INFLIGHT.values()))
+        original_wait = flight.event.wait
+
+        def observe_wait(timeout=None):
+            joined.set()
+            return original_wait(timeout)
+
+        monkeypatch.setattr(flight.event, "wait", observe_wait)
+        second = pool.submit(snapshot_module.preflight, service, api_key="key", org_id="org")
+        try:
+            assert joined.wait(5)
+        finally:
+            release.set()
+        for future in (first, second):
+            with pytest.raises(snapshot_module.SnapshotUnavailableError, match="Check Daytona access"):
+                future.result(timeout=5)
+    assert service.calls == 1
+    assert snapshot_module.preflight(service, api_key="key", org_id="org").id == "retry"
+
+
+@pytest.mark.parametrize("status", [401, 404, 500])
+def test_preflight_classifies_daytona_errors_without_exposing_the_provider_message(status) -> None:
+    import importlib
+
+    from daytona import DaytonaError, DaytonaNotFoundError
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+
+    error_class = DaytonaNotFoundError if status == 404 else DaytonaError
+    service = _RecordingSnapshotService(error=error_class("private provider detail", status_code=status))
+    with pytest.raises(snapshot_module.SnapshotUnavailableError) as raised:
+        snapshot_module.preflight(service, api_key="key", org_id="org")
+    assert "private provider detail" not in str(raised.value)
+    assert ("state=missing" in str(raised.value)) is (status == 404)
 
 
 @pytest.mark.parametrize(("cpu", "mem", "disk"), [(3, 8, 8), (4, 6, 8), (4, 8, 7)])
@@ -1209,9 +1413,10 @@ def test_preflight_resources_enforce_floors(monkeypatch, tmp_path, cpu, mem, dis
 
 
 def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
+    import importlib
     from concurrent.futures import ThreadPoolExecutor
 
-    from fleet_rlm.sandbox import snapshots as snapshot_module
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
     first_started = threading.Event()
     second_arrived = threading.Event()
@@ -1243,20 +1448,28 @@ def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
 
 
 def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) -> None:
-    from fleet_rlm.sandbox import snapshots as snapshot_module
+    import importlib
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
 
     monkeypatch.chdir(tmp_path)
     for name in ("FLEET_DAYTONA_API_KEY", "FLEET_DAYTONA_ORG_ID", "DAYTONA_API_KEY", "DAYTONA_ORG_ID", "FLEET_CONFIG"):
         monkeypatch.delenv(name, raising=False)
 
     instances: list[Any] = []
+    creations: list[tuple[Any, dict[str, Any]]] = []
 
     class FakeDaytona:
         def __init__(self, config: Any) -> None:
             self.config = config
+            self._before = len(creations)
             self.snapshot = SimpleNamespace(
-                get=lambda _name: _SnapshotDTO(id="snap-1", state="active", cpu=4, mem=8, disk=8),
-                create=lambda _params: None,
+                get=lambda _name: (
+                    _SnapshotDTO(id="snap-1", state="active", cpu=4, mem=8, disk=8)
+                    if len(creations) > self._before
+                    else None
+                ),
+                create=lambda params, **kwargs: creations.append((params, kwargs)),
             )
             instances.append(self)
 
@@ -1271,9 +1484,28 @@ def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) 
     assert identity.name == snapshot_module.SNAPSHOT_NAME
     assert instances[-1].config.api_key == "explicit-key"
     assert instances[-1].config.organization_id == "explicit-org"
+    assert creations[-1][1]["timeout"] == 1200
+    assert callable(creations[-1][1]["on_logs"])
+    recipe = creations[-1][0].image.dockerfile()
+    assert "@sha256:" in recipe and "--require-hashes" in recipe
+    assert "pnpm@" in recipe and "typescript@" in recipe
+
+    snapshot_module.build_snapshot(api_key="explicit-key", org_id="explicit-org", timeout_seconds=45, on_logs=None)
+    assert creations[-1][1] == {"timeout": 45, "on_logs": None}
 
     with pytest.raises(ValueError, match="FLEET_DAYTONA_API_KEY"):
         snapshot_module.verify_snapshot(api_key="   ", org_id="explicit-org")
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
+def test_build_snapshot_rejects_unbounded_or_invalid_timeouts_before_contacting_daytona(timeout, monkeypatch):
+    import importlib
+
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
+
+    monkeypatch.setattr(snapshot_module, "Daytona", lambda *_args: pytest.fail("No provider call expected"))
+    with pytest.raises(ValueError, match="finite and positive"):
+        snapshot_module.build_snapshot(timeout_seconds=timeout)
 
 
 def test_child_and_snapshot_provisioning_skips_turn_preflight(monkeypatch, tmp_path) -> None:

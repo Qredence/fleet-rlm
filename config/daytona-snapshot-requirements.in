@@ -1,0 +1,19 @@
+# Generate src/fleet_rlm/sandbox/snapshots/snapshot-requirements.txt with:
+# uv pip compile config/daytona-snapshot-requirements.in --python-version 3.13 \
+#   --python-platform x86_64-manylinux_2_28 --no-header --no-annotate \
+#   --generate-hashes --only-binary=:all: \
+#   --output-file src/fleet_rlm/sandbox/snapshots/snapshot-requirements.txt
+numpy==2.5.1
+pandas==3.0.5
+mpmath==1.4.1
+openpyxl==3.1.5
+matplotlib==3.11.2
+pillow==13.0.0
+pypdf==6.21.2
+requests==2.34.2
+beautifulsoup4==4.15.0
+uv==0.13.5
+pytest==9.1.1
+pytest-cov==7.1.0
+ruff==0.17.2
+pip==26.2.2

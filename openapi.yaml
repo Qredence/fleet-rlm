@@ -3,6 +3,692 @@ info:
   title: Fleet-RLM Lite API
   version: 0.8.1
 paths:
+  /setup/status:
+    get:
+      tags:
+      - setup
+      summary: Status
+      description: Return current readiness without triggering provider checks.
+      operationId: status_setup_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/config:
+    delete:
+      tags:
+      - setup
+      summary: Discard Config
+      description: Discard unsaved edits without changing the saved dotenv file.
+      operationId: discard_config_setup_config_delete
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+    patch:
+      tags:
+      - setup
+      summary: Edit Config
+      description: Stage candidate edits without persisting them.
+      operationId: edit_config_setup_config_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigEdit'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/save:
+    post:
+      tags:
+      - setup
+      summary: Save
+      description: Explicitly persist validated edits to the launch project dotenv file.
+      operationId: save_setup_save_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/verify:
+    post:
+      tags:
+      - setup
+      summary: Verify
+      description: Start read-only checks for all required service sections.
+      operationId: verify_setup_verify_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStarted'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/daytona/volumes:
+    get:
+      tags:
+      - setup
+      summary: Volumes
+      description: List workspace Volumes using server credentials.
+      operationId: volumes_setup_daytona_volumes_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/VolumeInfo'
+                type: array
+                title: Response Volumes Setup Daytona Volumes Get
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - setup
+      summary: Create Volume
+      description: Start explicit creation of a persistent provider Volume.
+      operationId: create_volume_setup_daytona_volumes_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVolume'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStarted'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/daytona/snapshot/build:
+    post:
+      tags:
+      - setup
+      summary: Build
+      description: Start explicit snapshot construction from the packaged recipe.
+      operationId: build_setup_daytona_snapshot_build_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Action'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStarted'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/daytona/snapshot/activate:
+    post:
+      tags:
+      - setup
+      summary: Activate
+      description: Activate an existing provider snapshot without rebuilding it.
+      operationId: activate_setup_daytona_snapshot_activate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Action'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStarted'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/models/test:
+    post:
+      tags:
+      - setup
+      summary: Model Test
+      description: Start an optional small, potentially billed model request.
+      operationId: model_test_setup_models_test_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Action'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStarted'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/operations/{operation_id}/events:
+    get:
+      tags:
+      - setup
+      summary: Operation Events
+      description: Replay retained progress and stream until one terminal outcome.
+      operationId: operation_events_setup_operations__operation_id__events_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Operation Id
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: After
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  data:
+                    type: string
+                  event:
+                    type: string
+                  id:
+                    type: string
+                  retry:
+                    type: integer
+                    minimum: 0
+        '401':
+          description: Operator token required
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+  /setup/apply:
+    post:
+      tags:
+      - setup
+      summary: Apply
+      description: Fence new Turns and request a restart only when existing work is idle.
+      operationId: apply_setup_apply_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyResult'
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
   /health:
     get:
       tags:
@@ -859,6 +1545,30 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    Action:
+      properties:
+        request_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[a-zA-Z0-9_-]+$
+          title: Request Id
+      additionalProperties: false
+      type: object
+      required:
+      - request_id
+      title: Action
+      description: Client request identity used to avoid replaying a setup operation.
+    ApplyResult:
+      properties:
+        restart_required:
+          type: boolean
+          title: Restart Required
+      type: object
+      required:
+      - restart_required
+      title: ApplyResult
+      description: Request for the owning launcher to restart with saved configuration.
     Attached:
       properties:
         mounted_path:
@@ -893,6 +1603,22 @@ components:
       - catalog_xml
       title: Catalog
       description: Session Skill catalog rendered as XML.
+    ConfigEdit:
+      properties:
+        values:
+          additionalProperties:
+            type: string
+            format: password
+            writeOnly: true
+          type: object
+          maxProperties: 40
+          title: Values
+      additionalProperties: false
+      type: object
+      required:
+      - values
+      title: ConfigEdit
+      description: Masked candidate values; responses never echo submitted credentials.
     ContextRequest:
       properties:
         path:
@@ -929,6 +1655,27 @@ components:
       - sha256
       title: ContextSelected
       description: Workspace file recorded as the Session's context, with its size and digest.
+    CreateVolume:
+      properties:
+        request_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[a-zA-Z0-9_-]+$
+          title: Request Id
+        name:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - request_id
+      - name
+      title: CreateVolume
+      description: Explicit request for a newly named workspace Volume.
     Deleted:
       properties:
         deleted:
@@ -1031,7 +1778,9 @@ components:
           type: string
           title: Version
         mlflow:
-          $ref: '#/components/schemas/MlflowHealth'
+          anyOf:
+          - $ref: '#/components/schemas/MlflowHealth'
+          - type: 'null'
       type: object
       required:
       - status
@@ -1269,6 +2018,16 @@ components:
       - models
       title: Models
       description: Chat models available in one discovery scope.
+    OperationStarted:
+      properties:
+        operation_id:
+          type: string
+          title: Operation Id
+      type: object
+      required:
+      - operation_id
+      title: OperationStarted
+      description: Identity of a background operation whose progress can be reconnected.
     Pushed:
       properties:
         pushed:
@@ -1341,6 +2100,103 @@ components:
       - sessions
       title: Sessions
       description: Listing of every stored Session.
+    SetupError:
+      properties:
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: SetupError
+      description: Sanitized operator-facing error; credential inputs are never returned.
+    SetupField:
+      properties:
+        name:
+          type: string
+          title: Name
+        section:
+          type: string
+          title: Section
+        secret:
+          type: boolean
+          title: Secret
+        configured:
+          type: boolean
+          title: Configured
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+        source:
+          type: string
+          title: Source
+        editable:
+          type: boolean
+          title: Editable
+      type: object
+      required:
+      - name
+      - section
+      - secret
+      - configured
+      - value
+      - source
+      - editable
+      title: SetupField
+      description: One sanitized editable field and its effective source.
+    SetupStatus:
+      properties:
+        backend:
+          type: string
+          title: Backend
+        snapshot_name:
+          type: string
+          title: Snapshot Name
+        env_path:
+          type: string
+          title: Env Path
+        fields:
+          items:
+            $ref: '#/components/schemas/SetupField'
+          type: array
+          title: Fields
+        checks:
+          additionalProperties: true
+          type: object
+          title: Checks
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+        dirty:
+          type: boolean
+          title: Dirty
+        busy:
+          type: boolean
+          title: Busy
+        ready:
+          type: boolean
+          title: Ready
+        restart_required:
+          type: boolean
+          title: Restart Required
+      type: object
+      required:
+      - backend
+      - snapshot_name
+      - env_path
+      - fields
+      - checks
+      - errors
+      - dirty
+      - busy
+      - ready
+      - restart_required
+      title: SetupStatus
+      description: Readiness and redacted configuration for the operator checklist.
     Status:
       properties:
         status:
@@ -1432,6 +2288,50 @@ components:
       - msg
       - type
       title: ValidationError
+    VerifyRequest:
+      properties:
+        request_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[a-zA-Z0-9_-]+$
+          title: Request Id
+        sections:
+          items:
+            type: string
+            enum:
+            - models
+            - database
+            - mlflow
+            - daytona
+          type: array
+          maxItems: 4
+          minItems: 1
+          title: Sections
+      additionalProperties: false
+      type: object
+      required:
+      - request_id
+      title: VerifyRequest
+      description: Recheck all services or selected sections without changing provider state.
+    VolumeInfo:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        state:
+          type: string
+          title: State
+          default: unknown
+      type: object
+      required:
+      - id
+      - name
+      title: VolumeInfo
+      description: Safe provider identity of a workspace Volume.
     WorkspaceWriteRequest:
       properties:
         content:
@@ -1450,3 +2350,7 @@ components:
       type: object
       title: WorkspaceWriteRequest
       description: File content for a workspace write, as text or base64; supply exactly one.
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer

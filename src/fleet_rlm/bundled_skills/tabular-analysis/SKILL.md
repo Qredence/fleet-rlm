@@ -8,6 +8,11 @@ description: Aggregate, filter, join, and compare CSV or JSON data in /workspace
 Use this for questions answered by computing over rows: sums, averages, rates,
 group-bys, rankings, period-over-period changes, and "what if" recomputations.
 
+Use the snapshot's installed Python packages and the task project's own dependency
+manifest when one applies. Do not install packages into the shared snapshot during
+a task. If a required dependency is unavailable, explain the limitation or ask
+whether an isolated optional environment is acceptable.
+
 ## Steps
 
 1. Inspect before computing. Print the header, the row count, a few rows, and

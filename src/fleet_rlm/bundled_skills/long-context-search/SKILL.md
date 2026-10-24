@@ -1,12 +1,14 @@
 ---
 name: long-context-search
-description: Find, count, or summarize evidence in large text, log, or document files that are too big to read at once, by streaming lines or chunks, keyword search, and batched sub-LLM reading with cited line numbers.
+description: Find, count, or summarize evidence in a large selected text, log, or document file that is too big to read at once, using streaming lines or chunks, keyword search, and (when needed) batched sub-LLM reading with cited line numbers.
 ---
 
 # Long-context search
 
-Use this when a file is too large to print, or the answer depends on scattered
-passages: logs, transcripts, long documents, many files.
+Use this when a selected dataset is too large to print or the answer depends on
+scattered passages in that file, such as a log, transcript, or long document. For
+other workspace files, inspect `workspace.tree()` and read the relevant files in
+bounded pieces; the `context` methods apply only when a dataset was selected.
 
 ## Steps
 

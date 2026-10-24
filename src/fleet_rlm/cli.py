@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import json
+import os
+import secrets
+import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -29,6 +34,16 @@ def _is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def _configuration_error(exc: ValueError) -> str:
+    """Format configuration failures without echoing credential-bearing inputs."""
+    if isinstance(exc, ValidationError):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {str(error['msg']).removeprefix('Value error, ')}"
+            for error in exc.errors(include_url=False, include_input=False)
+        )
+    return str(exc)
 
 
 def _trace_request(trace: Any) -> dict[str, Any]:
@@ -283,6 +298,7 @@ def main(argv: list[str] | None = None) -> None:
     serve = commands.add_parser("serve", help="run the FastAPI SSE server")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
+    serve.add_argument("--setup", action="store_true", help=argparse.SUPPRESS)
 
     cli = commands.add_parser(
         "cli",
@@ -358,6 +374,47 @@ def main(argv: list[str] | None = None) -> None:
     if getattr(args, "backend", None) and args.mlflow == "local":
         parser.error("cli databricks conflicts with --mlflow local")
     backend = getattr(args, "backend", None) or getattr(args, "mlflow", None) or "local"
+    if getattr(args, "mlflow_port", None) is not None:
+        if backend != "local":
+            parser.error("--mlflow-port is only supported with local MLflow")
+        if not 1 <= args.mlflow_port <= 65535:
+            parser.error("--mlflow-port must be between 1 and 65535")
+    setup_token = ""
+    if args.command == "serve" and args.setup:
+        from fleet_rlm.api.app import create_app
+
+        setup_token = os.environ.get("FLEET_SETUP_TOKEN", "")
+        if not setup_token or not _is_loopback(args.host or "127.0.0.1"):
+            parser.error("setup requires a private operator token and a loopback listener")
+        uvicorn.run(
+            create_app(
+                setup_mode=True,
+                setup_token=setup_token,
+                project_dir=Path(os.environ.get("FLEET_SETUP_PROJECT_DIR", ".")),
+                setup_backend=backend,
+            ),
+            host=args.host or "127.0.0.1",
+            port=args.port or 8000,
+        )
+        return
+    if args.command in {None, "cli"} and not getattr(args, "url", None):
+        try:
+            existing_settings = get_settings(backend)
+        except (ValueError, ValidationError) as exc:
+            if not sys.stdin.isatty():
+                parser.error(f"invalid configuration: {_configuration_error(exc)}")
+            existing_settings = None
+        owned_local = existing_settings is None or (
+            _is_loopback(existing_settings.host)
+            and not launcher.api_is_healthy(f"http://{existing_settings.host}:{existing_settings.port}")
+        )
+        if owned_local:
+            setup_token = secrets.token_urlsafe(32)
+            if not _onboard(args, backend, setup_token):
+                if not sys.stdin.isatty():
+                    raise SystemExit(1)
+                return
+            get_settings.cache_clear()
     try:
         settings = get_settings(backend)
         overrides = {}
@@ -375,15 +432,9 @@ def main(argv: list[str] | None = None) -> None:
         if overrides:
             settings = settings.with_explicit_overrides(**overrides)
     except (ValidationError, ValueError) as exc:
-        if isinstance(exc, ValidationError):
-            details = "; ".join(
-                f"{'.'.join(str(part) for part in error['loc'])}: {str(error['msg']).removeprefix('Value error, ')}"
-                for error in exc.errors(include_url=False, include_input=False)
-            )
-        else:
-            details = str(exc)
-        parser.error(f"invalid configuration: {details}")
-    settings.prepare_mlflow_auth()
+        parser.error(f"invalid configuration: {_configuration_error(exc)}")
+    if args.command not in {None, "cli"}:
+        settings.prepare_mlflow_auth()
     target = settings.mlflow_target()
     if args.command == "eval" and args.eval_command == "run" and args.url is None:
         args.url = f"http://{settings.host}:{settings.port}"
@@ -412,7 +463,20 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
         from fleet_rlm.api.app import create_app
 
-        uvicorn.run(create_app(settings=settings), host=settings.host, port=settings.port, reload=False)
+        operator_token = os.environ.get("FLEET_SETUP_TOKEN", "")
+        if operator_token and not _is_loopback(settings.host):
+            parser.error("operator setup endpoints require a loopback listener")
+        uvicorn.run(
+            create_app(
+                settings=settings,
+                setup_token=operator_token,
+                project_dir=Path(os.environ.get("FLEET_SETUP_PROJECT_DIR", ".")),
+                setup_backend=backend,
+            ),
+            host=settings.host,
+            port=settings.port,
+            reload=False,
+        )
         return
 
     session_id = getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}")
@@ -421,6 +485,20 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
     try:
         plan = launcher.plan_launch(url=url, host=settings.host, port=settings.port, settings=settings)
+        if plan.start_api and setup_token:
+            derived = [
+                name
+                for name in plan.api_env
+                if name not in os.environ
+                and settings.configuration_source(name.removeprefix("FLEET_").lower()) != "explicit"
+            ]
+            if backend == "databricks" and settings.mlflow_tracking_uri == "databricks":
+                derived.extend(name for name in ("DATABRICKS_HOST", "DATABRICKS_TOKEN") if name not in os.environ)
+            plan.api_env.update(
+                FLEET_SETUP_TOKEN=setup_token,
+                FLEET_SETUP_PROJECT_DIR=str(Path.cwd()),
+                FLEET_SETUP_DERIVED_ENV=json.dumps(derived),
+            )
         _CONSOLE.print(f"MLflow: {target.mode} | {target.tracking_uri} | {target.experiment_name}", markup=False)
         with launcher.running_services(
             plan,
@@ -431,11 +509,83 @@ def main(argv: list[str] | None = None) -> None:
             log=lambda message: _CONSOLE.print(f"[dim]{message}[/dim]"),
         ):
             launcher.verify_api_destination(plan.api_url, settings.mlflow_descriptor())
-            run_interactive_cli(base_url=plan.api_url, session_id=session_id, settings=settings)
+            while True:
+                result = run_interactive_cli(
+                    base_url=plan.api_url,
+                    session_id=session_id,
+                    settings=settings,
+                    setup_token=setup_token if plan.start_api else "",
+                )
+                if result != "setup":
+                    break
+                import httpx
+
+                from fleet_rlm.tui.setup import run_setup
+
+                with httpx.Client(
+                    base_url=plan.api_url,
+                    headers={"Authorization": f"Bearer {setup_token}"},
+                    timeout=httpx.Timeout(300, connect=10),
+                ) as setup_client:
+                    if run_setup(setup_client, automatic=False, console=_CONSOLE):
+                        result = "restart"
+                        break
+        if result == "restart":
+            get_settings.cache_clear()
+            # Re-enter with the same Session; the service context has drained and stopped owned processes.
+            main(
+                [
+                    "cli",
+                    "--session",
+                    session_id,
+                    "--mlflow",
+                    backend,
+                    "--startup-timeout",
+                    str(getattr(args, "startup_timeout", 180.0)),
+                    *(["--mlflow-port", str(args.mlflow_port)] if getattr(args, "mlflow_port", None) else []),
+                    *(
+                        ["--mlflow-experiment", args.mlflow_experiment]
+                        if getattr(args, "mlflow_experiment", None)
+                        else []
+                    ),
+                ]
+            )
     except KeyboardInterrupt:
         raise SystemExit(130) from None
     except launcher.LaunchError as exc:
         _CONSOLE.print(f"[bold red]Could not start services:[/bold red] {exc}")
+        raise SystemExit(1) from None
+
+
+def _onboard(args: argparse.Namespace, backend: str, token: str) -> bool:
+    """Drive setup through the private FastAPI app, including when full settings are invalid."""
+    import httpx
+
+    from fleet_rlm.tui.setup import run_setup
+
+    overrides = {}
+    if getattr(args, "mlflow_port", None) is not None:
+        overrides["FLEET_MLFLOW_LOCAL_PORT"] = str(args.mlflow_port)
+    if getattr(args, "mlflow_experiment", None):
+        overrides[f"FLEET_MLFLOW_{backend.upper()}_EXPERIMENT_NAME"] = args.mlflow_experiment
+    try:
+        with (
+            launcher.running_setup(
+                backend=backend,
+                token=token,
+                startup_timeout=getattr(args, "startup_timeout", 180.0),
+                log=lambda text: _CONSOLE.print(text, markup=False),
+                overrides=overrides,
+            ) as url,
+            httpx.Client(
+                base_url=url, headers={"Authorization": f"Bearer {token}"}, timeout=httpx.Timeout(300, connect=10)
+            ) as client,
+        ):
+            return run_setup(client, console=_CONSOLE)
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    except (launcher.LaunchError, httpx.HTTPError) as exc:
+        _CONSOLE.print(f"Could not complete setup ({type(exc).__name__}). See .fleet/logs/setup.log.")
         raise SystemExit(1) from None
 
 

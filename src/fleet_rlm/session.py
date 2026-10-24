@@ -43,6 +43,7 @@ class SessionRuntime:
     lease: psycopg.Connection | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
+    restart_requested: threading.Event = field(default_factory=threading.Event, repr=False)
     _lease_monitor_stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _lease_monitor: threading.Thread | None = field(default=None, repr=False)
     _lease_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -164,11 +165,23 @@ class SessionRuntimeRegistry:
         self._lock = threading.Lock()
         # Serializes first use, eviction, and lease-loss recovery. The fast path only takes `_lock`.
         self._rebuild_lock = threading.RLock()
+        self._restart_requested = threading.Event()
+
+    def request_restart(self) -> bool:
+        """Fence all runtime admission, reopening it if existing work prevents restart."""
+        with self._lock:
+            self._restart_requested.set()
+            if any(runtime.turn_lock.locked() for runtime in self._sessions.values()):
+                self._restart_requested.clear()
+                return False
+            return True
 
     def get(self, session_id: str) -> SessionRuntime:
         """Return the Session's runtime, rebuilding it after a lost ownership lease."""
         session_id = validate_session_id(session_id)
         with self._lock:
+            if self._restart_requested.is_set():
+                raise RuntimeError("Fleet is restarting after setup")
             runtime = self._sessions.get(session_id)
             if runtime is not None and not runtime.lease_lost.is_set():
                 return runtime
@@ -245,6 +258,7 @@ class SessionRuntimeRegistry:
         )
         harness = VolumePostgresHarness(store, sandbox_mgr)
         runtime = SessionRuntime(
+            restart_requested=self._restart_requested,
             sandbox_mgr=sandbox_mgr,
             harness=harness,
             skill_mgr=SkillManager(sandbox_mgr, Path(settings.local_skills_dir)),

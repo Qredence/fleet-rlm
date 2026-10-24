@@ -6,11 +6,16 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
+from pathlib import Path
+from typing import Literal
 
 import mlflow
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
-from fleet_rlm.api.routes import sessions, turns, workspace
+from fleet_rlm.api.routes import sessions, setup, turns, workspace
 from fleet_rlm.api.schemas import Health
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.launcher import mlflow_is_healthy
@@ -27,12 +32,24 @@ def create_app(
     initialize_db: bool = True,
     configure_observability: bool = True,
     store: Store | None = None,
+    setup_mode: bool = False,
+    setup_token: str = "",
+    project_dir: Path | None = None,
+    setup_backend: Literal["local", "databricks"] = "local",
 ) -> FastAPI:
     """Build the API. External resources are acquired by the lifespan, not at construction."""
-    resolved = settings or get_settings()
+    resolved = None if setup_mode else settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
+        if setup_mode:
+            try:
+                yield
+            finally:
+                if application.state.setup_service is not None:
+                    application.state.setup_service.close()
+            return
+        assert resolved is not None
         # The pool opens in the background so a cold Lakebase connect does not block startup.
         application.state.turn_executor = turns.create_turn_executor()
         application.state.store = store or (
@@ -71,16 +88,39 @@ def create_app(
                         # uvicorn re-raises SIGTERM after graceful stop, skipping MLflow's exit-time flush.
                         with suppress(Exception):
                             await asyncio.to_thread(mlflow.flush_trace_async_logging)
+                    if application.state.setup_service is not None:
+                        application.state.setup_service.close()
 
     app = FastAPI(title="Fleet-RLM Lite API", version=VERSION, lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        """Do not echo setup credential input in validation error responses."""
+        if request.url.path.startswith("/setup/"):
+            return JSONResponse(
+                status_code=422, content={"detail": "Invalid setup request; check the submitted fields."}
+            )
+        return await request_validation_exception_handler(request, exc)
+
     app.state.settings = resolved
     app.state.store = store
     app.state.session_registry = None
     app.state.turn_executor = None
     app.state.mlflow_experiment_id = None
+    app.state.setup_token = setup_token
+    app.state.setup_applying = False
+    app.state.setup_service = None
+    if setup_token:
+        from fleet_rlm.setup.service import SetupService
+
+        app.state.setup_service = SetupService(project_dir or Path.cwd(), setup_backend)
+    app.include_router(setup.router)
 
     @app.get("/health", response_model=Health, tags=["health"])
     def health() -> dict:
+        if setup_mode:
+            return {"status": "setup", "version": VERSION, "mlflow": None}
+        assert resolved is not None
         return {
             "status": "ok",
             "version": VERSION,
@@ -92,11 +132,15 @@ def create_app(
         }
 
     for router in (
-        sessions.router,
-        workspace.router,
-        sessions.memory_router,
-        sessions.skills_router,
-        turns.router,
+        ()
+        if setup_mode
+        else (
+            sessions.router,
+            workspace.router,
+            sessions.memory_router,
+            sessions.skills_router,
+            turns.router,
+        )
     ):
         app.include_router(router)
     return app

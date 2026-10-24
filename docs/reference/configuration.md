@@ -201,7 +201,7 @@ search, environment interpolation or hot reload. Every file must declare
 The configuration digest includes the selected backend and both profiles.
 Existing GEPA approval evidence with a different identity requires reevaluation.
 Removing the former snapshot setting (`[daytona] snapshot` and its environment
-override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots.py`
+override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots/definition.py`
 and cannot be selected through the environment or TOML) intentionally changes
 `configuration()`'s digest. Treat that as an intentional configuration identity
 break: prior digests identify a different configuration, so dependent GEPA approval
@@ -226,7 +226,9 @@ identifiers are not credentials and may be configured in `[daytona]`.
 `/config` retains its existing mode/models/context/limits and adds `configuration`:
 safe effective values, source per field, schema, SHA256 digest, and restart
 requirement. Session mode/model overrides have source `session`. File edits affect
-the next process startup; a general TUI configuration editor is not implemented.
+the next process startup. The CLI-owned `/setup` checklist can edit supported
+`.env` overrides and explicitly restart owned services. Ordinary serving
+configuration remains frozen.
 
 ## Generation options and value audit
 
