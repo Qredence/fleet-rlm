@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any, cast
 
 from daytona import CreateSnapshotParams, Daytona, DaytonaConfig
 
@@ -108,13 +110,38 @@ def activate_snapshot(
     except SnapshotUnavailableError as exc:
         if exc.state != "inactive":
             raise
-    client.snapshot.activate(name)
     deadline = time.monotonic() + timeout_seconds
+    # Daytona 0.224.0's public activate() omits the generated client's request timeout.
+    snapshots_api = cast(Any, client.snapshot)._SnapshotService__snapshots_api
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SnapshotUnavailableError(
+            "Activation is not confirmed; verify provider state before retrying.", state="pending"
+        ) from None
+    snapshot = snapshots_api.get_snapshot(name, _request_timeout=remaining)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SnapshotUnavailableError(
+            "Activation is not confirmed; verify provider state before retrying.", state="pending"
+        ) from None
+    snapshots_api.activate_snapshot(snapshot.id, _request_timeout=remaining)
+
+    def get_snapshot_with_timeout(snapshot_name: str) -> Any:
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            raise TimeoutError("Snapshot activation readiness deadline expired")
+        return snapshots_api.get_snapshot(snapshot_name, _request_timeout=remaining_seconds)
+
+    timed_snapshot_service = SimpleNamespace(get=get_snapshot_with_timeout)
     while True:
         try:
-            return preflight(client.snapshot, name=name, api_key=key, org_id=organization, refresh=True)
+            return preflight(timed_snapshot_service, name=name, api_key=key, org_id=organization, refresh=True)
         except SnapshotUnavailableError as exc:
             if exc.state not in {"inactive", "pending", "building", "pulling", "snapshotting", "activating"}:
+                if exc.state == "lookup_failed" and time.monotonic() >= deadline:
+                    raise SnapshotUnavailableError(
+                        "Activation is not confirmed; verify provider state before retrying.", state="pending"
+                    ) from None
                 raise
             if time.monotonic() >= deadline:
                 raise SnapshotUnavailableError(

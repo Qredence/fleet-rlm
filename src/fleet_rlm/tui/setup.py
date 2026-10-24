@@ -437,7 +437,10 @@ def run_setup(client: httpx.Client, *, automatic: bool = True, console: Console 
         action = request(client, "POST", "/setup/verify", json={"request_id": uuid.uuid4().hex})
         operation_events(client, action["operation_id"], lambda _event: None)
         status = request(client, "GET", "/setup/status")
-        if status["ready"] and all(c["status"] != "warning" for c in status["checks"].values()):
+        if status["ready"]:
+            for section, check in status["checks"].items():
+                if check["status"] == "warning":
+                    output.print(f"{section}: {check['message']}", markup=False)
             request(client, "POST", "/setup/apply")
             return True
     output.print("Fleet setup needs attention. Run `fleet cli` in an interactive terminal.")

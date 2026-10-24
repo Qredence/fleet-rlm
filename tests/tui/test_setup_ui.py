@@ -109,6 +109,20 @@ def test_noninteractive_setup_reports_blockers_without_consuming_stdin(setup_cli
     assert "Snapshot missing" in stream.getvalue()
 
 
+def test_noninteractive_setup_applies_when_only_model_discovery_warns(setup_client, monkeypatch):
+    monkeypatch.setattr(
+        SetupService,
+        "check_models",
+        lambda _self, _settings: {"status": "warning", "message": "Model discovery is unavailable."},
+    )
+    monkeypatch.setattr("fleet_rlm.tui.setup.sys.stdin", SimpleNamespace(isatty=lambda: False))
+    stream = io.StringIO()
+
+    assert run_setup(setup_client, console=Console(file=stream, force_terminal=False))
+    assert "models: Model discovery is unavailable." in stream.getvalue()
+    assert setup_client.app.state.setup_applying
+
+
 @pytest.mark.asyncio
 async def test_small_terminal_controls_and_keyboard_build_action(setup_client, monkeypatch):
     monkeypatch.setattr(

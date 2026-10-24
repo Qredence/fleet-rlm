@@ -33,22 +33,34 @@ def test_lookup_failure_does_not_turn_into_snapshot_creation(monkeypatch):
 def test_activation_runs_once_then_verifies_provider_identity(monkeypatch):
     state = ["inactive"]
     calls = []
+    timeouts = []
 
-    def activate(name):
-        calls.append(name)
+    def get_snapshot(name, *, _request_timeout):
+        timeouts.append(_request_timeout)
+        return SimpleNamespace(name=name, id="provider-id", state=state[0], cpu=4, mem=8, disk=8)
+
+    def activate(snapshot_id, *, _request_timeout):
+        calls.append(snapshot_id)
+        timeouts.append(_request_timeout)
         state[0] = "active"
+        return SimpleNamespace(name=SNAPSHOT_NAME, id=snapshot_id, state=state[0], cpu=4, mem=8, disk=8)
 
     service = SimpleNamespace(
         get=lambda name: SimpleNamespace(name=name, id="provider-id", state=state[0], cpu=4, mem=8, disk=8),
-        activate=activate,
+        _SnapshotService__snapshots_api=SimpleNamespace(
+            get_snapshot=get_snapshot,
+            activate_snapshot=activate,
+        ),
     )
     monkeypatch.setattr(operations, "Daytona", lambda _config: SimpleNamespace(snapshot=service))
     identity = operations.activate_snapshot(api_key="key", org_id="org")
-    assert calls == [SNAPSHOT_NAME]
+    assert calls == ["provider-id"]
+    assert len(timeouts) == 3
+    assert timeouts[0] > timeouts[1] > timeouts[2] > 0
     assert identity.id == "provider-id"
     # A second explicit activation only verifies the already active snapshot.
     assert operations.activate_snapshot(api_key="key", org_id="org").id == "provider-id"
-    assert calls == [SNAPSHOT_NAME]
+    assert calls == ["provider-id"]
 
 
 def test_activation_does_not_create_a_missing_snapshot(monkeypatch):

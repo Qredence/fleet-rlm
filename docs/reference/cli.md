@@ -61,7 +61,7 @@ actions and the optional root-model inference test show a confirmation before
 starting. Long operations stream progress through FastAPI; reconnecting reads the
 existing operation rather than starting it again.
 
-**Start / Apply and Restart** shuts down the bootstrap app and starts the normal
+**Start / Restart** shuts down the bootstrap app and starts the normal
 API/MLflow services. Normal startup applies Fleet's existing additive migrations
 and initializes tracking destinations. The checklist does not provision PostgreSQL.
 Use `/setup` from chat between Turns to edit settings and request a controlled
