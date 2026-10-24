@@ -116,20 +116,20 @@ def create_app(
         app.state.setup_service = SetupService(project_dir or Path.cwd(), setup_backend)
     app.include_router(setup.router)
 
-    @app.get("/health", response_model=Health, tags=["health"])
-    def health() -> dict:
+    @app.get("/health", tags=["health"])
+    def health() -> Health:
         if setup_mode:
-            return {"status": "setup", "version": VERSION, "mlflow": None}
+            return Health(status="setup", version=VERSION, mlflow=None)
         assert resolved is not None
-        return {
-            "status": "ok",
-            "version": VERSION,
-            "mlflow": {
+        return Health(
+            status="ok",
+            version=VERSION,
+            mlflow={
                 **resolved.mlflow_descriptor(),
                 "experiment_id": app.state.mlflow_experiment_id,
                 "ready": app.state.mlflow_experiment_id is not None,
             },
-        }
+        )
 
     for router in (
         ()

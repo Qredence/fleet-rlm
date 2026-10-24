@@ -732,8 +732,10 @@ paths:
         required: false
         schema:
           type: string
+          description: Runtime scope tag for model discovery
           default: system.ai
           title: Scope
+        description: Runtime scope tag for model discovery
       responses:
         '200':
           description: Successful Response
@@ -1043,13 +1045,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /sessions/{session_id}/workspace/tree:
+  /sessions/{session_id}/files:
     get:
       tags:
       - workspace
       summary: List Files
       description: List a Session's workspace files and the artifacts among them.
-      operationId: list_files_sessions__session_id__workspace_tree_get
+      operationId: list_files_sessions__session_id__files_get
       parameters:
       - name: session_id
         in: path
@@ -1072,13 +1074,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /sessions/{session_id}/files:
+  /sessions/{session_id}/workspace/tree:
     get:
       tags:
       - workspace
-      summary: List Files
-      description: List a Session's workspace files and the artifacts among them.
-      operationId: list_files_sessions__session_id__files_get
+      summary: List Workspace Tree
+      description: List a Session's workspace files and the artifacts among them (workspace/tree alias).
+      operationId: list_workspace_tree_sessions__session_id__workspace_tree_get
       parameters:
       - name: session_id
         in: path
@@ -1307,8 +1309,10 @@ paths:
         required: false
         schema:
           type: string
+          description: Optional search query to filter memories
           default: ''
           title: Q
+        description: Optional search query to filter memories
       responses:
         '200':
           description: Successful Response

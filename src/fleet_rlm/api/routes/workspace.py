@@ -22,24 +22,38 @@ router = APIRouter(tags=["workspace"])
 _MAX_FILE_BYTES = 25_000_000
 
 
-@router.get("/sessions/{session_id}/files", response_model=Files, responses=LOCKED)
-@router.get("/sessions/{session_id}/workspace/tree", response_model=Files, responses=LOCKED)
-def list_files(session_id: str, runtime: Runtime) -> dict:
-    """List a Session's workspace files and the artifacts among them."""
+async def _list_files(session_id: str, runtime: Runtime) -> Files:
+    """Shared implementation for the workspace file listing routes."""
     with translate("Session workspace is unavailable"), session_lock(runtime):
         files = runtime.sandbox_mgr.list_workspace_files()
-    return {"session_id": session_id, "files": files, "artifacts": [p for p in files if p.startswith("artifacts/")]}
+    return Files(
+        session_id=session_id,
+        files=files,
+        artifacts=[p for p in files if p.startswith("artifacts/")],
+    )
 
 
-@router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", response_model=FileStat, responses=LOCKED)
-def workspace_stat(rel_path: str, runtime: Runtime) -> dict:
+@router.get("/sessions/{session_id}/files", response_model=Files, responses=LOCKED)
+async def list_files(session_id: str, runtime: Runtime) -> Files:
+    """List a Session's workspace files and the artifacts among them."""
+    return await _list_files(session_id, runtime)
+
+
+@router.get("/sessions/{session_id}/workspace/tree", response_model=Files, responses=LOCKED)
+async def list_workspace_tree(session_id: str, runtime: Runtime) -> Files:
+    """List a Session's workspace files and the artifacts among them (workspace/tree alias)."""
+    return await _list_files(session_id, runtime)
+
+
+@router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", responses=LOCKED)
+def workspace_stat(rel_path: str, runtime: Runtime) -> FileStat:
     """Return the size and SHA-256 digest of one workspace file."""
     with (
         translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404),
         session_lock(runtime),
     ):
         metadata = runtime.sandbox_mgr.stat_workspace_file(rel_path)
-    return {"path": rel_path, "size_bytes": metadata["size_bytes"], "sha256": metadata["sha256"]}
+    return FileStat(path=rel_path, size_bytes=metadata["size_bytes"], sha256=metadata["sha256"])
 
 
 @router.get("/sessions/{session_id}/workspace/files/{rel_path:path}", response_class=FileResponse, responses=LOCKED)
@@ -66,8 +80,8 @@ def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
     )
 
 
-@router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=FileWritten, responses=LOCKED)
-def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> dict:
+@router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", responses=LOCKED)
+def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> FileWritten:
     """Write one workspace file from text or base64 content, capped at 25 MB.
 
     Supplying both or neither of the content fields returns 422.
@@ -84,16 +98,16 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
             raise HTTPException(status_code=413, detail="Workspace file exceeds the 25 MB limit")
         with session_lock(runtime):
             mounted_path = runtime.sandbox_mgr.write_workspace_file(rel_path, content)
-    return {
-        "path": rel_path,
-        "mounted_path": mounted_path,
-        "size_bytes": len(content),
-        "sha256": hashlib.sha256(content).hexdigest(),
-    }
+    return FileWritten(
+        path=rel_path,
+        mounted_path=mounted_path,
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
 
 
-@router.delete("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=Deleted, responses=LOCKED)
-def delete_workspace_file(rel_path: str, runtime: Runtime) -> dict:
+@router.delete("/sessions/{session_id}/workspace/files/{rel_path:path}", responses=LOCKED)
+def delete_workspace_file(rel_path: str, runtime: Runtime) -> Deleted:
     """Delete one workspace file.
 
     Failures return 404.
@@ -101,11 +115,11 @@ def delete_workspace_file(rel_path: str, runtime: Runtime) -> dict:
     unavailable = "Workspace file could not be deleted"
     with translate(unavailable, invalid="Invalid workspace path", status=404), session_lock(runtime):
         runtime.sandbox_mgr.delete_workspace_file(rel_path)
-    return {"deleted": rel_path}
+    return Deleted(deleted=rel_path)
 
 
-@router.post("/sessions/{session_id}/attach", response_model=Attached, responses=LOCKED)
-def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> dict:
+@router.post("/sessions/{session_id}/attach", responses=LOCKED)
+def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> Attached:
     """Store an uploaded attachment under files/ in the workspace.
 
     Uploads stream to disk and return 413 above the size limit.
@@ -131,6 +145,6 @@ def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile
             finally:
                 with suppress(FileNotFoundError):
                     os.unlink(temporary)
-        return {"mounted_path": mounted_path, "rel_path": relative_path}
+        return Attached(mounted_path=mounted_path, rel_path=relative_path)
     finally:
         file.file.close()

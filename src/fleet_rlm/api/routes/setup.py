@@ -144,10 +144,10 @@ class ApplyResult(BaseModel):
     restart_required: bool
 
 
-@router.get("/status", response_model=SetupStatus)
-def status(service: Operator) -> dict[str, Any]:
+@router.get("/status")
+def status(service: Operator) -> SetupStatus:
     """Return current readiness without triggering provider checks."""
-    return service.status()
+    return SetupStatus.model_validate(service.status())
 
 
 def _edit_error(exc: Exception) -> HTTPException:
@@ -158,78 +158,80 @@ def _edit_error(exc: Exception) -> HTTPException:
     )
 
 
-@router.patch("/config", response_model=SetupStatus)
-def edit_config(body: ConfigEdit, service: Operator) -> dict[str, Any]:
+@router.patch("/config")
+def edit_config(body: ConfigEdit, service: Operator) -> SetupStatus:
     """Stage candidate edits without persisting them."""
     try:
-        return service.stage({name: value.get_secret_value() for name, value in body.values.items()})
+        return SetupStatus.model_validate(
+            service.stage({name: value.get_secret_value() for name, value in body.values.items()})
+        )
     except ValueError as exc:
         raise _edit_error(exc) from None
 
 
-@router.post("/save", response_model=SetupStatus)
-def save(service: Operator) -> dict[str, Any]:
+@router.post("/save")
+def save(service: Operator) -> SetupStatus:
     """Explicitly persist validated edits to the launch project dotenv file."""
     try:
-        return service.save()
+        return SetupStatus.model_validate(service.save())
     except (ValueError, OSError) as exc:
         raise _edit_error(exc) from None
 
 
-@router.delete("/config", response_model=SetupStatus)
-def discard_config(service: Operator) -> dict[str, Any]:
+@router.delete("/config")
+def discard_config(service: Operator) -> SetupStatus:
     """Discard unsaved edits without changing the saved dotenv file."""
     try:
-        return service.discard()
+        return SetupStatus.model_validate(service.discard())
     except SetupConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
-def _start(service: SetupService, action: str, body: Action, run: Any) -> dict[str, str]:
+def _start(service: SetupService, action: str, body: Action, run: Any) -> OperationStarted:
     try:
         operation = service.start(action, body.request_id, run)
     except SetupConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    return {"operation_id": operation.id}
+    return OperationStarted(operation_id=operation.id)
 
 
-@router.post("/verify", response_model=OperationStarted)
-def verify(body: VerifyRequest, service: Operator) -> dict[str, str]:
+@router.post("/verify")
+def verify(body: VerifyRequest, service: Operator) -> OperationStarted:
     """Start read-only checks for all required service sections."""
     return _start(service, "verify", body, lambda operation: service.verify(operation, tuple(body.sections)))
 
 
-@router.get("/daytona/volumes", response_model=list[VolumeInfo])
-def volumes(service: Operator) -> list[dict[str, str]]:
+@router.get("/daytona/volumes")
+def volumes(service: Operator) -> list[VolumeInfo]:
     """List workspace Volumes using server credentials."""
     try:
-        return service.volumes()
+        return [VolumeInfo.model_validate(v) for v in service.volumes()]
     except Exception:
         raise HTTPException(
             status_code=503, detail="Could not list Volumes; check Daytona configuration and access."
         ) from None
 
 
-@router.post("/daytona/volumes", response_model=OperationStarted)
-def create_volume(body: CreateVolume, service: Operator) -> dict[str, str]:
+@router.post("/daytona/volumes")
+def create_volume(body: CreateVolume, service: Operator) -> OperationStarted:
     """Start explicit creation of a persistent provider Volume."""
     return _start(service, "create_volume", body, lambda _operation: service.create_volume(body.name))
 
 
-@router.post("/daytona/snapshot/build", response_model=OperationStarted)
-def build(body: Action, service: Operator) -> dict[str, str]:
+@router.post("/daytona/snapshot/build")
+def build(body: Action, service: Operator) -> OperationStarted:
     """Start explicit snapshot construction from the packaged recipe."""
     return _start(service, "build_snapshot", body, service.build)
 
 
-@router.post("/daytona/snapshot/activate", response_model=OperationStarted)
-def activate(body: Action, service: Operator) -> dict[str, str]:
+@router.post("/daytona/snapshot/activate")
+def activate(body: Action, service: Operator) -> OperationStarted:
     """Activate an existing provider snapshot without rebuilding it."""
     return _start(service, "activate_snapshot", body, service.activate)
 
 
-@router.post("/models/test", response_model=OperationStarted)
-def model_test(body: Action, service: Operator) -> dict[str, str]:
+@router.post("/models/test")
+def model_test(body: Action, service: Operator) -> OperationStarted:
     """Start an optional small, potentially billed model request."""
     return _start(service, "model_test", body, service.test_model)
 
@@ -264,8 +266,8 @@ async def operation_events(
         await asyncio.sleep(0.15)
 
 
-@router.post("/apply", response_model=ApplyResult)
-async def apply(request: Request, service: Operator) -> dict[str, bool]:
+@router.post("/apply")
+def apply(request: Request, service: Operator) -> ApplyResult:
     """Fence new Turns and request a restart only when existing work is idle."""
     try:
         service.can_apply()
@@ -280,4 +282,4 @@ async def apply(request: Request, service: Operator) -> dict[str, bool]:
         raise HTTPException(
             status_code=409, detail="A Turn or workspace operation is running; apply setup when it finishes."
         )
-    return {"restart_required": True}
+    return ApplyResult(restart_required=True)
