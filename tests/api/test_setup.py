@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import stat
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.session import SessionRuntimeRegistry
 from fleet_rlm.setup.service import SECTIONS, Operation, SetupConflictError, SetupService
 
 TOKEN = "local-test-operator-token"
@@ -217,6 +219,63 @@ def test_verify_apply_and_restart_fence_are_consistent(tmp_path, monkeypatch):
             client.patch("/setup/config", json={"values": {"DATABRICKS_HOST": "https://new.test"}}).status_code == 409
         )
         assert client.post("/setup/verify", json={"request_id": "after-apply"}).status_code == 409
+
+
+def test_concurrent_apply_cannot_undo_an_accepted_restart(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ready_checks(monkeypatch)
+    client, app = client_for(tmp_path)
+    rejected, release, second_started, second_admitted = (threading.Event() for _ in range(4))
+    runtime = SimpleNamespace(turn_lock=threading.Lock())
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), None)
+    registry._sessions["session-a"] = runtime
+    request_restart = registry.request_restart
+
+    def pause_rejected_restart():
+        result = request_restart()
+        if not result:
+            rejected.set()
+            assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(registry, "request_restart", pause_rejected_restart)
+    with client, ThreadPoolExecutor(max_workers=2) as pool:
+        finish(client, client.post("/setup/verify", json={"request_id": "ready"}))
+        app.state.session_registry = registry
+        can_apply = app.state.setup_service.can_apply
+        calls = []
+
+        def track_admission():
+            calls.append(1)
+            if len(calls) == 2:
+                second_admitted.set()
+            can_apply()
+
+        monkeypatch.setattr(app.state.setup_service, "can_apply", track_admission)
+        runtime.turn_lock.acquire()
+        first = pool.submit(client.post, "/setup/apply")
+        try:
+            assert rejected.wait(5)
+        finally:
+            runtime.turn_lock.release()
+
+        def retry():
+            second_started.set()
+            return client.post("/setup/apply")
+
+        try:
+            second = pool.submit(retry)
+            assert second_started.wait(5)
+            # The rejected attempt still owns cleanup, so the retry must wait.
+            assert not second_admitted.wait(0.2)
+        finally:
+            release.set()
+        assert first.result(timeout=5).status_code == 409
+        assert second.result(timeout=5).json() == {"restart_required": True}
+        assert second_admitted.is_set()
+        assert app.state.setup_applying
+        assert client.get("/setup/status").json()["restart_required"]
+        assert registry._restart_requested.is_set()
 
 
 def test_operation_reconnect_and_duplicate_request_do_not_repeat_mutation(tmp_path, monkeypatch):

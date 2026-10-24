@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
@@ -109,6 +110,7 @@ def create_app(
     app.state.mlflow_experiment_id = None
     app.state.setup_token = setup_token
     app.state.setup_applying = False
+    app.state.setup_apply_lock = threading.Lock()
     app.state.setup_service = None
     if setup_token:
         from fleet_rlm.setup.service import SetupService
@@ -116,20 +118,25 @@ def create_app(
         app.state.setup_service = SetupService(project_dir or Path.cwd(), setup_backend)
     app.include_router(setup.router)
 
-    @app.get("/health", response_model=Health, tags=["health"])
-    def health() -> dict:
+    @app.get("/health", tags=["health"])
+    def health() -> Health:
+        """Return the API version and setup status or MLflow configuration.
+
+        MLflow readiness reflects whether an experiment ID was initialized.
+        Databricks workspace identity errors propagate as ValueError.
+        """
         if setup_mode:
-            return {"status": "setup", "version": VERSION, "mlflow": None}
+            return Health(status="setup", version=VERSION, mlflow=None)
         assert resolved is not None
-        return {
-            "status": "ok",
-            "version": VERSION,
-            "mlflow": {
+        return Health(
+            status="ok",
+            version=VERSION,
+            mlflow={
                 **resolved.mlflow_descriptor(),
                 "experiment_id": app.state.mlflow_experiment_id,
                 "ready": app.state.mlflow_experiment_id is not None,
             },
-        }
+        )
 
     for router in (
         ()

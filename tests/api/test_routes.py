@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,6 +40,34 @@ def test_health_reports_the_package_version():
         assert (health["status"], health["version"]) == ("ok", "0.8.1")
         assert health["mlflow"]["mode"] == "local"
         assert health["mlflow"]["ready"] is False
+
+
+@pytest.mark.parametrize("path", ["files", "workspace/tree"])
+def test_workspace_listing_keeps_other_requests_responsive(path):
+    entered, release = threading.Event(), threading.Event()
+
+    def list_files():
+        entered.set()
+        assert release.wait(5)
+        return ["artifacts/report.txt"]
+
+    runtime = runtime_with(sandbox_mgr=FakeManager(list_workspace_files=list_files))
+    client, _ = client_for(runtime)
+    with client, ThreadPoolExecutor(max_workers=2) as pool:
+        listing = pool.submit(client.get, f"/sessions/session-a/{path}")
+        try:
+            assert entered.wait(5)
+            health = pool.submit(client.get, "/health")
+            assert health.result(timeout=2).status_code == 200
+        finally:
+            release.set()
+        response = listing.result(timeout=5)
+        assert response.status_code == 200
+        assert response.json() == {
+            "session_id": "session-a",
+            "files": ["artifacts/report.txt"],
+            "artifacts": ["artifacts/report.txt"],
+        }
 
 
 def test_context_selection_and_workspace_stat_use_remote_metadata_without_downloading():
