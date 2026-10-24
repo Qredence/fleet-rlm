@@ -603,9 +603,136 @@ def test_score_split_scores_failed_rollouts_as_zero_errors() -> None:
         dspy.Example(task="ok", critical=True).with_inputs("task"),
         dspy.Example(task="boom", critical=False).with_inputs("task"),
     ]
-    result = workflow.score_split(Program(), examples, lambda _gold, pred, *_: float(pred.answer == "ok"), 1)
+    result = workflow.score_split(
+        Program(), examples, lambda _gold, pred, *_: float(pred.answer == "ok"), 1, workflow.ErrorLimit(share=0.5)
+    )
     assert (result.mean, result.errors, result.scores) == (0.5, 1, [1.0, 0.0])
     assert result.critical_scores == [1.0]
+
+
+class _Rollouts(dspy.Module):
+    """Answers every task, except that the listed tasks raise like a lost sandbox."""
+
+    def __init__(self, failing: set[str]):
+        super().__init__()
+        self.failing = failing
+        self.calls = 0
+
+    def forward(self, task):
+        self.calls += 1
+        if task in self.failing:
+            raise RuntimeError("sandbox died")
+        return dspy.Prediction(answer=task)
+
+
+def _tasks(count: int) -> list[dspy.Example]:
+    return [dspy.Example(task=f"t{index}").with_inputs("task") for index in range(count)]
+
+
+@pytest.mark.parametrize(
+    ("limit", "examples", "allowed"),
+    [
+        (workflow.ErrorLimit(), 3, 1),  # 20% of 3 floors to 0, but a positive share allows one
+        (workflow.ErrorLimit(), 10, 2),
+        (workflow.ErrorLimit(share=0.0), 10, 0),
+        (workflow.ErrorLimit(cap=0), 10, 0),
+        (workflow.ErrorLimit(share=0.5, cap=3), 10, 3),
+        (workflow.ErrorLimit(), 1, 0),  # never every example: a 1-example split that fails still aborts
+        (workflow.ErrorLimit(share=1.0), 4, 3),
+    ],
+)
+def test_error_limit_allows_at_least_one_error_for_any_positive_share(limit, examples, allowed) -> None:
+    assert limit.allowed(examples) == allowed
+
+
+def test_a_one_example_split_that_fails_aborts() -> None:
+    with pytest.raises(workflow.EvaluationAbortedError):
+        workflow.score_split(_Rollouts({"t0"}), _tasks(1), lambda *_: 1.0, 1)
+
+
+def test_a_single_flaky_rollout_does_not_abort_a_small_split() -> None:
+    result = workflow.score_split(_Rollouts({"t1"}), _tasks(3), lambda *_: 1.0, 1)
+    assert result.errors == 1 and result.scores.count(0.0) == 1
+
+
+def test_score_split_stops_early_and_raises_when_every_rollout_fails() -> None:
+    examples = _tasks(10)
+    program = _Rollouts({example.task for example in examples})
+
+    with pytest.raises(workflow.EvaluationAbortedError, match="3 failed rollouts out of 10"):
+        workflow.score_split(program, examples, lambda *_: 1.0, 1)
+
+    # The default limit allows 20% (2 of 10); the third failure cancels the remaining rollouts.
+    assert program.calls == 3
+
+
+def test_score_split_with_errors_within_the_limit_still_scores_and_counts_them() -> None:
+    examples = _tasks(10)
+    program = _Rollouts({"t3", "t7"})
+    failing_metric_task = "t5"
+
+    def metric(gold, _pred, *_):
+        if gold.task == failing_metric_task:
+            raise ValueError("judge unavailable")
+        return 1.0
+
+    result = workflow.score_split(program, examples, metric, 2, workflow.ErrorLimit(share=0.3))
+
+    # Errors are counted where they were raised (two rollouts and one metric call), not inferred from outputs.
+    assert result.errors == 3
+    assert result.scores.count(0.0) == 3 and result.mean == pytest.approx(0.7)
+    with pytest.raises(workflow.EvaluationAbortedError):
+        workflow.score_split(_Rollouts({"t3", "t7"}), examples, lambda *_: 1.0, 1, workflow.ErrorLimit(cap=1))
+
+
+def _compile_args() -> SimpleNamespace:
+    return SimpleNamespace(
+        validation_ratio=0.35,
+        max_metric_calls=4,
+        gepa_budget="light",
+        threads=1,
+        max_eval_error_share=0.2,
+        max_eval_errors=None,
+    )
+
+
+def test_an_aborted_validation_split_never_reaches_the_promotion_gate(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    lm = dspy.LM("openai/test", cache=False)
+    monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (lm, lm, lm, None))
+    monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
+    train, dev, holdout = [_tasks(5) for _ in range(3)]
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
+    monkeypatch.setattr(workflow, "DaytonaSandboxManager", lambda *_args, **_kw: None)
+    monkeypatch.setattr(
+        workflow, "AdaptiveFleetEngine", lambda *_args, **_kw: SimpleNamespace(compiled=SimpleNamespace(digest="d"))
+    )
+    monkeypatch.setattr(workflow, "build_isolated_engine_factory", lambda *_args: None)
+    # Every validation rollout fails, as when the sandbox provider is down.
+    monkeypatch.setattr(workflow, "IsolatedFleetProgram", lambda *_args: _Rollouts({e.task for e in dev + holdout}))
+
+    class Optimizer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def compile(self, baseline, **_kwargs):
+            return SimpleNamespace(program=baseline)
+
+    gated = []
+    monkeypatch.setattr(workflow.dspy, "GEPA", Optimizer)
+    monkeypatch.setattr(workflow, "promotion_gate", lambda evaluation: gated.append(evaluation))
+    monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kw: nullcontext())
+    monkeypatch.setattr(workflow.mlflow, "set_tags", lambda *_args, **_kw: None)
+    store = SimpleNamespace(runtime_settings=lambda _session: {})
+    args = _compile_args()
+
+    with pytest.raises(workflow.EvaluationAbortedError):
+        workflow._compile(args, settings, store, "s1", settings.mlflow_target())
+
+    assert gated == []
+    assert not (tmp_path / "candidates").exists()
 
 
 def _manifest(path: Path, version: str, evaluation: dict) -> ArtifactManifest:
@@ -810,7 +937,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(monke
     monkeypatch.setattr(workflow.dspy, "GEPA", Optimizer)
     measured = []
 
-    def score(program, actual_dev, actual_holdout, _metric, _threads):
+    def score(program, actual_dev, actual_holdout, _metric, _threads, _limit):
         assert searched and actual_dev is dev and actual_holdout is holdout
         changed = "optimized source" in program.program.flex_agent.module_src
         measured.append(changed)
@@ -820,7 +947,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(monke
     monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kw: nullcontext())
     for name in ("set_tags", "log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
         monkeypatch.setattr(workflow.mlflow, name, lambda *_args, **_kw: None)
-    args = SimpleNamespace(validation_ratio=0.35, max_metric_calls=4, gepa_budget="light", threads=1)
+    args = _compile_args()
     workflow._compile(args, settings, store, "s1", settings.mlflow_target())
     assert measured == [False, True, True, False, False, True]
     assert all(config.fleet_root_model == "openai/deployed-root" for config in factories)

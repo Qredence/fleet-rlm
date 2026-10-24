@@ -148,6 +148,12 @@ each Turn and by `/trace`.
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
 `--validation-ratio`, and `--approve VERSION`. Reflection calls and the three paired
 final validation passes are additional work, not covered by the search budget.
+`--max-eval-error-share` (default `0.2`) and an optional `--max-eval-errors N` cap set how many
+validation rollouts in a split may fail (raise in the program or the metric) and still be scored. Any
+share above 0 allows at least one failure, so a tiny split survives one flaky call, but never every
+rollout, so a split that fails completely always stops. Past
+that limit the evaluation stops early and the run fails with no candidate saved and no gate verdict,
+instead of reporting a near-zero score.
 
 ## Interactive tasks, settings, and model selection
 
