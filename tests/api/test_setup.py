@@ -329,7 +329,12 @@ def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environmen
     from fleet_rlm.store import db
 
     observed = []
-    monkeypatch.setattr(databricks.sdk, "WorkspaceClient", lambda **kw: observed.append(kw["config"]) or object())
+
+    def workspace_client(**kwargs):
+        observed.append(kwargs["config"])
+        return object()
+
+    monkeypatch.setattr(databricks.sdk, "WorkspaceClient", workspace_client)
     # Config's normal constructor probes workspace metadata and retries on network failure.
     # This test checks candidate credentials are wired through, not SDK discovery behavior.
     monkeypatch.setattr(databricks.sdk.core, "Config", lambda **kw: SimpleNamespace(**kw))

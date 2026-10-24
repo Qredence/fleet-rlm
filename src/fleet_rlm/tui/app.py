@@ -1518,3 +1518,4 @@ def run_interactive_cli(
                 CONSOLE.print(
                     "[yellow]Turn stream closed; server cancels on disconnect. Check /history for outcome.[/yellow]"
                 )
+    return None
