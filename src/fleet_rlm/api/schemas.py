@@ -119,7 +119,7 @@ class Health(BaseModel):
 
     status: str
     version: str
-    mlflow: MlflowHealth
+    mlflow: MlflowHealth | None
 
 
 class SessionSummary(BaseModel):

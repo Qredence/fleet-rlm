@@ -229,6 +229,7 @@ def test_a_failed_api_start_still_stops_mlflow(monkeypatch: pytest.MonkeyPatch) 
 
 def _stub_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {}
+    monkeypatch.setattr(cli, "_onboard", lambda *_args: True)
     monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)
 
     class Services:
@@ -296,6 +297,7 @@ def test_fleet_cli_reports_a_startup_failure_and_exits_nonzero(monkeypatch: pyte
         def __exit__(self, *_exc: Any) -> None:
             return None
 
+    monkeypatch.setattr(cli, "_onboard", lambda *_args: True)
     monkeypatch.setattr(cli.launcher, "running_services", Failing)
     monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
     monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: False)
@@ -303,3 +305,25 @@ def test_fleet_cli_reports_a_startup_failure_and_exits_nonzero(monkeypatch: pyte
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["cli"])
     assert exit_info.value.code == 1
+
+
+def test_setup_restart_preserves_session_and_explicit_startup_timeout(monkeypatch):
+    _stub_cli(monkeypatch)
+    services = launcher.running_services
+    timeouts, sessions = [], []
+    results = iter(["setup", None])
+
+    def start(plan, **kwargs):
+        timeouts.append(kwargs["startup_timeout"])
+        return services(plan, **kwargs)
+
+    def run(**kwargs):
+        sessions.append(kwargs["session_id"])
+        return next(results)
+
+    monkeypatch.setattr(launcher, "running_services", start)
+    monkeypatch.setattr(cli, "run_interactive_cli", run)
+    monkeypatch.setattr("fleet_rlm.tui.setup.run_setup", lambda *_args, **_kw: True)
+    cli.main(["cli", "--session", "same-session", "--startup-timeout", "360"])
+    assert sessions == ["same-session", "same-session"]
+    assert timeouts == [360.0, 360.0]

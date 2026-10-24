@@ -6,6 +6,7 @@ import atexit
 import contextlib
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -231,6 +232,55 @@ def _mlflow_process(mlflow_port: int, data_dir: str) -> ManagedProcess:
         ],
         STATE_DIR / "logs" / "mlflow.log",
     )
+
+
+@contextlib.contextmanager
+def running_setup(
+    *,
+    backend: str,
+    token: str,
+    startup_timeout: float,
+    log: Callable[[str], None],
+    overrides: dict[str, str] | None = None,
+) -> Generator[str, None, None]:
+    """Run the same FastAPI app on a private loopback port before runtime prerequisites exist."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    url = f"http://127.0.0.1:{port}"
+    process = ManagedProcess(
+        "Setup API",
+        [
+            sys.executable,
+            "-m",
+            "fleet_rlm.cli",
+            "serve",
+            "--setup",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--mlflow",
+            backend,
+        ],
+        STATE_DIR / "logs" / "setup.log",
+        env={"FLEET_SETUP_TOKEN": token, "FLEET_SETUP_PROJECT_DIR": str(Path.cwd()), **(overrides or {})},
+    )
+
+    def ready() -> bool:
+        try:
+            response = httpx.get(url + "/health", timeout=1.5)
+            return response.status_code == 200 and response.json().get("status") == "setup"
+        except (httpx.HTTPError, ValueError):
+            return False
+
+    try:
+        log("Checking Fleet setup…")
+        process.start()
+        process.wait_ready(ready, startup_timeout)
+        yield url
+    finally:
+        process.stop()
 
 
 @contextlib.contextmanager

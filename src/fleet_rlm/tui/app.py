@@ -612,7 +612,7 @@ class _TurnWidget(Vertical):
         self._footer_static.update(footer)
 
 
-class FleetTextualApp(App[None]):
+class FleetTextualApp(App[str | None]):
     """Full-screen Textual chat TUI with bottom-docked composer, status pills, and collapsible REPL steps."""
 
     CSS: ClassVar[str] = """
@@ -927,6 +927,7 @@ class FleetTextualApp(App[None]):
         """Update the bottom status pills and shortcut bar."""
         if not self.is_running:
             return
+
         self.query_one("#status-left", Static).update(self._render_status_left())
         self.query_one("#status-right", Static).update(self._render_status_right())
         self.query_one("#shortcut-bar", Static).update(self._render_shortcut_bar())
@@ -1230,6 +1231,10 @@ class FleetTextualApp(App[None]):
             )
             return
 
+        if user_input.strip() == "/setup" and self.state.setup_available:
+            self.exit("setup")
+            return
+
         self._mount_to_chat(_UserPromptCard(user_input))
 
         if user_input.startswith("/"):
@@ -1453,16 +1458,20 @@ class FleetTextualApp(App[None]):
         threading.Thread(target=worker, name="fleet-textual-turn", daemon=True).start()
 
 
-def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettings | None = None) -> None:
+def run_interactive_cli(
+    base_url: str, session_id: str, *, settings: FleetSettings | None = None, setup_token: str = ""
+) -> str | None:
     """Connect to the API and run the Textual full-screen chat TUI (or non-TTY fallback) until exit."""
     validate_session_id(session_id)
-    state = SessionState(mlflow_settings=settings)
+    state = SessionState(mlflow_settings=settings, setup_available=bool(setup_token))
     # FastAPI's SSE routing emits a `: ping` keepalive every 15 seconds while the Turn
     # generator is idle, so the 300-second read timeout is only a safety net.
-    with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
+    with httpx.Client(
+        base_url=base_url,
+        timeout=httpx.Timeout(300.0, connect=10.0),
+    ) as client:
         if sys.stdin.isatty() and CONSOLE.is_terminal:
-            FleetTextualApp(client, session_id, state).run()
-            return
+            return FleetTextualApp(client, session_id, state).run()
 
         CONSOLE.print(
             Panel.fit(
@@ -1481,6 +1490,8 @@ def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettin
                 break
             if not user_input:
                 continue
+            if user_input == "/setup" and state.setup_available:
+                return "setup"
             if user_input.startswith("/"):
                 if not handle_command(client, user_input, session_id, state=state):
                     break

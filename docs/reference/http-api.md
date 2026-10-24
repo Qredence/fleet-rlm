@@ -97,9 +97,17 @@ numeric `prompt_tokens`, `completion_tokens`, `total_tokens`, and, when the prov
 includes the recorded `trace_id`. A Turn that provisioned its sandbox also reports
 the preflight-resolved environment identity as `snapshot_name`, `snapshot_id`,
 `snapshot_cpu`, `snapshot_mem`, `snapshot_disk`, and `snapshot_definition_digest`.
-The same six fields appear on the `fleet_turn` trace span, in the stored Turn
+When Daytona returns build metadata, `snapshot_build_digest` records a hash of
+the provider-reported image reference, build context hashes, and Dockerfile
+content. This is observed provider evidence, not a claim that an arbitrary
+custom snapshot matches Fleet's recipe. Custom snapshot names have a null
+`snapshot_definition_digest`; only the repository-owned name receives Fleet's
+intended recipe digest.
+The identity fields appear on the `fleet_turn` trace span, in the stored Turn
 record, and in the result returned by `GET /sessions/{session_id}/turns/{turn_id}`;
-they are read from the provider DTO, never re-derived. The same `turn_id` from the
+snapshot name, ID, and resource values come from the provider DTO. The definition
+digest comes from Fleet's versioned definition; provider build metadata is hashed
+separately. The same `turn_id` from the
 terminal envelope joins the stored `fleet_lite_turns` primary key, the status response,
 and the `fleet_turn` span, and those surfaces also agree on `route`, `outcome` (or
 `answer`), `deadline_source`, `effective_seconds` (an explicit `null` when the Turn was
@@ -108,9 +116,10 @@ with a monotonic clock; MLflow derives its span duration from timestamps taken j
 outside that measurement, so the two agree within two seconds. A Turn or replay row
 with incomplete snapshot fields and no `deadline_source` remains readable as
 `provenance_state: "pre-provenance"`, without backfilling absent values. A newer Turn with `deadline_source` but
-incomplete snapshot fields reports `provenance_state: "unresolved"`, for example
+incomplete required snapshot fields reports `provenance_state: "unresolved"`, for example
 when snapshot preflight refused the Turn. All six snapshot fields must be present
-for `provenance_state: "recorded"`.
+for `provenance_state: "recorded"`; the optional provider build digest is
+present only when Daytona returns build metadata.
 The identity is recorded the
 moment preflight resolves it, so a failure in a later preparation step (for example an
 oversized replay payload) still reports the same six fields on the span, in the stored
@@ -118,7 +127,24 @@ failure, and in the `error` event. A Turn that fails before preflight resolves r
 no snapshot fields. A Turn that executed against a root sandbox also reports the live
 provider handle id as `root_sandbox_id` on the completion or failure event, on the
 `fleet_turn` span, in the stored Turn record, and in the Turn status result. It is
-omitted when the Turn never provisioned a sandbox. A completed Turn keeps its warm
+omitted when the Turn never provisioned a sandbox.
+
+The default Python 3.13 snapshot includes hash-locked packages for common data,
+plotting, Excel/PDF, HTTP/HTML, and Python coding tasks. Git, Node.js/npm, pnpm,
+TypeScript, ripgrep, and jq are available as commands. Bundled Skills prepare
+specialist document, scientific/ML, and DSPy/GEPA dependencies only when needed,
+using isolated uv environments outside the workspace. Optional packages do not
+change the recorded base snapshot identity. The interpreter reports installed
+modules and available commands as observations. See
+[sandbox environment](sandbox-environment.md) for the package list, dependency
+isolation, and staged snapshot verification.
+
+Fleet's guarded workspace helper and Python file APIs provide sandbox file
+access. Git CLI operations run inside the sandbox. The snapshot does not grant
+private repository credentials or enable MarkItDown's cloud integrations;
+package installation alone does not configure those services.
+
+A completed Turn keeps its warm
 root for the next Turn and reports the same id; after a failed or cancelled Turn the
 stopped root is discarded, so the next Turn provisions a new sandbox with a new id and
 does not recover the terminal Turn's interpreter state. Failures produce a sanitized `error` event
@@ -214,3 +240,52 @@ synced as user Skills.
 `GET /sessions/{session_id}/files` returns `files` and an `artifacts` subset;
 it does not download file contents. The workspace is session-scoped and
 persisted on the Session's Daytona Volume.
+
+## Private local setup API
+
+Setup is enabled only for a CLI-owned loopback server with a private per-launch
+bearer token. Every setup route requires this token and a loopback connection.
+Ordinary `fleet serve`, existing API reuse, and remote `--url` clients do not gain
+setup privileges. Disabled setup returns 404; missing/invalid credentials return
+401 and non-loopback callers return 403. Setup does not add authentication to the
+ordinary Session API.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/setup/status` | Sanitized fields/sources, readiness results, operation availability. |
+| `PATCH` | `/setup/config` | Stage supported edits with `{"values":{"ENV_NAME":"value"}}`; never echo secret input. |
+| `DELETE` | `/setup/config` | Discard unsaved edits and reload configuration. |
+| `POST` | `/setup/save` | Validate and atomically save staged edits to the fixed project `.env`. |
+| `POST` | `/setup/verify` | Run read-only checks of Models, Database, MLflow, and Daytona. |
+| `GET` | `/setup/daytona/volumes` | List safe Volume identities for the configured organization. |
+| `POST` | `/setup/daytona/volumes` | Explicitly create a named workspace Volume. |
+| `POST` | `/setup/daytona/snapshot/build` | Build the versioned packaged recipe; refuse an existing snapshot name. |
+| `POST` | `/setup/daytona/snapshot/activate` | Explicitly activate and verify an existing snapshot. |
+| `POST` | `/setup/models/test` | Make one optional, potentially billed root-model request. |
+| `GET` | `/setup/operations/{operation_id}/events?after=0` | Replay retained progress and stream SSE until `complete` or `error`. |
+| `POST` | `/setup/apply` | Require saved/verified settings, fence new Turns, and request a launcher restart. |
+
+Background actions take a `request_id`; Volume creation also takes `name`.
+Verification accepts optional `sections` (`models`, `database`, `mlflow`,
+`daytona`), defaulting to all sections. Results from other sections are reused
+only for the same effective configuration. They
+return `operation_id`. Reusing a request ID for the same action returns the
+existing operation; another active operation returns 409. Events have `seq`,
+`event`, and a bounded redacted `message`, with a safe result on completion.
+Provider failures are sanitized. Disconnect does not cancel remote work or start
+it again. A process exit can leave an unknown provider outcome: recheck the
+snapshot/Volume before issuing another mutation. Progress retention is bounded
+and process-local; completed operation IDs are not durable job identifiers.
+
+Configuration edits are drafts until Save. Only supported fields are accepted;
+process environment overrides are read-only. File conflicts and running operations
+return 409. Save preserves unrelated dotenv entries and restricts file permissions.
+`apply` returns `{"restart_required":true}`; the owning CLI performs the restart.
+It returns 409 while any Turn or workspace operation is active. Once accepted,
+apply is idempotent: status reports `restart_required=true`, and repeating apply
+recovers the same restart request without repeating provider work.
+
+Setup-mode `/health` returns `status="setup"` and `mlflow=null`; it must not be
+reused as a ready reasoning API. Setup mode exposes no Session routes and opens no
+database or tracking resources. After the controlled restart, normal startup
+initializes the schema and tracing destination under the existing lifecycle.

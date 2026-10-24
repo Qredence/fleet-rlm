@@ -68,6 +68,7 @@ def test_cli_selects_databricks_and_propagates_the_profile(monkeypatch, argument
     from contextlib import nullcontext
 
     seen = {}
+    monkeypatch.setattr(cli, "_onboard", lambda *_args: True)
     monkeypatch.setenv("DATABRICKS_HOST", "https://workspace.invalid")
     monkeypatch.setattr(launcher, "api_is_healthy", lambda _url: False)
     monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)

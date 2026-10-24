@@ -56,15 +56,19 @@ def _turn_executor(request: Request) -> ThreadPoolExecutor:
         return _fallback_executor
 
 
-async def hold_turn_lock(runtime: Runtime) -> AsyncIterator[None]:
+async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[None]:
     """Hold the Session's lock for the whole streamed response, or raise 409 like the other routes.
 
     A request-scoped dependency: it is released after the stream has finished and the Turn has
     drained, and also when the request fails before the stream starts.
     """
+    if getattr(request.app.state, "setup_applying", False):
+        raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
     if not await _acquire(runtime):
         raise HTTPException(status_code=409, detail="A Turn is running on this Session; retry when it completes")
     try:
+        if getattr(request.app.state, "setup_applying", False):
+            raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
         yield
     finally:
         runtime.turn_lock.release()
