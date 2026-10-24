@@ -33,7 +33,7 @@ classifiers = [
 dependencies = [
     # GEPA Flex helpers are imported from DSPy's internal namespace; verify before adopting 3.5+.
     "dspy[typesafe]>=3.4.1,<3.5",
-    "daytona==0.224.0",
+    "daytona==0.225.0",
     "mlflow==3.17.2",
     "databricks-sdk>=0.153.0,<1",
     "psycopg[binary]>=3.3.6,<4",
