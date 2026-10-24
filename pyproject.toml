@@ -129,6 +129,7 @@ override-dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fleet_rlm"]
+force-include = { "src/fleet_rlm/sandbox/snapshots/snapshot-requirements.txt" = "fleet_rlm/sandbox/snapshots/snapshot-requirements.txt" }
 
 # Ship only what builds and tests the package; agent, editor, and CI config stay out.
 # Hatch always adds pyproject.toml, the readme, and the license files.

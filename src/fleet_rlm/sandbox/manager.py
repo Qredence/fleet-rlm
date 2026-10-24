@@ -75,18 +75,43 @@ _DIGESTS_CODE = (
 )
 # Probed rather than configured: the Turn snapshot and its package set are repository-owned
 # (fleet_rlm.sandbox.snapshots); only optional packages can be absent at runtime.
-_ENVIRONMENT_MODULES = ("numpy", "pandas", "scipy", "mpmath", "sympy", "gmpy2", "polars", "pyarrow", "sklearn")
+_ENVIRONMENT_MODULES = (
+    ("numpy", "numpy"),
+    ("pandas", "pandas"),
+    ("scipy", "scipy"),
+    ("mpmath", "mpmath"),
+    ("sympy", "sympy"),
+    ("gmpy2", "gmpy2"),
+    ("polars", "polars"),
+    ("pyarrow", "pyarrow"),
+    ("sklearn", "scikit-learn"),
+    ("openpyxl", "openpyxl"),
+    ("matplotlib", "matplotlib"),
+    ("PIL", "pillow"),
+    ("pypdf", "pypdf"),
+    ("requests", "requests"),
+    ("bs4", "beautifulsoup4"),
+    ("pdfplumber", "pdfplumber"),
+    ("reportlab", "reportlab"),
+    ("docx", "python-docx"),
+    ("pptx", "python-pptx"),
+    ("markitdown", "markitdown"),
+    ("dspy", "dspy"),
+    ("gepa", "gepa"),
+)
 _ENVIRONMENT_CODE = (
-    "import importlib.metadata,importlib.util,platform,sys\n"
+    "import importlib.metadata,importlib.util,platform,shutil,sys\n"
     "found=[]\n"
-    f"for module in {_ENVIRONMENT_MODULES!r}:\n"
+    f"for module,distribution in {_ENVIRONMENT_MODULES!r}:\n"
     " if importlib.util.find_spec(module) is None: continue\n"
-    " try: found.append(module+' '+importlib.metadata.version('scikit-learn' if module=='sklearn' else module))\n"
+    " try: found.append(module+' '+importlib.metadata.version(distribution))\n"
     " except importlib.metadata.PackageNotFoundError: found.append(module)\n"
     "names=[item.split()[0] for item in found]\n"
-    f"missing=[module for module in {_ENVIRONMENT_MODULES!r} if module not in names]\n"
+    f"missing=[module for module,_ in {_ENVIRONMENT_MODULES!r} if module not in names]\n"
     "environment='Sandbox environment: Python '+platform.python_version()+'; installed: '+(', '.join(found) or 'none')"
     "+'; not installed: '+(', '.join(missing) or 'none')"
+    "+'; coding tools: '+(', '.join(name for name in "
+    "('git','node','npm','pnpm','tsc','uv','pytest','ruff','rg','jq') if shutil.which(name)) or 'none')"
     "+('; call sys.set_int_max_str_digits(0) before converting integers over 4300 digits to str'"
     " if hasattr(sys,'set_int_max_str_digits') else '')+'.'\n"
 )

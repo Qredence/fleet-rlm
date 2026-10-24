@@ -392,6 +392,7 @@ def test_snapshot_provenance_matches_across_span_turn_record_and_replay(traced) 
         "snapshot_mem": 8,
         "snapshot_disk": 8,
         "snapshot_definition_digest": "a" * 64,
+        "snapshot_build_digest": "c" * 64,
     }
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
@@ -931,7 +932,10 @@ def test_snapshot_preflight_refusal_reaches_the_client_and_the_stored_failure(st
     assert observed in message
     assert f"cpu>={snapshot_module.CPU_FLOOR}" in message
     assert f"mem>={snapshot_module.MEMORY_FLOOR}" in message
-    assert snapshot_module.BUILD_COMMAND in message
+    if state == "inactive":
+        assert "Activate snapshot" in message
+    else:
+        assert snapshot_module.BUILD_COMMAND in message
     # The stored failure carries the same bounded text, and no sandbox was provisioned.
     assert finished[0][1] == "failed"
     assert finished[0][2]["error"] == message

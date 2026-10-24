@@ -34,8 +34,10 @@ for result in results:
   `skills/`, or `artifacts/` (a previous Turn's report, for example). Every
   child also receives the Session's Skills under `skills/`; it sees nothing
   else from the parent.
-- A failed child returns `{findings: "", error, artifacts: []}`. Handle it and
-  retry or work around it; do not assume success.
+- `spawn_agents` returns an error result `{findings: "", error, artifacts: []}` for
+  ordinary child failures. Direct `spawn_agent` returns that shape for a reply
+  parsing failure; other ordinary errors may propagate to the caller. Handle
+  both cases and do not assume a child succeeded.
 
 ## Combining results
 
