@@ -23,7 +23,11 @@ _MAX_FILE_BYTES = 25_000_000
 
 
 def _list_files(session_id: str, runtime: Runtime) -> Files:
-    """Shared implementation for the workspace file listing routes."""
+    """Return workspace-relative file paths and the subset under artifacts/.
+
+    Return 409 when the Session lock is busy and 503 when the runtime or listing
+    is unavailable. Invalid input reported as ValueError becomes HTTP 422.
+    """
     with translate("Session workspace is unavailable"), session_lock(runtime):
         files = runtime.sandbox_mgr.list_workspace_files()
     return Files(
@@ -84,7 +88,10 @@ def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
 def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> FileWritten:
     """Write one workspace file from text or base64 content, capped at 25 MB.
 
-    Supplying both or neither of the content fields returns 422.
+    Text is encoded as UTF-8; the limit is 25,000,000 encoded or decoded bytes.
+    Supplying both or neither content field, invalid base64, or a malformed relative path
+    returns 422; exceeding the limit returns 413. A busy Session lock returns 409.
+    Return the relative and mounted paths, byte count, and SHA-256 digest.
     """
     with translate("Workspace write failed", invalid="Invalid workspace path or content"):
         if (body.content is None) == (body.content_base64 is None):
@@ -110,7 +117,8 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
 def delete_workspace_file(rel_path: str, runtime: Runtime) -> Deleted:
     """Delete one workspace file.
 
-    Failures return 404.
+    Malformed relative paths return 422, a busy Session lock returns 409, and other file
+    deletion failures return 404. Return the deleted relative path on success.
     """
     unavailable = "Workspace file could not be deleted"
     with translate(unavailable, invalid="Invalid workspace path", status=404), session_lock(runtime):
@@ -122,7 +130,10 @@ def delete_workspace_file(rel_path: str, runtime: Runtime) -> Deleted:
 def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> Attached:
     """Store an uploaded attachment under files/ in the workspace.
 
-    Uploads stream to disk and return 413 above the size limit.
+    Uploads stream to disk and return 413 above the smaller of max_upload_bytes
+    and 25,000,000 bytes. Return the workspace-relative and mounted paths using
+    the filename's final component. Invalid filenames return 422 and a busy
+    Session lock returns 409. The uploaded file is closed even on failure.
     """
     try:
         with translate("Attachment storage is unavailable"):

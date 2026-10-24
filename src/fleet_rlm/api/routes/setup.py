@@ -188,6 +188,12 @@ def discard_config(service: Operator) -> SetupStatus:
 
 
 def _start(service: SetupService, action: str, body: Action, run: Any) -> OperationStarted:
+    """Start a background action and return its operation ID.
+
+    Reuse a retained operation for the same request ID and action without running
+    it again. Conflicting requests raise HTTP 409; failures in ``run`` are
+    reported through operation events.
+    """
     try:
         operation = service.start(action, body.request_id, run)
     except SetupConflictError as exc:
@@ -197,7 +203,7 @@ def _start(service: SetupService, action: str, body: Action, run: Any) -> Operat
 
 @router.post("/verify")
 def verify(body: VerifyRequest, service: Operator) -> OperationStarted:
-    """Start read-only checks for all required service sections."""
+    """Start read-only checks for the requested sections, defaulting to all sections."""
     return _start(service, "verify", body, lambda operation: service.verify(operation, tuple(body.sections)))
 
 
@@ -268,7 +274,13 @@ async def operation_events(
 
 @router.post("/apply")
 def apply(request: Request, service: Operator) -> ApplyResult:
-    """Fence new Turns and request a restart only when existing work is idle."""
+    """Fence new Turns and request a restart only when existing work is idle.
+
+    Return restart_required=True on acceptance. Return 409 when setup is not
+    ready or a Turn or workspace operation is active, leaving that work running.
+    Concurrent attempts are serialized so a rejected request cannot reopen setup
+    after an accepted restart.
+    """
     # A rejected attempt must finish reopening setup before another attempt can succeed.
     with request.app.state.setup_apply_lock:
         try:

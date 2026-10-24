@@ -120,6 +120,11 @@ def create_app(
 
     @app.get("/health", tags=["health"])
     def health() -> Health:
+        """Return the API version and setup status or MLflow configuration.
+
+        MLflow readiness reflects whether an experiment ID was initialized.
+        Databricks workspace identity errors propagate as ValueError.
+        """
         if setup_mode:
             return Health(status="setup", version=VERSION, mlflow=None)
         assert resolved is not None
