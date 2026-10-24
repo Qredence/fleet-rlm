@@ -221,7 +221,7 @@ paths:
       tags:
       - setup
       summary: Verify
-      description: Start read-only checks for all required service sections.
+      description: Start read-only checks for the requested sections, defaulting to all sections.
       operationId: verify_setup_verify_post
       requestBody:
         content:
@@ -642,7 +642,16 @@ paths:
       tags:
       - setup
       summary: Apply
-      description: Fence new Turns and request a restart only when existing work is idle.
+      description: 'Fence new Turns and request a restart only when existing work is idle.
+
+
+        Return restart_required=True on acceptance. Return 409 when setup is not
+
+        ready or a Turn or workspace operation is active, leaving that work running.
+
+        Concurrent attempts are serialized so a rejected request cannot reopen setup
+
+        after an accepted restart.'
       operationId: apply_setup_apply_post
       responses:
         '200':
@@ -694,6 +703,12 @@ paths:
       tags:
       - health
       summary: Health
+      description: 'Return the API version and setup status or MLflow configuration.
+
+
+        MLflow readiness reflects whether an experiment ID was initialized.
+
+        Databricks workspace identity errors propagate as ValueError.'
       operationId: health_health_get
       responses:
         '200':
@@ -1179,7 +1194,13 @@ paths:
       description: 'Write one workspace file from text or base64 content, capped at 25 MB.
 
 
-        Supplying both or neither of the content fields returns 422.'
+        Text is encoded as UTF-8; the limit is 25,000,000 encoded or decoded bytes.
+
+        Supplying both or neither content field, invalid base64, or a malformed relative path
+
+        returns 422; exceeding the limit returns 413. A busy Session lock returns 409.
+
+        Return the relative and mounted paths, byte count, and SHA-256 digest.'
       operationId: write_workspace_file_sessions__session_id__workspace_files__rel_path__put
       parameters:
       - name: rel_path
@@ -1222,7 +1243,9 @@ paths:
       description: 'Delete one workspace file.
 
 
-        Failures return 404.'
+        Malformed relative paths return 422, a busy Session lock returns 409, and other file
+
+        deletion failures return 404. Return the deleted relative path on success.'
       operationId: delete_workspace_file_sessions__session_id__workspace_files__rel_path__delete
       parameters:
       - name: rel_path
@@ -1260,7 +1283,13 @@ paths:
       description: 'Store an uploaded attachment under files/ in the workspace.
 
 
-        Uploads stream to disk and return 413 above the size limit.'
+        Uploads stream to disk and return 413 above the smaller of max_upload_bytes
+
+        and 25,000,000 bytes. Return the workspace-relative and mounted paths using
+
+        the filename''s final component. Invalid filenames return 422 and a busy
+
+        Session lock returns 409. The uploaded file is closed even on failure.'
       operationId: attach_file_sessions__session_id__attach_post
       parameters:
       - name: session_id
