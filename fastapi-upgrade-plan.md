@@ -230,18 +230,18 @@ to a shared implementation function.
 1. Open [`src/fleet_rlm/api/routes/workspace.py`](src/fleet_rlm/api/routes/workspace.py).
 2. Extract the current `list_files` body into a private helper, e.g.:
    ```python
-   async def _list_files(rel_path: str, runtime: Runtime, settings: Settings) -> Files:
+   def _list_files(rel_path: str, runtime: Runtime, settings: Settings) -> Files:
        ...  # existing implementation
    ```
 3. Replace the stacked handler with two single-decorator functions:
    ```python
    @router.get("/")
-   async def list_files_root(runtime: Runtime, settings: Settings) -> Files:
-       return await _list_files("", runtime, settings)
+   def list_files_root(runtime: Runtime, settings: Settings) -> Files:
+       return _list_files("", runtime, settings)
 
    @router.get("/{rel_path:path}")
-   async def list_files_path(rel_path: str, runtime: Runtime, settings: Settings) -> Files:
-       return await _list_files(rel_path, runtime, settings)
+   def list_files_path(rel_path: str, runtime: Runtime, settings: Settings) -> Files:
+       return _list_files(rel_path, runtime, settings)
    ```
 4. Run `uv run pytest tests/api/ -v` and confirm both routes are exercised.
 5. Verify both paths appear in `openapi.json`:
