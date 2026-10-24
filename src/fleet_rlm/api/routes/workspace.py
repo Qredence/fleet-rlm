@@ -22,7 +22,7 @@ router = APIRouter(tags=["workspace"])
 _MAX_FILE_BYTES = 25_000_000
 
 
-async def _list_files(session_id: str, runtime: Runtime) -> Files:
+def _list_files(session_id: str, runtime: Runtime) -> Files:
     """Shared implementation for the workspace file listing routes."""
     with translate("Session workspace is unavailable"), session_lock(runtime):
         files = runtime.sandbox_mgr.list_workspace_files()
@@ -34,15 +34,15 @@ async def _list_files(session_id: str, runtime: Runtime) -> Files:
 
 
 @router.get("/sessions/{session_id}/files", response_model=Files, responses=LOCKED)
-async def list_files(session_id: str, runtime: Runtime) -> Files:
+def list_files(session_id: str, runtime: Runtime) -> Files:
     """List a Session's workspace files and the artifacts among them."""
-    return await _list_files(session_id, runtime)
+    return _list_files(session_id, runtime)
 
 
 @router.get("/sessions/{session_id}/workspace/tree", response_model=Files, responses=LOCKED)
-async def list_workspace_tree(session_id: str, runtime: Runtime) -> Files:
+def list_workspace_tree(session_id: str, runtime: Runtime) -> Files:
     """List a Session's workspace files and the artifacts among them (workspace/tree alias)."""
-    return await _list_files(session_id, runtime)
+    return _list_files(session_id, runtime)
 
 
 @router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", responses=LOCKED)

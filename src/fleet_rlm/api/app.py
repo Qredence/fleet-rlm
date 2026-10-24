@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
@@ -109,6 +110,7 @@ def create_app(
     app.state.mlflow_experiment_id = None
     app.state.setup_token = setup_token
     app.state.setup_applying = False
+    app.state.setup_apply_lock = threading.Lock()
     app.state.setup_service = None
     if setup_token:
         from fleet_rlm.setup.service import SetupService

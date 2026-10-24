@@ -269,17 +269,19 @@ async def operation_events(
 @router.post("/apply")
 def apply(request: Request, service: Operator) -> ApplyResult:
     """Fence new Turns and request a restart only when existing work is idle."""
-    try:
-        service.can_apply()
-    except SetupConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
-    # Fence new admission before checking active locks. Existing Turns are never cancelled here.
-    request.app.state.setup_applying = True
-    registry = request.app.state.session_registry
-    if registry is not None and not registry.request_restart():
-        request.app.state.setup_applying = False
-        service.cancel_apply()
-        raise HTTPException(
-            status_code=409, detail="A Turn or workspace operation is running; apply setup when it finishes."
-        )
+    # A rejected attempt must finish reopening setup before another attempt can succeed.
+    with request.app.state.setup_apply_lock:
+        try:
+            service.can_apply()
+        except SetupConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        # Fence new admission before checking active locks. Existing Turns are never cancelled here.
+        request.app.state.setup_applying = True
+        registry = request.app.state.session_registry
+        if registry is not None and not registry.request_restart():
+            request.app.state.setup_applying = False
+            service.cancel_apply()
+            raise HTTPException(
+                status_code=409, detail="A Turn or workspace operation is running; apply setup when it finishes."
+            )
     return ApplyResult(restart_required=True)
