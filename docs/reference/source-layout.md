@@ -5,7 +5,11 @@ The active runtime is deliberately compact:
 ```text
 src/fleet_rlm/
 ├── config.py          # FleetSettings and model construction
-├── dspy_support.py    # Pinned DSPy adapter and typed routing compatibility
+├── contracts.py       # Route vocabulary, stopping rules, runtime input names, decision evidence
+├── adapters.py        # Fleet's DSPy ChatAdapter: raw-Python fence and one format re-ask
+├── metering.py        # The metered host-LM proxy (budget charge per completion)
+├── program_file.py    # Compiled-program loading: bounded, atomic, rolled back on failure
+├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
 ├── skills.py          # User Skill validation, sync, and catalog
 ├── sandbox/
 │   ├── manager.py     # Daytona root/child sandboxes, budgets, workspace files, learned notes
@@ -15,16 +19,17 @@ src/fleet_rlm/
 │   └── runtime/repl.py # Sandbox-side namespace, output capture, and bridge
 ├── workspace.py       # Session ID and workspace path validation, serializable dataset handles
 ├── engine/
-│   ├── signatures.py  # Route enum (direct / flex / rlm), every DSPy signature, the stopping rules
+│   ├── signatures.py  # Every DSPy signature GEPA tunes (route vocabulary lives in contracts)
 │   ├── programs.py    # The Turn program: route selection, then direct / Flex / RLM
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # spawn_agent, spawn_agents
 ├── store/
 │   └── db.py          # Store, numbered additive migrations, one pool, Turn commits
-├── optimize/
-│   ├── artifacts.py   # Isolated rollouts, manifests, promotion gate, approval, compiled-program loader
+├── optimize/          # Offline tooling: never imported by the API or the engine
+│   ├── objectives.py  # Pure scoring objectives: no MLflow, LM, or filesystem
+│   ├── artifacts.py   # Isolated rollouts, manifests, promotion gate, approval
 │   ├── dataset.py     # Reviewed examples from Postgres/MLflow, grouped splits
-│   ├── scorers.py     # MLflow scorers, judge suite, and the GEPA metric
+│   ├── scorers.py     # MLflow scorer sinks, judge suite, and the GEPA metric
 │   ├── gepa.py        # `fleet optimize`
 │   ├── evaluation.py  # Eval cases, gold labels, `fleet eval` runs
 │   └── benchmarks.py  # Synthetic long-context task generators
@@ -44,6 +49,11 @@ src/fleet_rlm/
 │   └── render.py      # Event rendering
 └── cli.py             # `fleet` entry point: serve, cli, optimize, eval
 ```
+
+The FastAPI app (`api/app.py`) is the primary application: a Turn enters through
+`api/routes/turns.py`, runs on a worker thread, and ends with one terminal outcome.
+`fleet optimize` and `fleet eval` are offline tooling, and importing
+`fleet_rlm.api.app` does not load `fleet_rlm.optimize`.
 
 The corresponding implementation areas are covered by `tests/`. Repository
 commands are defined in the root `Makefile`; CI runs the Lite quality targets

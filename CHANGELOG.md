@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- One scoring source: every pure objective now lives in `optimize/objectives.py`, and the
+  MLflow sinks and the GEPA metric derive their numbers from it. The GEPA metric reads the
+  documented `program_trace` argument and reports it as evidence; the scalar score is
+  unchanged, so the same predictions still score identically. `fleet-metric` moves to v9.
+- The routing-budget gauge is monotonic: a direct Turn is no longer scored `1.0` after
+  spending up to fifteen budget units, and the score no longer rises from `0.95` to `0.98`
+  at the bounded-route boundary. Trace assessments move to v7 and the approval policy to 6,
+  so earlier candidate evidence requires reevaluation.
+- `engine/` and `sandbox/` no longer import the offline optimizer. Route vocabulary,
+  stopping rules, runtime input names, and execution evidence moved to neutral modules
+  (`contracts`, `program_file`, `execution_evidence`), and `dspy_support` is replaced by
+  `adapters`, `metering`, and the neutral modules.
+- The FastAPI app is documented as the primary application; `fleet optimize` and
+  `fleet eval` are offline tooling. Importing `fleet_rlm.api.app` no longer loads the
+  optimizer.
+
+### Fixed
+
+- A Flex Turn now gets the Turn's RLM budgets instead of DSPy's defaults, applied to every
+  `dspy.RLM` construction in the module source, including GEPA-authored source.
+- A child agent failure is a value returned to the parent whether the child was spawned
+  alone or in a batch; delegation shape no longer changes whether an error is fatal.
+- Route-error redaction reads the credential from the LM's `kwargs` and proxy chain, so it
+  redacts on the production path instead of only for `TypeSafe` clients.
+- Live evaluation labels a multi-value case without a fabricated joined `expected_answer`,
+  and trace readback uses one reader per window instead of one thread per poll.
+- `optimization_code_digest` covers behavior-affecting modules only; documentation, API,
+  TUI, and Store edits no longer invalidate every candidate.
+
 ## [0.8.1] - 2026-10-23
 
 ### Added

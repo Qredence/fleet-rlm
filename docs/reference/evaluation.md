@@ -69,7 +69,7 @@ traces without sending another Turn.
   a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
   lineage, status, outcome, code, stdout, stderr, and return values (including
   `SUBMIT` payloads), with bounded redaction. These assessments use
-  `fleet-trace-assessments-v6`. It does not ask the judge to
+  `fleet-trace-assessments-v7`. It does not ask the judge to
   reconstruct evidence from a serialized full trace. Execution rationales cite
   real sandbox span IDs; malformed results, placeholder rationales, or unknown
   citations are scorer errors. The evidence summary includes at most eight
@@ -91,8 +91,8 @@ traces without sending another Turn.
   and final answer, up to 20,000 characters each. It does not replace the middle
   of either field with a preview. Missing, empty, oversized, or already truncated
   evidence produces a scorer error before any judge call. Diagnostic version
-  `fleet-trace-assessments-v6` invalidates comparisons with earlier partial-text
-  judgments; the shared `fleet-metric-v8` and GEPA objectives are unchanged.
+  `fleet-trace-assessments-v7` invalidates comparisons with earlier partial-text
+  judgments; the shared `fleet-metric-v9` and GEPA objectives are unchanged.
 - `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
   actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
   cover `use_skill`, `read_skill_reference`, `run_skill_script`, and `save_skill`,
@@ -106,7 +106,11 @@ traces without sending another Turn.
   host-recorded `fleet_turn` output. Nested predictor/model spans and tracebacks
   are not counted as additional calls or failures.
 - `jev_routing_efficiency`: rewards fast paths without RLM/Flex and bounded
-  RLM/Flex runs, using host-recorded budget units rather than wrapper spans.
+  RLM/Flex runs, using host-recorded budget units rather than wrapper spans. Both
+  route classes are monotonic in budget units: a direct Turn keeps `1.0` up to two
+  units and loses 0.02 per extra unit, and a Flex/RLM Turn keeps `0.95` up to fifteen
+  and loses the same 0.02 per extra unit, floored at 0.2. This is a routing gauge,
+  distinct from the GEPA efficiency term in `fleet_metric`.
 - `route_correctness`: compares the turn's reported `route` (`direct`, `flex`,
   `rlm`) with the `route` expectation on a labeled case. It returns no value
   when a case has no gold route.
@@ -117,15 +121,15 @@ Retrieval groundedness is applied only to traces containing a `RETRIEVER`
 span. Inapplicable custom scorers return `None`, which MLflow skips, instead of
 logging null feedback without an error. Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
-The GEPA objective uses `fleet-metric-v8`; changes to that metric invalidate
+The GEPA objective uses `fleet-metric-v9`; changes to that metric invalidate
 earlier metric feedback and candidate approval evidence. Candidate approval uses
-policy version 5; older evidence requires reevaluation.
+policy version 6; older evidence requires reevaluation.
 
-The v6 trace-assessment identity also invalidates comparisons with the earlier
+The v7 trace-assessment identity also invalidates comparisons with the earlier
 routing rubric; Jev route probabilities retain their full precision in assessment metadata.
 Trace diagnostic rubric changes use the independent
 `fleet.trace_scorer_version` plus MLflow scorer name/version metadata. They do not change
-`fleet-metric-v8` or GEPA candidate identity. The code-based Fleet suite is the
+`fleet-metric-v9` or GEPA candidate identity. The code-based Fleet suite is the
 source for Fleet-managed evaluations; historical and manually created MLflow
 assessments remain in the trace as audit history. Re-score a saved trace with
 `score_evaluation_traces` to add new assessments without executing its Turn,
@@ -185,9 +189,26 @@ max(0, 1 - 0.015 * max(0, lm_calls - 3)
 All three counters must be explicit nonnegative integers. Missing legacy rejection
 counts are unknown, not zero: efficiency is omitted, `usage_available` is zero,
 and no efficiency credit or promotion evidence is granted. Existing feedback and
-candidate evidence must be reevaluated under `fleet-metric-v8`; old traces remain
+candidate evidence must be reevaluated under `fleet-metric-v9`; old traces remain
 inspectable.
 Latency and token usage remain diagnostic rather than weighted objectives.
+
+### Metric feedback and JeV decisions
+
+`fleet_metric` consumes the documented GEPA metric arguments: `gold`, `pred`, `trace`,
+`pred_name`, `pred_trace`, and `program_trace` are positional, and the judge LM is
+keyword-only. When GEPA supplies `program_trace` — only while optimizing a `dspy.Flex`
+submodule — the feedback names the program's execution steps as bounded evidence. That
+evidence does not move the score: identical predictions score identically with or without it.
+
+TypeSafe/Jev serves decisions with a finite answer space that repeat, whose correctness can
+be labelled, and where probability evidence is useful: route selection, Skill relevance, and
+route suitability. Plans, generated code, summaries, Skill bodies, and explanations stay on
+generative predictors, and no `RLM` or `Flex` output carries a decision type. The route
+suitability judge keeps `Noul` at `JEV_ROUTE_THRESHOLD`. Calibrating the router's `Choice`
+weights with DSPy's `ReAnchor` is deferred until a candidate artifact can carry fitted fields
+into paired validation; installing calibrated fields after the gate would ship behavior the
+gate never measured.
 
 ### Trace regression boundary
 

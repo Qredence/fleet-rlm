@@ -20,13 +20,18 @@ flowchart LR
     Engine --> MLflow[MLflow traces / evaluation]
 ```
 
-- `cli.py` provides the `fleet` entry point.
+- FastAPI (`fleet_rlm.api.app`) is the primary application; `cli.py` provides the
+  `fleet` entry point, where `serve` starts the API and `optimize`/`eval` are offline tooling.
 - `launcher.py` owns the local API and optional local MLflow.
 - Textual/Rich clients submit requests and render events.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
 - `session.py` owns the runtime registry and Session leases.
-- `engine/turn.py` runs each Turn on a worker thread.
+- `engine/turn.py` runs each Turn on a worker thread; `sandbox_mgr.turn_scope()` is the one
+  place that decides whether a caller owns a Turn, so a program nested inside an API Turn
+  never resets its budget or tears it down.
 - Each runtime combines a Daytona manager, PostgreSQL harness, Skill manager, and DSPy engine.
+- The runtime does not import the offline optimizer: shared route, input, and evidence
+  contracts live in neutral modules (`contracts`, `program_file`, `execution_evidence`).
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
@@ -120,6 +125,8 @@ Deadlines:
 - Routing errors or unknown labels fall back to RLM.
 - Selected datasets cannot use context-free direct answers.
 - RLM tunes instructions. Flex rewrites module source and initially wraps RLM when given tools.
+- Both execution routes carry the Turn's RLM budgets: the Flex source is rewritten so its
+  inner `dspy.RLM` gets the same iteration and call caps as the primary RLM.
 - Both RLM and Flex can delegate.
 - Optional Jev Skill selection preloads up to three instructions and consumes shared budget.
 - Ordinary Skill selection failures retain the catalog.
