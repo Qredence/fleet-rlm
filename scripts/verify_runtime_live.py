@@ -13,11 +13,12 @@ import json
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dspy
 import httpx
 import psycopg
-from daytona import Daytona, DaytonaConfig, ListSandboxesQuery
+from daytona import Daytona, DaytonaConfig, DaytonaNotFoundError, ListSandboxesQuery
 from dspy.primitives.facade import FacadeInvocation
 from fastapi.testclient import TestClient
 from psycopg import sql
@@ -134,6 +135,20 @@ def main() -> None:
         )
         with psycopg.connect(settings.fleet_database_migration_url) as connection:
             connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            # The migration role owns the schema, while the app connects as a different role. Without
+            # USAGE and default privileges the serving role cannot see the migrated tables at all
+            # (`UndefinedTable`), so grant them here, before `initialize` creates anything.
+            app_role = urlparse(settings.fleet_database_url).username
+            if app_role and app_role != urlparse(settings.fleet_database_migration_url).username:
+                connection.execute(
+                    sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(schema), sql.Identifier(app_role))
+                )
+                for object_type in ("TABLES", "SEQUENCES"):
+                    connection.execute(
+                        sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT ALL ON {} TO {}").format(
+                            sql.Identifier(schema), sql.SQL(object_type), sql.Identifier(app_role)
+                        )
+                    )
             schema_created = True
         app = create_app(settings=settings, configure_observability=args.trace)
         with TestClient(app) as client:
@@ -363,8 +378,12 @@ def main() -> None:
         if provider is not None:
             try:
                 for sandbox in provider.list(ListSandboxesQuery(labels={"fleet_session": session})):
-                    provider.delete(sandbox, wait=True, timeout=60)
-                    deleted.append(sandbox.id)
+                    try:
+                        provider.delete(sandbox, wait=True, timeout=60)
+                        deleted.append(sandbox.id)
+                    except DaytonaNotFoundError:
+                        # It expired between the listing and the delete: already cleaned up.
+                        continue
                 # Provider list indexes can briefly lag a confirmed delete.
                 deadline = time.monotonic() + 60
                 while True:
