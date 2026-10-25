@@ -20,8 +20,8 @@ from typing import Any
 
 import dspy
 import mlflow
-from dspy.teleprompt.gepa import InstructionProposer
 
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.observability import configure_mlflow_observability
@@ -232,6 +232,47 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
     return create
 
 
+# A proposed instruction replaces one predictor's instructions wholesale. FleetTask carries the
+# stopping rules (about 2.3k characters), so the bound leaves room for them plus Turn conventions.
+INSTRUCTION_MAX_CHARS = 4000
+_PROPOSER_GUIDANCE = (
+    "Write imperative instructions for one DSPy predictor inside Fleet's Turn program. "
+    "Keep every input and output field name unchanged, keep the keyword-only SUBMIT contract, "
+    "and do not restate the stopping rules you were given."
+)
+# Only what can change Turn behavior or scoring invalidates a candidate; docs, api, tui and store do not.
+DIGEST_SOURCES = (
+    "adapters.py",
+    "config.py",
+    "contracts.py",
+    "execution_evidence.py",
+    "lm_usage.py",
+    "metering.py",
+    "program_file.py",
+    "sandbox/interpreter.py",
+    "sandbox/manager.py",
+)
+
+
+def build_instruction_proposer() -> Any:
+    """GEPA's instruction proposer, bounded and running on Fleet's adapter.
+
+    The proposer writes every new instruction from the metric's per-component feedback, so its
+    prompt and output size are controlled here: ``max_chars`` bounds a proposed instruction and
+    ``truncate_history_outputs`` keeps ``dspy.History``/REPL payloads from filling the reflection
+    prompt. ``InstructionProposer`` is experimental in DSPy 3.4, so the import stays inside the
+    factory and an upgrade touches this function only.
+    """
+    from dspy.teleprompt.gepa import InstructionProposer
+
+    return InstructionProposer(
+        adapter=FleetRLMChatAdapter(use_json_adapter_fallback=False),
+        max_chars=INSTRUCTION_MAX_CHARS,
+        truncate_history_outputs=True,
+        additional_instructions=_PROPOSER_GUIDANCE,
+    )
+
+
 def tunable_components(program: dspy.Module) -> dict[str, str]:
     """What GEPA rewrites: each predictor's instructions and each ``dspy.Flex`` submodule's source."""
     from dspy.teleprompt.gepa.gepa_flex_utils import enumerate_flex_submodules
@@ -262,8 +303,14 @@ def dataset_digest(splits: dict[str, list[dspy.Example]]) -> str:
 def optimization_code_digest() -> str:
     """Hash the runtime/evaluation source that determines candidate behavior and scoring."""
     package = Path(__file__).parents[1]
-    sources = sorted(package.rglob("*.py"))
-    material = [(path.relative_to(package).as_posix(), digest_bytes(path.read_bytes())) for path in sources]
+    paths = {package / name for name in DIGEST_SOURCES}
+    paths |= set((package / "engine").rglob("*.py"))
+    paths |= set((package / "optimize").rglob("*.py"))
+    material = [
+        (path.relative_to(package).as_posix(), digest_bytes(path.read_bytes()))
+        for path in sorted(paths)
+        if path.is_file()
+    ]
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
 
@@ -432,8 +479,16 @@ def _compile(args: argparse.Namespace, settings: FleetSettings, store: Store, se
     factory = build_isolated_engine_factory(settings, store, [*trainset, *devset])
     baseline = IsolatedFleetProgram(template, factory)
 
-    def metric(gold: Any, pred: Any, trace: Any = None, pred_name: Any = None, pred_trace: Any = None) -> Any:
-        return fleet_metric(gold, pred, trace, pred_name, pred_trace, judge_lm=judge_lm)
+    def metric(
+        gold: Any,
+        pred: Any,
+        trace: Any = None,
+        pred_name: Any = None,
+        pred_trace: Any = None,
+        program_trace: Any = None,
+    ) -> Any:
+        # GEPA passes program_trace by keyword only because this signature declares it.
+        return fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge_lm)
 
     directory = Path(settings.compiled_program_dir)
     version = f"{session_id}-{uuid.uuid4().hex}"
@@ -443,7 +498,7 @@ def _compile(args: argparse.Namespace, settings: FleetSettings, store: Store, se
         optimized = dspy.GEPA(
             metric=metric,
             reflection_lm=reflection_lm,
-            instruction_proposer=InstructionProposer(adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)),
+            instruction_proposer=build_instruction_proposer(),
             num_threads=args.threads,
             track_stats=True,
             seed=0,

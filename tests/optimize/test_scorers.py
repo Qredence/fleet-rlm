@@ -973,3 +973,27 @@ def test_should_reject_a_stopping_verdict_with_an_unknown_execution_citation(mon
     judge = next(item for item in build_mlflow_scorer_suite("openai:/judge") if item.name == "stopping_discipline")
     with pytest.raises(ScorerEvidenceError, match="absent from the trace"):
         judge(trace=_pi_execution_trace())
+
+
+def test_metric_names_the_program_trace_without_changing_the_score():
+    from fleet_rlm.optimize.scorers import SCORER_VERSION
+
+    assert SCORER_VERSION == "fleet-metric-v9"
+    gold = dspy.Example(task="Convert 72F", answer="22.2", expected_values=["22.2"], route="flex")
+    pred = dspy.Prediction(answer="22.2", route="flex", lm_calls=4, sandbox_errors=0, submit_rejections=0)
+    program_trace = [("FlexModule", {"task": "Convert 72F"}, {"answer": "22.2"})]
+
+    with_trace = fleet_metric(gold, pred, program_trace=program_trace, judge_lm=_judge(True))
+    without_trace = fleet_metric(gold, pred, judge_lm=_judge(True))
+
+    # GEPA passes program_trace only while optimizing a Flex submodule; evidence must not move the score.
+    assert "Program trace: " in with_trace.feedback
+    assert "Program trace: " not in without_trace.feedback
+    assert with_trace.score == without_trace.score == pytest.approx(0.9 + 0.1 * 0.985)
+
+
+def test_metric_degrades_on_an_unexpected_program_trace_shape():
+    gold = dspy.Example(task="t", answer="a", expected_values=["a"], route="rlm")
+    pred = dspy.Prediction(answer="a", route="rlm", lm_calls=5, sandbox_errors=0, submit_rejections=0)
+    result = fleet_metric(gold, pred, program_trace=["not-a-step"], judge_lm=_judge(True))
+    assert "Program trace: unavailable" in result.feedback

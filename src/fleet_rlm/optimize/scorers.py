@@ -30,7 +30,7 @@ from fleet_rlm.optimize.objectives import (
     routing_efficiency,
 )
 
-SCORER_VERSION = "fleet-metric-v8"
+SCORER_VERSION = "fleet-metric-v9"
 TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v7"
 
 _MAX_EXECUTION_SPANS = 8
@@ -777,12 +777,25 @@ def answer_correctness(gold: Any, answer: str, judge_lm: dspy.LM) -> Metric:
     return verdict.score, verdict.feedback
 
 
+def _trace_preview(trace: Any, *, limit: int) -> str:
+    """Render a DSPy trace as bounded input/output evidence, degrading to a marker on unknown shapes."""
+    steps = []
+    for step in trace if isinstance(trace, (list, tuple)) else []:
+        try:
+            _, inputs, outputs = step
+        except (TypeError, ValueError):
+            continue
+        steps.append({"inputs": inputs, "outputs": dict(outputs) if isinstance(outputs, dict) else outputs})
+    return activity_preview(steps, limit=limit) if steps else "unavailable"
+
+
 def fleet_metric(
     gold: Any,
     pred: Any,
-    trace: Any = None,  # noqa: ARG001
+    trace: Any = None,  # noqa: ARG001 - GEPA passes None; program_trace carries Flex evidence
     pred_name: str | None = None,
     pred_trace: Any = None,
+    program_trace: Any = None,
     *,
     judge_lm: dspy.LM,
 ) -> dspy.Prediction:
@@ -819,12 +832,10 @@ def fleet_metric(
     if pred_name:
         lines.insert(0, f"Feedback for {pred_name}; the score covers the whole Turn.")
         if pred_trace:
-            lines.append(
-                "Target step: "
-                + activity_preview(
-                    [{"inputs": inputs, "outputs": dict(outputs)} for _, inputs, outputs in pred_trace], limit=2000
-                )
-            )
+            lines.append("Target step: " + _trace_preview(pred_trace, limit=2000))
+    # GEPA supplies this only while optimizing a dspy.Flex submodule: how the answer was produced.
+    if program_trace is not None:
+        lines.append("Program trace: " + _trace_preview(program_trace, limit=2000))
     if metrics["efficiency"] is None:
         lines.append("Execution usage unavailable; no efficiency credit or promotion evidence.")
     return dspy.Prediction(

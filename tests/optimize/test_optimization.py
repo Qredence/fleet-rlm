@@ -856,3 +856,16 @@ def test_relabelling_a_trace_overrides_the_earlier_label() -> None:
     older = SimpleNamespace(name="route", value="flex", create_time_ms=1)
     trace = SimpleNamespace(search_assessments=lambda **_kwargs: [newer, older])
     assert dataset.labels_of(trace) == {"route": "direct"}
+
+
+def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
+    from fleet_rlm.optimize.gepa import DIGEST_SOURCES, optimization_code_digest
+
+    digest = optimization_code_digest()
+    assert len(digest) == 64 and digest == optimization_code_digest()
+    assert {"adapters.py", "contracts.py", "execution_evidence.py", "metering.py", "program_file.py"} <= set(
+        DIGEST_SOURCES
+    )
+    # Docs, the API layer, the TUI, and the Store cannot change Turn behavior or scoring.
+    for excluded in ("api/", "tui/", "store/", "dspy_support.py"):
+        assert not any(name.startswith(excluded) for name in DIGEST_SOURCES)

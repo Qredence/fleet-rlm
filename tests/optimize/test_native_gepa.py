@@ -11,6 +11,7 @@ from dspy import ChatAdapter
 from dspy.primitives.facade import SHIM_SETUP
 from dspy.utils import DummyLM
 
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.optimize.artifacts import IsolatedFleetProgram
 from fleet_rlm.optimize.gepa import changed_components, tunable_components
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
@@ -150,9 +151,19 @@ def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_tr
 
 
 def test_native_gepa_instruction_component_contract() -> None:
+    from fleet_rlm.optimize.gepa import INSTRUCTION_MAX_CHARS, build_instruction_proposer
+
+    proposer = build_instruction_proposer()
+    assert isinstance(proposer.adapter, FleetRLMChatAdapter)
+    assert proposer.max_chars == INSTRUCTION_MAX_CHARS
+    assert proposer.truncate_history_outputs is True
+
     student = dspy.Predict("task -> answer")
     student.signature = student.signature.with_instructions("Return a concise answer.")
-    reflection_lm = DummyLM([{"text": '{"new_instruction": "Return the reviewed answer exactly."}'}] * 8)
+    # The proposer runs on Fleet's ChatAdapter, so the scripted reply uses DSPy's field markers.
+    reflection_lm = DummyLM(
+        [{"text": "[[ ## new_instruction ## ]]\nReturn the reviewed answer exactly.\n[[ ## completed ## ]]"}] * 8
+    )
 
     def metric(
         example: dspy.Example,
@@ -167,6 +178,7 @@ def test_native_gepa_instruction_component_contract() -> None:
     gepa = dspy.GEPA(
         metric=metric,
         reflection_lm=reflection_lm,
+        instruction_proposer=proposer,
         max_metric_calls=4,
         reflection_minibatch_size=1,
         use_merge=False,
