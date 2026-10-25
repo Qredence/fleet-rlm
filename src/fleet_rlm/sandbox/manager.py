@@ -32,7 +32,7 @@ from daytona import (
 from mlflow.entities import SpanType
 
 from fleet_rlm.config import validate_shared_notes_subpath
-from fleet_rlm.engine.signatures import STOPPING_RULES
+from fleet_rlm.contracts import STOPPING_RULES
 from fleet_rlm.observability import activity_text
 from fleet_rlm.sandbox import repl
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
@@ -711,7 +711,7 @@ class DaytonaSandboxManager:
 
     def execution_evidence(self) -> dict[str, Any]:
         """Observe actual workspace bytes before teardown, never model-provided receipts."""
-        from fleet_rlm.optimize.evidence import collect_artifacts
+        from fleet_rlm.execution_evidence import collect_artifacts
 
         artifacts = collect_artifacts(self) if self._sandbox is not None else {"complete": True, "files": {}}
         with self.root._budget_lock:
@@ -740,7 +740,7 @@ class DaytonaSandboxManager:
 
         Errors while reading the file before verification also propagate.
         """
-        from fleet_rlm.optimize.evidence import MAX_ARTIFACT_BYTES, artifact_path
+        from fleet_rlm.execution_evidence import MAX_ARTIFACT_BYTES, artifact_path
 
         artifact_path(path)
         if not path.endswith(".py") or type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 60:

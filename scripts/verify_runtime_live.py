@@ -22,9 +22,9 @@ from dspy.primitives.facade import FacadeInvocation
 from fastapi.testclient import TestClient
 from psycopg import sql
 
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.dspy_support import FleetRLMChatAdapter
 from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
 
 # Reported by the Turn itself, so the harness measures without instrumenting the runtime.

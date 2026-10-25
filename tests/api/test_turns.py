@@ -273,8 +273,8 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
 
 
 def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitization(traced):
+    from fleet_rlm.execution_evidence import artifact_correctness, delegation_correctness
     from fleet_rlm.observability import sanitize_trace_span
-    from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
     from fleet_rlm.optimize.scorers import efficiency_metric
 
     raw = b"report"

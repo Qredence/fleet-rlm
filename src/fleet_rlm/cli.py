@@ -19,7 +19,7 @@ from rich.console import Console
 
 from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
-from fleet_rlm.engine.signatures import Route
+from fleet_rlm.contracts import Route
 from fleet_rlm.observability import trace_object as _trace_object
 from fleet_rlm.replay import REVIEW_STATUSES
 from fleet_rlm.tui.app import run_interactive_cli
@@ -97,7 +97,7 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
         if value is not None:
             labels[name] = value
     if getattr(args, "expectations_file", None):
-        from fleet_rlm.optimize.evidence import parse_expectations_file
+        from fleet_rlm.execution_evidence import parse_expectations_file
 
         labels["structured_expectations"] = parse_expectations_file(args.expectations_file)
     request = _trace_request(trace)

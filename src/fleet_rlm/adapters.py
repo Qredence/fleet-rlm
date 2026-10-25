@@ -1,56 +1,11 @@
-"""Small adapters around DSPy's runtime-generated types and output formats."""
+"""Fleet's DSPy adapter: accept the documented raw Python fence and re-ask once on format failure."""
 
 from __future__ import annotations
 
-import math
 import re
-from contextlib import nullcontext
 from typing import Any
 
 from dspy import AdapterParseError, ChatAdapter, Signature
-from dspy.experimental import Choice
-from dspy.primitives.facade import SandboxLM
-from pydantic import BaseModel
-
-try:  # DSPy 3.4 only; removed together with the legacy LM interfaces in 3.5.
-    from dspy.clients._deprecation import _adapter_call, adapter_message_call
-except ImportError:  # pragma: no cover - DSPy 3.5+ raises its own message contract instead
-    _adapter_call = adapter_message_call = None  # type: ignore[assignment]
-
-
-def without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
-    """TypeSafe uses manual evidence spans rather than MLflow's generative-LM hook."""
-    return [
-        callback
-        for callback in callbacks
-        if not (
-            callback.__class__.__module__ == "mlflow.dspy.callback" and callback.__class__.__name__ == "MlflowCallback"
-        )
-    ]
-
-
-def decision_evidence(decision: Any, lm: Any) -> dict[str, Any]:
-    """Retain decision evidence without synthesizing absent confidence."""
-    probabilities = getattr(decision, "probabilities", None)
-    confidence = getattr(decision, "confidence", None)
-    if not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
-        confidence = None
-    if isinstance(probabilities, dict):
-        probabilities = {
-            str(key): value
-            for key, value in probabilities.items()
-            if isinstance(value, (int, float)) and math.isfinite(value)
-        }
-    else:
-        probabilities = None
-    return {
-        "raw_choice": getattr(decision, "value", decision if isinstance(decision, str) else None),
-        "probabilities": probabilities,
-        "confidence": confidence,
-        "backend": "typesafe" if lm.__class__.__name__ == "TypeSafe" else "generative",
-        "model": str(getattr(lm, "model", "unknown")),
-    }
-
 
 _RAW_PYTHON_FENCE = re.compile(
     r"\s*(?P<reasoning>.*?)```(?:python|py|python3|py3)?[ \t]*\r?\n(?P<code>.*?)\r?\n```[ \t]*"
@@ -147,56 +102,3 @@ class FleetRLMChatAdapter(ChatAdapter):
             if match and match.group("code").strip() and "```" not in match.group("reasoning") + match.group("code"):
                 return {"reasoning": match.group("reasoning").strip(), "code": match.group("code").strip()}
         return super().parse(signature, completion)
-
-
-class MeteredLM(SandboxLM):
-    """The metered host LM proxy, kept transparent to DSPy's adapter-origin marker.
-
-    DSPy tags the exact ``(lm, messages)`` pair its adapter formats so its ``messages=``
-    deprecation warning fires only for code that builds its own OpenAI-style messages. The proxy
-    forwards that same list to the wrapped LM, where the identity check no longer matches and the
-    adapter's own call is reported as deprecated. Re-tagging the forwarded call keeps the warning
-    for sandboxed and host code that really does pass message dictionaries.
-    """
-
-    def _relay_adapter_origin(self, kwargs: dict[str, Any]) -> Any:
-        """Re-tag the wrapped LM for the message list DSPy's own adapter built.
-
-        Only that exact list object is matched, so a nested proxy still forwards the tag and code
-        that assembles its own message dictionaries keeps the warning.
-        """
-        messages = kwargs.get("messages")
-        if _adapter_call is None or adapter_message_call is None or messages is None:
-            return nullcontext()
-        origin = _adapter_call.get()
-        if origin is None or origin[1] is not messages:
-            return nullcontext()
-        return adapter_message_call(self._lm, messages)
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Charge the call, then forward it with DSPy's adapter tag intact."""
-        self._admit(kwargs)
-        with self._relay_adapter_origin(kwargs):
-            return self._lm(*args, **kwargs)
-
-    async def acall(self, *args: Any, **kwargs: Any) -> Any:
-        """Async variant of __call__ with the same charge and tag forwarding."""
-        self._admit(kwargs)
-        with self._relay_adapter_origin(kwargs):
-            return await self._lm.acall(*args, **kwargs)
-
-    def copy(self, **kwargs: Any) -> MeteredLM:
-        """Return a metered copy that keeps the subclass and its reserve callback."""
-        self._check(kwargs)
-        return type(self)(self._lm.copy(**kwargs), self._reserve)
-
-
-def make_choice_type(options: tuple[tuple[str, str], ...]) -> type[BaseModel]:
-    """Build a validated DSPy Choice model from runtime options."""
-    specialize = getattr(Choice, "__class_getitem__", None)
-    if not callable(specialize):
-        raise RuntimeError("This DSPy version cannot construct typed Choice options")
-    result = specialize(options)
-    if not isinstance(result, type) or not issubclass(result, BaseModel):
-        raise RuntimeError("DSPy returned an invalid typed Choice model")
-    return result

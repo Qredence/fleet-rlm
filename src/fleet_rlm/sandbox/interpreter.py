@@ -21,10 +21,9 @@ import mlflow
 from mlflow.entities import SpanType
 from pydantic_core import to_jsonable_python
 
-from fleet_rlm.dspy_support import decision_evidence, without_mlflow_dspy_callback
-from fleet_rlm.engine.signatures import item_decision
+from fleet_rlm.contracts import decision_evidence, item_decision
 from fleet_rlm.lm_usage import decision_usage
-from fleet_rlm.observability import activity_preview, activity_text
+from fleet_rlm.observability import activity_preview, activity_text, without_mlflow_dspy_callback
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import _child_input_path

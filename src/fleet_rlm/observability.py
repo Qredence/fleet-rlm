@@ -22,6 +22,18 @@ _CREDENTIAL = re.compile(
 _TRACE_STRING_LIMIT = 20_000
 _TRACE_NODE_LIMIT = 200
 
+try:  # MLflow's DSPy hook module is an integration detail; never fail import over it.
+    from mlflow.dspy.callback import MlflowCallback as _MlflowDspyCallback
+except ImportError:  # pragma: no cover - the integration moved or was removed
+    _MlflowDspyCallback = None
+
+
+def without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
+    """TypeSafe uses manual evidence spans rather than MLflow's generative-LM hook."""
+    if _MlflowDspyCallback is not None:
+        return [callback for callback in callbacks if not isinstance(callback, _MlflowDspyCallback)]
+    return [callback for callback in callbacks if callback.__class__.__name__ != "MlflowCallback"]
+
 
 def trace_object(value: Any) -> dict[str, Any]:
     """Decode a trace object, including Unity Catalog's extra JSON string wrapper."""

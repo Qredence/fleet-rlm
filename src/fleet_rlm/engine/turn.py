@@ -23,7 +23,7 @@ from mlflow.entities import SpanType
 from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.config import resolve_turn_deadline
-from fleet_rlm.engine.signatures import Route
+from fleet_rlm.contracts import Route
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
 from fleet_rlm.sandbox.manager import (
     CLEANUP_NOT_REQUIRED,

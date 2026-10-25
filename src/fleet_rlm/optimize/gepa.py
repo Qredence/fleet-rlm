@@ -138,7 +138,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
     Each engine receives a temporary copy of the candidate program. Serving LMs are
     shared within this factory; callers own cleanup of returned engines and program files.
     """
-    from fleet_rlm.optimize.evidence import verification_entries
+    from fleet_rlm.execution_evidence import verification_entries
 
     verifications = {
         (item.source_session, item.replay_turn_id, item.replay_snapshot_sha256): verification_entries(

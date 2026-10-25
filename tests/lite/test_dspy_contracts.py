@@ -2,17 +2,46 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import dspy
 import pytest
 from dspy.primitives.facade import SandboxLM
+from pydantic import BaseModel
 
-from fleet_rlm.dspy_support import decision_evidence, make_choice_type
+from fleet_rlm.contracts import TRIAGE_ROUTE, decision_evidence, item_decision, make_choice_type
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
-from fleet_rlm.engine.signatures import TRIAGE_ROUTE
+from fleet_rlm.engine.signatures import FleetTask
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+def test_api_app_import_does_not_pull_the_optimizer():
+    """The FastAPI app is the primary application; the offline optimizer must not load with it."""
+    code = (
+        "import sys, fleet_rlm.api.app\n"
+        "loaded = sorted(m for m in sys.modules if m.startswith('fleet_rlm.optimize'))\n"
+        "assert not loaded, loaded\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_decision_outputs_stay_on_predict_predictors():
+    """TypeSafe decision types belong on Predict; RLM and Flex outputs stay generative prose."""
+    for name, field in FleetTask.output_fields.items():
+        assert field.annotation is str, name
+    decision = item_decision(["a", "b"])
+    assert issubclass(decision.output_fields["decision"].annotation, BaseModel)
 
 
 def manager():

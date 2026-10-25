@@ -11,7 +11,8 @@ import dspy
 import pytest
 from dspy import AdapterParseError, LMUnexpectedError
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, MeteredLM
+from fleet_rlm.adapters import FleetRLMChatAdapter
+from fleet_rlm.metering import MeteredLM
 
 
 def test_dspy_history_is_disabled_for_session_turn_contexts() -> None:
@@ -270,14 +271,15 @@ def _ignore(_count: int) -> None:
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("proxies", [1, 2])
-def test_adapter_message_calls_are_not_reported_as_deprecated(asynchronous, proxies) -> None:
-    # DSPy tags the exact (lm, messages) pair it formatted; every proxy hop must forward that tag.
+def test_adapter_message_calls_surface_dspy_deprecation(asynchronous, proxies) -> None:
+    # The proxy used to re-tag DSPy's own adapter call so this warning stayed silent. Fleet keeps the
+    # proxy minimal instead: DSPy's messages= migration warning surfaces once per process.
     lm = ScriptedLM(["[[ ## answer ## ]]\n42"])
     metered = MeteredLM(lm, _ignore)
     for _ in range(proxies - 1):
         metered = MeteredLM(metered, _ignore)
 
-    with _deprecation_errors():
+    with pytest.warns(DeprecationWarning, match="OpenAI-style message dictionaries"):
         assert _invoke(FleetRLMChatAdapter(), metered, dspy.Signature("task -> answer"), asynchronous=asynchronous)
     assert len(lm.calls) == 1
 
@@ -295,6 +297,6 @@ def test_metered_lm_copy_stays_metered() -> None:
     copy = MeteredLM(ScriptedLM(["[[ ## answer ## ]]\n42"]), charged.append).copy(rollout_id=1)
     assert type(copy) is MeteredLM and copy.kwargs["rollout_id"] == 1
 
-    with _deprecation_errors():
+    with pytest.warns(DeprecationWarning, match="OpenAI-style message dictionaries"):
         assert _invoke(FleetRLMChatAdapter(), copy, dspy.Signature("task -> answer")) == [{"answer": "42"}]
     assert charged == [1]

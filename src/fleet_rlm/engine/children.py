@@ -13,7 +13,7 @@ from typing import Any
 import dspy
 from dspy import AdapterParseError
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.engine.signatures import ChildTask
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager

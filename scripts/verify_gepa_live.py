@@ -18,8 +18,9 @@ from typing import Any
 import dspy
 from daytona import ListSandboxesQuery
 
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, MeteredLM
+from fleet_rlm.metering import MeteredLM
 from fleet_rlm.optimize.artifacts import IsolatedFleetProgram, digest_bytes
 from fleet_rlm.optimize.scorers import fleet_metric
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager

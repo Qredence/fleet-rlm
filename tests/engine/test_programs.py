@@ -12,8 +12,18 @@ import dspy
 import pytest
 from dspy import AdapterParseError
 
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+def test_engine_forward_inputs_match_the_shared_contract():
+    """`contracts.ENGINE_INPUT_FIELDS` is the literal rollout whitelist; forward must not drift from it."""
+    import inspect
+
+    parameters = set(inspect.signature(AdaptiveFleetEngine.forward).parameters)
+    assert set(ENGINE_INPUT_FIELDS) <= parameters
+    assert parameters - set(ENGINE_INPUT_FIELDS) == {"self", "context", "execution_mode"}
 
 
 def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path: Path) -> None:
@@ -368,7 +378,7 @@ CATALOG = (
 
 
 def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> tuple[AdaptiveFleetEngine, dict]:
-    from fleet_rlm.engine.signatures import Route
+    from fleet_rlm.contracts import Route
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     engine = AdaptiveFleetEngine(

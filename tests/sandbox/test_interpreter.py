@@ -33,8 +33,9 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
 
     from pydantic_core import to_jsonable_python
 
+    from fleet_rlm.contracts import Route
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
-    from fleet_rlm.engine.signatures import FleetTask, Route
+    from fleet_rlm.engine.signatures import FleetTask
 
     raw = b"__FILE_BODY_ONLY__,value\none,11\ntwo,17\n"
     sandbox.fs.upload_file(raw, "/workspace/files/selected.csv")
@@ -102,8 +103,9 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
 @pytest.mark.parametrize("route", ["rlm", "flex"])
 @pytest.mark.parametrize("failure", ["missing", "changed"])
 def test_dataset_initialization_failure_closes_native_interpreters(sandbox, route, failure, monkeypatch):
+    from fleet_rlm.contracts import Route
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
-    from fleet_rlm.engine.signatures import FleetTask, Route
+    from fleet_rlm.engine.signatures import FleetTask
 
     if failure == "changed":
         sandbox.fs.upload_file(b"changed", "/workspace/files/selected.txt")
@@ -536,8 +538,8 @@ def test_should_accept_note_constants_without_weakening_substantive_grounding(sa
 
 def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sandbox):
     """Native Evaluate/RLM contract over recorded output; no claim of improved live model behavior."""
-    from fleet_rlm.dspy_support import MeteredLM
-    from fleet_rlm.engine.signatures import STOPPING_RULES
+    from fleet_rlm.contracts import STOPPING_RULES
+    from fleet_rlm.metering import MeteredLM
 
     fixture = json.loads((Path(__file__).parents[1] / "fixtures/pi_digit_trace.json").read_text())
     events = []

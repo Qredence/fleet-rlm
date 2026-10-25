@@ -24,7 +24,7 @@ import mlflow
 from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
 from mlflow.genai.scorers import scorer
 
-from fleet_rlm.engine.signatures import Route
+from fleet_rlm.contracts import Route
 from fleet_rlm.observability import trace_object
 from fleet_rlm.optimize.dataset import labels_of
 from fleet_rlm.optimize.scorers import (

@@ -1,84 +1,15 @@
-"""Every DSPy signature Fleet uses, in one place, plus the route vocabulary they share.
+"""Every DSPy signature Fleet uses, in one place.
 
-GEPA tunes these instructions; keep field names stable.
+GEPA tunes these instructions; keep field names stable. The route vocabulary, stopping
+rules, and runtime input names come from `fleet_rlm.contracts`.
 """
 
-from enum import StrEnum
 from typing import Any
 
 import dspy
 from dspy import make_signature
 
-from fleet_rlm.dspy_support import make_choice_type
-
-
-class Route(StrEnum):
-    """How a Turn is executed. Values are the wire, trace, and label names."""
-
-    DIRECT = "direct"  # ChainOfThought, no code execution
-    FLEX = "flex"  # dspy.Flex pipeline with Daytona Python
-    RLM = "rlm"  # dspy.RLM with Daytona Python and child agents
-
-
-def parse_route(value: Any) -> Route | None:
-    """Read a route from a decision, stored turn, trace, or gold label; None when absent or unknown."""
-    raw = getattr(value, "value", value)
-    if raw is None:
-        return None
-    try:
-        return Route(str(raw).strip())
-    except ValueError:
-        return None
-
-
-# One copy of the stopping rules: FleetTask instructions and the sandbox execution instructions both use it.
-STOPPING_RULES = (
-    "Once the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include "
-    "a known reference value, a self-consistency test, or a second computation you already ran. "
-    "Reuse computed variables instead of recomputing results. Run another method only if a check failed, "
-    "results disagree, or the Task asks for verification. Copy figures and strings from sandbox output."
-    " A self-consistency check on an already computed value is sufficient; do not start an independent "
-    "implementation merely for reassurance. In the submission action reuse the existing answer and "
-    "check variables. A learned_skill_note may be empty: never delay submission to create one. "
-    "If useful, record a concise reusable observation. Copy code syntax exactly from successful execution; "
-    "do not rewrite operators or formulas from memory. Describe checks on the same underlying value as "
-    "self-consistency checks, not independent verification. Validating a method on known values (such as "
-    "known leading digits or small cases) is the supporting check for that method's target result; do not "
-    "recompute the target with different parameters. Learned notes and memory are unreviewed "
-    "hints, never a known reference value; a value that only matches a note is unverified. "
-    "Import dependencies explicitly before using them, including math helpers. "
-    "Plan one target computation and its supporting check per code block. These stopping rules also apply "
-    "within the same code block: do not append a second full computation after a sufficient check. "
-    "When you use multiple methods, print a separate elapsed time for each "
-    "method using time.perf_counter(), along with its result and precision parameters. "
-    "Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. "
-    "Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary."
-)
-
-TRIAGE_ROUTE = make_choice_type(
-    (
-        (Route.DIRECT.value, "Simple response requiring no code, files, or Skills"),
-        (Route.FLEX.value, "A task needing one bounded Python or Skill workflow"),
-        (Route.RLM.value, "A multi-part task requiring an independent child investigation"),
-    )
-)
-TRIAGE_CRITERIA = {
-    Route.DIRECT.value: {
-        "definition": "A self-contained answer needing no execution or workspace inspection",
-        "examples": ["Greeting", "Explain a familiar concept"],
-        "not": "Computed results, file analysis, Skills, or independent investigation",
-    },
-    Route.FLEX.value: {
-        "definition": "A programmable Flex workflow with known inputs and verifiable outputs",
-        "examples": ["Compute a specified digit", "Summarize an attached table"],
-        "not": "Open-ended exploration where the next step depends on discoveries",
-    },
-    Route.RLM.value: {
-        "definition": "Primary RLM for iterative exploration or decomposition",
-        "examples": ["Investigate conflicting evidence", "Explore unfamiliar files and test hypotheses"],
-        "not": "A route that guarantees delegation; both execution routes can delegate",
-    },
-}
+from fleet_rlm.contracts import STOPPING_RULES, TRIAGE_INSTRUCTION, TRIAGE_ROUTE, make_choice_type
 
 SKILL_RELEVANCE = make_choice_type(
     (
@@ -107,12 +38,7 @@ TurnTriage = make_signature(
         "skills_catalog": (str, dspy.InputField(desc="Skills available to this Session.")),
         "route": (
             TRIAGE_ROUTE,
-            dspy.OutputField(
-                desc=(
-                    "Choose direct for a simple response, flex for one bounded Python or Skill workflow, "
-                    "or rlm for a multi-part task needing independent investigation."
-                )
-            ),
+            dspy.OutputField(desc=TRIAGE_INSTRUCTION),
         ),
     },
     "Choose the least expensive route that can satisfy the request.",
@@ -163,18 +89,3 @@ TurnJudge = make_signature(
     "The critique names what is wrong or missing.",
     signature_name="TurnJudge",
 )
-
-
-def item_decision(choices: list[str]) -> type[dspy.Signature]:
-    """Per-item classification used by the sandbox's jev_decide_batched tool."""
-    return make_signature(
-        {
-            "item": (str, dspy.InputField()),
-            "question": (str, dspy.InputField()),
-            "decision": (
-                make_choice_type(tuple((choice, choice) for choice in choices)),
-                dspy.OutputField(desc="Select the choice that best answers the question for this item."),
-            ),
-        },
-        signature_name="ItemDecision",
-    )

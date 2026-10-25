@@ -12,25 +12,14 @@ import dspy
 import mlflow
 from mlflow.entities import SpanType
 
-from fleet_rlm.dspy_support import (
-    FleetRLMChatAdapter,
-    MeteredLM,
-    decision_evidence,
-    without_mlflow_dspy_callback,
-)
+from fleet_rlm.adapters import FleetRLMChatAdapter
+from fleet_rlm.contracts import ROUTE_SUMMARIES, TRIAGE_CRITERIA, Route, decision_evidence, parse_route
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
-from fleet_rlm.engine.signatures import (
-    TRIAGE_CRITERIA,
-    DirectAnswer,
-    FleetTask,
-    Route,
-    SkillRelevance,
-    TurnTriage,
-    parse_route,
-)
+from fleet_rlm.engine.signatures import DirectAnswer, FleetTask, SkillRelevance, TurnTriage
 from fleet_rlm.lm_usage import decision_usage, usage_callbacks
-from fleet_rlm.observability import activity_text
-from fleet_rlm.optimize.artifacts import CompiledProgramFile
+from fleet_rlm.metering import MeteredLM
+from fleet_rlm.observability import activity_text, without_mlflow_dspy_callback
+from fleet_rlm.program_file import CompiledProgramFile
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import WorkspaceDataset
@@ -299,11 +288,7 @@ class AdaptiveFleetEngine(dspy.Module):
             reason = "selected_context"
             route = Route.RLM
             summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
-        summary += {
-            Route.DIRECT: " Answer directly without code execution.",
-            Route.FLEX: " Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
-            Route.RLM: " Execute a bounded RLM with Daytona Python and optional child agents.",
-        }[route]
+        summary += " " + ROUTE_SUMMARIES[route.value]
         routing = {**evidence, "effective_route": route.value, "override_reason": reason}
         active_span = mlflow.get_current_active_span()
         if active_span is not None:

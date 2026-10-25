@@ -221,8 +221,8 @@ import mlflow
 from dspy.lm15 import Message, Response, Usage
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
-from fleet_rlm.engine.signatures import Route
-from fleet_rlm.dspy_support import FleetRLMChatAdapter
+from fleet_rlm.contracts import Route
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.lm_usage import decision_usage, usage_callbacks
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 

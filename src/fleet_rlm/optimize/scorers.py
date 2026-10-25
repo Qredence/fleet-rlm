@@ -15,11 +15,11 @@ from mlflow.entities import Feedback, SpanType
 from mlflow.genai.judges import make_judge
 from mlflow.genai.scorers import RelevanceToQuery, RetrievalGroundedness, scorer
 
-from fleet_rlm.dspy_support import make_choice_type, without_mlflow_dspy_callback
-from fleet_rlm.engine.signatures import AnswerJudge, Route, TurnJudge, parse_route
+from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, make_choice_type, parse_route
+from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge
+from fleet_rlm.execution_evidence import artifact_correctness, delegation_correctness
 from fleet_rlm.lm_usage import decision_usage
-from fleet_rlm.observability import activity_preview, activity_text, trace_object
-from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
+from fleet_rlm.observability import activity_preview, activity_text, trace_object, without_mlflow_dspy_callback
 
 SCORER_VERSION = "fleet-metric-v8"
 TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v6"
@@ -30,11 +30,6 @@ _COMPLETE_TEXT_LIMIT = 20_000
 _SPAN_CITATION = re.compile(r"\bspan_id=([0-9a-f]{16})\b", re.IGNORECASE)
 _PLACEHOLDER_RATIONALE = re.compile(r"\b(?:placeholder|todo|tbd)\b", re.IGNORECASE)
 JEV_ROUTE_THRESHOLD = 0.5
-_ROUTE_CHOICES = (
-    (Route.DIRECT.value, "Simple self-contained question or conversation needing no code, files, or dataset work"),
-    (Route.FLEX.value, "One bounded calculation, file operation, or short analysis that benefits from code"),
-    (Route.RLM.value, "Substantial multi-step or iterative investigation with broad context exploration"),
-)
 
 
 class ScorerEvidenceError(ValueError):
@@ -337,7 +332,7 @@ def _route_judgment_signature() -> type[dspy.Signature]:
                 ),
             ),
             "best_route": (
-                make_choice_type(_ROUTE_CHOICES),
+                make_choice_type(JUDGE_ROUTE_CHOICES),
                 dspy.OutputField(desc="The route that best fits the task, judged independently of the recorded route."),
             ),
         },

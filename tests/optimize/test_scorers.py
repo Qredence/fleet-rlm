@@ -236,7 +236,7 @@ def test_route_judgment_signature_uses_route_vocabulary():
 
     from dspy.experimental import Noul
 
-    from fleet_rlm.engine.signatures import Route
+    from fleet_rlm.contracts import Route
     from fleet_rlm.optimize.scorers import _route_judgment_signature
 
     signature = _route_judgment_signature()
