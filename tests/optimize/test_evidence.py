@@ -9,12 +9,8 @@ import json
 import dspy
 import pytest
 
-from fleet_rlm.execution_evidence import (
-    artifact_correctness,
-    delegation_correctness,
-    validate_structured,
-    verification_entries,
-)
+from fleet_rlm.execution_evidence import validate_structured, verification_entries
+from fleet_rlm.optimize.objectives import artifact_correctness, delegation_correctness
 from fleet_rlm.optimize.scorers import fleet_metric, fleet_scorer, route_correctness
 
 

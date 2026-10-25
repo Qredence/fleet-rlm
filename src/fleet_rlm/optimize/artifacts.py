@@ -14,7 +14,7 @@ from typing import Any
 
 import dspy
 
-APPROVAL_POLICY_VERSION = 5
+APPROVAL_POLICY_VERSION = 6
 VALIDATION_PASSES = 3
 
 

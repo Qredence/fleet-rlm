@@ -21,16 +21,11 @@ from typing import Any
 
 import httpx
 import mlflow
-from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
-from mlflow.genai.scorers import scorer
+from mlflow.entities import AssessmentSource, AssessmentSourceType
 
 from fleet_rlm.contracts import Route
-from fleet_rlm.observability import trace_object
 from fleet_rlm.optimize.dataset import labels_of
-from fleet_rlm.optimize.scorers import (
-    build_mlflow_scorer_suite,
-    missing_values,
-)
+from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite, expected_values_present
 from fleet_rlm.replay import validate_review_labels
 
 _REGIONS = ("north", "south", "east", "west", "central")
@@ -246,20 +241,6 @@ def run_case(client: httpx.Client, case: EvalCase, session_id: str) -> dict[str,
         "trace_id": complete.get("trace_id"),
         "error": None,
     }
-
-
-@scorer
-def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
-    """Deterministic check: every gold value appears in the answer (thousands separators ignored)."""
-    expected = (expectations or {}).get("expected_values") or []
-    if not expected:
-        return None
-    outputs = trace_object(outputs) or outputs
-    missing = missing_values(str(outputs.get("answer", "") if isinstance(outputs, dict) else outputs), expected)
-    return Feedback(
-        value=not missing,
-        rationale="All expected values found." if not missing else f"Missing from answer: {missing}",
-    )
 
 
 class EvaluationError(RuntimeError):

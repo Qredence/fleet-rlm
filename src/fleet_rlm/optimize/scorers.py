@@ -17,12 +17,21 @@ from mlflow.genai.scorers import RelevanceToQuery, RetrievalGroundedness, scorer
 
 from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, make_choice_type, parse_route
 from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge
-from fleet_rlm.execution_evidence import artifact_correctness, delegation_correctness
 from fleet_rlm.lm_usage import decision_usage
 from fleet_rlm.observability import activity_preview, activity_text, trace_object, without_mlflow_dspy_callback
+from fleet_rlm.optimize.objectives import (
+    Metric,
+    aggregate,
+    artifact_correctness,
+    delegation_correctness,
+    efficiency_metric,
+    expected_values_metric,
+    route_metric,
+    routing_efficiency,
+)
 
 SCORER_VERSION = "fleet-metric-v8"
-TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v6"
+TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v7"
 
 _MAX_EXECUTION_SPANS = 8
 _EVIDENCE_TEXT_LIMIT = 1600
@@ -277,7 +286,7 @@ def rlm_trajectory_efficiency(trace: Any) -> Feedback | None:
 
 @scorer
 def jev_routing_efficiency(trace: Any) -> Feedback | None:
-    """Score simple requests routed without starting a Flex/RLM execution."""
+    """Score the route's budget use: a direct Turn should stay inside its allowance."""
     if trace is None:
         return None
     try:
@@ -288,12 +297,8 @@ def jev_routing_efficiency(trace: Any) -> Feedback | None:
     lm_calls = outputs.get("lm_calls")
     if type(lm_calls) is not int or lm_calls < 0:
         return None
-    if not used_rlm and lm_calls <= 2:
-        return Feedback(value=1.0, rationale=f"Fast path completed in {lm_calls} budget units.")
-    if used_rlm and lm_calls <= 15:
-        return Feedback(value=0.95, rationale=f"Bounded RLM/Flex execution used {lm_calls} budget units.")
-    score = max(0.2, 1.0 - 0.02 * max(0, lm_calls - 15))
-    return Feedback(value=round(score, 3), rationale=f"Heavy route used {lm_calls} budget units.")
+    value, rationale = routing_efficiency(used_rlm, lm_calls)
+    return Feedback(value=value, rationale=rationale)
 
 
 @scorer
@@ -305,8 +310,8 @@ def route_correctness(outputs: Any, expectations: dict[str, Any]) -> Feedback | 
     actual = parse_route(trace_object(outputs).get("route"))
     if actual is None:
         return Feedback(value=False, rationale="Gold route exists but actual route evidence is missing")
-    correct = str(actual) == str(expected)
-    return Feedback(value=correct, rationale=f"Expected route {expected!r}, observed {actual!r}.")
+    value, detail = route_metric(dspy.Example(route=expected), dspy.Prediction(route=actual)) or (0.0, "")
+    return Feedback(value=value == 1.0, rationale=f"Expected route {expected!r}, observed {actual!r}. {detail}")
 
 
 @functools.lru_cache(maxsize=1)
@@ -731,18 +736,6 @@ def build_mlflow_scorer_suite(
     return [*suite, fleet_scorer(judge_lm)] if judge_lm is not None else suite
 
 
-def efficiency(lm_calls: int, sandbox_errors: int, submit_rejections: int) -> float:
-    """Budget units beyond three cost 0.015; each remote error or blocking rejection costs 0.15."""
-    return round(max(0.0, 1.0 - 0.015 * max(0, lm_calls - 3) - 0.15 * (sandbox_errors + submit_rejections)), 3)
-
-
-def missing_values(answer: str, expected: list[Any]) -> list[Any]:
-    """Gold values absent from the answer; thousands separators are ignored."""
-    text = answer.lower().replace(",", "")
-    # Boundaries stop "12" from matching inside "120" or "1.25".
-    return [value for value in expected if not re.search(rf"(?<![\w.]){re.escape(str(value).lower())}(?![\w])", text)]
-
-
 class FleetJudge(dspy.Module):
     """LLM-as-judge for one Turn answer: against the gold answer when labelled, reference-free otherwise."""
 
@@ -776,48 +769,12 @@ def _judge_for(judge_lm: dspy.LM) -> FleetJudge:
     return judge
 
 
-# Each metric returns (score, detail), or None when it does not apply to the example.
-Metric = tuple[float, str] | None
-
-
 def answer_correctness(gold: Any, answer: str, judge_lm: dspy.LM) -> Metric:
     """The judge's verdict; uses the gold answer when one is labelled."""
     verdict = _judge_for(judge_lm)(
         task=str(getattr(gold, "task", "")), answer=answer, expected_answer=str(getattr(gold, "answer", "") or "")
     )
     return verdict.score, verdict.feedback
-
-
-def expected_values_metric(gold: Any, answer: str) -> Metric:
-    """Every labelled gold value appears in the answer."""
-    expected = getattr(gold, "expected_values", None)
-    if not expected:
-        return None
-    missing = missing_values(answer, list(expected))
-    return (0.0, f"missing {missing}") if missing else (1.0, "all present")
-
-
-def route_metric(gold: Any, pred: Any) -> Metric:
-    """The Turn took the labelled gold route."""
-    expected = parse_route(getattr(gold, "route", None))
-    if expected is None:
-        return None
-    actual = parse_route(getattr(pred, "route", None))
-    return float(actual == expected), f"expected {expected.value}, took {actual and actual.value}"
-
-
-def efficiency_metric(pred: Any) -> Metric:
-    """Explicit host counters are required; legacy missing rejection counts cannot mean zero."""
-    lm_calls = getattr(pred, "lm_calls", None)
-    sandbox_errors = getattr(pred, "sandbox_errors", None)
-    submit_rejections = getattr(pred, "submit_rejections", None)
-    if type(lm_calls) is not int or type(sandbox_errors) is not int or type(submit_rejections) is not int:
-        return None
-    if any(value < 0 for value in (lm_calls, sandbox_errors, submit_rejections)):
-        return None
-    return efficiency(lm_calls, sandbox_errors, submit_rejections), (
-        f"{lm_calls} budget units, {sandbox_errors} remote Python errors, {submit_rejections} submission rejections"
-    )
 
 
 def fleet_metric(
@@ -850,9 +807,7 @@ def fleet_metric(
         ),
     }
     applied = {name: result for name, result in metrics.items() if result is not None}
-    quality = {name: result for name, result in applied.items() if name != "efficiency"}
-    correctness = min(value for value, _ in quality.values())
-    score = (0.9 + 0.1 * (metrics["efficiency"][0] if metrics["efficiency"] else 0.0)) if correctness == 1 else 0.0
+    score, correctness = aggregate(applied)
     lines = [
         f"{'PASS' if value == 1.0 else 'FAIL'} {name} ({value:.2f}): {detail}"
         for name, (value, detail) in applied.items()
@@ -902,6 +857,17 @@ def metric_feedbacks(result: dspy.Prediction) -> list[Feedback]:
     return [overall] + [
         Feedback(name=f"fleet_metric.{name}", value=value) for name, value in (result.objective_scores or {}).items()
     ]
+
+
+@scorer
+def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
+    """Deterministic check: every gold value appears in the answer (thousands separators ignored)."""
+    gold, pred = gold_and_prediction({}, outputs, expectations)
+    result = expected_values_metric(gold, str(getattr(pred, "answer", "") or ""))
+    if result is None:
+        return None
+    value, detail = result
+    return Feedback(value=value == 1.0, rationale=f"Expected values: {detail}.")
 
 
 def fleet_scorer(judge_lm: dspy.LM) -> Any:

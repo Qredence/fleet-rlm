@@ -8,11 +8,11 @@ import pytest
 from fleet_rlm.optimize import evaluation
 from fleet_rlm.optimize.evaluation import (
     EvalCase,
-    expected_values_present,
     label_trace,
     run_case,
     synthetic_cases,
 )
+from fleet_rlm.optimize.scorers import expected_values_present
 
 
 def _rows(content: str) -> list[dict[str, str]]:

@@ -1,17 +1,14 @@
-"""Declarative gold checks and bounded, host-collected execution evidence.
+"""Bounded, host-collected execution evidence and the gold schema it is scored against.
 
-Gold is never a program input. Collectors observe files and lifecycle receipts;
-only the scorer compares those observations with reviewed expectations.
+Gold is never a program input. This module observes files and lifecycle receipts and
+validates reviewed expectations; `optimize/objectives.py` compares the two.
 """
 
 from __future__ import annotations
 
 import base64
-import csv
 import hashlib
-import io
 import json
-import math
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -163,113 +160,6 @@ def collect_artifacts(manager: Any) -> dict[str, Any]:
         except (ValueError, OSError):
             complete = False
     return {"complete": complete, "files": files}
-
-
-def _equal(actual: Any, expected: Any, tolerance: float, *, csv_numbers: bool = False) -> bool:
-    if isinstance(expected, dict):
-        return isinstance(actual, dict) and all(
-            key in actual and _equal(actual[key], value, tolerance, csv_numbers=csv_numbers)
-            for key, value in expected.items()
-        )
-    if isinstance(expected, list):
-        return (
-            isinstance(actual, list)
-            and len(actual) == len(expected)
-            and all(_equal(a, b, tolerance, csv_numbers=csv_numbers) for a, b in zip(actual, expected, strict=True))
-        )
-    if type(expected) in (int, float):
-        if isinstance(actual, bool):
-            return False
-        if not csv_numbers and type(actual) not in (int, float):
-            return False
-        try:
-            return math.isfinite(float(actual)) and abs(float(actual) - expected) <= tolerance
-        except (TypeError, ValueError):
-            return False
-    return type(actual) is type(expected) and actual == expected
-
-
-def _file(receipt: dict[str, Any]) -> bytes:
-    raw = base64.b64decode(receipt["base64"], validate=True) if "base64" in receipt else receipt["text"].encode("utf-8")
-    if len(raw) > MAX_ARTIFACT_BYTES or hashlib.sha256(raw).hexdigest() != receipt["sha256"]:
-        raise ValueError("Invalid artifact digest or size")
-    return raw
-
-
-def artifact_correctness(gold: dict[str, Any], evidence: dict[str, Any]) -> tuple[float, str] | None:
-    """Score declared artifacts as (score, reason), or return None when none are declared."""
-    specifications = validate_structured(gold).get("artifacts", [])
-    if not specifications:
-        return None
-    observed = evidence.get("artifacts", {})
-    if observed.get("complete") is not True:
-        return 0.0, "Required artifact evidence is missing or incomplete"
-    for item in specifications:
-        path, kind = item["path"], item["kind"]
-        try:
-            receipt = observed["files"][path]
-            raw = _file(receipt)
-            text = raw.decode("utf-8")
-            if kind == "text":
-                passed = text == item["expected"]
-            elif kind == "json":
-                passed = _equal(json.loads(text), item["expected"], item["tolerance"])
-            elif kind == "csv":
-                rows = list(csv.DictReader(io.StringIO(text)))
-                keys = item["key_columns"]
-                actual = {tuple(row[key] for key in keys): row for row in rows}
-                wanted = {tuple(str(row[key]) for key in keys): row for row in item["expected"]}
-                passed = (
-                    len(actual) == len(rows) and len(wanted) == len(item["expected"]) and set(actual) == set(wanted)
-                )
-                passed = passed and all(
-                    _equal(actual[key], row, item["tolerance"], csv_numbers=True) for key, row in wanted.items()
-                )
-            else:
-                verification = evidence.get("python", {}).get(path, {})
-                passed = (
-                    verification.get("complete") is True
-                    and verification.get("sha256") == receipt["sha256"]
-                    and verification.get("exit_code") == item["exit_code"]
-                    and (item["stdout"] is None or verification.get("stdout") == item["stdout"])
-                )
-            if not passed:
-                return 0.0, f"Artifact check failed: {path}"
-        except (KeyError, TypeError, ValueError, UnicodeError):
-            return 0.0, f"Artifact evidence unavailable or invalid: {path}"
-    return 1.0, "Every declared artifact passed"
-
-
-def delegation_correctness(gold: dict[str, Any], evidence: dict[str, Any]) -> tuple[float, str] | None:
-    """Score required children as (score, reason), or return None when none are required.
-
-    Each required child must match one unused successful child by inputs, artifacts, and promoted digests.
-    """
-    required = validate_structured(gold).get("children")
-    if required is None:
-        return None
-    actual = evidence.get("children")
-    if evidence.get("children_complete") is not True or not isinstance(actual, list) or len(actual) != len(required):
-        return 0.0, "Child count or lifecycle evidence does not match"
-    remaining = list(actual)
-    files = evidence.get("artifacts", {}).get("files", {})
-    for expectation in required:
-        found = None
-        for index, child in enumerate(remaining):
-            if child.get("status") != "succeeded" or set(child.get("inputs", {})) != set(expectation["input_paths"]):
-                continue
-            receipts = child.get("artifacts", [])
-            suffixes = {row["path"].split("/", 2)[-1] for row in receipts}
-            if not set(expectation["artifacts"]) <= suffixes:
-                continue
-            if any(files.get(row.get("root_path", row["path"]), {}).get("sha256") != row["sha256"] for row in receipts):
-                continue
-            found = index
-            break
-        if found is None:
-            return 0.0, "Child inputs, success, or promoted artifact digest did not match"
-        remaining.pop(found)
-    return 1.0, "Every declared child and promotion receipt passed"
 
 
 def parse_expectations_file(path: str) -> dict[str, Any]:

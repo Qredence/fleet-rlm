@@ -7,11 +7,11 @@ import pytest
 from dspy.utils import DummyLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.optimize.evaluation import expected_values_present
 from fleet_rlm.optimize.scorers import (
     JEV_ROUTE_THRESHOLD,
     TRACE_ASSESSMENT_VERSION,
     build_mlflow_scorer_suite,
+    expected_values_present,
     fleet_metric,
     fleet_scorer,
     jev_routing_efficiency,
@@ -89,7 +89,7 @@ def test_flex_route_is_bounded_and_heavy_route_degrades():
     heavy = _trace(
         _span("fleet_turn", outputs={"lm_calls": 25}), _span("RLM.forward"), *[_span("lm", SpanType.LLM)] * 25
     )
-    assert jev_routing_efficiency(trace=heavy).value == 0.8
+    assert jev_routing_efficiency(trace=heavy).value == 0.75
 
 
 def test_trajectory_penalizes_host_usage_without_counting_wrapper_errors():
@@ -116,7 +116,7 @@ def test_trace_readers_require_one_host_root_and_ignore_nested_turns(root_count)
     trace = _trace(*roots, nested)
     if root_count == 1:
         assert rlm_trajectory_efficiency(trace=trace).value == 1.0
-        assert jev_routing_efficiency(trace=trace).value == 1.0
+        assert jev_routing_efficiency(trace=trace).value == 0.98
         assert _trace_evidence_context(trace)[0]["answer"] == "Done"
     else:
         assert rlm_trajectory_efficiency(trace=trace) is None
@@ -176,8 +176,8 @@ def test_jev_route_judge_maps_probability_to_verdict_and_records_evidence(monkey
     ]
     assert feedback.metadata["fleet.judge_backend"] == "typesafe"
     assert float(feedback.metadata["fleet.jev.route_probability"]) == probability
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
-    assert feedback.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
+    assert feedback.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v7"
     assert feedback.metadata["fleet.jev.best_route"] == "flex"
     assert feedback.metadata["fleet.jev.rubric_version"] == "jev-route-v1"
     assert f"p(route reasonable)={probability:.2f}" in feedback.rationale
@@ -412,7 +412,7 @@ def test_registered_suite_emits_each_trace_rubric_once_with_version_metadata(mon
     }
     for item in feedback:
         assert item.metadata["mlflow.assessment.scorerName"] == item.name
-        assert item.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+        assert item.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v7"
 
 
 def test_execution_assessments_preserve_judge_source_and_count_tokens_once(monkeypatch):
@@ -444,7 +444,7 @@ def test_execution_assessments_preserve_judge_source_and_count_tokens_once(monke
     assert verification.source.source_type == AssessmentSourceType.LLM_JUDGE
     assert verification.source.source_id == "openai:/judge"
     assert verification.metadata["mlflow.assessment.scorerName"] == "sandbox_verification_discipline"
-    assert verification.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+    assert verification.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v7"
     assert verification.metadata["mlflow.assessment.judgeInputTokens"] == "100"
     assert integrity.source.source_id == "openai:/judge"
     assert integrity.metadata["mlflow.assessment.scorerName"] == "tool_execution_integrity"
@@ -585,7 +585,7 @@ def test_output_compliance_judge_receives_only_request_and_final_answer(monkeypa
     trace = _pi_execution_trace()
     feedback = output_scorer(trace=trace)
     assert feedback.name == "output_instruction_compliance" and feedback.value is True
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
     call = next(context for name, context in calls if name == "output_instruction_compliance")
     assert call == {
         "inputs": {"task": "Tell me the 1492252th digits after the decimal point of Pi"},
@@ -692,7 +692,7 @@ def test_skill_progressive_disclosure_skips_unselected_skills_and_uses_selected_
     assert not any(name == "agent_skills_progressive_disclosure" for name, _ in calls)
     feedback = skill_scorer(trace=_pi_execution_trace(skill_selected=True))
     assert feedback.value is True
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
     skill_call = next(context for name, context in calls if name == "agent_skills_progressive_disclosure")
     assert skill_call["inputs"]["skill_activity"][0]["outputs"]
 
@@ -925,7 +925,7 @@ def test_should_judge_stopping_from_execution_receipts_with_task_exceptions(monk
     rules = calls.definitions["stopping_discipline"]["instructions"]
     assert "same code block" in rules
     assert "failed" in rules and "disagree" in rules and "requests verification" in rules
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
 
 
 def test_should_refuse_stopping_judgment_when_computation_code_is_truncated(monkeypatch):
