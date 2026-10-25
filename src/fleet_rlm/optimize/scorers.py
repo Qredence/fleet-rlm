@@ -9,7 +9,6 @@ import re
 from typing import Any, cast
 
 import dspy
-import mlflow
 from dspy.experimental import Noul
 from mlflow.entities import Feedback, SpanType
 from mlflow.genai.judges import make_judge
@@ -17,8 +16,8 @@ from mlflow.genai.scorers import RelevanceToQuery, RetrievalGroundedness, scorer
 
 from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, make_choice_type, parse_route
 from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge
-from fleet_rlm.lm_usage import decision_usage
-from fleet_rlm.observability import activity_preview, activity_text, trace_object, without_mlflow_dspy_callback
+from fleet_rlm.lm_usage import typed_decision_scope
+from fleet_rlm.observability import activity_preview, activity_text, evidence_span, trace_object
 from fleet_rlm.optimize.objectives import (
     Metric,
     aggregate,
@@ -362,14 +361,8 @@ def _jev_route_judgment(jev_lm: Any, state: dict[str, Any]) -> dict[str, Any]:
     """
     predictor = dspy.Predict(_route_judgment_signature())
     predictor.fields = {"route_reasonable": {"threshold": JEV_ROUTE_THRESHOLD}}
-    with mlflow.start_span(name="jev_route_judgment", span_type=SpanType.LLM) as span:
-        span.set_inputs(dict(state))
-        with (
-            dspy.context(
-                lm=jev_lm, disable_history=True, callbacks=without_mlflow_dspy_callback(list(dspy.settings.callbacks))
-            ),
-            decision_usage(span),
-        ):
+    with evidence_span("jev_route_judgment", inputs=dict(state)) as span:
+        with typed_decision_scope(lm=jev_lm, span=span, typesafe=True):
             prediction = predictor(**state)
         probabilities = {
             str(key): probability

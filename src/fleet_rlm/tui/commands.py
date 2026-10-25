@@ -9,7 +9,6 @@ import re
 import shlex
 import subprocess
 import sys
-import xml.etree.ElementTree as ElementTree
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +20,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from fleet_rlm.config import FleetSettings, validate_turn_timeout_seconds
+from fleet_rlm.contracts import catalog_entries
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
 MODES = ("rlm", "flex", "hybrid")
@@ -260,16 +260,11 @@ def _listing(key: str, title: str, path: str) -> Callable[[Context, str], None]:
 
 
 def _format_skills_catalog(catalog_xml: str) -> str:
-    """Format XML skill catalog entries into readable lines when valid XML is returned."""
-    try:
-        root = ElementTree.fromstring(catalog_xml)
-    except ElementTree.ParseError:
+    """Format catalog entries into readable lines when valid XML is returned."""
+    entries = catalog_entries(catalog_xml)
+    if entries is None:
         return catalog_xml or "(empty)"
-    skills = [
-        f"• {item.get('name')}: {' '.join((item.text or '').split())}"
-        for item in root.iter("skill")
-        if item.get("name")
-    ]
+    skills = [f"• {name}: {' '.join(description.split())}" for name, description in entries]
     return "\n".join(skills) if skills else (catalog_xml or "(no skills in catalog)")
 
 

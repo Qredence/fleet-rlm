@@ -9,6 +9,7 @@ from typing import Any
 import dspy
 import mlflow
 
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, LINEAGE_INPUT_FIELDS
 from fleet_rlm.observability import trace_object
 from fleet_rlm.replay import decode_snapshot, selected_snapshot, validate_review_labels
 from fleet_rlm.store import Store
@@ -18,17 +19,7 @@ _MAX_EXAMPLES = 500
 MIN_EXAMPLES = 8
 MIN_GROUPS = 3
 # Model inputs plus the immutable reference checked by the isolated runtime factory.
-_INPUTS = (
-    "workspace_manifest",
-    "skills_catalog",
-    "memory_summary",
-    "session_history",
-    "task",
-    "source_session",
-    "replay_turn_id",
-    "replay_snapshot_sha256",
-    "context_files",
-)
+_INPUTS = (*ENGINE_INPUT_FIELDS, *LINEAGE_INPUT_FIELDS)
 
 
 def grouped_split(

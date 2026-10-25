@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import ast
 import logging
-import xml.etree.ElementTree as ElementTree
-from contextlib import nullcontext
 from functools import partial
 from typing import Any, TypeGuard
 
@@ -19,14 +17,15 @@ from fleet_rlm.contracts import (
     TRIAGE_CRITERIA,
     OptimizationInputs,
     Route,
+    catalog_entries,
     decision_evidence,
     parse_route,
 )
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
 from fleet_rlm.engine.signatures import DirectAnswer, FleetTask, SkillRelevance, TurnTriage
-from fleet_rlm.lm_usage import decision_usage, usage_callbacks
+from fleet_rlm.lm_usage import turn_callbacks, typed_decision_scope
 from fleet_rlm.metering import MeteredLM
-from fleet_rlm.observability import activity_text, without_mlflow_dspy_callback
+from fleet_rlm.observability import activity_text, evidence_span
 from fleet_rlm.program_file import CompiledProgramFile
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
@@ -95,15 +94,6 @@ def _bind_flex_budgets(flex: Any, *, max_iters: int, max_llm_calls: int) -> bool
         return False
     flex._bind_code(rewritten)
     return True
-
-
-def _catalog_entries(skills_catalog: str) -> list[tuple[str, str]]:
-    """(name, description) pairs from the Stage-1 catalog; empty when it lists no Skills or is malformed."""
-    try:
-        root = ElementTree.fromstring(skills_catalog)
-    except ElementTree.ParseError:
-        return []
-    return [(item.get("name") or "", (item.text or "").strip()) for item in root.iter("skill") if item.get("name")]
 
 
 def _lm_api_key(lm: Any) -> str | None:
@@ -199,7 +189,7 @@ class AdaptiveFleetEngine(dspy.Module):
     ) -> dspy.Prediction:
         """Run one Turn, attaching the execution evidence and turn usage that scoring reads."""
         with self.sandbox_mgr.turn_scope():
-            with dspy.context(callbacks=usage_callbacks(list(dspy.settings.callbacks))):
+            with dspy.context(callbacks=turn_callbacks()):
                 prediction = self._run_turn(
                     workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
                 )
@@ -271,7 +261,7 @@ class AdaptiveFleetEngine(dspy.Module):
 
     def _select_skills(self, task: str, skills_catalog: str, route: Route) -> str:
         """Preload the instructions of Skills the TypeSafe Jev marks relevant; other Skills stay in the catalog."""
-        skills = _catalog_entries(skills_catalog)[:_MAX_SELECTABLE_SKILLS]
+        skills = (catalog_entries(skills_catalog) or [])[:_MAX_SELECTABLE_SKILLS]
         if self.jev_lm is None or route is Route.DIRECT or not skills:
             return skills_catalog
         try:
@@ -282,10 +272,10 @@ class AdaptiveFleetEngine(dspy.Module):
                 )
                 for name, description in skills
             ]
-            callbacks = without_mlflow_dspy_callback(list(dspy.settings.callbacks))
-            with mlflow.start_span(name="typesafe_skill_selection", span_type=SpanType.LLM) as span:
-                span.set_inputs({"task": activity_text(task), "skills": [name for name, _ in skills]})
-                with dspy.context(lm=self.jev_lm, callbacks=callbacks), decision_usage(span):
+            with evidence_span(
+                "typesafe_skill_selection", inputs={"task": activity_text(task), "skills": [name for name, _ in skills]}
+            ) as span:
+                with typed_decision_scope(lm=self.jev_lm, span=span, typesafe=True):
                     predictions = self.skill_selector.batch(examples, num_threads=min(8, len(examples)))
                 decisions = []
                 for (name, _), prediction in zip(skills, predictions, strict=True):
@@ -333,21 +323,13 @@ class AdaptiveFleetEngine(dspy.Module):
             else:
                 if self.jev_lm is not None:
                     self.sandbox_mgr.consume_budget(category="routing")
-                callbacks = (
-                    without_mlflow_dspy_callback(list(dspy.settings.callbacks))
-                    if self.jev_lm is not None
-                    else list(dspy.settings.callbacks)
-                )
                 # A generative backend has its own LM child span; do not count the wrapper twice.
-                with mlflow.start_span(
-                    name="typesafe_route_selection",
+                with evidence_span(
+                    "typesafe_route_selection",
                     span_type=SpanType.LLM if self.jev_lm is not None else SpanType.CHAIN,
+                    inputs={name: activity_text(value) for name, value in triage_inputs.items()},
                 ) as span:
-                    span.set_inputs({name: activity_text(value) for name, value in triage_inputs.items()})
-                    with (
-                        dspy.context(lm=route_lm, callbacks=callbacks),
-                        decision_usage(span) if self.jev_lm is not None else nullcontext(),
-                    ):
+                    with typed_decision_scope(lm=route_lm, span=span, typesafe=self.jev_lm is not None):
                         decision = self.triage(**triage_inputs).route
                     evidence = decision_evidence(decision, route_lm)
                     # An unknown or missing label takes the bounded RLM path.

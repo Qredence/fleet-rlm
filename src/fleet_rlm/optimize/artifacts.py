@@ -14,6 +14,8 @@ from typing import Any
 
 import dspy
 
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS
+
 APPROVAL_POLICY_VERSION = 6
 VALIDATION_PASSES = 3
 
@@ -34,11 +36,7 @@ class IsolatedFleetProgram(dspy.Module):
         """
         engine = self.engine_factory(dspy.Example(**inputs), self.program)
         try:
-            arguments = {
-                name: value
-                for name, value in inputs.items()
-                if name in {"workspace_manifest", "skills_catalog", "memory_summary", "task", "session_history"}
-            }
+            arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
             if engine.optimization is not None:
                 arguments["context"] = engine.optimization.context
             return engine(**arguments)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import threading
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 import dspy
@@ -168,3 +168,43 @@ def usage_callbacks(callbacks: list[Any]) -> list[Any]:
     collectors = [callback for callback in callbacks if isinstance(callback, LMUsageCallback)]
     collector = collectors[0] if collectors else LMUsageCallback()
     return [collector, *(callback for callback in callbacks if not isinstance(callback, LMUsageCallback))]
+
+
+def ambient_callbacks() -> list[Any]:
+    """The ambient callback list; `dspy.context` replaces callbacks, so a scope must re-spread them."""
+    return list(dspy.settings.callbacks)
+
+
+def turn_callbacks(*extra: Any) -> list[Any]:
+    """Turn callbacks with the numeric usage collector, reused when the caller already supplies one."""
+    return usage_callbacks([*ambient_callbacks(), *extra])
+
+
+def stream_callbacks(*extra: Any) -> list[Any]:
+    """Ambient callbacks with a caller's collector appended, keeping the caller's order.
+
+    `dspy.context` replaces the list, so any scope that needs the ambient callbacks must re-spread
+    them; this is the one place that does it for a streaming collector that is not a usage collector.
+    """
+    return [*ambient_callbacks(), *extra]
+
+
+def typesafe_callbacks() -> list[Any]:
+    """Ambient callbacks without MLflow's DSPy hook, for typed decisions that emit their own spans."""
+    from fleet_rlm.observability import without_mlflow_dspy_callback
+
+    return without_mlflow_dspy_callback(ambient_callbacks())
+
+
+@contextmanager
+def typed_decision_scope(*, lm: Any, span: Any, typesafe: bool) -> Generator[None, None, None]:
+    """One typed decision's scope: no LM history, the right callbacks, and usage on its own span.
+
+    TypeSafe clients emit their own usage, so only they are metered here; a generative backend
+    already reports usage through the LM callback and must keep the MLflow hook off.
+    """
+    with (
+        dspy.context(lm=lm, disable_history=True, callbacks=typesafe_callbacks() if typesafe else ambient_callbacks()),
+        decision_usage(span) if typesafe else nullcontext(),
+    ):
+        yield

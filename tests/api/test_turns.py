@@ -104,12 +104,13 @@ def traced(monkeypatch):
         seen["callbacks"].extend(callbacks)
         yield
 
+    import fleet_rlm.lm_usage as lm_usage
+
     seen["global_callback"] = object()
-    monkeypatch.setattr(
-        turn_module,
-        "dspy",
-        SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context),
-    )
+    fake_dspy = SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context)
+    monkeypatch.setattr(turn_module, "dspy", fake_dspy)
+    # Callback composition lives in lm_usage, so the same ambient list must be visible there.
+    monkeypatch.setattr(lm_usage, "dspy", fake_dspy)
     monkeypatch.setattr(turn_module.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **kwargs: seen["updates"].append(kwargs))
 

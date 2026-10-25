@@ -50,3 +50,19 @@ def test_triage_instruction_text_is_unchanged():
         "or rlm for a multi-part task needing independent investigation."
     )
     assert TurnTriage.model_fields["route"].json_schema_extra["desc"] == TRIAGE_INSTRUCTION
+
+
+def test_catalog_parser_is_shared_and_reports_malformed_xml():
+    from fleet_rlm.contracts import catalog_entries
+
+    catalog = '<available_skills>\n  <skill name="alpha">Use for A</skill>\n</available_skills>'
+    assert catalog_entries(catalog) == [("alpha", "Use for A")]
+    assert catalog_entries("<available_skills>No Skills installed.</available_skills>") == []
+    assert catalog_entries("not xml") is None
+
+
+def test_curated_examples_share_the_engine_input_contract():
+    from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, LINEAGE_INPUT_FIELDS
+    from fleet_rlm.optimize.dataset import _INPUTS
+
+    assert (*ENGINE_INPUT_FIELDS, *LINEAGE_INPUT_FIELDS) == _INPUTS

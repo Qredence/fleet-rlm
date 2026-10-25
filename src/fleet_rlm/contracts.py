@@ -7,6 +7,7 @@ This module is a leaf. The runtime (`engine`, `sandbox`) and the offline tooling
 from __future__ import annotations
 
 import math
+import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, cast
@@ -47,6 +48,15 @@ class OptimizationInputs:
     context: Any = None
     artifact_path: str | None = None
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+
+
+def catalog_entries(catalog: str) -> list[tuple[str, str]] | None:
+    """(name, description) pairs from a rendered Stage-1 catalog; None when it is not valid XML."""
+    try:
+        root = ElementTree.fromstring(catalog)
+    except ElementTree.ParseError:
+        return None
+    return [(item.get("name") or "", (item.text or "").strip()) for item in root.iter("skill") if item.get("name")]
 
 
 def parse_route(value: Any) -> Route | None:

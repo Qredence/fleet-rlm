@@ -24,6 +24,7 @@ from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import Route
+from fleet_rlm.lm_usage import stream_callbacks
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
 from fleet_rlm.sandbox.manager import (
     CLEANUP_NOT_REQUIRED,
@@ -204,7 +205,7 @@ def run_turn(
                 _describe_turn(
                     span, runtime, settings, session_id, task, turn_id, idempotency_key, inputs, replay_snapshot
                 )
-                with dspy.context(callbacks=[*dspy.settings.callbacks, callback], disable_history=True):
+                with dspy.context(callbacks=stream_callbacks(callback), disable_history=True):
                     prediction = runtime.engine(
                         workspace_manifest=inputs["manifest"],
                         skills_catalog=inputs["skills_catalog"],

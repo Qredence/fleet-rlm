@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from itertools import islice
 from typing import Any
 
 import mlflow
+from mlflow.entities import SpanType
 
 _CREDENTIAL_KEY = r"password|secret|token|authorization|cookie|api.?key|credential"
 _PRIVATE_KEY = re.compile(rf"{_CREDENTIAL_KEY}|reasoning|thought|scratchpad", re.I)
@@ -33,6 +35,14 @@ def without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
     if _MlflowDspyCallback is not None:
         return [callback for callback in callbacks if not isinstance(callback, _MlflowDspyCallback)]
     return [callback for callback in callbacks if callback.__class__.__name__ != "MlflowCallback"]
+
+
+@contextmanager
+def evidence_span(name: str, *, inputs: dict[str, Any], span_type: Any = SpanType.LLM) -> Generator[Any, None, None]:
+    """Start one decision span and record its bounded inputs, so callers do not repeat the pattern."""
+    with mlflow.start_span(name=name, span_type=span_type) as span:
+        span.set_inputs(inputs)
+        yield span
 
 
 def trace_object(value: Any) -> dict[str, Any]:

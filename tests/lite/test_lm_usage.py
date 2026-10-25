@@ -299,3 +299,40 @@ print(f"Verified offline trace {trace_id}: {len(trace.data.spans)} spans, 3 mode
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "3 model calls, 997 tokens" in result.stdout
+
+
+def test_turn_callbacks_compose_ambient_callbacks_with_one_usage_collector():
+    import dspy
+
+    from fleet_rlm.lm_usage import LMUsageCallback, ambient_callbacks, turn_callbacks
+
+    marker = object()
+    with dspy.context(callbacks=[marker]):
+        composed = turn_callbacks()
+        assert marker in ambient_callbacks()
+        assert sum(isinstance(item, LMUsageCallback) for item in composed) == 1
+        assert len(composed) == 2
+        # dspy.context replaces the callback list, so re-spreading the ambient list is mandatory.
+        assert marker in composed
+
+
+def test_typesafe_callbacks_drop_the_mlflow_dspy_hook():
+    import dspy
+    from mlflow.dspy.callback import MlflowCallback
+
+    from fleet_rlm.lm_usage import typesafe_callbacks
+
+    marker = object()
+    with dspy.context(callbacks=[MlflowCallback(), marker]):
+        assert typesafe_callbacks() == [marker]
+
+
+def test_stream_callbacks_append_without_reordering():
+    import dspy
+
+    from fleet_rlm.lm_usage import stream_callbacks
+
+    marker, collector = object(), object()
+    with dspy.context(callbacks=[marker]):
+        # The Turn's stream collector must stay last: it is the API's terminal-event owner.
+        assert stream_callbacks(collector) == [marker, collector]

@@ -23,7 +23,7 @@ import mlflow
 
 from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.contracts import OptimizationInputs
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimize.artifacts import (
@@ -188,17 +188,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
         snapshot = selected_snapshot(
             store, example.source_session, example.replay_turn_id, example.replay_snapshot_sha256
         )
-        if any(
-            snapshot[name] != getattr(example, name)
-            for name in (
-                "task",
-                "workspace_manifest",
-                "context_files",
-                "skills_catalog",
-                "memory_summary",
-                "session_history",
-            )
-        ):
+        if any(snapshot[name] != getattr(example, name) for name in (*ENGINE_INPUT_FIELDS, "context_files")):
             raise ValueError("Curated replay snapshot does not match the reviewed example")
         if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
             raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")

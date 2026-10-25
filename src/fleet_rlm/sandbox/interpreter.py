@@ -13,7 +13,6 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
 from typing import Any, ClassVar
 
 import dspy
@@ -22,8 +21,8 @@ from mlflow.entities import SpanType
 from pydantic_core import to_jsonable_python
 
 from fleet_rlm.contracts import decision_evidence, item_decision
-from fleet_rlm.lm_usage import decision_usage
-from fleet_rlm.observability import activity_preview, activity_text, without_mlflow_dspy_callback
+from fleet_rlm.lm_usage import typed_decision_scope
+from fleet_rlm.observability import activity_preview, activity_text, evidence_span
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import _child_input_path
@@ -281,15 +280,12 @@ class DaytonaInterpreter:
         predictor = dspy.Predict(item_decision(choices))
         active_lm = self.manager.jev_lm or self.manager.sub_lm or dspy.settings.lm
         examples = [dspy.Example(item=item, question=question).with_inputs("item", "question") for item in items]
-        callbacks = list(dspy.settings.callbacks)
-        if active_lm is self.manager.jev_lm and self.manager.jev_lm is not None:
-            callbacks = without_mlflow_dspy_callback(callbacks)
-        with mlflow.start_span(name="jev_batch_decisions", span_type=SpanType.LLM) as span:
-            span.set_inputs({"item_count": len(items), "question": activity_text(question), "choices": choices})
-            with (
-                dspy.context(lm=active_lm, disable_history=True, callbacks=callbacks),
-                decision_usage(span) if active_lm is self.manager.jev_lm else nullcontext(),
-            ):
+        typesafe = active_lm is self.manager.jev_lm and self.manager.jev_lm is not None
+        with evidence_span(
+            "jev_batch_decisions",
+            inputs={"item_count": len(items), "question": activity_text(question), "choices": choices},
+        ) as span:
+            with typed_decision_scope(lm=active_lm, span=span, typesafe=typesafe):
                 predictions = predictor.batch(examples, num_threads=min(8, len(items)))
             results: list[dict[str, Any]] = []
             for item, prediction in zip(items, predictions, strict=True):
