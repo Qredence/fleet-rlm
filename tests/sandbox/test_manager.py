@@ -2140,3 +2140,23 @@ def test_provider_bounds_report_requested_ttl_and_an_unknown_lifespan_before_pro
     }
     child = DaytonaSandboxManager("key", "org", "volume", "session-a", parent=manager)
     assert child.provider_bounds()["ttl_minutes"] == 30
+
+
+def test_turn_scope_owns_an_unowned_turn_and_is_inert_inside_one() -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-scope")
+
+    with manager.turn_scope(deadline_seconds=5, deadline_source="request"):
+        assert manager.turn_active
+        assert manager.deadline_provenance()["effective_seconds"] == 5
+    assert not manager.turn_active
+
+    # A Turn an outer owner started stays that owner's: a nested scope neither resets nor ends it.
+    manager.reset_turn_budget(deadline_seconds=None, deadline_source="request")
+    try:
+        with manager.turn_scope(deadline_seconds=5, deadline_source="request"):
+            assert manager.turn_active
+            assert manager.deadline_provenance()["effective_seconds"] is None
+        assert manager.turn_active
+    finally:
+        manager.end_turn()
+    assert not manager.turn_active

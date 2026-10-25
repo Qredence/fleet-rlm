@@ -106,11 +106,27 @@ def _catalog_entries(skills_catalog: str) -> list[tuple[str, str]]:
     return [(item.get("name") or "", (item.text or "").strip()) for item in root.iter("skill") if item.get("name")]
 
 
+def _lm_api_key(lm: Any) -> str | None:
+    """Find the credential on a DSPy LM, a sandbox proxy, or a TypeSafe client.
+
+    `dspy.LM` keeps it in `kwargs`, the sandbox proxy exposes `kwargs` and `_lm`, and a TypeSafe
+    client keeps an `api_key` attribute. The walk is id-guarded in case a proxy points at itself.
+    """
+    seen: set[int] = set()
+    while lm is not None and id(lm) not in seen:
+        seen.add(id(lm))
+        for candidate in (getattr(lm, "api_key", None), (getattr(lm, "kwargs", None) or {}).get("api_key")):
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        lm = getattr(lm, "_lm", None)
+    return None
+
+
 def _safe_route_error(exc: Exception, route_lm: Any) -> str:
     """Keep useful route errors in logs without echoing the active credential."""
     detail = " ".join(str(exc).split())
-    api_key = getattr(route_lm, "api_key", None)
-    if isinstance(api_key, str) and api_key:
+    api_key = _lm_api_key(route_lm)
+    if api_key:
         detail = detail.replace(api_key, "[redacted]")
     return detail[:500] or "no exception message"
 
@@ -182,8 +198,7 @@ class AdaptiveFleetEngine(dspy.Module):
         execution_mode: str | None = None,
     ) -> dspy.Prediction:
         """Run one Turn, attaching the execution evidence and turn usage that scoring reads."""
-        owns_turn = not self.sandbox_mgr.turn_active
-        try:
+        with self.sandbox_mgr.turn_scope():
             with dspy.context(callbacks=usage_callbacks(list(dspy.settings.callbacks))):
                 prediction = self._run_turn(
                     workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
@@ -194,9 +209,6 @@ class AdaptiveFleetEngine(dspy.Module):
             for name, value in self.sandbox_mgr.turn_usage().items():
                 prediction[name] = value
             return prediction
-        finally:
-            if owns_turn:
-                self.sandbox_mgr.end_turn()
 
     def _execution_evidence(self) -> dict[str, Any]:
         """Collection failures mark evidence incomplete, which scores zero, instead of failing an answered Turn."""
@@ -245,10 +257,6 @@ class AdaptiveFleetEngine(dspy.Module):
         self.compiled.reload_if_changed(self)
         # A reloaded artifact carries its own Flex source, so the budgets are re-applied here too.
         self._apply_flex_budgets()
-        if not self.sandbox_mgr.turn_active:
-            # Only the Turn's owner initializes the shared budgets; a Turn already started by
-            # the API stream (including a deadline-free one) must not be reset a second time.
-            self.sandbox_mgr.reset_turn_budget()
         self.sandbox_mgr.check_turn()
         mode = execution_mode or self.execution_mode
         if mode not in {"rlm", "flex", "hybrid"}:

@@ -1312,6 +1312,29 @@ class DaytonaSandboxManager:
             root._deadline = None
             root._turn_active = False
 
+    @contextmanager
+    def turn_scope(
+        self,
+        *,
+        deadline_seconds: int | object | None = _UNSET,
+        deadline_source: str | None = None,
+    ) -> Generator[None, None, None]:
+        """Own a Turn only when nobody owns one already, and end only the Turn this scope started.
+
+        Nested scopes are inert: a Turn the API stream started stays owned by that stream, so a
+        program running inside it neither resets the shared budgets nor tears the Turn down. A
+        caller with no outer owner (the direct engine path, an isolated optimization rollout)
+        gets a fresh budget and a teardown of its own.
+        """
+        owns = not self.turn_active
+        if owns:
+            self.reset_turn_budget(deadline_seconds=deadline_seconds, deadline_source=deadline_source)
+        try:
+            yield
+        finally:
+            if owns:
+                self.end_turn()
+
     def consume_budget(self, count: int = 1, *, category: str = "generation_query") -> None:
         """Charge shared budget units, categorized without changing admission or completion counts."""
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:

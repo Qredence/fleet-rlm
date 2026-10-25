@@ -11,7 +11,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import dspy
-from dspy import AdapterParseError
 
 from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.engine.signatures import ChildTask
@@ -93,9 +92,12 @@ class ChildAgents:
         try:
             with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
                 result = child(subtask=subtask)
-        except AdapterParseError as exc:
-            # A child whose reply cannot be parsed must not abort the parent's Turn or promote its
-            # unverified files; the parent sees the failure and can retry or use other children.
+        except Exception as exc:
+            if turn_is_over(exc):
+                raise
+            # A child that fails must not abort the parent's Turn or promote its unverified files.
+            # This rule is the same for a solo and a batched child, so delegation cannot change an
+            # error's severity; the parent sees the failure and can retry or use other children.
             return {"findings": "", "error": child_failure(exc), "artifacts": []}
         else:
             return {

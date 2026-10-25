@@ -92,7 +92,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
 
 
 def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
-    """A Turn the API already started must not reset shared budgets or end itself in the engine."""
+    """A Turn the API already started keeps its budget and teardown; the engine's scope is inert."""
     engine = _answering_engine()
     manager = engine.sandbox_mgr
     manager.reset_turn_budget(deadline_seconds=None, deadline_source="request")
@@ -517,3 +517,56 @@ def test_engine_binds_the_turn_budgets_into_the_flex_baseline():
     )
     assert "max_iters=16" in engine.flex_agent.module_src
     assert f"max_llm_calls={manager.max_llm_calls}" in engine.flex_agent.module_src
+
+
+def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypatch) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-symmetry")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+    )
+    tools = engine.primary_rlm._user_tools
+
+    class FailingChild:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.generate_action = dspy.Predict("a -> b")
+
+        def __call__(self, **_kwargs):
+            raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(dspy, "RLM", FailingChild)
+
+    solo = tools["spawn_agent"](subtask="count refunds", input_paths=[])
+    batched = tools["spawn_agents"](subtasks=["count refunds", "count credits"], input_paths=[[], []])
+
+    # Delegation shape must not decide whether a child error is fatal.
+    assert solo["error"].startswith("child agent failed (RuntimeError)")
+    assert [item["error"].split(":")[0] for item in batched] == ["child agent failed (RuntimeError)"] * 2
+
+
+def test_route_errors_redact_the_serving_lm_credential(caplog: pytest.LogCaptureFixture) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-redact")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False, api_key="real-serving-token"),
+    )
+
+    class FailingTriage:
+        def __call__(self, **_kwargs: Any) -> Any:
+            raise RuntimeError("401: rejected real-serving-token")
+
+    engine.triage = FailingTriage()  # type: ignore[assignment]
+    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+        answer="bounded fallback",
+        learned_skill_note="",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.programs"):
+        prediction = engine(workspace_manifest="", memory_summary="", task="test fallback")
+
+    # Production dspy.LM keeps the key in kwargs, not as an attribute; it must still be redacted.
+    assert prediction.route == "rlm"
+    assert "401: rejected" in caplog.text
+    assert "real-serving-token" not in caplog.text
