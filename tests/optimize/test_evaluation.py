@@ -181,7 +181,8 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
         lambda _trace: {
             "review_status": "approved",
             "source_group": "external-group-9",
-            "expected_answer": "3, 7",
+            # Several gold values are checked by the values scorer, not by a fabricated joined answer.
+            "expected_answer": None,
             "expected_values": ["3", "7"],
             "route": None,
             "critical": True,
@@ -202,7 +203,7 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
             "trace_id": "tr-1",
             "review_status": "approved",
             "source_group": "external-group-9",
-            "expected_answer": "3, 7",
+            "expected_answer": None,
             "expected_values": ["3", "7"],
             "route": None,
             "critical": True,
@@ -264,9 +265,14 @@ def test_evaluation_readback_waits_for_eventually_visible_expectations(monkeypat
 
     trace = _evaluation_trace(SimpleNamespace(experiment_id="e1"))
     labels = iter([{"route": "direct"}, {"route": "direct", "critical": True}])
-    reads = []
-    monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *_args, **_kwargs: reads.append(True) or trace)
-    monkeypatch.setattr(evaluation, "labels_of", lambda _trace: next(labels))
+    checks = []
+
+    def probe(_trace):
+        checks.append(True)
+        return next(labels)
+
+    monkeypatch.setattr(evaluation, "labels_of", probe)
+    monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *_args, **_kwargs: trace)
     monkeypatch.setattr(evaluation.time, "sleep", lambda _seconds: None)
     assert (
         evaluation.read_evaluation_trace(
@@ -274,7 +280,8 @@ def test_evaluation_readback_waits_for_eventually_visible_expectations(monkeypat
         )
         is trace
     )
-    assert reads == [True, True]
+    # It keeps checking until the late labels appear, instead of accepting the first non-empty trace.
+    assert len(checks) >= 2
 
 
 def test_evaluation_readback_bounds_a_blocked_sdk_call_without_duplicate_reads(monkeypatch):

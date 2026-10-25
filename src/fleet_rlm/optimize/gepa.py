@@ -57,9 +57,30 @@ class SplitScore:
     seconds: float
 
 
+class _RolloutTracker(dspy.Module):
+    """Count rollouts that raised, instead of inferring it from the prediction `dspy.Evaluate` substitutes."""
+
+    def __init__(self, program: dspy.Module) -> None:
+        """Wrap the scored program; failures are counted per thread and re-raised for the evaluator."""
+        super().__init__()
+        self.program = program
+        self.failures = 0
+        self._lock = threading.Lock()
+
+    def forward(self, **inputs: Any) -> Any:
+        """Run one rollout, counting and re-raising anything it raises."""
+        try:
+            return self.program(**inputs)
+        except Exception:
+            with self._lock:
+                self.failures += 1
+            raise
+
+
 def score_split(program: dspy.Module, examples: list[dspy.Example], metric: Any, threads: int) -> SplitScore:
     """Score every example with ``dspy.Evaluate``; a rollout that raises scores 0.0 and counts as an error."""
     started = time.perf_counter()
+    tracker = _RolloutTracker(program)
     result = dspy.Evaluate(
         devset=examples,
         metric=metric,
@@ -67,10 +88,9 @@ def score_split(program: dspy.Module, examples: list[dspy.Example], metric: Any,
         failure_score=0.0,
         max_errors=len(examples) + 1,
         provide_traceback=False,
-    )(program)
+    )(tracker)
     scores = [float(score) for _, _, score in result.results]
-    # Evaluate substitutes an empty Prediction for a rollout that raised.
-    errors = sum(1 for _, prediction, _ in result.results if "answer" not in prediction)
+    errors = tracker.failures
     critical_scores = [
         float((getattr(score, "objective_scores", None) or {}).get("quality", float(score)))
         for example, _prediction, score in result.results

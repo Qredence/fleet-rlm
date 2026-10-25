@@ -16,7 +16,6 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from queue import Empty, Queue
 from typing import Any
 
 import httpx
@@ -257,47 +256,57 @@ def read_evaluation_trace(
 ) -> Any:
     """Wait for one completed trace in the intended destination, including cold warehouse startup.
 
-    Each read runs on a daemon thread so an SDK request cannot exceed the caller's readback
-    window. A timeout abandons that read, never starts a concurrent retry, and never repeats a Turn.
+    One daemon reader polls for the whole window, so a slow SDK request cannot extend the deadline and
+    a poll never abandons a thread behind it. Validation stays on the waiting thread: a trace that is
+    merely not ready yet is re-read, while a wrong destination or a failed state raises at once.
     """
     deadline = time.monotonic() + wait_seconds
-    while (remaining := deadline - time.monotonic()) > 0:
-        result: Queue[tuple[Any, Exception | None]] = Queue(maxsize=1)
+    latest: dict[str, Any] = {}
+    stop = threading.Event()
 
-        def read(result: Queue[tuple[Any, Exception | None]] = result) -> None:
+    def read() -> None:
+        while not stop.is_set():
             try:
-                result.put((mlflow.get_trace(trace_id, silent=True, flush=True), None))
+                latest["trace"] = mlflow.get_trace(trace_id, silent=True, flush=True)
+                latest["error"] = None
             except Exception as exc:
-                result.put((None, exc))
+                latest["error"] = exc
+            stop.wait(1.0)
 
-        threading.Thread(target=read, daemon=True).start()
-        try:
-            trace, error = result.get(timeout=remaining)
-        except Empty:
-            break
-        if error is not None:
-            raise EvaluationError(f"Trace readback failed ({type(error).__name__}); recover trace {trace_id}") from None
-        if trace is not None:
-            location = trace.info.trace_location
-            if uc_location is not None:
-                location = getattr(location, "uc_table_prefix", None) or location
-                actual = tuple(getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix"))
-                matches = actual == uc_location
-            else:
-                location = getattr(location, "mlflow_experiment", None) or location
-                matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
-            if not matches:
-                raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
-            state = str(trace.info.state)
-            if state not in {"OK", "IN_PROGRESS"}:
-                raise EvaluationError(f"Trace {trace_id} completed with state {state}")
-            if state == "OK" and trace.data.spans:
-                if expected_labels is None:
-                    return trace
-                saved = labels_of(trace)
-                if all(saved.get(key) == value for key, value in expected_labels.items()):
-                    return trace
-        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        while (remaining := deadline - time.monotonic()) > 0:
+            error = latest.get("error")
+            if error is not None:
+                raise EvaluationError(
+                    f"Trace readback failed ({type(error).__name__}); recover trace {trace_id}"
+                ) from None
+            trace = latest.get("trace")
+            if trace is not None:
+                location = trace.info.trace_location
+                if uc_location is not None:
+                    location = getattr(location, "uc_table_prefix", None) or location
+                    actual = tuple(
+                        getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix")
+                    )
+                    matches = actual == uc_location
+                else:
+                    location = getattr(location, "mlflow_experiment", None) or location
+                    matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
+                if not matches:
+                    raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
+                state = str(trace.info.state)
+                if state not in {"OK", "IN_PROGRESS"}:
+                    raise EvaluationError(f"Trace {trace_id} completed with state {state}")
+                if state == "OK" and trace.data.spans:
+                    if expected_labels is None:
+                        return trace
+                    saved = labels_of(trace)
+                    if all(saved.get(key) == value for key, value in expected_labels.items()):
+                        return trace
+            time.sleep(min(1.0, max(0.0, remaining)))
+    finally:
+        stop.set()
     raise EvaluationError(
         f"Trace {trace_id} was not ready within {wait_seconds:g}s; recover this trace without rerunning"
     )
@@ -353,12 +362,15 @@ def evaluate_cases(
             readback_deadline = time.monotonic() + 180.0
             read_evaluation_trace(trace_id, experiment_id=experiment_id, uc_location=uc_location)
             labels = case.record()["expectations"]
+            # A single value is the reference answer; several values are judged by the values check,
+            # never by their joined text, which would fabricate a gold answer nobody wrote.
+            expected_answer = case.expected_values[0] if len(case.expected_values) == 1 else None
             try:
                 label_trace(
                     trace_id,
                     review_status=case.review_status,
                     source_group=case.source_group,
-                    expected_answer=", ".join(case.expected_values) or None,
+                    expected_answer=expected_answer,
                     expected_values=labels["expected_values"],
                     route=case.route,
                     critical=case.critical,
@@ -371,7 +383,7 @@ def evaluate_cases(
             expected = {
                 "review_status": case.review_status,
                 "source_group": case.source_group,
-                "expected_answer": ", ".join(case.expected_values) or None,
+                "expected_answer": expected_answer,
                 "expected_values": list(case.expected_values) or None,
                 "route": case.route,
                 "critical": case.critical,

@@ -870,3 +870,31 @@ def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
     # Docs, the API layer, the TUI, and the Store cannot change Turn behavior or scoring.
     for excluded in ("api/", "tui/", "store/", "dspy_support.py"):
         assert not any(name.startswith(excluded) for name in DIGEST_SOURCES)
+
+
+def test_mlflow_example_loading_requires_a_store() -> None:
+    with pytest.raises(ValueError, match="store is required"):
+        dataset.load_examples_from_mlflow("experiment", store=None)
+
+
+def test_score_split_counts_raised_rollouts_not_a_missing_answer_field() -> None:
+    class Program(dspy.Module):
+        def forward(self, task):
+            if task == "boom":
+                raise RuntimeError("rollout failed")
+            # A legitimate prediction without an `answer` field is not an error.
+            return dspy.Prediction(result="done")
+
+    def metric(_gold, _pred, _trace=None, _pred_name=None, _pred_trace=None):
+        return dspy.Prediction(score=1.0, feedback="ok", objective_scores={"quality": 1.0})
+
+    examples = [
+        dspy.Example(task="ok").with_inputs("task"),
+        dspy.Example(task="boom").with_inputs("task"),
+        dspy.Example(task="ok-again").with_inputs("task"),
+    ]
+    scored = workflow.score_split(Program(), examples, metric, threads=1)
+
+    assert scored.errors == 1
+    assert len(scored.scores) == 3
+    assert scored.scores.count(0.0) == 1

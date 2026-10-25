@@ -136,15 +136,14 @@ def turn_traces(experiment_name: str, max_results: int = _MAX_EXAMPLES) -> list[
         order_by=["timestamp_ms DESC"],
         return_type="list",
     )
-    return [
-        trace
-        for trace in traces
+    selected = []
+    for trace in traces:
+        request = trace_object(trace.data.request)
         if (
-            isinstance(trace_object(trace.data.request).get("workspace_manifest"), str)
-            or trace_object(trace.data.request).get("replay_snapshot_selected") is True
-        )
-        and not _is_test_trace(trace)
-    ]
+            isinstance(request.get("workspace_manifest"), str) or request.get("replay_snapshot_selected") is True
+        ) and not _is_test_trace(trace):
+            selected.append(trace)
+    return selected
 
 
 def _is_test_trace(trace: Any) -> bool:
@@ -167,9 +166,13 @@ def load_examples_from_mlflow(
     *,
     store: Store | None = None,
 ) -> list[dspy.Example]:
-    """Load approved traces only when their immutable selected snapshot is available and matches."""
+    """Load approved traces only when their immutable selected snapshot is available and matches.
+
+    Raises:
+        ValueError: `store` is missing; approved traces cannot be verified against a snapshot without it.
+    """
     if store is None:
-        return []
+        raise ValueError("store is required to verify reviewed replay snapshots")
     examples: list[dspy.Example] = []
     for trace in turn_traces(experiment_name, max_results):
         labels = labels_of(trace)
