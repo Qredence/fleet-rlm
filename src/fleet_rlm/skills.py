@@ -354,11 +354,12 @@ class SkillManager:
             "print(json.dumps(result))"
         )
         with mlflow.start_span(name="skills.inspect_remote", span_type=SpanType.TOOL) as span:
-            span.set_attribute("file_count", len(staged_files))
+            span.set_inputs({"file_count": len(staged_files)})
             try:
                 existing = json.loads(self.sandbox_mgr.exec_remote_python(inspection_code) or "{}")
             except (TypeError, json.JSONDecodeError) as exc:
                 raise ValueError("Could not inspect existing session Skills before synchronization") from exc
+            span.set_outputs({"existing": len(existing) if isinstance(existing, dict) else None})
         if not isinstance(existing, dict):
             raise ValueError("Existing session Skill manifest is invalid")
         changed = {
@@ -377,8 +378,10 @@ class SkillManager:
             relative: content for relative, content in staged_files if relative not in existing or relative in changed
         }
         with mlflow.start_span(name="skills.upload", span_type=SpanType.TOOL) as span:
-            span.set_attributes({"file_count": len(uploads), "byte_count": sum(map(len, uploads.values()))})
+            byte_count = sum(map(len, uploads.values()))
+            span.set_inputs({"file_count": len(uploads), "byte_count": byte_count})
             self.sandbox_mgr.write_workspace_files(uploads)
+            span.set_outputs({"uploaded": len(uploads)})
         return count
 
     def export_volume_skills_to_local(self) -> list[str]:

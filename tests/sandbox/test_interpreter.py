@@ -237,11 +237,30 @@ def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch
     assert span["attributes"]["phase"] == "task" and span["attributes"]["namespace"] == interpreter.ns_id
     assert span["attributes"]["outcome"] == "completed"
     names = [item["name"] for item in spans]
-    assert "sandbox.provision" in names and "sandbox.namespace_prepare" in names
+    # A manager whose sandbox is already live is not "provisioning": a Turn calls this repeatedly,
+    # and tracing each reuse buried a real trace under no-op spans.
+    assert "sandbox.provision" not in names and "sandbox.namespace_prepare" in names
     prepared = next(item for item in spans if item["name"] == "sandbox.namespace_prepare")
     assert prepared["attributes"]["namespace"] == interpreter.ns_id
     assert prepared["attributes"]["agent_id"] == interpreter.manager.agent_id
     assert prepared["outputs"]["completed"] is True
+
+
+def test_provisioning_is_traced_only_when_it_creates_the_sandbox(sandbox, monkeypatch):
+    spans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        interpreter_module.mlflow, "start_span", lambda name, span_type: recording_span(spans, name, span_type)
+    )
+    manager = manager_on(sandbox)
+    manager._sandbox = None
+    # The manager uses slots, so the provisioning call is replaced on the class, not the instance.
+    monkeypatch.setattr(type(manager), "_ensure_sandbox", lambda _self: sandbox)
+
+    assert manager.ensure_sandbox() is sandbox
+    [provision] = [span for span in spans if span["name"] == "sandbox.provision"]
+    assert provision["attributes"]["action"] == "create"
+    assert provision["inputs"] == {"operation": "sandbox.provision"}
+    assert provision["outputs"] == {"completed": True}
 
 
 def test_sandbox_skill_receipts_reach_the_progressive_disclosure_scorer(sandbox, monkeypatch):

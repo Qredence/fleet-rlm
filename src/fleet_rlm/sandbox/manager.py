@@ -938,9 +938,16 @@ class DaytonaSandboxManager:
         return mounts
 
     def ensure_sandbox(self) -> Any:
-        """Trace provisioning/resume, including the provider state check on a reused sandbox."""
+        """Return the live handle, tracing provisioning but not the common already-live case.
+
+        A Turn calls this from many places; emitting a span for each reuse produced 24 of one
+        trace's 64 spans, none of which recorded anything happening. Only a create/resume is
+        traced, and the caller sees the outcome on the spans that actually do work.
+        """
+        if self._sandbox is not None:
+            return self._ensure_sandbox()
         with self._lifecycle_span("sandbox.provision") as span:
-            span.set_attribute("action", "reuse" if self._sandbox is not None else "create")
+            span.set_attribute("action", "create")
             return self._ensure_sandbox()
 
     def _ensure_sandbox(self) -> Any:

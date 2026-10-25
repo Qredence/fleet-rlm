@@ -25,6 +25,7 @@ from mlflow.entities.trace_location import MlflowExperimentLocation
 from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import Route
 from fleet_rlm.lm_usage import stream_callbacks
+from fleet_rlm.observability import phase_span
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
 from fleet_rlm.sandbox.manager import (
     CLEANUP_NOT_REQUIRED,
@@ -157,8 +158,18 @@ def run_turn(
                 resolved_identity = getattr(manager, "snapshot_identity", None)
                 if resolved_identity is not None:
                     record_snapshot_identity(resolved_identity)
-                with mlflow.start_span(name="turn.prepare_inputs", span_type=SpanType.CHAIN):
+                with phase_span("turn.prepare_inputs", session_id=session_id, record_replay=record_replay) as phase:
                     inputs = _prepare_inputs(runtime, session_id, task, record_replay=record_replay)
+                    # Counts only: the prepared text is already on the root span's inputs.
+                    phase.set_outputs(
+                        {
+                            "context_files": len(inputs["context_files"]),
+                            "skills_catalog_chars": len(inputs["skills_catalog"]),
+                            "memory_summary_chars": len(inputs["memory_summary"]),
+                            "session_history_chars": len(inputs["session_history"]),
+                            "replay_files": len(inputs["replay_files"]),
+                        }
+                    )
                 # The provider resolved this identity during preparation; every surface records
                 # these exact values rather than re-deriving them from the definition.
                 snapshot_provenance = manager.snapshot_provenance()
@@ -166,7 +177,7 @@ def run_turn(
                 if record_replay:
                     from fleet_rlm.session import runtime_configuration
 
-                    with mlflow.start_span(name="turn.capture_replay", span_type=SpanType.CHAIN):
+                    with phase_span("turn.capture_replay", turn_id=turn_id) as phase:
                         snapshot = {
                             "schema_version": 1,
                             "turn_id": turn_id,
@@ -202,6 +213,13 @@ def run_turn(
                             "provenance": {"fleet_rlm_version": version("fleet-rlm")},
                         }
                         replay_snapshot = encode_snapshot(snapshot)
+                        phase.set_attributes(
+                            {
+                                "snapshot_id": replay_snapshot[0],
+                                "snapshot_bytes": len(replay_snapshot[1]),
+                                "replay_files": len(inputs["replay_files"]),
+                            }
+                        )
                 _describe_turn(
                     span, runtime, settings, session_id, task, turn_id, idempotency_key, inputs, replay_snapshot
                 )
@@ -256,13 +274,14 @@ def run_turn(
                     # A completed Turn keeps its warm root sandbox for the next Turn.
                     _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                 }
-                with mlflow.start_span(name="turn.commit", span_type=SpanType.CHAIN):
+                with phase_span("turn.commit", turn_id=turn_id, learned_note=bool(learned_note)) as phase:
                     artifacts = runtime.harness.commit_turn(
                         session_id=session_id,
                         turn_record=turn_record,
                         new_memory_note=learned_note,
                         replay_snapshot=replay_snapshot,
                     )
+                    phase.set_outputs({"artifacts": len(artifacts or [])})
                 _write_learned_note(runtime, turn_id, learned_note, trace_id)
                 # The span carries the same join keys as the record, status payload, and terminal
                 # event so one turn_id resolves all four surfaces without re-deriving anything.
@@ -510,13 +529,21 @@ def _distinct_notes(
 def _prepare_inputs(
     runtime: SessionRuntime, session_id: str, task: str, *, record_replay: bool = False
 ) -> dict[str, Any]:
-    with mlflow.start_span(name="turn.load_context", span_type=SpanType.CHAIN):
+    with phase_span("turn.load_context", session_id=session_id) as phase:
         memory_summary, session_history = runtime.harness.load_context(session_id)
+        phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
     # Skills land first so their files are hashed; everything else remote arrives in one exec.
-    with mlflow.start_span(name="turn.sync_skills", span_type=SpanType.CHAIN):
-        runtime.skill_mgr.sync_local_skills_to_volume()
-    with mlflow.start_span(name="turn.workspace_inputs", span_type=SpanType.CHAIN):
+    with phase_span("turn.sync_skills") as phase:
+        phase.set_outputs({"skills": runtime.skill_mgr.sync_local_skills_to_volume()})
+    with phase_span("turn.workspace_inputs") as phase:
         remote = runtime.sandbox_mgr.turn_inputs()
+        phase.set_outputs(
+            {
+                "files": len(remote["digests"]),
+                "notes": len(remote["notes"]),
+                "has_environment": bool(remote["environment"]),
+            }
+        )
     shared_notes = _distinct_notes(remote["notes"])
     if shared_notes:
         memory_summary = "\n".join(
@@ -534,7 +561,7 @@ def _prepare_inputs(
     replay_bytes = 0
     # Only a selected replay needs the bytes; other Turns record the remotely computed digests.
     if record_replay:
-        with mlflow.start_span(name="turn.replay_files", span_type=SpanType.CHAIN):
+        with phase_span("turn.replay_files") as phase:
             for path in files:
                 content = runtime.sandbox_mgr.read_workspace_file(path)
                 if hashlib.sha256(content).hexdigest() != context_files[path]:
@@ -543,10 +570,13 @@ def _prepare_inputs(
                 if replay_bytes > MAX_REPLAY_FILE_BYTES:
                     raise ValueError("Selected replay workspace exceeds the 8 MB snapshot limit")
                 replay_files[path] = base64.b64encode(content).decode("ascii")
-    with mlflow.start_span(name="turn.reviewed_memories", span_type=SpanType.CHAIN):
+            phase.set_outputs({"files": len(replay_files), "bytes": replay_bytes})
+    with phase_span("turn.reviewed_memories", task_chars=len(task)) as phase:
         memories = runtime.harness.memories(task, reviewed_only=True)
-    with mlflow.start_span(name="turn.skill_catalog", span_type=SpanType.CHAIN):
+        phase.set_outputs({"memories": len(memories)})
+    with phase_span("turn.skill_catalog") as phase:
         skills_catalog = runtime.skill_mgr.build_catalog_xml()
+        phase.set_outputs({"chars": len(skills_catalog)})
     # Keep the version-1 replay manifest paths-only. Environment hints are captured
     # with the other context so serving and immutable replay see the same inputs.
     if remote["environment"]:
@@ -623,7 +653,8 @@ def _describe_turn(
 
 def _write_learned_note(runtime: SessionRuntime, turn_id: str, note: str, trace_id: str | None) -> None:
     try:
-        with mlflow.start_span(name="turn.write_learned_note", span_type=SpanType.CHAIN):
-            runtime.sandbox_mgr.write_learned_note(turn_id, note, trace_id=trace_id)
+        with phase_span("turn.write_learned_note", note_chars=len(note)) as phase:
+            path = runtime.sandbox_mgr.write_learned_note(turn_id, note, trace_id=trace_id)
+            phase.set_outputs({"written": bool(path)})
     except Exception as exc:
         _LOGGER.warning("Learned note was not written to the shared mount (%s)", type(exc).__name__)

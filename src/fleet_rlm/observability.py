@@ -45,6 +45,19 @@ def evidence_span(name: str, *, inputs: dict[str, Any], span_type: Any = SpanTyp
         yield span
 
 
+@contextmanager
+def phase_span(name: str, **inputs: Any) -> Generator[Any, None, None]:
+    """Time one Turn phase and record its bounded counts, never payloads or credentials.
+
+    A phase span without inputs or outputs tells an operator nothing about where the time went,
+    so the caller sets `outputs` on the yielded span once the phase has produced its result.
+    """
+    with mlflow.start_span(name=name, span_type=SpanType.CHAIN) as span:
+        if inputs:
+            span.set_inputs(inputs)
+        yield span
+
+
 def trace_object(value: Any) -> dict[str, Any]:
     """Decode a trace object, including Unity Catalog's extra JSON string wrapper."""
     for _ in range(2):

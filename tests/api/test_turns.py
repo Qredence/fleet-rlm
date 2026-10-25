@@ -85,7 +85,14 @@ def traced(monkeypatch):
         seen["span_active"] = True
         try:
             if not root:
-                yield SimpleNamespace(set_attribute=lambda k, v: row.__setitem__(k, v))
+                # Phase spans record bounded counts, so the fake must accept every setter a
+                # real span does; a missing one shows up as a production AttributeError.
+                yield SimpleNamespace(
+                    set_inputs=lambda value: row.__setitem__("inputs", value),
+                    set_outputs=lambda value: row.__setitem__("outputs", value),
+                    set_attributes=lambda value: row.setdefault("attributes", {}).update(value),
+                    set_attribute=lambda name, value: row.__setitem__(name, value),
+                )
                 return
             yield SimpleNamespace(
                 trace_id=seen.get("span_trace_id"),
@@ -105,12 +112,15 @@ def traced(monkeypatch):
         yield
 
     import fleet_rlm.lm_usage as lm_usage
+    import fleet_rlm.observability as observability
 
     seen["global_callback"] = object()
     fake_dspy = SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context)
     monkeypatch.setattr(turn_module, "dspy", fake_dspy)
     # Callback composition lives in lm_usage, so the same ambient list must be visible there.
     monkeypatch.setattr(lm_usage, "dspy", fake_dspy)
+    # The phase-span helper lives in observability, so the same recorder must be visible there.
+    monkeypatch.setattr(observability.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **kwargs: seen["updates"].append(kwargs))
 
