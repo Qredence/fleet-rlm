@@ -12,7 +12,7 @@ import dspy
 import pytest
 from dspy import AdapterParseError
 
-from fleet_rlm.contracts import ENGINE_INPUT_FIELDS
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
@@ -161,7 +161,7 @@ def test_dataset_revision_check_uses_remote_stat_before_execution(monkeypatch, c
 
 def test_evidence_collection_failure_keeps_the_answer_and_marks_evidence_incomplete(monkeypatch) -> None:
     engine = _answering_engine()
-    engine.optimization_verifications = [{"path": "artifacts/check.py", "timeout_seconds": 5}]
+    engine.optimization = OptimizationInputs(verifications=({"path": "artifacts/check.py", "timeout_seconds": 5},))
 
     def broken(*_args: Any, **_kwargs: Any) -> Any:
         raise OSError("transport down")
@@ -181,7 +181,7 @@ def test_unknown_verification_outcome_still_ends_the_turn(monkeypatch) -> None:
     from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 
     engine = _answering_engine()
-    engine.optimization_verifications = [{"path": "artifacts/check.py", "timeout_seconds": 5}]
+    engine.optimization = OptimizationInputs(verifications=({"path": "artifacts/check.py", "timeout_seconds": 5},))
 
     def unknown(*_args: Any, **_kwargs: Any) -> Any:
         raise ExecutionOutcomeUnknownError("outcome unknown")
@@ -484,3 +484,36 @@ def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -
     engine.compiled.reload_if_changed(engine)
 
     assert engine.triage.signature.instructions == "Older approved triage instructions."
+
+
+def test_flex_module_source_gets_the_turn_rlm_budgets():
+    from fleet_rlm.engine.programs import _with_turn_budgets
+
+    source = (
+        "class M(dspy.Module):\n"
+        "    def __init__(self):\n"
+        '        self.rlm = dspy.RLM("task -> answer", tools=[lookup])\n'
+    )
+    rewritten = _with_turn_budgets(source, max_iters=16, max_llm_calls=150)
+    assert "tools=[lookup], max_iters=16, max_llm_calls=150)" in rewritten
+    assert _with_turn_budgets(rewritten, max_iters=16, max_llm_calls=150) == rewritten
+    # A source with no RLM construction, or no parseable source, is left alone.
+    plain = "class M(dspy.Module):\n    def forward(self, **inputs):\n        return dspy.Prediction(answer='x')\n"
+    assert _with_turn_budgets(plain, max_iters=16, max_llm_calls=150) == plain
+    assert _with_turn_budgets("not python(", max_iters=16, max_llm_calls=150) == "not python("
+    # An explicit budget in evolved source wins over the Turn default.
+    explicit = 'x = dspy.RLM("a -> b", max_llm_calls=7)'
+    assert _with_turn_budgets(explicit, max_iters=16, max_llm_calls=150) == (
+        'x = dspy.RLM("a -> b", max_llm_calls=7, max_iters=16)'
+    )
+
+
+def test_engine_binds_the_turn_budgets_into_the_flex_baseline():
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-budgets")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+    )
+    assert "max_iters=16" in engine.flex_agent.module_src
+    assert f"max_llm_calls={manager.max_llm_calls}" in engine.flex_agent.module_src

@@ -7,6 +7,7 @@ This module is a leaf. The runtime (`engine`, `sandbox`) and the offline tooling
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, cast
 
@@ -37,6 +38,15 @@ class Route(StrEnum):
     DIRECT = "direct"  # ChainOfThought, no code execution
     FLEX = "flex"  # dspy.Flex pipeline with Daytona Python
     RLM = "rlm"  # dspy.RLM with Daytona Python and child agents
+
+
+@dataclass(frozen=True)
+class OptimizationInputs:
+    """What only an isolated optimization rollout supplies; absent on every ordinary Turn."""
+
+    context: Any = None
+    artifact_path: str | None = None
+    verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
 def parse_route(value: Any) -> Route | None:

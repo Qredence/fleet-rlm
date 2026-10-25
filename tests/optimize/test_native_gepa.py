@@ -82,7 +82,7 @@ class _RolloutEngine(dspy.Module):
         super().__init__()
         self.flex_agent = flex
         self.sandbox_mgr = SimpleNamespace(shutdown=lambda: None)
-        self.optimization_artifact_path = None
+        self.optimization = None
 
     def forward(self, task: str, **_kwargs: Any) -> dspy.Prediction:
         return self.flex_agent(task=task)

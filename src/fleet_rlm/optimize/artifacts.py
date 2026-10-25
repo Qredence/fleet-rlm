@@ -39,14 +39,14 @@ class IsolatedFleetProgram(dspy.Module):
                 for name, value in inputs.items()
                 if name in {"workspace_manifest", "skills_catalog", "memory_summary", "task", "session_history"}
             }
-            if hasattr(engine, "optimization_context"):
-                arguments["context"] = engine.optimization_context
+            if engine.optimization is not None:
+                arguments["context"] = engine.optimization.context
             return engine(**arguments)
         finally:
             try:
                 engine.sandbox_mgr.shutdown()
             finally:
-                artifact_path = getattr(engine, "optimization_artifact_path", None)
+                artifact_path = engine.optimization.artifact_path if engine.optimization else None
                 if artifact_path:
                     Path(artifact_path).unlink(missing_ok=True)
 

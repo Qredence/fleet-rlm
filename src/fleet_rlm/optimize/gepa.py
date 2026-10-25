@@ -23,6 +23,7 @@ import mlflow
 
 from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.contracts import OptimizationInputs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimize.artifacts import (
@@ -216,11 +217,15 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
                 compiled_path=program_path,
                 execution_mode=settings.execution_mode,
             )
-            engine.optimization_artifact_path = program_path
-            engine.optimization_verifications = verifications.get(
-                (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256), []
+            engine.optimization = OptimizationInputs(
+                context=WorkspaceDataset(**replay_context) if replay_context else None,
+                artifact_path=program_path,
+                verifications=tuple(
+                    verifications.get(
+                        (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256), []
+                    )
+                ),
             )
-            engine.optimization_context = WorkspaceDataset(**replay_context) if replay_context else None
             return engine
         except BaseException:
             try:

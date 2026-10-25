@@ -447,7 +447,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             assert built_models == ["openai/current-deployment"]
             assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
         finally:
-            Path(engine.optimization_artifact_path).unlink(missing_ok=True)
+            Path(engine.optimization.artifact_path).unlink(missing_ok=True)
 
 
 def test_grouped_split_is_stable_and_keeps_same_task_lineage_together() -> None:
@@ -621,6 +621,7 @@ def test_isolated_rollouts_retain_candidate_instructions_without_sharing_runtime
             self.predict = dspy.Predict("task -> answer")
             self.turns = 0
             self.closed = False
+            self.optimization = None
             self.sandbox_mgr = SimpleNamespace(shutdown=self.close)
 
         def close(self):

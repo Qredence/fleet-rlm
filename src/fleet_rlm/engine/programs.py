@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 import xml.etree.ElementTree as ElementTree
 from contextlib import nullcontext
 from functools import partial
-from typing import Any
+from typing import Any, TypeGuard
 
 import dspy
 import mlflow
 from mlflow.entities import SpanType
 
 from fleet_rlm.adapters import FleetRLMChatAdapter
-from fleet_rlm.contracts import ROUTE_SUMMARIES, TRIAGE_CRITERIA, Route, decision_evidence, parse_route
+from fleet_rlm.contracts import (
+    ROUTE_SUMMARIES,
+    TRIAGE_CRITERIA,
+    OptimizationInputs,
+    Route,
+    decision_evidence,
+    parse_route,
+)
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
 from fleet_rlm.engine.signatures import DirectAnswer, FleetTask, SkillRelevance, TurnTriage
 from fleet_rlm.lm_usage import decision_usage, usage_callbacks
@@ -28,6 +36,65 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_SELECTABLE_SKILLS = 20
 _MAX_PRELOADED_SKILLS = 3
 _MAX_PRELOADED_SKILL_CHARS = 20_000
+# A Flex baseline is dspy.RLM with DSPy's defaults (20 iterations, 50 sub-LLM calls). The rlm route
+# uses the Turn's own budgets, so the flex route gets the same ones.
+_FLEX_MAX_ITERS = 16
+
+
+def _is_dspy_rlm(node: ast.AST) -> TypeGuard[ast.Call]:
+    """True for a `dspy.RLM(...)` call in generated Flex source."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "RLM"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "dspy"
+    )
+
+
+def _with_turn_budgets(source: str, *, max_iters: int, max_llm_calls: int) -> str:
+    """Add the Turn's RLM budgets to every `dspy.RLM(...)` call in generated Flex source.
+
+    The rewrite is AST-driven, so nested signature text and quoting cannot confuse it, and a source
+    that already sets a budget keeps its own value. Source that does not parse, or holds no RLM
+    construction, is returned unchanged.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.splitlines(keepends=True)
+    edits: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        if not _is_dspy_rlm(node):
+            continue
+        declared = {keyword.arg for keyword in node.keywords}
+        additions = [
+            f"{name}={value}"
+            for name, value in (("max_iters", max_iters), ("max_llm_calls", max_llm_calls))
+            if name not in declared
+        ]
+        if additions and node.end_lineno is not None and node.end_col_offset is not None:
+            edits.append((node.end_lineno - 1, node.end_col_offset - 1, ", " + ", ".join(additions)))
+    for line_index, column, insertion in sorted(edits, reverse=True):
+        line = lines[line_index]
+        lines[line_index] = line[:column] + insertion + line[column:]
+    return "".join(lines)
+
+
+def _bind_flex_budgets(flex: Any, *, max_iters: int, max_llm_calls: int) -> bool:
+    """Apply the Turn's RLM budgets to a Flex module source; True when the source changed.
+
+    DSPy's Flex bridge scopes the call-time LM, so a sandbox-built `dspy.RLM` has no `sub_lm` hook:
+    its sub-queries run on the serving LM, metered, with DSPy's default call cap. The budgets are
+    the part Fleet can control, and `_bind_code` is the only hook for them, so it stays here.
+    """
+    source = flex.module_src or ""
+    rewritten = _with_turn_budgets(source, max_iters=max_iters, max_llm_calls=max_llm_calls)
+    if not source or rewritten == source:
+        return False
+    flex._bind_code(rewritten)
+    return True
 
 
 def _catalog_entries(skills_catalog: str) -> list[tuple[str, str]]:
@@ -91,14 +158,18 @@ class AdaptiveFleetEngine(dspy.Module):
             tools=tools,
             sub_lm=self._metered_sub,
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
-            max_iters=16,
+            max_iters=_FLEX_MAX_ITERS,
             max_llm_calls=sandbox_mgr.max_llm_calls,
         )
         self.compiled = CompiledProgramFile(compiled_path)
-        # Set by the optimizer's per-example factory; IsolatedFleetProgram deletes it after the rollout.
-        self.optimization_artifact_path: str | None = None
-        self.optimization_verifications: list[dict[str, Any]] = []
+        # Set by the optimizer's per-example factory; IsolatedFleetProgram clears it after the rollout.
+        self.optimization: OptimizationInputs | None = None
         self.compiled.load_initial(self)
+        self._apply_flex_budgets()
+
+    def _apply_flex_budgets(self) -> None:
+        """Give the Flex module source the Turn's RLM budgets after construction or an artifact reload."""
+        _bind_flex_budgets(self.flex_agent, max_iters=_FLEX_MAX_ITERS, max_llm_calls=self.sandbox_mgr.max_llm_calls)
 
     def forward(
         self,
@@ -130,7 +201,7 @@ class AdaptiveFleetEngine(dspy.Module):
     def _execution_evidence(self) -> dict[str, Any]:
         """Collection failures mark evidence incomplete, which scores zero, instead of failing an answered Turn."""
         verifications: dict[str, Any] = {}
-        for entry in self.optimization_verifications:
+        for entry in self.optimization.verifications if self.optimization else ():
             try:
                 verifications[entry["path"]] = self.sandbox_mgr.verify_python_artifact(
                     entry["path"], entry["timeout_seconds"]
@@ -172,6 +243,8 @@ class AdaptiveFleetEngine(dspy.Module):
         cancellation, and execution errors propagate.
         """
         self.compiled.reload_if_changed(self)
+        # A reloaded artifact carries its own Flex source, so the budgets are re-applied here too.
+        self._apply_flex_budgets()
         if not self.sandbox_mgr.turn_active:
             # Only the Turn's owner initializes the shared budgets; a Turn already started by
             # the API stream (including a deadline-free one) must not be reset a second time.
