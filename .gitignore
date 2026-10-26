@@ -12,7 +12,7 @@ build/
 .coverage
 .coverage.*
 htmlcov/
-
+docs/plans/later
 # Virtual environments
 .venv/
 venv/
