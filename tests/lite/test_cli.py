@@ -379,7 +379,14 @@ def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypat
     )
     monkeypatch.delenv("FLEET_SETUP_TOKEN", raising=False)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(cli.get_settings, "cache_clear", lambda: None, raising=False)
     monkeypatch.setattr(cli.launcher, "plan_launch", lambda **_kwargs: plan)
+
+    def complete_setup(_args, _backend, token):
+        calls["setup_token"] = token
+        return True
+
+    monkeypatch.setattr(cli, "_onboard", complete_setup)
 
     def running_services(selected_plan, **kwargs):
         calls["serving_plan"] = selected_plan
@@ -393,7 +400,8 @@ def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypat
     cli.main(["web", "--host", "127.0.0.1", "--port", "8765"])
 
     token = plan.api_env["FLEET_SETUP_TOKEN"]
-    assert token and calls["serving_plan"].api_env["FLEET_SETUP_TOKEN"] == token
+    assert token and calls["setup_token"] == token
+    assert calls["serving_plan"].api_env["FLEET_SETUP_TOKEN"] == token
     assert plan.api_env["FLEET_SETUP_PROJECT_DIR"]
     assert "FLEET_SETUP_DERIVED_ENV" in plan.api_env
     assert "setup_token" not in calls["web"]
