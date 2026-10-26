@@ -829,9 +829,26 @@ class FleetSettings(BaseSettings):
             name: getattr(self, f"fleet_{role}_{name}")
             for name in ("max_tokens", "temperature", "num_retries", "cache")
         }
+        base_url = self._gateway_base_url()
+        if (
+            role == "reflection"
+            and urlsplit(base_url).path == "/ai-gateway/mlflow/v1"
+            and model.rsplit(".", 1)[-1].startswith("claude-")
+        ):
+            from dspy.lm15 import AccessPolicy, ModelSupport, OpenAIChatCompat, ProviderDefinition, register_provider
+
+            # Gateway translates response_format into forced Anthropic tool use,
+            # which newer Claude deployments reject. Declare this chat-only route
+            # so native JSONAdapter requests/parses JSON without forcing API tools.
+            provider = "fleet-gateway-reflection-" + hashlib.sha256(base_url.encode()).hexdigest()[:12]
+            register_provider(
+                ProviderDefinition.chat(AccessPolicy(provider=provider, base_url=base_url), compat=OpenAIChatCompat()),
+                supports=ModelSupport(function_calling=False, response_schema=False),
+            )
+            model = provider + "/" + model.removeprefix("openai/")
         return dspy.LM(
             model,
-            api_base=self._gateway_base_url(),
+            api_base=base_url,
             api_key=self._gateway_api_key(),
             engine="lm15",
             **{key: value for key, value in options.items() if value is not None},

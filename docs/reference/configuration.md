@@ -242,6 +242,14 @@ fields is re-asked once. Other omitted generation options stay provider-controll
 Provider compatibility still requires live verification.
 Native `lm15` remains fixed; no backend setting or per-model deadline is added.
 
+Claude reflection deployments behind Unity Gateway use a native DSPy provider
+declaration for chat-only JSON generation. The Gateway's structured-output
+translation uses forced tools that newer Claude models reject. Native
+`InstructionProposer` and `JSONAdapter` still request and parse JSON; this route
+omits the API `response_format` parameter. Configured deployment identifiers stay
+unchanged; reflection traces identify the declared Gateway route. Other model
+families retain their ordinary native provider capabilities.
+
 The checked-in values are provisional baselines, not optimized claims. Root/sub
 limits 16384/8192 are comparison candidates only. Keep a candidate only after
 correctness, no truncation, no isolation/budget regression, at least 10% lower
