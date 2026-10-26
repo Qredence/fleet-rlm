@@ -1,6 +1,6 @@
 PYTHON_SOURCES := src/fleet_rlm tests scripts notebooks
 
-.PHONY: help install install-dev dev serve web cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run
+.PHONY: help install install-dev dev serve web cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run coverage
 
 help:
 	@echo "Fleet-RLM Lite development targets:"
@@ -12,6 +12,7 @@ help:
 	@echo "  make eval         Run synthetic cases against a live server (live model and sandbox cost)"
 	@echo "  make optimize SESSION=<id>  Run GEPA compile and gated evaluation (live, explicit approval only)"
 	@echo "  make test         Run non-live unit and boundary tests"
+	@echo "  make coverage     Run offline tests with the enforced coverage threshold"
 	@echo "  make lint         Run Ruff"
 	@echo "  make typecheck    Run ty on the public package"
 	@echo "  make api-sync     Regenerate openapi.yaml from FastAPI"
@@ -106,7 +107,11 @@ release-smoke:
 build:
 	uv build
 
-check: test lint format-check typecheck check-docs api-check build
+coverage:
+	uv run coverage run -m pytest
+	uv run coverage report
+
+check: coverage lint format-check typecheck check-docs api-check build
 
 precommit-run:
 	uv run pre-commit run --all-files

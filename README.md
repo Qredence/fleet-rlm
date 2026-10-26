@@ -180,9 +180,11 @@ make install-dev
 make check
 ```
 
-The quality gate runs non-live tests, static checks, documentation links, OpenAPI
-validation, and a package build. It does not establish live provider compatibility
-or measured workload gains. Documentation-only changes use `make check-docs` and
+The quality gate runs non-live tests, statement and branch coverage (minimum 80%
+statement coverage), static checks, documentation links, OpenAPI validation, and a
+package build. Coverage uses the entire Fleet package, including generated sandbox
+runtime code. The gate does not establish live provider compatibility or measured
+workload gains. Documentation-only changes use `make check-docs` and
 `git diff --check`.
 
 - [Documentation index](docs/index.md)

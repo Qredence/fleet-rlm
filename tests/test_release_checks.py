@@ -125,26 +125,27 @@ def test_artifact_verification_rejects_unexpected_files(tmp_path: Path) -> None:
         verify_artifacts("0.8.0", tmp_path)
 
 
-def test_release_manifest_detects_changed_archive(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        pytest.param("changed_bytes", "checksum mismatch", id="changed-byte-checksum"),
+        pytest.param("missing_archive", "does not match", id="missing-file-mismatch"),
+    ],
+)
+def test_release_manifest_rejects_archive_mutations(tmp_path: Path, mutation: str, message: str) -> None:
     wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
     sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
     wheel.write_bytes(b"wheel")
     sdist.write_bytes(b"sdist")
-
     create_manifest(tmp_path)
     verify_manifest(tmp_path)
 
-    wheel.write_bytes(b"changed wheel")
-    with pytest.raises(SystemExit, match="checksum mismatch"):
-        verify_manifest(tmp_path)
+    if mutation == "changed_bytes":
+        wheel.write_bytes(b"changed wheel")
+    else:
+        sdist.unlink()
 
-
-def test_release_manifest_rejects_missing_archive(tmp_path: Path) -> None:
-    (tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl").write_bytes(b"wheel")
-    create_manifest(tmp_path)
-    (tmp_path / "fleet_rlm-0.8.0.tar.gz").write_bytes(b"sdist")
-
-    with pytest.raises(SystemExit, match="does not match"):
+    with pytest.raises(SystemExit, match=message):
         verify_manifest(tmp_path)
 
 
@@ -172,13 +173,26 @@ def test_registry_wheel_rejects_wrong_version(tmp_path: Path) -> None:
         verify_registry_wheel("0.8.0", wheel, tmp_path / "SHA256SUMS")
 
 
-def test_pypi_all_artifacts_must_match_manifest(tmp_path: Path) -> None:
+def _pypi_release(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
     sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
     wheel.write_bytes(b"wheel")
     sdist.write_bytes(b"sdist")
     create_manifest(tmp_path)
     hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (wheel, sdist)}
+    return wheel, sdist, hashes
+
+
+def _pypi_response(files: list[str], hashes: dict[str, str]) -> io.BytesIO:
+    payload = {
+        "info": {"version": "0.8.0"},
+        "urls": [{"filename": name, "digests": {"sha256": hashes[name]}} for name in files],
+    }
+    return io.BytesIO(json.dumps(payload).encode())
+
+
+def test_pypi_all_artifacts_must_match_manifest(tmp_path: Path) -> None:
+    _, _, hashes = _pypi_release(tmp_path)
     with patch("fleet_rlm.release_checks.urllib.request.urlopen") as response:
         response.return_value.__enter__.return_value.read.return_value = json.dumps(
             {
@@ -198,27 +212,15 @@ def test_pypi_all_artifacts_must_match_manifest(tmp_path: Path) -> None:
 
 
 def test_pypi_artifact_verification_retries_transient_errors_and_missing_files(tmp_path: Path) -> None:
-    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
-    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
-    wheel.write_bytes(b"wheel")
-    sdist.write_bytes(b"sdist")
-    create_manifest(tmp_path)
-    hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (wheel, sdist)}
-
-    def response(files: list[str]):
-        payload = {
-            "info": {"version": "0.8.0"},
-            "urls": [{"filename": name, "digests": {"sha256": hashes[name]}} for name in files],
-        }
-        return io.BytesIO(json.dumps(payload).encode())
+    wheel, sdist, hashes = _pypi_release(tmp_path)
 
     with (
         patch(
             "fleet_rlm.release_checks.urllib.request.urlopen",
             side_effect=[
                 urllib.error.HTTPError("https://pypi.org", 503, "unavailable", {}, None),
-                response([wheel.name]),
-                response([wheel.name, sdist.name]),
+                _pypi_response([wheel.name], hashes),
+                _pypi_response([wheel.name, sdist.name], hashes),
             ],
         ) as urlopen,
         patch("fleet_rlm.release_checks.time.sleep") as sleep,
@@ -230,16 +232,12 @@ def test_pypi_artifact_verification_retries_transient_errors_and_missing_files(t
 
 
 def test_pypi_artifact_checksum_mismatch_fails_without_retry(tmp_path: Path) -> None:
-    wheel = tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl"
-    sdist = tmp_path / "fleet_rlm-0.8.0.tar.gz"
-    wheel.write_bytes(b"wheel")
-    sdist.write_bytes(b"sdist")
-    create_manifest(tmp_path)
+    wheel, sdist, hashes = _pypi_release(tmp_path)
     payload = {
         "info": {"version": "0.8.0"},
         "urls": [
             {"filename": wheel.name, "digests": {"sha256": "0" * 64}},
-            {"filename": sdist.name, "digests": {"sha256": hashlib.sha256(sdist.read_bytes()).hexdigest()}},
+            {"filename": sdist.name, "digests": {"sha256": hashes[sdist.name]}},
         ],
     }
     with (

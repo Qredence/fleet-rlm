@@ -201,3 +201,11 @@ include = ["src"]
 [tool.ty.rules]
 deprecated = "error"
 unused-ignore-comment = "error"
+
+[tool.coverage.run]
+branch = true
+source = ["src/fleet_rlm"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
