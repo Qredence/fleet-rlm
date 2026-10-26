@@ -7,7 +7,6 @@ src/fleet_rlm/
 ├── config.py          # FleetSettings and model construction
 ├── contracts.py       # Route vocabulary, stopping rules, runtime input names, decision evidence
 ├── adapters.py        # Fleet's DSPy ChatAdapter: raw-Python fence and one format re-ask
-├── metering.py        # The metered host-LM proxy (budget charge per completion)
 ├── program_file.py    # Compiled-program loading: bounded, atomic, rolled back on failure
 ├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
 ├── skills.py          # User Skill validation, sync, and catalog

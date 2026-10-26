@@ -38,7 +38,6 @@ class SessionRuntime:
     skill_mgr: SkillManager
     engine: AdaptiveFleetEngine
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
-    execution_mode: str = "hybrid"
     context: WorkspaceDataset | None = None
     lease: psycopg.Connection | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
@@ -114,8 +113,7 @@ class SessionRuntime:
             lease.close()
 
     def set_mode(self, mode: str) -> None:
-        """Set the execution mode on this Session and its engine, and record it as an override."""
-        self.execution_mode = mode
+        """Set the execution mode on the engine and record its Session-level provenance."""
         self.engine.execution_mode = mode
         self.configuration_overrides["execution_mode"] = mode
 
@@ -145,7 +143,7 @@ def runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, An
         model = getattr(getattr(runtime.engine, f"{role}_lm", None), "model", None)
         if model is not None and model != getattr(settings, f"fleet_{role}_model"):
             overrides[f"fleet_{role}_model"] = model
-    mode = getattr(runtime, "execution_mode", settings.execution_mode)
+    mode = getattr(getattr(runtime, "engine", None), "execution_mode", settings.execution_mode)
     if mode != settings.execution_mode:
         overrides["execution_mode"] = mode
     return settings.configuration(overrides)
@@ -270,7 +268,6 @@ class SessionRuntimeRegistry:
                 compiled_path=str(Path(settings.compiled_program_dir) / f"{session_id}.json"),
                 execution_mode=settings.execution_mode,
             ),
-            execution_mode=settings.execution_mode,
         )
         harness.ensure_session(session_id)
         runtime.lease = store.acquire_session_lease(session_id)
@@ -298,7 +295,7 @@ class SessionRuntimeRegistry:
             sub_lm=sub,
             jev_lm=self.jev_lm,
             compiled_path=runtime.engine.compiled_path,
-            execution_mode=runtime.execution_mode,
+            execution_mode=runtime.engine.execution_mode,
         )
 
     def evict(self, session_id: str) -> bool:

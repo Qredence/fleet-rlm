@@ -15,7 +15,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from fleet_rlm.api.deps import LOCKED, Runtime, Settings, session_lock, translate
+from fleet_rlm.api.deps import LOCKED, LockedRuntime, Runtime, Settings, session_lock, translate
 from fleet_rlm.api.schemas import Attached, Deleted, Files, FileStat, FileWritten, WorkspaceWriteRequest
 
 router = APIRouter(tags=["workspace"])
@@ -28,7 +28,7 @@ def _list_files(session_id: str, runtime: Runtime) -> Files:
     Return 409 when the Session lock is busy and 503 when the runtime or listing
     is unavailable. Invalid input reported as ValueError becomes HTTP 422.
     """
-    with translate("Session workspace is unavailable"), session_lock(runtime):
+    with translate("Session workspace is unavailable"):
         files = runtime.sandbox_mgr.list_workspace_files()
     return Files(
         session_id=session_id,
@@ -38,24 +38,21 @@ def _list_files(session_id: str, runtime: Runtime) -> Files:
 
 
 @router.get("/sessions/{session_id}/files", response_model=Files, responses=LOCKED)
-def list_files(session_id: str, runtime: Runtime) -> Files:
+def list_files(session_id: str, runtime: LockedRuntime) -> Files:
     """List a Session's workspace files and the artifacts among them."""
     return _list_files(session_id, runtime)
 
 
 @router.get("/sessions/{session_id}/workspace/tree", response_model=Files, responses=LOCKED)
-def list_workspace_tree(session_id: str, runtime: Runtime) -> Files:
+def list_workspace_tree(session_id: str, runtime: LockedRuntime) -> Files:
     """List a Session's workspace files and the artifacts among them (workspace/tree alias)."""
     return _list_files(session_id, runtime)
 
 
 @router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", responses=LOCKED)
-def workspace_stat(rel_path: str, runtime: Runtime) -> FileStat:
+def workspace_stat(rel_path: str, runtime: LockedRuntime) -> FileStat:
     """Return the size and SHA-256 digest of one workspace file."""
-    with (
-        translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404),
-        session_lock(runtime),
-    ):
+    with translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404):
         metadata = runtime.sandbox_mgr.stat_workspace_file(rel_path)
     return FileStat(path=rel_path, size_bytes=metadata["size_bytes"], sha256=metadata["sha256"])
 
@@ -114,14 +111,14 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
 
 
 @router.delete("/sessions/{session_id}/workspace/files/{rel_path:path}", responses=LOCKED)
-def delete_workspace_file(rel_path: str, runtime: Runtime) -> Deleted:
+def delete_workspace_file(rel_path: str, runtime: LockedRuntime) -> Deleted:
     """Delete one workspace file.
 
     Malformed relative paths return 422, a busy Session lock returns 409, and other file
     deletion failures return 404. Return the deleted relative path on success.
     """
     unavailable = "Workspace file could not be deleted"
-    with translate(unavailable, invalid="Invalid workspace path", status=404), session_lock(runtime):
+    with translate(unavailable, invalid="Invalid workspace path", status=404):
         runtime.sandbox_mgr.delete_workspace_file(rel_path)
     return Deleted(deleted=rel_path)
 

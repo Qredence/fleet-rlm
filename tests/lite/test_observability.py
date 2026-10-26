@@ -124,9 +124,8 @@ def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **_kwargs: None)
     runtime = SimpleNamespace(
-        execution_mode="hybrid",
         configuration_overrides={},
-        engine=SimpleNamespace(root_lm=None, sub_lm=None),
+        engine=SimpleNamespace(execution_mode="hybrid", root_lm=None, sub_lm=None),
         sandbox_mgr=SimpleNamespace(
             turn_timeout_seconds=900,
             snapshot_provenance=identity.provenance,

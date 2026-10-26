@@ -16,7 +16,7 @@ from typing import Any
 import dspy
 import pytest
 from dspy import AdapterParseError
-from fakes import FakeHarness, FakeManager, api_settings, client_for, runtime_with, store_with
+from fakes import FakeHarness, FakeManager, api_settings, client_for, opened_client, runtime_with, store_with
 
 import fleet_rlm.api.app as api_app
 import fleet_rlm.api.deps as api_deps
@@ -183,8 +183,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         engine=run_engine,
         context=WorkspaceDataset("files/input.txt"),
     )
-    client, app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, app):
         app.state.mlflow_experiment_id = "experiment-test-id"
         response = client.post("/sessions/session-a/turn", json={"task": "summarize this file"})
 
@@ -268,8 +267,7 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
         harness=FakeHarness(commit_turn=lambda **kwargs: records.append(kwargs["turn_record"]) or [path]),
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", execution_evidence=evidence),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "repeat prior computation"})
     assert response.status_code == 200
     assert (
@@ -324,8 +322,7 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
         harness=FakeHarness(commit_turn=lambda **_kwargs: paths),
         engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "Produce reports"})
     assert response.status_code == 200
     sanitized = {}
@@ -364,8 +361,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
             "files/input.csv", "selected source", len(content), hashlib.sha256(content).hexdigest()
         ),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post(
             "/sessions/session-a/turn",
             json={"task": "sum the values", "record_replay": True},
@@ -395,7 +391,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
     assert traced["inputs"]["replay_snapshot_sha256"] == digest
 
 
-def test_snapshot_provenance_matches_across_span_turn_record_and_replay(traced) -> None:
+def test_turn_provenance_matches_across_span_record_replay_and_terminal(traced) -> None:
     provenance = {
         "snapshot_name": "fleet-rlm-python313-v10",
         "snapshot_id": "snap-provider-1",
@@ -411,44 +407,14 @@ def test_snapshot_provenance_matches_across_span_turn_record_and_replay(traced) 
         harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", lm_calls=1, sandbox_errors=0),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute", "record_replay": True})
 
     assert response.status_code == 200
     assert len(persisted) == 1
     turn_record = persisted[0]["turn_record"]
     digest, compressed = persisted[0]["replay_snapshot"]
-    assert {key: turn_record[key] for key in provenance} == provenance
-    assert {key: traced["attributes"][key] for key in provenance} == provenance
-    assert {key: decode_snapshot(digest, compressed)[key] for key in provenance} == provenance
     terminal = next(event for event in events_of(response) if event["event"] == "turn_complete")
-    assert {key: terminal[key] for key in provenance} == provenance
-
-
-def test_one_turn_joins_across_terminal_envelope_record_and_span(traced) -> None:
-    """The same turn_id and every enumerated field agree on the stream, the record, and the span."""
-    provenance = {
-        "snapshot_name": "fleet-rlm-python313-v10",
-        "snapshot_id": "snap-provider-1",
-        "snapshot_cpu": 4,
-        "snapshot_mem": 8,
-        "snapshot_disk": 8,
-        "snapshot_definition_digest": "d" * 64,
-    }
-    persisted: list[dict[str, Any]] = []
-    runtime = runtime_with(
-        sandbox_mgr=FakeManager(snapshot_provenance=lambda: dict(provenance)),
-        harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
-        engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", lm_calls=2, sandbox_errors=0),
-    )
-    client, _app = client_for(runtime)
-    with client:
-        response = client.post("/sessions/session-a/turn", json={"task": "compute"})
-
-    turn_record = persisted[0]["turn_record"]
-    terminal = next(event for event in events_of(response) if event["event"] == "turn_complete")
-    assert terminal["turn_id"] == turn_record["turn_id"]
     joined = (
         "route",
         "outcome",
@@ -462,8 +428,9 @@ def test_one_turn_joins_across_terminal_envelope_record_and_span(traced) -> None
     span_joined = {key: traced["attributes"][key] for key in joined if key != "cleanup"}
     assert span_joined == {key: turn_record[key] for key in joined if key != "cleanup"}
     assert traced["cleanup"] == turn_record["cleanup"]
-    assert traced["outputs"]["turn_id"] == turn_record["turn_id"]
+    assert traced["outputs"]["turn_id"] == terminal["turn_id"] == turn_record["turn_id"]
     assert traced["outputs"]["answer"] == terminal["answer"] == turn_record["answer"]
+    assert {key: decode_snapshot(digest, compressed)[key] for key in provenance} == provenance
     # Stored record and span duration are one measurement; MLflow's own span duration differs
     # only at the span boundary, within the documented tolerance.
     assert abs(traced["attributes"]["duration_seconds"] - turn_record["duration_seconds"]) <= 2.0
@@ -495,8 +462,7 @@ def test_snapshot_provenance_survives_a_preparation_failure_after_preflight(trac
         sandbox_mgr=manager,
         harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute", "record_replay": True})
 
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -531,8 +497,7 @@ def test_a_reused_snapshot_identity_reaches_the_span_before_preparation(traced) 
         sandbox_mgr=manager,
         harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute"})
 
     assert {key: traced["attributes"][key] for key in provenance} == provenance
@@ -550,8 +515,7 @@ def test_no_snapshot_provenance_is_invented_when_preflight_never_resolved(traced
         sandbox_mgr=FakeManager(turn_inputs=explode),
         harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute"})
 
     attributes = traced.get("attributes", {})
@@ -584,8 +548,7 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
         ),
         engine=failing_engine,
     )
-    client, app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, app):
         app.state.mlflow_experiment_id = "experiment-test-id"
         response = client.post("/sessions/session-a/turn", json={"task": "anything"})
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -628,6 +591,10 @@ def _run_turn_direct(
         emit=emit,
         timeout_seconds=timeout_seconds,
     )
+
+
+def _failed_turn_runtime(manager: FakeManager, stored: list[tuple[str, str, dict[str, Any]]], engine: Any):
+    return runtime_with(sandbox_mgr=manager, harness=FakeHarness(store=_recording_store(stored)), engine=engine)
 
 
 def _recording_store(stored: list[tuple[str, str, dict[str, Any]]]) -> SimpleNamespace:
@@ -720,57 +687,35 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
     assert traced["attributes"]["root_sandbox_id"] == "sandbox-warm-root"
 
 
-def test_a_failed_turn_records_the_root_id_it_stopped(traced) -> None:
+def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced) -> None:
+    order: list[str] = []
     stored: list[tuple[str, str, dict[str, Any]]] = []
     manager = FakeManager(live_sandbox_id="sandbox-failed-root")
 
     def cancel_turn() -> None:
-        # The real manager discards the stopped handle once its teardown has run.
+        order.append("cancel_turn")
+        # The real manager discards the stopped handle once teardown has run.
         manager.live_sandbox_id = None
 
     def engine(**_kwargs: Any) -> SimpleNamespace:
         raise RuntimeError("engine failed")
 
     manager.cancel_turn = cancel_turn
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
-    emitted: list[dict[str, Any]] = []
-    _run_turn_direct(runtime, emitted=emitted)
-
-    assert emitted[0]["root_sandbox_id"] == "sandbox-failed-root"
-    assert stored[0][2]["root_sandbox_id"] == "sandbox-failed-root"
-    assert traced["root_sandbox_id"] == "sandbox-failed-root"
-    assert manager.live_sandbox_id is None
-
-
-def test_a_failed_turn_stops_before_its_terminal_event_and_done(traced) -> None:
-    order: list[str] = []
-    stored: list[tuple[str, str, dict[str, Any]]] = []
-
-    def cancel_turn() -> None:
-        order.append("cancel_turn")
-
-    def engine(**_kwargs: Any) -> SimpleNamespace:
-        raise RuntimeError("engine failed")
-
-    manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    manager.end_turn = lambda: order.append("end_turn")
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted, order=order)
 
-    # Teardown precedes acknowledgment: cancel_turn, end_turn, the outcome, then the stream end.
+    # Teardown precedes acknowledgment: cancel_turn, end_turn, the outcome, then stream end.
     assert order == ["cancel_turn", "end_turn", "error", "done"]
     assert emitted[0]["event"] == "error" and emitted[0]["cleanup"] == "stopped"
     assert stored[0][1] == "failed"
     assert stored[0][2]["cleanup"] == "stopped"
+    assert emitted[0]["root_sandbox_id"] == "sandbox-failed-root"
+    assert stored[0][2]["root_sandbox_id"] == "sandbox-failed-root"
+    assert traced["root_sandbox_id"] == "sandbox-failed-root"
     assert traced["cleanup"] == "stopped"
+    assert manager.live_sandbox_id is None
 
 
 @pytest.mark.usefixtures("traced")
@@ -793,11 +738,7 @@ def test_cancelled_and_deadline_turns_are_stored_as_cancelled(failure) -> None:
         manager.check_turn()
         return SimpleNamespace(answer="unreachable", route="direct")
 
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted)
 
@@ -819,11 +760,7 @@ def test_a_raising_provider_stop_records_unconfirmed_and_still_ends_the_stream(t
         raise RuntimeError("engine failed")
 
     manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted, order=order)
 
@@ -853,11 +790,7 @@ def test_an_unknown_execution_outcome_stays_terminal_and_tears_down_once(transpo
         manager._cancelled.set()
 
     manager = FakeManager(cancel_turn=cancel_turn)
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted)
 
@@ -932,8 +865,7 @@ def test_snapshot_preflight_refusal_reaches_the_client_and_the_stored_failure(st
         sandbox_mgr=FakeManager(turn_inputs=refuse),
         harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute pi"})
 
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -964,8 +896,7 @@ def test_other_preparation_failures_stay_sanitized_on_both_surfaces() -> None:
         sandbox_mgr=FakeManager(turn_inputs=explode),
         harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute pi"})
 
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -996,8 +927,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
             {**prior, "updated_at": "2026-10-16T00:00:00"} if turn_id == "original-turn" else None
         )
     )
-    client, _ = client_for(runtime, store=store)
-    with client:
+    with opened_client(runtime, store=store) as (client, _):
         response = client.post("/sessions/s1/turn", json={"task": "same task", "idempotency_key": "same-key"})
         outcomes = [event for event in events_of(response) if event["event"] in {"turn_complete", "error"}]
         assert len(outcomes) == 1 and outcomes[0]["turn_id"] == "original-turn"
@@ -1014,8 +944,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
 def test_shutdown_flushes_pending_traces_only_when_tracing_is_configured(monkeypatch, configured):
     flushed: list[bool] = []
     monkeypatch.setattr(api_app.mlflow, "flush_trace_async_logging", lambda: flushed.append(True))
-    client, app = client_for()
-    with client:
+    with opened_client() as (_client, app):
         if configured:
             app.state.mlflow_experiment_id = "experiment-test-id"
         assert flushed == []
@@ -1026,8 +955,7 @@ def test_reusing_an_idempotency_key_for_another_task_names_the_conflict() -> Non
     def conflict(*_args):
         raise IdempotencyConflictError("Idempotency key already belongs to another task")
 
-    client, _ = client_for(runtime_with(harness=FakeHarness(claim_turn=conflict)))
-    with client:
+    with opened_client(runtime_with(harness=FakeHarness(claim_turn=conflict))) as (client, _):
         response = client.post("/sessions/session-a/turn", json={"task": "other", "idempotency_key": "k"})
 
     events = events_of(response)
@@ -1122,8 +1050,7 @@ def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> No
 
 def test_should_trace_preparation_and_persistence_under_the_turn(traced):
     runtime = runtime_with(engine=lambda **_kwargs: SimpleNamespace(answer="hello", route="direct"))
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "hello"})
     assert response.status_code == 200
     parents = {row["name"]: row["parent"] for row in traced["spans"]}
@@ -1209,8 +1136,7 @@ def test_a_failing_sandbox_cleanup_still_ends_the_stream_after_the_outcome():
 @pytest.mark.usefixtures("traced")
 def test_the_stream_delivers_the_enveloped_done_after_the_outcome() -> None:
     runtime = runtime_with(engine=lambda **_kwargs: SimpleNamespace(answer="hello", route="direct"))
-    client, _ = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _):
         response = client.post("/sessions/session-a/turn", json={"task": "hello"})
 
     events = events_of(response)
@@ -1242,6 +1168,20 @@ def test_a_second_turn_on_a_busy_session_gets_a_prompt_409(monkeypatch):
     assert "Turn" in response.json()["detail"]
     assert elapsed < 2
     assert "409" in app.openapi()["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]
+
+
+def test_turn_without_lifespan_executor_returns_503_without_creating_a_global_pool():
+    runtime = runtime_with()
+    client, app = client_for(runtime)
+    # Deliberately exercise a TestClient request made without entering the lifespan context.
+    app.state.turn_executor = None
+
+    response = client.post("/sessions/session-a/turn", json={"task": "hello"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Fleet Turn executor is unavailable"}
+    assert not runtime.turn_lock.locked()
+    assert not hasattr(turns_route, "_fallback_executor")
 
 
 @pytest.mark.usefixtures("traced")
@@ -1591,7 +1531,7 @@ async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypa
             is_disconnected=is_disconnected,
         )
         stream = turns_route.stream_turn(
-            "session-a", turns_route.TurnRequest(task="hello"), request, runtime, api_settings(), None
+            "session-a", turns_route.TurnRequest(task="hello"), request, runtime, api_settings(), executor, None
         )
         try:
             status = await anext(stream)

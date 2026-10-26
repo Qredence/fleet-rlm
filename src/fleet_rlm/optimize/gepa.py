@@ -262,7 +262,6 @@ DIGEST_SOURCES = (
     "contracts.py",
     "execution_evidence.py",
     "lm_usage.py",
-    "metering.py",
     "program_file.py",
     "sandbox/interpreter.py",
     "sandbox/manager.py",

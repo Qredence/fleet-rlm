@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import weakref
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.app import create_app
 from fleet_rlm.api.deps import get_registry
+from fleet_rlm.api.routes.turns import create_turn_executor
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.session import SessionRuntime
 from fleet_rlm.workspace import validate_session_id
@@ -121,6 +124,9 @@ def engine_with(root: str = "openai/system.ai.root", sub: str = "openai/system.a
 
 
 def runtime_with(**parts: Any) -> SessionRuntime:
+    engine = parts.pop("engine", engine_with())
+    execution_mode = parts.pop("execution_mode", getattr(engine, "execution_mode", "hybrid"))
+    engine.execution_mode = execution_mode
     return SessionRuntime(
         sandbox_mgr=parts.pop("sandbox_mgr", FakeManager()),
         harness=parts.pop("harness", FakeHarness()),
@@ -128,7 +134,7 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "skill_mgr",
             SimpleNamespace(sync_local_skills_to_volume=lambda: 0, build_catalog_xml=lambda: "<available_skills />"),
         ),
-        engine=parts.pop("engine", engine_with()),
+        engine=engine,
         **parts,
     )
 
@@ -162,6 +168,14 @@ def api_settings(**values: Any) -> FleetSettings:
     )
 
 
+@contextmanager
+def opened_client(*args: Any, **kwargs: Any):
+    """Create and enter a fake-runtime client with its FastAPI lifespan active."""
+    client, app = client_for(*args, **kwargs)
+    with client:
+        yield client, app
+
+
 def client_for(
     runtime: SessionRuntime | None = None,
     *,
@@ -178,4 +192,10 @@ def client_for(
     if runtime is not None:
         fake = FakeRegistry(runtime, **registry)
         app.dependency_overrides[get_registry] = lambda: fake
-    return TestClient(app, raise_server_exceptions=False), app
+    client = TestClient(app, raise_server_exceptions=False)
+    # TestClient requests without a context manager do not run FastAPI lifespan. Give each
+    # test app an explicit executor owner instead of relying on a hidden process-global fallback.
+    executor = create_turn_executor()
+    app.state.turn_executor = executor
+    weakref.finalize(client, executor.shutdown, wait=False, cancel_futures=True)
+    return client, app

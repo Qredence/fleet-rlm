@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
-import threading
 import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
@@ -40,20 +39,15 @@ def create_turn_executor() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=TURN_WORKERS, thread_name_prefix="fleet-turn")
 
 
-_fallback_executor: ThreadPoolExecutor | None = None
-_fallback_lock = threading.Lock()
-
-
 def _turn_executor(request: Request) -> ThreadPoolExecutor:
-    """The lifespan's Turn pool; an app served without its lifespan gets one shared bounded pool."""
-    global _fallback_executor
+    """Return the lifespan-owned Turn pool, refusing to run without its lifecycle."""
     executor = getattr(request.app.state, "turn_executor", None)
-    if executor is not None:
-        return executor
-    with _fallback_lock:
-        if _fallback_executor is None:
-            _fallback_executor = create_turn_executor()
-        return _fallback_executor
+    if executor is None:
+        raise HTTPException(status_code=503, detail="Fleet Turn executor is unavailable")
+    return executor
+
+
+TurnExecutor = Annotated[ThreadPoolExecutor, Depends(_turn_executor)]
 
 
 async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[None]:
@@ -94,6 +88,7 @@ async def stream_turn(
     request: Request,
     runtime: Runtime,
     settings: Settings,
+    executor: TurnExecutor,
     _lock: TurnLock,
 ) -> AsyncIterator[ServerSentEvent]:
     """Run one Turn and stream its activity as Server-Sent Events.
@@ -111,7 +106,7 @@ async def stream_turn(
     # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
     # in them, so the Turn runs in a copy of the request's context.
     context = contextvars.copy_context()
-    job = _turn_executor(request).submit(
+    job = executor.submit(
         context.run,
         run_turn,
         runtime,

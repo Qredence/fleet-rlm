@@ -9,6 +9,7 @@ from typing import Any, TypeGuard
 
 import dspy
 import mlflow
+from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
 from fleet_rlm.adapters import FleetRLMChatAdapter
@@ -24,7 +25,6 @@ from fleet_rlm.contracts import (
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
 from fleet_rlm.engine.signatures import DirectAnswer, FleetTask, SkillRelevance, TurnTriage
 from fleet_rlm.lm_usage import turn_callbacks, typed_decision_scope
-from fleet_rlm.metering import MeteredLM
 from fleet_rlm.observability import activity_text, evidence_span
 from fleet_rlm.program_file import CompiledProgramFile
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -85,14 +85,20 @@ def _bind_flex_budgets(flex: Any, *, max_iters: int, max_llm_calls: int) -> bool
     """Apply the Turn's RLM budgets to a Flex module source; True when the source changed.
 
     DSPy's Flex bridge scopes the call-time LM, so a sandbox-built `dspy.RLM` has no `sub_lm` hook:
-    its sub-queries run on the serving LM, metered, with DSPy's default call cap. The budgets are
-    the part Fleet can control, and `_bind_code` is the only hook for them, so it stays here.
+    its sub-queries run on the serving LM, metered, with DSPy's default call cap. Fleet supplies
+    missing source-level limits; shared aggregate usage remains enforced by host metering.
     """
     source = flex.module_src or ""
     rewritten = _with_turn_budgets(source, max_iters=max_iters, max_llm_calls=max_llm_calls)
     if not source or rewritten == source:
         return False
-    flex._bind_code(rewritten)
+    # Flex.load_state is the public rebinding interface. It resets ``lm`` when the
+    # supplied state omits one, so preserve the host-owned metered LM explicitly.
+    lm = flex.get_lm()
+    try:
+        flex.load_state({"module_src": rewritten})
+    finally:
+        flex.set_lm(lm)
     return True
 
 
@@ -144,8 +150,8 @@ class AdaptiveFleetEngine(dspy.Module):
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
         self.optimization_context: WorkspaceDataset | None = None
-        self._metered_root = MeteredLM(root_lm, sandbox_mgr.consume_budget)
-        self._metered_sub = MeteredLM(sub_lm, sandbox_mgr.consume_budget)
+        self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
+        self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
         self.triage.set_criteria("route", TRIAGE_CRITERIA)
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
@@ -306,7 +312,7 @@ class AdaptiveFleetEngine(dspy.Module):
     def _route(self, mode: str, task: str, workspace_manifest: str, skills_catalog: str, context: Any) -> Route:
         """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""
         route = Route.FLEX
-        route_lm = self.jev_lm or MeteredLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
+        route_lm = self.jev_lm or SandboxLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
         triage_inputs = {
             "task": task,
             "workspace_manifest": workspace_manifest,

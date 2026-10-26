@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.sandbox import manager as manager_module
+from fleet_rlm.sandbox import repl as repl_module
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
@@ -188,7 +192,6 @@ def test_terminal_teardown_stops_the_root_once_and_records_the_outcome() -> None
 
 
 def test_a_raising_provider_stop_records_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
     manager = DaytonaSandboxManager("key", "org", "volume", "stop-failure")
@@ -367,7 +370,6 @@ def test_cancellation_cannot_acknowledge_while_a_child_cleanup_is_in_flight() ->
 def test_cancellation_observes_an_unconfirmed_join_rather_than_an_early_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     # A failed provider delete must surface as unconfirmed; the join must not be skipped or retried
     # outside the caller that observes it.
@@ -424,8 +426,6 @@ def test_a_local_journal_unlink_failure_keeps_provider_confirmation(
 ) -> None:
     import pathlib
 
-    from fleet_rlm.sandbox import manager as manager_module
-
     monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
     root = DaytonaSandboxManager("key", "org", "volume", "state-test")
     deleted: list[str] = []
@@ -455,7 +455,6 @@ def test_a_local_journal_unlink_failure_keeps_provider_confirmation(
 def test_a_failed_child_provider_delete_keeps_the_child_registered_for_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
     root, calls = _manager_with(SimpleNamespace(id="sandbox-retry-root", state="started"))
@@ -514,12 +513,15 @@ def test_a_raising_shared_callback_never_skips_real_child_provider_cleanup(
     assert "secret" not in caplog.text
 
 
-def test_a_failing_child_cleanup_never_skips_its_sibling_or_the_root_stop() -> None:
-    manager, calls = _manager_with(SimpleNamespace(id="sandbox-child-aggregate", state="started"))
+@pytest.mark.parametrize("raises", [False, True], ids=["returns-unconfirmed", "raises"])
+def test_a_failing_child_never_skips_its_sibling_or_the_root_stop(raises: bool) -> None:
+    manager, calls = _manager_with(SimpleNamespace(id="sandbox-child-failure", state="started"))
     observed: list[str] = []
 
     def refuse_shutdown() -> bool:
         observed.append("failed-child")
+        if raises:
+            raise RuntimeError("provider delete failed")
         return False
 
     def succeed_shutdown() -> bool:
@@ -532,29 +534,7 @@ def test_a_failing_child_cleanup_never_skips_its_sibling_or_the_root_stop() -> N
     manager.cancel_turn()
 
     assert observed == ["failed-child", "healthy-child"]
-    assert calls == ["stop"], "one failing child must not skip the root stop"
-    assert manager.cleanup_outcome == "unconfirmed", "only a real provider cleanup failure is unconfirmed"
-
-
-def test_a_child_shutdown_that_raises_never_skips_its_siblings_or_escapes_cancel_turn() -> None:
-    manager, calls = _manager_with(SimpleNamespace(id="sandbox-child-raises", state="started"))
-    observed: list[str] = []
-
-    def refuse_shutdown() -> None:
-        observed.append("raising-child")
-        raise RuntimeError("provider delete failed")
-
-    def succeed_shutdown() -> bool:
-        observed.append("healthy-child")
-        return True
-
-    manager._children["child-1"] = SimpleNamespace(shutdown=refuse_shutdown)
-    manager._children["child-2"] = SimpleNamespace(shutdown=succeed_shutdown)
-
-    manager.cancel_turn()
-
-    assert observed == ["raising-child", "healthy-child"]
-    assert calls == ["stop"]
+    assert calls == ["stop"], "a failed child must not skip the root stop"
     assert manager.cleanup_outcome == "unconfirmed"
 
 
@@ -572,7 +552,6 @@ def test_a_successful_turn_keeps_one_warm_root_for_the_next_turn() -> None:
 
 
 def test_managers_with_the_same_credentials_share_one_daytona_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     created: list[tuple[str, str]] = []
 
@@ -625,7 +604,6 @@ def test_ensure_sandbox_refreshes_remote_state_before_deciding_to_restart() -> N
 
 
 def test_ensure_sandbox_waits_for_a_settling_sandbox_before_starting_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "_STATE_POLL_SECONDS", 0.0)
     sandbox = _RemoteSandbox("started", "stopping", "stopping", "stopped")
@@ -655,8 +633,6 @@ def test_idempotent_daytona_calls_retry_only_transient_failures(
 ) -> None:
     from daytona.common.errors import DaytonaConnectionError, DaytonaError
 
-    from fleet_rlm.sandbox import repl as repl_module
-
     monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
     attempts: list[str] = []
 
@@ -683,8 +659,6 @@ def test_idempotent_daytona_calls_retry_only_transient_failures(
 
 def test_run_code_transport_failures_are_never_retried() -> None:
     from daytona.common.errors import DaytonaTimeoutError
-
-    from fleet_rlm.sandbox import repl as repl_module
 
     attempts: list[int] = []
 
@@ -794,8 +768,6 @@ def test_should_trace_child_copy_lineage_and_preserve_failure_cleanup(monkeypatc
 
 def test_artifact_execution_is_not_replayed_after_losing_its_response(monkeypatch: pytest.MonkeyPatch) -> None:
     from daytona.common.errors import DaytonaConnectionError
-
-    from fleet_rlm.sandbox import repl as repl_module
 
     monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
     executions: list[str] = []
@@ -1074,7 +1046,6 @@ class _RecordingClient:
 
 @pytest.fixture(autouse=True)
 def clear_snapshot_preflight_cache():
-    import importlib
 
     from fleet_rlm.config import get_settings
 
@@ -1199,7 +1170,6 @@ def test_preflight_unusable_snapshot_treats_provider_error_as_missing(monkeypatc
 
 
 def test_preflight_surfaces_provider_failures_and_refresh_evicts_stale_cache() -> None:
-    import importlib
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
@@ -1268,7 +1238,6 @@ def test_provider_build_metadata_is_hashed_and_not_copied_to_provenance() -> Non
 
 
 def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
-    import importlib
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
@@ -1287,8 +1256,6 @@ def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
 @pytest.mark.parametrize("operation", ["clear", "refresh"])
 @pytest.mark.parametrize("old_failure", [False, True])
 def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation, old_failure) -> None:
-    import importlib
-    from concurrent.futures import ThreadPoolExecutor
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
@@ -1328,8 +1295,6 @@ def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation,
 
 
 def test_concurrent_failed_preflight_releases_waiters_and_can_retry(monkeypatch) -> None:
-    import importlib
-    from concurrent.futures import ThreadPoolExecutor
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
@@ -1374,7 +1339,6 @@ def test_concurrent_failed_preflight_releases_waiters_and_can_retry(monkeypatch)
 
 @pytest.mark.parametrize("status", [401, 404, 500])
 def test_preflight_classifies_daytona_errors_without_exposing_the_provider_message(status) -> None:
-    import importlib
 
     from daytona import DaytonaError, DaytonaNotFoundError
 
@@ -1413,8 +1377,6 @@ def test_preflight_resources_enforce_floors(monkeypatch, tmp_path, cpu, mem, dis
 
 
 def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
-    import importlib
-    from concurrent.futures import ThreadPoolExecutor
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
 
@@ -1448,7 +1410,6 @@ def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
 
 
 def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) -> None:
-    import importlib
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
 
@@ -1499,7 +1460,6 @@ def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
 def test_build_snapshot_rejects_unbounded_or_invalid_timeouts_before_contacting_daytona(timeout, monkeypatch):
-    import importlib
 
     snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
 
@@ -1625,7 +1585,6 @@ def _ready_interpreter() -> Any:
 
 
 def _record_host_call_bound(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    from fleet_rlm.sandbox import repl as repl_module
 
     captured: dict[str, Any] = {}
 
@@ -1664,7 +1623,6 @@ def test_an_expired_deadline_stops_the_turn_instead_of_waiting() -> None:
 def test_run_namespace_opens_one_execution_token_and_closes_it_when_the_execution_ends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     captured = _record_host_call_bound(monkeypatch)
     observed: list[bool] = []
@@ -1708,7 +1666,6 @@ def test_a_cancelled_execution_token_is_never_reopened_by_the_next_turn() -> Non
 def test_an_abandoned_worker_cannot_publish_after_cancellation_and_the_next_turn(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     manager = _ready_manager(deadline=time.monotonic() + 120)
     manager._client = SimpleNamespace(stop=lambda *_args, **_kwargs: None)
@@ -1776,7 +1733,6 @@ def test_a_fence_whose_channel_is_closed_logs_one_bounded_warning(caplog: pytest
 
 
 def test_a_live_execution_token_allows_a_successful_publication() -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     class RecordingFs:
         def __init__(self) -> None:
@@ -1841,7 +1797,6 @@ def test_a_stale_watchdog_cannot_cancel_a_later_turn() -> None:
 
 
 def test_watchdog_cancellation_cannot_cross_a_turn_reset(monkeypatch: pytest.MonkeyPatch) -> None:
-    from concurrent.futures import ThreadPoolExecutor
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-racing-watchdog")
     manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
@@ -1931,7 +1886,6 @@ def test_a_whole_second_remainder_still_truncates(monkeypatch: pytest.MonkeyPatc
 def test_a_threshold_straddling_clock_is_a_deadline_cancellation_not_a_transport_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     # The two former reads: admission sees 1.5 s left and passes, the bound samples 0.4 s
     # later. A single sample must drive both, so the Turn is a deadline cancellation and
@@ -1995,7 +1949,6 @@ def _cancellable_manager(*, turn_timeout_seconds: int = 900) -> tuple[DaytonaSan
 def test_an_unknown_execution_outcome_issues_exactly_one_terminal_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     invocations = _record_terminal_cancellations(monkeypatch)
     manager, stops = _cancellable_manager()

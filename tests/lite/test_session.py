@@ -9,6 +9,17 @@ import pytest
 from fleet_rlm.session import SessionRuntime
 
 
+def _runtime(**overrides) -> SessionRuntime:
+    dependencies = {
+        "sandbox_mgr": SimpleNamespace(),
+        "harness": SimpleNamespace(),
+        "skill_mgr": SimpleNamespace(),
+        "engine": SimpleNamespace(),
+    }
+    dependencies.update(overrides)
+    return SessionRuntime(**dependencies)
+
+
 def test_lost_session_lease_cancels_remote_work_and_fences_runtime() -> None:
     probed = threading.Event()
     cancelled = threading.Event()
@@ -21,11 +32,8 @@ def test_lost_session_lease_cancels_remote_work_and_fences_runtime() -> None:
         def close(self) -> None:
             return None
 
-    runtime = SessionRuntime(
+    runtime = _runtime(
         sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
         lease=LostLease(),  # type: ignore[arg-type]
     )
     runtime.start_lease_monitor(interval_seconds=0.001)
@@ -62,11 +70,9 @@ def test_a_dropped_lease_is_renewed_on_a_fresh_connection_when_the_lock_is_still
 
     renewed = RenewedLease()
     store = SimpleNamespace(acquire_session_lease=lambda session_id: renewed if session_id == "s1" else None)
-    runtime = SessionRuntime(
+    runtime = _runtime(
         sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set, session_id="s1"),
         harness=SimpleNamespace(store=store),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
         lease=DroppedLease(),  # type: ignore[arg-type]
     )
     runtime.start_lease_monitor(interval_seconds=0.001)
@@ -88,12 +94,16 @@ def _registry_with(runtime, *, max_active_sessions: int = 64):
     return registry
 
 
+def _buildable_registry(runtime, *, max_active_sessions: int = 64):
+    registry = _registry_with(runtime, max_active_sessions=max_active_sessions)
+    registry.store = SimpleNamespace()  # type: ignore[assignment]
+    registry.root_lm = object()
+    return registry
+
+
 def _stale_runtime(events: list[str]) -> SessionRuntime:
-    runtime = SessionRuntime(
+    runtime = _runtime(
         sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown")),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
         lease=SimpleNamespace(close=lambda: events.append("lease")),  # type: ignore[arg-type]
     )
     runtime.lease_lost.set()
@@ -101,11 +111,8 @@ def _stale_runtime(events: list[str]) -> SessionRuntime:
 
 
 def test_get_returns_a_healthy_runtime_without_evicting_it() -> None:
-    runtime = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(shutdown=lambda: pytest.fail("healthy runtimes must not be evicted")),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(shutdown=lambda: pytest.fail("healthy runtimes must not be evicted"))
     )
     registry = _registry_with(runtime)
     assert registry.get("s1") is runtime
@@ -114,15 +121,8 @@ def test_get_returns_a_healthy_runtime_without_evicting_it() -> None:
 def test_get_rebuilds_a_runtime_after_lease_loss(monkeypatch, caplog) -> None:
     events: list[str] = []
     stale = _stale_runtime(events)
-    registry = _registry_with(stale)
-    registry.store = SimpleNamespace()  # type: ignore[assignment]
-    registry.root_lm = object()
-    fresh = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
+    registry = _buildable_registry(stale)
+    fresh = _runtime()
     monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
 
     assert registry.get("s1") is fresh
@@ -138,9 +138,7 @@ def test_get_keeps_a_stale_runtime_while_its_turn_is_still_draining(monkeypatch)
     events: list[str] = []
     stale = _stale_runtime(events)
     stale.turn_lock.acquire()
-    registry = _registry_with(stale)
-    registry.store = SimpleNamespace()  # type: ignore[assignment]
-    registry.root_lm = object()
+    registry = _buildable_registry(stale)
     monkeypatch.setattr(registry, "_build", lambda _session_id: pytest.fail("must not rebuild while draining"))
     try:
         with pytest.raises(RuntimeError, match="still draining"):
@@ -150,33 +148,16 @@ def test_get_keeps_a_stale_runtime_while_its_turn_is_still_draining(monkeypatch)
     assert registry._sessions["s1"] is stale
     assert events == []
 
-    fresh = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
+    fresh = _runtime()
     monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
     assert registry.get("s1") is fresh
     assert events == ["shutdown", "lease"]
 
 
 def test_get_serves_a_cached_session_while_another_session_builds(monkeypatch) -> None:
-    cached = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
-    registry = _registry_with(cached)
-    registry.store = SimpleNamespace()  # type: ignore[assignment]
-    registry.root_lm = object()
-    fresh = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
+    cached = _runtime()
+    registry = _buildable_registry(cached)
+    fresh = _runtime()
     build_started = threading.Event()
     release_build = threading.Event()
 
@@ -224,15 +205,8 @@ def test_get_serves_a_cached_session_while_another_session_builds(monkeypatch) -
 
 
 def test_get_refuses_a_new_session_at_capacity(monkeypatch) -> None:
-    cached = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
-    registry = _registry_with(cached, max_active_sessions=1)
-    registry.store = SimpleNamespace()  # type: ignore[assignment]
-    registry.root_lm = object()
+    cached = _runtime()
+    registry = _buildable_registry(cached, max_active_sessions=1)
     monkeypatch.setattr(registry, "_build", lambda _session_id: pytest.fail("must not build at capacity"))
 
     with pytest.raises(RuntimeError, match="maximum number of active Sessions"):
@@ -243,15 +217,8 @@ def test_get_refuses_a_new_session_at_capacity(monkeypatch) -> None:
 def test_get_rebuilds_a_stale_session_at_capacity(monkeypatch) -> None:
     events: list[str] = []
     stale = _stale_runtime(events)
-    registry = _registry_with(stale, max_active_sessions=1)
-    registry.store = SimpleNamespace()  # type: ignore[assignment]
-    registry.root_lm = object()
-    fresh = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
+    registry = _buildable_registry(stale, max_active_sessions=1)
+    fresh = _runtime()
     monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
 
     assert registry.get("s1") is fresh
@@ -261,11 +228,8 @@ def test_get_rebuilds_a_stale_session_at_capacity(monkeypatch) -> None:
 
 def test_evicting_a_session_stops_its_sandbox_releases_the_lease_and_forgets_the_runtime() -> None:
     events: list[str] = []
-    runtime = SessionRuntime(
+    runtime = _runtime(
         sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown")),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
         lease=SimpleNamespace(close=lambda: events.append("lease")),  # type: ignore[arg-type]
     )
     registry = _registry_with(runtime)
@@ -279,12 +243,7 @@ def test_evicting_a_busy_session_is_refused_and_keeps_the_runtime(monkeypatch) -
     from fleet_rlm import session as session_module
 
     monkeypatch.setattr(session_module, "_EVICT_WAIT_SECONDS", 0.01)
-    runtime = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(shutdown=lambda: pytest.fail("must not shut down mid-Turn")),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
+    runtime = _runtime(sandbox_mgr=SimpleNamespace(shutdown=lambda: pytest.fail("must not shut down mid-Turn")))
     registry = _registry_with(runtime)
     runtime.turn_lock.acquire()
     try:
@@ -304,12 +263,7 @@ def test_eviction_fences_a_resolved_runtime_before_releasing_its_turn_lock() -> 
         shutdown_started.set()
         assert finish_shutdown.wait(timeout=2)
 
-    runtime = SessionRuntime(
-        sandbox_mgr=SimpleNamespace(shutdown=shutdown),
-        harness=SimpleNamespace(),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
-    )
+    runtime = _runtime(sandbox_mgr=SimpleNamespace(shutdown=shutdown))
     registry = _registry_with(runtime)
     stale = registry.get("s1")
 
@@ -362,11 +316,9 @@ def test_lease_acquired_after_close_times_out_is_closed_without_publication(monk
         assert finish_acquiring.wait(timeout=2)
         return renewed
 
-    runtime = SessionRuntime(
+    runtime = _runtime(
         sandbox_mgr=SimpleNamespace(session_id="s1"),
         harness=SimpleNamespace(store=SimpleNamespace(acquire_session_lease=acquire)),
-        skill_mgr=SimpleNamespace(),
-        engine=SimpleNamespace(),
         lease=SimpleNamespace(execute=probe, close=old_closed.set),  # type: ignore[arg-type]
     )
     runtime.start_lease_monitor(interval_seconds=0.001)

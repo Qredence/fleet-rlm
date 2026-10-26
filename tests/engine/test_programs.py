@@ -17,6 +17,15 @@ from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
+def _engine(manager: DaytonaSandboxManager, **kwargs: Any) -> AdaptiveFleetEngine:
+    return AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+        **kwargs,
+    )
+
+
 def test_engine_forward_inputs_match_the_shared_contract():
     """`contracts.ENGINE_INPUT_FIELDS` is the literal rollout whitelist; forward must not drift from it."""
     import inspect
@@ -29,10 +38,8 @@ def test_engine_forward_inputs_match_the_shared_contract():
 def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path: Path) -> None:
     compiled_path = tmp_path / "session-a.json"
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         compiled_path=str(compiled_path),
     )
     engine.save(str(compiled_path))
@@ -49,10 +56,8 @@ def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path:
 
 def test_compiled_program_path_is_not_shared_by_default() -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
 
     assert engine.compiled_path is None
@@ -60,10 +65,8 @@ def test_compiled_program_path_is_not_shared_by_default() -> None:
 
 def test_route_selection_logs_specific_exception_without_exposing_credentials(caplog: pytest.LogCaptureFixture) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         jev_lm=SimpleNamespace(api_key="typesafe-test-token"),
     )
 
@@ -122,10 +125,8 @@ def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
 
 def _answering_engine() -> AdaptiveFleetEngine:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         execution_mode="rlm",
     )
     engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
@@ -194,10 +195,8 @@ def test_unknown_verification_outcome_still_ends_the_turn(monkeypatch) -> None:
 
 def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_turn(monkeypatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
     tools = engine.primary_rlm._user_tools
 
@@ -219,10 +218,8 @@ def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_t
 
 def test_child_budget_exhaustion_still_aborts_the_turn(monkeypatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
 
     class ExhaustedChild:
@@ -240,10 +237,8 @@ def test_child_budget_exhaustion_still_aborts_the_turn(monkeypatch) -> None:
 
 def _engine_with_fake_children(monkeypatch, child_call):
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
 
     class FakeChild:
@@ -317,10 +312,8 @@ def test_spawn_agents_children_inherit_the_callers_context(monkeypatch) -> None:
 
 def _spawn_agent_with_fake_child(monkeypatch, child_call):
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
     spawn_agent = engine.primary_rlm._user_tools["spawn_agent"]
     calls: list[str] = []
@@ -381,10 +374,8 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
     from fleet_rlm.contracts import Route
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         jev_lm=SimpleNamespace(model="jev-test") if jev else None,
     )
     seen: dict[str, Any] = {"budget": 0, "events": [], "batched": []}
@@ -469,10 +460,8 @@ def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch
 def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     path = tmp_path / "session-a.json"
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         compiled_path=str(path),
     )
     engine.save(str(path))
@@ -510,21 +499,44 @@ def test_flex_module_source_gets_the_turn_rlm_budgets():
 
 def test_engine_binds_the_turn_budgets_into_the_flex_baseline():
     manager = DaytonaSandboxManager("key", "org", "volume", "session-budgets")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
     assert "max_iters=16" in engine.flex_agent.module_src
     assert f"max_llm_calls={manager.max_llm_calls}" in engine.flex_agent.module_src
 
 
+def test_flex_budget_rebinding_uses_public_state_api_and_preserves_runtime_objects():
+    from fleet_rlm.engine.programs import _bind_flex_budgets
+
+    def interpreter_factory():
+        return None
+
+    flex = dspy.Flex("task -> answer", interpreter_factory=interpreter_factory)
+    lm = dspy.LM("openai/fleet-root", engine="lm15", cache=False)
+    flex.set_lm(lm)
+    source = (
+        "class FleetTaskModule(dspy.Module):\n"
+        "    def __init__(self):\n"
+        "        super().__init__()\n"
+        '        self.rlm = dspy.RLM("task -> answer")\n'
+        "    def forward(self, **inputs):\n"
+        "        return self.rlm(**inputs)\n"
+    )
+    flex.load_state({"module_src": source})
+    flex.set_lm(lm)
+
+    assert _bind_flex_budgets(flex, max_iters=16, max_llm_calls=23)
+    assert "max_iters=16, max_llm_calls=23" in flex.module_src
+    assert flex.get_lm() is lm
+    # Flex exposes no interpreter-factory getter; rebinding must leave its bridge config intact.
+    assert flex._interpreter_factory is interpreter_factory
+
+
 def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-symmetry")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
     tools = engine.primary_rlm._user_tools
 

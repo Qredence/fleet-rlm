@@ -203,7 +203,7 @@ def run_turn(
                             "dataset_context": (
                                 runtime.context.to_descriptor() if runtime.context is not None else None
                             ),
-                            "execution_mode": runtime.execution_mode,
+                            "execution_mode": runtime.engine.execution_mode,
                             "turn_timeout_seconds": manager.turn_timeout_seconds,
                             "deadline_source": policy.source,
                             "effective_seconds": policy.effective_seconds,
@@ -230,7 +230,7 @@ def run_turn(
                         memory_summary=inputs["memory_summary"],
                         session_history=inputs["session_history"],
                         task=task,
-                        execution_mode=runtime.execution_mode,
+                        execution_mode=runtime.engine.execution_mode,
                         context=runtime.context,
                     )
                 answer = str(prediction.answer)
@@ -263,7 +263,7 @@ def run_turn(
                     "learned_skill_note": learned_note,
                     "turn_id": turn_id,
                     "idempotency_key": idempotency_key,
-                    "execution_mode": runtime.execution_mode,
+                    "execution_mode": runtime.engine.execution_mode,
                     "trace_id": trace_id,
                     **usage,
                     **environment,
@@ -623,7 +623,7 @@ def _describe_turn(
     )
     span.set_attributes(
         {
-            "execution_mode": runtime.execution_mode,
+            "execution_mode": runtime.engine.execution_mode,
             "turn_timeout_seconds": runtime.sandbox_mgr.turn_timeout_seconds,
             **runtime.sandbox_mgr.deadline_provenance(),
             "sandbox_transport": SANDBOX_TRANSPORT,
@@ -643,7 +643,7 @@ def _describe_turn(
         metadata={"mlflow.trace.session": session_id},
         client_request_id=turn_id,
         tags={
-            "fleet.execution_mode": runtime.execution_mode,
+            "fleet.execution_mode": runtime.engine.execution_mode,
             "fleet.idempotency_key": idempotency_key or turn_id,
             "fleet.configuration_digest": configuration["digest"],
         },

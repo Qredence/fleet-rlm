@@ -89,7 +89,14 @@ def get_runtime(session_id: str, registry: Annotated[SessionRuntimeRegistry, Dep
         return registry.get(session_id)
 
 
+def locked_runtime(runtime: Runtime) -> Generator[SessionRuntime, None, None]:
+    """Acquire a Session lock for a short route operation and release it after the handler returns."""
+    with session_lock(runtime):
+        yield runtime
+
+
 Settings = Annotated[FleetSettings, Depends(get_settings)]
 StoreDep = Annotated[Store, Depends(get_store)]
 Registry = Annotated[SessionRuntimeRegistry, Depends(get_registry)]
 Runtime = Annotated[SessionRuntime, Depends(get_runtime)]
+LockedRuntime = Annotated[SessionRuntime, Depends(locked_runtime, scope="function")]
