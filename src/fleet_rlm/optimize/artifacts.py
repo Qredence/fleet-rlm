@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import math
@@ -10,13 +11,16 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dspy
 
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS
 
+_FLEX_TYPE = cast(type[dspy.Module], dspy.Flex)
+
 APPROVAL_POLICY_VERSION = 6
+APPROVAL_EVIDENCE_VERSION = 2
 VALIDATION_PASSES = 3
 
 
@@ -54,6 +58,46 @@ def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def tunable_components(program: dspy.Module) -> dict[str, str]:
+    """Inspect native GEPA instruction and Flex code components through public DSPy traversal."""
+    components = {name: predictor.signature.instructions for name, predictor in program.named_predictors()}
+    for name, parameter in program.named_parameters():
+        if isinstance(parameter, _FLEX_TYPE):
+            components[name] = parameter.module_src or ""
+    return components
+
+
+def changed_components(baseline: dspy.Module, candidate: dspy.Module) -> list[str]:
+    """Return components whose instruction text or Flex source changed."""
+    before = tunable_components(baseline)
+    return sorted(name for name, text in tunable_components(candidate).items() if before.get(name) != text)
+
+
+_COMPONENT_DIFF_MAX_CHARS = 8000
+
+
+def component_diffs(baseline: dspy.Module, candidate: dspy.Module) -> list[dict[str, str]]:
+    """Return exact before/after component text and a bounded unified diff for review."""
+    before, after = tunable_components(baseline), tunable_components(candidate)
+    changes = []
+    for name in sorted(after):
+        old, new = before.get(name, ""), after[name]
+        if old == new:
+            continue
+        diff = "".join(
+            difflib.unified_diff(
+                old.splitlines(keepends=True),
+                new.splitlines(keepends=True),
+                fromfile=f"incumbent/{name}",
+                tofile=f"candidate/{name}",
+            )
+        )
+        if len(diff) > _COMPONENT_DIFF_MAX_CHARS:
+            diff = diff[:_COMPONENT_DIFF_MAX_CHARS] + "\n… diff truncated; full text is retained below."
+        changes.append({"component": name, "before": old, "after": new, "diff": diff})
+    return changes
+
+
 @dataclass(frozen=True)
 class EvaluationGate:
     """Hold a promotion verdict and the reasons it failed, if any."""
@@ -76,14 +120,21 @@ def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
     reasons: list[str] = []
     observations = {}
     for stage in ("baseline", "candidate"):
-        passes = (evaluation.get(stage) or {}).get("passes")
+        stage_evidence = evaluation.get(stage)
+        if not isinstance(stage_evidence, Mapping):
+            return EvaluationGate(False, (f"{stage} validation evidence is invalid",))
+        passes = stage_evidence.get("passes")
         if not isinstance(passes, list) or len(passes) != VALIDATION_PASSES:
             return EvaluationGate(False, ("three paired validation passes are required",))
         observations[stage] = passes
         for item in passes:
+            if not isinstance(item, Mapping):
+                return EvaluationGate(False, (f"{stage} validation pass is invalid",))
             for split in ("dev", "holdout"):
                 score = item.get(split)
-                objectives = item.get(f"{split}_objectives") or {}
+                objectives = item.get(f"{split}_objectives")
+                if not isinstance(objectives, Mapping):
+                    return EvaluationGate(False, ("missing score or correctness evidence",))
                 quality = objectives.get("quality")
                 if any(
                     not isinstance(value, (int, float))
@@ -151,6 +202,10 @@ def approve_candidate(
     gate = promotion_gate(manifest.evaluation)
     if not gate.passed:
         raise ValueError("candidate failed the promotion gate: " + "; ".join(gate.reasons))
+    if manifest.dependencies.get("evidence_format") != str(APPROVAL_EVIDENCE_VERSION):
+        raise ValueError("candidate evidence format is obsolete; reevaluate before approval")
+    if evidence.get("evidence_format") != str(APPROVAL_EVIDENCE_VERSION):
+        raise ValueError("current approval evidence format is unsupported")
     if dict(manifest.dependencies) != dict(evidence):
         raise ValueError("candidate evidence is stale; reevaluate against the current incumbent and configuration")
     incumbent = digest_bytes(destination.read_bytes()) if destination.exists() else ""

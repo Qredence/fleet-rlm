@@ -1,8 +1,10 @@
 import csv
 import io
 import json
+from types import SimpleNamespace
 
 import httpx
+import pandas as pd
 import pytest
 
 from fleet_rlm.optimize import evaluation
@@ -213,8 +215,6 @@ def test_collect_only_labels_each_turn_with_its_gold_answer_and_skips_the_judge_
 
 
 def _evaluation_trace(location, *, state="OK", spans=None):
-    from types import SimpleNamespace
-
     return SimpleNamespace(
         info=SimpleNamespace(trace_location=location, state=state),
         data=SimpleNamespace(spans=[object()] if spans is None else spans),
@@ -223,8 +223,6 @@ def _evaluation_trace(location, *, state="OK", spans=None):
 
 @pytest.mark.parametrize("wrapped", [False, True])
 def test_evaluation_trace_readback_checks_exact_uc_destination(monkeypatch, wrapped):
-    from types import SimpleNamespace
-
     location = SimpleNamespace(catalog_name="c", schema_name="s", table_prefix="eval")
     trace = _evaluation_trace(SimpleNamespace(uc_table_prefix=location) if wrapped else location)
     reads = []
@@ -237,8 +235,6 @@ def test_evaluation_trace_readback_checks_exact_uc_destination(monkeypatch, wrap
 
 @pytest.mark.parametrize("wrapped", [False, True])
 def test_local_evaluation_trace_checks_experiment(monkeypatch, wrapped):
-    from types import SimpleNamespace
-
     location = SimpleNamespace(experiment_id="e1")
     trace = _evaluation_trace(SimpleNamespace(mlflow_experiment=location) if wrapped else location)
     monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *_args, **_kwargs: trace)
@@ -248,8 +244,6 @@ def test_local_evaluation_trace_checks_experiment(monkeypatch, wrapped):
 
 
 def test_evaluation_readback_waits_for_complete_nonempty_trace(monkeypatch):
-    from types import SimpleNamespace
-
     location = SimpleNamespace(experiment_id="e1")
     ready = _evaluation_trace(location)
     traces = iter(
@@ -261,8 +255,6 @@ def test_evaluation_readback_waits_for_complete_nonempty_trace(monkeypatch):
 
 
 def test_evaluation_readback_waits_for_eventually_visible_expectations(monkeypatch):
-    from types import SimpleNamespace
-
     trace = _evaluation_trace(SimpleNamespace(experiment_id="e1"))
     labels = iter([{"route": "direct"}, {"route": "direct", "critical": True}])
     checks = []
@@ -308,8 +300,6 @@ def test_evaluation_readback_bounds_a_blocked_sdk_call_without_duplicate_reads(m
 
 
 def test_evaluation_readback_rejects_failed_trace_and_sanitizes_sdk_errors(monkeypatch):
-    from types import SimpleNamespace
-
     monkeypatch.setattr(
         evaluation.mlflow,
         "get_trace",
@@ -410,10 +400,6 @@ def test_incomplete_evaluation_never_reports_collection_success(monkeypatch, fai
 
 
 def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
-    from types import SimpleNamespace
-
-    import pandas as pd
-
     result = SimpleNamespace(run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [None]}))
     received = []
     monkeypatch.setattr(evaluation, "build_mlflow_scorer_suite", lambda *args: received.append(args) or [])
@@ -427,10 +413,6 @@ def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
 
 @pytest.mark.parametrize("error", [None, "judge failed"])
 def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch, error):
-    from types import SimpleNamespace
-
-    import pandas as pd
-
     result = SimpleNamespace(run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [error]}))
     monkeypatch.setattr(evaluation, "build_mlflow_scorer_suite", lambda *_args: [])
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
@@ -444,10 +426,6 @@ def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch,
 
 
 def test_scoring_requires_feedback_readback_even_when_metrics_were_computed(monkeypatch):
-    from types import SimpleNamespace
-
-    import pandas as pd
-
     result = SimpleNamespace(
         run_id="run-1", metrics={"fleet_metric/mean": 1.0}, result_df=pd.DataFrame({"trace_id": ["tr-1"]})
     )

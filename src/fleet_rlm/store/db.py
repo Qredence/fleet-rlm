@@ -124,6 +124,29 @@ _REVIEW_LABELS_TABLE = """
             REFERENCES fleet_lite_replay_snapshots(session_id, turn_id) ON DELETE CASCADE
     )
 """
+_OPTIMIZATION_RUNS_TABLE = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_optimization_runs (
+        session_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        options JSONB NOT NULL DEFAULT '{}'::jsonb,
+        owner_id TEXT NOT NULL,
+        managed BOOLEAN NOT NULL DEFAULT FALSE,
+        status TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        stop_requested BOOLEAN NOT NULL DEFAULT FALSE,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, run_id),
+        UNIQUE (session_id, request_id)
+    )
+"""
+_OPTIMIZATION_RUNS_ACTIVE_INDEX = """
+    CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run
+    ON fleet_lite_optimization_runs ((1))
+    WHERE status IN ('running', 'approving')
+"""
 
 _APPEND_TURN = """
     UPDATE fleet_lite_sessions
@@ -170,6 +193,7 @@ _SCHEMA_MIGRATIONS = (
             "environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
         ),
     ),
+    (6, (_OPTIMIZATION_RUNS_TABLE, _OPTIMIZATION_RUNS_ACTIVE_INDEX)),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -178,6 +202,8 @@ _RETRY_DELAY_SECONDS = 0.5
 _POOL_MAX_LIFETIME_SECONDS = 50 * 60.0
 _POOL_MAX_IDLE_SECONDS = 10 * 60.0
 _POOL_RECONNECT_TIMEOUT_SECONDS = 60.0
+_OPTIMIZATION_LOCK_SCOPE = "fleet:optimization-global-lease"
+_OPTIMIZATION_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 _P = ParamSpec("_P")
@@ -507,11 +533,8 @@ class Store:
 
     @_retry_once
     def load_session(self, session_id: str) -> tuple[str, list[Any]]:
-        """Create the Session if needed; return its memory summary and Turn history."""
+        """Return context for a Session row created before its runtime was published."""
         with self.pool.connection() as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
             session = (
                 connection.cursor(row_factory=dict_row)
                 .execute("SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s", (session_id,))
@@ -707,6 +730,375 @@ class Store:
                 (session_id, turn_id),
             ).fetchone()
         return (row[0], bytes(row[1])) if row else None
+
+    # Optimization run ledger
+
+    def acquire_optimization_lease(self) -> psycopg.Connection:
+        """Hold the one process-wide optimization lease on a dedicated connection."""
+        return self._acquire_optimization_lock(_OPTIMIZATION_LOCK_SCOPE)
+
+    def acquire_optimization_owner_lease(self, owner_id: str) -> psycopg.Connection:
+        """Keep an API owner live through pending launch, execution, and draining."""
+        owner_id = self._optimization_owner_id(owner_id)
+        return self._acquire_optimization_lock(f"fleet:optimization-owner:{owner_id}")
+
+    def optimization_owner_alive(self, owner_id: str) -> bool:
+        """Probe a separate connection; database errors are not evidence of owner death."""
+        try:
+            lease = self.acquire_optimization_owner_lease(owner_id)
+        except RuntimeError:
+            return True
+        lease.close()
+        return False
+
+    def _acquire_optimization_lock(self, scope: str) -> psycopg.Connection:
+        connection = self.connection_class.connect(self.dsn, **self.connection_kwargs)
+        try:
+            locked = connection.execute("SELECT pg_try_advisory_lock(hashtextextended(%s,17))", (scope,)).fetchone()
+            if not locked or not locked[0]:
+                raise RuntimeError("An optimization run is already owned by another worker")
+            return connection
+        except BaseException:
+            connection.close()
+            raise
+
+    @_retry_once
+    def create_optimization_run(
+        self,
+        session_id: str,
+        run_id: str,
+        request_id: str,
+        options: dict[str, Any],
+        owner_id: str,
+        *,
+        managed: bool = False,
+    ) -> dict[str, Any]:
+        """Create one globally active run, or return an identical idempotent request retry."""
+        session_id = validate_session_id(session_id)
+        run_id = self._optimization_run_id(run_id)
+        request_id = self._optimization_request_id(request_id)
+        owner_id = self._optimization_owner_id(owner_id)
+        if not isinstance(options, dict):
+            raise ValueError("optimization options must be an object")
+        if type(managed) is not bool:
+            raise ValueError("managed must be a boolean")
+        options_json = self._optimization_json(options, "optimization options")
+        try:
+            with self.pool.connection() as connection, connection.transaction():
+                inserted = connection.execute(
+                    "INSERT INTO fleet_lite_optimization_runs "
+                    "(session_id,run_id,request_id,options,owner_id,managed,status,stage) "
+                    "VALUES (%s,%s,%s,%s::jsonb,%s,%s,'running','preparing') "
+                    "ON CONFLICT (session_id,request_id) DO NOTHING RETURNING *",
+                    (session_id, run_id, request_id, options_json, owner_id, managed),
+                ).fetchone()
+                if inserted is not None:
+                    return self._optimization_run_record(inserted)
+                prior = connection.execute(
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND request_id=%s FOR UPDATE",
+                    (session_id, request_id),
+                ).fetchone()
+                if prior is None:
+                    raise ValueError("optimization run request conflicts with an existing run")
+                record = self._optimization_run_record(prior)
+                if (
+                    record["options"] != json.loads(options_json)
+                    or record["owner_id"] != owner_id
+                    or record["managed"] is not managed
+                ):
+                    raise ValueError("optimization request_id was already used with different run details")
+                return record
+        except psycopg.errors.UniqueViolation as exc:
+            raise ValueError("An optimization run is already active or the run identity is in use") from exc
+
+    @_retry_once
+    def get_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
+        """Return one run from the durable ledger."""
+        session_id = validate_session_id(session_id)
+        run_id = self._optimization_run_id(run_id)
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s",
+                (session_id, run_id),
+            ).fetchone()
+        return self._optimization_run_record(row) if row is not None else None
+
+    @_retry_once
+    def list_optimization_runs(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        """List optimization history, either for one Session or across all Sessions."""
+        if session_id is not None:
+            session_id = validate_session_id(session_id)
+        with self.pool.connection() as connection:
+            if session_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM fleet_lite_optimization_runs ORDER BY updated_at DESC,run_id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s ORDER BY updated_at DESC,run_id",
+                    (session_id,),
+                ).fetchall()
+        return [self._optimization_run_record(row) for row in rows]
+
+    @_retry_once
+    def update_optimization_run(
+        self,
+        session_id: str,
+        run_id: str,
+        updates: dict[str, Any],
+        *,
+        owner_id: str | None = None,
+        expected_statuses: tuple[str, ...] | None = None,
+    ) -> dict[str, Any] | None:
+        """Apply a metadata/status update only while the optional owner and status fence match."""
+        session_id = validate_session_id(session_id)
+        run_id = self._optimization_run_id(run_id)
+        if not isinstance(updates, dict):
+            raise ValueError("optimization updates must be an object")
+        forbidden = {"session_id", "run_id", "request_id", "options", "owner_id", "managed", "created_at", "updated_at"}
+        if forbidden & updates.keys():
+            raise ValueError("optimization run identity fields cannot be changed")
+        if "status" in updates and (not isinstance(updates["status"], str) or not updates["status"].strip()):
+            raise ValueError("optimization status must be nonempty text")
+        if "stage" in updates and (not isinstance(updates["stage"], str) or not updates["stage"].strip()):
+            raise ValueError("optimization stage must be nonempty text")
+        if "stop_requested" in updates and type(updates["stop_requested"]) is not bool:
+            raise ValueError("stop_requested must be a boolean")
+        if expected_statuses is not None and (
+            not isinstance(expected_statuses, tuple)
+            or not expected_statuses
+            or any(not isinstance(value, str) or not value for value in expected_statuses)
+        ):
+            raise ValueError("expected_statuses must be a nonempty tuple of statuses")
+        metadata = {key: value for key, value in updates.items() if key not in {"status", "stage", "stop_requested"}}
+        metadata_json = self._optimization_json(metadata, "optimization metadata")
+        owner_id = self._optimization_owner_id(owner_id) if owner_id is not None else None
+        statuses = list(expected_statuses) if expected_statuses is not None else None
+        finishing_completed = updates.get("status") == "completed"
+        try:
+            with self.pool.connection() as connection:
+                row = connection.execute(
+                    "UPDATE fleet_lite_optimization_runs SET "
+                    "status=CASE WHEN %s AND stop_requested THEN 'cancelled' ELSE COALESCE(%s,status) END,"
+                    "stage=CASE WHEN %s AND stop_requested THEN 'cancelled' ELSE COALESCE(%s,stage) END,"
+                    "stop_requested=COALESCE(%s,stop_requested),"
+                    "metadata=metadata || %s::jsonb || CASE WHEN %s AND stop_requested "
+                    "THEN '{\"candidate_version\":null}'::jsonb ELSE '{}'::jsonb END,updated_at=NOW() "
+                    "WHERE session_id=%s AND run_id=%s "
+                    "AND (%s::text IS NULL OR owner_id=%s) "
+                    "AND (%s::text[] IS NULL OR status=ANY(%s::text[])) RETURNING *",
+                    (
+                        finishing_completed,
+                        updates.get("status"),
+                        finishing_completed,
+                        updates.get("stage"),
+                        updates.get("stop_requested"),
+                        metadata_json,
+                        finishing_completed,
+                        session_id,
+                        run_id,
+                        owner_id,
+                        owner_id,
+                        statuses,
+                        statuses,
+                    ),
+                ).fetchone()
+        except psycopg.errors.UniqueViolation as exc:
+            raise ValueError("Another optimization run is active") from exc
+        return self._optimization_run_record(row) if row is not None else None
+
+    @_retry_once
+    def request_optimization_stop(self, session_id: str, run_id: str) -> dict[str, Any]:
+        """Set a cooperative stop request for a running optimization; repeated requests are safe."""
+        session_id = validate_session_id(session_id)
+        run_id = self._optimization_run_id(run_id)
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "UPDATE fleet_lite_optimization_runs SET stop_requested=TRUE, "
+                "updated_at=CASE WHEN stop_requested THEN updated_at ELSE NOW() END "
+                "WHERE session_id=%s AND run_id=%s AND status='running' RETURNING *",
+                (session_id, run_id),
+            ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s",
+                    (session_id, run_id),
+                ).fetchone()
+        if row is None:
+            raise ValueError("optimization run was not found")
+        record = self._optimization_run_record(row)
+        if record["status"] != "running":
+            raise ValueError("only a running optimization can be stopped")
+        return record
+
+    @_retry_once
+    def claim_optimization_review(self, session_id: str, run_id: str, owner_id: str) -> dict[str, Any]:
+        """Claim a completed candidate for approval, or take over its recoverable approving state."""
+        session_id = validate_session_id(session_id)
+        run_id = self._optimization_run_id(run_id)
+        owner_id = self._optimization_owner_id(owner_id)
+        try:
+            with self.pool.connection() as connection, connection.transaction():
+                prior = connection.execute(
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s FOR UPDATE",
+                    (session_id, run_id),
+                ).fetchone()
+                if prior is None:
+                    raise ValueError("optimization run was not found")
+                record = self._optimization_run_record(prior)
+                if record["status"] not in {"completed", "approving"}:
+                    raise ValueError("only a completed or recoverable approving run can be reviewed")
+                row = connection.execute(
+                    "UPDATE fleet_lite_optimization_runs SET status='approving',owner_id=%s,updated_at=NOW() "
+                    "WHERE session_id=%s AND run_id=%s AND status IN ('completed','approving') RETURNING *",
+                    (owner_id, session_id, run_id),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("optimization review claim was lost")
+                return self._optimization_run_record(row)
+        except psycopg.errors.UniqueViolation as exc:
+            raise ValueError("Another optimization run is active") from exc
+
+    @_retry_once
+    def reject_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any]:
+        """Record a rejection for a completed candidate without deleting its artifacts or history."""
+        session_id = validate_session_id(session_id)
+        run_id = self._optimization_run_id(run_id)
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "UPDATE fleet_lite_optimization_runs SET status='rejected',"
+                "metadata=metadata || CASE WHEN status='rejected' THEN '{}'::jsonb "
+                "ELSE jsonb_build_object('decision','rejected','decision_at',NOW()) END,"
+                "updated_at=CASE WHEN status='rejected' THEN updated_at ELSE NOW() END "
+                "WHERE session_id=%s AND run_id=%s AND status IN ('completed','rejected') RETURNING *",
+                (session_id, run_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError("only a completed optimization run can be rejected")
+        return self._optimization_run_record(row)
+
+    @_retry_once
+    def import_optimization_run(self, session_id: str, record: dict[str, Any]) -> bool:
+        """Import one validated legacy run record; return False when its identity already exists."""
+        session_id = validate_session_id(session_id)
+        if not isinstance(record, dict) or record.get("session_id") != session_id:
+            raise ValueError("optimization run session_id does not match its import target")
+        run_id = self._optimization_run_id(record.get("run_id"))
+        options = record.get("options", {})
+        if not isinstance(options, dict):
+            raise ValueError("optimization options must be an object")
+        request_id = self._optimization_request_id(record.get("request_id") or run_id)
+        owner_id = self._optimization_owner_id(record.get("owner_id") or "imported")
+        managed = record.get("managed", False)
+        if type(managed) is not bool:
+            raise ValueError("managed must be a boolean")
+        status = record.get("status", "failed")
+        stage = record.get("stage", status)
+        if not isinstance(status, str) or not status.strip() or not isinstance(stage, str) or not stage.strip():
+            raise ValueError("optimization status and stage must be nonempty text")
+        stop_requested = record.get("stop_requested", False)
+        if type(stop_requested) is not bool:
+            raise ValueError("stop_requested must be a boolean")
+        core = {
+            "session_id",
+            "run_id",
+            "request_id",
+            "options",
+            "owner_id",
+            "managed",
+            "status",
+            "stage",
+            "stop_requested",
+            "created_at",
+            "updated_at",
+        }
+        metadata = {key: value for key, value in record.items() if key not in core}
+        options_json = self._optimization_json(options, "optimization options")
+        metadata_json = self._optimization_json(metadata, "optimization metadata")
+        try:
+            with self.pool.connection() as connection:
+                row = connection.execute(
+                    "INSERT INTO fleet_lite_optimization_runs "
+                    "(session_id,run_id,request_id,options,owner_id,managed,status,stage,stop_requested,metadata,"
+                    "created_at,updated_at) VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s::jsonb,"
+                    "COALESCE(%s::timestamptz,NOW()),COALESCE(%s::timestamptz,NOW())) "
+                    "ON CONFLICT (session_id,run_id) DO NOTHING RETURNING run_id",
+                    (
+                        session_id,
+                        run_id,
+                        request_id,
+                        options_json,
+                        owner_id,
+                        managed,
+                        status,
+                        stage,
+                        stop_requested,
+                        metadata_json,
+                        record.get("created_at"),
+                        record.get("updated_at"),
+                    ),
+                ).fetchone()
+            return row is not None
+        except psycopg.errors.UniqueViolation as exc:
+            raise ValueError("optimization run conflicts with an existing run identity or active run") from exc
+
+    @staticmethod
+    def _optimization_run_id(value: Any) -> str:
+        if not isinstance(value, str) or not _OPTIMIZATION_RUN_ID.fullmatch(value) or ".." in value:
+            raise ValueError("optimization run_id is invalid")
+        return value
+
+    @staticmethod
+    def _optimization_request_id(value: Any) -> str:
+        if not isinstance(value, str) or not value.strip() or len(value) > 200:
+            raise ValueError("optimization request_id must contain 1-200 characters")
+        return value
+
+    @staticmethod
+    def _optimization_owner_id(value: Any) -> str:
+        if not isinstance(value, str) or not value.strip() or len(value) > 200:
+            raise ValueError("optimization owner_id must contain 1-200 characters")
+        return value
+
+    @staticmethod
+    def _optimization_json(value: dict[str, Any], label: str) -> str:
+        try:
+            return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must contain JSON values") from exc
+
+    @staticmethod
+    def _optimization_run_record(row: Any) -> dict[str, Any]:
+        """Merge free-form run details with canonical ledger columns, preserving ledger authority."""
+        if isinstance(row, dict):
+            values = dict(row)
+        else:
+            columns = (
+                "session_id",
+                "run_id",
+                "request_id",
+                "options",
+                "owner_id",
+                "managed",
+                "status",
+                "stage",
+                "stop_requested",
+                "metadata",
+                "created_at",
+                "updated_at",
+            )
+            values = dict(zip(columns, row, strict=False))
+        metadata = values.pop("metadata", {}) or {}
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        if not isinstance(metadata, dict):
+            raise ValueError("stored optimization metadata is invalid")
+        values = {**metadata, **values}
+        for name in ("created_at", "updated_at"):
+            stamp = values.get(name)
+            if hasattr(stamp, "isoformat"):
+                values[name] = stamp.isoformat()
+        return values
 
 
 _MAX_TURN_RECORD_BYTES = 1_000_000

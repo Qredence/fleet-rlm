@@ -28,6 +28,9 @@ class FakeCursor:
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
         rendered = sql.as_string() if hasattr(sql, "as_string") else sql
         self.connection.statements.append((" ".join(rendered.split()), params))
+        if self.connection.error is not None:
+            error, self.connection.error = self.connection.error, None
+            raise error
         self.rows = self.connection.replies.pop(0) if self.connection.replies else []
         return self
 
@@ -39,15 +42,20 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self, replies: list[list[Any]]) -> None:
+    def __init__(self, replies: list[list[Any]], error: Exception | None = None) -> None:
         self.statements: list[tuple[str, tuple[Any, ...]]] = []
         self.replies = replies
+        self.error = error
+        self.closed = False
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
         return FakeCursor(self).execute(sql, params)
 
     def cursor(self, **_kwargs: Any) -> FakeCursor:
         return FakeCursor(self)
+
+    def close(self) -> None:
+        self.closed = True
 
     @contextmanager
     def transaction(self):
@@ -57,8 +65,9 @@ class FakeConnection:
 
 
 class FakePool:
-    def __init__(self, *replies: list[Any]) -> None:
-        self.conn = FakeConnection(list(replies))
+    def __init__(self, *replies: list[Any], error: Exception | None = None) -> None:
+        self.conn = FakeConnection(list(replies), error)
+        self.connection_value = self.conn
         self.borrowed = 0
 
     @contextmanager
@@ -67,8 +76,8 @@ class FakePool:
         yield self.conn
 
 
-def make_store(*replies: list[Any]) -> tuple[Store, FakePool]:
-    pool = FakePool(*replies)
+def make_store(*replies: list[Any], error: Exception | None = None) -> tuple[Store, FakePool]:
+    pool = FakePool(*replies, error=error)
     return Store(pool, "postgresql://fake"), pool  # ty: ignore[invalid-argument-type]
 
 
@@ -89,12 +98,26 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 5
-    version, statements = _SCHEMA_MIGRATIONS[-1]
+    assert SCHEMA_VERSION == 6
+    version, statements = _SCHEMA_MIGRATIONS[4]
     assert version == 5
     assert statements == (
         "ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
     )
+
+
+def test_migration_six_adds_a_global_optimization_ledger_without_session_cascade():
+    version, statements = _SCHEMA_MIGRATIONS[-1]
+    assert version == 6
+    create_table, active_index = statements
+    assert "fleet_lite_optimization_runs" in create_table
+    assert "PRIMARY KEY (session_id, run_id)" in create_table
+    assert "UNIQUE (session_id, request_id)" in create_table
+    assert "REFERENCES fleet_lite_sessions" not in create_table
+    assert "owner_id TEXT NOT NULL" in create_table
+    assert "metadata JSONB NOT NULL" in create_table
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run" in active_index
+    assert "WHERE status IN ('running', 'approving')" in active_index
 
 
 def test_claim_environment_report_is_one_atomic_update_per_session():
@@ -288,6 +311,17 @@ def test_memories_return_iso_timestamps_without_reading_workspace_files():
     assert not any("fleet_lite_vfs_files" in statement for statement, _ in pool.conn.statements)
 
 
+def test_load_session_reads_history_without_recreating_the_runtime_session():
+    turns = [{"turn_id": "t1", "task": "question", "answer": "answer"}]
+    store, pool = make_store([{"memory_summary": "known", "turns": turns}])
+
+    assert store.load_session("s1") == ("known", turns)
+    assert pool.borrowed == 1
+    assert len(pool.conn.statements) == 1
+    assert pool.conn.statements[0][0] == ("SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s")
+    assert pool.conn.statements[0][1] == ("s1",)
+
+
 def test_committing_a_turn_is_one_transaction_with_the_completion():
     store, pool = make_store()
     store.commit_turn(
@@ -357,16 +391,20 @@ def test_snapshot_provenance_round_trips_into_the_turn_status_payload():
     assert {key: stored_record[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
 
 
-def test_cleanup_outcome_round_trips_into_the_stored_turn_and_status_payload():
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("cleanup", "not_required"), ("root_sandbox_id", "sandbox-7")],
+)
+def test_turn_metadata_round_trips_into_the_stored_turn_and_status_payload(field, value):
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
-    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", "cleanup": "not_required"}
+    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", field: value}
     _harness(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
-    assert result["cleanup"] == "not_required"
-    assert json.loads(calls[0][1]["turn_record_json"])["cleanup"] == "not_required"
+    assert result[field] == value
+    assert json.loads(calls[0][1]["turn_record_json"])[field] == value
 
 
 def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preserved():
@@ -400,18 +438,6 @@ def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preser
     assert {key: result[key] for key in joined} == {key: turn_record[key] for key in joined}
     assert result["effective_seconds"] is None, "a deadline-free Turn keeps an explicit null"
     assert json.loads(calls[0][1]["turn_record_json"]) == turn_record
-
-
-def test_root_sandbox_id_round_trips_into_the_stored_turn_and_status_payload():
-    calls = []
-    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
-    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", "root_sandbox_id": "sandbox-7"}
-    _harness(store, []).commit_turn("s1", turn_record)
-
-    turn_id, result = calls[0][1]["completion"]
-    assert turn_id == "t1"
-    assert result["root_sandbox_id"] == "sandbox-7"
-    assert json.loads(calls[0][1]["turn_record_json"])["root_sandbox_id"] == "sandbox-7"
 
 
 def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():

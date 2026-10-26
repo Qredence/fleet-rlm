@@ -175,6 +175,7 @@ Progress events:
 - Paired validation, critical cases, correctness, execution errors, and measured usage gate promotion.
 - Candidate creation and installation are separate.
 - Approval rechecks artifact, incumbent, configuration, code, and dependency identities.
+- Installed distribution identities, rather than source-tree lockfile paths, identify dependencies.
 - Incompatible evidence requires reevaluation.
 - External benchmarks and verifiers live in notebooks/helpers.
 - Benchmark traces stay outside curation.

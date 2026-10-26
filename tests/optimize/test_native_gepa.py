@@ -7,13 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import dspy
-from dspy import ChatAdapter
+import pytest
+from dspy import ChatAdapter, JSONAdapter
 from dspy.primitives.facade import SHIM_SETUP
 from dspy.utils import DummyLM
 
-from fleet_rlm.adapters import FleetRLMChatAdapter
-from fleet_rlm.optimize.artifacts import IsolatedFleetProgram
-from fleet_rlm.optimize.gepa import changed_components, tunable_components
+from fleet_rlm.optimize.artifacts import IsolatedFleetProgram, changed_components, tunable_components
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 
 BASELINE_SOURCE = """\
@@ -73,7 +72,7 @@ def lookup(*, task: str) -> str:
 def _flex() -> dspy.Flex:
     flex = dspy.Flex("task -> answer", tools=[lookup], interpreter_factory=lambda: ScriptedCodeInterpreter(lookup))
     # Keep a real Flex baseline source at construction, then use a small, fixed baseline fixture for rollouts.
-    flex._bind_code(BASELINE_SOURCE)
+    flex.load_state({"module_src": BASELINE_SOURCE})
     return flex
 
 
@@ -96,7 +95,10 @@ def _factory(example: dspy.Example, candidate: dspy.Module, loaded: list[dspy.Fl
     return _RolloutEngine(flex)
 
 
-def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_trips(tmp_path) -> None:
+@pytest.mark.parametrize("bounded_canary", [False, True])
+def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_trips(tmp_path, bounded_canary) -> None:
+    from gepa.utils.stop_condition import MaxCandidateProposalsStopper
+
     baseline = _flex()
     assert "dspy.RLM" in baseline._baseline_src()
     assert set(tunable_components(baseline)) == {"self"}
@@ -119,16 +121,21 @@ def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_tr
     gepa = dspy.GEPA(
         metric=metric,
         reflection_lm=reflection_lm,
-        max_metric_calls=5,
+        max_metric_calls=10 if bounded_canary else 5,
         reflection_minibatch_size=1,
         use_merge=False,
         skip_perfect_score=False,
         num_threads=1,
         seed=0,
+        track_stats=True,
+        gepa_kwargs={"stop_callbacks": [MaxCandidateProposalsStopper(1)]} if bounded_canary else None,
     )
     example = dspy.Example(task="solve fixture", answer="right").with_inputs("task")
     with dspy.context(adapter=ChatAdapter(use_json_adapter_fallback=False), trace=[]):
-        candidate = gepa.compile(baseline, trainset=[example], valset=[example])
+        candidate = gepa.compile(baseline, trainset=[example], valset=[example] * (3 if bounded_canary else 1))
+
+    if bounded_canary:
+        assert candidate.detailed_results.total_metric_calls == 8
 
     assert changed_components(baseline, candidate) == ["self"]
     assert candidate.module_src.strip() == REVISED_SOURCE.strip()
@@ -154,15 +161,16 @@ def test_native_gepa_instruction_component_contract() -> None:
     from fleet_rlm.optimize.gepa import INSTRUCTION_MAX_CHARS, build_instruction_proposer
 
     proposer = build_instruction_proposer()
-    assert isinstance(proposer.adapter, FleetRLMChatAdapter)
+    assert isinstance(proposer.adapter, JSONAdapter)
     assert proposer.max_chars == INSTRUCTION_MAX_CHARS
     assert proposer.truncate_history_outputs is True
 
     student = dspy.Predict("task -> answer")
     student.signature = student.signature.with_instructions("Return a concise answer.")
-    # The proposer runs on Fleet's ChatAdapter, so the scripted reply uses DSPy's field markers.
+    # The native proposer uses JSONAdapter and returns its typed instruction field.
     reflection_lm = DummyLM(
-        [{"text": "[[ ## new_instruction ## ]]\nReturn the reviewed answer exactly.\n[[ ## completed ## ]]"}] * 8
+        [{"new_instruction": "Return the reviewed answer exactly."}] * 8,
+        adapter=JSONAdapter(),
     )
 
     def metric(
@@ -192,3 +200,17 @@ def test_native_gepa_instruction_component_contract() -> None:
         candidate = gepa.compile(student, trainset=[example], valset=[example])
     assert candidate.signature.instructions == "Return the reviewed answer exactly."
     assert student.signature.instructions == "Return a concise answer."
+
+
+def test_public_parameter_traversal_finds_predictor_and_flex_together() -> None:
+    class MixedProgram(dspy.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.route = dspy.Predict("task -> route")
+            self.flex_agent = _flex()
+
+    program = MixedProgram()
+    components = tunable_components(program)
+    assert set(components) == {"route", "flex_agent"}
+    assert components["route"] == program.route.signature.instructions
+    assert components["flex_agent"] == BASELINE_SOURCE

@@ -21,6 +21,7 @@ from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
 from fleet_rlm.contracts import Route
 from fleet_rlm.observability import trace_object as _trace_object
+from fleet_rlm.optimization_runs import add_optimization_arguments, read_worker_settings
 from fleet_rlm.replay import REVIEW_STATUSES
 from fleet_rlm.tui.app import run_interactive_cli
 
@@ -311,12 +312,10 @@ def main(argv: list[str] | None = None) -> None:
     cli.add_argument("--mlflow-experiment", default=None)
     cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
 
-    from fleet_rlm.optimize import gepa
-
     optimize = commands.add_parser(
         "optimize", help="evaluate a Session's reviewed examples and compile a GEPA candidate (live)"
     )
-    gepa.add_arguments(optimize)
+    add_optimization_arguments(optimize)
 
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
@@ -374,6 +373,14 @@ def main(argv: list[str] | None = None) -> None:
     if getattr(args, "backend", None) and args.mlflow == "local":
         parser.error("cli databricks conflicts with --mlflow local")
     backend = getattr(args, "backend", None) or getattr(args, "mlflow", None) or "local"
+    managed_settings = None
+    if args.command == "optimize" and getattr(args, "managed_run_id", None):
+        try:
+            managed_settings = read_worker_settings(sys.stdin)
+        except (ValueError, TypeError):
+            parser.error("invalid private worker configuration")
+        if managed_settings.mlflow_mode != backend:
+            parser.error("worker MLflow backend does not match its server configuration")
     if getattr(args, "mlflow_port", None) is not None:
         if backend != "local":
             parser.error("--mlflow-port is only supported with local MLflow")
@@ -416,7 +423,7 @@ def main(argv: list[str] | None = None) -> None:
                 return
             get_settings.cache_clear()
     try:
-        settings = get_settings(backend)
+        settings = managed_settings or get_settings(backend)
         overrides = {}
         if getattr(args, "mlflow_port", None) is not None:
             if backend != "local":
@@ -450,6 +457,8 @@ def main(argv: list[str] | None = None) -> None:
             "or run an MLflow server separately before using standalone commands."
         )
     if args.command == "optimize":
+        from fleet_rlm.optimize import gepa
+
         gepa.run(args, optimize, settings)
         return
     if args.command == "eval":

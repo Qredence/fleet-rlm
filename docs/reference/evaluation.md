@@ -165,14 +165,17 @@ Every metric scores the Turn's final prediction (`answer`, `route`, `lm_calls`,
 | `delegation_correctness` | structured child gold | 1 if child count, inputs, success and promoted hashes match |
 | `efficiency` | explicit host usage counters | Measured execution efficiency; it contributes only after all applicable correctness checks pass |
 
-`fleet_metric(gold, pred, trace=None, pred_name=None, pred_trace=None, *, judge_lm)`
-returns `dspy.Prediction(score, feedback, objective_scores)`. `quality` is the
-minimum of judge correctness/safety, labeled values and route, and applicable
-artifact/delegation checks. `score` is zero if quality is below 1; otherwise it is
-`0.9 + 0.1 * efficiency`. The judge must report both correctness and safety.
-An empty answer scores zero without calling the judge. The feedback lists each
-check and its reason, adds the expected answer, and names the component GEPA is
-tuning during reflection.
+`fleet_metric(gold, pred, trace=None, pred_name=None, pred_trace=None,
+program_trace=None, *, judge_lm)` returns
+`dspy.Prediction(score, feedback, objective_scores)`. The first five arguments
+remain the metric's existing positional contract; `program_trace` is the optional
+sixth GEPA argument, declared so GEPA can pass bounded Flex execution evidence.
+`quality` is the minimum of judge correctness/safety, labeled values and route,
+and applicable artifact/delegation checks. `score` is zero if quality is below 1;
+otherwise it is `0.9 + 0.1 * efficiency`. The judge must report both correctness
+and safety. An empty answer scores zero without calling the judge. The feedback
+lists each check and its reason, adds the expected answer, and names the component
+GEPA is tuning during reflection.
 
 `lm_calls` retains its public name and counts shared budget units: requested
 generation/query completions, routing decisions, Skill decisions, and other
@@ -247,16 +250,31 @@ executes cases and scores only the traces it just produced.
 
 ## DSPy integration rationale and validation
 
-The integration follows the locked DSPy 3.4.1 contracts. Native GEPA treats each
+The integration follows the locked DSPy 3.4.1 and GEPA 0.1.4 contracts. These
+were the latest published stable releases checked on 2026-10-25; `uv.lock` is
+authoritative for installed packages. DSPy 3.4.1 treats each
 Flex as a whole source-code component; predictors inside that Flex are owned by
 the source and are not separately tuned. Ordinary predictors remain instruction
-components. Fleet supplies the metric and isolated runtime, rather than a custom
-search loop or code proposer. See the [versioned Flex contract](https://github.com/stanfordnlp/dspy/blob/3.4.1/docs/docs/api/modules/Flex.md)
-and [GEPA implementation](https://github.com/stanfordnlp/dspy/blob/3.4.1/dspy/teleprompt/gepa/gepa.py).
+components. DSPy supplies native instruction reflection using its JSON adapter,
+Flex code proposal, component selection, and candidate selection. Fleet sets
+bounded instruction length and task guidance, supplies the metric and isolated
+runtime, and uses DSPy's `SandboxLM` to account host-mediated calls against the
+shared Turn budget. GEPA's file stop and candidate-proposal
+callbacks are isolated version-specific integration points from GEPA 0.1.4;
+search metric call limits remain advisory between native batches. See the [versioned Flex
+contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
+API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
 
-LM and adapter overrides use scoped `dspy.context` calls. DSPy's evaluator owns
-worker context propagation. JSON state preserves optimized instructions and Flex
-source; the host reconstructs the Daytona interpreter and current credentials.
+LM and serving-adapter overrides use scoped `dspy.context` calls. DSPy's evaluator
+owns worker context propagation. Fleet uses public Flex parameter traversal and
+`Flex.load_state` to apply missing nested RLM limits while preserving the host
+SandboxLM and interpreter factory. JSON state preserves optimized instructions
+and Flex source; the host reconstructs the Daytona interpreter and current
+credentials. Runtime and configuration digests, a digest of optimization source,
+and a versioned fingerprint of installed distribution names and versions are
+captured before search and rechecked before the candidate manifest is written and
+again at approval. Evidence format 2 does not depend on finding a source-tree
+`uv.lock` at runtime.
 See [settings and context](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/settings-and-context.md)
 and [saving and loading](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/saving-and-loading.md).
 

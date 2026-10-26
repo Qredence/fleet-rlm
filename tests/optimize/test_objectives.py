@@ -26,16 +26,15 @@ def test_routing_efficiency_keeps_its_bands():
     assert routing_efficiency(True, 10) == (0.95, "Bounded RLM/Flex execution used 10 budget units.")
 
 
-def test_direct_route_is_penalised_after_its_allowance_instead_of_scoring_one():
+@pytest.mark.parametrize("calls,expected", [(2, 1.0), (3, 0.98), (15, 0.74)])
+def test_direct_route_is_penalised_after_its_allowance_instead_of_scoring_one(calls, expected):
     # The previous fall-through scored any non-RLM Turn with 3-15 units as 1.0.
-    assert routing_efficiency(False, 2)[0] == 1.0
-    assert routing_efficiency(False, 3)[0] == pytest.approx(0.98)
-    assert routing_efficiency(False, 15)[0] == pytest.approx(0.74)
+    assert routing_efficiency(False, calls)[0] == pytest.approx(expected)
 
 
-def test_routing_efficiency_floors_instead_of_going_negative():
-    assert routing_efficiency(True, 10_000)[0] == 0.2
-    assert routing_efficiency(False, 10_000)[0] == 0.2
+@pytest.mark.parametrize("used_rlm", [False, True])
+def test_routing_efficiency_floors_instead_of_going_negative(used_rlm):
+    assert routing_efficiency(used_rlm, 10_000)[0] == 0.2
 
 
 def test_efficiency_penalties_and_availability():
