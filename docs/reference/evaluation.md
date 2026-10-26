@@ -243,6 +243,61 @@ Approval rechecks that the current incumbent, configuration, code, and
 dependencies match the candidate manifest. A mismatch requires reevaluation;
 old manifests are not an unchecked rollback path.
 
+### Experiments in the Fleet TUI
+
+Use `/optimize` to open the Experiments screen and start or focus a GEPA run.
+The API owns the job and runs the existing CLI optimizer in a subprocess. Its
+lifecycle is recorded in PostgreSQL; candidate files remain in the configured
+artifact directory and MLflow stores the optimization run, traces, and evidence.
+The API admits one optimization or review globally and does not queue requests.
+The screen polls snapshots once per second and lists Session-scoped history for
+completed, failed, cancelled, rejected, and approved runs. Select a run to inspect
+its saved comparison, exact before/after component text, bounded diffs, objective
+and quality changes, gate reasons, and sanitized validation failures. Approve
+rechecks the candidate's current evidence; Reject records an explicit decision
+without deleting candidate artifacts.
+
+The client owns neither the job nor its cancellation: disconnecting does not stop
+work, while the explicit cancel action requests cooperative stopping. A normal
+launcher shutdown drains its API-owned job before stopping the API and MLflow.
+An API restart fences abandoned work as interrupted without automatically rerunning
+it; interrupted approvals are reconciled against active artifact digests before
+they can be reviewed again. Standalone `fleet optimize` remains a separate CLI
+workflow and can also list/approve its stored run records.
+
+Before the PostgreSQL lifecycle table existed, optimizer history was written as
+per-Session JSON files. The first API/CLI read imports those files idempotently;
+the original files are retained read-only. PostgreSQL is authoritative for new
+run states.
+
+Progress shows named lifecycle stages when no counter is available. During search,
+the counter is GEPA metric calls used/total as reported by its budget callback; it
+is not a provider-request or LM-call count. Cancellation is cooperative: the TUI
+requests a stop, remains responsive while in-flight work finishes, and reports the
+terminal outcome only after cleanup.
+An accepted stop during finalization still cancels the run. Files already written
+remain as diagnostic evidence and are unavailable for approval. A stop received
+after the completed outcome is saved does not change that outcome. Cleanup
+failure is reported as failure, and the TUI waits for the subprocess to exit and
+its output to drain before displaying its terminal event.
+
+Measured LM-call totals, median per-example runtime, and artifact-pass counts are
+diagnostics with sample counts and applicability. They do not independently pass
+or fail the promotion gate. Promotion still requires paired dev/holdout quality,
+critical-case, execution-error, and measured-usage checks described above. A
+`--max-metric-calls 10` configures the search metric-call budget; GEPA reflection,
+judging, and final paired validation can make additional calls and incur additional
+cost. Native GEPA checks this budget between batches and can overshoot it.
+For a bounded canary with three dev examples, add
+`--reflection-minibatch-size 1 --max-candidate-proposals 1`: seed scoring,
+one parent/child minibatch, and an optional full candidate evaluation use at most
+eight search metric calls. The proposal limit uses GEPA's native stopping rule;
+ordinary runs retain their existing defaults. Optimization does not promote a
+candidate; approval is a separate action. Search rollout traces are disabled by
+default; `--trace-search` opts into them. Final paired validation emits per-case
+traces tagged with stage, split, pass, and case identity in the same MLflow run.
+Async trace writes are flushed before a run can reach its terminal state.
+
 ## Explicit historical trace evaluation
 
 Compiling or optimizing does not score historical traces. `fleet eval run`

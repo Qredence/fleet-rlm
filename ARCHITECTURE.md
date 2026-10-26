@@ -14,17 +14,27 @@ Code lives in `src/fleet_rlm/`. See the [source layout](docs/reference/source-la
 ```mermaid
 flowchart LR
     Client[Textual terminal client] -->|HTTP / SSE| API[FastAPI server]
+    Browser[Browser] -->|WebSocket terminal I/O| Serve[Textual Serve]
+    Serve -->|per-browser Textual subprocess| WebTUI[Textual client]
+    WebTUI -->|HTTP / SSE| API
     API --> Engine[DSPy engine]
     Engine --> Daytona[Daytona Python execution]
     API --> PostgreSQL[PostgreSQL state]
     Engine --> MLflow[MLflow traces / evaluation]
+    API -->|owns one optimization job| Worker[CLI optimizer subprocess]
+    Worker --> PostgreSQL
+    Worker --> MLflow
 ```
 
 - FastAPI (`fleet_rlm.api.app`) is the primary application; `cli.py` provides the
-  `fleet` entry point, where `serve` starts the API and `optimize`/`eval` are offline tooling.
+  `fleet` entry point, where `serve` starts the API, `web` serves the Textual client,
+  `optimize` is also available as a standalone CLI command, and `eval` is offline tooling.
 - `launcher.py` owns the local API and optional local MLflow.
-- Textual/Rich clients submit requests and render events.
+- Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
+- The API owns TUI optimization jobs through one subprocess slot. The worker runs the existing CLI optimizer; PostgreSQL owns lifecycle state, while MLflow stores run traces and candidate evidence. The API does not import GEPA.
+- A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
+- A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer.
 - `session.py` owns the runtime registry and Session leases.
 - `engine/turn.py` runs each Turn on a worker thread; `sandbox_mgr.turn_scope()` is the one
   place that decides whether a caller owns a Turn, so a program nested inside an API Turn
@@ -186,6 +196,7 @@ See [evaluation](docs/reference/evaluation.md) and the [canary runbook](docs/run
 
 - The ordinary API has no caller authentication and defaults to `127.0.0.1`.
 - Non-loopback binding requires `FLEET_ALLOW_NON_LOOPBACK_BIND=true` and a secured boundary.
+- Browser terminal WebSockets validate Origin and Host against the configured public URL before acceptance or client process creation.
 - Daytona policy governs generated Python and network access.
 - Live validation requires explicit authorization and saved evidence.
 - Offline tests cannot establish provider availability, isolation, model compatibility, or workload improvement.

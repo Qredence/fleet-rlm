@@ -24,6 +24,12 @@ Migration 5 adds `fleet_lite_sessions.environment_reported`, the durable
 once-per-Session marker for the soft `sandbox_environment_incomplete`
 observation. Existing rows default to unreported; no backfill is performed.
 The migration role owns the change; existing runtime DML grants apply.
+Migration 6 adds `fleet_lite_optimization_runs`, the canonical lifecycle ledger
+for API-owned and standalone CLI optimization runs. A unique partial index permits
+at most one globally active run or approval; there is no job queue. The record
+stores request idempotency, validated options, owner, managed-worker marker,
+status/stage, cooperative stop intent, and run metadata. Database owner/status
+checks fence stale workers from publishing lifecycle updates.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy
@@ -107,6 +113,23 @@ and suspend settings are unchanged.
 Daytona Volume bytes are not part of a database transaction. Restarting
 recovers Turns and settings from PostgreSQL and files from the Volume; it does
 not restore Python process memory.
+
+New optimization status is stored in PostgreSQL; candidate manifests, reports,
+and GEPA working files remain in the configured artifact directory, while MLflow
+stores optimization traces and evidence. Existing per-Session JSON run records
+are imported idempotently at startup and before history reads. They are retained
+as read-only migration sources. API restart marks abandoned managed workers
+interrupted and does not rerun provider work; a later explicit review reconciles
+an interrupted approval against the active candidate digests.
+
+Each API holds a dedicated advisory owner lease through worker startup and
+draining. History reads preserve runs owned by another live API. Abandoned
+managed workers receive a cooperative stop request while holding the global
+optimization lease; their rows become interrupted only after it is released.
+Standalone optimization reconciles abandoned running rows under that global
+lease before admitting a new run, so a crashed CLI does not require an API
+history read to unblock the next search. Ctrl+C during search or validation
+records cancellation and clears candidate eligibility before exiting.
 
 The default URL includes a development username and password; replace it for
 any shared or production environment. Do not include database secrets in a

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
-import os
 import re
 import shlex
-import subprocess
-import sys
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +20,7 @@ from rich.text import Text
 
 from fleet_rlm.config import FleetSettings, validate_turn_timeout_seconds
 from fleet_rlm.contracts import catalog_entries
+from fleet_rlm.optimization_runs import ExperimentOptions, add_search_arguments
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
 MODES = ("rlm", "flex", "hybrid")
@@ -46,6 +46,9 @@ class SessionState:
     fullscreen: bool = False
     setup_available: bool = False
     pending_model_choice: tuple[str, list[str]] | None = None
+    optimizer_launcher: Callable[[dict[str, Any] | str], None] | None = field(default=None, repr=False)
+    experiments_opener: Callable[[], None] | None = field(default=None, repr=False)
+    pending_optimizer_request: dict[str, Any] | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,46 +499,104 @@ def _sessions(ctx: Context, _arg: str) -> None:
         )
 
 
-def _optimize(ctx: Context, arg: str) -> None:
-    """Run `fleet optimize` for this Session; extra arguments pass through (e.g. `--approve VERSION`)."""
+def _experiments(ctx: Context, _arg: str) -> None:
+    """Open the session-scoped GEPA run history in fullscreen mode."""
+    if ctx.state.experiments_opener is None:
+        CONSOLE.print("[yellow]Experiments are available in the fullscreen TUI.[/yellow]")
+        return
+    ctx.state.experiments_opener()
+
+
+def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], str | None] | None:
+    """Validate `/optimize` arguments and return the API request or reviewed run ID."""
     try:
         extra = shlex.split(arg)
     except ValueError as exc:
         CONSOLE.print(f"[red]Invalid /optimize arguments:[/red] {exc}")
-        return
+        return None
+    if any(value == "--session" or value.startswith("--session=") for value in extra):
+        CONSOLE.print("[red]/optimize always uses the active Session.[/red]")
+        return None
+    parser = argparse.ArgumentParser(prog="/optimize", add_help=False, exit_on_error=False)
+    add_search_arguments(parser)
+    parser.add_argument("--approve")
+    parser.add_argument("--mlflow", choices=("local", "databricks"))
+    try:
+        args = parser.parse_args(extra)
+    except (argparse.ArgumentError, SystemExit) as exc:
+        CONSOLE.print(f"[red]Invalid /optimize arguments:[/red] {exc}")
+        return None
+    try:
+        options = ExperimentOptions.from_namespace(args).model_dump()
+    except ValueError as exc:
+        CONSOLE.print(f"[red]Invalid /optimize options:[/red] {exc}")
+        return None
     settings = ctx.state.mlflow_settings
     backend = settings.mlflow_mode if settings is not None else "local"
-    for index, value in enumerate(extra):
-        selected = (
-            (extra[index + 1] if index + 1 < len(extra) else "")
-            if value == "--mlflow"
-            else (value.split("=", 1)[1] if value.startswith("--mlflow=") else None)
-        )
-        if selected is not None and selected != backend:
-            CONSOLE.print("[red]/optimize must use the session's MLflow backend.[/red]")
-            return
-    command = [
-        sys.executable,
-        "-m",
-        "fleet_rlm.cli",
-        "optimize",
-        "--session",
-        ctx.session_id,
-        *extra,
-        "--mlflow",
-        backend,
-    ]
-    environment = dict(os.environ)
-    for key in ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_ID"):
-        environment.pop(key, None)
-    if settings is not None:
-        environment.update(settings.mlflow_environment())
-    if getattr(getattr(ctx, "state", None), "fullscreen", False):
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, env=environment)
-        output = (completed.stdout or "") + (completed.stderr or "")
-        CONSOLE.print(Panel(output.strip() or "(no output)", title="Optimization run"))
+    if args.mlflow is not None and args.mlflow != backend:
+        CONSOLE.print("[red]/optimize must use the session's MLflow backend.[/red]")
+        return None
+    if args.approve:
+        return {}, args.approve
+    pending = ctx.state.pending_optimizer_request
+    if pending is None or {key: value for key, value in pending.items() if key != "request_id"} != options:
+        pending = {"request_id": str(uuid.uuid4()), **options}
+        ctx.state.pending_optimizer_request = pending
+    return pending.copy(), None
+
+
+def _finish_optimizer_request(state: SessionState, request_id: str) -> None:
+    """Forget a start id only after the API gives a definitive outcome."""
+    pending = state.pending_optimizer_request
+    if pending is not None and pending.get("request_id") == request_id:
+        state.pending_optimizer_request = None
+
+
+def _optimize(ctx: Context, arg: str) -> None:
+    """Start or review this Session's optimization through the Fleet API."""
+    parsed = _parse_optimizer_arguments(ctx, arg)
+    if parsed is None:
         return
-    subprocess.run(command, check=False, env=environment)
+    payload, approve_run = parsed
+    if ctx.state.fullscreen:
+        if ctx.state.optimizer_launcher is None:
+            CONSOLE.print("[red]The fullscreen experiments screen is unavailable.[/red]")
+            return
+        if approve_run is not None:
+            ctx.state.optimizer_launcher(f"--approve {approve_run}")
+        else:
+            ctx.state.optimizer_launcher(payload)
+        return
+    if approve_run is not None:
+        response = ctx.post(
+            f"{ctx.session}/experiments/{quote(approve_run, safe='')}/review",
+            json={"decision": "approved", "request_id": str(uuid.uuid4())},
+        )
+        run = response.json().get("experiment", {})
+    else:
+        try:
+            response = ctx.post(f"{ctx.session}/experiments", json=payload)
+        except httpx.HTTPStatusError as exc:
+            if 400 <= exc.response.status_code < 500:
+                _finish_optimizer_request(ctx.state, str(payload["request_id"]))
+            raise
+        _finish_optimizer_request(ctx.state, str(payload["request_id"]))
+        run = response.json().get("experiment", {})
+    run_id = run.get("run_id")
+    if not isinstance(run_id, str):
+        CONSOLE.print("[red]Fleet API returned an invalid experiment record.[/red]")
+        return
+    CONSOLE.print(f"[cyan]Optimization {run.get('status', 'started')}:[/cyan] {run_id}")
+    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+    while run.get("status") not in terminal:
+        import time
+
+        time.sleep(1)
+        run = ctx.get(f"{ctx.session}/experiments/{quote(run_id, safe='')}").json().get("experiment", {})
+        stage = run.get("stage")
+        if stage:
+            CONSOLE.print(f"[cyan]Optimization stage:[/cyan] {str(stage)[:60]}")
+    CONSOLE.print(f"[green]Optimization {run.get('status')}.[/green]")
 
 
 _MODE_OPTIONS = dict.fromkeys(MODES)
@@ -639,6 +700,12 @@ COMMANDS: dict[str, Command] = {
         category="Evaluation & Traces",
     ),
     "/sessions": Command("/sessions", "list saved Sessions", _sessions, category="Session & Models"),
+    "/experiments": Command(
+        "/experiments",
+        "review GEPA run history and candidate evidence",
+        _experiments,
+        category="Evaluation & Traces",
+    ),
     "/optimize": Command(
         "/optimize [--max-metric-calls N | --approve VERSION]",
         "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",

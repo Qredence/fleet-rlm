@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import httpx
 import pytest
 
@@ -18,6 +20,12 @@ async def _wait_until_idle(tui, pilot):
     pytest.fail("Turn worker did not finish")
 
 
+@asynccontextmanager
+async def _menu_test(app, size=(80, 24)):
+    async with app.run_test(size=size) as pilot:
+        yield pilot, app.query_one("#prompt-input", _PromptInput)
+
+
 @pytest.fixture
 def menu_app(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
@@ -31,8 +39,7 @@ def menu_app(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_history_preserves_drafts_and_does_not_reopen_command_suggestions(menu_app):
-    async with menu_app.run_test(size=(100, 30)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(100, 30)) as (pilot, composer):
         composer.value = "/timeout off"
         await pilot.press("enter")
         composer.value = "/timeout 120"
@@ -59,8 +66,7 @@ async def test_history_preserves_drafts_and_does_not_reopen_command_suggestions(
 async def test_every_command_is_reachable_and_the_highlight_stays_visible(menu_app, size):
     from textual.widgets import OptionList
 
-    async with menu_app.run_test(size=size) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=size) as (pilot, composer):
         composer.value = "/"
         await pilot.pause()
         popup = menu_app.query_one("#slash-popup", OptionList)
@@ -78,8 +84,7 @@ async def test_every_command_is_reachable_and_the_highlight_stays_visible(menu_a
 
 @pytest.mark.asyncio
 async def test_enter_accepts_incomplete_suggestions_before_executing_the_command(menu_app):
-    async with menu_app.run_test(size=(100, 30)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(100, 30)) as (pilot, composer):
         composer.value = "/ti"
         await pilot.press("enter")
         assert composer.value == "/timeout "
@@ -98,8 +103,7 @@ async def test_enter_accepts_incomplete_suggestions_before_executing_the_command
 
 @pytest.mark.asyncio
 async def test_mouse_selection_fills_the_composer_without_running_the_command(menu_app):
-    async with menu_app.run_test(size=(100, 30)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(100, 30)) as (pilot, composer):
         composer.value = "/ti"
         await pilot.pause()
         await pilot.click("#slash-popup", offset=(2, 1))
@@ -110,8 +114,7 @@ async def test_mouse_selection_fills_the_composer_without_running_the_command(me
 
 @pytest.mark.asyncio
 async def test_escape_keeps_the_input_and_explicit_tab_reopens_completion(menu_app):
-    async with menu_app.run_test(size=(100, 30)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(100, 30)) as (pilot, composer):
         composer.value = "/ti"
         await pilot.press("escape")
         await pilot.pause()
@@ -142,8 +145,7 @@ async def test_escape_keeps_the_input_and_explicit_tab_reopens_completion(menu_a
 async def test_every_advertised_submenu_can_be_navigated_and_completed(menu_app, prefix, choices):
     from textual.widgets import OptionList
 
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         for index, choice in enumerate(choices):
             composer.value = prefix
             await pilot.pause()
@@ -160,8 +162,7 @@ async def test_every_advertised_submenu_can_be_navigated_and_completed(menu_app,
 async def test_local_path_menu_can_descend_into_a_directory(menu_app, tmp_path, command):
     (tmp_path / "folder").mkdir()
     (tmp_path / "folder" / "revenue.csv").write_text("amount\n42\n")
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = command + " fol"
         await pilot.press("tab")
         assert composer.value == command + " folder/"
@@ -174,8 +175,7 @@ async def test_local_path_menu_can_descend_into_a_directory(menu_app, tmp_path, 
 @pytest.mark.parametrize("command", ["/cat", "/stat", "/get", "/rm", "/context"])
 async def test_workspace_file_menus_and_mentions_include_all_cached_paths(menu_app, command):
     menu_app.state.workspace_files = [f"files/input-{index:02}.csv" for index in range(12)]
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = command + " files/"
         await pilot.press("up", "tab")
         assert composer.value == command + " files/input-11.csv"
@@ -204,8 +204,7 @@ async def test_transfer_menu_quotes_paths_with_spaces_and_the_commands_execute(m
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(transfer)) as client:
         tui = FleetTextualApp(client, "menu-transfer", SessionState())
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = "/put qua"
             await pilot.press("tab")
             assert composer.value == "/put 'quarter report.csv'"
@@ -224,8 +223,7 @@ async def test_transfer_menu_quotes_paths_with_spaces_and_the_commands_execute(m
 async def test_all_commands_wrap_in_both_directions_and_page_keys_scroll(menu_app):
     from textual.widgets import OptionList
 
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "/"
         await pilot.pause()
         popup = menu_app.query_one("#slash-popup", OptionList)
@@ -248,8 +246,7 @@ async def test_all_commands_wrap_in_both_directions_and_page_keys_scroll(menu_ap
 
 @pytest.mark.asyncio
 async def test_multiline_editing_and_editing_recalled_history_preserve_the_new_draft(menu_app):
-    async with menu_app.run_test(size=(100, 30)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(100, 30)) as (pilot, composer):
         composer.value = "/timeout off"
         await pilot.press("enter")
         composer.value = "first line\nsecond line\nthird line"
@@ -285,8 +282,7 @@ async def test_nested_mode_selection_dispatches_only_after_the_completed_command
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(mode)) as client:
         tui = FleetTextualApp(client, "menu-mode", SessionState())
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = "/config m"
             await pilot.press("enter")
             assert composer.value == "/config mode "
@@ -310,8 +306,7 @@ async def test_nested_mode_selection_dispatches_only_after_the_completed_command
 async def test_terminal_key_bursts_preserve_input_and_completion_order(menu_app, prefix, burst, expected):
     from textual import events
 
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "/timeout 120"
         await pilot.press("enter")
         composer.value = prefix
@@ -331,8 +326,7 @@ async def test_local_mentions_browse_folders_and_quote_files_without_uploading(m
     folder = tmp_path / "reports"
     folder.mkdir()
     (folder / "quarter report.csv").write_text("amount\n42\n")
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "Summarize @"
         await pilot.pause()
         assert menu_app.query_one("#slash-popup").display
@@ -351,8 +345,7 @@ async def test_local_mentions_keep_typing_inside_quoted_folder_paths(menu_app, t
     folder = tmp_path / "my reports"
     folder.mkdir()
     (folder / 'quarter "one".csv').write_text("amount\n42\n")
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "Read @my"
         await pilot.press("down", "tab")
         assert composer.value == 'Read @"./my reports/"'
@@ -366,8 +359,7 @@ async def test_local_mentions_keep_typing_inside_quoted_folder_paths(menu_app, t
 @pytest.mark.asyncio
 async def test_local_mentions_complete_at_the_cursor_and_ignore_email_addresses(menu_app, tmp_path):
     (tmp_path / "report.csv").write_text("amount\n42\n")
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "Read @rep and summarize it"
         composer.move_cursor((0, len("Read @rep")))
         await pilot.pause()
@@ -386,8 +378,7 @@ async def test_local_mentions_complete_at_the_cursor_and_ignore_email_addresses(
 @pytest.mark.asyncio
 async def test_mention_menu_tracks_cursor_movement_without_editing(menu_app, tmp_path):
     (tmp_path / "report.csv").write_text("amount\n42\n")
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "Read @rep and summarize"
         await pilot.pause()
         popup = menu_app.query_one("#slash-popup")
@@ -413,8 +404,7 @@ async def test_local_mentions_support_typed_paths_and_scroll_all_files(menu_app,
     monkeypatch.setenv("HOME", str(tmp_path))
     prefix = {"relative": "reports/", "absolute": f"{folder}/", "home": "~/reports/"}[style]
     completed_prefix = "./reports/" if style == "relative" else prefix
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = f"Read @{prefix}"
         await pilot.pause()
         assert menu_app.query_one("#slash-popup").option_count == 12
@@ -427,8 +417,7 @@ async def test_workspace_and_local_mentions_with_the_same_path_stay_distinct(men
     (tmp_path / "files").mkdir()
     (tmp_path / "files" / "report.csv").write_text("amount\n42\n")
     menu_app.state.workspace_files = ["files/report.csv"]
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "Read @files/rep"
         await pilot.pause()
         assert [usage for _fill, usage, _description in menu_app._popup_items] == [
@@ -461,8 +450,7 @@ async def test_mentions_upload_on_submit_deduplicate_and_rewrite_before_the_turn
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         tui = FleetTextualApp(client, "mentions", SessionState(workspace_files=["files/existing.csv"]))
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = (
                 'Compare @"./quarter report.csv" @"./other/quarter report.csv" '
                 '@"./quarter report.csv" @files/existing.csv'
@@ -498,8 +486,7 @@ async def test_attachment_failures_keep_the_draft_and_never_start_a_turn(monkeyp
     }[failure]
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         tui = FleetTextualApp(client, "mention-failure", SessionState())
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = text
             await pilot.press("escape", "enter")
             await _wait_until_idle(tui, pilot)
@@ -526,8 +513,7 @@ async def test_cancellation_during_an_attachment_does_not_send_a_turn(monkeypatc
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         tui = FleetTextualApp(client, "mention-cancel", SessionState())
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = "Read @./report.csv"
             try:
                 await pilot.press("enter")
@@ -550,8 +536,7 @@ async def test_enter_keeps_exact_workspace_paths_even_when_not_first(menu_app, m
     submitted = []
     monkeypatch.setattr(menu_app, "submit_text", submitted.append)
     menu_app.state.workspace_files = ["files/report-old.csv", "files/report"]
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "/cat files/report"
         await pilot.press("enter")
         assert submitted == ["/cat files/report"]
@@ -565,8 +550,7 @@ async def test_enter_keeps_free_form_transfer_destinations(menu_app, monkeypatch
     menu_app.state.workspace_files = ["files/report-old.csv"]
     (tmp_path / "report-old.csv").write_bytes(b"existing file")
     text = f"{command} source.csv " + ("files/report" if command == "/put" else "report")
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = text
         await pilot.press("enter")
         assert submitted == [text]
@@ -603,8 +587,7 @@ def git_mention_project(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("git_mention_project")
 async def test_bare_name_suggests_nested_directories_and_files(menu_app):
-    async with menu_app.run_test(size=(80, 24)) as pilot:
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
+    async with _menu_test(menu_app, size=(80, 24)) as (pilot, composer):
         composer.value = "Review @fleet_rlm"
         await pilot.pause()
         assert [usage for _fill, usage, _description in menu_app._popup_items] == [
@@ -627,13 +610,12 @@ async def test_bare_name_suggests_nested_directories_and_files(menu_app):
 async def test_local_directory_mentions_complete_during_a_terminal_key_burst(menu_app):
     from textual import events
 
-    async with menu_app.run_test(size=(80, 24)) as pilot:
+    async with _menu_test(menu_app) as (pilot, composer):
         for character in "review @fleet_rlm":
             key = {" ": "space", "@": "at", "_": "underscore"}.get(character, character)
             menu_app.post_message(events.Key(key, character))
         menu_app.post_message(events.Key("tab", None))
         await pilot.pause()
-        composer = menu_app.query_one("#prompt-input", _PromptInput)
         assert composer.value == "review @./src/fleet_rlm "
         assert composer.has_focus
         assert menu_app.state.workspace_files == []
@@ -660,8 +642,7 @@ async def test_selected_directory_uploads_recursively_before_starting_the_turn(s
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         tui = FleetTextualApp(client, "directory-mention", SessionState())
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = "Review @fleet_rlm"
             await pilot.pause()
             if selection == "mouse":
@@ -692,8 +673,7 @@ async def test_partial_directory_upload_failure_keeps_draft_and_never_starts_a_t
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(respond)) as client:
         tui = FleetTextualApp(client, "directory-failure", SessionState())
-        async with tui.run_test(size=(80, 24)) as pilot:
-            composer = tui.query_one("#prompt-input", _PromptInput)
+        async with _menu_test(tui, size=(80, 24)) as (pilot, composer):
             composer.value = "Review @./src/fleet_rlm"
             await pilot.press("enter")
             await _wait_until_idle(tui, pilot)

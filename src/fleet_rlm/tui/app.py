@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import shlex
@@ -48,6 +49,7 @@ from fleet_rlm.tui.commands import (
     completion_options,
     handle_command,
 )
+from fleet_rlm.tui.experiments import ExperimentsScreen
 from fleet_rlm.tui.mentions import attach_local_mentions, completed_mention_cursor, mention_completions
 from fleet_rlm.tui.render import (
     CONSOLE,
@@ -792,6 +794,15 @@ class FleetTextualApp(App[str | None]):
         self._cancel_requested: bool = False
         self._active_response: httpx.Response | None = None
         self._active_turn_widget: _TurnWidget | None = None
+        self._optimization_active = False
+        self._optimization_stopping = False
+        self._optimizer_stop_requested = False
+        self._optimizer_snapshot_polling = False
+        self._optimization_terminal_status: str | None = None
+        self._optimization_progress: dict[str, Any] = {}
+        self._optimization_run_id: str | None = None
+        self.state.optimizer_launcher = self._launch_optimizer_arguments
+        self.state.experiments_opener = self._open_experiments
         self._history_entries: list[str] = []
         self._history_index: int = 0
         self._history_draft = ""
@@ -863,6 +874,7 @@ class FleetTextualApp(App[str | None]):
         """Focus the composer input and start the live spinner refresh timer."""
         self.query_one("#prompt-input", _PromptInput).focus()
         self.set_interval(0.2, self._tick_live_turn)
+        self.set_interval(1.0, self._tick_optimizer_snapshot)
 
     def _render_composer_hints(self) -> Text:
         hints = Text()
@@ -885,6 +897,8 @@ class FleetTextualApp(App[str | None]):
             left.append(" replay: on ", style="bold #34d399 on #14291f")
         if self._turn_active:
             left.append("  running…", style="bold #fbbf24")
+        elif self._optimization_active:
+            left.append("  stopping…" if self._optimization_stopping else "  optimizing…", style="bold #fbbf24")
         elif self._last_ctrl_c and (time.monotonic() - self._last_ctrl_c) <= 2.5:
             left.append("  press ctrl+c again to exit", style="bold #fbbf24")
         return left
@@ -911,7 +925,7 @@ class FleetTextualApp(App[str | None]):
             ("ctrl+o", "Toggle REPL"),
             ("ctrl+t", "Thinking"),
             ("ctrl+k", "Mode"),
-            ("esc", "Cancel" if self._turn_active else "Dismiss"),
+            ("esc", "Cancel" if self._turn_active or self._optimization_active else "Dismiss"),
             ("ctrl+c x2", "Quit"),
         ]
         if any(popup.display for popup in self.query("#slash-popup")):
@@ -943,6 +957,48 @@ class FleetTextualApp(App[str | None]):
             with self._lock:
                 self._active_turn_widget.tracker.advance_spinner()
             self._active_turn_widget.sync_from_tracker()
+
+    def _tick_optimizer_snapshot(self) -> None:
+        """Keep observing an active API run while its history screen is closed."""
+        if (
+            not self._optimization_active
+            or isinstance(self.screen, ExperimentsScreen)
+            or self._optimizer_snapshot_polling
+        ):
+            return
+        self._optimizer_snapshot_polling = True
+        self.run_worker(
+            self._poll_optimizer_snapshot(),
+            name="optimizer-snapshot",
+            group="optimizer-snapshot",
+            exit_on_error=False,
+        )
+
+    async def _poll_optimizer_snapshot(self) -> None:
+        try:
+            response = await asyncio.to_thread(
+                self.client.get, f"/sessions/{quote(self.session_id, safe='')}/experiments"
+            )
+            response.raise_for_status()
+            snapshot = response.json()
+            if not isinstance(snapshot, dict):
+                return
+            records = snapshot.get("experiments")
+            if not isinstance(records, list):
+                return
+            active_id = snapshot.get("active_run_id")
+            run_id = active_id if isinstance(active_id, str) else self._optimization_run_id
+            record = next(
+                (item for item in records if isinstance(item, dict) and item.get("run_id") == run_id),
+                None,
+            )
+            if record is not None:
+                self._optimizer_snapshot(record)
+        except (httpx.HTTPError, ValueError, TypeError):
+            # Keep the last known state and retry on the next tick.
+            pass
+        finally:
+            self._optimizer_snapshot_polling = False
 
     @contextmanager
     def _capture_console(self) -> Generator[io.StringIO]:
@@ -1204,6 +1260,159 @@ class FleetTextualApp(App[str | None]):
                 self._refresh_last_turn_widget()
                 event.stop()
 
+    def _open_experiments(self) -> None:
+        """Open or refresh the Experiments screen for the active Session."""
+        if isinstance(self.screen, ExperimentsScreen):
+            self.screen.refresh_history()
+            return
+        self.push_screen(
+            ExperimentsScreen(
+                self.client,
+                self.session_id,
+                on_run=self._start_optimization,
+                on_cancel=self._request_optimizer_stop,
+                on_review=self._review_optimization,
+                on_snapshot=self._optimizer_snapshot,
+            )
+        )
+
+    def _launch_optimizer_arguments(self, arguments: str | dict[str, Any]) -> None:
+        """Parse `/optimize` then send the request to the API-owned run manager."""
+        if isinstance(arguments, dict):
+            self._start_optimization(arguments)
+            return
+        parsed = commands_mod._parse_optimizer_arguments(Context(self.client, self.session_id, self.state), arguments)
+        if parsed is None:
+            return
+        options, approve_run = parsed
+        if approve_run:
+            self._review_optimization(approve_run, "approved", str(uuid.uuid4()))
+        else:
+            self._start_optimization(options)
+
+    def _start_optimization(self, options: dict[str, Any] | str) -> None:
+        """Submit an API-owned optimization; closing the screen only stops observation."""
+        if isinstance(options, str):
+            parsed = commands_mod._parse_optimizer_arguments(Context(self.client, self.session_id, self.state), options)
+            if parsed is None:
+                return
+            options, approve_run = parsed
+            if approve_run:
+                self._review_optimization(approve_run, "approved", str(uuid.uuid4()))
+                return
+        self._open_experiments()
+        self.run_worker(
+            self._post_optimization(options),
+            name="experiment-start",
+            group="experiment-api",
+            exit_on_error=False,
+        )
+
+    async def _post_optimization(self, options: dict[str, Any]) -> None:
+        try:
+            response = await asyncio.to_thread(
+                self.client.post, f"/sessions/{quote(self.session_id, safe='')}/experiments", json=options
+            )
+            response.raise_for_status()
+            record = response.json().get("experiment", {})
+            request_id = options.get("request_id")
+            if isinstance(request_id, str):
+                commands_mod._finish_optimizer_request(self.state, request_id)
+            self._optimizer_snapshot(record)
+            self.append_markup(f"[cyan]Optimization {record.get('status', 'started')}:[/cyan] {record.get('run_id')}")
+            if isinstance(self.screen, ExperimentsScreen):
+                self.screen.refresh_history()
+        except httpx.HTTPError as exc:
+            request_id = options.get("request_id")
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and 400 <= exc.response.status_code < 500
+                and isinstance(request_id, str)
+            ):
+                commands_mod._finish_optimizer_request(self.state, request_id)
+            self.append_markup(f"[red]Optimization could not start ({type(exc).__name__}).[/red]")
+
+    def _review_optimization(self, run_id: str, decision: str, request_id: str) -> None:
+        self.run_worker(
+            self._post_review(run_id, decision, request_id),
+            name="experiment-review",
+            group="experiment-api",
+            exit_on_error=False,
+        )
+
+    async def _post_review(self, run_id: str, decision: str, request_id: str) -> None:
+        try:
+            response = await asyncio.to_thread(
+                self.client.post,
+                f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}/review",
+                json={"decision": decision, "request_id": request_id},
+            )
+            response.raise_for_status()
+            self._optimizer_snapshot(response.json().get("experiment", {}))
+            if isinstance(self.screen, ExperimentsScreen):
+                self.screen._finish_review_request(run_id, decision)
+                self.screen.refresh_history()
+        except httpx.HTTPError as exc:
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code < 500
+                and isinstance(self.screen, ExperimentsScreen)
+            ):
+                self.screen._finish_review_request(run_id, decision)
+            self.append_markup(f"[red]Experiment review failed ({type(exc).__name__}); retry from history.[/red]")
+
+    def _request_optimizer_stop(self, run_id: str | None = None) -> None:
+        """Ask the API-owned optimization to stop, independent of this UI lifetime."""
+        run_id = run_id or self._optimization_run_id
+        if not run_id or self._optimization_stopping:
+            return
+        self._optimizer_stop_requested = True
+        self._optimization_stopping = True
+        self.refresh_chrome()
+        self.run_worker(
+            self._cancel_optimization(run_id),
+            name="experiment-cancel",
+            group="experiment-api",
+            exit_on_error=False,
+        )
+
+    async def _cancel_optimization(self, run_id: str) -> None:
+        try:
+            response = await asyncio.to_thread(
+                self.client.post,
+                f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}/cancel",
+            )
+            response.raise_for_status()
+            self._optimizer_snapshot(response.json().get("experiment", {}))
+            self.append_markup("[yellow]Cancellation requested; the API is cleaning up.[/yellow]")
+        except httpx.HTTPError as exc:
+            self._optimization_stopping = False
+            self._optimizer_stop_requested = False
+            self.append_markup(f"[red]Cancellation failed ({type(exc).__name__}); you can retry.[/red]")
+        finally:
+            self.refresh_chrome()
+
+    def _optimizer_snapshot(self, record: dict[str, Any] | None) -> None:
+        """Reflect the selected API run in the main TUI controls."""
+        self._optimization_run_id = record.get("run_id") if record else None
+        status = record.get("status") if record else None
+        self._optimization_active = status in {"running", "approving"}
+        self._optimization_stopping = self._optimization_active and (
+            self._optimizer_stop_requested
+            or status == "cancelling"
+            or (record is not None and record.get("stage") in {"stopping", "cancelling"})
+        )
+        if not self._optimization_active:
+            self._optimizer_stop_requested = False
+        terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+        self._optimization_terminal_status = status if status in terminal else None
+        progress = record.get("progress") if record else None
+        self._optimization_progress = (
+            dict(progress) if isinstance(progress, dict) else {"stage": record.get("stage")} if record else {}
+        )
+        if self.is_running:
+            self.refresh_chrome()
+
     def submit_text(self, user_input: str) -> None:
         """Process a submitted command, model selection, or Turn prompt."""
         if self.state.pending_model_choice is not None:
@@ -1299,12 +1508,18 @@ class FleetTextualApp(App[str | None]):
                 return
         if self._turn_active:
             self.cancel_active_turn()
+        elif self._optimization_active:
+            self._request_optimizer_stop()
 
     def action_clear_or_cancel(self) -> None:
         """Cancel an active Turn stream, clear input on first Ctrl+C, or exit on second Ctrl+C."""
         if self._turn_active:
             self._last_ctrl_c = 0.0
             self.cancel_active_turn()
+            return
+        if self._optimization_active:
+            self._last_ctrl_c = 0.0
+            self._request_optimizer_stop()
             return
         now = time.monotonic()
         if self._last_ctrl_c and (now - self._last_ctrl_c) <= 2.5:

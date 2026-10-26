@@ -15,6 +15,10 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/files` | List workspace files and generated artifacts. |
 | `POST` | `/sessions/{session_id}/attach` | Attach a multipart file to `files/` in the session workspace. |
 | `POST` | `/sessions/{session_id}/turn` | Run a Turn and stream progress as SSE. |
+| `GET`, `POST` | `/sessions/{session_id}/experiments` | List persisted experiments or submit an idempotent GEPA run request. |
+| `GET` | `/sessions/{session_id}/experiments/{run_id}` | Read one experiment snapshot and its bounded saved comparison. |
+| `POST` | `/sessions/{session_id}/experiments/{run_id}/cancel` | Request cooperative cancellation of a running experiment. |
+| `POST` | `/sessions/{session_id}/experiments/{run_id}/review` | Explicitly approve or reject a candidate. |
 | `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `rlm`, `flex`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
 | `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
@@ -35,6 +39,40 @@ Routes that change or read workspace, context, memory, Skill, mode, or model sta
 session lock. While a Turn holds it they answer `409` after two seconds rather than queueing.
 `POST /sessions/{session_id}/turn` takes the same lock and answers `409` the same way when another Turn
 or workspace change is running; it holds the lock until the stream ends and the Turn has drained.
+
+## Experiments
+
+The experiments routes do not acquire a Session runtime lease. A `POST` start
+body contains the shared optimizer options (`gepa_budget` or `max_metric_calls`,
+`threads`, `reflection_minibatch_size`, `max_candidate_proposals`,
+`validation_ratio`, and `trace_search`) plus a caller-generated `request_id`.
+Repeating the same request ID with the same options returns the existing run;
+reusing it with different options returns `409`. The API owns the accepted job
+across client disconnection. It runs the existing optimizer as a subprocess,
+records lifecycle state in PostgreSQL, and saves traces/evidence to the configured
+MLflow experiment and candidates to the configured artifact directory.
+
+There is one active optimization-or-review slot across Sessions and no queue.
+An occupied or draining slot returns `409`. List returns persisted Session runs,
+`active_run_id`, and whether the manager is accepting new work. Detail returns a
+snapshot plus a bounded comparison document when one exists. The TUI polls these
+snapshots every second; experiment progress is not an SSE stream.
+
+Cancellation requires a running run and requests a cooperative stop. The worker
+checks both its stop signal and the PostgreSQL stop flag at safe boundaries;
+terminal status is written only after the worker exits and output drains. A
+disconnect has no cancellation effect. The launcher drains API-owned experiments
+before a normal service shutdown. If the API process restarts unexpectedly,
+abandoned managed work is marked interrupted and is never automatically rerun.
+Interrupted approval is reconciled against active artifact digests before the
+candidate can be reviewed again.
+
+Approval uses the same artifact, incumbent, configuration, source, and installed
+dependency identity checks as standalone `fleet optimize --approve`. Review is an
+explicit action; a passing optimization candidate is not installed automatically.
+Standalone `fleet optimize` remains a separate synchronous CLI workflow. Legacy
+per-Session JSON run files are imported idempotently into PostgreSQL and retained
+read-only; PostgreSQL is authoritative for new run lifecycle.
 
 There is no caller authentication. The service binds to loopback by default;
 binding elsewhere does not add authentication. Only use on a trusted host or
@@ -263,6 +301,8 @@ ordinary Session API.
 | `POST` | `/setup/daytona/snapshot/activate` | Explicitly activate and verify an existing snapshot. |
 | `POST` | `/setup/models/test` | Make one optional, potentially billed root-model request. |
 | `GET` | `/setup/operations/{operation_id}/events?after=0` | Replay retained progress and stream SSE until `complete` or `error`. |
+| `GET` | `/setup/experiments/status` | Read whether the owned experiment is active and draining. |
+| `POST` | `/setup/experiments/drain` | Stop admitting jobs and wait for API-owned experiments to finish. |
 | `POST` | `/setup/apply` | Require saved/verified settings, fence new Turns, and request a launcher restart. |
 
 Background actions take a `request_id`; Volume creation also takes `name`.
@@ -281,7 +321,10 @@ Configuration edits are drafts until Save. Only supported fields are accepted;
 process environment overrides are read-only. File conflicts and running operations
 return 409. Save preserves unrelated dotenv entries and restricts file permissions.
 `apply` returns `{"restart_required":true}`; the owning CLI performs the restart.
-It returns 409 while any Turn or workspace operation is active. Once accepted,
+It returns 409 while any Turn, workspace operation, or API-owned experiment is
+active. On normal terminal-client exit, the owning launcher uses the protected
+experiment drain/status routes and waits for the worker and API/MLflow cleanup
+before stopping services it owns. Once accepted,
 apply is idempotent: status reports `restart_required=true`, and repeating apply
 recovers the same restart request without repeating provider work.
 

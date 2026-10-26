@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
+import threading
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -16,6 +19,73 @@ import fleet_rlm.tui.render as render
 def use_console(monkeypatch, console):
     for module in (render, commands, app):
         monkeypatch.setattr(module, "CONSOLE", console)
+
+
+def _capture_console(monkeypatch: pytest.MonkeyPatch, width: int = 100) -> tuple[io.StringIO, Console]:
+    output = io.StringIO()
+    console = Console(file=output, width=width)
+    use_console(monkeypatch, console)
+    return output, console
+
+
+@asynccontextmanager
+async def _running_tui(
+    transport,
+    session_id: str,
+    size: tuple[int, int],
+    state: commands.SessionState | None = None,
+):
+    with httpx.Client(base_url="http://fleet.test", transport=transport) as client:
+        tui = app.FleetTextualApp(client, session_id, state or commands.SessionState())
+        async with tui.run_test(size=size) as pilot:
+            yield client, tui, pilot
+
+
+@pytest.mark.parametrize("size", [(100, 40), (80, 24), (60, 20)])
+def test_experiments_actions_are_visible_in_compact_terminals(size) -> None:
+    from textual.widgets import Button
+
+    report = {
+        "manifest": {
+            "evaluation": {
+                "baseline": {},
+                "candidate": {
+                    "component_diffs": [
+                        {
+                            "component": "long",
+                            "before": "before\n" * 100,
+                            "after": "after\n" * 100,
+                            "diff": "diff\n" * 100,
+                        }
+                    ]
+                },
+            }
+        }
+    }
+    transport, _state = _experiment_transport([_experiment_record("layout-check-run")], comparison=report)
+
+    async def scenario():
+        async with _running_tui(transport, "layout-check", size) as (_client, tui, pilot):
+            tui._open_experiments()
+            await pilot.pause()
+            panel = tui.screen.query_one("#experiments-panel")
+            for button in tui.screen.query("#experiment-actions Button"):
+                assert panel.region.contains_region(button.region), button.id
+            detail = tui.screen.query_one("#experiment-detail-scroll")
+            actions = tui.screen.query_one("#experiment-actions")
+            assert detail.region.bottom <= actions.region.y
+            assert detail.max_scroll_y > 0
+            detail.scroll_end(animate=False)
+            await pilot.pause()
+            assert detail.scroll_y > 0
+            close = tui.screen.query_one("#experiment-close", Button)
+            close.focus()
+            await pilot.pause()
+            assert panel.region.contains_region(close.region)
+            await pilot.press("enter")
+            assert not isinstance(tui.screen, app.ExperimentsScreen)
+
+    asyncio.run(scenario())
 
 
 def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,8 +119,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(app.httpx, "Client", create_client)
 
-    output = io.StringIO()
-    console = Console(file=output, width=100)
+    output, console = _capture_console(monkeypatch, width=100)
     user_inputs = iter(("/replay on", "summarize the file", "/replay off", "/help", "/exit"))
 
     def read_input(prompt: str) -> str:
@@ -58,7 +127,6 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
         return next(user_inputs)
 
     monkeypatch.setattr(console, "input", read_input)
-    use_console(monkeypatch, console)
 
     app.run_interactive_cli("http://fleet.test", "session-1")
 
@@ -81,8 +149,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
 
 
 def test_rich_cli_renders_versioned_event_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=100))
+    output, _console = _capture_console(monkeypatch, width=100)
 
     render.render_event(
         {
@@ -170,8 +237,7 @@ def test_memory_and_trace_commands_use_session_history_contract(monkeypatch: pyt
             return httpx.Response(200, json={"memories": [{"memory_id": "m-1", "content": "Use cents."}]})
         return httpx.Response(200, json={"turns": [{"task": "prior", "answer": "ok"}]})
 
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=100))
+    output, _console = _capture_console(monkeypatch, width=100)
     client = httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle_request))
     commands.handle_command(client, "/memory invoice", "session-1")
     commands.handle_command(client, "/trace", "session-1")
@@ -185,8 +251,7 @@ def test_memory_and_trace_commands_use_session_history_contract(monkeypatch: pyt
 
 
 def test_trace_command_shows_trace_id_when_saved_turn_has_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=100))
+    output, _console = _capture_console(monkeypatch, width=100)
     client = httpx.Client(
         base_url="http://fleet.test",
         transport=httpx.MockTransport(
@@ -213,8 +278,7 @@ def test_trace_command_shows_trace_id_when_saved_turn_has_one(monkeypatch: pytes
 def test_terminal_statuses_are_rendered_truthfully(
     monkeypatch: pytest.MonkeyPatch, event: dict[str, Any], expected: str
 ) -> None:
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=100))
+    output, _console = _capture_console(monkeypatch, width=100)
 
     render.render_event(event)
 
@@ -254,9 +318,7 @@ def test_command_and_argument_completion(text: str, expected: str) -> None:
 
 @pytest.mark.parametrize(("choice", "selected"), [("2", True), ("", False), ("0", False), ("oops", False)])
 def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selected: bool) -> None:
-    output = io.StringIO()
-    console = Console(file=output, width=100)
-    use_console(monkeypatch, console)
+    output, console = _capture_console(monkeypatch, width=100)
     monkeypatch.setattr(console, "input", lambda _prompt: choice)
     writes = []
 
@@ -279,9 +341,7 @@ def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selecte
 
 @pytest.mark.parametrize("outcome", ["complete", "error", "cancelled", "disconnect", "interrupt", "network", "http"])
 def test_free_form_tasks_stream_live_and_recover_from_errors(monkeypatch, outcome: str) -> None:
-    output = io.StringIO()
-    console = Console(file=output, width=120)
-    use_console(monkeypatch, console)
+    output, console = _capture_console(monkeypatch, width=120)
     inputs = iter(["Analyze '分析' and explain why 17 * 19 differs from 17 + 19?", "/exit"])
     monkeypatch.setattr(console, "input", lambda _prompt: next(inputs))
     submitted = []
@@ -335,8 +395,7 @@ def test_free_form_tasks_stream_live_and_recover_from_errors(monkeypatch, outcom
 
 
 def test_activity_and_literal_multiline_answer_are_separate(monkeypatch: pytest.MonkeyPatch) -> None:
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=120))
+    output, _console = _capture_console(monkeypatch, width=120)
     for event in (
         {"event": "triage_decision", "mode": "hybrid", "route": "rlm", "summary": "Context requires code."},
         {"event": "lm_start", "model": "test-model", "call_id": "lm-17", "agent_id": "child-2"},
@@ -367,31 +426,77 @@ def test_every_command_has_help_and_completion():
 
 
 def test_unknown_and_exit_commands(monkeypatch):
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=100))
+    output, _console = _capture_console(monkeypatch, width=100)
     assert commands.handle_command(None, "/nope", "s1") is True
     assert "Unknown command" in output.getvalue()
     assert commands.handle_command(None, "/exit", "s1") is False
 
 
-def test_optimize_passes_its_arguments_to_fleet_optimize(monkeypatch) -> None:
-    from types import SimpleNamespace
+def test_fullscreen_optimize_submits_options_to_api_worker() -> None:
+    captured: list[dict[str, Any] | str] = []
+    state = commands.SessionState(fullscreen=True, optimizer_launcher=captured.append)
+    ctx = type("Context", (), {"session_id": "sess_tui", "state": state})()
 
-    calls: list[list[str]] = []
-    monkeypatch.setattr(commands.subprocess, "run", lambda command, **_kwargs: calls.append(command))
-    ctx = SimpleNamespace(session_id="sess_tui", state=commands.SessionState())
-    commands.COMMANDS["/optimize"].run(ctx, "--approve 'sess_tui-abc'")
-    commands.COMMANDS["/optimize"].run(ctx, "")
-    assert calls[0][-7:] == [
-        "optimize",
-        "--session",
-        "sess_tui",
-        "--approve",
-        "sess_tui-abc",
-        "--mlflow",
-        "local",
-    ]
-    assert calls[1][-5:] == ["optimize", "--session", "sess_tui", "--mlflow", "local"]
+    commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
+
+    assert len(captured) == 1
+    assert isinstance(captured[0], dict)
+    assert captured[0]["max_metric_calls"] == 10
+    assert len(captured[0]["request_id"]) == 36
+    assert captured[0]["threads"] == 4
+    assert captured[0]["request_id"]
+
+
+def test_fullscreen_optimize_rejects_session_override_and_mlflow_mismatch() -> None:
+    calls: list[Any] = []
+    state = commands.SessionState(fullscreen=True, optimizer_launcher=calls.append)
+    ctx = type("Context", (), {"session_id": "sess_tui", "state": state})()
+
+    commands.COMMANDS["/optimize"].run(ctx, "--session other-session")
+    commands.COMMANDS["/optimize"].run(ctx, "--mlflow databricks")
+
+    assert calls == []
+
+
+def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
+    import time
+
+    requests: list[httpx.Request] = []
+    run_id = "sess_cli-run"
+    record = {"run_id": run_id, "status": "running", "stage": "search"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(202, json={"experiment": record})
+        record.update(status="completed", stage="completed")
+        return httpx.Response(200, json={"experiment": record})
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    output, _console = _capture_console(monkeypatch, width=100)
+    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handler)) as client:
+        ctx = commands.Context(client, "sess_cli")
+        commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
+
+    assert [request.method for request in requests] == ["POST", "GET"]
+    assert requests[0].url.path == "/sessions/sess_cli/experiments"
+    assert json.loads(requests[0].content)["max_metric_calls"] == 10
+    assert "Optimization completed" in output.getvalue()
+
+
+def test_optimize_reuses_pending_start_request_until_definitive_outcome() -> None:
+    state = commands.SessionState()
+    ctx = commands.Context(httpx.Client(base_url="http://fleet.test"), "sess_retry", state)
+    first = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 10")[0]
+    retry = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 10")[0]
+    changed = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 11")[0]
+
+    assert first["request_id"] == retry["request_id"]
+    assert changed["request_id"] != first["request_id"]
+    commands._finish_optimizer_request(state, changed["request_id"])
+    fresh = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 11")[0]
+    assert fresh["request_id"] != changed["request_id"]
+    ctx.client.close()
 
 
 def test_turn_tracker_pairs_repl_cells_and_preserves_user_toggle_across_completion() -> None:
@@ -502,8 +607,7 @@ def test_turn_tracker_toggles_and_confidence_bar() -> None:
 
 
 def test_bootstrap_omitted_payloads_and_sandbox_resuming_render_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=110))
+    output, _console = _capture_console(monkeypatch, width=110)
 
     for event in (
         {"event": "sandbox_resuming", "state": "paused", "agent_id": "root-1"},
@@ -546,8 +650,7 @@ def test_http_error_detail_turn_command_and_workspace_completions(monkeypatch: p
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
 
-    output = io.StringIO()
-    use_console(monkeypatch, Console(file=output, width=110))
+    output, _console = _capture_console(monkeypatch, width=110)
     state = commands.SessionState(last_turn_id="turn-42")
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -638,99 +741,97 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
 
     async def scenario() -> None:
         state = commands.SessionState()
-        with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
-            tui = app.FleetTextualApp(client, "sess_fs", state)
-            async with tui.run_test(size=(100, 30)) as pilot:
-                inp = tui.query_one("#prompt-input", app._PromptInput)
-                assert inp.placeholder == "What would you like to do?"
+        async with _running_tui(httpx.MockTransport(handle), "sess_fs", (100, 30), state) as (client, tui, pilot):
+            inp = tui.query_one("#prompt-input", app._PromptInput)
+            assert inp.placeholder == "What would you like to do?"
 
-                # Typing '/mo' + Tab autocompletes the first popup item ('/mode ') directly;
-                # typing '/mo' + Down + Tab selects the second popup item ('/models ').
-                inp.value = "/mo"
-                await pilot.pause(0.05)
-                assert tui.query_one("#slash-popup").highlighted == 0 and tui._popup_items[0][0] == "/mode "
-                await pilot.press("tab")
-                await pilot.pause(0.05)
-                assert inp.value == "/mode "
+            # Typing '/mo' + Tab autocompletes the first popup item ('/mode ') directly;
+            # typing '/mo' + Down + Tab selects the second popup item ('/models ').
+            inp.value = "/mo"
+            await pilot.pause(0.05)
+            assert tui.query_one("#slash-popup").highlighted == 0 and tui._popup_items[0][0] == "/mode "
+            await pilot.press("tab")
+            await pilot.pause(0.05)
+            assert inp.value == "/mode "
 
-                inp.value = "/mo"
-                await pilot.pause(0.05)
-                await pilot.press("down")
-                assert tui.query_one("#slash-popup").highlighted == 1 and tui._popup_items[1][0] == "/models "
-                await pilot.press("tab")
-                await pilot.pause(0.05)
-                assert inp.value == "/models "
+            inp.value = "/mo"
+            await pilot.pause(0.05)
+            await pilot.press("down")
+            assert tui.query_one("#slash-popup").highlighted == 1 and tui._popup_items[1][0] == "/models "
+            await pilot.press("tab")
+            await pilot.pause(0.05)
+            assert inp.value == "/models "
 
-                inp.value = "/config"
-                await pilot.press("enter")
-                inp.value = "/replay on"
-                await pilot.press("enter")
-                assert state.root_model == "openai/system.ai.gpt-5"
-                assert state.context_path == "files/q3.csv"
-                assert state.record_replay is True
+            inp.value = "/config"
+            await pilot.press("enter")
+            inp.value = "/replay on"
+            await pilot.press("enter")
+            assert state.root_model == "openai/system.ai.gpt-5"
+            assert state.context_path == "files/q3.csv"
+            assert state.record_replay is True
 
-                # Pasting a multi-paragraph prompt preserves all paragraphs and submits the full text on Enter.
-                multiline_prompt = (
-                    "Answer with ONLY the final results.\n\n"
-                    "You are given a machine with 5 registers: A B C D E.\n\n"
-                    "PROGRAM:\n1. ADD A 5\n2. ADD B 3\n40. ADD A 1"
-                )
-                inp.post_message(events.Paste(multiline_prompt))
-                await pilot.pause(0.05)
-                assert inp.value == multiline_prompt
-                await pilot.press("enter")
-                for _ in range(40):
-                    await pilot.pause(0.03)
-                    if not tui._turn_active:
-                        break
-                tui._refresh_last_turn_widget()
-                await pilot.pause(0.05)
-                answer_output = io.StringIO()
-                Console(file=answer_output, width=100).print(tui.query_one(app._TurnWidget)._answer_static.content)
-                rendered_answer = answer_output.getvalue()
-                assert "Total is 323." in rendered_answer
-                assert "Turn persisted to Session history." in rendered_answer
-                assert submitted_tasks == [multiline_prompt]
+            # Pasting a multi-paragraph prompt preserves all paragraphs and submits the full text on Enter.
+            multiline_prompt = (
+                "Answer with ONLY the final results.\n\n"
+                "You are given a machine with 5 registers: A B C D E.\n\n"
+                "PROGRAM:\n1. ADD A 5\n2. ADD B 3\n40. ADD A 1"
+            )
+            inp.post_message(events.Paste(multiline_prompt))
+            await pilot.pause(0.05)
+            assert inp.value == multiline_prompt
+            await pilot.press("enter")
+            for _ in range(40):
+                await pilot.pause(0.03)
+                if not tui._turn_active:
+                    break
+            tui._refresh_last_turn_widget()
+            await pilot.pause(0.05)
+            answer_output = io.StringIO()
+            Console(file=answer_output, width=100).print(tui.query_one(app._TurnWidget)._answer_static.content)
+            rendered_answer = answer_output.getvalue()
+            assert "Total is 323." in rendered_answer
+            assert "Turn persisted to Session history." in rendered_answer
+            assert submitted_tasks == [multiline_prompt]
 
-                assert state.last_tracker is not None
-                assert len(state.last_tracker.items) == 1
-                repl_item = state.last_tracker.items[0]
-                assert repl_item.expanded is False
+            assert state.last_tracker is not None
+            assert len(state.last_tracker.items) == 1
+            repl_item = state.last_tracker.items[0]
+            assert repl_item.expanded is False
 
-                step_widget = tui.query_one(app._StepWidget)
-                collapsed_render = str(step_widget.render())
-                assert "▸" in collapsed_render and "Python #1" in collapsed_render
+            step_widget = tui.query_one(app._StepWidget)
+            collapsed_render = str(step_widget.render())
+            assert "▸" in collapsed_render and "Python #1" in collapsed_render
 
-                # Pressing Ctrl+O toggles the REPL cell open in place.
-                await pilot.press("ctrl+o")
-                await pilot.pause(0.05)
-                assert repl_item.expanded is True
+            # Pressing Ctrl+O toggles the REPL cell open in place.
+            await pilot.press("ctrl+o")
+            await pilot.pause(0.05)
+            assert repl_item.expanded is True
 
-                # Clicking the step widget toggles it closed again.
-                await pilot.click(app._StepWidget)
-                await pilot.pause(0.05)
-                assert repl_item.expanded is False
+            # Clicking the step widget toggles it closed again.
+            await pilot.click(app._StepWidget)
+            await pilot.pause(0.05)
+            assert repl_item.expanded is False
 
-                # Exercise the active Textual bindings rather than a separate key dispatcher.
-                state.last_tracker.ingest({"event": "lm_end", "reasoning": "Supporting check complete."})
-                tui._refresh_last_turn_widget()
-                await pilot.pause(0.05)
-                thinking = state.last_tracker.items[-1]
-                await pilot.press("ctrl+t")
-                assert thinking.expanded is True
-                await pilot.press("alt+a")
-                assert all(item.expanded for item in state.last_tracker.items)
-                await pilot.press("alt+a")
-                assert all(not item.expanded for item in state.last_tracker.items)
+            # Exercise the active Textual bindings rather than a separate key dispatcher.
+            state.last_tracker.ingest({"event": "lm_end", "reasoning": "Supporting check complete."})
+            tui._refresh_last_turn_widget()
+            await pilot.pause(0.05)
+            thinking = state.last_tracker.items[-1]
+            await pilot.press("ctrl+t")
+            assert thinking.expanded is True
+            await pilot.press("alt+a")
+            assert all(item.expanded for item in state.last_tracker.items)
+            await pilot.press("alt+a")
+            assert all(not item.expanded for item in state.last_tracker.items)
 
-                # Pressing Ctrl+C once clears input and arms exit; pressing Ctrl+C a second time exits.
-                inp.value = "draft text"
-                await pilot.press("ctrl+c")
-                await pilot.pause(0.05)
-                assert inp.value == "" and tui.is_running is True
-                await pilot.press("ctrl+c")
-                await pilot.pause(0.05)
-                assert tui.is_running is False
+            # Pressing Ctrl+C once clears input and arms exit; pressing Ctrl+C a second time exits.
+            inp.value = "draft text"
+            await pilot.press("ctrl+c")
+            await pilot.pause(0.05)
+            assert inp.value == "" and tui.is_running is True
+            await pilot.press("ctrl+c")
+            await pilot.pause(0.05)
+            assert tui.is_running is False
 
             # Reloading history in a fresh session preserves multi-line pasted prompts as single entries.
             reloaded = app.FleetTextualApp(client, "sess_fs", commands.SessionState())
@@ -762,34 +863,34 @@ def test_fullscreen_cancellation_closes_the_active_response_without_claiming_com
 
     async def scenario():
         state = commands.SessionState()
-        with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
-            tui = app.FleetTextualApp(client, "session-cancel", state)
-            async with tui.run_test(size=(100, 30)) as pilot:
-                tui.submit_text("Run work")
-                for _ in range(50):
-                    await pilot.pause(0.02)
-                    if state.last_tracker and state.last_tracker.items:
-                        break
-                assert tui._turn_active and tui._active_response is not None
-                assert state.last_tracker.items[0].status == "running"
-                await pilot.press("ctrl+c")
-                for _ in range(50):
-                    await pilot.pause(0.02)
-                    if not tui._turn_active:
-                        break
-                assert closed.is_set() and not tui._turn_active
-                assert tui._active_response is None
-                assert state.last_tracker.items[0].status == "cancelled"
-                assert state.last_tracker.terminal_event == {"event": "interrupted"}
-                assert tui.is_running
+        async with _running_tui(httpx.MockTransport(handle), "session-cancel", (100, 30), state) as (
+            _client,
+            tui,
+            pilot,
+        ):
+            tui.submit_text("Run work")
+            for _ in range(50):
+                await pilot.pause(0.02)
+                if state.last_tracker and state.last_tracker.items:
+                    break
+            assert tui._turn_active and tui._active_response is not None
+            assert state.last_tracker.items[0].status == "running"
+            await pilot.press("ctrl+c")
+            for _ in range(50):
+                await pilot.pause(0.02)
+                if not tui._turn_active:
+                    break
+            assert closed.is_set() and not tui._turn_active
+            assert tui._active_response is None
+            assert state.last_tracker.items[0].status == "cancelled"
+            assert state.last_tracker.terminal_event == {"event": "interrupted"}
+            assert tui.is_running
 
     asyncio.run(scenario())
 
 
 def test_timeout_command_holds_a_client_local_override_and_rejects_invalid_values(monkeypatch):
-    output = io.StringIO()
-    console = Console(file=output, width=120)
-    use_console(monkeypatch, console)
+    output, _console = _capture_console(monkeypatch, width=120)
     state = commands.SessionState()
 
     for command, expected in (("/timeout 120", 120), ("/timeout off", 0), ("/timeout default", None)):
@@ -900,9 +1001,7 @@ def test_tui_displays_the_stored_route_answer_and_elapsed_time() -> None:
 
 
 def test_rich_cli_renders_status_progress_and_fenced_observations(monkeypatch) -> None:
-    output = io.StringIO()
-    console = Console(file=output, width=100)
-    use_console(monkeypatch, console)
+    output, _console = _capture_console(monkeypatch, width=100)
 
     render.render_event({"event": "status", "status": "stalled", "scope": "scan workspace"})
     render.render_event({"event": "progress", "scope": "scan workspace", "checkpoint": 9})
@@ -913,3 +1012,411 @@ def test_rich_cli_renders_status_progress_and_fenced_observations(monkeypatch) -
     assert "checkpoint 9" in rendered
     assert "Publication fenced" in rendered
     assert not any(token in rendered for token in ("%", "percent", "complete", "remaining", "ETA"))
+
+
+def _experiment_record(run_id: str, status: str = "completed") -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "status": status,
+        "stage": status,
+        "started_at": "2026-10-25T12:00:00+00:00",
+        "finished_at": None,
+        "candidate_version": run_id,
+        "gate": {"passed": True, "reasons": []},
+        "progress": {"type": "progress", "metric_calls_used": 3, "metric_calls_remaining": 7},
+    }
+
+
+def _experiment_transport(records: list[dict[str, Any]], *, comparison: dict[str, Any] | None = None):
+    state: dict[str, Any] = {"records": records, "comparison": comparison, "requests": [], "accepting": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["requests"].append(request)
+        parts = request.url.path.split("/")
+        if request.method == "GET" and parts[-1] == "experiments":
+            active = next(
+                (record["run_id"] for record in state["records"] if record["status"] in {"running", "approving"}),
+                None,
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "experiments": state["records"],
+                    "active_run_id": active,
+                    "accepting": state["accepting"],
+                },
+            )
+        if request.method == "GET" and parts[-2] == "experiments":
+            record = next(r for r in state["records"] if r["run_id"] == parts[-1])
+            return httpx.Response(200, json={"experiment": record, "comparison": state["comparison"]})
+        if request.method == "POST" and parts[-1] == "cancel":
+            record = next(r for r in state["records"] if r["run_id"] == parts[-2])
+            record.update(status="running", stage="stopping")
+            return httpx.Response(202, json={"experiment": record})
+        if request.method == "POST" and parts[-1] == "review":
+            record = next(r for r in state["records"] if r["run_id"] == parts[-2])
+            body = json.loads(request.content)
+            status = "approving" if body["decision"] == "approved" else "rejected"
+            record.update(status=status, decision=body["decision"])
+            return httpx.Response(202, json={"experiment": record})
+        if request.method == "POST" and parts[-1] == "experiments":
+            record = _experiment_record("sess_api-run", "running")
+            state["records"].insert(0, record)
+            return httpx.Response(202, json={"experiment": record})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    return httpx.MockTransport(handler), state
+
+
+def test_experiments_screen_fetches_session_scoped_api_snapshot_and_detail() -> None:
+    run_id = "sess_experiments-run-1"
+    records = [_experiment_record(run_id), _experiment_record("sess_other-run-1", "failed")]
+    report = {"manifest": {"evaluation": {"baseline": {}, "candidate": {"component_diffs": []}}}}
+    transport, _state = _experiment_transport(records, comparison=report)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_experiments", (100, 30)) as (_client, tui, pilot):
+            tui._open_experiments()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if tui.screen.records:
+                    break
+            assert run_id in str(tui.screen.query_one("#experiment-history").render())
+            assert "sess_other-run-1" in str(tui.screen.query_one("#experiment-history").render())
+            assert "3/10 metric calls" in str(tui.screen.query_one("#experiments-progress").render())
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stale_response", ["success", "error"])
+def test_experiment_navigation_discards_delayed_evidence_and_guards_approval(stale_response):
+    from textual.widgets import Button
+
+    records = [_experiment_record("s1-run-a"), _experiment_record("s1-run-b")]
+    started = {record["run_id"]: threading.Event() for record in records}
+    release = {record["run_id"]: threading.Event() for record in records}
+
+    def handler(request):
+        run_id = request.url.path.rsplit("/", 1)[-1]
+        if run_id == "experiments":
+            return httpx.Response(200, json={"experiments": records, "active_run_id": None, "accepting": True})
+        started[run_id].set()
+        assert release[run_id].wait(5), "test did not release detail request"
+        if stale_response == "error" and run_id == "s1-run-a":
+            return httpx.Response(500)
+        record = next(record for record in records if record["run_id"] == run_id)
+        return httpx.Response(200, json={"experiment": record, "comparison": {"evidence_for": run_id}})
+
+    async def scenario():
+        try:
+            async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
+                tui._open_experiments()
+                assert await asyncio.to_thread(started["s1-run-a"].wait, 5)
+                screen = tui.screen
+                reviews = []
+                screen.on_review = lambda *args: reviews.append(args)
+                await pilot.click("#experiment-next")
+                assert screen.selected_run_id == "s1-run-b"
+                approve = screen.query_one("#experiment-approve", Button)
+                assert approve.disabled
+                screen.on_button_pressed(Button.Pressed(approve))
+                assert not reviews
+                release["s1-run-a"].set()
+                assert await asyncio.to_thread(started["s1-run-b"].wait, 5)
+                assert screen.comparison is None
+                assert screen.comparison_run_id is None
+                assert approve.disabled
+                assert "s1-run-a" not in str(screen.query_one("#experiment-detail").render())
+                release["s1-run-b"].set()
+                for _ in range(20):
+                    await pilot.pause(0.05)
+                    if screen.comparison_run_id == "s1-run-b":
+                        break
+                assert screen.comparison == {"evidence_for": "s1-run-b"}
+                assert not approve.disabled
+                screen.on_button_pressed(Button.Pressed(approve))
+                assert reviews[0][:2] == ("s1-run-b", "approved")
+        finally:
+            for event in release.values():
+                event.set()
+
+    asyncio.run(scenario())
+
+
+def test_experiment_detail_rejects_mismatched_response_identity():
+    from textual.widgets import Button
+
+    record = _experiment_record("s1-run")
+
+    def handler(request):
+        if request.url.path.endswith("/experiments"):
+            return httpx.Response(200, json={"experiments": [record], "accepting": True})
+        return httpx.Response(200, json={"experiment": _experiment_record("s1-other"), "comparison": {"wrong": True}})
+
+    async def scenario():
+        async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
+            tui._open_experiments()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if tui.screen.records and not tui.screen._polling:
+                    break
+            screen = tui.screen
+            assert screen._selected()["run_id"] == "s1-run"
+            assert screen.comparison is None and screen.comparison_run_id is None
+            assert screen.query_one("#experiment-approve", Button).disabled
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("late_response", ["success", "error"])
+def test_experiment_detail_arriving_after_dismissal_is_ignored(late_response):
+    record = _experiment_record("s1-run")
+    started, release = threading.Event(), threading.Event()
+
+    def handler(request):
+        if request.url.path.endswith("/experiments"):
+            return httpx.Response(200, json={"experiments": [record], "accepting": True})
+        started.set()
+        assert release.wait(5)
+        if late_response == "error":
+            return httpx.Response(500)
+        return httpx.Response(200, json={"experiment": record, "comparison": {"late": True}})
+
+    async def scenario():
+        try:
+            async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
+                tui._open_experiments()
+                assert await asyncio.to_thread(started.wait, 5)
+                screen = tui.screen
+                await screen.dismiss()
+                await pilot.pause()
+                assert not screen.is_attached
+                release.set()
+                await pilot.pause()
+                assert screen.comparison is None and screen.comparison_run_id is None
+        finally:
+            release.set()
+
+    asyncio.run(scenario())
+
+
+def test_experiments_detail_renders_api_saved_diagnostics_diffs_and_failures() -> None:
+    run_id = "sess_detail-run-1"
+    comparison = {
+        "manifest": {
+            "evaluation": {
+                "baseline": {
+                    "dev": 0.5,
+                    "holdout": 0.6,
+                    "holdout_objectives": {"quality": 0.4},
+                    "holdout_lm_calls_median": 3,
+                    "holdout_lm_calls_measured": 2,
+                    "holdout_lm_calls": [2, 3],
+                    "holdout_seconds_per_example_median": 1.25,
+                    "holdout_seconds_per_example": [1.25],
+                    "holdout_artifact_passes": 1,
+                    "holdout_artifact_cases": 2,
+                },
+                "candidate": {
+                    "dev": 0.7,
+                    "holdout": 0.8,
+                    "holdout_objectives": {"quality": 0.7},
+                    "holdout_lm_calls_median": 2,
+                    "holdout_lm_calls_measured": 3,
+                    "holdout_lm_calls": [1, 2, 3],
+                    "holdout_critical_scores": [1.0, 0.0],
+                    "holdout_errors": 1,
+                    "holdout_seconds_per_example_median": 0.9,
+                    "holdout_seconds_per_example": [0.9],
+                    "holdout_artifact_passes": 2,
+                    "holdout_artifact_cases": 2,
+                    "component_diffs": [
+                        {
+                            "component": "root.instructions",
+                            "diff": "-old guidance\n+new guidance",
+                            "before": "old guidance",
+                            "after": "new guidance",
+                        }
+                    ],
+                    "holdout_failures": [{"case_id": "abc123", "type": "RuntimeError", "detail": "sanitized failure"}],
+                },
+            }
+        }
+    }
+    transport, _state = _experiment_transport([_experiment_record(run_id)], comparison=comparison)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_detail", (120, 40)) as (_client, tui, pilot):
+            tui._open_experiments()
+            for _ in range(30):
+                await pilot.pause(0.05)
+                if tui.screen.comparison:
+                    break
+            detail = tui.screen._format_record(tui.screen._selected())
+            for expected in (
+                "0.600 → 0.800 (+0.200)",
+                "quality  0.400 → 0.700 (+0.300)",
+                "Holdout candidate: LM calls total 6, median 2 (3/3 measured)",
+                "artifact passes 2/2 applicable",
+                "Critical holdout cases 1/2 passed; 1 rollout error",
+                "old guidance",
+                "new guidance",
+                "sanitized failure",
+            ):
+                assert expected in detail, detail
+
+    asyncio.run(scenario())
+
+
+def test_experiments_disconnect_keeps_observing_run_and_reopen_shows_final_record() -> None:
+    running = _experiment_record("sess_detach-run", "running")
+    transport, api = _experiment_transport([running])
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_detach", (100, 30)) as (_client, tui, pilot):
+            tui._open_experiments()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if tui.screen.records:
+                    break
+            await pilot.click("#experiment-close")
+            assert not isinstance(tui.screen, app.ExperimentsScreen)
+            assert tui._optimization_active
+            assert running["status"] == "running"
+
+            running.update(status="completed", stage="completed")
+            for _ in range(40):
+                await pilot.pause(0.1)
+                if not tui._optimization_active:
+                    break
+            assert not tui._optimization_active
+            assert not tui._optimization_stopping
+            assert tui._optimization_terminal_status == "completed"
+            assert not any(request.url.path.endswith("/cancel") for request in api["requests"])
+
+            tui._open_experiments()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if tui.screen.records:
+                    break
+            assert tui.screen.selected_run_id == "sess_detach-run"
+            assert tui.screen._selected()["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_ambiguous_start_retry_reuses_request_id_then_definitive_results_rotate_it() -> None:
+    record = _experiment_record("sess_start-retry-run", "running")
+    state = {"start_result": "network"}
+    posts: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith("/experiments"):
+            return httpx.Response(
+                200,
+                json={"experiments": [record], "active_run_id": record["run_id"], "accepting": True},
+            )
+        if request.method == "POST" and request.url.path.endswith("/experiments"):
+            body = json.loads(request.content)
+            posts.append(body)
+            if state["start_result"] == "network":
+                raise httpx.ConnectError("connection lost after submit", request=request)
+            if state["start_result"] == "conflict":
+                return httpx.Response(409, json={"detail": "busy"}, request=request)
+            return httpx.Response(202, json={"experiment": record}, request=request)
+        return httpx.Response(404, request=request)
+
+    async def scenario() -> None:
+        async with _running_tui(httpx.MockTransport(handle), "sess_start-retry", (100, 30)) as (client, tui, _pilot):
+            ctx = commands.Context(client, "sess_start-retry", tui.state)
+            first = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 10")[0]
+            await tui._post_optimization(first)
+            retry = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 10")[0]
+            assert retry["request_id"] == first["request_id"]
+
+            state["start_result"] = "accepted"
+            await tui._post_optimization(retry)
+            assert tui.state.pending_optimizer_request is None
+            next_action = commands._parse_optimizer_arguments(ctx, "--max-metric-calls 10")[0]
+            assert next_action["request_id"] != retry["request_id"]
+
+            state["start_result"] = "conflict"
+            await tui._post_optimization(next_action)
+            assert tui.state.pending_optimizer_request is None
+            assert [body["request_id"] for body in posts] == [
+                first["request_id"],
+                retry["request_id"],
+                next_action["request_id"],
+            ]
+
+    asyncio.run(scenario())
+
+
+def test_experiments_review_and_cancel_use_idempotent_api_requests() -> None:
+    running = _experiment_record("sess_active-run", "running")
+    completed = _experiment_record("sess_review-run", "completed")
+    transport, api = _experiment_transport([running, completed])
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_actions", (120, 40)) as (_client, tui, pilot):
+            tui._open_experiments()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if len(tui.screen.records) == 2:
+                    break
+            screen = tui.screen
+            first = screen._review_request_id("sess_review-run", "approved")
+            second = screen._review_request_id("sess_review-run", "approved")
+            assert first == second
+            screen.selected_run_id = "sess_review-run"
+            screen.on_review("sess_review-run", "approved", first)
+            await pilot.pause(0.05)
+            screen.on_review("sess_review-run", "approved", second)
+            await pilot.pause(0.05)
+            screen.selected_run_id = "sess_active-run"
+            screen.on_cancel("sess_active-run")
+            await pilot.pause(0.05)
+            posts = [r for r in api["requests"] if r.method == "POST"]
+            assert [r.url.path.rsplit("/", 1)[-1] for r in posts] == ["review", "review", "cancel"]
+            assert json.loads(posts[0].content) == {"decision": "approved", "request_id": first}
+            assert json.loads(posts[1].content) == json.loads(posts[0].content)
+            assert running["status"] == "running" and running["stage"] == "stopping"
+            assert completed["status"] == "approving"
+
+    asyncio.run(scenario())
+
+
+def test_review_request_retries_keep_id_until_known_outcome_then_rotate() -> None:
+    record = _experiment_record("sess_review-retry-run", "completed")
+    state = {"review_error": "conflict"}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith("/experiments"):
+            return httpx.Response(200, json={"experiments": [record], "active_run_id": None, "accepting": True})
+        if request.method == "GET" and request.url.path.endswith(f"/experiments/{record['run_id']}"):
+            return httpx.Response(200, json={"experiment": record, "comparison": None})
+        if request.method == "POST" and request.url.path.endswith("/review"):
+            if state["review_error"] == "network":
+                raise httpx.ConnectError("connection lost", request=request)
+            return httpx.Response(409, json={"detail": "candidate is no longer reviewable"}, request=request)
+        return httpx.Response(404, request=request)
+
+    async def scenario() -> None:
+        async with _running_tui(httpx.MockTransport(handle), "sess_review-retry", (100, 30)) as (_client, tui, pilot):
+            tui._open_experiments()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if isinstance(tui.screen, app.ExperimentsScreen) and tui.screen.records:
+                    break
+            screen = tui.screen
+            first = screen._review_request_id(record["run_id"], "approved")
+            assert len(first) == 36
+            await tui._post_review(record["run_id"], "approved", first)
+            retry = screen._review_request_id(record["run_id"], "approved")
+            assert retry != first
+
+            state["review_error"] = "network"
+            await tui._post_review(record["run_id"], "approved", retry)
+            assert screen._review_request_id(record["run_id"], "approved") == retry
+
+    asyncio.run(scenario())

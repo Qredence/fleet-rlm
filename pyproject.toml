@@ -31,7 +31,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # GEPA Flex helpers are imported from DSPy's internal namespace; verify before adopting 3.5+.
+    # Flex is experimental; the lock pins DSPy 3.4.1 and GEPA 0.1.4 contracts.
     "dspy[typesafe]>=3.4.1,<3.5",
     "daytona==0.224.0",
     "mlflow==3.17.2",
@@ -49,6 +49,7 @@ dependencies = [
     "prompt-toolkit>=3.0.50,<4",
     "psycopg-pool>=3.2.6,<4",
     "textual>=8.2.8",
+    "textual-serve>=1.0,<2",
 ]
 
 [project.urls]

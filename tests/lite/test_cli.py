@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import builtins
+import io
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -193,12 +197,10 @@ def test_trace_verify_command_routes_scope_to_the_trace_handler(monkeypatch) -> 
     assert captured[0].scope == "optimization"
 
 
-def test_trace_verify_flushes_and_requires_a_readable_trace(monkeypatch) -> None:
-    import mlflow
-
+def _local_trace_settings():
     from fleet_rlm.config import MlflowTarget
 
-    settings = SimpleNamespace(
+    return SimpleNamespace(
         mlflow_target=lambda: MlflowTarget("local", "file:///tmp/mlruns", "runtime", "eval", "opt"),
         mlflow_trace_schema="runtime_schema",
         mlflow_trace_table_prefix="runtime_prefix",
@@ -206,6 +208,12 @@ def test_trace_verify_flushes_and_requires_a_readable_trace(monkeypatch) -> None
         mlflow_optimization_trace_schema="optimization_schema",
         mlflow_optimization_trace_table_prefix="optimization_prefix",
     )
+
+
+def test_trace_verify_flushes_and_requires_a_readable_trace(monkeypatch) -> None:
+    import mlflow
+
+    settings = _local_trace_settings()
     flushed = []
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(trace_location=None))
@@ -222,16 +230,7 @@ def test_trace_verify_flushes_and_requires_a_readable_trace(monkeypatch) -> None
 def test_trace_verify_confirms_stored_span_count(monkeypatch, capsys) -> None:
     import mlflow
 
-    from fleet_rlm.config import MlflowTarget
-
-    settings = SimpleNamespace(
-        mlflow_target=lambda: MlflowTarget("local", "file:///tmp/mlruns", "runtime", "eval", "opt"),
-        mlflow_trace_schema="runtime_schema",
-        mlflow_trace_table_prefix="runtime_prefix",
-        mlflow_eval_trace_table_prefix="eval_prefix",
-        mlflow_optimization_trace_schema="optimization_schema",
-        mlflow_optimization_trace_table_prefix="optimization_prefix",
-    )
+    settings = _local_trace_settings()
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(trace_location=None))
     monkeypatch.setattr(
@@ -245,14 +244,10 @@ def test_trace_verify_confirms_stored_span_count(monkeypatch, capsys) -> None:
     assert "Trace export verified: tr-found (2 spans; file:///tmp/mlruns)" in capsys.readouterr().out
 
 
-def test_trace_verify_requires_the_configured_unity_catalog_destination(monkeypatch) -> None:
-    import mlflow
-    import pytest
-    from mlflow.entities.trace_location import UnityCatalog
-
+def _databricks_trace_settings():
     from fleet_rlm.config import MlflowTarget
 
-    settings = SimpleNamespace(
+    return SimpleNamespace(
         mlflow_target=lambda: MlflowTarget(
             "databricks", "databricks", "/Shared/runtime", "/Shared/eval", "/Shared/opt"
         ),
@@ -264,6 +259,14 @@ def test_trace_verify_requires_the_configured_unity_catalog_destination(monkeypa
         mlflow_optimization_trace_table_prefix="optimization_prefix",
         mlflow_tracing_sql_warehouse_id="warehouse-id",
     )
+
+
+def test_trace_verify_requires_the_configured_unity_catalog_destination(monkeypatch) -> None:
+    import mlflow
+    import pytest
+    from mlflow.entities.trace_location import UnityCatalog
+
+    settings = _databricks_trace_settings()
     monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-value")
     experiment = SimpleNamespace(trace_location=UnityCatalog("catalog", "runtime_schema", "wrong_prefix"))
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
@@ -279,20 +282,7 @@ def test_trace_verify_checks_the_trace_itself_is_in_the_configured_destination(m
     import pytest
     from mlflow.entities.trace_location import UnityCatalog
 
-    from fleet_rlm.config import MlflowTarget
-
-    settings = SimpleNamespace(
-        mlflow_target=lambda: MlflowTarget(
-            "databricks", "databricks", "/Shared/runtime", "/Shared/eval", "/Shared/opt"
-        ),
-        mlflow_trace_catalog="catalog",
-        mlflow_trace_schema="runtime_schema",
-        mlflow_trace_table_prefix="runtime_prefix",
-        mlflow_eval_trace_table_prefix="eval_prefix",
-        mlflow_optimization_trace_schema="optimization_schema",
-        mlflow_optimization_trace_table_prefix="optimization_prefix",
-        mlflow_tracing_sql_warehouse_id="warehouse-id",
-    )
+    settings = _databricks_trace_settings()
     monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-value")
     experiment = SimpleNamespace(trace_location=UnityCatalog("catalog", "runtime_schema", "runtime_prefix"))
     trace = SimpleNamespace(
@@ -312,20 +302,7 @@ def test_trace_verify_accepts_wrapped_unity_catalog_location(monkeypatch, capsys
     import mlflow
     from mlflow.entities.trace_location import TraceLocation, TraceLocationType, UnityCatalog
 
-    from fleet_rlm.config import MlflowTarget
-
-    settings = SimpleNamespace(
-        mlflow_target=lambda: MlflowTarget(
-            "databricks", "databricks", "/Shared/runtime", "/Shared/eval", "/Shared/opt"
-        ),
-        mlflow_trace_catalog="catalog",
-        mlflow_trace_schema="runtime_schema",
-        mlflow_trace_table_prefix="runtime_prefix",
-        mlflow_eval_trace_table_prefix="eval_prefix",
-        mlflow_optimization_trace_schema="optimization_schema",
-        mlflow_optimization_trace_table_prefix="optimization_prefix",
-        mlflow_tracing_sql_warehouse_id="warehouse-id",
-    )
+    settings = _databricks_trace_settings()
     location = UnityCatalog("catalog", "runtime_schema", "runtime_prefix")
     experiment = SimpleNamespace(trace_location=location)
     trace = SimpleNamespace(
@@ -344,3 +321,157 @@ def test_trace_verify_accepts_wrapped_unity_catalog_location(monkeypatch, capsys
     assert (
         "Trace export verified: trace:/catalog.runtime_schema/id (1 spans; catalog.runtime_schema.runtime_prefix)"
     ) in output
+
+
+def test_web_cli_serves_textual_client_after_verifying_api_destination(monkeypatch) -> None:
+    from contextlib import nullcontext
+
+    settings = FleetSettings(_env_file=None)
+    calls = {}
+    plan = cli.launcher.LaunchPlan(api_url="http://fleet.test", start_api=False)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(
+        cli.launcher,
+        "plan_launch",
+        lambda **kwargs: calls.update(plan=kwargs) or plan,
+    )
+    monkeypatch.setattr(cli.launcher, "running_services", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        cli.launcher,
+        "verify_api_destination",
+        lambda *args: calls.update(verified=args),
+    )
+    monkeypatch.setattr(cli, "serve_web_client", lambda **kwargs: calls.update(web=kwargs))
+
+    cli.main(
+        [
+            "web",
+            "--url",
+            "http://fleet.test",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8765",
+            "--session",
+            "browser-session",
+        ]
+    )
+
+    assert calls["plan"]["url"] == "http://fleet.test"
+    assert calls["verified"][0] == "http://fleet.test"
+    assert calls["web"]["host"] == "127.0.0.1"
+    assert calls["web"]["port"] == 8765
+    assert calls["web"]["session_id"] == "browser-session"
+    assert "FLEET_SETUP_TOKEN" not in plan.api_env
+
+
+def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypatch) -> None:
+    from contextlib import nullcontext
+
+    settings = FleetSettings(_env_file=None)
+    calls = {}
+    plan = cli.launcher.LaunchPlan(
+        api_url="http://127.0.0.1:8000",
+        start_api=True,
+        start_mlflow=True,
+        mlflow_url="http://127.0.0.1:5001",
+        api_env={"FLEET_MLFLOW_LOCAL_PORT": "5001"},
+    )
+    monkeypatch.delenv("FLEET_SETUP_TOKEN", raising=False)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(cli.launcher, "plan_launch", lambda **_kwargs: plan)
+
+    def running_services(selected_plan, **kwargs):
+        calls["serving_plan"] = selected_plan
+        calls["services"] = kwargs
+        return nullcontext(selected_plan)
+
+    monkeypatch.setattr(cli.launcher, "running_services", running_services)
+    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(cli, "serve_web_client", lambda **kwargs: calls.update(web=kwargs))
+
+    cli.main(["web", "--host", "127.0.0.1", "--port", "8765"])
+
+    token = plan.api_env["FLEET_SETUP_TOKEN"]
+    assert token and calls["serving_plan"].api_env["FLEET_SETUP_TOKEN"] == token
+    assert plan.api_env["FLEET_SETUP_PROJECT_DIR"]
+    assert "FLEET_SETUP_DERIVED_ENV" in plan.api_env
+    assert "setup_token" not in calls["web"]
+
+
+def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(monkeypatch, tmp_path) -> None:
+    from fleet_rlm.optimization_runs import worker_settings_payload
+
+    settings = FleetSettings(
+        _env_file=None,
+        compiled_program_dir=str(tmp_path),
+        mlflow_mode="local",
+    )
+    monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: True)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: pytest.fail("managed worker must use stdin settings"))
+    original_reader = cli.read_worker_settings
+    events: list[str] = []
+
+    def read_settings(stream):
+        events.append("read settings")
+        return original_reader(stream)
+
+    monkeypatch.setattr(cli, "read_worker_settings", read_settings)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(worker_settings_payload(settings).decode()))
+    fake_gepa = types.SimpleNamespace(run=lambda args, parser, selected: events.append(("run", args, parser, selected)))
+    fake_optimizer_package = types.ModuleType("fleet_rlm.optimize")
+    fake_optimizer_package.gepa = fake_gepa
+    monkeypatch.setitem(sys.modules, "fleet_rlm.optimize", fake_optimizer_package)
+    real_import = builtins.__import__
+
+    def tracked_import(name, *args, **kwargs):
+        fromlist = kwargs.get("fromlist", args[2] if len(args) > 2 else ())
+        if name == "fleet_rlm.optimize" and "gepa" in fromlist:
+            events.append("import optimizer")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", tracked_import)
+
+    cli.main(
+        [
+            "optimize",
+            "--session",
+            "sess_worker",
+            "--managed-run-id",
+            "sess_worker-run",
+            "--managed-owner-id",
+            "api-owner",
+        ]
+    )
+
+    assert events[:2] == ["read settings", "import optimizer"]
+    run = events[2]
+    assert run[0] == "run"
+    assert run[1].managed_run_id == "sess_worker-run"
+    assert run[1].managed_owner_id == "api-owner"
+    assert run[2].prog == "fleet optimize"
+    assert run[3].compiled_program_dir == str(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "allow_public,arguments,message",
+    [
+        (False, ["--public-url", "https://fleet.example.test"], None),
+        (True, [], "public-url is required"),
+    ],
+)
+def test_web_cli_rejects_invalid_public_listener(monkeypatch, capsys, allow_public, arguments, message):
+    settings = FleetSettings(_env_file=None, allow_non_loopback_bind=allow_public)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(
+        cli.launcher,
+        "plan_launch",
+        lambda **_kwargs: pytest.fail("invalid public listener must fail before planning services"),
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main(["web", "--url", "http://fleet.test", "--host", "0.0.0.0", *arguments])
+
+    assert error.value.code == 2
+    if message:
+        assert message in capsys.readouterr().err

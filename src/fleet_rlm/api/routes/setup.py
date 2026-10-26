@@ -6,6 +6,7 @@ import asyncio
 import ipaddress
 import secrets
 from collections.abc import AsyncIterator
+from contextlib import nullcontext
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from fleet_rlm.optimization_runs import ACTIVE_STATUSES
 from fleet_rlm.setup.service import SECTIONS, Operation, SetupConflictError, SetupService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -273,7 +275,7 @@ async def operation_events(
 
 
 @router.post("/apply")
-def apply(request: Request, service: Operator) -> ApplyResult:
+async def apply(request: Request, service: Operator) -> ApplyResult:
     """Fence new Turns and request a restart only when existing work is idle.
 
     Return restart_required=True on acceptance. Return 409 when setup is not
@@ -281,19 +283,45 @@ def apply(request: Request, service: Operator) -> ApplyResult:
     Concurrent attempts are serialized so a rejected request cannot reopen setup
     after an accepted restart.
     """
-    # A rejected attempt must finish reopening setup before another attempt can succeed.
-    with request.app.state.setup_apply_lock:
+    # Both locks belong to this event loop; provider/configuration work stays off-loop.
+    manager = request.app.state.experiments
+    async with request.app.state.setup_apply_lock, manager._lock if manager is not None else nullcontext():
         try:
-            service.can_apply()
+            await asyncio.to_thread(service.can_apply)
         except SetupConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+        if manager is not None:
+            records = await asyncio.to_thread(manager.store.list_optimization_runs)
+            if manager.busy or any(record["status"] in ACTIVE_STATUSES for record in records):
+                service.cancel_apply()
+                raise HTTPException(status_code=409, detail="An experiment is active; apply setup when it finishes.")
         # Fence new admission before checking active locks. Existing Turns are never cancelled here.
         request.app.state.setup_applying = True
         registry = request.app.state.session_registry
-        if registry is not None and not registry.request_restart():
+        if registry is not None and not await asyncio.to_thread(registry.request_restart):
             request.app.state.setup_applying = False
             service.cancel_apply()
             raise HTTPException(
                 status_code=409, detail="A Turn or workspace operation is running; apply setup when it finishes."
             )
+        if manager is not None:
+            manager.accepting = False
     return ApplyResult(restart_required=True)
+
+
+@router.post("/experiments/drain")
+async def drain_experiments(request: Request, _service: Operator) -> dict[str, Any]:
+    """Fence experiment admission before a local owner waits to stop its services."""
+    manager = request.app.state.experiments
+    if manager is None:
+        return {"accepting": False, "busy": False, "experiments": []}
+    return await manager.begin_drain()
+
+
+@router.get("/experiments/status")
+async def experiment_status(request: Request, _service: Operator) -> dict[str, Any]:
+    """Observe cleanup through the same private, loopback-only operator capability."""
+    manager = request.app.state.experiments
+    if manager is None:
+        return {"accepting": False, "busy": False, "experiments": []}
+    return await manager.status()

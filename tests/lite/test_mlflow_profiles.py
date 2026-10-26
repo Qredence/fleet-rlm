@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from types import SimpleNamespace
 
 import httpx
@@ -240,8 +242,8 @@ def test_tracing_failure_releases_owned_database_pool(monkeypatch):
     assert events == ["initialize", "close migration", "close store"]
 
 
-@pytest.mark.parametrize("failure", ["registry", "store", "flush"])
-def test_shutdown_attempts_every_owned_cleanup_after_a_failure(monkeypatch, failure):
+@pytest.mark.parametrize("failure", ["experiments", "registry", "store", "flush"])
+def test_shutdown_attempts_every_owned_cleanup_after_a_failure(monkeypatch, tmp_path, failure):
     events = []
 
     def cleanup(name):
@@ -250,20 +252,32 @@ def test_shutdown_attempts_every_owned_cleanup_after_a_failure(monkeypatch, fail
             raise RuntimeError(f"{name} cleanup failed")
 
     store = SimpleNamespace(initialize=lambda: None, close_migration_pool=lambda: None, close=lambda: cleanup("store"))
+
+    class FakeExperimentManager:
+        def __init__(self, _settings, _store):
+            pass
+
+        async def initialize(self):
+            return None
+
+        async def close(self):
+            cleanup("experiments")
+
     monkeypatch.setattr(api.Store, "open", lambda *_args, **_kwargs: store)
+    monkeypatch.setattr(api, "ExperimentManager", FakeExperimentManager)
     monkeypatch.setattr(api, "_configure_tracing", lambda _settings: "17")
     monkeypatch.setattr(
         api, "SessionRuntimeRegistry", lambda *_args: SimpleNamespace(close=lambda: cleanup("registry"))
     )
     monkeypatch.setattr(api.mlflow, "flush_trace_async_logging", lambda: cleanup("flush"))
-    app = api.create_app(settings=FleetSettings(_env_file=None))
+    app = api.create_app(settings=FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path)))
     if failure == "flush":
         with TestClient(app):
             pass
     else:
         with pytest.raises(RuntimeError, match=f"{failure} cleanup failed"), TestClient(app):
             pass
-    assert events == ["registry", "store", "flush"]
+    assert events == ["experiments", "registry", "store", "flush"]
 
 
 def test_shutdown_preserves_injected_store_ownership(monkeypatch):
@@ -322,20 +336,37 @@ def test_local_service_uses_configured_persistent_directory(tmp_path):
 
 
 def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination(monkeypatch, capsys):
+    import time
+
     settings = FleetSettings(
         _env_file=None, mlflow_mode="databricks", mlflow_databricks_experiment_name="/Shared/custom"
     )
     state = commands.SessionState(mlflow_settings=settings)
-    ctx = SimpleNamespace(session_id="s1", state=state)
-    calls = []
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(
+                202,
+                json={"experiment": {"run_id": "s1-run", "status": "running", "stage": "search"}},
+            )
+        return httpx.Response(200, json={"experiment": {"run_id": "s1-run", "status": "completed"}})
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "stale")
-    monkeypatch.setattr(commands.subprocess, "run", lambda command, **kwargs: calls.append((command, kwargs)))
-    commands._optimize(ctx, "--max-metric-calls 1")
-    command, kwargs = calls[0]
-    assert command[-2:] == ["--mlflow", "databricks"]
-    assert kwargs["env"]["FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME"] == "/Shared/custom"
-    assert "MLFLOW_EXPERIMENT_ID" not in kwargs["env"]
-    assert "MLFLOW_TRACKING_URI" not in kwargs["env"]
-    commands._optimize(ctx, "--mlflow=local")
-    assert len(calls) == 1
+    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
+        ctx = commands.Context(client, "s1", state)
+        commands._optimize(ctx, "--max-metric-calls 1")
+        commands._optimize(ctx, "--mlflow=local")
+
+    assert [request.method for request in requests] == ["POST", "GET"]
+    assert requests[0].url.path == "/sessions/s1/experiments"
+    body = json.loads(requests[0].content)
+    assert body["max_metric_calls"] == 1
+    assert body["request_id"]
+    assert "mlflow" not in body and "tracking_uri" not in body and "experiment_name" not in body
+    assert "MLFLOW_EXPERIMENT_ID" not in requests[0].headers
+    assert "MLFLOW_TRACKING_URI" not in requests[0].headers
+    assert os.environ["MLFLOW_EXPERIMENT_ID"] == "stale"
     assert "session's MLflow backend" in capsys.readouterr().out

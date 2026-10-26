@@ -98,10 +98,22 @@ stops only processes it owns; MLflow data persists under `.fleet/mlflow`.
 Logs are written under `.fleet/logs`.
 
 Interactive terminals use the full-screen Textual client; non-TTY input uses a
-Rich fallback. Use `uv run fleet cli databricks` for managed MLflow with Unity
-Catalog tracing after configuring that profile. Pass `--url` to connect to an
-existing compatible API without starting services. Standalone `fleet serve`
-starts only the API and needs its tracking destination available.
+Rich fallback. Run `uv run fleet web` to serve the same Textual app in a browser
+at `http://127.0.0.1:8080`; each browser connection gets its own Session unless
+`--session` is explicitly set. The web listener is loopback-only by default and
+has no visitor authentication. External access requires a separately secured
+boundary. Browser file paths refer to the host running Fleet, not the visitor's
+computer. Use `fleet cli databricks` or `fleet web --mlflow databricks` for
+managed MLflow with Unity Catalog tracing after configuring that profile. Pass
+`--url` to connect to an existing compatible API without starting services.
+Standalone `fleet serve` starts only the API and needs its tracking destination
+available.
+
+The TUI's `/optimize` starts an API-owned GEPA job that continues if the client
+disconnects; use its explicit cancel action to request cooperative stopping.
+On normal exit, the owning `fleet cli`/`fleet web` launcher drains the job before
+it stops services it owns. `uv run fleet optimize --session SESSION_ID` remains
+available as a standalone CLI workflow.
 
 ### 4. Analyze a file and save an artifact
 

@@ -1,11 +1,12 @@
 PYTHON_SOURCES := src/fleet_rlm tests scripts notebooks
 
-.PHONY: help install install-dev dev serve cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run
+.PHONY: help install install-dev dev serve web cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run
 
 help:
 	@echo "Fleet-RLM Lite development targets:"
 	@echo "  make install-dev  Install runtime and development dependencies"
 	@echo "  make serve        Start the local FastAPI SSE server"
+	@echo "  make web          Serve the Textual client in a browser on loopback"
 	@echo "  make cli          Show terminal client help"
 	@echo "  make eval-dataset Create the synthetic evaluation dataset (writes to Unity Catalog)"
 	@echo "  make eval         Run synthetic cases against a live server (live model and sandbox cost)"
@@ -26,6 +27,9 @@ dev: serve
 
 serve:
 	uv run fleet serve
+
+web:
+	uv run fleet web
 
 cli:
 	uv run fleet --help
