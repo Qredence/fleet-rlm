@@ -142,7 +142,7 @@ only-include = ["src", "tests", "config", "docs", "scripts", "openapi.yaml", "CH
 
 [tool.pytest]
 minversion = "9.0"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = ["-q"]
 # strict_config, strict_markers, strict_parametrization_ids, strict_xfail; uv.lock pins pytest.
