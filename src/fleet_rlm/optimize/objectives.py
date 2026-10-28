@@ -14,7 +14,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fleet_rlm.contracts import parse_route
@@ -38,7 +38,17 @@ def efficiency(lm_calls: int, sandbox_errors: int, submit_rejections: int) -> fl
 
 
 _NUMBER = r"[+-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
-_NUMERIC_TOKEN = re.compile(rf"(?<![\w.+-]){_NUMBER}(?![\w.]|,\d)")
+# A leading sign belongs to the token; a leading comma binds a grouped thousands digit, so
+# "12,34" cannot yield 34. Trailing ",\d" keeps a partial group from being read as a number.
+_NUMERIC_TOKEN = re.compile(rf"(?<![\w.])(?<!\d,){_NUMBER}(?![\w.]|,\d)")
+
+
+def _decimal(literal: str) -> Decimal | None:
+    """Parse without raising; exponents beyond MAX_EMAX are simply unmatchable numbers."""
+    try:
+        return Decimal(literal)
+    except InvalidOperation:
+        return None
 
 
 def missing_values(answer: str, expected: list[Any]) -> list[Any]:
@@ -47,13 +57,18 @@ def missing_values(answer: str, expected: list[Any]) -> list[Any]:
     Numeric equality is exact (Decimal; no tolerance). Text expectations retain
     case-insensitive word matching and comma removal, independently of numbers.
     """
-    numbers = {Decimal(match.group().replace(",", "")) for match in _NUMERIC_TOKEN.finditer(answer)}
+    numbers = {
+        number
+        for match in _NUMERIC_TOKEN.finditer(answer)
+        if (number := _decimal(match.group().replace(",", ""))) is not None
+    }
     text = answer.lower().replace(",", "")
     missing = []
     for value in expected:
         literal = str(value)
         if re.fullmatch(_NUMBER, literal):
-            present = Decimal(literal.replace(",", "")) in numbers
+            number = _decimal(literal.replace(",", ""))
+            present = number is not None and number in numbers
         else:
             present = re.search(rf"(?<![\w.]){re.escape(literal.lower())}(?![\w])", text) is not None
         if not present:

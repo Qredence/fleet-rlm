@@ -51,6 +51,40 @@ def test_missing_values_respects_token_boundaries():
 
 
 @pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("12,34", 34),
+        ("12,34", 1234),
+        ("1,23,456", 23),
+    ],
+)
+def test_partial_group_cannot_yield_a_number(answer, expected):
+    """A comma between digits binds them, so a malformed group is not two numbers."""
+    assert missing_values(answer, [expected]) == [expected]
+
+
+@pytest.mark.parametrize(
+    "answer,present",
+    [
+        ("2024-2025", 2024),
+        ("2024-2025", 2025),
+        ("10-20", 20),
+        ("range 3-4.", 4),
+    ],
+)
+def test_hyphenated_ranges_still_yield_both_numbers(answer, present):
+    """A hyphen joins two separate numbers; each stays independently matchable."""
+    assert missing_values(answer, [present]) == []
+
+
+def test_unparseable_exponent_is_missing_instead_of_raising():
+    """Decimal() raises beyond MAX_EMAX; a number that cannot be parsed cannot match."""
+    huge = "1e" + "9" * 19
+    assert missing_values(f"the value is {huge}", [1]) == [1]
+    assert missing_values("the value is 1", [huge]) == [huge]
+
+
+@pytest.mark.parametrize(
     "answer,expected,present",
     [
         ("-12", 12, False),
