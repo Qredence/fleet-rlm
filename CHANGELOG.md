@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Consolidate the backend from 70 to 61 Python files. Native compiled-state loading
+  lives with engine assembly; usage callbacks live with observability. Store, setup,
+  and snapshots are single modules; release checks live in the repository script.
+  SessionRuntime directly owns memory/history/Turn-record policies using a shared Store.
+  See [Python import changes](docs/reference/source-layout.md#python-import-changes).
+- Retain native DSPy signatures, traversal, GEPA, evaluation, and explicit RLM children.
+  Isolated replay construction/execution, artifact identity/reporting, and dataset
+  identity now live with their respective owners. No SQL or saved-state key changes.
+- Pin DSPy support to the verified 3.4.1 facade protocol; resolved dependencies are unchanged.
+- Share inclusive validation-ratio bounds (0.1–0.5, default 0.35) across entry points.
+  Unusable curated splits, especially missing critical holdout, fail before search.
+- Expand approval-source identity to cover runtime, Store review selection, replay,
+  snapshot requirements, and bundled Skills, including relevant file additions/deletions.
+  Historical evidence remains readable; incompatible evidence cannot install.
+- Pass typed TUI launch/review actions directly to existing operations, preserving
+  unresolved request IDs, retry behavior, and lifecycle rendering.
+
+### Fixed
+
+- Supply omitted outer-Flex RLM limits at native construction without editing candidate
+  source or rebinding state. Explicit values, aliases, expanded kwargs, model roles,
+  aggregate host budgets, and deeper/explicit-child limits retain their contracts.
+- Match complete signed decimal/exponent numeric tokens instead of partial numbers.
+  Equality is exact, with grouped thousands separators; the shared scorer advances to
+  `fleet-metric-v10`, requiring reevaluation of earlier candidate evidence.
+- Derive changed-component names and display records from one membership-aware comparison;
+  a newly added empty component counts as changed. Paired validation is not skipped.
+- Generate remote workspace roots and Skill limits from their existing host owners.
+- Preserve ordinary child failures as parent-visible values, route-credential redaction,
+  separate gold labels, and monotonic routing-budget gauges from the earlier branch work.
+  Trace assessments remain v7 and approval policy remains version 6.
+
+`fleet_metric` retains its five positional GEPA arguments, optional program-trace
+feedback, and Prediction score/feedback/objective result. This consolidation introduces
+no early no-candidate completion, automatic installation, durable cleanup recovery, or
+measured workload improvement.
+
 ## [0.8.1] - 2026-10-23
 
 ### Added

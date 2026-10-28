@@ -11,7 +11,7 @@ from rich.console import Console
 from textual.widgets import Button, Input
 
 from fleet_rlm.api.app import create_app
-from fleet_rlm.setup.service import SECTIONS, SetupService
+from fleet_rlm.setup import SECTIONS, SetupService
 from fleet_rlm.tui.setup import SetupApp, run_setup
 
 
@@ -35,11 +35,27 @@ async def idle(app, pilot):
     pytest.fail("Setup operation did not finish")
 
 
+def _block_daytona(monkeypatch):
+    monkeypatch.setattr(
+        SetupService,
+        "check_daytona",
+        lambda _self, _settings: {
+            "status": "blocked",
+            "message": "Snapshot missing",
+            "state": "missing",
+        },
+    )
+
+
+def running_setup(app, size):
+    return app.run_test(size=size)
+
+
 @pytest.mark.asyncio
 async def test_checklist_masks_secrets_and_saves_through_fastapi(setup_client, tmp_path):
     status = setup_client.get("/setup/status").json()
     app = SetupApp(setup_client, status)
-    async with app.run_test(size=(140, 55)) as pilot:
+    async with running_setup(app, (140, 55)) as pilot:
         await idle(app, pilot)
         field = app.query_one("#DATABRICKS_TOKEN", Input)
         assert field.password
@@ -55,7 +71,7 @@ async def test_checklist_masks_secrets_and_saves_through_fastapi(setup_client, t
 @pytest.mark.asyncio
 async def test_automatic_healthy_launch_requests_apply_and_returns_true(setup_client):
     app = SetupApp(setup_client, setup_client.get("/setup/status").json(), automatic=True)
-    async with app.run_test(size=(140, 55)) as pilot:
+    async with running_setup(app, (140, 55)) as pilot:
         for _ in range(100):
             await pilot.pause(0.03)
             if app.return_value is True:
@@ -67,15 +83,7 @@ async def test_automatic_healthy_launch_requests_apply_and_returns_true(setup_cl
 @pytest.mark.asyncio
 async def test_provider_mutation_requires_the_explicit_confirmation(setup_client, monkeypatch):
     called = []
-    monkeypatch.setattr(
-        SetupService,
-        "check_daytona",
-        lambda _self, _settings: {
-            "status": "blocked",
-            "message": "Snapshot missing",
-            "state": "missing",
-        },
-    )
+    _block_daytona(monkeypatch)
 
     def built(_self, _operation):
         called.append(True)
@@ -83,7 +91,7 @@ async def test_provider_mutation_requires_the_explicit_confirmation(setup_client
 
     monkeypatch.setattr(SetupService, "build", built)
     app = SetupApp(setup_client, setup_client.get("/setup/status").json())
-    async with app.run_test(size=(140, 55)) as pilot:
+    async with running_setup(app, (140, 55)) as pilot:
         await idle(app, pilot)
         assert called == []
         app.query_one("#build", Button).press()
@@ -125,17 +133,9 @@ def test_noninteractive_setup_applies_when_only_model_discovery_warns(setup_clie
 
 @pytest.mark.asyncio
 async def test_small_terminal_controls_and_keyboard_build_action(setup_client, monkeypatch):
-    monkeypatch.setattr(
-        SetupService,
-        "check_daytona",
-        lambda _self, _settings: {
-            "status": "blocked",
-            "message": "Snapshot missing",
-            "state": "missing",
-        },
-    )
+    _block_daytona(monkeypatch)
     app = SetupApp(setup_client, setup_client.get("/setup/status").json())
-    async with app.run_test(size=(80, 24)) as pilot:
+    async with running_setup(app, (80, 24)) as pilot:
         await idle(app, pilot)
         for name in ("save", "verify", "reconnect", "apply", "leave", "discard"):
             region = app.query_one("#" + name, Button).region
@@ -168,17 +168,9 @@ def test_normal_chat_client_does_not_carry_the_setup_capability(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unsaved_inputs_cannot_build_in_the_previous_organization(setup_client, monkeypatch):
-    monkeypatch.setattr(
-        SetupService,
-        "check_daytona",
-        lambda _self, _settings: {
-            "status": "blocked",
-            "message": "Snapshot missing",
-            "state": "missing",
-        },
-    )
+    _block_daytona(monkeypatch)
     app = SetupApp(setup_client, setup_client.get("/setup/status").json())
-    async with app.run_test(size=(100, 40)) as pilot:
+    async with running_setup(app, (100, 40)) as pilot:
         await idle(app, pilot)
         assert not app.query_one("#build", Button).disabled
         field = app.query_one("#FLEET_DAYTONA_ORG_ID", Input)

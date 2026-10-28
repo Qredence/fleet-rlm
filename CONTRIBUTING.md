@@ -8,16 +8,24 @@ uv; no Node toolchain is required.
 
 ```bash
 uv sync --dev
+uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 uv run fleet --help
 make check
 make check-security
 ```
 
+The installed pre-commit hook runs file-oriented hygiene, TOML validation, and
+Ruff checks on staged files. The pre-push hook runs the full `make test` suite.
+For a manual run across all files, use `make precommit-run`; it runs only the
+pre-commit stage.
+
 For focused changes, run the relevant tests with `uv run pytest -q <path>` and
 the relevant Make targets. `make check` is the repository's non-live quality
-gate. Ruff lint and format checks include `notebooks/`, matching the pre-commit
-hooks. These checks do not execute notebook cells or live benchmarks. The quality
-gate must not require Daytona, model-provider, or production credentials.
+gate and includes the whole-tree typecheck. Ruff lint and format checks include
+`notebooks/`, matching the pre-commit hooks. These checks do not execute notebook
+cells or live benchmarks. The quality gate must not require Daytona,
+model-provider, or production credentials.
 CircleCI splits the same non-live quality gate across static checks, complete
 test runs on Python 3.11 and 3.13, a Smarter Testing pytest run on Python 3.12,
 package build and smoke checks, and one locked dependency audit. The aggregate

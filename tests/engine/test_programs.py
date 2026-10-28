@@ -12,17 +12,34 @@ import dspy
 import pytest
 from dspy import AdapterParseError
 
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+def _engine(manager: DaytonaSandboxManager, **kwargs: Any) -> AdaptiveFleetEngine:
+    return AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
+        **kwargs,
+    )
+
+
+def test_engine_forward_inputs_match_the_shared_contract():
+    """`contracts.ENGINE_INPUT_FIELDS` is the literal rollout whitelist; forward must not drift from it."""
+    import inspect
+
+    parameters = set(inspect.signature(AdaptiveFleetEngine.forward).parameters)
+    assert set(ENGINE_INPUT_FIELDS) <= parameters
+    assert parameters - set(ENGINE_INPUT_FIELDS) == {"self", "context", "execution_mode"}
 
 
 def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path: Path) -> None:
     compiled_path = tmp_path / "session-a.json"
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         compiled_path=str(compiled_path),
     )
     engine.save(str(compiled_path))
@@ -39,10 +56,8 @@ def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path:
 
 def test_compiled_program_path_is_not_shared_by_default() -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
 
     assert engine.compiled_path is None
@@ -50,10 +65,8 @@ def test_compiled_program_path_is_not_shared_by_default() -> None:
 
 def test_route_selection_logs_specific_exception_without_exposing_credentials(caplog: pytest.LogCaptureFixture) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         jev_lm=SimpleNamespace(api_key="typesafe-test-token"),
     )
 
@@ -82,7 +95,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
 
 
 def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
-    """A Turn the API already started must not reset shared budgets or end itself in the engine."""
+    """A Turn the API already started keeps its budget and teardown; the engine's scope is inert."""
     engine = _answering_engine()
     manager = engine.sandbox_mgr
     manager.reset_turn_budget(deadline_seconds=None, deadline_source="request")
@@ -112,10 +125,8 @@ def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
 
 def _answering_engine() -> AdaptiveFleetEngine:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         execution_mode="rlm",
     )
     engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
@@ -151,7 +162,7 @@ def test_dataset_revision_check_uses_remote_stat_before_execution(monkeypatch, c
 
 def test_evidence_collection_failure_keeps_the_answer_and_marks_evidence_incomplete(monkeypatch) -> None:
     engine = _answering_engine()
-    engine.optimization_verifications = [{"path": "artifacts/check.py", "timeout_seconds": 5}]
+    engine.optimization = OptimizationInputs(verifications=({"path": "artifacts/check.py", "timeout_seconds": 5},))
 
     def broken(*_args: Any, **_kwargs: Any) -> Any:
         raise OSError("transport down")
@@ -171,7 +182,7 @@ def test_unknown_verification_outcome_still_ends_the_turn(monkeypatch) -> None:
     from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 
     engine = _answering_engine()
-    engine.optimization_verifications = [{"path": "artifacts/check.py", "timeout_seconds": 5}]
+    engine.optimization = OptimizationInputs(verifications=({"path": "artifacts/check.py", "timeout_seconds": 5},))
 
     def unknown(*_args: Any, **_kwargs: Any) -> Any:
         raise ExecutionOutcomeUnknownError("outcome unknown")
@@ -184,10 +195,8 @@ def test_unknown_verification_outcome_still_ends_the_turn(monkeypatch) -> None:
 
 def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_turn(monkeypatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
     tools = engine.primary_rlm._user_tools
 
@@ -209,10 +218,8 @@ def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_t
 
 def test_child_budget_exhaustion_still_aborts_the_turn(monkeypatch) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
 
     class ExhaustedChild:
@@ -230,10 +237,8 @@ def test_child_budget_exhaustion_still_aborts_the_turn(monkeypatch) -> None:
 
 def _engine_with_fake_children(monkeypatch, child_call):
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
 
     class FakeChild:
@@ -307,10 +312,8 @@ def test_spawn_agents_children_inherit_the_callers_context(monkeypatch) -> None:
 
 def _spawn_agent_with_fake_child(monkeypatch, child_call):
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
     )
     spawn_agent = engine.primary_rlm._user_tools["spawn_agent"]
     calls: list[str] = []
@@ -368,13 +371,11 @@ CATALOG = (
 
 
 def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> tuple[AdaptiveFleetEngine, dict]:
-    from fleet_rlm.engine.signatures import Route
+    from fleet_rlm.contracts import Route
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         jev_lm=SimpleNamespace(model="jev-test") if jev else None,
     )
     seen: dict[str, Any] = {"budget": 0, "events": [], "batched": []}
@@ -459,10 +460,8 @@ def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch
 def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     path = tmp_path / "session-a.json"
-    engine = AdaptiveFleetEngine(
+    engine = _engine(
         manager,
-        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
-        dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
         compiled_path=str(path),
     )
     engine.save(str(path))
@@ -474,3 +473,75 @@ def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -
     engine.compiled.reload_if_changed(engine)
 
     assert engine.triage.signature.instructions == "Older approved triage instructions."
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-budgets")
+    engine = _engine(manager)
+    assert engine.flex_agent.module_src == engine.flex_agent._baseline_src()
+    assert engine.flex_agent._interpreter_factory().rlm_defaults == {
+        "max_iters": 16,
+        "max_llm_calls": manager.max_llm_calls,
+    }
+    assert engine.primary_rlm._interpreter_factory().rlm_defaults == {}
+
+
+def test_pre_consolidation_native_state_loads_unchanged():
+    from pathlib import Path
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "state-fixture")
+    engine = _engine(manager)
+    fixture = Path(__file__).parents[1] / "fixtures/pre_consolidation_program.json"
+    state = json.loads(fixture.read_text())
+    engine.load_state(state)
+    assert engine.dump_state() == state
+    assert "max_iters=16" in engine.flex_agent.module_src
+
+
+def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypatch) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-symmetry")
+    engine = _engine(
+        manager,
+    )
+    tools = engine.primary_rlm._user_tools
+
+    class FailingChild:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.generate_action = dspy.Predict("a -> b")
+
+        def __call__(self, **_kwargs):
+            raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(dspy, "RLM", FailingChild)
+
+    solo = tools["spawn_agent"](subtask="count refunds", input_paths=[])
+    batched = tools["spawn_agents"](subtasks=["count refunds", "count credits"], input_paths=[[], []])
+
+    # Delegation shape must not decide whether a child error is fatal.
+    assert solo["error"].startswith("child agent failed (RuntimeError)")
+    assert [item["error"].split(":")[0] for item in batched] == ["child agent failed (RuntimeError)"] * 2
+
+
+def test_route_errors_redact_the_serving_lm_credential(caplog: pytest.LogCaptureFixture) -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-redact")
+    engine = AdaptiveFleetEngine(
+        manager,
+        dspy.LM("openai/fleet-root", engine="lm15", cache=False),
+        dspy.LM("openai/fleet-sub", engine="lm15", cache=False, api_key="real-serving-token"),
+    )
+
+    class FailingTriage:
+        def __call__(self, **_kwargs: Any) -> Any:
+            raise RuntimeError("401: rejected real-serving-token")
+
+    engine.triage = FailingTriage()  # type: ignore[assignment]
+    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+        answer="bounded fallback",
+        learned_skill_note="",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.programs"):
+        prediction = engine(workspace_manifest="", memory_summary="", task="test fallback")
+
+    # Production dspy.LM keeps the key in kwargs, not as an attribute; it must still be redacted.
+    assert prediction.route == "rlm"
+    assert "401: rejected" in caplog.text
+    assert "real-serving-token" not in caplog.text

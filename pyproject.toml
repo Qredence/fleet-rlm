@@ -31,8 +31,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # GEPA Flex helpers are imported from DSPy's internal namespace; verify before adopting 3.5+.
-    "dspy[typesafe]>=3.4.1,<3.5",
+    # Flex uses an internal constructor protocol verified only on DSPy 3.4.1 (GEPA lock: 0.1.4).
+    "dspy[typesafe]==3.4.1",
     "daytona==0.224.0",
     "mlflow==3.17.2",
     "databricks-sdk>=0.153.0,<1",
@@ -49,6 +49,7 @@ dependencies = [
     "prompt-toolkit>=3.0.50,<4",
     "psycopg-pool>=3.2.6,<4",
     "textual>=8.2.8",
+    "textual-serve>=1.0,<2",
 ]
 
 [project.urls]
@@ -114,9 +115,12 @@ override-dependencies = [
     # litellm is installed only as DSPy's transitive dependency — fleet-rlm does
     # NOT declare it as a direct dep in `[project].dependencies` and does not
     # import it from `src/`. This override floor is the policy mechanism:
-    # DSPy 3.4.0 accepts litellm>=1.65.8, but the CVE remediation family
-    # requires >=1.83.7 and the reviewed floor is pinned below.
-    "litellm>=1.87.0",
+    # DSPy 3.4.0 accepts litellm>=1.65.8, but CVE-2026-114612 needs the 1.101.3
+    # remediation. Pin it exactly so the fix moves nothing else; later releases
+    # also downgrade filelock, which is a separate change to review.
+    "litellm==1.101.3",
+    # dnspython <2.9.0 has an advisory reachable through DNS resolution.
+    "dnspython>=2.9.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
     # multidict <=6.9.0 has a memory leak in attacker-controlled item-view operations.
@@ -129,7 +133,7 @@ override-dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fleet_rlm"]
-force-include = { "src/fleet_rlm/sandbox/snapshots/snapshot-requirements.txt" = "fleet_rlm/sandbox/snapshots/snapshot-requirements.txt" }
+force-include = { "src/fleet_rlm/sandbox/snapshot-requirements.txt" = "fleet_rlm/sandbox/snapshot-requirements.txt" }
 
 # Ship only what builds and tests the package; agent, editor, and CI config stay out.
 # Hatch always adds pyproject.toml, the readme, and the license files.
@@ -138,7 +142,7 @@ only-include = ["src", "tests", "config", "docs", "scripts", "openapi.yaml", "CH
 
 [tool.pytest]
 minversion = "9.0"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = ["-q"]
 # strict_config, strict_markers, strict_parametrization_ids, strict_xfail; uv.lock pins pytest.
@@ -197,3 +201,11 @@ include = ["src"]
 [tool.ty.rules]
 deprecated = "error"
 unused-ignore-comment = "error"
+
+[tool.coverage.run]
+branch = true
+source = ["src/fleet_rlm"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 from daytona import DaytonaNotFoundError
 
-from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError, operations
+from fleet_rlm.sandbox import snapshots as operations
+from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError
 
 
 def test_existing_snapshot_is_never_replaced(monkeypatch):

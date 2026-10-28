@@ -7,11 +7,12 @@ import pytest
 from dspy.utils import DummyLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.optimize.evaluation import expected_values_present
 from fleet_rlm.optimize.scorers import (
     JEV_ROUTE_THRESHOLD,
     TRACE_ASSESSMENT_VERSION,
+    ScorerEvidenceError,
     build_mlflow_scorer_suite,
+    expected_values_present,
     fleet_metric,
     fleet_scorer,
     jev_routing_efficiency,
@@ -89,7 +90,7 @@ def test_flex_route_is_bounded_and_heavy_route_degrades():
     heavy = _trace(
         _span("fleet_turn", outputs={"lm_calls": 25}), _span("RLM.forward"), *[_span("lm", SpanType.LLM)] * 25
     )
-    assert jev_routing_efficiency(trace=heavy).value == 0.8
+    assert jev_routing_efficiency(trace=heavy).value == 0.75
 
 
 def test_trajectory_penalizes_host_usage_without_counting_wrapper_errors():
@@ -116,7 +117,7 @@ def test_trace_readers_require_one_host_root_and_ignore_nested_turns(root_count)
     trace = _trace(*roots, nested)
     if root_count == 1:
         assert rlm_trajectory_efficiency(trace=trace).value == 1.0
-        assert jev_routing_efficiency(trace=trace).value == 1.0
+        assert jev_routing_efficiency(trace=trace).value == 0.98
         assert _trace_evidence_context(trace)[0]["answer"] == "Done"
     else:
         assert rlm_trajectory_efficiency(trace=trace) is None
@@ -154,6 +155,19 @@ def _route_judge(jev_lm="jev-sentinel"):
     ]
 
 
+def _scorer(name: str, judge_model: str = "openai:/judge"):
+    return next(item for item in build_mlflow_scorer_suite(judge_model) if item.name == name)
+
+
+def _standard_judge_responses():
+    return {
+        "execution_evidence_diagnostics": (_execution_judge_payload(), "structured result"),
+        "jev_routing_efficiency_judge": (True, "Flex was suitable."),
+        "output_instruction_compliance": (True, "The answer followed the format."),
+        "agent_skills_progressive_disclosure": (True, "Skill activity was reviewed."),
+    }
+
+
 @pytest.mark.parametrize("probability", [0.83, 0.4999, 0.5001])
 def test_jev_route_judge_maps_probability_to_verdict_and_records_evidence(monkeypatch, probability):
     calls = []
@@ -176,8 +190,8 @@ def test_jev_route_judge_maps_probability_to_verdict_and_records_evidence(monkey
     ]
     assert feedback.metadata["fleet.judge_backend"] == "typesafe"
     assert float(feedback.metadata["fleet.jev.route_probability"]) == probability
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
-    assert feedback.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
+    assert feedback.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v7"
     assert feedback.metadata["fleet.jev.best_route"] == "flex"
     assert feedback.metadata["fleet.jev.rubric_version"] == "jev-route-v1"
     assert f"p(route reasonable)={probability:.2f}" in feedback.rationale
@@ -215,7 +229,22 @@ def test_jev_route_judge_falls_back_to_generative_judge_without_typesafe_key(mon
     feedback = _route_judge(jev_lm=None)(trace=_route_trace())
     assert feedback.value is True
     assert feedback.metadata["fleet.judge_backend"] == "generative"
-    assert calls and calls[0][0] == "jev_routing_efficiency_judge"
+    assert calls and calls[0] == (
+        "jev_routing_efficiency_judge",
+        {"inputs": {"task": "Inspect the file"}, "outputs": {"route": "flex", "lm_calls": 4, "sandbox_errors": 0}},
+    )
+    definition = calls.definitions["jev_routing_efficiency_judge"]
+    assert definition["model"] == "databricks:/test-judge"
+    assert "{{ trace }}" not in definition["instructions"]
+
+
+@pytest.mark.parametrize("outputs", [None, {}, {"outcome": "failed", "error": "Turn failed"}])
+def test_chat_route_judge_rejects_missing_host_evidence_before_model_dispatch(monkeypatch, outputs):
+    calls = _judge_responses(monkeypatch, {"jev_routing_efficiency_judge": (True, "must not be used")})
+    trace = _trace(_span("fleet_turn", inputs={"task": "Inspect the file"}, outputs=outputs))
+    with pytest.raises(ScorerEvidenceError, match="host-recorded"):
+        _route_judge(jev_lm=None)(trace=trace)
+    assert calls == []
 
 
 def test_route_judgment_signature_keeps_routing_guardrails():
@@ -236,7 +265,7 @@ def test_route_judgment_signature_uses_route_vocabulary():
 
     from dspy.experimental import Noul
 
-    from fleet_rlm.engine.signatures import Route
+    from fleet_rlm.contracts import Route
     from fleet_rlm.optimize.scorers import _route_judgment_signature
 
     signature = _route_judgment_signature()
@@ -319,8 +348,7 @@ def test_execution_assessments_use_bounded_sandbox_evidence_and_version(monkeypa
             "agent_skills_progressive_disclosure": (True, "Selected Skill evidence was reviewed."),
         },
     )
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    execution_scorer = _scorer("execution_evidence_diagnostics")
     feedback = execution_scorer(trace=_pi_execution_trace())
     assert {item.name: item.value for item in feedback} == {
         "sandbox_verification_discipline": True,
@@ -358,8 +386,7 @@ def test_execution_judge_receives_return_values_without_stdout(monkeypatch, valu
     trace = _pi_execution_trace()
     execution = next(span for span in trace.search_spans() if span.name == "sandbox.exec")
     execution.outputs = {"stdout": "", "value": value, "error": False}
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    judge = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    judge = _scorer("execution_evidence_diagnostics")
     judge(trace=trace)
     evidence = calls[0][1]["inputs"]["sandbox_exec_spans"][0]
     assert evidence["stdout"] == ""
@@ -385,12 +412,7 @@ def test_execution_return_value_is_bounded_and_redacted():
 
 
 def test_registered_suite_emits_each_trace_rubric_once_with_version_metadata(monkeypatch):
-    responses = {
-        "execution_evidence_diagnostics": (_execution_judge_payload(), "structured result"),
-        "jev_routing_efficiency_judge": (True, "Flex was suitable."),
-        "output_instruction_compliance": (True, "The answer followed the format."),
-        "agent_skills_progressive_disclosure": (True, "Skill activity was reviewed."),
-    }
+    responses = _standard_judge_responses()
     _judge_responses(monkeypatch, responses)
     suite = build_mlflow_scorer_suite("openai:/judge")
     trace = _pi_execution_trace(skill_selected=True)
@@ -412,7 +434,7 @@ def test_registered_suite_emits_each_trace_rubric_once_with_version_metadata(mon
     }
     for item in feedback:
         assert item.metadata["mlflow.assessment.scorerName"] == item.name
-        assert item.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+        assert item.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v7"
 
 
 def test_execution_assessments_preserve_judge_source_and_count_tokens_once(monkeypatch):
@@ -438,13 +460,12 @@ def test_execution_assessments_preserve_judge_source_and_count_tokens_once(monke
         )
 
     monkeypatch.setattr("fleet_rlm.optimize.scorers.make_judge", make_judge)
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    execution_scorer = _scorer("execution_evidence_diagnostics")
     verification, integrity = execution_scorer(trace=_pi_execution_trace())
     assert verification.source.source_type == AssessmentSourceType.LLM_JUDGE
     assert verification.source.source_id == "openai:/judge"
     assert verification.metadata["mlflow.assessment.scorerName"] == "sandbox_verification_discipline"
-    assert verification.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v6"
+    assert verification.metadata["mlflow.assessment.scorerVersion"] == "fleet-trace-assessments-v7"
     assert verification.metadata["mlflow.assessment.judgeInputTokens"] == "100"
     assert integrity.source.source_id == "openai:/judge"
     assert integrity.metadata["mlflow.assessment.scorerName"] == "tool_execution_integrity"
@@ -467,8 +488,7 @@ def test_missing_execution_fails_required_verification_and_direct_answers_are_no
         "agent_skills_progressive_disclosure": (True, "No Skill activity was selected."),
     }
     _judge_responses(monkeypatch, responses)
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    execution_scorer = _scorer("execution_evidence_diagnostics")
     computation = _trace(
         _span("fleet_turn", inputs={"task": "Compute a large Pi digit"}, outputs={"answer": "5"}, span_id="a" * 16)
     )
@@ -515,8 +535,7 @@ def test_failed_sandbox_span_is_visible_and_can_be_cited_for_a_negative_assessme
             "agent_skills_progressive_disclosure": (True, "Skill activity was reviewed."),
         },
     )
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    execution_scorer = _scorer("execution_evidence_diagnostics")
     failed = _span(
         "sandbox.exec",
         SpanType.TOOL,
@@ -538,8 +557,6 @@ def test_failed_sandbox_span_is_visible_and_can_be_cited_for_a_negative_assessme
 
 
 def test_truncated_execution_context_fails_scoring_instead_of_judging_partial_evidence(monkeypatch):
-    from fleet_rlm.optimize.scorers import ScorerEvidenceError
-
     calls = _judge_responses(
         monkeypatch,
         {
@@ -549,8 +566,7 @@ def test_truncated_execution_context_fails_scoring_instead_of_judging_partial_ev
             "agent_skills_progressive_disclosure": (True, "Skill activity was reviewed."),
         },
     )
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    execution_scorer = _scorer("execution_evidence_diagnostics")
     root = _span("fleet_turn", inputs={"task": "Compute a value"}, outputs={"answer": "5"}, span_id="a" * 16)
     execution_spans = [
         _span(
@@ -585,7 +601,7 @@ def test_output_compliance_judge_receives_only_request_and_final_answer(monkeypa
     trace = _pi_execution_trace()
     feedback = output_scorer(trace=trace)
     assert feedback.name == "output_instruction_compliance" and feedback.value is True
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
     call = next(context for name, context in calls if name == "output_instruction_compliance")
     assert call == {
         "inputs": {"task": "Tell me the 1492252th digits after the decimal point of Pi"},
@@ -595,9 +611,7 @@ def test_output_compliance_judge_receives_only_request_and_final_answer(monkeypa
 
 def test_output_compliance_preserves_middle_constraints_and_violations(monkeypatch):
     calls = _judge_responses(monkeypatch, {"output_instruction_compliance": (False, "The answer violates the format.")})
-    output_scorer = next(
-        item for item in build_mlflow_scorer_suite("openai:/judge") if item.name == "output_instruction_compliance"
-    )
+    output_scorer = _scorer("output_instruction_compliance")
     task = "a" * 1800 + "Return exactly one line." + "z" * 1800
     answer = "b" * 1800 + "\nEXTRA LINE\n" + "y" * 1800
     result = output_scorer(trace=_trace(_span("fleet_turn", inputs={"task": task}, outputs={"answer": answer})))
@@ -619,12 +633,8 @@ def test_output_compliance_preserves_middle_constraints_and_violations(monkeypat
     ],
 )
 def test_output_compliance_rejects_incomplete_evidence_without_a_judge_call(monkeypatch, field, value):
-    from fleet_rlm.optimize.scorers import ScorerEvidenceError
-
     calls = _judge_responses(monkeypatch, {"output_instruction_compliance": (True, "The output is compliant.")})
-    output_scorer = next(
-        item for item in build_mlflow_scorer_suite("openai:/judge") if item.name == "output_instruction_compliance"
-    )
+    output_scorer = _scorer("output_instruction_compliance")
     fields = {"task": "Return one line", "answer": "done", field: value}
     trace = _trace(_span("fleet_turn", inputs={"task": fields["task"]}, outputs={"answer": fields["answer"]}))
     with pytest.raises(ScorerEvidenceError, match=r"complete.*evidence"):
@@ -634,9 +644,7 @@ def test_output_compliance_rejects_incomplete_evidence_without_a_judge_call(monk
 
 def test_output_compliance_redacts_complete_fields_and_accepts_the_limit(monkeypatch):
     calls = _judge_responses(monkeypatch, {"output_instruction_compliance": (True, "The output is compliant.")})
-    output_scorer = next(
-        item for item in build_mlflow_scorer_suite("openai:/judge") if item.name == "output_instruction_compliance"
-    )
+    output_scorer = _scorer("output_instruction_compliance")
     output_scorer(
         trace=_trace(
             _span("fleet_turn", inputs={"task": "Use api_key=private-value"}, outputs={"answer": "x" * 20_000})
@@ -657,8 +665,6 @@ def test_output_compliance_redacts_complete_fields_and_accepts_the_limit(monkeyp
     ],
 )
 def test_execution_assessments_reject_placeholder_and_unknown_span_citations(monkeypatch, rationale, message):
-    from fleet_rlm.optimize.scorers import ScorerEvidenceError
-
     response = _execution_judge_payload(
         verification_rationale=rationale,
         integrity_rationale="Supported by span_id=1111111111111111.",
@@ -672,8 +678,7 @@ def test_execution_assessments_reject_placeholder_and_unknown_span_citations(mon
             "agent_skills_progressive_disclosure": (True, "Skill activity was reviewed."),
         },
     )
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    execution_scorer = next(item for item in suite if item.name == "execution_evidence_diagnostics")
+    execution_scorer = _scorer("execution_evidence_diagnostics")
     with pytest.raises(ScorerEvidenceError, match=message):
         execution_scorer(trace=_pi_execution_trace())
 
@@ -686,13 +691,12 @@ def test_skill_progressive_disclosure_skips_unselected_skills_and_uses_selected_
         "agent_skills_progressive_disclosure": (True, "Selected Skill evidence was reviewed."),
     }
     calls = _judge_responses(monkeypatch, responses)
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    skill_scorer = next(item for item in suite if item.name == "agent_skills_progressive_disclosure")
+    skill_scorer = _scorer("agent_skills_progressive_disclosure")
     assert skill_scorer(trace=_pi_execution_trace(skill_selected=False)) is None
     assert not any(name == "agent_skills_progressive_disclosure" for name, _ in calls)
     feedback = skill_scorer(trace=_pi_execution_trace(skill_selected=True))
     assert feedback.value is True
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
     skill_call = next(context for name, context in calls if name == "agent_skills_progressive_disclosure")
     assert skill_call["inputs"]["skill_activity"][0]["outputs"]
 
@@ -722,8 +726,7 @@ def test_route_suitability_judge_is_separate_from_deterministic_budget_efficienc
             "agent_skills_progressive_disclosure": (True, "Skill activity was reviewed."),
         },
     )
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    route_scorer = next(item for item in suite if item.name == "jev_routing_efficiency_judge")
+    route_scorer = _scorer("jev_routing_efficiency_judge")
     trace = _pi_execution_trace()
     assert route_scorer(trace=trace).value is True
     assert jev_routing_efficiency(trace=trace).value == 0.95
@@ -761,8 +764,7 @@ def test_non_retrieval_tasks_skip_groundedness_without_null_feedback(monkeypatch
             return [Feedback(value=True)]
 
     monkeypatch.setattr("fleet_rlm.optimize.scorers.RetrievalGroundedness", Judge)
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    groundedness = next(item for item in suite if item.name == "retrieval_groundedness")
+    groundedness = _scorer("retrieval_groundedness")
     assert groundedness(trace=_trace(_span("sandbox.exec", SpanType.TOOL))) is None
     assert calls == []
     trace = _trace(_span("retriever", SpanType.RETRIEVER))
@@ -911,8 +913,7 @@ def test_should_judge_stopping_from_execution_receipts_with_task_exceptions(monk
     calls = _judge_responses(
         monkeypatch, {"stopping_discipline": (passes, "The computation is in span_id=1111111111111111.")}
     )
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    judge = next(item for item in suite if item.name == "stopping_discipline")
+    judge = _scorer("stopping_discipline")
     trace = _pi_execution_trace()
     spans = trace.search_spans()
     if passes:
@@ -925,15 +926,12 @@ def test_should_judge_stopping_from_execution_receipts_with_task_exceptions(monk
     rules = calls.definitions["stopping_discipline"]["instructions"]
     assert "same code block" in rules
     assert "failed" in rules and "disagree" in rules and "requests verification" in rules
-    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v6"
+    assert feedback.metadata["fleet.trace_scorer_version"] == "fleet-trace-assessments-v7"
 
 
 def test_should_refuse_stopping_judgment_when_computation_code_is_truncated(monkeypatch):
-    from fleet_rlm.optimize.scorers import ScorerEvidenceError
-
     calls = _judge_responses(monkeypatch, {})
-    suite = build_mlflow_scorer_suite("openai:/judge")
-    judge = next(item for item in suite if item.name == "stopping_discipline")
+    judge = _scorer("stopping_discipline")
     trace = _pi_execution_trace()
     trace.search_spans()[2].inputs["code"] = "x" * 13000
     with pytest.raises(ScorerEvidenceError, match="evidence context limit"):
@@ -958,7 +956,7 @@ def test_should_preserve_both_methods_in_a_single_execution_for_stopping_review(
         status=_execution_status(),
     )
     bootstrap = _span("sandbox.exec", inputs={"code": "x" * 20000}, attributes={"phase": "bootstrap"})
-    judge = next(item for item in build_mlflow_scorer_suite("openai:/judge") if item.name == "stopping_discipline")
+    judge = _scorer("stopping_discipline")
     assert judge(trace=_trace(root, bootstrap, computation)).value is False
     [evidence] = calls[0][1]["inputs"]["sandbox_exec_spans"]
     assert evidence["code"] == fixture["code"]
@@ -967,9 +965,31 @@ def test_should_preserve_both_methods_in_a_single_execution_for_stopping_review(
 
 
 def test_should_reject_a_stopping_verdict_with_an_unknown_execution_citation(monkeypatch):
-    from fleet_rlm.optimize.scorers import ScorerEvidenceError
-
     _judge_responses(monkeypatch, {"stopping_discipline": (True, "Verified span_id=9999999999999999.")})
-    judge = next(item for item in build_mlflow_scorer_suite("openai:/judge") if item.name == "stopping_discipline")
+    judge = _scorer("stopping_discipline")
     with pytest.raises(ScorerEvidenceError, match="absent from the trace"):
         judge(trace=_pi_execution_trace())
+
+
+def test_metric_names_the_program_trace_without_changing_the_score():
+    from fleet_rlm.optimize.scorers import SCORER_VERSION
+
+    assert SCORER_VERSION == "fleet-metric-v10"
+    gold = dspy.Example(task="Convert 72F", answer="22.2", expected_values=["22.2"], route="flex")
+    pred = dspy.Prediction(answer="22.2", route="flex", lm_calls=4, sandbox_errors=0, submit_rejections=0)
+    program_trace = [("FlexModule", {"task": "Convert 72F"}, {"answer": "22.2"})]
+
+    with_trace = fleet_metric(gold, pred, program_trace=program_trace, judge_lm=_judge(True))
+    without_trace = fleet_metric(gold, pred, judge_lm=_judge(True))
+
+    # GEPA passes program_trace only while optimizing a Flex submodule; evidence must not move the score.
+    assert "Program trace: " in with_trace.feedback
+    assert "Program trace: " not in without_trace.feedback
+    assert with_trace.score == without_trace.score == pytest.approx(0.9 + 0.1 * 0.985)
+
+
+def test_metric_degrades_on_an_unexpected_program_trace_shape():
+    gold = dspy.Example(task="t", answer="a", expected_values=["a"], route="rlm")
+    pred = dspy.Prediction(answer="a", route="rlm", lm_calls=5, sandbox_errors=0, submit_rejections=0)
+    result = fleet_metric(gold, pred, program_trace=["not-a-step"], judge_lm=_judge(True))
+    assert "Program trace: unavailable" in result.feedback

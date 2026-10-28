@@ -13,7 +13,6 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
 from typing import Any, ClassVar
 
 import dspy
@@ -21,10 +20,8 @@ import mlflow
 from mlflow.entities import SpanType
 from pydantic_core import to_jsonable_python
 
-from fleet_rlm.dspy_support import decision_evidence, without_mlflow_dspy_callback
-from fleet_rlm.engine.signatures import item_decision
-from fleet_rlm.lm_usage import decision_usage
-from fleet_rlm.observability import activity_preview, activity_text
+from fleet_rlm.contracts import decision_evidence, item_decision
+from fleet_rlm.observability import activity_preview, activity_text, evidence_span, typed_decision_scope
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import _child_input_path
@@ -66,10 +63,12 @@ class DaytonaInterpreter:
         tools: dict[str, Callable[..., Any]] | None = None,
         owns_manager: bool = False,
         native_input_paths: tuple[str, ...] | None = None,
+        rlm_defaults: Mapping[str, int] | None = None,
     ):
         """Create an interpreter with a fresh namespace and validated bridged tool names."""
         self.manager = manager
         self.owns_manager = owns_manager
+        self.rlm_defaults = dict(rlm_defaults or {})
         self.native_input_paths = (
             tuple(_child_input_path(path) for path in native_input_paths) if native_input_paths is not None else None
         )
@@ -142,6 +141,14 @@ class DaytonaInterpreter:
                             or "/workspace/files (empty)",
                         },
                     }
+            if tool_name == "__dspy_construct__" and kwargs.get("kind") == "RLM" and self.rlm_defaults:
+                native_kwargs = kwargs.get("kwargs")
+                # Leave malformed payloads and explicit field values to native validation.
+                if native_kwargs is None or isinstance(native_kwargs, dict):
+                    effective = dict(native_kwargs or {})
+                    for name, default in self.rlm_defaults.items():
+                        effective.setdefault(name, default)
+                    kwargs = {**kwargs, "kwargs": effective}
             value = self.tools[tool_name](*args, **kwargs)
             if tool_name == "__dspy_construct__" and isinstance(value, str):
                 self._code_agent_handles.discard(value)
@@ -217,15 +224,21 @@ class DaytonaInterpreter:
         finally:
             _ACTIVE_MANAGER.reset(active_token)
 
+    def _complete_sub_lm(self, prompt: str, active_lm: Any) -> Any:
+        with dspy.context(lm=active_lm, disable_history=True):
+            return active_lm(prompt)[0]
+
+    @staticmethod
+    def _valid_prompt(value: Any) -> bool:
+        return isinstance(value, str) and len(value) <= 100_000
+
     def _llm_query(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        if len(args) != 1 or not isinstance(args[0], str) or len(args[0]) > 100_000:
+        if len(args) != 1 or not self._valid_prompt(args[0]):
             raise ValueError("llm_query requires one prompt of at most 100000 characters")
         if "llm_query" in self.tools:  # a Flex-registered override
             return self._invoke_tool("llm_query", args, kwargs)
         self.manager.consume_budget()
-        active_lm = self.manager.sub_lm or dspy.settings.lm
-        with dspy.context(lm=active_lm, disable_history=True):
-            return active_lm(args[0])[0]
+        return self._complete_sub_lm(args[0], self.manager.sub_lm or dspy.settings.lm)
 
     def _llm_query_batched(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
         if len(args) != 1:
@@ -235,20 +248,15 @@ class DaytonaInterpreter:
             not isinstance(prompts, list)
             or not prompts
             or len(prompts) > 100
-            or any(not isinstance(prompt, str) or len(prompt) > 100_000 for prompt in prompts)
+            or not all(map(self._valid_prompt, prompts))
         ):
             raise ValueError("llm_query_batched requires 1-100 bounded string prompts")
         if "llm_query_batched" in self.tools:
             return self._invoke_tool("llm_query_batched", args, kwargs)
         self.manager.consume_budget(len(prompts))
         active_lm = self.manager.sub_lm or dspy.settings.lm
-
-        def complete(prompt: str) -> Any:
-            with dspy.context(lm=active_lm, disable_history=True):
-                return active_lm(prompt)[0]
-
         with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
-            return list(pool.map(complete, prompts))
+            return list(pool.map(lambda prompt: self._complete_sub_lm(prompt, active_lm), prompts))
 
     def _jev_decide_batched(self, args: list[Any], _kwargs: dict[str, Any]) -> Any:
         if len(args) != 3:
@@ -256,7 +264,7 @@ class DaytonaInterpreter:
         items, question, choices = args
         if (
             not isinstance(items, list)
-            or any(not isinstance(item, str) or len(item) > 100_000 for item in items)
+            or not all(map(self._valid_prompt, items))
             or not isinstance(question, str)
             or len(question) > 10_000
             or not isinstance(choices, list)
@@ -275,6 +283,12 @@ class DaytonaInterpreter:
     }
 
     def _run_jev_batch(self, items: list[str], question: str, choices: list[str]) -> list[dict[str, Any]]:
+        """Classify 1-100 items against 1-20 choices, returning each item, choice, and decision evidence.
+
+        Prefer the Jev LM, then the sub LM, then the ambient DSPy LM. Invalid batch
+        counts raise ValueError; missing typed choices raise RuntimeError. Prediction
+        and result shape errors propagate.
+        """
         if not items or not choices or len(items) > 100 or len(choices) > 20:
             raise ValueError("Jev batch inputs exceed the supported bounds")
         from pydantic import BaseModel
@@ -282,15 +296,12 @@ class DaytonaInterpreter:
         predictor = dspy.Predict(item_decision(choices))
         active_lm = self.manager.jev_lm or self.manager.sub_lm or dspy.settings.lm
         examples = [dspy.Example(item=item, question=question).with_inputs("item", "question") for item in items]
-        callbacks = list(dspy.settings.callbacks)
-        if active_lm is self.manager.jev_lm and self.manager.jev_lm is not None:
-            callbacks = without_mlflow_dspy_callback(callbacks)
-        with mlflow.start_span(name="jev_batch_decisions", span_type=SpanType.LLM) as span:
-            span.set_inputs({"item_count": len(items), "question": activity_text(question), "choices": choices})
-            with (
-                dspy.context(lm=active_lm, disable_history=True, callbacks=callbacks),
-                decision_usage(span) if active_lm is self.manager.jev_lm else nullcontext(),
-            ):
+        typesafe = active_lm is self.manager.jev_lm and self.manager.jev_lm is not None
+        with evidence_span(
+            "jev_batch_decisions",
+            inputs={"item_count": len(items), "question": activity_text(question), "choices": choices},
+        ) as span:
+            with typed_decision_scope(lm=active_lm, span=span, typesafe=typesafe):
                 predictions = predictor.batch(examples, num_threads=min(8, len(items)))
             results: list[dict[str, Any]] = []
             for item, prediction in zip(items, predictions, strict=True):

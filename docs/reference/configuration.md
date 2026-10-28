@@ -58,6 +58,7 @@ source control.
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |
+| `FLEET_WEB_AUTH_TOKEN` | unset | Environment-only proxy bearer secret required for non-loopback web listeners; at least 32 non-whitespace characters. See [CLI](cli.md). |
 
 Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
@@ -201,7 +202,7 @@ search, environment interpolation or hot reload. Every file must declare
 The configuration digest includes the selected backend and both profiles.
 Existing GEPA approval evidence with a different identity requires reevaluation.
 Removing the former snapshot setting (`[daytona] snapshot` and its environment
-override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots/definition.py`
+override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots.py`
 and cannot be selected through the environment or TOML) intentionally changes
 `configuration()`'s digest. Treat that as an intentional configuration identity
 break: prior digests identify a different configuration, so dependent GEPA approval
@@ -241,6 +242,14 @@ Each `[llm.root]`, `[llm.sub]`, `[llm.reflection]` supports `model`, optional
 fields is re-asked once. Other omitted generation options stay provider-controlled.
 Provider compatibility still requires live verification.
 Native `lm15` remains fixed; no backend setting or per-model deadline is added.
+
+Claude reflection deployments behind Unity Gateway use a native DSPy provider
+declaration for chat-only JSON generation. The Gateway's structured-output
+translation uses forced tools that newer Claude models reject. Native
+`InstructionProposer` and `JSONAdapter` still request and parse JSON; this route
+omits the API `response_format` parameter. Configured deployment identifiers stay
+unchanged; reflection traces identify the declared Gateway route. Other model
+families retain their ordinary native provider capabilities.
 
 The checked-in values are provisional baselines, not optimized claims. Root/sub
 limits 16384/8192 are comparison candidates only. Keep a candidate only after

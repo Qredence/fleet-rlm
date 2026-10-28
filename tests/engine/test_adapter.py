@@ -10,8 +10,9 @@ from threading import Barrier
 import dspy
 import pytest
 from dspy import AdapterParseError, LMUnexpectedError
+from dspy.primitives.facade import SandboxLM
 
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, MeteredLM
+from fleet_rlm.adapters import FleetRLMChatAdapter
 
 
 def test_dspy_history_is_disabled_for_session_turn_contexts() -> None:
@@ -132,7 +133,7 @@ def test_adapter_valid_reply_costs_one_call(asynchronous, response, signature, e
     lm = ScriptedLM([response])
     charged = []
     assert _invoke(
-        FleetRLMChatAdapter(), MeteredLM(lm, charged.append), dspy.Signature(signature), asynchronous=asynchronous
+        FleetRLMChatAdapter(), SandboxLM(lm, charged.append), dspy.Signature(signature), asynchronous=asynchronous
     ) == [expected]
     assert len(lm.calls) == 1 and charged == [1]
 
@@ -146,7 +147,7 @@ def test_adapter_reasks_once_with_format_feedback_without_mutating_inputs(asynch
     charged = []
     assert _invoke(
         FleetRLMChatAdapter(),
-        MeteredLM(lm, charged.append),
+        SandboxLM(lm, charged.append),
         signature,
         asynchronous=asynchronous,
         lm_kwargs=lm_kwargs,
@@ -171,7 +172,7 @@ def test_adapter_stops_at_retry_budget(asynchronous, retries, expected_calls) ->
     with pytest.raises(AdapterParseError):
         _invoke(
             FleetRLMChatAdapter(parse_retries=retries),
-            MeteredLM(lm, charged.append),
+            SandboxLM(lm, charged.append),
             dspy.Signature("task -> answer"),
             asynchronous=asynchronous,
         )
@@ -234,7 +235,7 @@ def test_adapter_turn_limits_can_stop_the_retry(asynchronous, error) -> None:
 
     with pytest.raises(type(error)) as caught:
         _invoke(
-            FleetRLMChatAdapter(), MeteredLM(lm, reserve), dspy.Signature("task -> answer"), asynchronous=asynchronous
+            FleetRLMChatAdapter(), SandboxLM(lm, reserve), dspy.Signature("task -> answer"), asynchronous=asynchronous
         )
     assert caught.value is error
     assert charged == [1, 1] and len(lm.calls) == 1
@@ -270,31 +271,31 @@ def _ignore(_count: int) -> None:
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("proxies", [1, 2])
-def test_adapter_message_calls_are_not_reported_as_deprecated(asynchronous, proxies) -> None:
-    # DSPy tags the exact (lm, messages) pair it formatted; every proxy hop must forward that tag.
+def test_adapter_message_calls_surface_dspy_deprecation(asynchronous, proxies) -> None:
+    # DSPy's messages= migration warning surfaces once per process through the native facade.
     lm = ScriptedLM(["[[ ## answer ## ]]\n42"])
-    metered = MeteredLM(lm, _ignore)
+    metered = SandboxLM(lm, _ignore)
     for _ in range(proxies - 1):
-        metered = MeteredLM(metered, _ignore)
+        metered = SandboxLM(metered, _ignore)
 
-    with _deprecation_errors():
+    with pytest.warns(DeprecationWarning, match="OpenAI-style message dictionaries"):
         assert _invoke(FleetRLMChatAdapter(), metered, dspy.Signature("task -> answer"), asynchronous=asynchronous)
     assert len(lm.calls) == 1
 
 
-def test_metered_lm_still_reports_its_own_messages_kwargs() -> None:
-    # The bridge must narrow to DSPy's adapter call: messages= assembled by other code still warns.
+def test_sandbox_lm_messages_kwargs_still_surface_dspy_deprecation() -> None:
+    # messages= assembled by other code still reaches DSPy's native deprecation warning.
     lm = ScriptedLM(["[[ ## answer ## ]]\n42"])
     with _deprecation_errors(), pytest.raises(DeprecationWarning, match="OpenAI-style message dictionaries"):
-        MeteredLM(lm, _ignore)(messages=[{"role": "user", "content": "pi"}])
+        SandboxLM(lm, _ignore)(messages=[{"role": "user", "content": "pi"}])
 
 
-def test_metered_lm_copy_stays_metered() -> None:
-    # DSPy's facade copies the configured LM; a copy must keep the proxy and its reserve callback.
+def test_sandbox_lm_copy_keeps_its_reserve_callback() -> None:
+    # DSPy's facade copies the configured LM and retains the host-side budget callback.
     charged = []
-    copy = MeteredLM(ScriptedLM(["[[ ## answer ## ]]\n42"]), charged.append).copy(rollout_id=1)
-    assert type(copy) is MeteredLM and copy.kwargs["rollout_id"] == 1
+    copy = SandboxLM(ScriptedLM(["[[ ## answer ## ]]\n42"]), charged.append).copy(rollout_id=1)
+    assert type(copy) is SandboxLM and copy.kwargs["rollout_id"] == 1
 
-    with _deprecation_errors():
+    with pytest.warns(DeprecationWarning, match="OpenAI-style message dictionaries"):
         assert _invoke(FleetRLMChatAdapter(), copy, dspy.Signature("task -> answer")) == [{"answer": "42"}]
     assert charged == [1]

@@ -23,6 +23,67 @@ def toml(text):
     Path("config/fleet.toml").write_text("[config]\nschema_version = 4\n" + text)
 
 
+def test_gateway_claude_reflection_uses_native_json_prompt_without_forced_tools(monkeypatch):
+    import dspy
+
+    settings = FleetSettings(
+        _env_file=None,
+        databricks_host="https://workspace.example",
+        databricks_token="private-test-token",
+        fleet_reflection_model="openai/system.ai.claude-haiku-5-5",
+    )
+    root, _sub, reflection, _jev = settings.build_lms()
+    calls = []
+
+    def complete(_self, **kwargs):
+        calls.append(kwargs)
+        return ['{"answer":"valid-json"}']
+
+    monkeypatch.setattr(dspy.LM, "__call__", complete)
+    with dspy.context(lm=reflection, adapter=dspy.JSONAdapter()):
+        assert dspy.Predict("task -> answer")(task="fixture").answer == "valid-json"
+    assert "response_format" not in calls[0]
+    assert root.model == settings.fleet_root_model
+    assert type(reflection) is dspy.LM
+    assert reflection.copy().model == reflection.model
+    assert reflection.kwargs["api_key"] == "private-test-token"
+    assert "private-test-token" not in str(reflection.dump_state())
+
+
+@pytest.mark.parametrize(
+    ("databricks_host", "base_url", "model", "gateway_claude"),
+    [
+        ("https://first.example", None, "openai/system.ai.claude-haiku-5-5", True),
+        ("https://second.example", None, "openai/system.ai.claude-haiku-5-5", True),
+        (
+            "https://workspace.example",
+            None,
+            "openai/system.ai.deepseek-v4-pro-0813",
+            False,
+        ),
+        ("", "https://compatible.example/v1", "openai/claude-haiku-5-5", False),
+    ],
+)
+def test_reflection_declarations_preserve_provider_routing_and_repeatability(
+    databricks_host, base_url, model, gateway_claude
+):
+    settings = FleetSettings(
+        _env_file=None,
+        databricks_host=databricks_host,
+        fleet_llm_base_url=base_url or "",
+        databricks_token="test",
+        fleet_reflection_model=model,
+    )
+    first = settings.build_lms()[2]
+    second = settings.build_lms()[2]
+    assert first.model == second.model
+    if gateway_claude:
+        assert first.model.startswith("fleet-gateway-reflection-")
+        assert "response_format" not in first.supported_params
+    else:
+        assert first.model == model
+
+
 def test_sources_and_aliases_have_one_precedence(monkeypatch):
     toml("[runtime]\nmax_llm_calls_per_turn = 41\n")
     assert FleetSettings(_env_file=None).max_llm_calls_per_turn == 41

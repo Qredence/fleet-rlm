@@ -33,8 +33,9 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
 
     from pydantic_core import to_jsonable_python
 
+    from fleet_rlm.contracts import Route
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
-    from fleet_rlm.engine.signatures import FleetTask, Route
+    from fleet_rlm.engine.signatures import FleetTask
 
     raw = b"__FILE_BODY_ONLY__,value\none,11\ntwo,17\n"
     sandbox.fs.upload_file(raw, "/workspace/files/selected.csv")
@@ -102,8 +103,9 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
 @pytest.mark.parametrize("route", ["rlm", "flex"])
 @pytest.mark.parametrize("failure", ["missing", "changed"])
 def test_dataset_initialization_failure_closes_native_interpreters(sandbox, route, failure, monkeypatch):
+    from fleet_rlm.contracts import Route
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
-    from fleet_rlm.engine.signatures import FleetTask, Route
+    from fleet_rlm.engine.signatures import FleetTask
 
     if failure == "changed":
         sandbox.fs.upload_file(b"changed", "/workspace/files/selected.txt")
@@ -143,6 +145,14 @@ def manager_on(sandbox, events=None, name="interp-test", claim=None) -> DaytonaS
     manager._sandbox = sandbox
     manager._client = SimpleNamespace(stop=lambda stopped, **_kwargs: STOPPED.append(stopped.id))
     return manager
+
+
+def test_batched_queries_use_scoped_lm_when_manager_has_no_sub_lm(sandbox):
+    manager = manager_on(sandbox)
+    lm = lambda prompt: [f"reply:{prompt}"]  # noqa: E731
+    with dspy.context(lm=lm):
+        interpreter = DaytonaInterpreter(manager)
+        assert interpreter._llm_query_batched([["one", "two"]], {}) == ["reply:one", "reply:two"]
 
 
 @contextmanager
@@ -235,11 +245,30 @@ def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch
     assert span["attributes"]["phase"] == "task" and span["attributes"]["namespace"] == interpreter.ns_id
     assert span["attributes"]["outcome"] == "completed"
     names = [item["name"] for item in spans]
-    assert "sandbox.provision" in names and "sandbox.namespace_prepare" in names
+    # A manager whose sandbox is already live is not "provisioning": a Turn calls this repeatedly,
+    # and tracing each reuse buried a real trace under no-op spans.
+    assert "sandbox.provision" not in names and "sandbox.namespace_prepare" in names
     prepared = next(item for item in spans if item["name"] == "sandbox.namespace_prepare")
     assert prepared["attributes"]["namespace"] == interpreter.ns_id
     assert prepared["attributes"]["agent_id"] == interpreter.manager.agent_id
     assert prepared["outputs"]["completed"] is True
+
+
+def test_provisioning_is_traced_only_when_it_creates_the_sandbox(sandbox, monkeypatch):
+    spans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        interpreter_module.mlflow, "start_span", lambda name, span_type: recording_span(spans, name, span_type)
+    )
+    manager = manager_on(sandbox)
+    manager._sandbox = None
+    # The manager uses slots, so the provisioning call is replaced on the class, not the instance.
+    monkeypatch.setattr(type(manager), "_ensure_sandbox", lambda _self: sandbox)
+
+    assert manager.ensure_sandbox() is sandbox
+    [provision] = [span for span in spans if span["name"] == "sandbox.provision"]
+    assert provision["attributes"]["action"] == "create"
+    assert provision["inputs"] == {"operation": "sandbox.provision"}
+    assert provision["outputs"] == {"completed": True}
 
 
 def test_sandbox_skill_receipts_reach_the_progressive_disclosure_scorer(sandbox, monkeypatch):
@@ -536,8 +565,9 @@ def test_should_accept_note_constants_without_weakening_substantive_grounding(sa
 
 def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sandbox):
     """Native Evaluate/RLM contract over recorded output; no claim of improved live model behavior."""
-    from fleet_rlm.dspy_support import MeteredLM
-    from fleet_rlm.engine.signatures import STOPPING_RULES
+    from dspy.primitives.facade import SandboxLM
+
+    from fleet_rlm.contracts import STOPPING_RULES
 
     fixture = json.loads((Path(__file__).parents[1] / "fixtures/pi_digit_trace.json").read_text())
     events = []
@@ -555,7 +585,7 @@ def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sa
     signature = dspy.Signature("task -> answer, learned_skill_note").with_instructions(STOPPING_RULES)
     rlm = dspy.RLM(signature, interpreter_factory=lambda: DaytonaInterpreter(manager), max_iters=3)
     example = dspy.Example(task=fixture["task"], answer=fixture["answer"]).with_inputs("task")
-    with dspy.context(lm=MeteredLM(lm, manager.consume_budget), disable_history=True):
+    with dspy.context(lm=SandboxLM(lm, manager.consume_budget), disable_history=True):
         result = dspy.Evaluate(devset=[example], metric=dspy.evaluate.answer_exact_match, num_threads=1)(rlm)
     assert result.score == 100
     prediction = result.results[0][1]
@@ -579,53 +609,29 @@ def _environment_probe(missing: list[str], environment: str = _OBSERVED_ENVIRONM
     return json.dumps({"digests": {}, "notes": [], "environment": environment, "missing": missing}, sort_keys=True)
 
 
-def test_environment_incomplete_event_is_emitted_once_per_session(sandbox, monkeypatch):
+def _install_environment_probe(monkeypatch, missing: list[str] = _OBSERVED_MISSING) -> None:
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: _environment_probe(missing))
+
+
+@pytest.mark.parametrize(
+    ("missing", "turn_count", "event_count"),
+    [(_OBSERVED_MISSING, 3, 1), ([], 1, 0), (["scipy"], 1, 1)],
+    ids=["reported-once-per-session", "complete-environment", "single-missing-module"],
+)
+def test_environment_incomplete_event_reports_missing_modules_once_without_failing(
+    sandbox, monkeypatch, missing, turn_count, event_count
+):
     events: list[dict[str, Any]] = []
     manager = manager_on(sandbox, events)
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
-    )
+    _install_environment_probe(monkeypatch, missing)
 
-    turns = [manager.turn_inputs() for _ in range(3)]
+    turns = [manager.turn_inputs() for _ in range(turn_count)]
 
     observed = [event for event in events if event["event"] == "sandbox_environment_incomplete"]
-    assert len(observed) == 1
-    assert observed[0]["missing"] == _OBSERVED_MISSING
+    assert len(observed) == event_count
+    if missing:
+        assert observed[0]["missing"] == missing
     assert all(turn["environment"] == _OBSERVED_ENVIRONMENT for turn in turns)
-    assert manager.turn_usage()["sandbox_errors"] == 0
-
-
-def test_environment_incomplete_event_is_absent_when_nothing_is_missing(sandbox, monkeypatch):
-    events: list[dict[str, Any]] = []
-    manager = manager_on(sandbox, events)
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe([]),
-    )
-
-    inputs = manager.turn_inputs()
-
-    assert [event for event in events if event["event"] == "sandbox_environment_incomplete"] == []
-    assert inputs["environment"] == _OBSERVED_ENVIRONMENT
-
-
-def test_environment_incomplete_event_reports_a_single_absent_module_without_failing(sandbox, monkeypatch):
-    events: list[dict[str, Any]] = []
-    manager = manager_on(sandbox, events)
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe(["scipy"]),
-    )
-
-    inputs = manager.turn_inputs()
-
-    [observed] = [event for event in events if event["event"] == "sandbox_environment_incomplete"]
-    assert observed["missing"] == ["scipy"]
-    assert inputs["environment"] == _OBSERVED_ENVIRONMENT
     assert manager.turn_usage()["sandbox_errors"] == 0
 
 
@@ -645,11 +651,7 @@ class _DurableEnvironmentClaims:
 def test_environment_incomplete_event_survives_runtime_release_and_reopen(sandbox, monkeypatch):
     events: list[dict[str, Any]] = []
     claims = _DurableEnvironmentClaims()
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
-    )
+    _install_environment_probe(monkeypatch)
 
     first = manager_on(sandbox, events, claim=claims)
     first.turn_inputs()
@@ -668,11 +670,7 @@ def test_environment_incomplete_event_survives_runtime_release_and_reopen(sandbo
 def test_environment_incomplete_event_survives_a_lease_loss_rebuild(sandbox, monkeypatch):
     events: list[dict[str, Any]] = []
     claims = _DurableEnvironmentClaims()
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe(["scipy"]),
-    )
+    _install_environment_probe(monkeypatch, ["scipy"])
 
     manager_on(sandbox, events, claim=claims).turn_inputs()
     rebuilt = manager_on(sandbox, events, claim=claims)
@@ -686,11 +684,7 @@ def test_environment_incomplete_event_survives_a_lease_loss_rebuild(sandbox, mon
 def test_environment_incomplete_event_is_not_duplicated_after_release_but_a_new_session_emits(sandbox, monkeypatch):
     events: list[dict[str, Any]] = []
     claims = _DurableEnvironmentClaims()
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
-    )
+    _install_environment_probe(monkeypatch)
 
     original = manager_on(sandbox, events, claim=claims)
     original.turn_inputs()
@@ -710,11 +704,7 @@ def test_environment_incomplete_event_emits_nothing_when_the_durable_marker_is_a
     events: list[dict[str, Any]] = []
     claims = _DurableEnvironmentClaims()
     claims.reported.add("interp-test")
-    monkeypatch.setattr(
-        DaytonaSandboxManager,
-        "exec_remote_python",
-        lambda _self, _code: _environment_probe(_OBSERVED_MISSING),
-    )
+    _install_environment_probe(monkeypatch)
 
     manager_on(sandbox, events, claim=claims).turn_inputs()
 

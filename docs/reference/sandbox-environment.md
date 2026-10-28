@@ -1,7 +1,10 @@
 # Sandbox environment
 
 Fleet defines the Python 3.13 snapshot in
-[`sandbox/snapshots/definition.py`](../../src/fleet_rlm/sandbox/snapshots/definition.py).
+[`sandbox/snapshots.py`](../../src/fleet_rlm/sandbox/snapshots.py).
+That module owns the recipe, readiness cache/provenance, and explicit build/activate
+operations. Configuration and credential resolution for operator actions remain
+lazy; importing metadata neither initializes a provider client nor builds an image.
 The resource floors remain 4 vCPU, 8 GiB RAM, and 8 GiB disk. Generated code,
 package preparation, file access, and Git commands execute in Daytona; credentials
 and host-mediated model clients remain on the server.
@@ -22,10 +25,17 @@ Existing projects should use their own dependency manifests for project-specific
 requirements. Fleet's workspace helper and ordinary Python file APIs already
 provide sandbox filesystem access; Git CLI commands run through subprocesses.
 
+Turn preparation spans report character counts for the task, workspace manifest,
+Skill catalog, memory summary, Session history, and dataset preview. These are
+input-size indicators, not per-model token attribution. The
+`sandbox.workspace_inventory` and `sandbox.artifact_collection` spans separately
+time managed file listing and evidence collection and report counts, not file
+names or contents. Model-call spans retain their existing usage and duration data.
+
 The curated input is
 [`config/daytona-snapshot-requirements.in`](../../config/daytona-snapshot-requirements.in).
 Its header contains the uv command to regenerate the Linux/Python 3.13
-[`snapshot-requirements.txt`](../../src/fleet_rlm/sandbox/snapshots/snapshot-requirements.txt)
+[`snapshot-requirements.txt`](../../src/fleet_rlm/sandbox/snapshot-requirements.txt)
 lock. The lock pins the complete Python dependency closure and artifact hashes;
 image builds require hashes and binary wheels and discard the pip download cache.
 The Python base image is pinned by OCI digest. The definition digest also records
@@ -45,12 +55,18 @@ Discovery and activation do not install packages.
 Fleet bundles a small set of Skills that guide common file-analysis and agent
 workflows: [tabular analysis](../../src/fleet_rlm/bundled_skills/tabular-analysis/SKILL.md),
 [long-context search](../../src/fleet_rlm/bundled_skills/long-context-search/SKILL.md),
-[delegation](../../src/fleet_rlm/bundled_skills/delegation/SKILL.md), and
-[Skill authoring](../../src/fleet_rlm/bundled_skills/skill-creator/SKILL.md).
+[delegation](../../src/fleet_rlm/bundled_skills/delegation/SKILL.md),
+[Skill authoring](../../src/fleet_rlm/bundled_skills/skill-creator/SKILL.md), and
+[public repository inspection](../../src/fleet_rlm/bundled_skills/repository-inspection/SKILL.md).
 They are instructions and optional resources, not server-side tools or automatic
 package installers. User Skills in `.fleet/skills/` can extend them and override
 a bundled Skill by name. `.agents/skills/` remains developer guidance and is not
 synchronized.
+
+The repository inspection Skill uses a commit-pinned GitHub source archive in
+temporary sandbox storage. Its measured comparison with Daytona Git acquisition
+is recorded in the [comparison runbook](../runbooks/daytona-repository-comparison.md);
+the result is specific to that repository, commit, snapshot, and run.
 
 ## Preflight and recorded identity
 
@@ -82,7 +98,7 @@ snapshot change. Live Daytona work requires explicit authorization. The operator
 setup action **Build snapshot** uses the packaged recipe and streams provider logs
 and uses a 20-minute wait by default; pass a positive finite timeout or another
 callback through the Python operator API in
-`fleet_rlm.sandbox.snapshots.operations`. The TUI uses the FastAPI setup routes.
+`fleet_rlm.sandbox.snapshots`. The TUI uses the FastAPI setup routes.
 
 A wait timeout does not prove the remote build stopped. Inspect the existing
 snapshot with **Verify** in `/setup` before deciding whether to retry; do not

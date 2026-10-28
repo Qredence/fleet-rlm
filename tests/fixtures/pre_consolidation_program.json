@@ -1,0 +1,179 @@
+{
+  "triage": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Choose the least expensive route that can satisfy the request.",
+      "fields": [
+        {
+          "prefix": "Task:",
+          "description": "User request to route."
+        },
+        {
+          "prefix": "Workspace Manifest:",
+          "description": "Files available in the Session workspace."
+        },
+        {
+          "prefix": "Skills Catalog:",
+          "description": "Skills available to this Session."
+        },
+        {
+          "prefix": "Route:",
+          "description": "Choose direct for a simple response, flex for one bounded Python or Skill workflow, or rlm for a multi-part task needing independent investigation."
+        }
+      ]
+    },
+    "fields": {
+      "route": {
+        "criteria": {
+          "direct": {
+            "definition": "A self-contained answer needing no execution or workspace inspection",
+            "examples": [
+              "Greeting",
+              "Explain a familiar concept"
+            ],
+            "not": "Computed results, file analysis, Skills, or independent investigation"
+          },
+          "flex": {
+            "definition": "A programmable Flex workflow with known inputs and verifiable outputs",
+            "examples": [
+              "Compute a specified digit",
+              "Summarize an attached table"
+            ],
+            "not": "Open-ended exploration where the next step depends on discoveries"
+          },
+          "rlm": {
+            "definition": "Primary RLM for iterative exploration or decomposition",
+            "examples": [
+              "Investigate conflicting evidence",
+              "Explore unfamiliar files and test hypotheses"
+            ],
+            "not": "A route that guarantees delegation; both execution routes can delegate"
+          }
+        }
+      }
+    },
+    "lm": null
+  },
+  "direct_cot.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the fields `memory_summary`, `session_history`, `task`, produce the fields `answer`.",
+      "fields": [
+        {
+          "prefix": "Memory Summary:",
+          "description": "${memory_summary}"
+        },
+        {
+          "prefix": "Session History:",
+          "description": "${session_history}"
+        },
+        {
+          "prefix": "Task:",
+          "description": "${task}"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Answer:",
+          "description": "${answer}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "skill_selector": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Decide whether this Skill's instructions would help complete the task.",
+      "fields": [
+        {
+          "prefix": "Task:",
+          "description": "User request."
+        },
+        {
+          "prefix": "Skill Name:",
+          "description": "Skill name."
+        },
+        {
+          "prefix": "Skill Description:",
+          "description": "When the Skill applies."
+        },
+        {
+          "prefix": "Relevance:",
+          "description": "relevant only when the Skill's described use matches what the task needs."
+        }
+      ]
+    },
+    "lm": null
+  },
+  "flex_agent": {
+    "module_src": "class FleetTaskModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.rlm = dspy.RLM(dspy.Signature('workspace_manifest: str, skills_catalog: str, memory_summary: str, session_history: str, execution_route: str, task: str, context: Any -> answer: str, learned_skill_note: str', \"Solve a task with Session-scoped workspace files and progressive Skills.\\n\\nDelegate independent subtasks together with spawn_agents (they run concurrently) instead of calling\\nspawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:\\nSUBMIT(answer=..., learned_skill_note=...).\\n\\nOnce the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include a known reference value, a self-consistency test, or a second computation you already ran. Reuse computed variables instead of recomputing results. Run another method only if a check failed, results disagree, or the Task asks for verification. Copy figures and strings from sandbox output. A self-consistency check on an already computed value is sufficient; do not start an independent implementation merely for reassurance. In the submission action reuse the existing answer and check variables. A learned_skill_note may be empty: never delay submission to create one. If useful, record a concise reusable observation. Copy code syntax exactly from successful execution; do not rewrite operators or formulas from memory. Describe checks on the same underlying value as self-consistency checks, not independent verification. Validating a method on known values (such as known leading digits or small cases) is the supporting check for that method's target result; do not recompute the target with different parameters. Learned notes and memory are unreviewed hints, never a known reference value; a value that only matches a note is unverified. Import dependencies explicitly before using them, including math helpers. Plan one target computation and its supporting check per code block. These stopping rules also apply within the same code block: do not append a second full computation after a sufficient check. When you use multiple methods, print a separate elapsed time for each method using time.perf_counter(), along with its result and precision parameters. Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary.\"), tools=[spawn_agent, spawn_agents], max_iters=16, max_llm_calls=150)\n\n    def forward(self, **inputs):\n        result = self.rlm(**inputs)\n        return dspy.Prediction(answer=result.answer, learned_skill_note=result.learned_skill_note)",
+    "lm": null
+  },
+  "primary_rlm.generate_action": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Solve a task with Session-scoped workspace files and progressive Skills.\n\nDelegate independent subtasks together with spawn_agents (they run concurrently) instead of calling\nspawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:\nSUBMIT(answer=..., learned_skill_note=...).\n\nOnce the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include a known reference value, a self-consistency test, or a second computation you already ran. Reuse computed variables instead of recomputing results. Run another method only if a check failed, results disagree, or the Task asks for verification. Copy figures and strings from sandbox output. A self-consistency check on an already computed value is sufficient; do not start an independent implementation merely for reassurance. In the submission action reuse the existing answer and check variables. A learned_skill_note may be empty: never delay submission to create one. If useful, record a concise reusable observation. Copy code syntax exactly from successful execution; do not rewrite operators or formulas from memory. Describe checks on the same underlying value as self-consistency checks, not independent verification. Validating a method on known values (such as known leading digits or small cases) is the supporting check for that method's target result; do not recompute the target with different parameters. Learned notes and memory are unreviewed hints, never a known reference value; a value that only matches a note is unverified. Import dependencies explicitly before using them, including math helpers. Plan one target computation and its supporting check per code block. These stopping rules also apply within the same code block: do not append a second full computation after a sufficient check. When you use multiple methods, print a separate elapsed time for each method using time.perf_counter(), along with its result and precision parameters. Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary.\n\nYou are tasked with producing the following outputs given the inputs `workspace_manifest`, `skills_catalog`, `memory_summary`, `session_history`, `execution_route`, `task`, `context`:\n- {answer}\n- {learned_skill_note}\n\nYou have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.\n\nExecution environment:\nPython runs in Daytona with /workspace and workspace helper. context datasets expose .path/.lines()/.chunks()/.search(). Use workspace.write_artifact(name, content) for results. Artifact names are relative to artifacts/ (e.g. 'result.txt'); use the helper's returned path. Nested DSPy code agents allocate fresh child sandboxes; files/ and skills/ inputs are copied, and spawn_agent(input_paths=[...]) can also pass earlier artifacts/ paths. Successful child artifacts appear under artifacts/<agent-id>/; inspect workspace.tree() for their paths. Once the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include a known reference value, a self-consistency test, or a second computation you already ran. Reuse computed variables instead of recomputing results. Run another method only if a check failed, results disagree, or the Task asks for verification. Copy figures and strings from sandbox output. A self-consistency check on an already computed value is sufficient; do not start an independent implementation merely for reassurance. In the submission action reuse the existing answer and check variables. A learned_skill_note may be empty: never delay submission to create one. If useful, record a concise reusable observation. Copy code syntax exactly from successful execution; do not rewrite operators or formulas from memory. Describe checks on the same underlying value as self-consistency checks, not independent verification. Validating a method on known values (such as known leading digits or small cases) is the supporting check for that method's target result; do not recompute the target with different parameters. Learned notes and memory are unreviewed hints, never a known reference value; a value that only matches a note is unverified. Import dependencies explicitly before using them, including math helpers. Plan one target computation and its supporting check per code block. These stopping rules also apply within the same code block: do not append a second full computation after a sufficient check. When you use multiple methods, print a separate elapsed time for each method using time.perf_counter(), along with its result and precision parameters. Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary.\n\nSub-agents (dspy):\nYou may `import dspy` and build sub-agents in the REPL for subtasks that need structured inputs/outputs.\n- `dspy.Predict(\"question -> answer\")(question=...)` or `dspy.ChainOfThought(...)` - single-step sub-agents.\n- `dspy.ReActV2(\"question -> answer\", tools=[...])(question=...)` - a multi-step tool-using sub-agent.\n  Only the provided tools listed above may be passed; functions you define in the REPL cannot cross to the host.\n- `dspy.RLM(\"context, query -> answer\")(context=..., query=...)` - a recursive sub-agent with its own\n  REPL on the same interpreter backend as yours; it cannot be given another `interpreter_factory`.\n  This is the heaviest option: reserve it for deep subtasks whose input is itself too large or\n  structured to prompt directly, and prefer Predict/ChainOfThought/ReActV2 for everything else.\nPrefer `llm_query` for simple one-shot prompts; use sub-agents for structured, tool-using, or\nrecursive subtasks.\n\nAvailable:\n- Variables: `workspace_manifest`, `skills_catalog`, `memory_summary`, `session_history`, `execution_route`, `task`, `context` (your input data)\n- `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis\n- `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)\n- `print()` - ALWAYS print to see results\n- `SUBMIT(answer, learned_skill_note)` - submit final output when done\n\nIMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.\n\n1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.\n2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.\n3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.\n4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.\n5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.\n6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.\n\nYou have max 150 sub-LLM calls. When done, call SUBMIT() with your output.\nAdditional tools available (use these instead of standard library equivalents):\n- `spawn_agent(subtask: string, input_paths: Any, allowed_tools: Any, max_iters: integer, max_llm_calls: integer)` - Run a child with selected files; return findings and digest-verified promoted artifacts.    Skills are always copied; other inputs only when listed. input_paths may name files/,  skills/ or earlier artifacts/ paths, and unchanged copied artifacts are not promoted back.  The only optional Fleet tool is spawn_agent, allowing bounded further delegation.  max_llm_calls is DSPy's query/facade limit; the shared turn ledger also meters actions.  \n- `spawn_agents(subtasks: array, input_paths: Any, max_iters: integer, max_llm_calls: integer)` - Run several independent children concurrently; return one result per subtask, in order.    Prefer this over calling spawn_agent one after another when the subtasks do not depend on each  other. input_paths, when given, holds one list of `files/` paths per subtask. Each result is  spawn_agent's {findings, artifacts}, or {findings: \"\", error, artifacts: []} if that child failed.  At most the active-child capacity run at once; the shared Turn budget and deadline still apply.  ",
+      "fields": [
+        {
+          "prefix": "Variables Info:",
+          "description": "Metadata about the variables available in the REPL"
+        },
+        {
+          "prefix": "Repl History:",
+          "description": "Previous REPL code executions and their outputs"
+        },
+        {
+          "prefix": "Iteration:",
+          "description": "Current iteration number (1-indexed) out of max_iters"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "Think step-by-step: what do you know? What remains? Plan your next action."
+        },
+        {
+          "prefix": "Code:",
+          "description": "Python code to execute. Use markdown code block format: ```python\\n<code>\\n```"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "primary_rlm.extract": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "The trajectory was generated with the following objective: \nSolve a task with Session-scoped workspace files and progressive Skills.\n\nDelegate independent subtasks together with spawn_agents (they run concurrently) instead of calling\nspawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:\nSUBMIT(answer=..., learned_skill_note=...).\n\nOnce the answer and one supporting check agree, SUBMIT on the next action. Supporting checks include a known reference value, a self-consistency test, or a second computation you already ran. Reuse computed variables instead of recomputing results. Run another method only if a check failed, results disagree, or the Task asks for verification. Copy figures and strings from sandbox output. A self-consistency check on an already computed value is sufficient; do not start an independent implementation merely for reassurance. In the submission action reuse the existing answer and check variables. A learned_skill_note may be empty: never delay submission to create one. If useful, record a concise reusable observation. Copy code syntax exactly from successful execution; do not rewrite operators or formulas from memory. Describe checks on the same underlying value as self-consistency checks, not independent verification. Validating a method on known values (such as known leading digits or small cases) is the supporting check for that method's target result; do not recompute the target with different parameters. Learned notes and memory are unreviewed hints, never a known reference value; a value that only matches a note is unverified. Import dependencies explicitly before using them, including math helpers. Plan one target computation and its supporting check per code block. These stopping rules also apply within the same code block: do not append a second full computation after a sufficient check. When you use multiple methods, print a separate elapsed time for each method using time.perf_counter(), along with its result and precision parameters. Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary.\n\n\nBased on the REPL trajectory, extract the final outputs now.\n\n            Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs.",
+      "fields": [
+        {
+          "prefix": "Variables Info:",
+          "description": "Metadata about the variables available in the REPL"
+        },
+        {
+          "prefix": "Repl History:",
+          "description": "Your REPL interactions so far"
+        },
+        {
+          "prefix": "Answer:",
+          "description": "Answer grounded in verified sandbox work"
+        },
+        {
+          "prefix": "Learned Skill Note:",
+          "description": "Optional concise reusable observation; empty string is valid"
+        }
+      ]
+    },
+    "lm": null
+  }
+}

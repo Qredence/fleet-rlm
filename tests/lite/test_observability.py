@@ -83,12 +83,16 @@ def test_trace_shows_reasoning_text_but_streams_still_redact_it() -> None:
 
 
 def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
-    from fleet_rlm.dspy_support import without_mlflow_dspy_callback
+    from mlflow.dspy.callback import MlflowCallback
 
-    mlflow_callback = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
+    from fleet_rlm.observability import without_mlflow_dspy_callback
+
     sse_callback = object()
+    # Matching is by class identity, not by module/name strings, so a look-alike from elsewhere survives.
+    impostor = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
 
-    assert without_mlflow_dspy_callback([mlflow_callback, sse_callback]) == [sse_callback]
+    assert without_mlflow_dspy_callback([MlflowCallback(), sse_callback]) == [sse_callback]
+    assert without_mlflow_dspy_callback([impostor, sse_callback]) == [impostor, sse_callback]
 
 
 def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,9 +124,8 @@ def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **_kwargs: None)
     runtime = SimpleNamespace(
-        execution_mode="hybrid",
         configuration_overrides={},
-        engine=SimpleNamespace(root_lm=None, sub_lm=None),
+        engine=SimpleNamespace(execution_mode="hybrid", root_lm=None, sub_lm=None),
         sandbox_mgr=SimpleNamespace(
             turn_timeout_seconds=900,
             snapshot_provenance=identity.provenance,

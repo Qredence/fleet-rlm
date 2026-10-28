@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
-import os
 import re
 import shlex
-import subprocess
-import sys
-import xml.etree.ElementTree as ElementTree
+import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,10 +16,13 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 from fleet_rlm.config import FleetSettings, validate_turn_timeout_seconds
+from fleet_rlm.contracts import catalog_entries
+from fleet_rlm.optimization_runs import ExperimentOptions, add_search_arguments
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
 MODES = ("rlm", "flex", "hybrid")
@@ -46,15 +48,20 @@ class SessionState:
     fullscreen: bool = False
     setup_available: bool = False
     pending_model_choice: tuple[str, list[str]] | None = None
+    optimizer_launcher: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
+    optimizer_reviewer: Callable[[str, str, str], None] | None = field(default=None, repr=False)
+    experiments_opener: Callable[[], None] | None = field(default=None, repr=False)
+    pending_optimizer_request: dict[str, Any] | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
 class Context:
-    """HTTP client, Session ID, and mutable client SessionState that slash command handlers use."""
+    """HTTP client, Session ID, mutable client SessionState, and output Console that slash command handlers use."""
 
     client: httpx.Client
     session_id: str
     state: SessionState = field(default_factory=SessionState)
+    console: Console = field(default_factory=lambda: CONSOLE, repr=False)
 
     @property
     def session(self) -> str:
@@ -76,6 +83,10 @@ class Context:
     def delete(self, path: str, **kwargs: Any) -> httpx.Response:
         """Send a DELETE request, raising on an HTTP error status."""
         return _ok(self.client.delete(path, **kwargs))
+
+
+def _out(ctx: Context) -> Console:
+    return getattr(ctx, "console", None) or CONSOLE
 
 
 def _ok(response: httpx.Response) -> httpx.Response:
@@ -169,25 +180,25 @@ def _config(ctx: Context, arg: str) -> None:
             str(context["workspace_path"]) if isinstance(context, dict) and context.get("workspace_path") else None
         )
     if arg == "json" or not isinstance(data, dict):
-        CONSOLE.print(Panel(json.dumps(data, indent=2), title="Session configuration"))
+        _out(ctx).print(Panel(json.dumps(data, indent=2), title="Session configuration"))
         return
-    CONSOLE.print(Panel(_format_config_panel(data), title="Session configuration", border_style="cyan"))
+    _out(ctx).print(Panel(_format_config_panel(data), title="Session configuration", border_style="cyan"))
 
 
 def _models(ctx: Context, arg: str) -> None:
     scope = arg or "system.ai"
     models = ctx.get("/models", params={"scope": scope}).json()["models"]
-    CONSOLE.print(Panel("\n".join(models) or "(no accessible chat services)", title=f"Models · {scope}"))
+    _out(ctx).print(Panel("\n".join(models) or "(no accessible chat services)", title=f"Models · {scope}"))
 
 
 def apply_model_choice(ctx: Context, role: str, models: list[str], choice: str) -> None:
     """Validate a numbered model selection and bind it to `role`."""
     choice = choice.strip()
     if not choice:
-        CONSOLE.print("[dim]Model selection cancelled; unchanged.[/dim]")
+        _out(ctx).print("[dim]Model selection cancelled; unchanged.[/dim]")
         return
     if not choice.isdigit() or not 1 <= int(choice) <= len(models):
-        CONSOLE.print("[red]Invalid model selection; unchanged.[/red]")
+        _out(ctx).print("[red]Invalid model selection; unchanged.[/red]")
         return
     selected = models[int(choice) - 1]
     model = ctx.put(f"{ctx.session}/model", json={"role": role, "model": selected}).json()["model"]
@@ -195,28 +206,30 @@ def apply_model_choice(ctx: Context, role: str, models: list[str], choice: str) 
         ctx.state.root_model = str(model)
     else:
         ctx.state.sub_model = str(model)
-    CONSOLE.print(f"[green]{role.title()} model:[/green] {model}")
+    _out(ctx).print(f"[green]{role.title()} model:[/green] {model}")
 
 
 def _model(ctx: Context, arg: str) -> None:
     args = arg.split()
     role = args[0] if args else "root"
     if role not in {"root", "sub"} or len(args) > 2:
-        CONSOLE.print("[red]Usage: /model [root|sub] [model-id|catalog.schema][/red]")
+        _out(ctx).print("[red]Usage: /model [root|sub] [model-id|catalog.schema][/red]")
         return
     selected = args[1] if len(args) > 1 else ""
     if not selected.startswith("openai/"):
         models = list(ctx.get("/models", params={"scope": selected or "system.ai"}).json()["models"])
         if not models:
-            CONSOLE.print("[yellow]No accessible chat services. Model unchanged.[/yellow]")
+            _out(ctx).print("[yellow]No accessible chat services. Model unchanged.[/yellow]")
             return
         for index, name in enumerate(models, 1):
-            CONSOLE.print(f"{index}. {name}")
+            _out(ctx).print(f"{index}. {name}")
         if ctx.state.fullscreen:
             ctx.state.pending_model_choice = (role, models)
-            CONSOLE.print(f"[cyan]Select {role} model [1-{len(models)}; Enter cancels] in the input box below.[/cyan]")
+            _out(ctx).print(
+                f"[cyan]Select {role} model [1-{len(models)}; Enter cancels] in the input box below.[/cyan]"
+            )
             return
-        choice = CONSOLE.input(f"Select {role} model [1-{len(models)}; Enter cancels]: ").strip()
+        choice = _out(ctx).input(f"Select {role} model [1-{len(models)}; Enter cancels]: ").strip()
         apply_model_choice(ctx, role, models, choice)
         return
     model = ctx.put(f"{ctx.session}/model", json={"role": role, "model": selected}).json()["model"]
@@ -224,16 +237,16 @@ def _model(ctx: Context, arg: str) -> None:
         ctx.state.root_model = str(model)
     else:
         ctx.state.sub_model = str(model)
-    CONSOLE.print(f"[green]{role.title()} model:[/green] {model}")
+    _out(ctx).print(f"[green]{role.title()} model:[/green] {model}")
 
 
 def _attach(ctx: Context, arg: str) -> None:
     if not arg:
-        CONSOLE.print("[yellow]Usage: /attach <path>[/yellow]")
+        _out(ctx).print("[yellow]Usage: /attach <path>[/yellow]")
         return
     path = Path(arg).expanduser()
     if not path.is_file():
-        CONSOLE.print(f"[red]File not found:[/red] {path}")
+        _out(ctx).print(f"[red]File not found:[/red] {path}")
         return
     with path.open("rb") as handle:
         payload = ctx.post(f"{ctx.session}/attach", files={"file": (path.name, handle)}).json()
@@ -241,7 +254,7 @@ def _attach(ctx: Context, arg: str) -> None:
     rel_path = payload.get("rel_path") or f"files/{path.name}"
     if rel_path not in ctx.state.workspace_files:
         ctx.state.workspace_files.append(rel_path)
-    CONSOLE.print(f"[green]Attached:[/green] {mounted}")
+    _out(ctx).print(f"[green]Attached:[/green] {mounted}")
 
 
 def _listing(key: str, title: str, path: str) -> Callable[[Context, str], None]:
@@ -254,50 +267,45 @@ def _listing(key: str, title: str, path: str) -> Callable[[Context, str], None]:
             f"{item}  [active context]" if ctx.state.context_path and item == ctx.state.context_path else str(item)
             for item in items
         ]
-        CONSOLE.print(Panel("\n".join(lines) or "(empty)", title=title))
+        _out(ctx).print(Panel("\n".join(lines) or "(empty)", title=title))
 
     return run
 
 
 def _format_skills_catalog(catalog_xml: str) -> str:
-    """Format XML skill catalog entries into readable lines when valid XML is returned."""
-    try:
-        root = ElementTree.fromstring(catalog_xml)
-    except ElementTree.ParseError:
+    """Format catalog entries into readable lines when valid XML is returned."""
+    entries = catalog_entries(catalog_xml)
+    if entries is None:
         return catalog_xml or "(empty)"
-    skills = [
-        f"• {item.get('name')}: {' '.join((item.text or '').split())}"
-        for item in root.iter("skill")
-        if item.get("name")
-    ]
+    skills = [f"• {name}: {' '.join(description.split())}" for name, description in entries]
     return "\n".join(skills) if skills else (catalog_xml or "(no skills in catalog)")
 
 
 def _skills(ctx: Context, arg: str) -> None:
     params = {"session_id": ctx.session_id}
     if arg == "pull":
-        CONSOLE.print(f"[green]Exported:[/green] {ctx.post('/skills/pull', params=params).json()['exported']}")
+        _out(ctx).print(f"[green]Exported:[/green] {ctx.post('/skills/pull', params=params).json()['exported']}")
     elif arg == "push":
-        CONSOLE.print(f"[green]Pushed:[/green] {ctx.post('/skills/push', params=params).json()['pushed']} Skills")
+        _out(ctx).print(f"[green]Pushed:[/green] {ctx.post('/skills/push', params=params).json()['pushed']} Skills")
     else:
         catalog_xml = ctx.get("/skills", params=params).json()["catalog_xml"]
-        CONSOLE.print(Panel(_format_skills_catalog(catalog_xml), title="Session Agent Skills"))
+        _out(ctx).print(Panel(_format_skills_catalog(catalog_xml), title="Session Agent Skills"))
 
 
 def _cat(ctx: Context, arg: str) -> None:
     if not arg:
-        CONSOLE.print("[yellow]Usage: /cat <path>[/yellow]")
+        _out(ctx).print("[yellow]Usage: /cat <path>[/yellow]")
         return
     response = ctx.get(f"{ctx.session}/workspace/files/{_file(arg)}")
-    CONSOLE.print(Panel(response.content.decode("utf-8", errors="replace"), title=arg))
+    _out(ctx).print(Panel(response.content.decode("utf-8", errors="replace"), title=arg))
 
 
 def _stat(ctx: Context, arg: str) -> None:
     if not arg:
-        CONSOLE.print("[yellow]Usage: /stat <path>[/yellow]")
+        _out(ctx).print("[yellow]Usage: /stat <path>[/yellow]")
         return
     item = ctx.get(f"{ctx.session}/workspace/stat/{_file(arg)}").json()
-    CONSOLE.print(f"{item['path']}: {item['size_bytes']} bytes, sha256={item['sha256']}")
+    _out(ctx).print(f"{item['path']}: {item['size_bytes']} bytes, sha256={item['sha256']}")
 
 
 def _put(ctx: Context, arg: str) -> None:
@@ -308,11 +316,11 @@ def _put(ctx: Context, arg: str) -> None:
     """
     args = shlex.split(arg)
     if not args:
-        CONSOLE.print("[yellow]Usage: /put <local-path> [workspace-path][/yellow]")
+        _out(ctx).print("[yellow]Usage: /put <local-path> [workspace-path][/yellow]")
         return
     source = Path(args[0]).expanduser()
     if not source.is_file():
-        CONSOLE.print(f"[red]File not found:[/red] {source}")
+        _out(ctx).print(f"[red]File not found:[/red] {source}")
         return
     destination = args[1] if len(args) > 1 else f"files/{source.name}"
     content = source.read_bytes()
@@ -322,7 +330,7 @@ def _put(ctx: Context, arg: str) -> None:
     )
     if destination not in ctx.state.workspace_files:
         ctx.state.workspace_files.append(destination)
-    CONSOLE.print(f"[green]Written:[/green] {destination}")
+    _out(ctx).print(f"[green]Written:[/green] {destination}")
 
 
 def _get(ctx: Context, arg: str) -> None:
@@ -333,30 +341,30 @@ def _get(ctx: Context, arg: str) -> None:
     """
     args = shlex.split(arg)
     if not args:
-        CONSOLE.print("[yellow]Usage: /get <workspace-path> [local-path][/yellow]")
+        _out(ctx).print("[yellow]Usage: /get <workspace-path> [local-path][/yellow]")
         return
     target = Path(args[1]).expanduser() if len(args) > 1 else Path(Path(args[0]).name)
     target.write_bytes(ctx.get(f"{ctx.session}/workspace/files/{_file(args[0])}").content)
-    CONSOLE.print(f"[green]Downloaded:[/green] {target}")
+    _out(ctx).print(f"[green]Downloaded:[/green] {target}")
 
 
 def _rm(ctx: Context, arg: str) -> None:
     if not arg:
-        CONSOLE.print("[yellow]Usage: /rm <path>[/yellow]")
+        _out(ctx).print("[yellow]Usage: /rm <path>[/yellow]")
         return
     ctx.delete(f"{ctx.session}/workspace/files/{_file(arg)}")
     if arg in ctx.state.workspace_files:
         ctx.state.workspace_files.remove(arg)
     if ctx.state.context_path == arg:
         ctx.state.context_path = None
-    CONSOLE.print(f"[green]Deleted:[/green] {arg}")
+    _out(ctx).print(f"[green]Deleted:[/green] {arg}")
 
 
 def _mode(ctx: Context, arg: str) -> None:
     response = ctx.put(f"{ctx.session}/mode", json={"mode": arg}) if arg else ctx.get(f"{ctx.session}/mode")
     mode = str(response.json()["mode"])
     ctx.state.mode = mode
-    CONSOLE.print(f"[cyan]Execution mode:[/cyan] {mode}")
+    _out(ctx).print(f"[cyan]Execution mode:[/cyan] {mode}")
 
 
 def _history(ctx: Context, _arg: str) -> None:
@@ -374,7 +382,7 @@ def _history(ctx: Context, _arg: str) -> None:
             ctx.state.last_turn_id = str(item["turn_id"])
         header = f"[{' · '.join(meta_parts)}] {item.get('task', '')}"
         entries.append(f"{header}\n{item.get('answer', '')}")
-    CONSOLE.print(Panel("\n\n".join(entries) or "(empty)", title="Session history"))
+    _out(ctx).print(Panel("\n\n".join(entries) or "(empty)", title="Session history"))
 
 
 def _memory(ctx: Context, arg: str) -> None:
@@ -386,7 +394,7 @@ def _memory(ctx: Context, arg: str) -> None:
             f"[{item.get('kind', 'memory')}] {item.get('content', '')}\n"
             f"ID: {item.get('memory_id', 'unknown')} · {status}"
         )
-    CONSOLE.print(Panel("\n\n".join(entries) or "(no saved memories)", title="Saved memories"))
+    _out(ctx).print(Panel("\n\n".join(entries) or "(no saved memories)", title="Saved memories"))
 
 
 def _trace(ctx: Context, _arg: str) -> None:
@@ -395,15 +403,15 @@ def _trace(ctx: Context, _arg: str) -> None:
     if traced:
         trace_id = traced[-1].get("trace_id") or traced[-1].get("mlflow_trace_id")
         ctx.state.last_trace_id = str(trace_id)
-        CONSOLE.print(f"[dim]Persisted MLflow trace ID:[/dim] {trace_id}")
+        _out(ctx).print(f"[dim]Persisted MLflow trace ID:[/dim] {trace_id}")
     else:
-        CONSOLE.print("[yellow]Trace unavailable:[/yellow] saved turn history contains no trace ID.")
+        _out(ctx).print("[yellow]Trace unavailable:[/yellow] saved turn history contains no trace ID.")
 
 
 def _turn(ctx: Context, arg: str) -> None:
     turn_id = arg or ctx.state.last_turn_id
     if not turn_id:
-        CONSOLE.print("[yellow]Usage: /turn <turn-id> (no Turn ID recorded in this client session yet)[/yellow]")
+        _out(ctx).print("[yellow]Usage: /turn <turn-id> (no Turn ID recorded in this client session yet)[/yellow]")
         return
     data = ctx.get(f"{ctx.session}/turns/{quote(turn_id, safe='')}").json()
     status = str(data.get("status", "unknown"))
@@ -422,20 +430,20 @@ def _turn(ctx: Context, arg: str) -> None:
     elif result.get("error"):
         lines.append(f"\nError:\n{result['error']}")
     style = "green" if status == "completed" else ("yellow" if status in {"running", "cancelled"} else "red")
-    CONSOLE.print(Panel(Text("\n".join(lines)), title=f"Turn status · {status}", border_style=style))
+    _out(ctx).print(Panel(Text("\n".join(lines)), title=f"Turn status · {status}", border_style=style))
 
 
 def _replay(ctx: Context, arg: str) -> None:
     if not arg:
         state_label = "enabled" if ctx.state.record_replay else "disabled"
-        CONSOLE.print(f"[cyan]Replay capture:[/cyan] {state_label}")
+        _out(ctx).print(f"[cyan]Replay capture:[/cyan] {state_label}")
         return
     if arg not in {"on", "off"}:
-        CONSOLE.print("[yellow]Usage: /replay on|off[/yellow]")
+        _out(ctx).print("[yellow]Usage: /replay on|off[/yellow]")
         return
     ctx.state.record_replay = arg == "on"
     state = "enabled for subsequent Turns" if ctx.state.record_replay else "disabled"
-    CONSOLE.print(f"[dim]Replay capture {state}.[/dim]")
+    _out(ctx).print(f"[dim]Replay capture {state}.[/dim]")
 
 
 def _timeout(ctx: Context, arg: str) -> None:
@@ -448,99 +456,160 @@ def _timeout(ctx: Context, arg: str) -> None:
             label = "off (no Fleet deadline)"
         else:
             label = f"{current}s"
-        CONSOLE.print(f"[cyan]Client timeout:[/cyan] {label}  [dim](use /timeout <seconds|off|default>)[/dim]")
+        _out(ctx).print(f"[cyan]Client timeout:[/cyan] {label}  [dim](use /timeout <seconds|off|default>)[/dim]")
         return
     if arg == "default":
         ctx.state.timeout_seconds = None
-        CONSOLE.print("[green]Timeout override cleared:[/green] subsequent Turns inherit the server configuration.")
+        _out(ctx).print("[green]Timeout override cleared:[/green] subsequent Turns inherit the server configuration.")
         return
     if arg == "off":
         ctx.state.timeout_seconds = 0
-        CONSOLE.print(
+        _out(ctx).print(
             "[green]Timeout off:[/green] subsequent Turns have no Fleet deadline; "
             "provider TTL and idle bounds still apply."
         )
         return
     if not re.fullmatch(r"[0-9]+", arg):
-        CONSOLE.print("[red]Invalid /timeout value:[/red] use an integer number of seconds, `off`, or `default`.")
+        _out(ctx).print("[red]Invalid /timeout value:[/red] use an integer number of seconds, `off`, or `default`.")
         return
     try:
         seconds = validate_turn_timeout_seconds(int(arg), field="/timeout")
     except ValueError:
-        CONSOLE.print("[red]Invalid /timeout value:[/red] use 0, or a value between 10 and 3600 seconds.")
+        _out(ctx).print("[red]Invalid /timeout value:[/red] use 0, or a value between 10 and 3600 seconds.")
         return
     ctx.state.timeout_seconds = seconds
     if seconds == 0:
-        CONSOLE.print(
+        _out(ctx).print(
             "[green]Timeout set to 0:[/green] subsequent Turns have no Fleet deadline; "
             "provider TTL and idle bounds still apply."
         )
     else:
-        CONSOLE.print(f"[green]Timeout set:[/green] subsequent Turns will request {seconds}s.")
+        _out(ctx).print(f"[green]Timeout set:[/green] subsequent Turns will request {seconds}s.")
 
 
 def _context(ctx: Context, arg: str) -> None:
     if not arg:
         current = ctx.state.context_path or "(none selected)"
-        CONSOLE.print(f"[cyan]Current context:[/cyan] {current}  [dim](use /context <workspace-path>|clear)[/dim]")
+        _out(ctx).print(f"[cyan]Current context:[/cyan] {current}  [dim](use /context <workspace-path>|clear)[/dim]")
         return
     if arg == "clear":
         ctx.delete(f"{ctx.session}/context")
         ctx.state.context_path = None
-        CONSOLE.print("[green]Context selection cleared.[/green]")
+        _out(ctx).print("[green]Context selection cleared.[/green]")
     else:
         ctx.put(f"{ctx.session}/context", json={"path": arg})
         ctx.state.context_path = arg
-        CONSOLE.print(f"[green]Context selected:[/green] {arg}")
+        _out(ctx).print(f"[green]Context selected:[/green] {arg}")
 
 
 def _sessions(ctx: Context, _arg: str) -> None:
     for item in ctx.get("/sessions").json().get("sessions", []):
-        CONSOLE.print(
+        _out(ctx).print(
             f"• [yellow]{item['session_id']}[/yellow] ({item['turn_count']} turns; updated {item['updated_at']})"
         )
 
 
-def _optimize(ctx: Context, arg: str) -> None:
-    """Run `fleet optimize` for this Session; extra arguments pass through (e.g. `--approve VERSION`)."""
+def _experiments(ctx: Context, _arg: str) -> None:
+    """Open the session-scoped GEPA run history in fullscreen mode."""
+    if ctx.state.experiments_opener is None:
+        _out(ctx).print("[yellow]Experiments are available in the fullscreen TUI.[/yellow]")
+        return
+    ctx.state.experiments_opener()
+
+
+def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], str | None] | None:
+    """Validate `/optimize` arguments and return the API request or reviewed run ID."""
     try:
         extra = shlex.split(arg)
     except ValueError as exc:
-        CONSOLE.print(f"[red]Invalid /optimize arguments:[/red] {exc}")
-        return
+        _out(ctx).print(f"[red]Invalid /optimize arguments:[/red] {exc}")
+        return None
+    if any(value == "--session" or value.startswith("--session=") for value in extra):
+        _out(ctx).print("[red]/optimize always uses the active Session.[/red]")
+        return None
+    parser = argparse.ArgumentParser(prog="/optimize", add_help=False, exit_on_error=False)
+    add_search_arguments(parser)
+    parser.add_argument("--approve")
+    parser.add_argument("--mlflow", choices=("local", "databricks"))
+    try:
+        args = parser.parse_args(extra)
+    except (argparse.ArgumentError, SystemExit) as exc:
+        _out(ctx).print(f"[red]Invalid /optimize arguments:[/red] {exc}")
+        return None
+    try:
+        options = ExperimentOptions.from_namespace(args).model_dump()
+    except ValueError as exc:
+        _out(ctx).print(f"[red]Invalid /optimize options:[/red] {exc}")
+        return None
     settings = ctx.state.mlflow_settings
     backend = settings.mlflow_mode if settings is not None else "local"
-    for index, value in enumerate(extra):
-        selected = (
-            (extra[index + 1] if index + 1 < len(extra) else "")
-            if value == "--mlflow"
-            else (value.split("=", 1)[1] if value.startswith("--mlflow=") else None)
-        )
-        if selected is not None and selected != backend:
-            CONSOLE.print("[red]/optimize must use the session's MLflow backend.[/red]")
-            return
-    command = [
-        sys.executable,
-        "-m",
-        "fleet_rlm.cli",
-        "optimize",
-        "--session",
-        ctx.session_id,
-        *extra,
-        "--mlflow",
-        backend,
-    ]
-    environment = dict(os.environ)
-    for key in ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_ID"):
-        environment.pop(key, None)
-    if settings is not None:
-        environment.update(settings.mlflow_environment())
-    if getattr(getattr(ctx, "state", None), "fullscreen", False):
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, env=environment)
-        output = (completed.stdout or "") + (completed.stderr or "")
-        CONSOLE.print(Panel(output.strip() or "(no output)", title="Optimization run"))
+    if args.mlflow is not None and args.mlflow != backend:
+        _out(ctx).print("[red]/optimize must use the session's MLflow backend.[/red]")
+        return None
+    if args.approve:
+        return {}, args.approve
+    pending = ctx.state.pending_optimizer_request
+    if pending is None or {key: value for key, value in pending.items() if key != "request_id"} != options:
+        pending = {"request_id": str(uuid.uuid4()), **options}
+        ctx.state.pending_optimizer_request = pending
+    return pending.copy(), None
+
+
+def _finish_optimizer_request(state: SessionState, request_id: str) -> None:
+    """Forget a start id only after the API gives a definitive outcome."""
+    pending = state.pending_optimizer_request
+    if pending is not None and pending.get("request_id") == request_id:
+        state.pending_optimizer_request = None
+
+
+def _optimize(ctx: Context, arg: str) -> None:
+    """Start or review this Session's optimization through the Fleet API."""
+    parsed = _parse_optimizer_arguments(ctx, arg)
+    if parsed is None:
         return
-    subprocess.run(command, check=False, env=environment)
+    payload, approve_run = parsed
+    if ctx.state.fullscreen:
+        callback = ctx.state.optimizer_reviewer if approve_run is not None else ctx.state.optimizer_launcher
+        if callback is None:
+            _out(ctx).print("[red]The fullscreen experiments screen is unavailable.[/red]")
+            return
+        if approve_run is not None:
+            assert ctx.state.optimizer_reviewer is not None
+            ctx.state.optimizer_reviewer(approve_run, "approved", str(uuid.uuid4()))
+        else:
+            assert ctx.state.optimizer_launcher is not None
+            ctx.state.optimizer_launcher(payload)
+        return
+    if approve_run is not None:
+        response = ctx.post(
+            f"{ctx.session}/experiments/{quote(approve_run, safe='')}/review",
+            json={"decision": "approved", "request_id": str(uuid.uuid4())},
+        )
+        run = response.json().get("experiment", {})
+    else:
+        try:
+            response = ctx.post(f"{ctx.session}/experiments", json=payload)
+        except httpx.HTTPStatusError as exc:
+            if 400 <= exc.response.status_code < 500:
+                _finish_optimizer_request(ctx.state, str(payload["request_id"]))
+            raise
+        _finish_optimizer_request(ctx.state, str(payload["request_id"]))
+        run = response.json().get("experiment", {})
+    run_id = run.get("run_id")
+    if not isinstance(run_id, str):
+        _out(ctx).print("[red]Fleet API returned an invalid experiment record.[/red]")
+        return
+    _out(ctx).print(f"[cyan]Optimization {run.get('status', 'started')}:[/cyan] {run_id}")
+    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+    last_stage: str | None = None
+    while run.get("status") not in terminal:
+        time.sleep(1)
+        run = ctx.get(f"{ctx.session}/experiments/{quote(run_id, safe='')}").json().get("experiment", {})
+        stage = run.get("stage")
+        if stage and stage != last_stage:
+            last_stage = stage
+            _out(ctx).print(f"[cyan]Optimization stage:[/cyan] {str(stage)[:60]}")
+    _out(ctx).print(f"[green]Optimization {run.get('status')}.[/green]")
 
 
 _MODE_OPTIONS = dict.fromkeys(MODES)
@@ -644,6 +713,12 @@ COMMANDS: dict[str, Command] = {
         category="Evaluation & Traces",
     ),
     "/sessions": Command("/sessions", "list saved Sessions", _sessions, category="Session & Models"),
+    "/experiments": Command(
+        "/experiments",
+        "review GEPA run history and candidate evidence",
+        _experiments,
+        category="Evaluation & Traces",
+    ),
     "/optimize": Command(
         "/optimize [--max-metric-calls N | --approve VERSION]",
         "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",
@@ -654,7 +729,7 @@ COMMANDS: dict[str, Command] = {
     "/setup": Command(
         "/setup",
         "open the setup checklist for this CLI-owned server",
-        lambda _ctx, _args: CONSOLE.print(
+        lambda ctx, _args: _out(ctx).print(
             "Setup is managed by the server operator. Run fleet cli on the server host to configure it."
         ),
     ),
@@ -694,26 +769,32 @@ def handle_command(
     command: str,
     session_id: str,
     state: SessionState | None = None,
+    *,
+    console: Console | None = None,
 ) -> bool:
     """Run one slash command. Return False when the CLI should exit."""
+    out = console if console is not None else CONSOLE
     name, _, arg = command.strip().partition(" ")
     if name in EXIT_COMMANDS:
         return False
     if name == "/help":
-        CONSOLE.print(help_text(), markup=False, highlight=False)
+        out.print(help_text(), markup=False, highlight=False)
         return True
     entry = COMMANDS.get(name)
     if entry is None:
-        CONSOLE.print("[yellow]Unknown command. Use /help; submit a task without a leading slash.[/yellow]")
+        out.print("[yellow]Unknown command. Use /help; submit a task without a leading slash.[/yellow]")
         return True
     try:
-        entry.run(Context(client, session_id, state if state is not None else SessionState()), arg.strip())
+        entry.run(
+            Context(client, session_id, state if state is not None else SessionState(), console=out),
+            arg.strip(),
+        )
     except httpx.HTTPStatusError as exc:
-        print_http_error(exc)
+        print_http_error(exc, console=out)
     except httpx.HTTPError as exc:
-        CONSOLE.print(f"[red]Fleet API is unavailable:[/red] {type(exc).__name__}")
+        out.print(f"[red]Fleet API is unavailable:[/red] {type(exc).__name__}")
     except (OSError, ValueError, KeyError, IndexError) as exc:
-        CONSOLE.print(f"[red]Command failed:[/red] {type(exc).__name__}")
+        out.print(f"[red]Command failed:[/red] {type(exc).__name__}")
     except (KeyboardInterrupt, EOFError):
-        CONSOLE.print("[dim]Command cancelled; no further changes requested.[/dim]")
+        out.print("[dim]Command cancelled; no further changes requested.[/dim]")
     return True

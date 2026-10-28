@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import random
 import threading
 import time
@@ -16,21 +15,15 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from queue import Empty, Queue
 from typing import Any
 
 import httpx
 import mlflow
-from mlflow.entities import AssessmentSource, AssessmentSourceType, Feedback
-from mlflow.genai.scorers import scorer
+from mlflow.entities import AssessmentSource, AssessmentSourceType
 
-from fleet_rlm.engine.signatures import Route
-from fleet_rlm.observability import trace_object
+from fleet_rlm.contracts import Route, parse_sse
 from fleet_rlm.optimize.dataset import labels_of
-from fleet_rlm.optimize.scorers import (
-    build_mlflow_scorer_suite,
-    missing_values,
-)
+from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite, expected_values_present
 from fleet_rlm.replay import validate_review_labels
 
 _REGIONS = ("north", "south", "east", "west", "central")
@@ -213,18 +206,6 @@ def label_trace(
         mlflow.log_expectation(trace_id=trace_id, name=name, value=value, source=source)
 
 
-def parse_sse(text: str) -> list[dict[str, Any]]:
-    """Decode the JSON data lines from a Fleet SSE response, ignoring malformed lines."""
-    events = []
-    for line in text.splitlines():
-        if line.startswith("data: "):
-            try:
-                events.append(json.loads(line[6:]))
-            except json.JSONDecodeError:
-                continue
-    return events
-
-
 def run_case(client: httpx.Client, case: EvalCase, session_id: str) -> dict[str, Any]:
     """Run one case through the server's attach and Turn endpoints."""
     for path, content in case.files.items():
@@ -248,20 +229,6 @@ def run_case(client: httpx.Client, case: EvalCase, session_id: str) -> dict[str,
     }
 
 
-@scorer
-def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedback | None:
-    """Deterministic check: every gold value appears in the answer (thousands separators ignored)."""
-    expected = (expectations or {}).get("expected_values") or []
-    if not expected:
-        return None
-    outputs = trace_object(outputs) or outputs
-    missing = missing_values(str(outputs.get("answer", "") if isinstance(outputs, dict) else outputs), expected)
-    return Feedback(
-        value=not missing,
-        rationale="All expected values found." if not missing else f"Missing from answer: {missing}",
-    )
-
-
 class EvaluationError(RuntimeError):
     """An evaluation is incomplete; its completed Turns must not be executed again for recovery."""
 
@@ -276,47 +243,75 @@ def read_evaluation_trace(
 ) -> Any:
     """Wait for one completed trace in the intended destination, including cold warehouse startup.
 
-    Each read runs on a daemon thread so an SDK request cannot exceed the caller's readback
-    window. A timeout abandons that read, never starts a concurrent retry, and never repeats a Turn.
+    Require a successful trace with spans and matching expected_labels when supplied.
+    uc_location selects the Unity Catalog destination check instead of experiment_id.
+    wait_seconds bounds the polling window; a blocked SDK read may finish after the
+    caller stops waiting.
+
+    Raises:
+        EvaluationError: Readback fails, the destination or terminal state is wrong,
+            or the trace and expected labels are not ready before the deadline.
     """
     deadline = time.monotonic() + wait_seconds
-    while (remaining := deadline - time.monotonic()) > 0:
-        result: Queue[tuple[Any, Exception | None]] = Queue(maxsize=1)
+    latest: dict[str, Any] = {}
+    stop = threading.Event()
+    next_poll = threading.Event()
+    ready = threading.Event()
+    next_poll.set()
 
-        def read(result: Queue[tuple[Any, Exception | None]] = result) -> None:
+    def read() -> None:
+        """Refresh trace readback until stopped, retaining read errors for the waiting caller."""
+        while next_poll.wait() and not stop.is_set():
+            next_poll.clear()
             try:
-                result.put((mlflow.get_trace(trace_id, silent=True, flush=True), None))
+                latest["trace"] = mlflow.get_trace(trace_id, silent=True, flush=True)
+                latest["error"] = None
             except Exception as exc:
-                result.put((None, exc))
+                latest["error"] = exc
+            ready.set()
 
-        threading.Thread(target=read, daemon=True).start()
-        try:
-            trace, error = result.get(timeout=remaining)
-        except Empty:
-            break
-        if error is not None:
-            raise EvaluationError(f"Trace readback failed ({type(error).__name__}); recover trace {trace_id}") from None
-        if trace is not None:
-            location = trace.info.trace_location
-            if uc_location is not None:
-                location = getattr(location, "uc_table_prefix", None) or location
-                actual = tuple(getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix"))
-                matches = actual == uc_location
-            else:
-                location = getattr(location, "mlflow_experiment", None) or location
-                matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
-            if not matches:
-                raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
-            state = str(trace.info.state)
-            if state not in {"OK", "IN_PROGRESS"}:
-                raise EvaluationError(f"Trace {trace_id} completed with state {state}")
-            if state == "OK" and trace.data.spans:
-                if expected_labels is None:
-                    return trace
-                saved = labels_of(trace)
-                if all(saved.get(key) == value for key, value in expected_labels.items()):
-                    return trace
-        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        while (remaining := deadline - time.monotonic()) > 0:
+            if not ready.wait(timeout=max(0.0, remaining)):
+                break
+            ready.clear()
+            error = latest.get("error")
+            if error is not None:
+                raise EvaluationError(
+                    f"Trace readback failed ({type(error).__name__}); recover trace {trace_id}"
+                ) from None
+            trace = latest.get("trace")
+            if trace is not None:
+                location = trace.info.trace_location
+                if uc_location is not None:
+                    location = getattr(location, "uc_table_prefix", None) or location
+                    actual = tuple(
+                        getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix")
+                    )
+                    matches = actual == uc_location
+                else:
+                    location = getattr(location, "mlflow_experiment", None) or location
+                    matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
+                if not matches:
+                    raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
+                state = str(trace.info.state)
+                if state not in {"OK", "IN_PROGRESS"}:
+                    raise EvaluationError(f"Trace {trace_id} completed with state {state}")
+                if state == "OK" and trace.data.spans:
+                    if expected_labels is None:
+                        return trace
+                    saved = labels_of(trace)
+                    if all(saved.get(key) == value for key, value in expected_labels.items()):
+                        return trace
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(1.0, max(0.0, remaining)))
+            next_poll.set()
+    finally:
+        stop.set()
+        next_poll.set()
     raise EvaluationError(
         f"Trace {trace_id} was not ready within {wait_seconds:g}s; recover this trace without rerunning"
     )
@@ -372,12 +367,15 @@ def evaluate_cases(
             readback_deadline = time.monotonic() + 180.0
             read_evaluation_trace(trace_id, experiment_id=experiment_id, uc_location=uc_location)
             labels = case.record()["expectations"]
+            # A single value is the reference answer; several values are judged by the values check,
+            # never by their joined text, which would fabricate a gold answer nobody wrote.
+            expected_answer = case.expected_values[0] if len(case.expected_values) == 1 else None
             try:
                 label_trace(
                     trace_id,
                     review_status=case.review_status,
                     source_group=case.source_group,
-                    expected_answer=", ".join(case.expected_values) or None,
+                    expected_answer=expected_answer,
                     expected_values=labels["expected_values"],
                     route=case.route,
                     critical=case.critical,
@@ -390,7 +388,7 @@ def evaluate_cases(
             expected = {
                 "review_status": case.review_status,
                 "source_group": case.source_group,
-                "expected_answer": ", ".join(case.expected_values) or None,
+                "expected_answer": expected_answer,
                 "expected_values": list(case.expected_values) or None,
                 "route": case.route,
                 "critical": case.critical,
@@ -453,3 +451,97 @@ def score_evaluation_traces(
     ):
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     return result
+
+
+_ACTIONS = ("login", "logout", "view", "purchase", "refund", "failed_login")
+_LOG_REGIONS = ("north", "south", "east", "west")
+
+
+def _log(rng: random.Random, target_chars: int) -> tuple[str, list[dict[str, Any]]]:
+    lines, events, size = [], [], 0
+    while size < target_chars:
+        event = {
+            "user": f"u{rng.randrange(1, 400):03d}",
+            "action": rng.choices(_ACTIONS, weights=(30, 25, 25, 10, 2, 8))[0],
+            "region": rng.choice(_LOG_REGIONS),
+            "amount": rng.randrange(5, 500),
+        }
+        line = (
+            f"2026-03-{rng.randrange(1, 29):02d}T{rng.randrange(24):02d}:{rng.randrange(60):02d}:"
+            f"{rng.randrange(60):02d}Z user={event['user']} action={event['action']} "
+            f"region={event['region']} amount={event['amount']}"
+        )
+        lines.append(line)
+        events.append(event)
+        size += len(line) + 1
+    return "\n".join(lines) + "\n", events
+
+
+def long_context_cases(
+    seed: int = 11, tiers: tuple[int, ...] = (20_000, 50_000, 100_000, 200_000), per_tier: int = 4
+) -> list[EvalCase]:
+    """Whole-file aggregation tasks over logs far larger than a prompt budget, by size tier."""
+    rng = random.Random(seed)
+    cases = []
+    for tier in tiers:
+        for index in range(per_tier):
+            text, events = _log(rng, tier)
+            kind = index % 4
+            if kind == 0:
+                task, values, answer_type = (
+                    "How many refund actions are in files/events.log?",
+                    (str(sum(e["action"] == "refund" for e in events)),),
+                    "scalar",
+                )
+            elif kind == 1:
+                spend: Counter[str] = Counter()
+                for e in events:
+                    if e["action"] == "purchase":
+                        spend[e["user"]] += e["amount"]
+                top = max(sorted(spend), key=lambda user: spend[user])
+                task, values, answer_type = (
+                    "Which user has the highest total purchase amount in files/events.log, and what is that total?",
+                    (top, str(spend[top])),
+                    "scalar",
+                )
+            elif kind == 2:
+                fails = Counter(e["user"] for e in events if e["action"] == "failed_login")
+                if not any(count >= 2 for count in fails.values()):
+                    # Guarantee a non-empty gold list so an empty answer cannot pass by accident.
+                    user = rng.choice(sorted({e["user"] for e in events}))
+                    extra = [
+                        f"2026-03-15T00:00:0{n}Z user={user} action=failed_login region=north amount=0"
+                        for n in range(3)
+                    ]
+                    text += "\n".join(extra) + "\n"
+                    fails[user] += 3
+                flagged = sorted(user for user, count in fails.items() if count >= 2)
+                task, values, answer_type = (
+                    "List every user with at least 2 failed_login actions in files/events.log.",
+                    tuple(flagged),
+                    "list",
+                )
+            else:
+                code = f"KX-{rng.randrange(1000, 9999)}"
+                lines = text.splitlines()
+                lines.insert(rng.randrange(len(lines)), f"ALERT code={code} severity=critical")
+                text = "\n".join(lines) + "\n"
+                task, values, answer_type = (
+                    "What is the code in the single ALERT line of files/events.log?",
+                    (code,),
+                    "scalar",
+                )
+            case_id = f"longctx-{tier // 1000}k-{index:02d}"
+            cases.append(
+                EvalCase(
+                    case_id=case_id,
+                    task=task,
+                    expected_values=values,
+                    category=f"long_context_{('count', 'topk', 'list', 'needle')[kind]}",
+                    source_group=case_id,
+                    files={"files/events.log": text},
+                    answer_type=answer_type,
+                    context_chars=len(text),
+                )
+            )
+    return cases

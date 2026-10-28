@@ -158,7 +158,13 @@ def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypat
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_selected)
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager, native_input_paths: (manager, tools, owns_manager, native_input_paths),
+        lambda *, manager, tools, owns_manager, native_input_paths, rlm_defaults: (
+            manager,
+            tools,
+            owns_manager,
+            native_input_paths,
+            rlm_defaults,
+        ),
     )
     captured = ["files/first.txt"]
     factory = root.interpreter_factory(input_paths=captured)
@@ -189,7 +195,13 @@ def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pyte
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_default)
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager, native_input_paths: (manager, tools, owns_manager, native_input_paths),
+        lambda *, manager, tools, owns_manager, native_input_paths, rlm_defaults: (
+            manager,
+            tools,
+            owns_manager,
+            native_input_paths,
+            rlm_defaults,
+        ),
     )
     factory = root.interpreter_factory()
     token = interpreter._ACTIVE_MANAGER.set(active)
@@ -206,7 +218,13 @@ def test_factory_without_active_root_keeps_existing_manager(monkeypatch: pytest.
     root = _manager()
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager, native_input_paths: (manager, tools, owns_manager, native_input_paths),
+        lambda *, manager, tools, owns_manager, native_input_paths, rlm_defaults: (
+            manager,
+            tools,
+            owns_manager,
+            native_input_paths,
+            rlm_defaults,
+        ),
     )
 
     result = root.interpreter_factory(input_paths=["files/input.txt"])()

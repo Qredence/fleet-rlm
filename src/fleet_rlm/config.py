@@ -314,6 +314,15 @@ class FleetSettings(BaseSettings):
         """Return which source supplied a setting, or `default` when it was not configured."""
         return self._configuration_sources.get(name, "default")
 
+    def for_session(self, saved: dict[str, Any]) -> FleetSettings:
+        """Apply only the supported persisted mode/model overrides, never credentials or provider endpoints."""
+        overrides = {}
+        if "mode" in saved:
+            overrides["execution_mode"] = saved["mode"]
+        if saved.get("models"):
+            overrides.update({f"fleet_{role}_model": saved["models"][role] for role in ("root", "sub")})
+        return self.with_explicit_overrides(**overrides)
+
     def with_explicit_overrides(self, **values: Any) -> FleetSettings:
         """Validate CLI overrides while retaining the provenance of unchanged settings."""
         unknown = values.keys() - type(self).model_fields.keys()
@@ -829,9 +838,26 @@ class FleetSettings(BaseSettings):
             name: getattr(self, f"fleet_{role}_{name}")
             for name in ("max_tokens", "temperature", "num_retries", "cache")
         }
+        base_url = self._gateway_base_url()
+        if (
+            role == "reflection"
+            and urlsplit(base_url).path == "/ai-gateway/mlflow/v1"
+            and model.rsplit(".", 1)[-1].startswith("claude-")
+        ):
+            from dspy.lm15 import AccessPolicy, ModelSupport, OpenAIChatCompat, ProviderDefinition, register_provider
+
+            # Gateway translates response_format into forced Anthropic tool use,
+            # which newer Claude deployments reject. Declare this chat-only route
+            # so native JSONAdapter requests/parses JSON without forcing API tools.
+            provider = "fleet-gateway-reflection-" + hashlib.sha256(base_url.encode()).hexdigest()[:12]
+            register_provider(
+                ProviderDefinition.chat(AccessPolicy(provider=provider, base_url=base_url), compat=OpenAIChatCompat()),
+                supports=ModelSupport(function_calling=False, response_schema=False),
+            )
+            model = provider + "/" + model.removeprefix("openai/")
         return dspy.LM(
             model,
-            api_base=self._gateway_base_url(),
+            api_base=base_url,
             api_key=self._gateway_api_key(),
             engine="lm15",
             **{key: value for key, value in options.items() if value is not None},

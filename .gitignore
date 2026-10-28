@@ -12,7 +12,6 @@ build/
 .coverage
 .coverage.*
 htmlcov/
-
 # Virtual environments
 .venv/
 venv/
@@ -52,6 +51,7 @@ docs/notes/
 docs/superpowers/
 .superpowers/
 docs/plans/
+docs/plans/*
 qa-results/
 .qoder
 plan/
@@ -204,8 +204,6 @@ skills-lock.json
 
 plans
 PLANS.md
-!docs/plans/
-!docs/plans/fleet-rlm-audit-and-platform-alignment.md
 
 notebooks/*
 !notebooks/oolong_benchmark.ipynb
@@ -223,8 +221,3 @@ docs/reviews/2026-10-05/PRD-04-domain-contracts-and-persistence.md
 docs/reviews/2026-10-05/PRD-05-api-streaming-and-generated-contracts.md
 docs/reviews/2026-10-05/PRD-06-observability-and-tracing.md
 docs/reviews/2026-10-05/README.md
-docs/plans/deep-research-report (1).md
-docs/plans/deep-research-report.md
-docs/plans/fleet-rlm-audit-and-platform-alignment.md
-docs/plans/progress-aware-execution.md
-docs/plans/.archive/fleet-rlm-audit-and-platform-alignment.md

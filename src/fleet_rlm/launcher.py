@@ -145,11 +145,6 @@ class ManagedProcess:
                 start_new_session=True,
             )
 
-    @property
-    def running(self) -> bool:
-        """Return True while the started process has not exited."""
-        return self._process is not None and self._process.poll() is None
-
     def tail(self, lines: int = 15) -> str:
         """Return the last `lines` lines of the log, or an empty string if it cannot be read."""
         try:
@@ -170,8 +165,8 @@ class ManagedProcess:
                 raise LaunchError(f"{self.name} was not ready after {timeout:.0f}s.\n{self.tail()}")
             time.sleep(interval)
 
-    def stop(self, grace: float = 10.0) -> None:
-        """Send SIGTERM to the process group, then SIGKILL if it has not exited within grace seconds."""
+    def stop(self, grace: float | None = 10.0) -> None:
+        """Stop the group; API owners may await lifespan cleanup without a force-kill deadline."""
         process = self._process
         if process is None or process.poll() is not None:
             return
@@ -189,6 +184,35 @@ class ManagedProcess:
                 os.killpg(process.pid, sig)
             else:  # pragma: no cover - non-POSIX platforms
                 process.send_signal(sig)
+
+
+def _drain_experiments(plan: LaunchPlan, log: Callable[[str], None]) -> None:
+    """Fence admission and retain owned services until accepted experiments finish."""
+    token = plan.api_env.get("FLEET_SETUP_TOKEN")
+    if not token:
+        log("Waiting for API graceful shutdown; active experiments finish before owned services stop.")
+        return
+    with httpx.Client(
+        base_url=plan.api_url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=httpx.Timeout(10.0, connect=2.0),
+    ) as client:
+        response = client.post("/setup/experiments/drain")
+        response.raise_for_status()
+        state = response.json()
+        previous = None
+        while state["busy"]:
+            summary = (
+                ", ".join(f"{run['run_id']}: {run.get('stage', run['status'])}" for run in state["experiments"])
+                or "worker cleanup"
+            )
+            if summary != previous:
+                log(f"Waiting for experiments before stopping owned services: {summary}")
+                previous = summary
+            time.sleep(1.0)
+            response = client.get("/setup/experiments/status")
+            response.raise_for_status()
+            state = response.json()
 
 
 def _api_process(plan: LaunchPlan, host: str, port: int) -> ManagedProcess:
@@ -295,16 +319,34 @@ def running_services(
 ) -> Generator[LaunchPlan, None, None]:
     """Start what `plan` asks for, yield, and always stop it: the API server first (it flushes traces), then MLflow."""
     started: list[ManagedProcess] = []
+    owned_api: ManagedProcess | None = None
+    api_ready = False
 
     def cleanup() -> None:
+        """Drain experiments and stop owned services in reverse startup order.
+
+        Wait for API shutdown without a kill deadline, keeping owned MLflow available
+        until then. Temporarily ignore termination signals on the main thread.
+        """
+        nonlocal api_ready
         # A second Ctrl-C must not interrupt wait() and abandon owned services.
         handlers = {}
         if threading.current_thread() is threading.main_thread():
             for sig in (signal.SIGINT, signal.SIGTERM):
                 handlers[sig] = signal.signal(sig, signal.SIG_IGN)
         try:
+            if api_ready and owned_api is not None and owned_api in started:
+                api_ready = False
+                try:
+                    _drain_experiments(plan, log)
+                except (httpx.HTTPError, ValueError, KeyError):
+                    log("Could not observe experiment drain; waiting for API graceful shutdown.")
             while started:
-                started.pop().stop()
+                process = started.pop()
+                if process is owned_api:
+                    process.stop(grace=None)
+                else:
+                    process.stop()
         finally:
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)
@@ -325,10 +367,12 @@ def running_services(
             log(f"MLflow server ready in {waited:.0f}s (log: {mlflow_process.log_path}).")
         if plan.start_api:
             api_process = _api_process(plan, host, port)
+            owned_api = api_process
             log(f"Starting API server at {plan.api_url} ...")
             api_process.start()
             started.append(api_process)
             waited = api_process.wait_ready(lambda: api_is_healthy(plan.api_url), startup_timeout)
+            api_ready = True
             log(f"API server ready in {waited:.0f}s (log: {api_process.log_path}).")
         yield plan
     finally:

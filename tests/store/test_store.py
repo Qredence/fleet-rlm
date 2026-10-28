@@ -11,12 +11,13 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.store import IdempotencyConflictError, Store
-from fleet_rlm.store.db import (
+from fleet_rlm.session import SessionRuntime
+from fleet_rlm.store import (
     _SCHEMA_MIGRATIONS,
     SCHEMA_STATEMENTS,
     SCHEMA_VERSION,
-    VolumePostgresHarness,
+    IdempotencyConflictError,
+    Store,
     lakebase_connection_class,
 )
 
@@ -28,6 +29,9 @@ class FakeCursor:
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
         rendered = sql.as_string() if hasattr(sql, "as_string") else sql
         self.connection.statements.append((" ".join(rendered.split()), params))
+        if self.connection.error is not None:
+            error, self.connection.error = self.connection.error, None
+            raise error
         self.rows = self.connection.replies.pop(0) if self.connection.replies else []
         return self
 
@@ -39,15 +43,20 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self, replies: list[list[Any]]) -> None:
+    def __init__(self, replies: list[list[Any]], error: Exception | None = None) -> None:
         self.statements: list[tuple[str, tuple[Any, ...]]] = []
         self.replies = replies
+        self.error = error
+        self.closed = False
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
         return FakeCursor(self).execute(sql, params)
 
     def cursor(self, **_kwargs: Any) -> FakeCursor:
         return FakeCursor(self)
+
+    def close(self) -> None:
+        self.closed = True
 
     @contextmanager
     def transaction(self):
@@ -57,8 +66,9 @@ class FakeConnection:
 
 
 class FakePool:
-    def __init__(self, *replies: list[Any]) -> None:
-        self.conn = FakeConnection(list(replies))
+    def __init__(self, *replies: list[Any], error: Exception | None = None) -> None:
+        self.conn = FakeConnection(list(replies), error)
+        self.connection_value = self.conn
         self.borrowed = 0
 
     @contextmanager
@@ -67,8 +77,8 @@ class FakePool:
         yield self.conn
 
 
-def make_store(*replies: list[Any]) -> tuple[Store, FakePool]:
-    pool = FakePool(*replies)
+def make_store(*replies: list[Any], error: Exception | None = None) -> tuple[Store, FakePool]:
+    pool = FakePool(*replies, error=error)
     return Store(pool, "postgresql://fake"), pool  # ty: ignore[invalid-argument-type]
 
 
@@ -89,12 +99,44 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 5
-    version, statements = _SCHEMA_MIGRATIONS[-1]
+    assert SCHEMA_VERSION == 7
+    version, statements = _SCHEMA_MIGRATIONS[4]
     assert version == 5
     assert statements == (
         "ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
     )
+
+
+def test_migration_six_adds_a_global_optimization_ledger_without_session_cascade():
+    version, statements = _SCHEMA_MIGRATIONS[5]
+    assert version == 6
+    create_table, active_index = statements
+    assert "fleet_lite_optimization_runs" in create_table
+    assert "PRIMARY KEY (session_id, run_id)" in create_table
+    assert "UNIQUE (session_id, request_id)" in create_table
+    assert "REFERENCES fleet_lite_sessions" not in create_table
+    assert "owner_id TEXT NOT NULL" in create_table
+    assert "metadata JSONB NOT NULL" in create_table
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run" in active_index
+    assert "WHERE status IN ('running', 'approving')" in active_index
+
+
+def test_migration_seven_indexes_the_memory_search_expression_and_upgrades_version_six():
+    statements = dict(_SCHEMA_MIGRATIONS)[7]
+    assert statements == (
+        "CREATE INDEX IF NOT EXISTS fleet_lite_memories_content_fts "
+        "ON fleet_lite_memories USING GIN (to_tsvector('english', content))",
+    )
+    store, pool = make_store([], [], [(6,)])
+    store.initialize()
+    sql = [statement for statement, _ in pool.conn.statements]
+    assert statements[0] in sql
+    assert not any("CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in statement for statement in sql)
+    assert (
+        "INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s) ON CONFLICT DO NOTHING",
+        (7,),
+    ) in pool.conn.statements
+    assert sql[-1] == "COMMIT"
 
 
 def test_claim_environment_report_is_one_atomic_update_per_session():
@@ -216,7 +258,7 @@ def test_custom_schema_is_created_by_migration_pool_and_runtime_uses_runtime_poo
 
 
 def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(monkeypatch):
-    import fleet_rlm.store.db as store_db
+    import fleet_rlm.store as store_db
 
     opened = []
 
@@ -259,7 +301,7 @@ def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(
 
 
 def test_schema_bootstrap_does_not_rerun_an_applied_migration():
-    from fleet_rlm.store.db import SCHEMA_VERSION
+    from fleet_rlm.store import SCHEMA_VERSION
 
     store, pool = make_store([], [], [(SCHEMA_VERSION,)])
     store.initialize()
@@ -286,6 +328,17 @@ def test_memories_return_iso_timestamps_without_reading_workspace_files():
     [row] = store.memories("s1", "", reviewed_only=True)
     assert row["updated_at"] == updated.isoformat() and "stale" not in row
     assert not any("fleet_lite_vfs_files" in statement for statement, _ in pool.conn.statements)
+
+
+def test_load_session_reads_history_without_recreating_the_runtime_session():
+    turns = [{"turn_id": "t1", "task": "question", "answer": "answer"}]
+    store, pool = make_store([{"memory_summary": "known", "turns": turns}])
+
+    assert store.load_session("s1") == ("known", turns)
+    assert pool.borrowed == 1
+    assert len(pool.conn.statements) == 1
+    assert pool.conn.statements[0][0] == ("SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s")
+    assert pool.conn.statements[0][1] == ("s1",)
 
 
 def test_committing_a_turn_is_one_transaction_with_the_completion():
@@ -347,7 +400,7 @@ def test_snapshot_provenance_round_trips_into_the_turn_status_payload():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **SNAPSHOT_PROVENANCE}
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
     (session_id,), kwargs = calls[0]
     assert session_id == "s1"
     turn_id, result = kwargs["completion"]
@@ -357,16 +410,20 @@ def test_snapshot_provenance_round_trips_into_the_turn_status_payload():
     assert {key: stored_record[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
 
 
-def test_cleanup_outcome_round_trips_into_the_stored_turn_and_status_payload():
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("cleanup", "not_required"), ("root_sandbox_id", "sandbox-7")],
+)
+def test_turn_metadata_round_trips_into_the_stored_turn_and_status_payload(field, value):
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
-    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", "cleanup": "not_required"}
-    _harness(store, []).commit_turn("s1", turn_record)
+    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", field: value}
+    _runtime(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
-    assert result["cleanup"] == "not_required"
-    assert json.loads(calls[0][1]["turn_record_json"])["cleanup"] == "not_required"
+    assert result[field] == value
+    assert json.loads(calls[0][1]["turn_record_json"])[field] == value
 
 
 def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preserved():
@@ -383,7 +440,7 @@ def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preser
         "cleanup": "not_required",
         **SNAPSHOT_PROVENANCE,
     }
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -402,18 +459,6 @@ def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preser
     assert json.loads(calls[0][1]["turn_record_json"]) == turn_record
 
 
-def test_root_sandbox_id_round_trips_into_the_stored_turn_and_status_payload():
-    calls = []
-    store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
-    turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", "root_sandbox_id": "sandbox-7"}
-    _harness(store, []).commit_turn("s1", turn_record)
-
-    turn_id, result = calls[0][1]["completion"]
-    assert turn_id == "t1"
-    assert result["root_sandbox_id"] == "sandbox-7"
-    assert json.loads(calls[0][1]["turn_record_json"])["root_sandbox_id"] == "sandbox-7"
-
-
 def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
@@ -424,7 +469,7 @@ def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():
         "provider_owned": True,
     }
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **bounds}
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -515,19 +560,22 @@ def test_replay_without_snapshot_provenance_is_readable(deadline_fields, expecte
     assert encode_snapshot(historical) == (digest, compressed)
 
 
-def _harness(store: Any, files: list[str]) -> VolumePostgresHarness:
+def _runtime(store: Any, files: list[str]) -> SessionRuntime:
     sandbox = SimpleNamespace(session_id="s1", list_workspace_files=lambda: list(files))
-    return VolumePostgresHarness(store, sandbox)  # ty: ignore[invalid-argument-type]
+    return SessionRuntime(sandbox_mgr=sandbox, store=store, skill_mgr=None, engine=None)
 
 
-def test_harness_rejects_an_invalid_workspace_listing_before_any_sql_runs():
+@pytest.mark.parametrize("paths", [["../escape"], ["outside/a"], ["files/a\\b"], ["files/a\nb"], [1], {}, "", None])
+def test_runtime_rejects_an_invalid_workspace_listing_before_any_sql_runs(paths):
     store, pool = make_store()
+    runtime = _runtime(store, [])
+    runtime.sandbox_mgr.list_workspace_files = lambda: paths
     with pytest.raises(ValueError, match="invalid relative path"):
-        _harness(store, ["../escape"]).commit_turn("s1", {"turn_id": "t1"})
+        runtime.commit_turn("s1", {"turn_id": "t1"})
     assert pool.borrowed == 0
 
 
-def test_harness_reports_artifacts_and_records_the_completion_without_reading_files():
+def test_runtime_reports_artifacts_and_records_the_completion_without_reading_files():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     usage = {
@@ -536,7 +584,7 @@ def test_harness_reports_artifacts_and_records_the_completion_without_reading_fi
         "submit_rejections": 2,
         "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
     }
-    artifacts = _harness(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
+    artifacts = _runtime(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
         "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1", **usage}
     )
     assert artifacts == ["artifacts/out.txt"]
@@ -552,13 +600,13 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
     prior = {"turn_id": "t0", "task_sha256": "other", "status": "running", "result": {}}
     store = SimpleNamespace(claim_turn=lambda *_args: prior)
     with pytest.raises(IdempotencyConflictError, match="another task"):
-        _harness(store, []).claim_turn("t1", "key", "task")
+        _runtime(store, []).claim_turn("t1", "key", "task")
 
 
 def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
     import psycopg
 
-    import fleet_rlm.store.db as store_db
+    import fleet_rlm.store as store_db
 
     paused: list[float] = []
     monkeypatch.setattr(store_db, "_RETRY_DELAY_SECONDS", 0.25)
@@ -611,9 +659,9 @@ def test_commit_turn_requires_a_turn_id_so_a_connection_retry_cannot_duplicate_t
     assert pool.borrowed == 0
 
 
-def test_harness_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
+def test_runtime_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
     calls: list = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     with pytest.raises(ValueError, match="turn_id"):
-        _harness(store, []).commit_turn("s1", {"answer": "42"})
+        _runtime(store, []).commit_turn("s1", {"answer": "42"})
     assert calls == []

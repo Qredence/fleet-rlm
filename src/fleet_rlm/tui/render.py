@@ -39,10 +39,10 @@ def _extract_http_detail(response: httpx.Response) -> str:
     return "Request was not completed."
 
 
-def print_http_error(error: httpx.HTTPStatusError) -> None:
+def print_http_error(error: httpx.HTTPStatusError, *, console: Console | None = None) -> None:
     """Print a one-line summary of a failed HTTP request with its sanitized detail when present."""
     detail = _extract_http_detail(error.response)
-    CONSOLE.print(f"[bold red]HTTP {error.response.status_code}:[/bold red] {detail}")
+    (console or CONSOLE).print(f"[bold red]HTTP {error.response.status_code}:[/bold red] {detail}")
 
 
 def _is_omitted_payload(value: Any) -> bool:
@@ -117,7 +117,6 @@ class CollapsibleItem:
     kind: str  # "repl" | "thinking" | "tool"
     index: int
     agent_label: str = "root"
-    depth: int = 0
     title: str = ""
     summary: str = ""
     status: str = "running"
@@ -156,9 +155,7 @@ class TurnTracker:
     route_override: str | None = None
     route_confidence: float | None = None
     preloaded_skills: list[str] | None = None
-    skills_evaluated: int = 0
     sandbox_status: str | None = None
-    active_module: str | None = None
     active_model: str | None = None
     lm_calls: int = 0
     max_llm_calls: int | None = None
@@ -172,7 +169,6 @@ class TurnTracker:
     status_label: str | None = None
     status_scope: str | None = None
     status_checkpoint: int | None = None
-    status_expect_seconds: float | None = None
     items: list[CollapsibleItem] = field(default_factory=list)
     notices: list[RenderableType] = field(default_factory=list)
     terminal_event: dict[str, Any] | None = None
@@ -187,7 +183,6 @@ class TurnTracker:
     _child_counter: int = 0
     _repl_by_exec: dict[str, CollapsibleItem] = field(default_factory=dict)
     _tool_by_call: dict[str, CollapsibleItem] = field(default_factory=dict)
-    _lm_by_call: dict[str, str] = field(default_factory=dict)
     _repl_counter: int = 0
     _think_counter: int = 0
     _tool_counter: int = 0
@@ -229,12 +224,6 @@ class TurnTracker:
             self.status_scope = scope[:64] if isinstance(scope, str) and scope else None
             checkpoint = event.get("checkpoint")
             self.status_checkpoint = checkpoint if type(checkpoint) is int and checkpoint >= 0 else None
-            expectation = event.get("expect_seconds")
-            self.status_expect_seconds = (
-                float(expectation)
-                if isinstance(expectation, (int, float)) and not isinstance(expectation, bool)
-                else None
-            )
         elif event_type == "fenced":
             self.notices.append(Text("Publication fenced; the late result was not delivered.", style="yellow"))
         elif event_type == "done":
@@ -242,7 +231,6 @@ class TurnTracker:
             self.status_label = None
             self.status_scope = None
             self.status_checkpoint = None
-            self.status_expect_seconds = None
             return
         if event_type == "orphan_deleted":
             self.notices.append(Text(f"✓ Cleaned up orphaned sandbox {event.get('sandbox_id') or ''}", style="dim"))
@@ -265,17 +253,8 @@ class TurnTracker:
             )
         elif event_type == "skill_selection":
             self.preloaded_skills = list(event.get("selected") or [])
-            decisions = event.get("decisions")
-            self.skills_evaluated = len(decisions) if isinstance(decisions, list) else 0
-        elif event_type == "module_start":
-            self.active_module = str(event.get("module") or "unknown")
-        elif event_type == "module_end":
-            self.active_module = None
         elif event_type == "lm_start":
-            model = str(event.get("model") or "unknown")
-            self.active_model = model
-            if event.get("call_id"):
-                self._lm_by_call[str(event["call_id"])] = model
+            self.active_model = str(event.get("model") or "unknown")
         elif event_type == "lm_end":
             self.active_model = None
             raw_usage = event.get("usage")
@@ -302,7 +281,6 @@ class TurnTracker:
                     kind="thinking",
                     index=self._think_counter,
                     agent_label=agent_label,
-                    depth=depth,
                     title="Thinking",
                     summary=_first_meaningful_line(reasoning_text),
                     status="completed" if event.get("ok", True) else "failed",
@@ -327,7 +305,6 @@ class TurnTracker:
                 kind="tool",
                 index=self._tool_counter,
                 agent_label=agent_label,
-                depth=depth,
                 title=tool_name,
                 summary=summary,
                 status="running",
@@ -352,7 +329,6 @@ class TurnTracker:
                     kind="tool",
                     index=self._tool_counter,
                     agent_label=agent_label,
-                    depth=depth,
                     title=tool_name,
                     expanded=False,
                 )
@@ -384,7 +360,6 @@ class TurnTracker:
                 kind="repl",
                 index=idx,
                 agent_label=agent_label,
-                depth=depth,
                 title="Python" if phase == "task" else "Bootstrap",
                 summary=_first_meaningful_line(code) if phase == "task" else "DSPy namespace setup",
                 status="running",
@@ -412,7 +387,6 @@ class TurnTracker:
                     kind="repl",
                     index=idx,
                     agent_label=agent_label,
-                    depth=depth,
                     title="Python" if phase == "task" else "Bootstrap",
                     phase=phase,
                     namespace=str(event.get("namespace") or ""),
@@ -521,7 +495,6 @@ class TurnTracker:
                 self.server_duration_seconds = float(duration)
             self.sandbox_status = None
             self.active_model = None
-            self.active_module = None
             end_status = (
                 "cancelled"
                 if event_type == "turn_cancelled"
@@ -536,14 +509,6 @@ class TurnTracker:
                 item.status = status
                 if status != "completed" and not item.user_toggled:
                     item.expanded = False
-
-    def toggle_item(self, item_id: str) -> bool:
-        """Toggle a specific collapsible item by ID; return True when found."""
-        for item in self.items:
-            if item.item_id == item_id:
-                item.toggle()
-                return True
-        return False
 
     def toggle_latest_repl(self) -> bool:
         """Toggle the most recent task REPL cell (or fallback to any collapsible item)."""

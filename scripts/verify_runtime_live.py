@@ -13,18 +13,49 @@ import json
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dspy
 import psycopg
-from daytona import Daytona, DaytonaConfig, ListSandboxesQuery
+from daytona import Daytona, DaytonaConfig, DaytonaNotFoundError, ListSandboxesQuery
 from dspy.primitives.facade import FacadeInvocation
 from fastapi.testclient import TestClient
 from psycopg import sql
 
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.dspy_support import FleetRLMChatAdapter
+from fleet_rlm.contracts import parse_sse
 from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
+
+# Reported by the Turn itself, so the harness measures without instrumenting the runtime.
+_METRIC_FIELDS = (
+    "route",
+    "answer",
+    "duration_seconds",
+    "lm_calls",
+    "budget_breakdown",
+    "sandbox_errors",
+    "submit_rejections",
+    "trace_id",
+)
+_OUTCOME_EVENTS = frozenset({"turn_complete", "error", "turn_cancelled"})
+
+
+def _turn_metrics(events: list[dict], wall_clock: float) -> dict[str, object]:
+    """Latency, budget accounting, and stream shape for before/after parity.
+
+    Reads only what the Turn already reports and what the client observes, so the
+    harness stays measurement-only: no runtime code is touched to gather it.
+    """
+    terminal = next((event for event in events if event.get("event") in _OUTCOME_EVENTS), {})
+    metrics: dict[str, object] = {
+        "wall_clock_s": round(wall_clock, 3),
+        "event_kinds": [event.get("event") for event in events],
+        "outcome": terminal.get("event"),
+    }
+    metrics.update({field: terminal.get(field) for field in _METRIC_FIELDS})
+    return metrics
 
 
 def main() -> None:
@@ -81,7 +112,13 @@ def main() -> None:
     if not settings.fleet_database_migration_url:
         parser.error("FLEET_DATABASE_MIGRATION_URL is required for private-schema setup and cleanup")
 
-    report: dict = {"session": session, "model": args.model, "snapshot": SNAPSHOT_NAME, "cases": {}}
+    report: dict = {
+        "session": session,
+        "model": args.model,
+        "snapshot": SNAPSHOT_NAME,
+        "cases": {},
+        "metrics": {},
+    }
     start = time.monotonic()
     provider = None
     schema_created = False
@@ -93,6 +130,20 @@ def main() -> None:
         )
         with psycopg.connect(settings.fleet_database_migration_url) as connection:
             connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            # The migration role owns the schema, while the app connects as a different role. Without
+            # USAGE and default privileges the serving role cannot see the migrated tables at all
+            # (`UndefinedTable`), so grant them here, before `initialize` creates anything.
+            app_role = urlparse(settings.fleet_database_url).username
+            if app_role and app_role != urlparse(settings.fleet_database_migration_url).username:
+                connection.execute(
+                    sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(schema), sql.Identifier(app_role))
+                )
+                for object_type in ("TABLES", "SEQUENCES"):
+                    connection.execute(
+                        sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT ALL ON {} TO {}").format(
+                            sql.Identifier(schema), sql.SQL(object_type), sql.Identifier(app_role)
+                        )
+                    )
             schema_created = True
         app = create_app(settings=settings, configure_observability=args.trace)
         with TestClient(app) as client:
@@ -121,8 +172,10 @@ def main() -> None:
                 "Submit a short answer stating those verified numbers. "
                 "Do not print or load the full dataset into a prompt."
             )
+            ledger_started = time.monotonic()
             response = client.post(f"/sessions/{session}/turn", json={"task": task, "idempotency_key": "ledger-v1"})
-            events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+            events = parse_sse(response.text)
+            report["metrics"]["ledger_turn_rlm"] = _turn_metrics(events, time.monotonic() - ledger_started)
             report["events"] = events
             outcomes = [e for e in events if e["event"] in {"turn_complete", "error"}]
             assert len(outcomes) == 1 and outcomes[0]["event"] == "turn_complete", outcomes
@@ -130,7 +183,7 @@ def main() -> None:
             persisted = client.get(f"/sessions/{session}/turns/{turn_id}").json()
             assert persisted["status"] == "completed"
             assert persisted["result"]["answer"] == outcomes[0]["answer"]
-            app.state.session_registry._sessions[session].harness.store.finish_turn(
+            app.state.session_registry._sessions[session].store.finish_turn(
                 session, turn_id, "failed", {"event": "error", "error": "simulated lost delivery"}
             )
             assert client.get(f"/sessions/{session}/turns/{turn_id}").json()["status"] == "completed"
@@ -143,8 +196,10 @@ def main() -> None:
                 "actual": actual,
                 "answer": outcomes[0]["answer"],
             }
+            replay_started = time.monotonic()
             replay = client.post(f"/sessions/{session}/turn", json={"task": task, "idempotency_key": "ledger-v1"})
-            replay_events = [json.loads(line[6:]) for line in replay.text.splitlines() if line.startswith("data: ")]
+            replay_events = parse_sse(replay.text)
+            report["metrics"]["ledger_replay"] = _turn_metrics(replay_events, time.monotonic() - replay_started)
             replay_outcomes = [e for e in replay_events if e["event"] in {"turn_complete", "error"}]
             assert len(replay_outcomes) == 1 and replay_outcomes[0].get("answer") == outcomes[0]["answer"]
             assert not any(e["event"] == "repl_code" for e in replay_events)
@@ -225,7 +280,8 @@ def main() -> None:
             selection = client.put(f"/sessions/{session}/model", json={"role": "sub", "model": alternate})
             assert selection.status_code == 200, selection.text
             assert manager.sub_lm.model == alternate
-            assert client.put(f"/sessions/{session}/mode", json={"mode": "flex"}).status_code == 200
+            selection = client.put(f"/sessions/{session}/mode", json={"mode": "flex"})
+            assert selection.status_code == 200, selection.text
             configuration = client.get(f"/sessions/{session}/config").json()
             assert configuration["models"] == {"root": args.model, "sub": alternate}
             assert configuration["context"]["workspace_path"] == "files/ledger.csv"
@@ -239,6 +295,37 @@ def main() -> None:
             assert len(resumed.get(f"/sessions/{session}/history").json()["turns"]) == 1
             assert resumed.get(f"/sessions/{session}/memory").json()["memories"][0]["memory_id"] == "ledger"
             report["cases"]["restart_recovery"] = "passed"
+            # Route coverage: pinned modes are deterministic, so their route is a parity check.
+            # Direct is only reachable by hybrid triage with no selected context.
+            arithmetic = "Use Python to compute 13*17 exactly and SUBMIT the result as the answer."
+            for mode, case, task_text, expected_route in (
+                ("rlm", "route_rlm", arithmetic, "rlm"),
+                ("flex", "route_flex", arithmetic, "flex"),
+            ):
+                selection = resumed.put(f"/sessions/{session}/mode", json={"mode": mode})
+                assert selection.status_code == 200, selection.text
+                started = time.monotonic()
+                body = resumed.post(f"/sessions/{session}/turn", json={"task": task_text, "idempotency_key": case})
+                assert body.status_code == 200, body.text
+                route_events = parse_sse(body.text)
+                report["metrics"][case] = _turn_metrics(route_events, time.monotonic() - started)
+                assert report["metrics"][case]["route"] == expected_route, report["metrics"][case]
+                assert report["metrics"][case]["answer"] == "221", report["metrics"][case]
+            cleared = resumed.delete(f"/sessions/{session}/context")
+            assert cleared.status_code == 200, cleared.text
+            selection = resumed.put(f"/sessions/{session}/mode", json={"mode": "hybrid"})
+            assert selection.status_code == 200, selection.text
+            started = time.monotonic()
+            body = resumed.post(
+                f"/sessions/{session}/turn",
+                json={"task": "Reply with exactly this text and nothing else: ACK", "idempotency_key": "route_hybrid"},
+            )
+            assert body.status_code == 200, body.text
+            hybrid_events = parse_sse(body.text)
+            report["metrics"]["route_hybrid"] = _turn_metrics(hybrid_events, time.monotonic() - started)
+            assert report["metrics"]["route_hybrid"]["answer"] == "ACK", report["metrics"]["route_hybrid"]
+            selection = resumed.put(f"/sessions/{session}/context", json={"path": "files/ledger.csv"})
+            assert selection.status_code == 200, selection.text
             manager = resumed.app.state.session_registry._sessions[session].sandbox_mgr
             manager.reset_turn_budget()
             allowance = manager.max_llm_calls
@@ -291,8 +378,12 @@ def main() -> None:
         if provider is not None:
             try:
                 for sandbox in provider.list(ListSandboxesQuery(labels={"fleet_session": session})):
-                    provider.delete(sandbox, wait=True, timeout=60)
-                    deleted.append(sandbox.id)
+                    try:
+                        provider.delete(sandbox, wait=True, timeout=60)
+                        deleted.append(sandbox.id)
+                    except DaytonaNotFoundError:
+                        # It expired between the listing and the delete: already cleaned up.
+                        continue
                 # Provider list indexes can briefly lag a confirmed delete.
                 deadline = time.monotonic() + 60
                 while True:

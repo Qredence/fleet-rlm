@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
-import json
 import shlex
 import sys
 import threading
 import time
-import uuid
-from collections.abc import Callable, Generator, Iterable
-from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import quote
@@ -26,9 +25,8 @@ from prompt_toolkit.completion import (
     merge_completers,
 )
 from prompt_toolkit.document import Document
-from rich.console import Console, Group, RenderableType
+from rich.console import Console
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
@@ -37,7 +35,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import OptionList, Static, TextArea
 
 import fleet_rlm.tui.commands as commands_mod
-import fleet_rlm.tui.render as render_mod
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.tui.commands import (
     COMMANDS,
@@ -48,30 +45,27 @@ from fleet_rlm.tui.commands import (
     completion_options,
     handle_command,
 )
+from fleet_rlm.tui.experiments import ExperimentsScreen
 from fleet_rlm.tui.mentions import attach_local_mentions, completed_mention_cursor, mention_completions
 from fleet_rlm.tui.render import (
     CONSOLE,
-    CollapsibleItem,
     TurnTracker,
     _extract_http_detail,
-    _format_tool_payload,
-    _is_omitted_payload,
-    confidence_bar_text,
     print_http_error,
     render_event,
+)
+from fleet_rlm.tui.stream import _request_turn, _turn_events
+from fleet_rlm.tui.widgets import (
+    _CommandMenu,
+    _GradientRule,
+    _PromptInput,
+    _TurnWidget,
+    _UserPromptCard,
 )
 from fleet_rlm.workspace import validate_session_id
 
 _LOCAL_PATH_COMMANDS = frozenset({"/attach", "/put"})
 _WORKSPACE_PATH_COMMANDS = frozenset({"/cat", "/stat", "/get", "/rm", "/context"})
-_GRADIENT_STOPS = (
-    (82, 82, 91),  # zinc
-    (161, 161, 170),  # silver
-    (52, 211, 153),  # emerald
-    (251, 191, 36),  # amber
-    (161, 161, 170),  # silver
-    (82, 82, 91),  # zinc
-)
 
 
 class _SessionCompleter(Completer):
@@ -157,459 +151,6 @@ def _completer(state: SessionState | None = None) -> Completer:
     arguments = NestedCompleter.from_nested_dict(completion_options())
     base = merge_completers([WordCompleter(list(arguments.options), sentence=True), arguments], deduplicate=True)
     return _SessionCompleter(base, state=state)
-
-
-def _parse_sse_line(line: str, state: SessionState) -> tuple[dict[str, Any] | None, bool]:
-    """Parse one `data:` SSE line and sync `state`; return `(event, malformed)`."""
-    if not line.startswith("data:"):
-        return None, False
-    try:
-        event = json.loads(line[5:].lstrip())
-    except json.JSONDecodeError:
-        return None, True
-    if not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict):
-        return None, True
-    if event.get("turn_id"):
-        state.last_turn_id = str(event["turn_id"])
-    payload = {**event, **event.get("payload", {})}
-    if payload.get("trace_id"):
-        state.last_trace_id = str(payload["trace_id"])
-    if payload.get("event") == "triage_decision" and payload.get("mode"):
-        state.mode = str(payload["mode"])
-    return event, False
-
-
-def _request_turn(
-    client: httpx.Client, session_id: str, task: str, state: SessionState
-) -> AbstractContextManager[httpx.Response]:
-    """Open the shared Turn HTTP contract; the caller owns response lifetime and cancellation."""
-    body: dict[str, Any] = {
-        "task": task,
-        "idempotency_key": uuid.uuid4().hex,
-        "record_replay": state.record_replay,
-    }
-    # Client-local `/timeout` state travels per Turn. Omitting the field inherits the
-    # server configuration; `0` explicitly disables the Fleet deadline for this Turn.
-    if state.timeout_seconds is not None:
-        body["timeout_seconds"] = state.timeout_seconds
-    return client.stream(
-        "POST",
-        f"/sessions/{quote(session_id, safe='')}/turn",
-        json=body,
-    )
-
-
-def _turn_events(
-    response: httpx.Response,
-    state: SessionState,
-    tracker: TurnTracker,
-    *,
-    lock: AbstractContextManager[Any] | None = None,
-    cancelled: Callable[[], bool] | None = None,
-) -> Generator[dict[str, Any] | None, None, None]:
-    """Update shared Turn state from SSE, yielding events or None for malformed data lines."""
-    for line in response.iter_lines():
-        if cancelled is not None and cancelled():
-            break
-        with lock if lock is not None else nullcontext():
-            event, malformed = _parse_sse_line(line, state)
-            if event is not None:
-                tracker.ingest(event)
-        if malformed:
-            yield None
-        elif event is not None:
-            yield event
-
-
-def _interpolate_gradient(width: int) -> Text:
-    """Build a 1-line smooth RGB gradient rule across `width` columns."""
-    w = max(20, width)
-    line = Text()
-    segments = len(_GRADIENT_STOPS) - 1
-    for col in range(w):
-        pos = (col / max(1, w - 1)) * segments
-        idx = min(segments - 1, int(pos))
-        frac = pos - idx
-        r1, g1, b1 = _GRADIENT_STOPS[idx]
-        r2, g2, b2 = _GRADIENT_STOPS[idx + 1]
-        r = int(r1 + (r2 - r1) * frac)
-        g = int(g1 + (g2 - g1) * frac)
-        b = int(b1 + (b2 - b1) * frac)
-        line.append("━", style=f"rgb({r},{g},{b})")
-    return line
-
-
-class _GradientRule(Static):
-    """Top 1-line gradient accent bar."""
-
-    def render(self) -> RenderableType:
-        width = self.size.width or 100
-        return _interpolate_gradient(width)
-
-
-class _UserPromptCard(Static):
-    """Elevated dark card displaying a submitted user prompt or command."""
-
-    def __init__(self, prompt_text: str) -> None:
-        super().__init__()
-        self.prompt_text = prompt_text
-
-    def render(self) -> RenderableType:
-        text = Text()
-        text.append("\u203a ", style="bold #a1a1aa")
-        text.append(self.prompt_text, style="#f4f4f5")
-        return text
-
-
-class _PromptInput(TextArea):
-    """Multi-line prompt composer that preserves multi-paragraph pastes and submits on Enter."""
-
-    def __init__(self, *, placeholder: str = "", id: str | None = None) -> None:  # noqa: A002
-        super().__init__(
-            "",
-            placeholder=placeholder,
-            show_line_numbers=False,
-            soft_wrap=True,
-            tab_behavior="focus",
-            id=id,
-        )
-
-    @property
-    def value(self) -> str:
-        """Return the full multi-line prompt text."""
-        return self.text
-
-    @value.setter
-    def value(self, text: str) -> None:
-        """Replace the prompt text, move the cursor to the end, and sync composer state."""
-        self.load_text(text)
-        self.move_cursor(self.document.end)
-        app = self.app
-        if isinstance(app, FleetTextualApp) and app.is_running:
-            app._sync_input_state(text)
-
-    @property
-    def cursor_offset(self) -> int:
-        """Return the cursor's character offset using the DocumentBase line contract."""
-        row, column = self.cursor_location
-        return sum(len(line) + len(self.document.newline) for line in self.document.lines[:row]) + column
-
-    def move_cursor_to_offset(self, offset: int) -> None:
-        """Move to a character offset without depending on a concrete document subclass."""
-        lines = self.text[:offset].split(self.document.newline)
-        self.move_cursor((len(lines) - 1, len(lines[-1])))
-
-    async def _on_paste(self, event: events.Paste) -> None:
-        """Insert the full pasted text (including all paragraphs and line breaks) at the cursor."""
-        event.stop()
-        event.prevent_default()
-        if event.text and not self.read_only:
-            self.insert(event.text)
-
-    async def _on_key(self, event: events.Key) -> None:
-        """Complete or submit on Enter; preserve ordered editing, menu, and history keys."""
-        app = self.app
-        if isinstance(app, FleetTextualApp) and event.key in {
-            "enter",
-            "tab",
-            "escape",
-            "ctrl+c",
-            "up",
-            "down",
-            "pageup",
-            "pagedown",
-        }:
-            # Changed notifications reach the App asynchronously; navigation must see the
-            # text already inserted by preceding keys, not the last rendered suggestions.
-            app._sync_input_state(self.text)
-        if event.key == "enter":
-            event.stop()
-            event.prevent_default()
-            if isinstance(app, FleetTextualApp):
-                if app._complete_on_enter():
-                    return
-                text = self.text.strip()
-                self.value = ""
-                app.query_one("#slash-popup", OptionList).display = False
-                app.submit_text(text)
-            return
-        if event.key in {"shift+enter", "alt+enter", "ctrl+j"}:
-            event.stop()
-            event.prevent_default()
-            self.insert("\n")
-            return
-        if isinstance(app, FleetTextualApp):
-            # Keep editing/menu keys on this widget's FIFO queue. App-level priority
-            # bindings can overtake earlier arrow or printable keys in a terminal burst.
-            if event.key in {"tab", "escape", "ctrl+c"}:
-                event.stop()
-                event.prevent_default()
-                if event.key == "tab":
-                    app.action_complete_slash()
-                elif event.key == "escape":
-                    app.action_dismiss_or_cancel()
-                else:
-                    app.action_clear_or_cancel()
-                return
-            popup = app.query_one("#slash-popup", OptionList)
-            popup_open = popup.display and bool(app._popup_items)
-            if popup_open and event.key in {"pageup", "pagedown"}:
-                event.stop()
-                event.prevent_default()
-                if event.key == "pageup":
-                    popup.action_page_up()
-                else:
-                    popup.action_page_down()
-                return
-            if event.key == "up" and (popup_open or self.cursor_location[0] == 0):
-                event.stop()
-                event.prevent_default()
-                app.action_cursor_up()
-                return
-            if event.key == "down" and (popup_open or self.cursor_location[0] >= self.document.line_count - 1):
-                event.stop()
-                event.prevent_default()
-                app.action_cursor_down()
-                return
-        await super()._on_key(event)
-
-
-class _CommandMenu(OptionList, can_focus=False):
-    """Scrollable suggestions; typing and keyboard navigation keep the composer focused."""
-
-
-class _StepWidget(Static):
-    """Clickable collapsible widget for one REPL cell, Thinking block, or Tool invocation."""
-
-    def __init__(self, item: CollapsibleItem, tracker: TurnTracker, on_toggle: Callable[[], None]) -> None:
-        super().__init__()
-        self.item = item
-        self.tracker = tracker
-        self._on_toggle = on_toggle
-
-    def on_click(self, event: events.Click) -> None:
-        """Toggle this step open or closed on left mouse click."""
-        event.stop()
-        app = self.app
-        if isinstance(app, FleetTextualApp):
-            with app._lock:
-                self.tracker.toggle_item(self.item.item_id)
-        else:
-            self.tracker.toggle_item(self.item.item_id)
-        self.refresh(layout=True)
-        self._on_toggle()
-
-    def render(self) -> RenderableType:
-        item = self.item
-        arrow = "▾" if item.expanded else "▸"
-        header = Text()
-        if item.error:
-            arrow_color = "bold #f87171"
-        elif item.status in {"running", "cancelled", "interrupted"}:
-            arrow_color = "bold #fbbf24"
-        else:
-            arrow_color = "bold #a1a1aa"
-        header.append(f"{arrow} ", style=arrow_color)
-
-        if item.kind == "repl":
-            label = f"Python #{item.index}" if item.phase == "task" else "Bootstrap"
-            header.append(label, style="bold #34d399" if item.phase == "task" else "#71717a")
-            header.append(f" · {item.agent_label}", style="#a1a1aa")
-            if item.namespace:
-                header.append(f" · {item.namespace}", style="#52525b")
-        elif item.kind == "thinking":
-            header.append(f"Thinking #{item.index}", style="bold #d4d4d8")
-            header.append(f" · {item.agent_label}", style="#71717a")
-        else:
-            header.append(f"Tool · {item.title}", style="bold #e4e4e7")
-            header.append(f" · {item.agent_label}", style="#71717a")
-
-        if item.status == "running":
-            header.append("   running…", style="#fbbf24")
-        elif item.status in {"cancelled", "interrupted"}:
-            header.append(f"   {item.status}", style="#fbbf24")
-        elif item.error:
-            err = f" ({item.error_type})" if item.error_type else ""
-            header.append(f"   failed{err}", style="bold #f87171")
-        else:
-            header.append("   ✓", style="#34d399" if item.kind == "repl" else "#71717a")
-
-        if item.duration_ms is not None:
-            header.append(f" {item.duration_ms} ms", style="#71717a")
-        if item.usage_text:
-            header.append(f" · {item.usage_text}", style="#71717a")
-
-        if not item.expanded and item.summary:
-            header.append(f"   {item.summary}", style="#52525b")
-
-        if not item.expanded:
-            return header
-
-        parts: list[RenderableType] = [header]
-        if item.kind == "repl":
-            if item.code:
-                parts.append(
-                    Panel(
-                        Syntax(
-                            item.code[:20000],
-                            "python",
-                            theme="monokai",
-                            background_color="default",
-                            line_numbers=True,
-                            word_wrap=True,
-                        ),
-                        title=f"Python · Daytona · {item.phase}",
-                        title_align="left",
-                        border_style="#3f3f46" if not item.error else "#f87171",
-                        padding=(0, 1),
-                    )
-                )
-            if item.status != "running" or item.stdout or item.stderr or item.value:
-                out_text = item.stdout + item.stderr
-                if item.value not in (None, "null", ""):
-                    out_text += ("\n" if out_text else "") + f"Return value: {item.value}"
-                status_label = (
-                    f"failed ({item.error_type or 'Python error'})"
-                    if item.error
-                    else ("running" if item.status == "running" else "completed")
-                )
-                duration_part = f" · {item.duration_ms} ms" if item.duration_ms is not None else ""
-                parts.append(
-                    Panel(
-                        Text(out_text[-20000:] or "(no output)", style="#e4e4e7"),
-                        title=f"Output · {status_label}{duration_part}",
-                        title_align="left",
-                        border_style="#f87171" if item.error else "#3f3f46",
-                        padding=(0, 1),
-                    )
-                )
-        elif item.kind == "thinking":
-            parts.append(
-                Panel(
-                    Text(item.reasoning, style="#a1a1aa"),
-                    title=f"Thinking · {item.agent_label}",
-                    title_align="left",
-                    border_style="#27272a",
-                    padding=(0, 1),
-                )
-            )
-        elif item.kind == "tool":
-            if item.tool_inputs and not _is_omitted_payload(item.tool_inputs):
-                parts.append(
-                    Panel(
-                        Text(_format_tool_payload(item.tool_inputs), style="#d4d4d8"),
-                        title="Arguments",
-                        title_align="left",
-                        border_style="#27272a",
-                        padding=(0, 1),
-                    )
-                )
-            if item.tool_output and not _is_omitted_payload(item.tool_output):
-                parts.append(
-                    Panel(
-                        Text(_format_tool_payload(item.tool_output), style="#e4e4e7"),
-                        title="Result",
-                        title_align="left",
-                        border_style="#f87171" if item.error else "#27272a",
-                        padding=(0, 1),
-                    )
-                )
-        return Group(*parts)
-
-
-class _TurnWidget(Vertical):
-    """Reactive container for one Turn's routing badge, collapsible steps, answer prose, and status."""
-
-    def __init__(self, tracker: TurnTracker) -> None:
-        super().__init__(classes="turn-container")
-        self.tracker = tracker
-        self._header_static = Static(classes="turn-meta")
-        self._steps_box = Vertical(classes="turn-steps")
-        self._answer_static = Static(classes="turn-answer")
-        self._footer_static = Static(classes="turn-footer")
-        self._mounted_step_ids: list[str] = []
-
-    def compose(self) -> ComposeResult:
-        yield self._header_static
-        yield self._steps_box
-        yield self._answer_static
-        yield self._footer_static
-
-    def on_mount(self) -> None:
-        self.sync_from_tracker()
-
-    def sync_from_tracker(self) -> None:
-        """Synchronize child widgets with `self.tracker` state."""
-        t = self.tracker
-        meta_lines: list[RenderableType] = []
-        if t.mode or t.route:
-            badge = Text()
-            badge.append(f" {t.route or t.mode} ", style="bold #f4f4f5 on #27272a")
-            if t.mode and t.route:
-                badge.append(f"  mode={t.mode}", style="#71717a")
-            if t.route_override:
-                badge.append(f" · override={t.route_override}", style="#fbbf24")
-            if t.route_confidence is not None:
-                badge.append(" · confidence ", style="#71717a")
-                badge.append_text(confidence_bar_text(t.route_confidence))
-            if t.preloaded_skills is not None:
-                skills_str = ", ".join(t.preloaded_skills) or "none"
-                badge.append(f" · skills: {skills_str}", style="#34d399")
-            meta_lines.append(badge)
-            if t.route_summary:
-                meta_lines.append(Text(f"{t.route_summary}", style="#71717a"))
-
-        if meta_lines:
-            self._header_static.update(Group(*meta_lines))
-            self._header_static.display = True
-        else:
-            self._header_static.display = False
-
-        current_ids = [item.item_id for item in t.items]
-        if current_ids != self._mounted_step_ids:
-            for item in t.items[len(self._mounted_step_ids) :]:
-                self._steps_box.mount(_StepWidget(item, t, self.sync_from_tracker))
-            self._mounted_step_ids = current_ids
-        for child in self._steps_box.children:
-            if isinstance(child, _StepWidget):
-                child.refresh(layout=True)
-
-        body_parts: list[RenderableType] = list(t.notices)
-        if t.terminal_event is not None:
-            ev = t.terminal_event
-            ev_type = ev.get("event")
-            if ev_type == "turn_complete":
-                answer_text = str(ev.get("answer", ""))
-                prefix = "\n" if body_parts else ""
-                body_parts.append(Text(prefix + answer_text, style="#f4f4f5"))
-                if ev.get("learned_skill_note"):
-                    note = Text()
-                    note.append("\nNote: ", style="bold #a1a1aa")
-                    note.append(str(ev["learned_skill_note"]), style="#a1a1aa")
-                    body_parts.append(note)
-                if ev.get("artifacts"):
-                    art = Text()
-                    art.append("\nArtifacts: ", style="bold #fbbf24")
-                    art.append(", ".join(str(a) for a in ev["artifacts"]), style="#d4d4d8")
-                    body_parts.append(art)
-                body_parts.append(Text(f"\n{render_mod.TURN_PERSISTED}", style="#34d399"))
-            elif ev_type == "turn_cancelled":
-                body_parts.append(
-                    Text(f"Turn cancelled: {ev.get('error', 'Cancellation confirmed.')}", style="bold #fbbf24")
-                )
-            elif ev_type == "error":
-                body_parts.append(Text(f"Turn failed: {ev.get('error', 'Unknown error')}", style="bold #f87171"))
-
-        if body_parts:
-            self._answer_static.update(Group(*body_parts))
-            self._answer_static.display = True
-        else:
-            self._answer_static.display = False
-
-        footer = t.status_line()
-        if t.terminal_event is not None and t.terminal_event.get("trace_id"):
-            footer.append(f" · trace {t.terminal_event['trace_id']}", style="#71717a")
-        self._footer_static.update(footer)
 
 
 class FleetTextualApp(App[str | None]):
@@ -792,6 +333,15 @@ class FleetTextualApp(App[str | None]):
         self._cancel_requested: bool = False
         self._active_response: httpx.Response | None = None
         self._active_turn_widget: _TurnWidget | None = None
+        self._optimization_active = False
+        self._optimization_stopping = False
+        self._optimizer_stop_requested = False
+        self._optimizer_snapshot_polling = False
+        self._optimization_run_id: str | None = None
+        self._optimization_terminal_status: str | None = None
+        self.state.optimizer_launcher = self._start_optimization
+        self.state.optimizer_reviewer = self._review_optimization
+        self.state.experiments_opener = self._open_experiments
         self._history_entries: list[str] = []
         self._history_index: int = 0
         self._history_draft = ""
@@ -863,6 +413,7 @@ class FleetTextualApp(App[str | None]):
         """Focus the composer input and start the live spinner refresh timer."""
         self.query_one("#prompt-input", _PromptInput).focus()
         self.set_interval(0.2, self._tick_live_turn)
+        self.set_interval(1.0, self._tick_optimizer_snapshot)
 
     def _render_composer_hints(self) -> Text:
         hints = Text()
@@ -875,6 +426,7 @@ class FleetTextualApp(App[str | None]):
         return hints
 
     def _render_status_left(self) -> Text:
+        """Render Session, context, replay, and status for active work or exit confirmation."""
         left = Text()
         left.append(" Fleet-RLM ", style="bold #f4f4f5 on #27272a")
         left.append(f"  {self.session_id}", style="bold #a1a1aa")
@@ -885,6 +437,8 @@ class FleetTextualApp(App[str | None]):
             left.append(" replay: on ", style="bold #34d399 on #14291f")
         if self._turn_active:
             left.append("  running…", style="bold #fbbf24")
+        elif self._optimization_active:
+            left.append("  stopping…" if self._optimization_stopping else "  optimizing…", style="bold #fbbf24")
         elif self._last_ctrl_c and (time.monotonic() - self._last_ctrl_c) <= 2.5:
             left.append("  press ctrl+c again to exit", style="bold #fbbf24")
         return left
@@ -911,7 +465,7 @@ class FleetTextualApp(App[str | None]):
             ("ctrl+o", "Toggle REPL"),
             ("ctrl+t", "Thinking"),
             ("ctrl+k", "Mode"),
-            ("esc", "Cancel" if self._turn_active else "Dismiss"),
+            ("esc", "Cancel" if self._turn_active or self._optimization_active else "Dismiss"),
             ("ctrl+c x2", "Quit"),
         ]
         if any(popup.display for popup in self.query("#slash-popup")):
@@ -942,10 +496,53 @@ class FleetTextualApp(App[str | None]):
         if self._turn_active and self._active_turn_widget is not None:
             with self._lock:
                 self._active_turn_widget.tracker.advance_spinner()
-            self._active_turn_widget.sync_from_tracker()
+                self._active_turn_widget.sync_status()
+
+    def _tick_optimizer_snapshot(self) -> None:
+        """Keep observing an active API run while its history screen is closed."""
+        if (
+            not self._optimization_active
+            or isinstance(self.screen, ExperimentsScreen)
+            or self._optimizer_snapshot_polling
+        ):
+            return
+        self._optimizer_snapshot_polling = True
+        self.run_worker(
+            self._poll_optimizer_snapshot(),
+            name="optimizer-snapshot",
+            group="optimizer-snapshot",
+            exit_on_error=False,
+        )
+
+    async def _poll_optimizer_snapshot(self) -> None:
+        """Refresh the active or last observed run, retaining the last state on handled fetch errors."""
+        try:
+            response = await asyncio.to_thread(
+                self.client.get, f"/sessions/{quote(self.session_id, safe='')}/experiments"
+            )
+            response.raise_for_status()
+            snapshot = response.json()
+            if not isinstance(snapshot, dict):
+                return
+            records = snapshot.get("experiments")
+            if not isinstance(records, list):
+                return
+            active_id = snapshot.get("active_run_id")
+            run_id = active_id if isinstance(active_id, str) else self._optimization_run_id
+            record = next(
+                (item for item in records if isinstance(item, dict) and item.get("run_id") == run_id),
+                None,
+            )
+            if record is not None:
+                self._optimizer_snapshot(record)
+        except (httpx.HTTPError, ValueError, TypeError):
+            # Keep the last known state and retry on the next tick.
+            pass
+        finally:
+            self._optimizer_snapshot_polling = False
 
     @contextmanager
-    def _capture_console(self) -> Generator[io.StringIO]:
+    def _capture_console(self) -> Generator[tuple[io.StringIO, Console]]:
         buffer = io.StringIO()
         width = max(60, (self.size.width or 100) - 6)
         capture = Console(
@@ -956,18 +553,7 @@ class FleetTextualApp(App[str | None]):
             no_color=False,
             _environ={"TERM": "xterm-256color"},
         )
-        prev_render = render_mod.CONSOLE
-        prev_commands = commands_mod.CONSOLE
-        prev_app = CONSOLE
-        render_mod.CONSOLE = capture
-        commands_mod.CONSOLE = capture
-        globals()["CONSOLE"] = capture
-        try:
-            yield buffer
-        finally:
-            render_mod.CONSOLE = prev_render
-            commands_mod.CONSOLE = prev_commands
-            globals()["CONSOLE"] = prev_app
+        yield buffer, capture
 
     def _mount_to_chat(self, widget: Any) -> None:
         if not self.is_running:
@@ -1204,18 +790,172 @@ class FleetTextualApp(App[str | None]):
                 self._refresh_last_turn_widget()
                 event.stop()
 
+    def _open_experiments(self) -> None:
+        """Open or refresh the Experiments screen for the active Session."""
+        if isinstance(self.screen, ExperimentsScreen):
+            self.screen.refresh_history()
+            return
+        self.push_screen(
+            ExperimentsScreen(
+                self.client,
+                self.session_id,
+                on_run=self._start_default_optimization,
+                on_cancel=self._request_optimizer_stop,
+                on_review=self._review_optimization,
+                on_snapshot=self._optimizer_snapshot,
+            )
+        )
+
+    def _start_default_optimization(self) -> None:
+        """Build the same default request as the slash-command launch."""
+        parsed = commands_mod._parse_optimizer_arguments(Context(self.client, self.session_id, self.state), "")
+        if parsed is not None:
+            self._start_optimization(parsed[0])
+
+    def _start_optimization(self, options: dict[str, Any]) -> None:
+        """Submit an API-owned optimization; closing the screen only stops observation."""
+        self._open_experiments()
+        self.run_worker(
+            self._post_optimization(options),
+            name="experiment-start",
+            group="experiment-api",
+            exit_on_error=False,
+        )
+
+    async def _post_optimization(self, options: dict[str, Any]) -> None:
+        """Submit a start request and update the observed run or display an HTTP failure.
+
+        Retain the request ID on transport or server errors so retries reuse it; clear
+        it on success or a 4xx response. Response decoding errors propagate.
+        """
+        try:
+            response = await asyncio.to_thread(
+                self.client.post, f"/sessions/{quote(self.session_id, safe='')}/experiments", json=options
+            )
+            response.raise_for_status()
+            record = response.json().get("experiment", {})
+            request_id = options.get("request_id")
+            if isinstance(request_id, str):
+                commands_mod._finish_optimizer_request(self.state, request_id)
+            self._optimizer_snapshot(record)
+            self.append_markup(f"[cyan]Optimization {record.get('status', 'started')}:[/cyan] {record.get('run_id')}")
+            if isinstance(self.screen, ExperimentsScreen):
+                self.screen.refresh_history()
+        except httpx.HTTPError as exc:
+            request_id = options.get("request_id")
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and 400 <= exc.response.status_code < 500
+                and isinstance(request_id, str)
+            ):
+                commands_mod._finish_optimizer_request(self.state, request_id)
+            self.append_markup(f"[red]Optimization could not start ({type(exc).__name__}).[/red]")
+
+    def _review_optimization(self, run_id: str, decision: str, request_id: str) -> None:
+        """Schedule a review request using the supplied retry identity without blocking the UI."""
+        self.run_worker(
+            self._post_review(run_id, decision, request_id),
+            name="experiment-review",
+            group="experiment-api",
+            exit_on_error=False,
+        )
+
+    async def _post_review(self, run_id: str, decision: str, request_id: str) -> None:
+        """Submit a review and refresh the observed run or display an HTTP failure.
+
+        Keep the review request ID for transport/server failures; release it on success
+        or a client error while the history screen is open. Response decoding errors
+        propagate.
+        """
+        try:
+            response = await asyncio.to_thread(
+                self.client.post,
+                f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}/review",
+                json={"decision": decision, "request_id": request_id},
+            )
+            response.raise_for_status()
+            self._optimizer_snapshot(response.json().get("experiment", {}))
+            if isinstance(self.screen, ExperimentsScreen):
+                self.screen._finish_review_request(run_id, decision)
+                self.screen.refresh_history()
+        except httpx.HTTPError as exc:
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code < 500
+                and isinstance(self.screen, ExperimentsScreen)
+            ):
+                self.screen._finish_review_request(run_id, decision)
+            self.append_markup(f"[red]Experiment review failed ({type(exc).__name__}); retry from history.[/red]")
+
+    def _request_optimizer_stop(self, run_id: str | None = None) -> None:
+        """Ask the API-owned optimization to stop, independent of this UI lifetime."""
+        run_id = run_id or self._optimization_run_id
+        if not run_id or self._optimization_stopping:
+            return
+        self._optimizer_stop_requested = True
+        self._optimization_stopping = True
+        self.refresh_chrome()
+        self.run_worker(
+            self._cancel_optimization(run_id),
+            name="experiment-cancel",
+            group="experiment-api",
+            exit_on_error=False,
+        )
+
+    async def _cancel_optimization(self, run_id: str) -> None:
+        """Request a cooperative stop, updating the snapshot or restoring retry controls on HTTP failure.
+
+        Refresh the status controls even when response decoding raises.
+        """
+        try:
+            response = await asyncio.to_thread(
+                self.client.post,
+                f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}/cancel",
+            )
+            response.raise_for_status()
+            self._optimizer_snapshot(response.json().get("experiment", {}))
+            self.append_markup("[yellow]Cancellation requested; the API is cleaning up.[/yellow]")
+        except httpx.HTTPError as exc:
+            self._optimization_stopping = False
+            self._optimizer_stop_requested = False
+            self.append_markup(f"[red]Cancellation failed ({type(exc).__name__}); you can retry.[/red]")
+        finally:
+            self.refresh_chrome()
+
+    def _optimizer_snapshot(self, record: dict[str, Any] | None) -> None:
+        """Reflect the selected API run in the main TUI controls."""
+        self._optimization_run_id = record.get("run_id") if record else None
+        status = record.get("status") if record else None
+        self._optimization_active = status in {"running", "approving"}
+        self._optimization_stopping = self._optimization_active and (
+            self._optimizer_stop_requested
+            or status == "cancelling"
+            or (record is not None and record.get("stage") in {"stopping", "cancelling"})
+        )
+        if not self._optimization_active:
+            self._optimizer_stop_requested = False
+        terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+        self._optimization_terminal_status = status if status in terminal else None
+        if self.is_running:
+            self.refresh_chrome()
+
     def submit_text(self, user_input: str) -> None:
         """Process a submitted command, model selection, or Turn prompt."""
         if self.state.pending_model_choice is not None:
             role, models = self.state.pending_model_choice
             self.state.pending_model_choice = None
-            with self._capture_console() as buffer:
+            with self._capture_console() as (buffer, console):
                 try:
-                    apply_model_choice(Context(self.client, self.session_id, self.state), role, models, user_input)
+                    apply_model_choice(
+                        Context(self.client, self.session_id, self.state, console=console),
+                        role,
+                        models,
+                        user_input,
+                    )
                 except httpx.HTTPStatusError as exc:
-                    print_http_error(exc)
+                    print_http_error(exc, console=console)
                 except httpx.HTTPError as exc:
-                    render_mod.CONSOLE.print(f"[red]Fleet API is unavailable:[/red] {type(exc).__name__}")
+                    console.print(f"[red]Fleet API is unavailable:[/red] {type(exc).__name__}")
             self.append_ansi(buffer.getvalue())
             self.refresh_chrome()
             return
@@ -1238,8 +978,10 @@ class FleetTextualApp(App[str | None]):
         self._mount_to_chat(_UserPromptCard(user_input))
 
         if user_input.startswith("/"):
-            with self._capture_console() as buffer:
-                keep_running = handle_command(self.client, user_input, self.session_id, state=self.state)
+            with self._capture_console() as (buffer, console):
+                keep_running = handle_command(
+                    self.client, user_input, self.session_id, state=self.state, console=console
+                )
             self.append_ansi(buffer.getvalue())
             self.refresh_chrome()
             if not keep_running:
@@ -1283,8 +1025,8 @@ class FleetTextualApp(App[str | None]):
             return
         idx = (MODES.index(self.state.mode) + 1) % len(MODES) if self.state.mode in MODES else 0
         next_mode = MODES[idx]
-        with self._capture_console() as buffer:
-            handle_command(self.client, f"/mode {next_mode}", self.session_id, state=self.state)
+        with self._capture_console() as (buffer, console):
+            handle_command(self.client, f"/mode {next_mode}", self.session_id, state=self.state, console=console)
         self.append_ansi(buffer.getvalue())
         self.refresh_chrome()
 
@@ -1299,6 +1041,8 @@ class FleetTextualApp(App[str | None]):
                 return
         if self._turn_active:
             self.cancel_active_turn()
+        elif self._optimization_active:
+            self._request_optimizer_stop()
 
     def action_clear_or_cancel(self) -> None:
         """Cancel an active Turn stream, clear input on first Ctrl+C, or exit on second Ctrl+C."""

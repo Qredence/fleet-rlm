@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import stat
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +16,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.session import SessionRuntimeRegistry
-from fleet_rlm.setup.service import SECTIONS, Operation, SetupConflictError, SetupService
+from fleet_rlm.setup import SECTIONS, Operation, SetupConflictError, SetupService
 
 TOKEN = "local-test-operator-token"
 
@@ -25,6 +27,13 @@ def client_for(tmp_path, **kwargs):
         app, base_url="http://127.0.0.1", client=("127.0.0.1", 32100), headers={"Authorization": f"Bearer {TOKEN}"}
     )
     return client, app
+
+
+@contextmanager
+def opened_client(tmp_path, **kwargs):
+    client, app = client_for(tmp_path, **kwargs)
+    with client:
+        yield client, app
 
 
 def finish(client, response):
@@ -40,6 +49,42 @@ def ready_checks(monkeypatch):
         monkeypatch.setattr(
             SetupService, "check_" + section, lambda _self, _settings: {"status": "ready", "message": "Verified"}
         )
+
+
+def test_private_experiment_drain_is_authenticated_and_apply_refuses_active_work(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ready_checks(monkeypatch)
+    active = [{"run_id": "s1-run", "session_id": "s1", "stage": "search", "status": "running"}]
+
+    class Manager:
+        def __init__(self):
+            self._lock = asyncio.Lock()
+            self.accepting = True
+            self.busy = True
+            self.store = SimpleNamespace(list_optimization_runs=lambda: active)
+
+        async def begin_drain(self):
+            self.accepting = False
+            return await self.status()
+
+        async def status(self):
+            return {"accepting": self.accepting, "busy": self.busy, "experiments": active}
+
+    with opened_client(tmp_path) as (client, app):
+        finish(client, client.post("/setup/verify", json={"request_id": "ready"}))
+        manager = Manager()
+        app.state.experiments = manager
+        denied = client.post("/setup/experiments/drain", headers={"Authorization": "Bearer wrong"})
+        assert denied.status_code == 401 and manager.accepting
+        assert client.post("/setup/apply").status_code == 409
+        assert manager.accepting and not app.state.setup_applying
+        drained = client.post("/setup/experiments/drain")
+        assert drained.status_code == 200
+        assert drained.json() == {"accepting": False, "busy": True, "experiments": active}
+        assert client.get("/setup/experiments/status").json()["busy"]
+        manager.busy = False
+        active.clear()
+        assert not client.get("/setup/experiments/status").json()["busy"]
 
 
 @pytest.mark.parametrize("sub_scope", ["team.models", "other.serving"])
@@ -114,8 +159,7 @@ def test_setup_boots_with_invalid_configuration_without_runtime_services(tmp_pat
     monkeypatch.setattr(
         "fleet_rlm.api.app._configure_tracing", lambda *_a: pytest.fail("setup must not configure tracing")
     )
-    client, app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, app):
         assert client.get("/health").json()["status"] == "setup"
         assert app.state.session_registry is None
         assert client.post("/sessions/a/turn", json={"task": "hello"}).status_code == 404
@@ -125,8 +169,7 @@ def test_setup_boots_with_invalid_configuration_without_runtime_services(tmp_pat
 
 
 def test_setup_requires_private_token_and_loopback_and_is_disabled_by_default(tmp_path):
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         assert client.get("/setup/status", headers={"Authorization": "Bearer wrong"}).status_code == 401
     remote = TestClient(
         create_app(setup_mode=True, setup_token=TOKEN, project_dir=tmp_path),
@@ -144,8 +187,7 @@ def test_secret_edits_are_masked_saved_atomically_and_preserve_unrelated_entries
     monkeypatch.chdir(tmp_path)
     env = tmp_path / ".env"
     env.write_text("# keep this comment\nUNRELATED='original'\n")
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         response = client.patch(
             "/setup/config",
             json={"values": {"DATABRICKS_TOKEN": "private-value", "DATABRICKS_HOST": "https://example.test"}},
@@ -170,8 +212,7 @@ def test_save_runs_fleet_validators_and_never_replaces_valid_file(tmp_path, monk
     monkeypatch.chdir(tmp_path)
     env = tmp_path / ".env"
     env.write_text("UNRELATED=preserved\n")
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         assert client.patch("/setup/config", json={"values": {name: value}}).status_code == 200
         response = client.post("/setup/save")
         assert response.status_code == 422
@@ -181,8 +222,7 @@ def test_save_runs_fleet_validators_and_never_replaces_valid_file(tmp_path, monk
 def test_env_authority_conflicts_and_invalid_url_secrets_are_not_exposed(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABRICKS_TOKEN", "environment-secret")
     monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://user:private-password@host.test/?token=secret")
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         status = client.get("/setup/status")
         assert "environment-secret" not in status.text and "private-password" not in status.text
         assert client.patch("/setup/config", json={"values": {"DATABRICKS_TOKEN": "another-secret"}}).status_code == 409
@@ -191,8 +231,7 @@ def test_env_authority_conflicts_and_invalid_url_secrets_are_not_exposed(tmp_pat
 
 
 def test_save_rejects_concurrent_edits(tmp_path):
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         client.patch("/setup/config", json={"values": {"DATABRICKS_TOKEN": "draft"}})
         (tmp_path / ".env").write_text("DATABRICKS_TOKEN=external\n")
         assert client.post("/setup/save").status_code == 409
@@ -202,8 +241,7 @@ def test_save_rejects_concurrent_edits(tmp_path):
 def test_verify_apply_and_restart_fence_are_consistent(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ready_checks(monkeypatch)
-    client, app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, app):
         events = finish(client, client.post("/setup/verify", json={"request_id": "verify-1"}))
         assert events[-1]["event"] == "complete"
         assert client.get("/setup/status").json()["ready"]
@@ -290,8 +328,7 @@ def test_operation_reconnect_and_duplicate_request_do_not_repeat_mutation(tmp_pa
         return {"name": "safe-snapshot"}
 
     monkeypatch.setattr(SetupService, "build", build)
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         first = client.post("/setup/daytona/snapshot/build", json={"request_id": "build-1"})
         try:
             assert entered.wait(5)
@@ -310,8 +347,7 @@ def test_provider_exception_body_is_never_streamed(tmp_path, monkeypatch):
         raise RuntimeError("provider-key-and-dsn-must-stay-private")
 
     monkeypatch.setattr(SetupService, "build", fail)
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         events = finish(client, client.post("/setup/daytona/snapshot/build", json={"request_id": "failure"}))
         assert events[-1]["event"] == "error"
         assert "must-stay-private" not in str(events)
@@ -323,8 +359,7 @@ def test_launcher_profile_environment_does_not_lock_saved_settings(tmp_path, mon
     (tmp_path / ".env").write_text("FLEET_MLFLOW_LOCAL_PORT=5002\n")
     monkeypatch.setenv("FLEET_MLFLOW_LOCAL_PORT", "5001")
     monkeypatch.setenv("FLEET_SETUP_DERIVED_ENV", '["FLEET_MLFLOW_LOCAL_PORT"]')
-    client, app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, app):
         field = next(f for f in client.get("/setup/status").json()["fields"] if f["name"] == "FLEET_MLFLOW_LOCAL_PORT")
         assert field["editable"] and field["source"] == "dotenv" and field["value"] == "5002"
         assert app.state.setup_service.settings().mlflow_local_port == 5002
@@ -337,8 +372,7 @@ def test_launcher_profile_environment_does_not_lock_saved_settings(tmp_path, mon
 
 
 def test_discard_recovers_from_external_configuration_conflicts(tmp_path):
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         client.patch("/setup/config", json={"values": {"DATABRICKS_HOST": "https://draft.test"}})
         (tmp_path / ".env").write_text("DATABRICKS_HOST=https://external.test\n")
         assert client.post("/setup/save").status_code == 409
@@ -349,8 +383,7 @@ def test_discard_recovers_from_external_configuration_conflicts(tmp_path):
 
 
 def test_unknown_operation_returns_404_before_streaming(tmp_path):
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         response = client.get("/setup/operations/not-found/events")
         assert response.status_code == 404
         assert response.headers["content-type"].startswith("application/json")
@@ -366,8 +399,7 @@ def test_selected_checks_reuse_only_results_for_the_same_configuration(tmp_path,
             return {"status": "ready", "message": "Verified"}
 
         monkeypatch.setattr(SetupService, "check_" + section, check)
-    client, _app = client_for(tmp_path)
-    with client:
+    with opened_client(tmp_path) as (client, _app):
         finish(client, client.post("/setup/verify", json={"request_id": "all"}))
         assert client.get("/setup/status").json()["ready"]
         calls.clear()
@@ -385,7 +417,7 @@ def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environmen
     import databricks.sdk
     import databricks.sdk.core
 
-    from fleet_rlm.store import db
+    import fleet_rlm.store as db
 
     observed = []
 

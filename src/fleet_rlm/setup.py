@@ -22,8 +22,7 @@ from dotenv import dotenv_values, set_key
 from pydantic import ValidationError
 
 from fleet_rlm.config import FleetSettings, _toml_settings
-from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError
-from fleet_rlm.sandbox.snapshots.operations import activate_snapshot, build_snapshot
+from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError, activate_snapshot, build_snapshot
 
 # A deliberately bounded editor. Values retain FleetSettings' existing validation and precedence.
 FIELDS: dict[str, tuple[str, str, bool]] = {
@@ -73,7 +72,7 @@ class Operation:
     events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
     finished: bool = False
     sequence: int = 0
-    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    lock: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
     def emit(self, message: str, *, event: str = "progress", **values: Any) -> None:
         """Append bounded progress or a terminal outcome with a monotonic sequence."""
@@ -82,10 +81,12 @@ class Operation:
             self.events.append({"seq": self.sequence, "event": event, "message": message[:2000], **values})
             if event in {"complete", "error"}:
                 self.finished = True
+            self.lock.notify_all()
 
-    def read(self, after: int) -> tuple[list[dict[str, Any]], bool]:
-        """Read retained events after a cursor and report terminal completion."""
+    def wait_for_events(self, after: int, timeout: float = 0.15) -> tuple[list[dict[str, Any]], bool]:
+        """Wait until new events after cursor arrive, the operation finishes, or timeout elapses."""
         with self.lock:
+            self.lock.wait_for(lambda: self.finished or self.sequence > after, timeout=timeout)
             return [dict(event) for event in self.events if event["seq"] > after], self.finished
 
 
@@ -393,14 +394,14 @@ class SetupService:
         import psycopg
         from psycopg import sql
 
-        from fleet_rlm.store.db import SCHEMA_VERSION
+        from fleet_rlm.store import SCHEMA_VERSION
 
         connection_class = psycopg.Connection
         if settings.fleet_lakebase_endpoint:
             from databricks.sdk import WorkspaceClient
             from databricks.sdk.core import Config
 
-            from fleet_rlm.store.db import lakebase_connection_class
+            from fleet_rlm.store import lakebase_connection_class
 
             if settings.mlflow_mode == "databricks" and settings.mlflow_tracking_uri == "databricks":
                 auth = Config(

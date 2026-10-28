@@ -2,35 +2,32 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-import xml.etree.ElementTree as ElementTree
-from contextlib import nullcontext
+import os
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 import dspy
 import mlflow
+from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.dspy_support import (
-    FleetRLMChatAdapter,
-    MeteredLM,
-    decision_evidence,
-    without_mlflow_dspy_callback,
-)
-from fleet_rlm.engine.children import ChildAgents, turn_is_over
-from fleet_rlm.engine.signatures import (
+from fleet_rlm.adapters import FleetRLMChatAdapter
+from fleet_rlm.contracts import (
+    ROUTE_SUMMARIES,
     TRIAGE_CRITERIA,
-    DirectAnswer,
-    FleetTask,
+    OptimizationInputs,
     Route,
-    SkillRelevance,
-    TurnTriage,
+    catalog_entries,
+    decision_evidence,
     parse_route,
 )
-from fleet_rlm.lm_usage import decision_usage, usage_callbacks
-from fleet_rlm.observability import activity_text
-from fleet_rlm.optimize.artifacts import CompiledProgramFile
+from fleet_rlm.engine.children import ChildAgents, turn_is_over
+from fleet_rlm.engine.signatures import DirectAnswer, FleetTask, SkillRelevance, TurnTriage
+from fleet_rlm.observability import activity_text, evidence_span, turn_callbacks, typed_decision_scope
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import WorkspaceDataset
@@ -39,24 +36,100 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_SELECTABLE_SKILLS = 20
 _MAX_PRELOADED_SKILLS = 3
 _MAX_PRELOADED_SKILL_CHARS = 20_000
+# A Flex baseline is dspy.RLM with DSPy's defaults (20 iterations, 50 sub-LLM calls). The rlm route
+# uses the Turn's own budgets, so the flex route gets the same ones.
+_FLEX_MAX_ITERS = 16
 
 
-def _catalog_entries(skills_catalog: str) -> list[tuple[str, str]]:
-    """(name, description) pairs from the Stage-1 catalog; empty when it lists no Skills or is malformed."""
-    try:
-        root = ElementTree.fromstring(skills_catalog)
-    except ElementTree.ParseError:
-        return []
-    return [(item.get("name") or "", (item.text or "").strip()) for item in root.iter("skill") if item.get("name")]
+def _lm_api_key(lm: Any) -> str | None:
+    """Find the credential on a DSPy LM, a sandbox proxy, or a TypeSafe client.
+
+    `dspy.LM` keeps it in `kwargs`, the sandbox proxy exposes `kwargs` and `_lm`, and a TypeSafe
+    client keeps an `api_key` attribute. The walk is id-guarded in case a proxy points at itself.
+    """
+    seen: set[int] = set()
+    while lm is not None and id(lm) not in seen:
+        seen.add(id(lm))
+        for candidate in (getattr(lm, "api_key", None), (getattr(lm, "kwargs", None) or {}).get("api_key")):
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        lm = getattr(lm, "_lm", None)
+    return None
 
 
 def _safe_route_error(exc: Exception, route_lm: Any) -> str:
     """Keep useful route errors in logs without echoing the active credential."""
     detail = " ".join(str(exc).split())
-    api_key = getattr(route_lm, "api_key", None)
-    if isinstance(api_key, str) and api_key:
+    api_key = _lm_api_key(route_lm)
+    if api_key:
         detail = detail.replace(api_key, "[redacted]")
     return detail[:500] or "no exception message"
+
+
+class CompiledProgramFile:
+    """The one path from a compiled-program file to a live engine: bounded, atomic, rolled back on failure.
+
+    Accepts artifacts saved from the engine itself and from the IsolatedFleetProgram wrapper
+    (whose state keys carry a ``program.`` prefix).
+    """
+
+    MAX_BYTES = 10_000_000
+
+    def __init__(self, path: str | None) -> None:
+        """Record the artifact path before any file is read or applied."""
+        self.path = path
+        self.digest = ""
+        self._stat: tuple[int, int] | None = None
+
+    def load_initial(self, program: dspy.Module) -> None:
+        """Apply the artifact at startup when it exists; a missing file keeps the program unchanged."""
+        if self.path and os.path.lexists(self.path):
+            self._apply(program, self._read())
+
+    def reload_if_changed(self, program: dspy.Module) -> None:
+        """Reapply the artifact only when its mtime or size has changed since the last load."""
+        if not self.path or not os.path.lexists(self.path):
+            return
+        stat = self._regular_stat(self.path)
+        if (stat.st_mtime_ns, stat.st_size) != self._stat:
+            self._apply(program, self._read())
+
+    def _read(self) -> bytes:
+        """Read the configured regular file, rejecting sizes over MAX_BYTES with ValueError.
+
+        Invalid paths raise ValueError; filesystem errors propagate.
+        """
+        assert self.path is not None
+        if self._regular_stat(self.path).st_size > self.MAX_BYTES:
+            raise ValueError("Compiled program exceeds the 10 MB size limit")
+        return Path(self.path).read_bytes()
+
+    @staticmethod
+    def _regular_stat(path: str) -> os.stat_result:
+        """Return file metadata, rejecting symlinks and non-files with ValueError."""
+        if os.path.islink(path) or not os.path.isfile(path):
+            raise ValueError("Compiled program path must be a regular file")
+        return os.stat(path)
+
+    def _apply(self, program: dspy.Module, content: bytes) -> None:
+        """Apply JSON program state, retaining existing state for omitted predictors.
+
+        Accept wrapped ``program.`` keys. Track the digest and, when the file exists,
+        its metadata after loading. JSON that is not an object raises ValueError;
+        JSON decoding, DSPy loading, and filesystem errors propagate.
+        """
+        state = json.loads(content)
+        if not isinstance(state, dict):
+            raise ValueError("Compiled program must be a JSON object")
+        if state and all(key.startswith("program.") or key == "metadata" for key in state):
+            state = {key.removeprefix("program."): value for key, value in state.items()}
+        # A program saved before a predictor existed keeps that predictor's current state.
+        state = {**program.dump_state(), **state}
+        program.load_state(state)  # DSPy trial-loads a copy first, so a bad artifact leaves `program` unchanged.
+        if self.path and os.path.lexists(self.path):
+            stat = self._regular_stat(self.path)
+            self._stat = (stat.st_mtime_ns, stat.st_size)
+        self.digest = hashlib.sha256(content).hexdigest()
 
 
 class AdaptiveFleetEngine(dspy.Module):
@@ -81,9 +154,8 @@ class AdaptiveFleetEngine(dspy.Module):
         if execution_mode not in {"rlm", "flex", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
-        self.optimization_context: WorkspaceDataset | None = None
-        self._metered_root = MeteredLM(root_lm, sandbox_mgr.consume_budget)
-        self._metered_sub = MeteredLM(sub_lm, sandbox_mgr.consume_budget)
+        self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
+        self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
         self.triage.set_criteria("route", TRIAGE_CRITERIA)
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
@@ -95,20 +167,22 @@ class AdaptiveFleetEngine(dspy.Module):
         self.flex_agent = dspy.Flex(
             FleetTask,
             tools=tools,
-            interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
+            interpreter_factory=self.sandbox_mgr.interpreter_factory(
+                tools=toolset,
+                rlm_defaults={"max_iters": _FLEX_MAX_ITERS, "max_llm_calls": sandbox_mgr.max_llm_calls},
+            ),
         )
         self.primary_rlm = dspy.RLM(
             FleetTask,
             tools=tools,
             sub_lm=self._metered_sub,
             interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
-            max_iters=16,
+            max_iters=_FLEX_MAX_ITERS,
             max_llm_calls=sandbox_mgr.max_llm_calls,
         )
         self.compiled = CompiledProgramFile(compiled_path)
-        # Set by the optimizer's per-example factory; IsolatedFleetProgram deletes it after the rollout.
-        self.optimization_artifact_path: str | None = None
-        self.optimization_verifications: list[dict[str, Any]] = []
+        # Set by the optimizer's per-example factory; IsolatedFleetProgram clears it after the rollout.
+        self.optimization: OptimizationInputs | None = None
         self.compiled.load_initial(self)
 
     def forward(
@@ -122,9 +196,8 @@ class AdaptiveFleetEngine(dspy.Module):
         execution_mode: str | None = None,
     ) -> dspy.Prediction:
         """Run one Turn, attaching the execution evidence and turn usage that scoring reads."""
-        owns_turn = not self.sandbox_mgr.turn_active
-        try:
-            with dspy.context(callbacks=usage_callbacks(list(dspy.settings.callbacks))):
+        with self.sandbox_mgr.turn_scope():
+            with dspy.context(callbacks=turn_callbacks()):
                 prediction = self._run_turn(
                     workspace_manifest, memory_summary, task, skills_catalog, session_history, context, execution_mode
                 )
@@ -134,14 +207,11 @@ class AdaptiveFleetEngine(dspy.Module):
             for name, value in self.sandbox_mgr.turn_usage().items():
                 prediction[name] = value
             return prediction
-        finally:
-            if owns_turn:
-                self.sandbox_mgr.end_turn()
 
     def _execution_evidence(self) -> dict[str, Any]:
         """Collection failures mark evidence incomplete, which scores zero, instead of failing an answered Turn."""
         verifications: dict[str, Any] = {}
-        for entry in self.optimization_verifications:
+        for entry in self.optimization.verifications if self.optimization else ():
             try:
                 verifications[entry["path"]] = self.sandbox_mgr.verify_python_artifact(
                     entry["path"], entry["timeout_seconds"]
@@ -183,10 +253,6 @@ class AdaptiveFleetEngine(dspy.Module):
         cancellation, and execution errors propagate.
         """
         self.compiled.reload_if_changed(self)
-        if not self.sandbox_mgr.turn_active:
-            # Only the Turn's owner initializes the shared budgets; a Turn already started by
-            # the API stream (including a deadline-free one) must not be reset a second time.
-            self.sandbox_mgr.reset_turn_budget()
         self.sandbox_mgr.check_turn()
         mode = execution_mode or self.execution_mode
         if mode not in {"rlm", "flex", "hybrid"}:
@@ -201,7 +267,7 @@ class AdaptiveFleetEngine(dspy.Module):
 
     def _select_skills(self, task: str, skills_catalog: str, route: Route) -> str:
         """Preload the instructions of Skills the TypeSafe Jev marks relevant; other Skills stay in the catalog."""
-        skills = _catalog_entries(skills_catalog)[:_MAX_SELECTABLE_SKILLS]
+        skills = (catalog_entries(skills_catalog) or [])[:_MAX_SELECTABLE_SKILLS]
         if self.jev_lm is None or route is Route.DIRECT or not skills:
             return skills_catalog
         try:
@@ -212,10 +278,10 @@ class AdaptiveFleetEngine(dspy.Module):
                 )
                 for name, description in skills
             ]
-            callbacks = without_mlflow_dspy_callback(list(dspy.settings.callbacks))
-            with mlflow.start_span(name="typesafe_skill_selection", span_type=SpanType.LLM) as span:
-                span.set_inputs({"task": activity_text(task), "skills": [name for name, _ in skills]})
-                with dspy.context(lm=self.jev_lm, callbacks=callbacks), decision_usage(span):
+            with evidence_span(
+                "typesafe_skill_selection", inputs={"task": activity_text(task), "skills": [name for name, _ in skills]}
+            ) as span:
+                with typed_decision_scope(lm=self.jev_lm, span=span, typesafe=True):
                     predictions = self.skill_selector.batch(examples, num_threads=min(8, len(examples)))
                 decisions = []
                 for (name, _), prediction in zip(skills, predictions, strict=True):
@@ -246,7 +312,7 @@ class AdaptiveFleetEngine(dspy.Module):
     def _route(self, mode: str, task: str, workspace_manifest: str, skills_catalog: str, context: Any) -> Route:
         """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""
         route = Route.FLEX
-        route_lm = self.jev_lm or MeteredLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
+        route_lm = self.jev_lm or SandboxLM(self.sub_lm, partial(self.sandbox_mgr.consume_budget, category="routing"))
         triage_inputs = {
             "task": task,
             "workspace_manifest": workspace_manifest,
@@ -263,21 +329,13 @@ class AdaptiveFleetEngine(dspy.Module):
             else:
                 if self.jev_lm is not None:
                     self.sandbox_mgr.consume_budget(category="routing")
-                callbacks = (
-                    without_mlflow_dspy_callback(list(dspy.settings.callbacks))
-                    if self.jev_lm is not None
-                    else list(dspy.settings.callbacks)
-                )
                 # A generative backend has its own LM child span; do not count the wrapper twice.
-                with mlflow.start_span(
-                    name="typesafe_route_selection",
+                with evidence_span(
+                    "typesafe_route_selection",
                     span_type=SpanType.LLM if self.jev_lm is not None else SpanType.CHAIN,
+                    inputs={name: activity_text(value) for name, value in triage_inputs.items()},
                 ) as span:
-                    span.set_inputs({name: activity_text(value) for name, value in triage_inputs.items()})
-                    with (
-                        dspy.context(lm=route_lm, callbacks=callbacks),
-                        decision_usage(span) if self.jev_lm is not None else nullcontext(),
-                    ):
+                    with typed_decision_scope(lm=route_lm, span=span, typesafe=self.jev_lm is not None):
                         decision = self.triage(**triage_inputs).route
                     evidence = decision_evidence(decision, route_lm)
                     # An unknown or missing label takes the bounded RLM path.
@@ -299,11 +357,7 @@ class AdaptiveFleetEngine(dspy.Module):
             reason = "selected_context"
             route = Route.RLM
             summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
-        summary += {
-            Route.DIRECT: " Answer directly without code execution.",
-            Route.FLEX: " Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
-            Route.RLM: " Execute a bounded RLM with Daytona Python and optional child agents.",
-        }[route]
+        summary += " " + ROUTE_SUMMARIES[route.value]
         routing = {**evidence, "effective_route": route.value, "override_reason": reason}
         active_span = mlflow.get_current_active_span()
         if active_span is not None:

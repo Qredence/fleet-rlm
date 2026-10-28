@@ -71,6 +71,24 @@ attributed [OOLONG scorer](../../scripts/oolong_scoring.py) preserves upstream p
 Dataset selection and verifier configuration live in the notebooks. Notebook dependencies
 are outside normal runtime/development installation.
 
+Runtime parity is measured by a producer/consumer pair.
+[verify_runtime_live.py](../../scripts/verify_runtime_live.py) runs the live acceptance
+cases and records a `metrics` entry per case: wall clock, LM calls, route, terminal
+outcome, and stream shape. [compare_runtime_reports.py](../../scripts/compare_runtime_reports.py)
+compares those entries against one or more baseline reports and exits non-zero when a
+case changes its route, outcome, or event shape, spends more budget units, or exceeds a
+latency allowance of the larger of 10% or the baseline's own spread:
+
+```bash
+uv run python scripts/verify_runtime_live.py --live --output baseline-1.json
+uv run python scripts/verify_runtime_live.py --live --output after.json
+uv run python scripts/compare_runtime_reports.py \
+    --baseline baseline-1.json --after after.json
+```
+
+Both scripts require live provider, database, and sandbox authorization; neither runs in
+ordinary CI.
+
 Direct-model comparisons, custom quota/admission profiles, benchmark-specific GEPA
 policies, and database comparison procedures are retired. Historical reports are kept
 in the local `docs/benchmarks/` archive and excluded from Git for now. Saved bundles,
@@ -78,6 +96,6 @@ receipts, and MLflow traces remain evidence of their original protocols. New not
 runs use distinct directories and do not reinterpret them.
 
 Fleet's own [evaluation and optimization](../reference/evaluation.md) remain supported.
-The current shared metric is `fleet-metric-v8` and approval policy is version 5; older
+The current shared metric is `fleet-metric-v10` and approval policy is version 6; older
 candidate evidence requires reevaluation. This cleanup does not migrate stored labels
 or install an optimization candidate.

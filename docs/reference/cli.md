@@ -6,6 +6,9 @@ The `fleet` command has these modes:
 uv run fleet cli [databricks] [--mlflow local|databricks] [--session SESSION_ID] [--url URL]
                  [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
 uv run fleet serve [--host 127.0.0.1] [--port 8000] [--mlflow local|databricks]
+uv run fleet web [--host 127.0.0.1] [--port 8080] [--url API_URL]
+                [--public-url URL] [--session SESSION] [--mlflow local|databricks]
+                [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
 uv run fleet eval dataset|run|label ... [--mlflow local|databricks]
 uv run fleet optimize --session SESSION_ID ... [--mlflow local|databricks]
 uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
@@ -17,7 +20,48 @@ backend; environment variables override values only inside that backend.
 Conflicting selectors are errors, and `--mlflow env` has been retired.
 
 `cli` starts the API server, waits for readiness, opens the terminal client,
-and stops services it owns when the client exits:
+and stops services it owns when the client exits. `web` starts the same local
+services and serves the Textual client in a browser through Textual Serve; pass
+`--url` to connect to an existing API without starting services. Both commands
+verify the API's MLflow destination before connecting.
+
+The web listener defaults to `127.0.0.1:8080`; its `--host` and `--port` are
+separate from the API's configured host and port. Each browser connection gets
+its own Session by default. `--session` explicitly makes browser clients share
+one Session. Use `--public-url` when a reverse proxy or wildcard bind needs a
+browser-facing URL (including the WebSocket scheme/path). Binding the web
+listener to a non-loopback interface requires
+`FLEET_ALLOW_NON_LOOPBACK_BIND=true` and `FLEET_WEB_AUTH_TOKEN`, an environment-only
+secret of at least 32 non-whitespace characters. Generate a random secret for each
+launch and configure an authenticated TLS reverse proxy to replace the WebSocket
+`Authorization` header with `Bearer <secret>` after authenticating the visitor.
+The listener validates this secret before starting a terminal process. Keep the
+listener reachable only by the proxy, and never expose the secret in browser URLs
+or client commands. Loopback listeners do not require this header.
+
+Terminal WebSockets require an Origin matching `--public-url`, or the generated
+listener URL when that option is omitted. Missing and foreign origins are
+rejected before a terminal process starts. Reverse proxies must preserve the
+public Host header; forwarded headers do not authorize connections. Use the
+configured browser-facing hostname and port when opening the client.
+
+Textual Serve presents the terminal UI, not a browser file picker. `/attach`,
+`/put`, and `/get` use paths on the host running `fleet web`; they do not read
+from or download to the visitor's computer. Stage files on the server or use
+workspace files already present in the Session.
+
+For example:
+
+```bash
+uv run fleet web
+# Then open http://127.0.0.1:8080
+```
+
+Like `cli`, `web` runs the terminal startup checklist when the local setup is
+incomplete. After setup, the browser app connects to the primary FastAPI API;
+Textual Serve is only a client transport and does not own runtime Turns.
+
+Managed service behavior for `cli` and `web`:
 
 - Local MLflow starts at `127.0.0.1:5001` by default, storing SQLite metadata
   and artifacts under `.fleet/mlflow`. Configure its port/data directory and
@@ -44,7 +88,7 @@ and stops services it owns when the client exits:
 
 ## Startup setup
 
-For a new local server, `fleet cli` first starts a private setup-mode FastAPI app.
+For a new local server, `fleet cli` or `fleet web` first starts a private setup-mode FastAPI app.
 The Textual readiness checklist covers serving models, an existing PostgreSQL or
 Lakebase database, the selected local/Databricks MLflow profile, and Daytona.
 It opens automatically when checks require attention. A healthy configuration
@@ -122,14 +166,18 @@ Commands include `/setup`, `/help`, `/attach <path>`, `/files`, `/artifacts`, `/
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
 `/optimize [args]` runs `fleet optimize --session <this session> [args]`.
-It inherits the session’s MLflow backend and effective profile settings; a conflicting
-`--mlflow` argument is rejected. It compiles and gates a GEPA candidate from self-contained, explicitly selected
+It submits an API-owned experiment and inherits the server's effective settings;
+the CLI uses the same controls but remains a standalone synchronous workflow.
+Client disconnect does not cancel API-owned work. Use the Experiments screen's
+explicit cancel action for cooperative stopping. The API allows one active
+optimization or review globally and rejects concurrent requests without queueing.
+It compiles and gates a GEPA candidate from self-contained, explicitly selected
 Turn snapshots with approved gold labels; it does not automatically score
 historical traces. Traces without a matching immutable Lakebase snapshot are
 skipped. It requires at least 8 examples from 3 source groups, as well as the
 corresponding model, Daytona, database, and tracking services. It never installs
 a candidate.
-`/optimize --approve <version>` (or the same CLI flag) installs one only when
+`/optimize --approve <version>` (or `fleet optimize --approve <version>`) installs one only when
 the current incumbent, configuration, code, and dependencies match the
 candidate's recorded identities. Old manifests require reevaluation. The engine
 loads an approved candidate at the start of the next Turn.
@@ -138,7 +186,7 @@ loads an approved candidate at the start of the next Turn.
 writes gold labels onto a trace; partial updates preserve existing expectations.
 `--critical` requires at least one supplied or previously saved expected value and pins the complete source group
 to GEPA holdout; a candidate must achieve quality 1 for every critical case in
-each of three paired validation passes. A promotion is refused if no critical
+each of three paired validation passes. Search fails during preparation, before GEPA compilation, if no critical
 holdout case is labeled. `--status` defaults to
 `approved` for a new label; updates preserve status and source group unless supplied.
 A new source group defaults to the trace's session id. The trace ID is printed after
@@ -146,8 +194,17 @@ each Turn and by `/trace`.
 
 `fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
-`--validation-ratio`, and `--approve VERSION`. Reflection calls and the three paired
+`--validation-ratio` (inclusive 0.1–0.5, default 0.35), and `--approve VERSION`. Reflection calls and the three paired
 final validation passes are additional work, not covered by the search budget.
+Native GEPA checks the metric-call budget between batches, so it may overshoot.
+`--reflection-minibatch-size N` (default 3) sets the native reflection batch size;
+`--max-candidate-proposals N` optionally limits native proposal iterations. A
+three-example dev set with minibatch size 1 and one proposal needs at most eight
+search metric calls, including seed scoring and full candidate validation.
+`--trace-search` opts into search-rollout traces; it is off by default. Final
+paired validation per-case traces are recorded in the optimization MLflow run.
+Optimization lifecycle state is stored in PostgreSQL. Existing JSON history is
+imported idempotently on read and retained unchanged as a legacy source.
 
 ## Interactive tasks, settings, and model selection
 

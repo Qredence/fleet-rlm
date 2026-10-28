@@ -1,7 +1,9 @@
-"""Per-Session runtime: one sandbox, harness, Skill manager, and engine, built on first use."""
+"""Per-Session runtime: sandbox, durable state policies, Skills, and engine, built on first use."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -16,13 +18,18 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.skills import SkillManager
-from fleet_rlm.store import Store
-from fleet_rlm.store.db import VolumePostgresHarness
-from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
+from fleet_rlm.store import IdempotencyConflictError, Store
+from fleet_rlm.workspace import WorkspaceDataset, _workspace_relative_path, validate_session_id
 
 _LOGGER = logging.getLogger("fleet_rlm.session")
 _EVICT_WAIT_SECONDS = 2.0
 _LEASE_MONITOR_JOIN_SECONDS = 5.0
+
+
+_MAX_TURN_RECORD_BYTES = 1_000_000
+_SESSION_HISTORY_TURNS = 8
+_SESSION_HISTORY_CHARS = 16_000
+_MAX_STORED_TURNS = 200
 
 
 @dataclass(slots=True)
@@ -34,11 +41,10 @@ class SessionRuntime:
     """
 
     sandbox_mgr: DaytonaSandboxManager
-    harness: VolumePostgresHarness
+    store: Store
     skill_mgr: SkillManager
     engine: AdaptiveFleetEngine
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
-    execution_mode: str = "hybrid"
     context: WorkspaceDataset | None = None
     lease: psycopg.Connection | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
@@ -47,6 +53,190 @@ class SessionRuntime:
     _lease_monitor_stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _lease_monitor: threading.Thread | None = field(default=None, repr=False)
     _lease_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @property
+    def session_id(self) -> str:
+        """Return the Session ID owned by the sandbox manager."""
+        return self.sandbox_mgr.session_id
+
+    def ensure_session(self, session_id: str) -> None:
+        """Create the Session row after validating its ID."""
+        self.store.ensure_session(validate_session_id(session_id))
+
+    def save_memory(
+        self,
+        memory_id: str,
+        content: str,
+        *,
+        sources: dict[str, str] | None = None,
+        kind: str = "observation",
+        reviewed: bool = False,
+    ) -> None:
+        """Validate and save one memory, checking content, kind, and source paths."""
+        validate_session_id(memory_id)
+        if (
+            not content.strip()
+            or len(content) > 10000
+            or kind not in {"observation", "preference", "hypothesis", "procedure"}
+        ):
+            raise ValueError("Invalid memory content or kind")
+        sources = sources or {}
+        if len(sources) > 100 or any(not self._valid_vfs_path(p) for p in sources):
+            raise ValueError("Invalid memory sources")
+        self.store.save_memory(self.session_id, memory_id, content, kind, sources, reviewed)
+
+    def memories(self, query: str = "", *, reviewed_only: bool = False) -> list[dict[str, Any]]:
+        """Search memories with a bounded OR-of-words query, optionally only reviewed ones."""
+        search = " OR ".join(query[:2000].split()[:32])
+        return self.store.memories(self.session_id, search, reviewed_only=reviewed_only)
+
+    def delete_memory(self, memory_id: str) -> None:
+        """Delete one memory after validating its ID."""
+        self.store.delete_memory(self.session_id, validate_session_id(memory_id))
+
+    def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
+        """Persist intent before side effects; an uncertain running turn is never replayed."""
+        digest = hashlib.sha256(task.encode()).hexdigest()
+        prior = self.store.claim_turn(self.session_id, turn_id, key, digest)
+        if prior is not None and prior["task_sha256"] != digest:
+            raise IdempotencyConflictError("Idempotency key already belongs to another task")
+        return prior
+
+    def turn_status(self, turn_id: str) -> dict[str, Any] | None:
+        """Return one Turn's status after validating its ID."""
+        return self.store.turn_status(self.session_id, validate_session_id(turn_id))
+
+    def load_context(self, session_id: str) -> tuple[str, str]:
+        """The Session's memory summary and bounded rendered history."""
+        summary, turns = self.store.load_session(validate_session_id(session_id))
+        return summary, self._render_history(turns)
+
+    @staticmethod
+    def _render_history(turns: list[dict[str, Any]]) -> str:
+        if not isinstance(turns, list):
+            return ""
+        entries: list[str] = []
+        total_chars = 0
+        for turn in reversed(turns[-_SESSION_HISTORY_TURNS:]):
+            if not isinstance(turn, dict):
+                continue
+            task = str(turn.get("task") or "")
+            answer = str(turn.get("answer") or "")
+            rendered = f"User: {task}\nAssistant: {answer}"
+            separator_chars = 2 if entries else 0
+            remaining = _SESSION_HISTORY_CHARS - total_chars - separator_chars
+            header = "User: \nAssistant: "
+            if remaining < len(header) + 2:
+                break
+            if len(rendered) > remaining:
+                task_budget = min(len(task), 4_000, (remaining - len(header)) // 2)
+                task_excerpt = task[:task_budget]
+                if len(task) > task_budget:
+                    task_excerpt += "…"
+                answer_budget = remaining - len(header) - len(task_excerpt)
+                if len(answer) > answer_budget:
+                    answer_excerpt = "…" + answer[-(answer_budget - 1) :] if answer_budget > 1 else "…"
+                else:
+                    answer_excerpt = answer
+                rendered = f"User: {task_excerpt}\nAssistant: {answer_excerpt}"
+            entries.append(rendered)
+            total_chars += len(entries[-1])
+        return "\n\n".join(reversed(entries))
+
+    def commit_turn(
+        self,
+        session_id: str,
+        turn_record: dict[str, Any],
+        new_memory_note: str = "",
+        replay_snapshot: tuple[str, bytes] | None = None,
+    ) -> list[str]:
+        """Record a finished Turn and return its sorted, unique `artifacts/` workspace paths.
+
+        Commits the record, memory note, completion payload, and optional immutable replay
+        together. `replay_snapshot` is the digest and compressed bytes selected by the record.
+
+        Raises:
+            ValueError: Replay selection metadata or digest is inconsistent, the Turn ID is
+                missing, the Session ID is invalid, the record is oversized, or a workspace
+                path is invalid.
+
+        Serialization, workspace listing, and storage errors propagate.
+        """
+        if bool(turn_record.get("replay_snapshot_selected")) != (replay_snapshot is not None):
+            raise ValueError("Selected replay metadata and immutable snapshot must be committed together")
+        if replay_snapshot is not None and turn_record.get("replay_snapshot_sha256") != replay_snapshot[0]:
+            raise ValueError("Turn replay digest does not match the immutable snapshot")
+        if not turn_record.get("turn_id"):
+            raise ValueError("Turn record must carry a turn_id")
+        session_id = validate_session_id(session_id)
+        record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
+        if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:
+            raise ValueError("Turn record exceeds the persistence size limit")
+        paths = self.sandbox_mgr.list_workspace_files()
+        if not isinstance(paths, list) or any(not self._valid_vfs_path(path) for path in paths):
+            raise ValueError("Workspace listing returned an invalid relative path")
+        artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
+        completion = None
+        if turn_record.get("turn_id"):
+            from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
+
+            result = {
+                "event": "turn_complete",
+                "answer": turn_record.get("answer", ""),
+                "route": turn_record.get("route", ""),
+                "learned_skill_note": turn_record.get("learned_skill_note", ""),
+                "artifacts": artifacts,
+                **{
+                    key: turn_record[key]
+                    for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
+                    if key in turn_record
+                },
+                # The status payload carries the same provider-resolved identity as the record.
+                **{key: turn_record[key] for key in PROVENANCE_KEYS if key in turn_record},
+                # Deadline, outcome, and wall duration join the same turn_id across the terminal
+                # event, the stored record, and the fleet_turn span. `effective_seconds=None` is
+                # preserved explicitly rather than substituted with a default.
+                **{
+                    key: turn_record[key]
+                    for key in (
+                        "deadline_source",
+                        "effective_seconds",
+                        "outcome",
+                        "duration_seconds",
+                    )
+                    if key in turn_record
+                },
+            }
+            if turn_record.get("trace_id"):
+                result["trace_id"] = turn_record["trace_id"]
+            # The status payload reports the same teardown outcome as the stored Turn and span.
+            if turn_record.get("cleanup"):
+                result["cleanup"] = turn_record["cleanup"]
+            # Provider-owned lifecycle bounds are surfaced unchanged; they are not Fleet limits.
+            for key in ("ttl_minutes", "auto_stop_interval", "maximum_lifespan_minutes", "provider_owned"):
+                if key in turn_record:
+                    result[key] = turn_record[key]
+            # The live root handle this Turn used, when it provisioned one.
+            if turn_record.get("root_sandbox_id"):
+                result["root_sandbox_id"] = turn_record["root_sandbox_id"]
+            completion = (turn_record["turn_id"], result)
+        self.store.commit_turn(
+            session_id,
+            turn_record_json=record_json,
+            max_turns=_MAX_STORED_TURNS,
+            memory_note=new_memory_note,
+            completion=completion,
+            replay_snapshot=replay_snapshot,
+        )
+        return artifacts
+
+    @staticmethod
+    def _valid_vfs_path(rel_path: str) -> bool:
+        try:
+            _workspace_relative_path(rel_path)
+        except ValueError:
+            return False
+        return True
 
     def assert_lease_held(self) -> None:
         """Fail closed after the dedicated connection holding this Session lock is lost."""
@@ -76,7 +266,7 @@ class SessionRuntime:
                 # The connection dropped (Lakebase closes idle ones). Re-take the advisory lock on a fresh
                 # connection, which also carries a fresh credential; another worker holding it means we lost.
                 try:
-                    renewed = self.harness.store.acquire_session_lease(self.sandbox_mgr.session_id)
+                    renewed = self.store.acquire_session_lease(self.sandbox_mgr.session_id)
                 except Exception:
                     if self._lease_monitor_stop.is_set():
                         return
@@ -114,8 +304,7 @@ class SessionRuntime:
             lease.close()
 
     def set_mode(self, mode: str) -> None:
-        """Set the execution mode on this Session and its engine, and record it as an override."""
-        self.execution_mode = mode
+        """Set the execution mode on the engine and record its Session-level provenance."""
         self.engine.execution_mode = mode
         self.configuration_overrides["execution_mode"] = mode
 
@@ -128,16 +317,6 @@ class SessionRuntime:
         )
 
 
-def settings_for_session(settings: FleetSettings, saved: dict[str, Any]) -> FleetSettings:
-    """Apply only the supported persisted mode/model overrides, never credentials or provider endpoints."""
-    overrides = {}
-    if "mode" in saved:
-        overrides["execution_mode"] = saved["mode"]
-    if saved.get("models"):
-        overrides.update({f"fleet_{role}_model": saved["models"][role] for role in ("root", "sub")})
-    return settings.with_explicit_overrides(**overrides)
-
-
 def runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, Any]:
     """The resolved configuration with this Session's model and mode overrides applied."""
     overrides = dict(getattr(runtime, "configuration_overrides", {}))
@@ -145,7 +324,7 @@ def runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, An
         model = getattr(getattr(runtime.engine, f"{role}_lm", None), "model", None)
         if model is not None and model != getattr(settings, f"fleet_{role}_model"):
             overrides[f"fleet_{role}_model"] = model
-    mode = getattr(runtime, "execution_mode", settings.execution_mode)
+    mode = getattr(getattr(runtime, "engine", None), "execution_mode", settings.execution_mode)
     if mode != settings.execution_mode:
         overrides["execution_mode"] = mode
     return settings.configuration(overrides)
@@ -256,11 +435,10 @@ class SessionRuntimeRegistry:
             linked_children=settings.linked_children,
             environment_report_claim=store.claim_environment_report,
         )
-        harness = VolumePostgresHarness(store, sandbox_mgr)
         runtime = SessionRuntime(
             restart_requested=self._restart_requested,
             sandbox_mgr=sandbox_mgr,
-            harness=harness,
+            store=store,
             skill_mgr=SkillManager(sandbox_mgr, Path(settings.local_skills_dir)),
             engine=AdaptiveFleetEngine(
                 sandbox_mgr=sandbox_mgr,
@@ -270,14 +448,13 @@ class SessionRuntimeRegistry:
                 compiled_path=str(Path(settings.compiled_program_dir) / f"{session_id}.json"),
                 execution_mode=settings.execution_mode,
             ),
-            execution_mode=settings.execution_mode,
         )
-        harness.ensure_session(session_id)
+        runtime.ensure_session(session_id)
         runtime.lease = store.acquire_session_lease(session_id)
         try:
             saved = store.runtime_settings(session_id)
             if "mode" in saved:
-                runtime.set_mode(settings_for_session(settings, saved).execution_mode)
+                runtime.set_mode(settings.for_session(saved).execution_mode)
             if saved.get("models"):
                 runtime.set_engine(self.engine_for_models(runtime, saved["models"]))
             if saved.get("context"):
@@ -290,7 +467,7 @@ class SessionRuntimeRegistry:
 
     def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> AdaptiveFleetEngine:
         """Build an engine for this Session that uses the given root and sub model names."""
-        settings = settings_for_session(self.settings, {"models": models})
+        settings = self.settings.for_session({"models": models})
         root, sub, _, _ = settings.build_lms()
         return AdaptiveFleetEngine(
             sandbox_mgr=runtime.sandbox_mgr,
@@ -298,7 +475,7 @@ class SessionRuntimeRegistry:
             sub_lm=sub,
             jev_lm=self.jev_lm,
             compiled_path=runtime.engine.compiled_path,
-            execution_mode=runtime.execution_mode,
+            execution_mode=runtime.engine.execution_mode,
         )
 
     def evict(self, session_id: str) -> bool:

@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import uvicorn
 from pydantic import ValidationError
@@ -19,10 +20,13 @@ from rich.console import Console
 
 from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
-from fleet_rlm.engine.signatures import Route
+from fleet_rlm.contracts import Route
 from fleet_rlm.observability import trace_object as _trace_object
+from fleet_rlm.optimization_runs import add_optimization_arguments, read_worker_settings
 from fleet_rlm.replay import REVIEW_STATUSES
 from fleet_rlm.tui.app import run_interactive_cli
+from fleet_rlm.tui.web import serve_web_client, validate_api_url, web_auth_token
+from fleet_rlm.workspace import validate_session_id
 
 _CONSOLE = Console()
 
@@ -36,6 +40,34 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def _web_api_url(value: str) -> str:
+    """Parse the API URL before it is embedded in Textual Serve's shell command."""
+    try:
+        return validate_api_url(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def _web_public_url(value: str) -> str:
+    """Validate and normalize the browser-facing URL used behind a proxy or wildcard bind."""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise argparse.ArgumentTypeError("public URL must be a valid HTTP(S) URL") from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise argparse.ArgumentTypeError("public URL must be an HTTP(S) URL without credentials, query, or fragment")
+    return value.rstrip("/")
+
+
 def _configuration_error(exc: ValueError) -> str:
     """Format configuration failures without echoing credential-bearing inputs."""
     if isinstance(exc, ValidationError):
@@ -44,6 +76,26 @@ def _configuration_error(exc: ValueError) -> str:
             for error in exc.errors(include_url=False, include_input=False)
         )
     return str(exc)
+
+
+def _prepare_owned_api(plan: launcher.LaunchPlan, settings: Any, token: str) -> str:
+    """Give both launch surfaces the same private operator capability and provenance."""
+    if not plan.start_api or not _is_loopback(settings.host):
+        return ""
+    token = token or secrets.token_urlsafe(32)
+    derived = [
+        name
+        for name in plan.api_env
+        if name not in os.environ and settings.configuration_source(name.removeprefix("FLEET_").lower()) != "explicit"
+    ]
+    if settings.mlflow_mode == "databricks" and settings.mlflow_tracking_uri == "databricks":
+        derived.extend(name for name in ("DATABRICKS_HOST", "DATABRICKS_TOKEN") if name not in os.environ)
+    plan.api_env.update(
+        FLEET_SETUP_TOKEN=token,
+        FLEET_SETUP_PROJECT_DIR=str(Path.cwd()),
+        FLEET_SETUP_DERIVED_ENV=json.dumps(derived),
+    )
+    return token
 
 
 def _trace_request(trace: Any) -> dict[str, Any]:
@@ -97,7 +149,7 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
         if value is not None:
             labels[name] = value
     if getattr(args, "expectations_file", None):
-        from fleet_rlm.optimize.evidence import parse_expectations_file
+        from fleet_rlm.execution_evidence import parse_expectations_file
 
         labels["structured_expectations"] = parse_expectations_file(args.expectations_file)
     request = _trace_request(trace)
@@ -142,8 +194,6 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
 
 def _eval_command(args: argparse.Namespace, settings: Any) -> None:
     """Build the eval dataset, label a trace, or run the synthetic cases against a live server."""
-    import os
-
     import mlflow
 
     from fleet_rlm.optimize import evaluation
@@ -162,19 +212,16 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         return
     if not target.eval_experiment_name:
         raise SystemExit(f"set FLEET_MLFLOW_{target.mode.upper()}_EVAL_EXPERIMENT_NAME to the evaluation experiment")
-    if target.mode == "databricks":
-        from mlflow.entities.trace_location import UnityCatalog
+    from fleet_rlm.observability import set_mlflow_trace_experiment
 
-        experiment = mlflow.set_experiment(
-            target.eval_experiment_name,
-            trace_location=UnityCatalog(
-                catalog_name=settings.mlflow_trace_catalog,
-                schema_name=settings.mlflow_trace_schema,
-                table_prefix=settings.mlflow_eval_trace_table_prefix,
-            ),
-        )
-    else:
-        experiment = mlflow.set_experiment(target.eval_experiment_name)
+    experiment = set_mlflow_trace_experiment(
+        target.eval_experiment_name,
+        databricks=target.mode == "databricks",
+        trace_catalog=getattr(settings, "mlflow_trace_catalog", ""),
+        trace_schema=getattr(settings, "mlflow_trace_schema", ""),
+        trace_table_prefix=getattr(settings, "mlflow_eval_trace_table_prefix", ""),
+        tracing_sql_warehouse_id=getattr(settings, "mlflow_tracing_sql_warehouse_id", ""),
+    )
     cases = evaluation.synthetic_cases(seed=args.seed)
     if args.eval_command == "dataset":
         name = args.name or (
@@ -182,10 +229,10 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
             if target.mode == "databricks"
             else "fleet_rlm_eval_cases"
         )
-        from fleet_rlm.optimize import benchmarks
+        from fleet_rlm.optimize import evaluation
 
         if args.long_context:
-            cases += benchmarks.long_context_cases()
+            cases += evaluation.long_context_cases()
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
         _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
         return
@@ -217,8 +264,6 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
 
 def _trace_verify_command(args: argparse.Namespace, settings: Any) -> None:
     """Flush pending export and verify one trace is readable from its configured destination."""
-    import os
-
     import mlflow
 
     target = settings.mlflow_target()
@@ -300,6 +345,18 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--port", type=int, default=None)
     serve.add_argument("--setup", action="store_true", help=argparse.SUPPRESS)
 
+    web = commands.add_parser("web", help="serve the Textual client in a browser")
+    web.add_argument(
+        "--url", type=_web_api_url, default=None, help="connect to this API only; do not start local services"
+    )
+    web.add_argument("--host", default="127.0.0.1", help="Textual Serve listener host (loopback by default)")
+    web.add_argument("--port", type=int, default=8080, help="Textual Serve listener port")
+    web.add_argument("--public-url", type=_web_public_url, help="browser-facing URL, e.g. behind a TLS proxy")
+    web.add_argument("--session", help="use one Session ID for all browser clients (otherwise each gets its own)")
+    web.add_argument("--mlflow-port", type=int, default=None)
+    web.add_argument("--mlflow-experiment", default=None)
+    web.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
+
     cli = commands.add_parser(
         "cli",
         help="start the API server and open the interactive terminal client",
@@ -311,12 +368,10 @@ def main(argv: list[str] | None = None) -> None:
     cli.add_argument("--mlflow-experiment", default=None)
     cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
 
-    from fleet_rlm.optimize import gepa
-
     optimize = commands.add_parser(
         "optimize", help="evaluate a Session's reviewed examples and compile a GEPA candidate (live)"
     )
-    gepa.add_arguments(optimize)
+    add_optimization_arguments(optimize)
 
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
@@ -362,7 +417,7 @@ def main(argv: list[str] | None = None) -> None:
     verify.add_argument("trace_id", help="trace ID; use its fully qualified trace:/ reference for Unity Catalog")
     verify.add_argument("--scope", choices=("runtime", "evaluation", "optimization"), default="runtime")
 
-    for command in (serve, cli, optimize, dataset, run, label, verify):
+    for command in (serve, web, cli, optimize, dataset, run, label, verify):
         command.add_argument(
             "--mlflow",
             choices=("local", "databricks"),
@@ -374,6 +429,14 @@ def main(argv: list[str] | None = None) -> None:
     if getattr(args, "backend", None) and args.mlflow == "local":
         parser.error("cli databricks conflicts with --mlflow local")
     backend = getattr(args, "backend", None) or getattr(args, "mlflow", None) or "local"
+    managed_settings = None
+    if args.command == "optimize" and getattr(args, "managed_run_id", None):
+        try:
+            managed_settings = read_worker_settings(sys.stdin)
+        except (ValueError, TypeError):
+            parser.error("invalid private worker configuration")
+        if managed_settings.mlflow_mode != backend:
+            parser.error("worker MLflow backend does not match its server configuration")
     if getattr(args, "mlflow_port", None) is not None:
         if backend != "local":
             parser.error("--mlflow-port is only supported with local MLflow")
@@ -397,7 +460,7 @@ def main(argv: list[str] | None = None) -> None:
             port=args.port or 8000,
         )
         return
-    if args.command in {None, "cli"} and not getattr(args, "url", None):
+    if args.command in {None, "cli", "web"} and not getattr(args, "url", None):
         try:
             existing_settings = get_settings(backend)
         except (ValueError, ValidationError) as exc:
@@ -416,11 +479,9 @@ def main(argv: list[str] | None = None) -> None:
                 return
             get_settings.cache_clear()
     try:
-        settings = get_settings(backend)
+        settings = managed_settings or get_settings(backend)
         overrides = {}
         if getattr(args, "mlflow_port", None) is not None:
-            if backend != "local":
-                parser.error("--mlflow-port is only supported with local MLflow")
             overrides["mlflow_local_port"] = args.mlflow_port
         if getattr(args, "mlflow_experiment", None) is not None:
             overrides[f"mlflow_{backend}_experiment_name"] = args.mlflow_experiment
@@ -450,6 +511,8 @@ def main(argv: list[str] | None = None) -> None:
             "or run an MLflow server separately before using standalone commands."
         )
     if args.command == "optimize":
+        from fleet_rlm.optimize import gepa
+
         gepa.run(args, optimize, settings)
         return
     if args.command == "eval":
@@ -479,26 +542,71 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
 
+    if args.command == "web":
+        if not 1 <= args.port <= 65535:
+            parser.error("web --port must be between 1 and 65535")
+        if not settings.allow_non_loopback_bind and not _is_loopback(args.host):
+            parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
+        if (args.host in {"0.0.0.0", "::"} or ":" in args.host) and args.public_url is None:
+            parser.error("web --public-url is required when binding to a wildcard or IPv6 host")
+        try:
+            web_auth_token(args.host)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.session is not None:
+            try:
+                validate_session_id(args.session)
+            except ValueError as exc:
+                parser.error(str(exc))
+        if not args.url and not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
+            parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
+        try:
+            plan = launcher.plan_launch(
+                url=args.url,
+                host=settings.host,
+                port=settings.port,
+                settings=settings,
+            )
+            _prepare_owned_api(plan, settings, setup_token)
+            _CONSOLE.print(f"MLflow: {target.mode} | {target.tracking_uri} | {target.experiment_name}", markup=False)
+            with launcher.running_services(
+                plan,
+                host=settings.host,
+                port=settings.port,
+                mlflow_port=settings.mlflow_local_port,
+                startup_timeout=args.startup_timeout,
+                log=lambda message: _CONSOLE.print(f"[dim]{message}[/dim]"),
+            ):
+                launcher.verify_api_destination(plan.api_url, settings.mlflow_descriptor())
+                browser_url = args.public_url or f"http://{args.host}:{args.port}"
+                _CONSOLE.print(f"Fleet RLM Lite web app: {browser_url}", markup=False)
+                serve_web_client(
+                    api_url=plan.api_url,
+                    mlflow_mode=backend,
+                    host=args.host,
+                    port=args.port,
+                    session_id=args.session,
+                    mlflow_port=args.mlflow_port,
+                    mlflow_experiment=args.mlflow_experiment,
+                    public_url=args.public_url,
+                )
+        except KeyboardInterrupt:
+            raise SystemExit(130) from None
+        except launcher.LaunchError as exc:
+            _CONSOLE.print(f"[bold red]Could not start services:[/bold red] {exc}")
+            raise SystemExit(1) from None
+        except OSError as exc:
+            _CONSOLE.print(f"[bold red]Could not start web server:[/bold red] {type(exc).__name__}")
+            raise SystemExit(1) from None
+        return
+
     session_id = getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}")
     url = getattr(args, "url", None)
     if not url and not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
         parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
     try:
         plan = launcher.plan_launch(url=url, host=settings.host, port=settings.port, settings=settings)
-        if plan.start_api and setup_token:
-            derived = [
-                name
-                for name in plan.api_env
-                if name not in os.environ
-                and settings.configuration_source(name.removeprefix("FLEET_").lower()) != "explicit"
-            ]
-            if backend == "databricks" and settings.mlflow_tracking_uri == "databricks":
-                derived.extend(name for name in ("DATABRICKS_HOST", "DATABRICKS_TOKEN") if name not in os.environ)
-            plan.api_env.update(
-                FLEET_SETUP_TOKEN=setup_token,
-                FLEET_SETUP_PROJECT_DIR=str(Path.cwd()),
-                FLEET_SETUP_DERIVED_ENV=json.dumps(derived),
-            )
+        setup_token = _prepare_owned_api(plan, settings, setup_token)
         _CONSOLE.print(f"MLflow: {target.mode} | {target.tracking_uri} | {target.experiment_name}", markup=False)
         with launcher.running_services(
             plan,

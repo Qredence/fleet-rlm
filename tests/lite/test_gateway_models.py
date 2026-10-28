@@ -74,10 +74,12 @@ def test_unity_gateway_models_use_native_dspy_engine_and_credentials(monkeypatch
     # config/fleet.toml gives GEPA reflection the DSPy-recommended temperature and output budget.
     reflection_options = {**gateway_options, "temperature": 1.0, "max_tokens": 32000}
     assert reflection_lm.kwargs == reflection_options
+    assert reflection_lm.model.startswith("fleet-gateway-reflection-")
+    assert reflection_lm.model.endswith("/system.ai.claude-sonnet-5-5")
     assert calls == [
         ("openai/uscentral.ai_gateway.deepseek-v4-1-flash-service", {**gateway_options, "max_tokens": 16384}),
         ("openai/system.ai.claude-haiku-5-5", gateway_options),
-        ("openai/system.ai.claude-sonnet-5-5", reflection_options),
+        (reflection_lm.model, reflection_options),
     ]
     assert "test-token" not in repr(settings)
 

@@ -1,7 +1,8 @@
 """Signatures live in one module with stable field names; the stopping rules exist once."""
 
+from fleet_rlm.contracts import STOPPING_RULES, TRIAGE_ROUTE, item_decision
 from fleet_rlm.engine import signatures
-from fleet_rlm.engine.signatures import STOPPING_RULES, TRIAGE_ROUTE, FleetTask, TurnTriage
+from fleet_rlm.engine.signatures import FleetTask, TurnTriage
 
 
 def test_triage_signature_keeps_the_typed_choice_and_criteria():
@@ -43,4 +44,4 @@ def test_stopping_rules_have_one_source():
 def test_child_and_judge_signatures_are_named():
     assert list(signatures.ChildTask.output_fields) == ["findings"]
     assert list(signatures.AnswerJudge.output_fields) == ["is_correct", "is_safe", "critique"]
-    assert list(signatures.item_decision(["a", "b"]).output_fields) == ["decision"]
+    assert list(item_decision(["a", "b"]).output_fields) == ["decision"]

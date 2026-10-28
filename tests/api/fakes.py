@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import weakref
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.app import create_app
 from fleet_rlm.api.deps import get_registry
+from fleet_rlm.api.routes.turns import create_turn_executor
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.session import SessionRuntime
 from fleet_rlm.workspace import validate_session_id
@@ -98,17 +101,8 @@ def store_with(**overrides: Any) -> SimpleNamespace:
     return SimpleNamespace(**{**defaults, **overrides})
 
 
-class FakeHarness(SimpleNamespace):
-    def __init__(self, **overrides: Any) -> None:
-        defaults: dict[str, Any] = {
-            "claim_turn": lambda *_args: None,
-            "memories": lambda *_args, **_kwargs: [],
-            "load_context": lambda _session: ("", ""),
-            "commit_turn": lambda **_kwargs: [],
-            "turn_status": lambda _turn_id: None,
-            "store": store_with(),
-        }
-        super().__init__(**{**defaults, **overrides})
+class FakeRuntime(SessionRuntime):
+    """Allow individual runtime policy methods to be replaced in boundary tests."""
 
 
 def engine_with(root: str = "openai/system.ai.root", sub: str = "openai/system.ai.sub") -> SimpleNamespace:
@@ -121,16 +115,44 @@ def engine_with(root: str = "openai/system.ai.root", sub: str = "openai/system.a
 
 
 def runtime_with(**parts: Any) -> SessionRuntime:
-    return SessionRuntime(
+    engine = parts.pop("engine", engine_with())
+    execution_mode = parts.pop("execution_mode", getattr(engine, "execution_mode", "hybrid"))
+    engine.execution_mode = execution_mode
+    real_policy = parts.pop("real_policy", False)
+    policy = {
+        name: parts.pop(name)
+        for name in (
+            "claim_turn",
+            "memories",
+            "load_context",
+            "commit_turn",
+            "turn_status",
+            "save_memory",
+            "delete_memory",
+        )
+        if name in parts
+    }
+    runtime = FakeRuntime(
         sandbox_mgr=parts.pop("sandbox_mgr", FakeManager()),
-        harness=parts.pop("harness", FakeHarness()),
+        store=parts.pop("store", store_with()),
         skill_mgr=parts.pop(
             "skill_mgr",
             SimpleNamespace(sync_local_skills_to_volume=lambda: 0, build_catalog_xml=lambda: "<available_skills />"),
         ),
-        engine=parts.pop("engine", engine_with()),
+        engine=engine,
         **parts,
     )
+    if not real_policy:
+        defaults = {
+            "claim_turn": lambda *_args: None,
+            "memories": lambda *_args, **_kwargs: [],
+            "load_context": lambda _session: ("", ""),
+            "commit_turn": lambda **_kwargs: [],
+            "turn_status": lambda _turn: None,
+        }
+        for name, method in (defaults | policy).items():
+            setattr(runtime, name, method)
+    return runtime
 
 
 class FakeRegistry:
@@ -162,6 +184,14 @@ def api_settings(**values: Any) -> FleetSettings:
     )
 
 
+@contextmanager
+def opened_client(*args: Any, **kwargs: Any):
+    """Create and enter a fake-runtime client with its FastAPI lifespan active."""
+    client, app = client_for(*args, **kwargs)
+    with client:
+        yield client, app
+
+
 def client_for(
     runtime: SessionRuntime | None = None,
     *,
@@ -178,4 +208,10 @@ def client_for(
     if runtime is not None:
         fake = FakeRegistry(runtime, **registry)
         app.dependency_overrides[get_registry] = lambda: fake
-    return TestClient(app, raise_server_exceptions=False), app
+    client = TestClient(app, raise_server_exceptions=False)
+    # TestClient requests without a context manager do not run FastAPI lifespan. Give each
+    # test app an explicit executor owner instead of relying on a hidden process-global fallback.
+    executor = create_turn_executor()
+    app.state.turn_executor = executor
+    weakref.finalize(client, executor.shutdown, wait=False, cancel_futures=True)
+    return client, app

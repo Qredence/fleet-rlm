@@ -14,19 +14,36 @@ Code lives in `src/fleet_rlm/`. See the [source layout](docs/reference/source-la
 ```mermaid
 flowchart LR
     Client[Textual terminal client] -->|HTTP / SSE| API[FastAPI server]
+    Browser[Browser] -->|WebSocket terminal I/O| Serve[Textual Serve]
+    Serve -->|per-browser Textual subprocess| WebTUI[Textual client]
+    WebTUI -->|HTTP / SSE| API
     API --> Engine[DSPy engine]
     Engine --> Daytona[Daytona Python execution]
     API --> PostgreSQL[PostgreSQL state]
     Engine --> MLflow[MLflow traces / evaluation]
+    API -->|owns one optimization job| Worker[CLI optimizer subprocess]
+    Worker --> PostgreSQL
+    Worker --> MLflow
 ```
 
-- `cli.py` provides the `fleet` entry point.
+- FastAPI (`fleet_rlm.api.app`) is the primary application; `cli.py` provides the
+  `fleet` entry point, where `serve` starts the API, `web` serves the Textual client,
+  `optimize` is also available as a standalone CLI command, and `eval` is offline tooling.
 - `launcher.py` owns the local API and optional local MLflow.
-- Textual/Rich clients submit requests and render events.
+- Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
+- The API owns TUI optimization jobs through one subprocess slot. The worker runs the existing CLI optimizer; PostgreSQL owns lifecycle state, while MLflow stores run traces and candidate evidence. The API does not import GEPA.
+- A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
+- A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer.
 - `session.py` owns the runtime registry and Session leases.
-- `engine/turn.py` runs each Turn on a worker thread.
-- Each runtime combines a Daytona manager, PostgreSQL harness, Skill manager, and DSPy engine.
+- `engine/turn.py` runs each Turn on a worker thread; `sandbox_mgr.turn_scope()` is the one
+  place that decides whether a caller owns a Turn, so a program nested inside an API Turn
+  never resets its budget or tears it down.
+- Each runtime combines a Daytona manager, shared Store reference, Skill manager, and DSPy engine.
+  `SessionRuntime` owns memory, history, idempotency, and Turn-record policies; Store owns SQL and transactions.
+- The runtime does not import the offline optimizer: shared route, input, and evidence
+  contracts live in neutral modules (`contracts`, `execution_evidence`). The bounded native
+  compiled-program loader lives beside the engine in `engine/programs.py`.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
@@ -120,6 +137,9 @@ Deadlines:
 - Routing errors or unknown labels fall back to RLM.
 - Selected datasets cannot use context-free direct answers.
 - RLM tunes instructions. Flex rewrites module source and initially wraps RLM when given tools.
+- Both execution routes carry the Turn's RLM budgets. The outer Flex interpreter supplies
+  omitted `max_iters` / `max_llm_calls` at native RLM construction, without editing source.
+  Explicit values are preserved; deeper factories and explicit child limits do not inherit these defaults.
 - Both RLM and Flex can delegate.
 - Optional Jev Skill selection preloads up to three instructions and consumes shared budget.
 - Ordinary Skill selection failures retain the catalog.
@@ -127,6 +147,10 @@ Deadlines:
 
 Child execution:
 
+- Native `llm_query` / `llm_query_batched` are semantic model queries, not full child agents.
+- Explicit children execute fresh native `dspy.RLM(ChildTask, ...)` instances on the metered sub LM.
+  Fleet retains selected inputs, allowlisted tools, bounded slices, concurrent context propagation,
+  failure classification, success-only promotion, and cleanup.
 - Explicit children receive Skills plus selected inputs.
 - Native nested RLMs copy their parent's `files/` and `skills/`.
 - Children use isolated Volume paths and promote only successful changed outputs.
@@ -163,11 +187,13 @@ Progress events:
 - Route assessments identify Jev or generative backends.
 - Diagnostic scorers do not automatically become GEPA objectives.
 - Search uses approved immutable replays grouped by lineage in isolated runtimes.
+  Nonempty train/dev/holdout splits and critical holdout are required before native search.
 - Gold stays outside program inputs. Host receipts support artifact and delegation scoring.
 - Train/dev search excludes holdout.
 - Paired validation, critical cases, correctness, execution errors, and measured usage gate promotion.
 - Candidate creation and installation are separate.
 - Approval rechecks artifact, incumbent, configuration, code, and dependency identities.
+- Installed distribution identities, rather than source-tree lockfile paths, identify dependencies.
 - Incompatible evidence requires reevaluation.
 - External benchmarks and verifiers live in notebooks/helpers.
 - Benchmark traces stay outside curation.
@@ -178,6 +204,8 @@ See [evaluation](docs/reference/evaluation.md) and the [canary runbook](docs/run
 
 - The ordinary API has no caller authentication and defaults to `127.0.0.1`.
 - Non-loopback binding requires `FLEET_ALLOW_NON_LOOPBACK_BIND=true` and a secured boundary.
+- Browser terminal WebSockets validate Origin and Host against the configured public URL before acceptance or client process creation.
+- Non-loopback browser terminal listeners also require an environment-only bearer secret supplied by an authenticated TLS reverse proxy.
 - Daytona policy governs generated Python and network access.
 - Live validation requires explicit authorization and saved evidence.
 - Offline tests cannot establish provider availability, isolation, model compatibility, or workload improvement.

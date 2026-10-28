@@ -698,6 +698,114 @@ paths:
                 $ref: '#/components/schemas/SetupError'
       security:
       - HTTPBearer: []
+  /setup/experiments/drain:
+    post:
+      tags:
+      - setup
+      summary: Drain Experiments
+      description: Fence experiment admission before a local owner waits to stop its services.
+      operationId: drain_experiments_setup_experiments_drain_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Drain Experiments Setup Experiments Drain Post
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
+  /setup/experiments/status:
+    get:
+      tags:
+      - setup
+      summary: Experiment Status
+      description: Observe cleanup through the same private, loopback-only operator capability.
+      operationId: experiment_status_setup_experiments_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Experiment Status Setup Experiments Status Get
+        '401':
+          description: Operator token required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '403':
+          description: Loopback connection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '404':
+          description: Setup or operation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '409':
+          description: Operation or configuration conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '422':
+          description: Invalid setup request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupError'
+      security:
+      - HTTPBearer: []
   /health:
     get:
       tags:
@@ -1576,6 +1684,180 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/experiments:
+    get:
+      tags:
+      - experiments
+      summary: List Experiments
+      description: List persisted history and the active run for one Session.
+      operationId: list_experiments_sessions__session_id__experiments_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Experiments Sessions  Session Id  Experiments Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - experiments
+      summary: Start Experiment
+      description: Start once per request ID; a busy server rejects instead of queueing work.
+      operationId: start_experiment_sessions__session_id__experiments_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartExperiment'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Start Experiment Sessions  Session Id  Experiments Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/experiments/{run_id}:
+    get:
+      tags:
+      - experiments
+      summary: Experiment Detail
+      description: Return a snapshot and its bounded saved comparison.
+      operationId: experiment_detail_sessions__session_id__experiments__run_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Experiment Detail Sessions  Session Id  Experiments  Run Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/experiments/{run_id}/cancel:
+    post:
+      tags:
+      - experiments
+      summary: Cancel Experiment
+      description: Request a cooperative stop; terminal status follows actual worker cleanup.
+      operationId: cancel_experiment_sessions__session_id__experiments__run_id__cancel_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Cancel Experiment Sessions  Session Id  Experiments  Run Id  Cancel Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/experiments/{run_id}/review:
+    post:
+      tags:
+      - experiments
+      summary: Review Experiment
+      description: Approve through the evidence-checking worker, or persist an explicit rejection.
+      operationId: review_experiment_sessions__session_id__experiments__run_id__review_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewExperiment'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Review Experiment Sessions  Session Id  Experiments  Run Id  Review Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Action:
@@ -2071,6 +2353,27 @@ components:
       - pushed
       title: Pushed
       description: Count of local Skills pushed to the Session's volume.
+    ReviewExperiment:
+      properties:
+        decision:
+          type: string
+          enum:
+          - approved
+          - rejected
+          title: Decision
+        request_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[A-Za-z0-9_-]+$
+          title: Request Id
+      additionalProperties: false
+      type: object
+      required:
+      - decision
+      - request_id
+      title: ReviewExperiment
+      description: An explicit human decision, never an implicit promotion after optimization.
     SessionConfig:
       properties:
         mode:
@@ -2230,6 +2533,63 @@ components:
       - restart_required
       title: SetupStatus
       description: Readiness and redacted configuration for the operator checklist.
+    StartExperiment:
+      properties:
+        gepa_budget:
+          anyOf:
+          - type: string
+            enum:
+            - light
+            - medium
+            - heavy
+          - type: 'null'
+          title: Gepa Budget
+          default: light
+        max_metric_calls:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Metric Calls
+        threads:
+          type: integer
+          maximum: 32.0
+          minimum: 1.0
+          title: Threads
+          default: 4
+        reflection_minibatch_size:
+          type: integer
+          minimum: 1.0
+          title: Reflection Minibatch Size
+          default: 3
+        max_candidate_proposals:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Candidate Proposals
+        validation_ratio:
+          type: number
+          maximum: 0.5
+          minimum: 0.1
+          title: Validation Ratio
+          default: 0.35
+        trace_search:
+          type: boolean
+          title: Trace Search
+          default: false
+        request_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[A-Za-z0-9_-]+$
+          title: Request Id
+      additionalProperties: false
+      type: object
+      required:
+      - request_id
+      title: StartExperiment
+      description: Validated search controls and a retry-safe caller identity.
     Status:
       properties:
         status:

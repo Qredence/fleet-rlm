@@ -5,6 +5,12 @@ Workspace files live on the Session's Daytona Volume. Configure the
 connection with `FLEET_DATABASE_URL`; the default DSN is local PostgreSQL at
 `postgresql://postgres:postgres@localhost:5432/fleet`.
 
+`store.py` owns SQL, migrations, pooling, and transactions. `SessionRuntime`
+owns memory validation, bounded history, idempotency, and Turn-record policies,
+using one shared `runtime.store` reference rather than a separate harness. Session
+rows are created before lease acquisition; releasing a runtime closes its lease,
+not the registry's Store. The consolidation changes no SQL or schema version.
+
 At startup, Fleet takes a transaction-scoped advisory lock, reads the
 `fleet_lite_schema_migrations` ledger, and applies each pending migration once.
 The initial migration creates additive tables for
@@ -24,6 +30,16 @@ Migration 5 adds `fleet_lite_sessions.environment_reported`, the durable
 once-per-Session marker for the soft `sandbox_environment_incomplete`
 observation. Existing rows default to unreported; no backfill is performed.
 The migration role owns the change; existing runtime DML grants apply.
+Migration 6 adds `fleet_lite_optimization_runs`, the canonical lifecycle ledger
+for API-owned and standalone CLI optimization runs. A unique partial index permits
+at most one globally active run or approval; there is no job queue. The record
+stores request idempotency, validated options, owner, managed-worker marker,
+status/stage, cooperative stop intent, and run metadata. Database owner/status
+checks fence stale workers from publishing lifecycle updates.
+Migration 7 adds an expression GIN index matching memory search's
+`to_tsvector('english', content)` predicate. PostgreSQL chooses whether to use
+it; it does not eliminate ranking work. The initial index build runs under the
+existing migration transaction/lock and adds index-maintenance cost to writes.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy
@@ -56,7 +72,15 @@ Mode and context changes take effect in the live runtime only after their
 settings have been saved successfully.
 
 Turn records retain pre-execution SHA-256 values in `context_files` for every
-advertised workspace path, not only the selected dataset. When a caller explicitly
+advertised workspace path, not only the selected dataset. Listing, digests,
+manifests, and replay capture share the managed roots `files/`, `artifacts/`,
+`memory/`, `skills/`, `buffers/`, and `sessions/`. Unmanaged top-level scratch
+files and checkouts are excluded without deleting or moving their bytes.
+Symbolic links are not traversed; a symbolic-link managed root, malformed
+managed path, or invalid inventory response fails the Turn before success
+persistence. A failed commit does not roll back Volume bytes, and its root
+trace reports failure rather than a completed answer.
+When a caller explicitly
 sets `record_replay=true`, Fleet writes the complete bounded input snapshot to
 `fleet_lite_replay_snapshots`, keyed by Session and Turn and protected by a
 content digest. It commits only with successful Turn completion; cascade deletion
@@ -107,6 +131,23 @@ and suspend settings are unchanged.
 Daytona Volume bytes are not part of a database transaction. Restarting
 recovers Turns and settings from PostgreSQL and files from the Volume; it does
 not restore Python process memory.
+
+New optimization status is stored in PostgreSQL; candidate manifests, reports,
+and GEPA working files remain in the configured artifact directory, while MLflow
+stores optimization traces and evidence. Existing per-Session JSON run records
+are imported idempotently at startup and before history reads. They are retained
+as read-only migration sources. API restart marks abandoned managed workers
+interrupted and does not rerun provider work; a later explicit review reconciles
+an interrupted approval against the active candidate digests.
+
+Each API holds a dedicated advisory owner lease through worker startup and
+draining. History reads preserve runs owned by another live API. Abandoned
+managed workers receive a cooperative stop request while holding the global
+optimization lease; their rows become interrupted only after it is released.
+Standalone optimization reconciles abandoned running rows under that global
+lease before admitting a new run, so a crashed CLI does not require an API
+history read to unblock the next search. Ctrl+C during search or validation
+records cancellation and clears candidate eligibility before exiting.
 
 The default URL includes a development username and password; replace it for
 any shared or production environment. Do not include database secrets in a

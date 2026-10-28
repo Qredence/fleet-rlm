@@ -74,7 +74,7 @@ for that Session. See the [configuration reference](docs/reference/configuration
 for model settings, database permissions, and tracking profiles.
 
 The versioned execution snapshot is defined in
-[sandbox/snapshots/definition.py](src/fleet_rlm/sandbox/snapshots/definition.py).
+[sandbox/snapshots.py](src/fleet_rlm/sandbox/snapshots.py).
 `fleet cli` checks service readiness through FastAPI and opens a setup checklist
 when configuration or snapshot preparation needs attention. The checklist can
 save missing settings to `.env`, select or create a Daytona Volume, build a
@@ -98,10 +98,22 @@ stops only processes it owns; MLflow data persists under `.fleet/mlflow`.
 Logs are written under `.fleet/logs`.
 
 Interactive terminals use the full-screen Textual client; non-TTY input uses a
-Rich fallback. Use `uv run fleet cli databricks` for managed MLflow with Unity
-Catalog tracing after configuring that profile. Pass `--url` to connect to an
-existing compatible API without starting services. Standalone `fleet serve`
-starts only the API and needs its tracking destination available.
+Rich fallback. Run `uv run fleet web` to serve the same Textual app in a browser
+at `http://127.0.0.1:8080`; each browser connection gets its own Session unless
+`--session` is explicitly set. The web listener is loopback-only by default and
+has no visitor authentication. External access requires a separately secured
+boundary. Browser file paths refer to the host running Fleet, not the visitor's
+computer. Use `fleet cli databricks` or `fleet web --mlflow databricks` for
+managed MLflow with Unity Catalog tracing after configuring that profile. Pass
+`--url` to connect to an existing compatible API without starting services.
+Standalone `fleet serve` starts only the API and needs its tracking destination
+available.
+
+The TUI's `/optimize` starts an API-owned GEPA job that continues if the client
+disconnects; use its explicit cancel action to request cooperative stopping.
+On normal exit, the owning `fleet cli`/`fleet web` launcher drains the job before
+it stops services it owns. `uv run fleet optimize --session SESSION_ID` remains
+available as a standalone CLI workflow.
 
 ### 4. Analyze a file and save an artifact
 
@@ -168,9 +180,11 @@ make install-dev
 make check
 ```
 
-The quality gate runs non-live tests, static checks, documentation links, OpenAPI
-validation, and a package build. It does not establish live provider compatibility
-or measured workload gains. Documentation-only changes use `make check-docs` and
+The quality gate runs non-live tests, statement and branch coverage (minimum 80%
+statement coverage), static checks, documentation links, OpenAPI validation, and a
+package build. Coverage uses the entire Fleet package, including generated sandbox
+runtime code. The gate does not establish live provider compatibility or measured
+workload gains. Documentation-only changes use `make check-docs` and
 `git diff --check`.
 
 - [Documentation index](docs/index.md)

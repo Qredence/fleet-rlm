@@ -9,8 +9,32 @@ import dspy
 import pytest
 
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
-from fleet_rlm.optimize.artifacts import IsolatedFleetProgram
+from fleet_rlm.optimize.validation import IsolatedFleetProgram
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+@pytest.mark.parametrize("kind", ["predictor", "flex"])
+def test_component_diff_distinguishes_absence_from_existing_empty(kind):
+    from fleet_rlm.optimize.artifacts import component_diffs
+
+    class Program(dspy.Module):
+        def __init__(self, present):
+            super().__init__()
+            if present:
+                if kind == "predictor":
+                    self.component = dspy.Predict("task -> answer")
+                    self.component.signature.instructions = ""
+                else:
+                    self.component = dspy.Flex("task -> answer")
+                    self.component._module_src = ""
+
+    absent, empty = Program(False), Program(True)
+    changes = component_diffs(absent, empty)
+    assert changes == [{"component": "component", "before": "", "after": "", "diff": ""}]
+    assert component_diffs(empty, empty.deepcopy()) == []
+    # The existing comparison policy ignores removed candidate keys.
+    assert component_diffs(empty, absent) == []
+
 
 LM = dspy.LM("openai/test", engine="lm15", cache=False)
 

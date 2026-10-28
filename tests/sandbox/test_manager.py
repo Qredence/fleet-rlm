@@ -1,16 +1,52 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.sandbox import manager as manager_module
+from fleet_rlm.sandbox import repl as repl_module
+from fleet_rlm.sandbox import workspace_io
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+def test_inventory_and_artifact_collection_record_only_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    spans: dict[str, Any] = {}
+
+    @contextmanager
+    def phase(name: str):
+        yield SimpleNamespace(set_outputs=lambda value: spans.__setitem__(name, value))
+
+    monkeypatch.setattr(workspace_io, "phase_span", phase)
+    monkeypatch.setattr(workspace_io.mlflow, "get_current_active_span", lambda: object())
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: json.dumps(["artifacts/private.txt"])
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, _path, **_kwargs: b"secret")
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager._sandbox = object()
+
+    evidence = manager.execution_evidence()
+
+    assert evidence["artifacts"]["complete"] is True
+    assert spans == {
+        "sandbox.workspace_inventory": {"files": 1},
+        "sandbox.artifact_collection": {"files": 1, "complete": True},
+    }
+    spans.clear()
+    monkeypatch.setattr(workspace_io.mlflow, "get_current_active_span", lambda: None)
+    assert manager.list_workspace_files() == ["artifacts/private.txt"]
+    assert manager.execution_evidence()["artifacts"]["complete"] is True
+    assert not spans
 
 
 def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,7 +224,6 @@ def test_terminal_teardown_stops_the_root_once_and_records_the_outcome() -> None
 
 
 def test_a_raising_provider_stop_records_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
     manager = DaytonaSandboxManager("key", "org", "volume", "stop-failure")
@@ -367,7 +402,6 @@ def test_cancellation_cannot_acknowledge_while_a_child_cleanup_is_in_flight() ->
 def test_cancellation_observes_an_unconfirmed_join_rather_than_an_early_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     # A failed provider delete must surface as unconfirmed; the join must not be skipped or retried
     # outside the caller that observes it.
@@ -424,8 +458,6 @@ def test_a_local_journal_unlink_failure_keeps_provider_confirmation(
 ) -> None:
     import pathlib
 
-    from fleet_rlm.sandbox import manager as manager_module
-
     monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
     root = DaytonaSandboxManager("key", "org", "volume", "state-test")
     deleted: list[str] = []
@@ -455,7 +487,6 @@ def test_a_local_journal_unlink_failure_keeps_provider_confirmation(
 def test_a_failed_child_provider_delete_keeps_the_child_registered_for_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
     root, calls = _manager_with(SimpleNamespace(id="sandbox-retry-root", state="started"))
@@ -514,12 +545,15 @@ def test_a_raising_shared_callback_never_skips_real_child_provider_cleanup(
     assert "secret" not in caplog.text
 
 
-def test_a_failing_child_cleanup_never_skips_its_sibling_or_the_root_stop() -> None:
-    manager, calls = _manager_with(SimpleNamespace(id="sandbox-child-aggregate", state="started"))
+@pytest.mark.parametrize("raises", [False, True], ids=["returns-unconfirmed", "raises"])
+def test_a_failing_child_never_skips_its_sibling_or_the_root_stop(raises: bool) -> None:
+    manager, calls = _manager_with(SimpleNamespace(id="sandbox-child-failure", state="started"))
     observed: list[str] = []
 
     def refuse_shutdown() -> bool:
         observed.append("failed-child")
+        if raises:
+            raise RuntimeError("provider delete failed")
         return False
 
     def succeed_shutdown() -> bool:
@@ -532,29 +566,7 @@ def test_a_failing_child_cleanup_never_skips_its_sibling_or_the_root_stop() -> N
     manager.cancel_turn()
 
     assert observed == ["failed-child", "healthy-child"]
-    assert calls == ["stop"], "one failing child must not skip the root stop"
-    assert manager.cleanup_outcome == "unconfirmed", "only a real provider cleanup failure is unconfirmed"
-
-
-def test_a_child_shutdown_that_raises_never_skips_its_siblings_or_escapes_cancel_turn() -> None:
-    manager, calls = _manager_with(SimpleNamespace(id="sandbox-child-raises", state="started"))
-    observed: list[str] = []
-
-    def refuse_shutdown() -> None:
-        observed.append("raising-child")
-        raise RuntimeError("provider delete failed")
-
-    def succeed_shutdown() -> bool:
-        observed.append("healthy-child")
-        return True
-
-    manager._children["child-1"] = SimpleNamespace(shutdown=refuse_shutdown)
-    manager._children["child-2"] = SimpleNamespace(shutdown=succeed_shutdown)
-
-    manager.cancel_turn()
-
-    assert observed == ["raising-child", "healthy-child"]
-    assert calls == ["stop"]
+    assert calls == ["stop"], "a failed child must not skip the root stop"
     assert manager.cleanup_outcome == "unconfirmed"
 
 
@@ -572,7 +584,6 @@ def test_a_successful_turn_keeps_one_warm_root_for_the_next_turn() -> None:
 
 
 def test_managers_with_the_same_credentials_share_one_daytona_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     created: list[tuple[str, str]] = []
 
@@ -625,7 +636,6 @@ def test_ensure_sandbox_refreshes_remote_state_before_deciding_to_restart() -> N
 
 
 def test_ensure_sandbox_waits_for_a_settling_sandbox_before_starting_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     monkeypatch.setattr(manager_module, "_STATE_POLL_SECONDS", 0.0)
     sandbox = _RemoteSandbox("started", "stopping", "stopping", "stopped")
@@ -655,8 +665,6 @@ def test_idempotent_daytona_calls_retry_only_transient_failures(
 ) -> None:
     from daytona.common.errors import DaytonaConnectionError, DaytonaError
 
-    from fleet_rlm.sandbox import repl as repl_module
-
     monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
     attempts: list[str] = []
 
@@ -683,8 +691,6 @@ def test_idempotent_daytona_calls_retry_only_transient_failures(
 
 def test_run_code_transport_failures_are_never_retried() -> None:
     from daytona.common.errors import DaytonaTimeoutError
-
-    from fleet_rlm.sandbox import repl as repl_module
 
     attempts: list[int] = []
 
@@ -795,8 +801,6 @@ def test_should_trace_child_copy_lineage_and_preserve_failure_cleanup(monkeypatc
 def test_artifact_execution_is_not_replayed_after_losing_its_response(monkeypatch: pytest.MonkeyPatch) -> None:
     from daytona.common.errors import DaytonaConnectionError
 
-    from fleet_rlm.sandbox import repl as repl_module
-
     monkeypatch.setattr(repl_module, "_RETRY_BASE_SECONDS", 0.0)
     executions: list[str] = []
     cancelled = threading.Event()
@@ -860,14 +864,75 @@ def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypat
 
     assert len(calls) == 1
     # Symbolic links are skipped and never traversed.
-    assert inputs["digests"] == {
-        "files/a.txt": hashlib.sha256(b"alpha").hexdigest(),
-        "outside/secret.txt": hashlib.sha256(b"secret").hexdigest(),
-    }
+    assert inputs["digests"] == {"files/a.txt": hashlib.sha256(b"alpha").hexdigest()}
     assert inputs["notes"] == [{"file": "s-1.md", "summary": "Use Chudnovsky"}]
     assert inputs["environment"].startswith("Sandbox environment: Python ")
     assert "installed: " in inputs["environment"] and "not installed: " in inputs["environment"]
     assert "set_int_max_str_digits(0)" in inputs["environment"]
+
+
+def test_workspace_listing_and_digests_share_managed_roots_without_touching_scratch(monkeypatch, tmp_path):
+    from fleet_rlm.workspace import _ALLOWED_WORKSPACE_ROOTS
+
+    workspace = tmp_path / "workspace"
+    expected = {}
+    for root in _ALLOWED_WORKSPACE_ROOTS:
+        directory = workspace / root / "nested"
+        directory.mkdir(parents=True)
+        (directory / "source.txt").write_bytes(b"source")
+        expected[f"{root}/nested/source.txt"] = hashlib.sha256(b"source").hexdigest()
+    (workspace / "checkout").mkdir()
+    scratch = workspace / "checkout" / "db.py"
+    scratch.write_bytes(b"unmanaged edits")
+    (workspace / "bundle.txt").write_bytes(b"bundle")
+    (workspace / "files" / "link").symlink_to(workspace / "checkout", target_is_directory=True)
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    assert manager.list_workspace_files() == sorted(expected)
+    assert manager.turn_inputs()["digests"] == expected
+    assert scratch.read_bytes() == b"unmanaged edits"
+    assert (workspace / "bundle.txt").read_bytes() == b"bundle"
+
+
+@pytest.mark.parametrize("method", ["list_workspace_files", "turn_inputs"])
+@pytest.mark.parametrize("unsafe", ["root-symlink", "backslash", "control"])
+def test_workspace_inventory_rejects_unsafe_managed_entries(monkeypatch, tmp_path, method, unsafe):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    if unsafe == "root-symlink":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret").write_bytes(b"secret")
+        (workspace / "files").symlink_to(outside, target_is_directory=True)
+    else:
+        (workspace / "files").mkdir()
+        name = "bad\\name" if unsafe == "backslash" else "bad\nname"
+        (workspace / "files" / name).write_bytes(b"source")
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    with pytest.raises(ValueError, match=r"workspace|Workspace"):
+        getattr(manager, method)()
+
+
+@pytest.mark.parametrize("response", ["", "{}", "null", '"files/a"', "[1]", '{"files/a": 1}'])
+def test_workspace_listing_rejects_malformed_responses(monkeypatch, response):
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda *_args: response)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    with pytest.raises((ValueError, RuntimeError)):
+        manager.list_workspace_files()
+
+
+@pytest.mark.parametrize(
+    "response",
+    ["", "{}", "null", '{"digests": {"files/a": "short"}}', '{"digests": {"outside/a": "' + "a" * 64 + '"}}'],
+)
+def test_workspace_digests_reject_malformed_responses(monkeypatch, response):
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda *_args: response)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    with pytest.raises((ValueError, RuntimeError)):
+        manager.turn_inputs()
 
 
 def test_turn_inputs_skips_notes_without_the_shared_mount(monkeypatch, tmp_path) -> None:
@@ -1074,11 +1139,10 @@ class _RecordingClient:
 
 @pytest.fixture(autouse=True)
 def clear_snapshot_preflight_cache():
-    import importlib
 
     from fleet_rlm.config import get_settings
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     snapshot_module.clear_preflight_cache()
     get_settings.cache_clear()
@@ -1199,9 +1263,8 @@ def test_preflight_unusable_snapshot_treats_provider_error_as_missing(monkeypatc
 
 
 def test_preflight_surfaces_provider_failures_and_refresh_evicts_stale_cache() -> None:
-    import importlib
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     active = _SnapshotDTO(id="snap-1", state="active", cpu=4, mem=8, disk=8)
 
@@ -1268,9 +1331,8 @@ def test_provider_build_metadata_is_hashed_and_not_copied_to_provenance() -> Non
 
 
 def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
-    import importlib
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     now = [100.0]
     monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
@@ -1287,10 +1349,8 @@ def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
 @pytest.mark.parametrize("operation", ["clear", "refresh"])
 @pytest.mark.parametrize("old_failure", [False, True])
 def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation, old_failure) -> None:
-    import importlib
-    from concurrent.futures import ThreadPoolExecutor
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     started = threading.Event()
     release = threading.Event()
@@ -1328,10 +1388,8 @@ def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation,
 
 
 def test_concurrent_failed_preflight_releases_waiters_and_can_retry(monkeypatch) -> None:
-    import importlib
-    from concurrent.futures import ThreadPoolExecutor
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     started = threading.Event()
     joined = threading.Event()
@@ -1374,11 +1432,10 @@ def test_concurrent_failed_preflight_releases_waiters_and_can_retry(monkeypatch)
 
 @pytest.mark.parametrize("status", [401, 404, 500])
 def test_preflight_classifies_daytona_errors_without_exposing_the_provider_message(status) -> None:
-    import importlib
 
     from daytona import DaytonaError, DaytonaNotFoundError
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     error_class = DaytonaNotFoundError if status == 404 else DaytonaError
     service = _RecordingSnapshotService(error=error_class("private provider detail", status_code=status))
@@ -1413,10 +1470,8 @@ def test_preflight_resources_enforce_floors(monkeypatch, tmp_path, cpu, mem, dis
 
 
 def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
-    import importlib
-    from concurrent.futures import ThreadPoolExecutor
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     first_started = threading.Event()
     second_arrived = threading.Event()
@@ -1448,9 +1503,8 @@ def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
 
 
 def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) -> None:
-    import importlib
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     monkeypatch.chdir(tmp_path)
     for name in ("FLEET_DAYTONA_API_KEY", "FLEET_DAYTONA_ORG_ID", "DAYTONA_API_KEY", "DAYTONA_ORG_ID", "FLEET_CONFIG"):
@@ -1494,14 +1548,13 @@ def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) 
     assert creations[-1][1] == {"timeout": 45, "on_logs": None}
 
     with pytest.raises(ValueError, match="FLEET_DAYTONA_API_KEY"):
-        snapshot_module.verify_snapshot(api_key="   ", org_id="explicit-org")
+        snapshot_module.build_snapshot(api_key="   ", org_id="explicit-org")
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
 def test_build_snapshot_rejects_unbounded_or_invalid_timeouts_before_contacting_daytona(timeout, monkeypatch):
-    import importlib
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     monkeypatch.setattr(snapshot_module, "Daytona", lambda *_args: pytest.fail("No provider call expected"))
     with pytest.raises(ValueError, match="finite and positive"):
@@ -1625,7 +1678,6 @@ def _ready_interpreter() -> Any:
 
 
 def _record_host_call_bound(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    from fleet_rlm.sandbox import repl as repl_module
 
     captured: dict[str, Any] = {}
 
@@ -1664,7 +1716,6 @@ def test_an_expired_deadline_stops_the_turn_instead_of_waiting() -> None:
 def test_run_namespace_opens_one_execution_token_and_closes_it_when_the_execution_ends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     captured = _record_host_call_bound(monkeypatch)
     observed: list[bool] = []
@@ -1708,7 +1759,6 @@ def test_a_cancelled_execution_token_is_never_reopened_by_the_next_turn() -> Non
 def test_an_abandoned_worker_cannot_publish_after_cancellation_and_the_next_turn(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     manager = _ready_manager(deadline=time.monotonic() + 120)
     manager._client = SimpleNamespace(stop=lambda *_args, **_kwargs: None)
@@ -1776,7 +1826,6 @@ def test_a_fence_whose_channel_is_closed_logs_one_bounded_warning(caplog: pytest
 
 
 def test_a_live_execution_token_allows_a_successful_publication() -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     class RecordingFs:
         def __init__(self) -> None:
@@ -1827,12 +1876,12 @@ def test_child_deadline_inherits_the_parents_absolute_deadline(monkeypatch: pyte
 def test_a_stale_watchdog_cannot_cancel_a_later_turn() -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-stale-watchdog")
     manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
-    first_generation = manager.turn_generation
+    first_generation = manager._turn_generation
     first_watchdog = manager._watchdog
     assert first_watchdog is not None
     try:
         manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
-        assert manager.turn_generation > first_generation
+        assert manager._turn_generation > first_generation
         # Fire the previous Turn's callback exactly as its timer thread would.
         first_watchdog.function()
         assert not manager._cancelled.is_set(), "a stale watchdog is a no-op for the current Turn"
@@ -1841,11 +1890,10 @@ def test_a_stale_watchdog_cannot_cancel_a_later_turn() -> None:
 
 
 def test_watchdog_cancellation_cannot_cross_a_turn_reset(monkeypatch: pytest.MonkeyPatch) -> None:
-    from concurrent.futures import ThreadPoolExecutor
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-racing-watchdog")
     manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
-    generation = manager.turn_generation
+    generation = manager._turn_generation
     entered = threading.Event()
     release = threading.Event()
     original = DaytonaSandboxManager.request_cancellation
@@ -1868,7 +1916,7 @@ def test_watchdog_cancellation_cannot_cross_a_turn_reset(monkeypatch: pytest.Mon
                 release.set()
             watchdog.result(timeout=5)
             reset.result(timeout=5)
-        assert manager.turn_generation > generation
+        assert manager._turn_generation > generation
         assert manager.turn_active
         assert not manager._cancelled.is_set(), "the watchdog belongs only to the preceding Turn"
     finally:
@@ -1931,7 +1979,6 @@ def test_a_whole_second_remainder_still_truncates(monkeypatch: pytest.MonkeyPatc
 def test_a_threshold_straddling_clock_is_a_deadline_cancellation_not_a_transport_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import manager as manager_module
 
     # The two former reads: admission sees 1.5 s left and passes, the bound samples 0.4 s
     # later. A single sample must drive both, so the Turn is a deadline cancellation and
@@ -1995,7 +2042,6 @@ def _cancellable_manager(*, turn_timeout_seconds: int = 900) -> tuple[DaytonaSan
 def test_an_unknown_execution_outcome_issues_exactly_one_terminal_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.sandbox import repl as repl_module
 
     invocations = _record_terminal_cancellations(monkeypatch)
     manager, stops = _cancellable_manager()
@@ -2140,3 +2186,23 @@ def test_provider_bounds_report_requested_ttl_and_an_unknown_lifespan_before_pro
     }
     child = DaytonaSandboxManager("key", "org", "volume", "session-a", parent=manager)
     assert child.provider_bounds()["ttl_minutes"] == 30
+
+
+def test_turn_scope_owns_an_unowned_turn_and_is_inert_inside_one() -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-scope")
+
+    with manager.turn_scope(deadline_seconds=5, deadline_source="request"):
+        assert manager.turn_active
+        assert manager.deadline_provenance()["effective_seconds"] == 5
+    assert not manager.turn_active
+
+    # A Turn an outer owner started stays that owner's: a nested scope neither resets nor ends it.
+    manager.reset_turn_budget(deadline_seconds=None, deadline_source="request")
+    try:
+        with manager.turn_scope(deadline_seconds=5, deadline_source="request"):
+            assert manager.turn_active
+            assert manager.deadline_provenance()["effective_seconds"] is None
+        assert manager.turn_active
+    finally:
+        manager.end_turn()
+    assert not manager.turn_active

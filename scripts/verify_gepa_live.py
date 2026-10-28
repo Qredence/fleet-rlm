@@ -2,8 +2,9 @@
 
 Usage: uv run python scripts/verify_gepa_live.py --live
 This is a small integration check with an intentionally wrong seed, not a production quality benchmark.
-Search is capped at six metric calls, one worker, and small generation budgets. No database writes,
-MLflow export, or candidate promotion occur. The report contains usage and cleanup evidence.
+Search is capped at ten metric calls, one proposal iteration, one worker, and small generation
+budgets. No database writes, MLflow export, or candidate promotion occur. The report contains
+usage and cleanup evidence.
 """
 
 from __future__ import annotations
@@ -17,11 +18,14 @@ from typing import Any
 
 import dspy
 from daytona import ListSandboxesQuery
+from dspy.primitives.facade import SandboxLM
 
+from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.dspy_support import FleetRLMChatAdapter, MeteredLM
-from fleet_rlm.optimize.artifacts import IsolatedFleetProgram, digest_bytes
+from fleet_rlm.optimize.artifacts import digest_bytes
+from fleet_rlm.optimize.gepa import build_instruction_proposer, build_proposal_stop_callback
 from fleet_rlm.optimize.scorers import fleet_metric
+from fleet_rlm.optimize.validation import IsolatedFleetProgram
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 _SEED = """class Addition(dspy.Module):
@@ -35,6 +39,7 @@ class AdditionProgram(dspy.Module):
         super().__init__()
         self.sandbox_mgr = manager
         self.lm = lm
+        self.optimization = None
         self.flex_agent = dspy.Flex(
             "task: str -> answer: str", interpreter_factory=manager.interpreter_factory(), max_predictor_calls=1
         )
@@ -42,7 +47,7 @@ class AdditionProgram(dspy.Module):
     def forward(self, task: str) -> dspy.Prediction:
         self.sandbox_mgr.reset_turn_budget()
         try:
-            with dspy.context(lm=MeteredLM(self.lm, self.sandbox_mgr.consume_budget), adapter=FleetRLMChatAdapter()):
+            with dspy.context(lm=SandboxLM(self.lm, self.sandbox_mgr.consume_budget), adapter=FleetRLMChatAdapter()):
                 result = self.flex_agent(task=task)
             return dspy.Prediction(answer=result.answer, **self.sandbox_mgr.turn_usage())
         finally:
@@ -83,7 +88,8 @@ def main() -> None:
         "run_id": run_id,
         "root_model": root.model,
         "reflection_model": reflection.model,
-        "search_budget": 6,
+        "search_metric_call_limit": 10,
+        "proposal_iteration_limit": 1,
         "production_candidate": False,
     }
 
@@ -119,8 +125,8 @@ def main() -> None:
     ]
     dev = [dspy.Example(task="Add 37 and 19; return the decimal integer only.", answer="56").with_inputs("task")]
 
-    def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):
-        result = fleet_metric(gold, pred, trace, pred_name, pred_trace, judge_lm=judge)
+    def metric(gold, pred, trace=None, pred_name=None, pred_trace=None, program_trace=None):
+        result = fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge)
         if result.objective_scores["quality"] != 1.0:
             result.feedback += (
                 " For addition, parse the two integers and sum them in Python. Generalize to other pairs."
@@ -133,17 +139,40 @@ def main() -> None:
         with dspy.context(lm=root, adapter=FleetRLMChatAdapter()):
             probe = dspy.Predict("task -> answer")(task="What is 2+2? Return only the integer.")
         report["serving_probe"] = str(probe.answer).strip() == "4"
-        with dspy.context(adapter=FleetRLMChatAdapter()):
-            candidate = dspy.GEPA(
-                metric=metric,
-                reflection_lm=reflection,
-                max_metric_calls=6,
-                reflection_minibatch_size=1,
-                num_threads=1,
-                use_merge=False,
-                track_stats=True,
-                seed=0,
-            ).compile(program, trainset=train, valset=dev)
+        # Probe the native InstructionProposer's JSONAdapter separately from the serving
+        # Fleet adapter. Its reflection usage is additional to GEPA search metric calls.
+        proposer = build_instruction_proposer()
+        with dspy.context(lm=reflection, adapter=dspy.JSONAdapter()):
+            probe_draft = proposer(
+                candidate={"probe": "Return the wrong value."},
+                reflective_dataset={
+                    "probe": [
+                        {
+                            "inputs": {"task": "2 + 2"},
+                            "outputs": {"answer": "5"},
+                            "feedback": "Compute the sum correctly.",
+                        }
+                    ]
+                },
+                components_to_update=["probe"],
+            )
+        report["native_instruction_json_probe"] = bool(probe_draft.get("probe", "").strip())
+        candidate = dspy.GEPA(
+            metric=metric,
+            reflection_lm=reflection,
+            instruction_proposer=proposer,
+            max_metric_calls=10,
+            reflection_minibatch_size=1,
+            num_threads=1,
+            use_merge=False,
+            track_stats=True,
+            seed=0,
+            gepa_kwargs={"stop_callbacks": [build_proposal_stop_callback(1)]},
+        ).compile(program, trainset=train, valset=dev)
+        search_metric_calls = candidate.detailed_results.total_metric_calls
+        report["search_metric_calls"] = search_metric_calls
+        if search_metric_calls > report["search_metric_call_limit"]:
+            raise RuntimeError("GEPA exceeded the live canary search metric-call limit")
         report["source_changed"] = candidate.program.flex_agent.module_src != _SEED
         report["search"] = candidate.detailed_results.to_dict()
         artifact = args.output.parent / f"{run_id}.json"
@@ -159,7 +188,12 @@ def main() -> None:
         report["heldout_metric"] = float(metric(dspy.Example(task="Add 101 and 307", answer="408"), result))
         report["artifact_digest"] = digest_bytes(artifact.read_bytes())
         report["status"] = (
-            "passed" if all(report[key] for key in ("serving_probe", "source_changed", "heldout_correct")) else "failed"
+            "passed"
+            if all(
+                report[key]
+                for key in ("serving_probe", "native_instruction_json_probe", "source_changed", "heldout_correct")
+            )
+            else "failed"
         )
     except Exception as exc:
         report.update(status="failed", error_type=type(exc).__name__)
@@ -197,7 +231,15 @@ def main() -> None:
             json.dumps(
                 {
                     key: report.get(key)
-                    for key in ("status", "source_changed", "heldout_correct", "cleanup_errors", "usage")
+                    for key in (
+                        "status",
+                        "search_metric_calls",
+                        "native_instruction_json_probe",
+                        "source_changed",
+                        "heldout_correct",
+                        "cleanup_errors",
+                        "usage",
+                    )
                 }
             )
         )

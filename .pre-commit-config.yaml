@@ -15,6 +15,8 @@ repos:
       - id: check-yaml
         args: ["--allow-multiple-documents"]
         stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.1
@@ -23,22 +25,16 @@ repos:
         args:
           - --fix
           - --exit-non-zero-on-fix
+        types_or: [python, pyi, jupyter]
         stages: [pre-commit]
       - id: ruff-format
-        types_or: [python, pyi, jupyter, markdown]
+        types_or: [python, pyi, jupyter]
         stages: [pre-commit]
 
   - repo: local
     hooks:
-      - id: ty-check
-        name: Type-check backend sources with ty
-        entry: make typecheck
-        language: system
-        pass_filenames: false
-        stages: [pre-commit]
-
-      - id: backend-fast-tests
-        name: Run backend fast test lane
+      - id: backend-tests
+        name: Run full backend test suite
         entry: make test
         language: system
         pass_filenames: false

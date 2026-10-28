@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from fleet_rlm.api.deps import LOCKED, Registry, Runtime, Settings, StoreDep, session_lock, translate
+from fleet_rlm.api.deps import LOCKED, LockedRuntime, Registry, Runtime, Settings, StoreDep, session_lock, translate
 from fleet_rlm.api.schemas import (
     Catalog,
     ContextRequest,
@@ -29,7 +29,7 @@ from fleet_rlm.api.schemas import (
     Status,
     TurnStatus,
 )
-from fleet_rlm.session import SessionRuntime, runtime_configuration
+from fleet_rlm.session import runtime_configuration
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 router = APIRouter(tags=["sessions"])
@@ -81,7 +81,7 @@ def session_config(runtime: Runtime, settings: Settings) -> SessionConfig:
     """Describe a Session's mode, models, context, configuration, and limits."""
     manager = runtime.sandbox_mgr
     return SessionConfig(
-        mode=runtime.execution_mode,
+        mode=runtime.engine.execution_mode,
         models={"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model},
         context=runtime.context.to_descriptor() if runtime.context else None,
         configuration=runtime_configuration(settings, runtime),
@@ -111,7 +111,7 @@ def select_model(
         with session_lock(runtime):
             models = {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model, body.role: body.model}
             engine = registry.engine_for_models(runtime, models)
-            runtime.harness.store.save_runtime_settings(session_id, {"models": models})
+            runtime.store.save_runtime_settings(session_id, {"models": models})
             runtime.set_engine(engine)
     return ModelSelection(role=body.role, model=body.model)
 
@@ -119,18 +119,18 @@ def select_model(
 @router.get("/sessions/{session_id}/mode")
 def get_mode(runtime: Runtime) -> Mode:
     """Return a Session's current execution mode."""
-    return Mode(mode=runtime.execution_mode)
+    return Mode(mode=runtime.engine.execution_mode)
 
 
 @router.put("/sessions/{session_id}/mode", responses=LOCKED)
-def set_mode(session_id: str, body: ModeRequest, runtime: Runtime) -> Mode:
+def set_mode(session_id: str, body: ModeRequest, runtime: LockedRuntime) -> Mode:
     """Persist a new execution mode and apply it to the Session runtime.
 
     The current context is saved with the mode.
     """
-    with translate("Session runtime is unavailable", invalid="Invalid Session ID or mode"), session_lock(runtime):
+    with translate("Session runtime is unavailable", invalid="Invalid Session ID or mode"):
         context = runtime.context.to_descriptor() if runtime.context else None
-        runtime.harness.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
+        runtime.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
         runtime.set_mode(body.mode)
     return Mode(mode=body.mode)
 
@@ -165,12 +165,12 @@ def turn_status(session_id: str, turn_id: str, store: StoreDep) -> TurnStatus:
 
 
 @router.put("/sessions/{session_id}/context", responses=LOCKED)
-def select_context(session_id: str, body: ContextRequest, runtime: Runtime) -> ContextSelected:
+def select_context(session_id: str, body: ContextRequest, runtime: LockedRuntime) -> ContextSelected:
     """Select a workspace file as the Session's context and persist it.
 
     The response reports the file's size and SHA-256 digest.
     """
-    with translate("Context selection is unavailable", invalid="Invalid context selection"), session_lock(runtime):
+    with translate("Context selection is unavailable", invalid="Invalid context selection"):
         metadata = runtime.sandbox_mgr.stat_workspace_file(body.path)
         context = WorkspaceDataset(
             workspace_path=body.path,
@@ -178,18 +178,18 @@ def select_context(session_id: str, body: ContextRequest, runtime: Runtime) -> C
             size_bytes=metadata["size_bytes"],
             sha256=metadata["sha256"],
         )
-        runtime.harness.store.save_runtime_settings(
-            session_id, {"mode": runtime.execution_mode, "context": context.to_descriptor()}
+        runtime.store.save_runtime_settings(
+            session_id, {"mode": runtime.engine.execution_mode, "context": context.to_descriptor()}
         )
         runtime.context = context
     return ContextSelected(path=body.path, size_bytes=context.size_bytes, sha256=context.sha256)
 
 
 @router.delete("/sessions/{session_id}/context", responses=LOCKED)
-def clear_context(session_id: str, runtime: Runtime) -> Status:
+def clear_context(session_id: str, runtime: LockedRuntime) -> Status:
     """Clear the Session's selected context and persist the change."""
-    with translate("Context selection is unavailable"), session_lock(runtime):
-        runtime.harness.store.save_runtime_settings(session_id, {"mode": runtime.execution_mode, "context": None})
+    with translate("Context selection is unavailable"):
+        runtime.store.save_runtime_settings(session_id, {"mode": runtime.engine.execution_mode, "context": None})
         runtime.context = None
     return Status(status="cleared")
 
@@ -201,53 +201,42 @@ def list_memory(
 ) -> Memories:
     """List a Session's memory entries that match an optional query."""
     with translate("Session memory is unavailable"):
-        return Memories(memories=runtime.harness.memories(q))
+        return Memories(memories=runtime.memories(q))
 
 
 @memory_router.put("/sessions/{session_id}/memory/{memory_id}", responses=LOCKED)
-def put_memory(memory_id: str, body: MemoryRequest, runtime: Runtime) -> MemorySaved:
+def put_memory(memory_id: str, body: MemoryRequest, runtime: LockedRuntime) -> MemorySaved:
     """Save one memory entry under the given ID."""
-    with translate("Session memory is unavailable", invalid="Invalid memory"), session_lock(runtime):
-        runtime.harness.save_memory(
-            memory_id, body.content, sources=body.sources, kind=body.kind, reviewed=body.reviewed
-        )
+    with translate("Session memory is unavailable", invalid="Invalid memory"):
+        runtime.save_memory(memory_id, body.content, sources=body.sources, kind=body.kind, reviewed=body.reviewed)
     return MemorySaved(memory_id=memory_id)
 
 
 @memory_router.delete("/sessions/{session_id}/memory/{memory_id}", responses=LOCKED)
-def remove_memory(memory_id: str, runtime: Runtime) -> Deleted:
+def remove_memory(memory_id: str, runtime: LockedRuntime) -> Deleted:
     """Delete one memory entry by ID."""
-    with translate("Session memory is unavailable", invalid="Invalid memory ID"), session_lock(runtime):
-        runtime.harness.delete_memory(memory_id)
+    with translate("Session memory is unavailable", invalid="Invalid memory ID"):
+        runtime.delete_memory(memory_id)
     return Deleted(deleted=memory_id)
 
 
-def skills_runtime(registry: Registry, session_id: str = "default") -> SessionRuntime:
-    """Resolve the Session runtime that a Skills request operates on."""
-    with translate("Session runtime is unavailable", invalid="Invalid Session ID"):
-        return registry.get(session_id)
-
-
-SkillsRuntime = Annotated[SessionRuntime, Depends(skills_runtime)]
-
-
 @skills_router.get("/skills", responses=LOCKED)
-def get_skills_catalog(runtime: SkillsRuntime) -> Catalog:
+def get_skills_catalog(runtime: LockedRuntime) -> Catalog:
     """Sync local Skills to the Session's volume and return the catalog XML."""
-    with translate("Session Skill catalog is unavailable"), session_lock(runtime):
+    with translate("Session Skill catalog is unavailable"):
         runtime.skill_mgr.sync_local_skills_to_volume()
         return Catalog(catalog_xml=runtime.skill_mgr.build_catalog_xml())
 
 
 @skills_router.post("/skills/pull", responses=LOCKED)
-def pull_skills_to_local(runtime: SkillsRuntime) -> Exported:
+def pull_skills_to_local(runtime: LockedRuntime) -> Exported:
     """Export the Session's volume Skills to local storage."""
-    with translate("Skill export is unavailable"), session_lock(runtime):
+    with translate("Skill export is unavailable"):
         return Exported(exported=runtime.skill_mgr.export_volume_skills_to_local())
 
 
 @skills_router.post("/skills/push", responses=LOCKED)
-def push_skills(runtime: SkillsRuntime) -> Pushed:
+def push_skills(runtime: LockedRuntime) -> Pushed:
     """Push local Skills to the Session's volume and return the count."""
-    with translate("Skill push is unavailable"), session_lock(runtime):
+    with translate("Skill push is unavailable"):
         return Pushed(pushed=int(runtime.skill_mgr.sync_local_skills_to_volume()))

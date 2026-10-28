@@ -16,12 +16,13 @@ from typing import Any
 import dspy
 import pytest
 from dspy import AdapterParseError
-from fakes import FakeHarness, FakeManager, api_settings, client_for, runtime_with, store_with
+from fakes import FakeManager, api_settings, client_for, opened_client, runtime_with, store_with
 
 import fleet_rlm.api.app as api_app
 import fleet_rlm.api.deps as api_deps
 import fleet_rlm.api.routes.turns as turns_route
 import fleet_rlm.engine.turn as turn_module
+import fleet_rlm.observability as observability
 from fleet_rlm.api.events import SSERuntimeCallback
 from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
@@ -85,10 +86,18 @@ def traced(monkeypatch):
         seen["span_active"] = True
         try:
             if not root:
-                yield SimpleNamespace(set_attribute=lambda k, v: row.__setitem__(k, v))
+                # Phase spans record bounded counts, so the fake must accept every setter a
+                # real span does; a missing one shows up as a production AttributeError.
+                yield SimpleNamespace(
+                    set_inputs=lambda value: row.__setitem__("inputs", value),
+                    set_outputs=lambda value: row.__setitem__("outputs", value),
+                    set_attributes=lambda value: row.setdefault("attributes", {}).update(value),
+                    set_attribute=lambda name, value: row.__setitem__(name, value),
+                )
                 return
             yield SimpleNamespace(
                 trace_id=seen.get("span_trace_id"),
+                set_status=lambda value: seen.__setitem__("status", value),
                 set_inputs=lambda value: seen.__setitem__("inputs", value),
                 set_outputs=lambda value: seen.__setitem__("outputs", value),
                 set_attributes=lambda value: seen.setdefault("attributes", {}).update(value),
@@ -105,11 +114,12 @@ def traced(monkeypatch):
         yield
 
     seen["global_callback"] = object()
-    monkeypatch.setattr(
-        turn_module,
-        "dspy",
-        SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context),
-    )
+    fake_dspy = SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context)
+    monkeypatch.setattr(turn_module, "dspy", fake_dspy)
+    # Callback composition lives in observability, so the same ambient list must be visible there.
+    monkeypatch.setattr(observability, "dspy", fake_dspy)
+    # The phase-span helper lives in observability, so the same recorder must be visible there.
+    monkeypatch.setattr(observability.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **kwargs: seen["updates"].append(kwargs))
 
@@ -168,12 +178,12 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
             notes=[{"file": "older.md", "summary": "prior hint"}],
             write_learned_note=write_note,
         ),
-        harness=FakeHarness(load_context=lambda _session: ("summary", "prior history"), commit_turn=persist),
+        load_context=lambda _session: ("summary", "prior history"),
+        commit_turn=persist,
         engine=run_engine,
         context=WorkspaceDataset("files/input.txt"),
     )
-    client, app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, app):
         app.state.mlflow_experiment_id = "experiment-test-id"
         response = client.post("/sessions/session-a/turn", json={"task": "summarize this file"})
 
@@ -254,11 +264,10 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
     evidence = {"artifacts": {"complete": True, "files": {path: {"sha256": digest}}}}
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
-        harness=FakeHarness(commit_turn=lambda **kwargs: records.append(kwargs["turn_record"]) or [path]),
+        commit_turn=lambda **kwargs: records.append(kwargs["turn_record"]) or [path],
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", execution_evidence=evidence),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "repeat prior computation"})
     assert response.status_code == 200
     assert (
@@ -273,8 +282,7 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
 
 
 def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitization(traced):
-    from fleet_rlm.observability import sanitize_trace_span
-    from fleet_rlm.optimize.evidence import artifact_correctness, delegation_correctness
+    from fleet_rlm.optimize.objectives import artifact_correctness, delegation_correctness
     from fleet_rlm.optimize.scorers import efficiency_metric
 
     raw = b"report"
@@ -310,15 +318,16 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
             list_workspace_files=lambda: paths,
             read_workspace_file=lambda _path: raw,
         ),
-        harness=FakeHarness(commit_turn=lambda **_kwargs: paths),
+        commit_turn=lambda **_kwargs: paths,
         engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "Produce reports"})
     assert response.status_code == 200
     sanitized = {}
-    sanitize_trace_span(SimpleNamespace(name="fleet_turn", outputs=traced["outputs"], set_outputs=sanitized.update))
+    observability.sanitize_trace_span(
+        SimpleNamespace(name="fleet_turn", outputs=traced["outputs"], set_outputs=sanitized.update)
+    )
     assert {name: sanitized[name] for name in usage} == usage
     assert efficiency_metric(dspy.Prediction(**sanitized)) == efficiency_metric(dspy.Prediction(**usage))
     assert efficiency_metric(dspy.Prediction(**sanitized)) is not None
@@ -326,6 +335,128 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
     assert artifact_correctness(artifact_gold, sanitized["execution_evidence"])[0] == 1
     assert delegation_correctness(delegation_gold, evidence)[0] == 1
     assert delegation_correctness(delegation_gold, sanitized["execution_evidence"])[0] == 1
+
+
+@pytest.mark.parametrize("record_replay", [False, True])
+@pytest.mark.parametrize("bad_commit", [False, True])
+def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
+    traced, monkeypatch, tmp_path, record_replay, bad_commit
+):
+    import io
+    from contextlib import redirect_stdout
+
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+    workspace = tmp_path / "workspace"
+    (workspace / "files").mkdir(parents=True)
+    (workspace / "files" / "input.txt").write_bytes(b"source")
+    (workspace / "checkout").mkdir()
+    scratch = workspace / "checkout" / "db.py"
+    scratch.write_bytes(b"sandbox edits")
+    (workspace / "bundle.txt").write_bytes(b"scratch bundle")
+    order = []
+    records = []
+    claims = {}
+    engine_calls = []
+
+    def remote_exec(_self, code):
+        output = io.StringIO()
+        code = code.replace("'/workspace'", repr(str(workspace)))
+        with redirect_stdout(output):
+            exec(code, {})
+        return output.getvalue()
+
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", remote_exec)
+    remote = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    def claim(_session, turn_id, key, digest):
+        if key in claims:
+            return claims[key]
+        claims[key] = {"turn_id": turn_id, "task_sha256": digest, "status": "running", "result": {}}
+        return None
+
+    def persist(_session, **kwargs):
+        order.append("persist")
+        records.append(kwargs)
+        for prior in claims.values():
+            if prior["turn_id"] == kwargs["completion"][0]:
+                prior.update(status="completed", result=kwargs["completion"][1])
+
+    def fail(_session, turn_id, outcome, result):
+        order.append("failed")
+        assert "stop" in order
+        for prior in claims.values():
+            if prior["turn_id"] == turn_id:
+                prior.update(status=outcome, result=result)
+
+    store = store_with(
+        load_session=lambda _session: ("", []),
+        memories=lambda *_args, **_kwargs: [],
+        claim_turn=claim,
+        commit_turn=persist,
+        finish_turn=fail,
+    )
+    manager = FakeManager(
+        session_id="session-a",
+        turn_inputs=remote.turn_inputs,
+        list_workspace_files=remote.list_workspace_files,
+        read_workspace_file=lambda path: (workspace / path).read_bytes(),
+        cancel_turn=lambda: order.append("stop"),
+    )
+
+    def engine(**_kwargs):
+        engine_calls.append(1)
+        (workspace / "artifacts").mkdir(exist_ok=True)
+        (workspace / "artifacts" / "result.txt").write_bytes(b"verified output")
+        if bad_commit:
+            (workspace / "artifacts" / "bad\nname").write_bytes(b"invalid name")
+        return SimpleNamespace(answer="complete", route="flex", lm_calls=1, sandbox_errors=0)
+
+    runtime = runtime_with(
+        sandbox_mgr=manager,
+        store=store,
+        real_policy=True,
+        engine=engine,
+    )
+    body = {"task": "produce output", "record_replay": record_replay, "idempotency_key": "inventory-first"}
+    with opened_client(runtime) as (client, _app):
+        response = client.post("/sessions/session-a/turn", json=body)
+        events = events_of(response)
+        assert events[-1]["event"] == "done"
+        terminal = [event for event in events if event["event"] in {"turn_complete", "error", "turn_cancelled"}]
+        assert len(terminal) == 1
+        if bad_commit:
+            assert terminal[0]["event"] == "error"
+            assert order == ["stop", "failed"] and records == []
+            assert traced["status"] == "ERROR"
+            assert traced["outputs"]["outcome"] == "failed"
+            assert "bad" not in traced["outputs"]["error"]
+            assert "answer" not in traced["outputs"]
+        else:
+            assert terminal[0]["event"] == "turn_complete"
+            assert terminal[0]["artifacts"] == ["artifacts/result.txt"]
+            assert order == ["persist"]
+            first = records[0]
+            saved = json.loads(first["turn_record_json"])
+            assert saved["context_files"] == {"files/input.txt": hashlib.sha256(b"source").hexdigest()}
+            if record_replay:
+                snapshot = decode_snapshot(*first["replay_snapshot"])
+                assert snapshot["context_files"] == saved["context_files"]
+                assert snapshot["replay_files"] == {"files/input.txt": base64.b64encode(b"source").decode()}
+            else:
+                assert first["replay_snapshot"] is None
+            replayed = events_of(client.post("/sessions/session-a/turn", json=body))
+            recovered = next(event for event in replayed if event["event"] == "turn_complete")
+            assert {key: value for key, value in recovered.items() if key != "timestamp"} == {
+                key: value for key, value in terminal[0].items() if key != "timestamp"
+            }
+            assert len(engine_calls) == 1 and len(records) == 1
+            second = {**body, "idempotency_key": "inventory-second"}
+            assert events_of(client.post("/sessions/session-a/turn", json=second))[-2]["event"] == "turn_complete"
+            assert len(engine_calls) == 2 and len(records) == 2
+    assert scratch.read_bytes() == b"sandbox edits"
+    assert (workspace / "bundle.txt").read_bytes() == b"scratch bundle"
+    assert (workspace / "artifacts" / "result.txt").read_bytes() == b"verified output"
 
 
 @pytest.mark.parametrize("environment", ["", "Sandbox environment: Python 3.12; pandas available."])
@@ -343,9 +474,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
                 "environment": environment,
             },
         ),
-        harness=FakeHarness(
-            commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
-        ),
+        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         engine=lambda **_kwargs: SimpleNamespace(
             answer="17", route="flex", learned_skill_note="", lm_calls=1, sandbox_errors=0
         ),
@@ -353,8 +482,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
             "files/input.csv", "selected source", len(content), hashlib.sha256(content).hexdigest()
         ),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post(
             "/sessions/session-a/turn",
             json={"task": "sum the values", "record_replay": True},
@@ -384,7 +512,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
     assert traced["inputs"]["replay_snapshot_sha256"] == digest
 
 
-def test_snapshot_provenance_matches_across_span_turn_record_and_replay(traced) -> None:
+def test_turn_provenance_matches_across_span_record_replay_and_terminal(traced) -> None:
     provenance = {
         "snapshot_name": "fleet-rlm-python313-v10",
         "snapshot_id": "snap-provider-1",
@@ -397,47 +525,17 @@ def test_snapshot_provenance_matches_across_span_turn_record_and_replay(traced) 
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
         sandbox_mgr=FakeManager(snapshot_provenance=lambda: dict(provenance)),
-        harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
+        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", lm_calls=1, sandbox_errors=0),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute", "record_replay": True})
 
     assert response.status_code == 200
     assert len(persisted) == 1
     turn_record = persisted[0]["turn_record"]
     digest, compressed = persisted[0]["replay_snapshot"]
-    assert {key: turn_record[key] for key in provenance} == provenance
-    assert {key: traced["attributes"][key] for key in provenance} == provenance
-    assert {key: decode_snapshot(digest, compressed)[key] for key in provenance} == provenance
     terminal = next(event for event in events_of(response) if event["event"] == "turn_complete")
-    assert {key: terminal[key] for key in provenance} == provenance
-
-
-def test_one_turn_joins_across_terminal_envelope_record_and_span(traced) -> None:
-    """The same turn_id and every enumerated field agree on the stream, the record, and the span."""
-    provenance = {
-        "snapshot_name": "fleet-rlm-python313-v10",
-        "snapshot_id": "snap-provider-1",
-        "snapshot_cpu": 4,
-        "snapshot_mem": 8,
-        "snapshot_disk": 8,
-        "snapshot_definition_digest": "d" * 64,
-    }
-    persisted: list[dict[str, Any]] = []
-    runtime = runtime_with(
-        sandbox_mgr=FakeManager(snapshot_provenance=lambda: dict(provenance)),
-        harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
-        engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", lm_calls=2, sandbox_errors=0),
-    )
-    client, _app = client_for(runtime)
-    with client:
-        response = client.post("/sessions/session-a/turn", json={"task": "compute"})
-
-    turn_record = persisted[0]["turn_record"]
-    terminal = next(event for event in events_of(response) if event["event"] == "turn_complete")
-    assert terminal["turn_id"] == turn_record["turn_id"]
     joined = (
         "route",
         "outcome",
@@ -451,8 +549,9 @@ def test_one_turn_joins_across_terminal_envelope_record_and_span(traced) -> None
     span_joined = {key: traced["attributes"][key] for key in joined if key != "cleanup"}
     assert span_joined == {key: turn_record[key] for key in joined if key != "cleanup"}
     assert traced["cleanup"] == turn_record["cleanup"]
-    assert traced["outputs"]["turn_id"] == turn_record["turn_id"]
+    assert traced["outputs"]["turn_id"] == terminal["turn_id"] == turn_record["turn_id"]
     assert traced["outputs"]["answer"] == terminal["answer"] == turn_record["answer"]
+    assert {key: decode_snapshot(digest, compressed)[key] for key in provenance} == provenance
     # Stored record and span duration are one measurement; MLflow's own span duration differs
     # only at the span boundary, within the documented tolerance.
     assert abs(traced["attributes"]["duration_seconds"] - turn_record["duration_seconds"]) <= 2.0
@@ -482,10 +581,9 @@ def test_snapshot_provenance_survives_a_preparation_failure_after_preflight(trac
     monkeypatch.setattr(turn_module, "encode_snapshot", oversized_replay)
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute", "record_replay": True})
 
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -518,10 +616,9 @@ def test_a_reused_snapshot_identity_reaches_the_span_before_preparation(traced) 
     )
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute"})
 
     assert {key: traced["attributes"][key] for key in provenance} == provenance
@@ -537,10 +634,9 @@ def test_no_snapshot_provenance_is_invented_when_preflight_never_resolved(traced
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(turn_inputs=explode),
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute"})
 
     attributes = traced.get("attributes", {})
@@ -567,14 +663,11 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
         raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
 
     runtime = runtime_with(
-        harness=FakeHarness(
-            load_context=hydrate,
-            store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
-        ),
+        load_context=hydrate,
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
         engine=failing_engine,
     )
-    client, app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, app):
         app.state.mlflow_experiment_id = "experiment-test-id"
         response = client.post("/sessions/session-a/turn", json={"task": "anything"})
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -619,6 +712,10 @@ def _run_turn_direct(
     )
 
 
+def _failed_turn_runtime(manager: FakeManager, stored: list[tuple[str, str, dict[str, Any]]], engine: Any):
+    return runtime_with(sandbox_mgr=manager, store=_recording_store(stored), engine=engine)
+
+
 def _recording_store(stored: list[tuple[str, str, dict[str, Any]]]) -> SimpleNamespace:
     """A Store fake that records the terminal status and result of a failing or cancelled Turn."""
 
@@ -645,7 +742,7 @@ def test_a_completed_turn_records_not_required_and_never_stops_the_root(traced) 
     manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=FakeHarness(commit_turn=persist),
+        commit_turn=persist,
         engine=engine,
     )
     emitted: list[dict[str, Any]] = []
@@ -674,7 +771,7 @@ def test_provider_bounds_are_reported_on_event_record_and_span_without_a_deadlin
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(provider_bounds=lambda: bounds),
-        harness=FakeHarness(commit_turn=persist),
+        commit_turn=persist,
         engine=lambda **_kwargs: SimpleNamespace(answer="kept warm", route="direct"),
     )
     emitted: list[dict[str, Any]] = []
@@ -696,7 +793,7 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(live_sandbox_id="sandbox-warm-root"),
-        harness=FakeHarness(commit_turn=persist),
+        commit_turn=persist,
         engine=lambda **_kwargs: SimpleNamespace(answer="kept warm", route="direct"),
     )
     for index in range(2):
@@ -709,57 +806,35 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
     assert traced["attributes"]["root_sandbox_id"] == "sandbox-warm-root"
 
 
-def test_a_failed_turn_records_the_root_id_it_stopped(traced) -> None:
+def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced) -> None:
+    order: list[str] = []
     stored: list[tuple[str, str, dict[str, Any]]] = []
     manager = FakeManager(live_sandbox_id="sandbox-failed-root")
 
     def cancel_turn() -> None:
-        # The real manager discards the stopped handle once its teardown has run.
+        order.append("cancel_turn")
+        # The real manager discards the stopped handle once teardown has run.
         manager.live_sandbox_id = None
 
     def engine(**_kwargs: Any) -> SimpleNamespace:
         raise RuntimeError("engine failed")
 
     manager.cancel_turn = cancel_turn
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
-    emitted: list[dict[str, Any]] = []
-    _run_turn_direct(runtime, emitted=emitted)
-
-    assert emitted[0]["root_sandbox_id"] == "sandbox-failed-root"
-    assert stored[0][2]["root_sandbox_id"] == "sandbox-failed-root"
-    assert traced["root_sandbox_id"] == "sandbox-failed-root"
-    assert manager.live_sandbox_id is None
-
-
-def test_a_failed_turn_stops_before_its_terminal_event_and_done(traced) -> None:
-    order: list[str] = []
-    stored: list[tuple[str, str, dict[str, Any]]] = []
-
-    def cancel_turn() -> None:
-        order.append("cancel_turn")
-
-    def engine(**_kwargs: Any) -> SimpleNamespace:
-        raise RuntimeError("engine failed")
-
-    manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    manager.end_turn = lambda: order.append("end_turn")
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted, order=order)
 
-    # Teardown precedes acknowledgment: cancel_turn, end_turn, the outcome, then the stream end.
+    # Teardown precedes acknowledgment: cancel_turn, end_turn, the outcome, then stream end.
     assert order == ["cancel_turn", "end_turn", "error", "done"]
     assert emitted[0]["event"] == "error" and emitted[0]["cleanup"] == "stopped"
     assert stored[0][1] == "failed"
     assert stored[0][2]["cleanup"] == "stopped"
+    assert emitted[0]["root_sandbox_id"] == "sandbox-failed-root"
+    assert stored[0][2]["root_sandbox_id"] == "sandbox-failed-root"
+    assert traced["root_sandbox_id"] == "sandbox-failed-root"
     assert traced["cleanup"] == "stopped"
+    assert manager.live_sandbox_id is None
 
 
 @pytest.mark.usefixtures("traced")
@@ -782,11 +857,7 @@ def test_cancelled_and_deadline_turns_are_stored_as_cancelled(failure) -> None:
         manager.check_turn()
         return SimpleNamespace(answer="unreachable", route="direct")
 
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted)
 
@@ -808,11 +879,7 @@ def test_a_raising_provider_stop_records_unconfirmed_and_still_ends_the_stream(t
         raise RuntimeError("engine failed")
 
     manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted, order=order)
 
@@ -842,11 +909,7 @@ def test_an_unknown_execution_outcome_stays_terminal_and_tears_down_once(transpo
         manager._cancelled.set()
 
     manager = FakeManager(cancel_turn=cancel_turn)
-    runtime = runtime_with(
-        sandbox_mgr=manager,
-        harness=FakeHarness(store=_recording_store(stored)),
-        engine=engine,
-    )
+    runtime = _failed_turn_runtime(manager, stored, engine)
     emitted: list[dict[str, Any]] = []
     _run_turn_direct(runtime, emitted=emitted)
 
@@ -871,7 +934,7 @@ def test_a_replayed_unknown_outcome_creates_no_new_execution() -> None:
         return SimpleNamespace(answer="unreachable", route="direct")
 
     runtime = runtime_with(
-        harness=FakeHarness(claim_turn=lambda *_args: prior),
+        claim_turn=lambda *_args: prior,
         engine=never,
     )
     emitted: list[dict[str, Any]] = []
@@ -919,10 +982,9 @@ def test_snapshot_preflight_refusal_reaches_the_client_and_the_stored_failure(st
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(turn_inputs=refuse),
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute pi"})
 
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -951,10 +1013,9 @@ def test_other_preparation_failures_stay_sanitized_on_both_surfaces() -> None:
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(turn_inputs=explode),
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute pi"})
 
     failure = next(event for event in events_of(response) if event["event"] == "error")
@@ -977,7 +1038,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
         raise AssertionError("a replayed turn must not run the engine")
 
     runtime = runtime_with(
-        harness=FakeHarness(claim_turn=lambda *_args: prior),
+        claim_turn=lambda *_args: prior,
         engine=never,
     )
     store = store_with(
@@ -985,8 +1046,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
             {**prior, "updated_at": "2026-10-16T00:00:00"} if turn_id == "original-turn" else None
         )
     )
-    client, _ = client_for(runtime, store=store)
-    with client:
+    with opened_client(runtime, store=store) as (client, _):
         response = client.post("/sessions/s1/turn", json={"task": "same task", "idempotency_key": "same-key"})
         outcomes = [event for event in events_of(response) if event["event"] in {"turn_complete", "error"}]
         assert len(outcomes) == 1 and outcomes[0]["turn_id"] == "original-turn"
@@ -1003,8 +1063,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
 def test_shutdown_flushes_pending_traces_only_when_tracing_is_configured(monkeypatch, configured):
     flushed: list[bool] = []
     monkeypatch.setattr(api_app.mlflow, "flush_trace_async_logging", lambda: flushed.append(True))
-    client, app = client_for()
-    with client:
+    with opened_client() as (_client, app):
         if configured:
             app.state.mlflow_experiment_id = "experiment-test-id"
         assert flushed == []
@@ -1015,8 +1074,7 @@ def test_reusing_an_idempotency_key_for_another_task_names_the_conflict() -> Non
     def conflict(*_args):
         raise IdempotencyConflictError("Idempotency key already belongs to another task")
 
-    client, _ = client_for(runtime_with(harness=FakeHarness(claim_turn=conflict)))
-    with client:
+    with opened_client(runtime_with(claim_turn=conflict)) as (client, _):
         response = client.post("/sessions/session-a/turn", json={"task": "other", "idempotency_key": "k"})
 
     events = events_of(response)
@@ -1111,8 +1169,7 @@ def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> No
 
 def test_should_trace_preparation_and_persistence_under_the_turn(traced):
     runtime = runtime_with(engine=lambda **_kwargs: SimpleNamespace(answer="hello", route="direct"))
-    client, _app = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "hello"})
     assert response.status_code == 200
     parents = {row["name"]: row["parent"] for row in traced["spans"]}
@@ -1126,6 +1183,11 @@ def test_should_trace_preparation_and_persistence_under_the_turn(traced):
     ):
         assert parents[name] == "turn.prepare_inputs"
     assert parents["turn.commit"] == parents["turn.write_learned_note"] == "fleet_turn"
+    prepared = next(row["outputs"] for row in traced["spans"] if row["name"] == "turn.prepare_inputs")
+    assert prepared["task_chars"] == len("hello")
+    assert prepared["workspace_manifest_chars"] == len("/workspace/files (empty)")
+    assert prepared["dataset_preview_chars"] == 0
+    assert all(isinstance(value, int) and value >= 0 for value in prepared.values())
 
 
 def _within(seconds: float, call):
@@ -1198,8 +1260,7 @@ def test_a_failing_sandbox_cleanup_still_ends_the_stream_after_the_outcome():
 @pytest.mark.usefixtures("traced")
 def test_the_stream_delivers_the_enveloped_done_after_the_outcome() -> None:
     runtime = runtime_with(engine=lambda **_kwargs: SimpleNamespace(answer="hello", route="direct"))
-    client, _ = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _):
         response = client.post("/sessions/session-a/turn", json={"task": "hello"})
 
     events = events_of(response)
@@ -1231,6 +1292,20 @@ def test_a_second_turn_on_a_busy_session_gets_a_prompt_409(monkeypatch):
     assert "Turn" in response.json()["detail"]
     assert elapsed < 2
     assert "409" in app.openapi()["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]
+
+
+def test_turn_without_lifespan_executor_returns_503_without_creating_a_global_pool():
+    runtime = runtime_with()
+    client, app = client_for(runtime)
+    # Deliberately exercise a TestClient request made without entering the lifespan context.
+    app.state.turn_executor = None
+
+    response = client.post("/sessions/session-a/turn", json={"task": "hello"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Fleet Turn executor is unavailable"}
+    assert not runtime.turn_lock.locked()
+    assert not hasattr(turns_route, "_fallback_executor")
 
 
 @pytest.mark.usefixtures("traced")
@@ -1516,7 +1591,7 @@ def test_deadline_provenance_matches_across_span_turn_record_and_replay(
     monkeypatch.setattr(turn_module, "resolve_turn_deadline", counting)
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
-        harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
+        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         engine=lambda **_kwargs: SimpleNamespace(answer="done", route="direct"),
     )
     client, _ = client_for(runtime, settings=settings)
@@ -1580,7 +1655,7 @@ async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypa
             is_disconnected=is_disconnected,
         )
         stream = turns_route.stream_turn(
-            "session-a", turns_route.TurnRequest(task="hello"), request, runtime, api_settings(), None
+            "session-a", turns_route.TurnRequest(task="hello"), request, runtime, api_settings(), executor, None
         )
         try:
             status = await anext(stream)

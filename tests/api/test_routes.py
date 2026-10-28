@@ -8,7 +8,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fakes import FakeHarness, FakeManager, api_settings, client_for, engine_with, runtime_with, store_with
+from fakes import (
+    FakeManager,
+    api_settings,
+    client_for,
+    engine_with,
+    opened_client,
+    runtime_with,
+    store_with,
+)
 
 from fleet_rlm.api.deps import get_registry
 from fleet_rlm.config import FleetSettings
@@ -34,8 +42,7 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
 
 
 def test_health_reports_the_package_version():
-    client, _ = client_for()
-    with client:
+    with opened_client() as (client, _):
         health = client.get("/health").json()
         assert (health["status"], health["version"]) == ("ok", "0.8.1")
         assert health["mlflow"]["mode"] == "local"
@@ -52,8 +59,7 @@ def test_workspace_listing_keeps_other_requests_responsive(path):
         return ["artifacts/report.txt"]
 
     runtime = runtime_with(sandbox_mgr=FakeManager(list_workspace_files=list_files))
-    client, _ = client_for(runtime)
-    with client, ThreadPoolExecutor(max_workers=2) as pool:
+    with opened_client(runtime) as (client, _), ThreadPoolExecutor(max_workers=2) as pool:
         listing = pool.submit(client.get, f"/sessions/session-a/{path}")
         try:
             assert entered.wait(5)
@@ -78,8 +84,7 @@ def test_context_selection_and_workspace_stat_use_remote_metadata_without_downlo
         stat_workspace_file=lambda path: {"path": path, "size_bytes": 8, "sha256": digest},
         read_workspace_file=lambda _path: pytest.fail("metadata must not download file contents"),
     )
-    client, _ = client_for(runtime_with(sandbox_mgr=manager))
-    with client:
+    with opened_client(runtime_with(sandbox_mgr=manager)) as (client, _):
         selected = client.put("/sessions/s1/context", json={"path": "files/selected.csv", "description": "selected"})
         stat = client.get("/sessions/s1/workspace/stat/files/selected.csv")
         descriptor = client.get("/sessions/s1/config").json()["context"]
@@ -94,8 +99,7 @@ def test_context_selection_and_workspace_stat_use_remote_metadata_without_downlo
 
 
 def test_an_invalid_session_id_is_a_422_before_any_runtime_is_built():
-    client, _ = client_for(runtime_with())
-    with client:
+    with opened_client(runtime_with()) as (client, _):
         assert client.get("/sessions/bad id/mode").status_code == 422
 
 
@@ -110,12 +114,11 @@ def test_session_settings_only_change_after_successful_persistence(operation, fa
         saved.update(data)
 
     runtime = runtime_with(
-        harness=FakeHarness(store=store_with(save_runtime_settings=lambda _session, data: save(data))),
+        store=store_with(save_runtime_settings=lambda _session, data: save(data)),
         sandbox_mgr=FakeManager(read_workspace_file=lambda _path: b"new data"),
         context=WorkspaceDataset("files/old.csv", sha256="a" * 64),
     )
-    client, _ = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _):
         before = client.get("/sessions/s1/config").json()
         if operation == "mode":
             response = client.put("/sessions/s1/mode", json={"mode": "rlm"})
@@ -157,7 +160,7 @@ def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failur
 
     runtime = runtime_with(
         engine=old_engine,
-        harness=FakeHarness(store=store_with(save_runtime_settings=lambda _session, data: save(data))),
+        store=store_with(save_runtime_settings=lambda _session, data: save(data)),
         execution_mode="rlm",
         sandbox_mgr=FakeManager(
             sub_lm=old_engine.sub_lm, max_llm_calls=7, max_depth=2, max_children=3, max_active_children=1
@@ -200,8 +203,7 @@ def test_attach_streams_to_the_provider_path_and_cleans_temp_files():
         ),
     )
     existing = set(Path("/tmp").glob("fleet-upload-*"))
-    client, _ = client_for(runtime, settings=api_settings(max_upload_bytes=4))
-    with client:
+    with opened_client(runtime, settings=api_settings(max_upload_bytes=4)) as (client, _):
         accepted = client.post("/sessions/session-a/attach", files={"file": ("sample.bin", b"1234")})
         rejected = client.post("/sessions/session-a/attach", files={"file": ("too-large.bin", b"12345")})
     assert accepted.status_code == 200
@@ -220,8 +222,7 @@ def test_workspace_download_streams_from_the_provider_path_and_cleans_its_temp_f
         Path(local_path).write_bytes(b"downloaded data")
         return 15
 
-    client, _ = client_for(runtime_with(sandbox_mgr=FakeManager(read_workspace_file_to_path=download)))
-    with client:
+    with opened_client(runtime_with(sandbox_mgr=FakeManager(read_workspace_file_to_path=download))) as (client, _):
         response = client.get("/sessions/session-a/workspace/files/files/result.bin")
     assert response.status_code == 200 and response.content == b"downloaded data"
     assert downloaded[0][0] == "files/result.bin"
@@ -235,37 +236,78 @@ def test_a_missing_workspace_file_is_a_404_and_cleans_its_temp_file():
         seen.append(local_path)
         raise FileNotFoundError("workspace file is unavailable")
 
-    client, _ = client_for(runtime_with(sandbox_mgr=FakeManager(read_workspace_file_to_path=download)))
-    with client:
+    with opened_client(runtime_with(sandbox_mgr=FakeManager(read_workspace_file_to_path=download))) as (client, _):
         response = client.get("/sessions/session-a/workspace/files/files/missing.bin")
     assert response.status_code == 404 and not Path(seen[0]).exists()
 
 
 def test_workspace_write_requires_exactly_one_content_field():
-    client, _ = client_for(runtime_with())
-    with client:
+    with opened_client(runtime_with()) as (client, _):
         both = client.put("/sessions/s1/workspace/files/files/a.txt", json={"content": "x", "content_base64": "eA=="})
         neither = client.put("/sessions/s1/workspace/files/files/a.txt", json={})
     assert both.status_code == neither.status_code == 422
 
 
-def test_turn_status_is_404_for_an_unknown_turn():
-    client, _ = client_for(store=store_with())
-    with client:
-        assert client.get("/sessions/s1/turns/unknown").status_code == 404
-
-
-def test_history_and_turn_status_read_the_durable_store_without_a_runtime():
+@pytest.mark.parametrize(
+    "turn_id, result, expected_result",
+    [
+        (
+            "turn-1",
+            {"answer": "stored"},
+            {"answer": "stored", "provenance_state": "pre-provenance"},
+        ),
+        (
+            "turn-2",
+            {
+                "event": "turn_complete",
+                "answer": "5",
+                "route": "flex",
+                "outcome": "completed",
+                "deadline_source": "request",
+                "effective_seconds": None,
+                "duration_seconds": 12.5,
+                "cleanup": "not_required",
+                "snapshot_name": "fleet-rlm-python313-v10",
+                "snapshot_id": "snap-1",
+                "snapshot_cpu": 4,
+                "snapshot_mem": 8,
+                "snapshot_disk": 8,
+                "snapshot_definition_digest": "d" * 64,
+                "snapshot_build_digest": "c" * 64,
+            },
+            {
+                "event": "turn_complete",
+                "answer": "5",
+                "route": "flex",
+                "outcome": "completed",
+                "deadline_source": "request",
+                "effective_seconds": None,
+                "duration_seconds": 12.5,
+                "cleanup": "not_required",
+                "snapshot_name": "fleet-rlm-python313-v10",
+                "snapshot_id": "snap-1",
+                "snapshot_cpu": 4,
+                "snapshot_mem": 8,
+                "snapshot_disk": 8,
+                "snapshot_definition_digest": "d" * 64,
+                "snapshot_build_digest": "c" * 64,
+                "provenance_state": "recorded",
+            },
+        ),
+    ],
+    ids=["pre-provenance", "recorded-provenance"],
+)
+def test_turn_status_and_history_read_durable_store_without_runtime(turn_id, result, expected_result):
     store = store_with(
         history=lambda _session: [{"turn_id": "turn-1", "answer": "stored"}],
-        turn_status=lambda _session, turn_id: (
+        turn_status=lambda _session, requested_id: (
             {
-                "turn_id": turn_id,
+                "turn_id": requested_id,
                 "status": "completed",
-                "result": {"answer": "stored"},
+                "result": dict(result),
                 "updated_at": "2026-10-20T00:00:00",
             }
-            if turn_id == "turn-1"
+            if requested_id == turn_id
             else None
         ),
     )
@@ -273,7 +315,7 @@ def test_history_and_turn_status_read_the_durable_store_without_a_runtime():
     app.dependency_overrides[get_registry] = lambda: pytest.fail("durable reads must not build a runtime")
     with client:
         history = client.get("/sessions/session-1/history")
-        status = client.get("/sessions/session-1/turns/turn-1")
+        status = client.get(f"/sessions/session-1/turns/{turn_id}")
         missing = client.get("/sessions/session-1/turns/missing")
     assert history.status_code == 200
     assert history.json() == {
@@ -282,47 +324,12 @@ def test_history_and_turn_status_read_the_durable_store_without_a_runtime():
     }
     assert status.status_code == 200
     assert status.json() == {
-        "turn_id": "turn-1",
+        "turn_id": turn_id,
         "status": "completed",
-        # A stored result without the provenance fields stays readable and is labelled, not rejected.
-        "result": {"answer": "stored", "provenance_state": "pre-provenance"},
+        "result": expected_result,
         "updated_at": "2026-10-20T00:00:00",
     }
     assert missing.status_code == 404
-
-
-def test_turn_status_returns_the_recorded_provenance_under_the_same_turn_id():
-    result = {
-        "event": "turn_complete",
-        "answer": "5",
-        "route": "flex",
-        "outcome": "completed",
-        "deadline_source": "request",
-        "effective_seconds": None,
-        "duration_seconds": 12.5,
-        "cleanup": "not_required",
-        "snapshot_name": "fleet-rlm-python313-v10",
-        "snapshot_id": "snap-1",
-        "snapshot_cpu": 4,
-        "snapshot_mem": 8,
-        "snapshot_disk": 8,
-        "snapshot_definition_digest": "d" * 64,
-        "snapshot_build_digest": "c" * 64,
-    }
-    store = store_with(
-        turn_status=lambda _session, turn_id: {
-            "turn_id": turn_id,
-            "status": "completed",
-            "result": dict(result),
-            "updated_at": "2026-10-20T00:00:00",
-        }
-    )
-    client, _ = client_for(store=store)
-    with client:
-        status = client.get("/sessions/session-1/turns/turn-1")
-    assert status.status_code == 200
-    assert status.json()["turn_id"] == "turn-1"
-    assert status.json()["result"] == {**result, "provenance_state": "recorded"}
 
 
 @pytest.mark.parametrize("partial_snapshot", [False, True])
@@ -338,8 +345,7 @@ def test_new_failed_turn_without_resolved_snapshot_is_not_historical(partial_sna
             "updated_at": "2026-10-23T00:00:00",
         }
     )
-    client, _ = client_for(store=store)
-    with client:
+    with opened_client(store=store) as (client, _):
         status = client.get("/sessions/session-1/turns/turn-1")
     assert status.status_code == 200
     assert status.json()["result"] == {**result, "provenance_state": "unresolved"}
@@ -347,16 +353,14 @@ def test_new_failed_turn_without_resolved_snapshot_is_not_historical(partial_sna
 
 @pytest.mark.parametrize("path", ["/sessions/session-1/history", "/sessions/session-1/turns/turn-1"])
 def test_durable_reads_need_storage(path):
-    client, _ = client_for()
-    with client:
+    with opened_client() as (client, _):
         response = client.get(path)
     assert response.status_code == 503
     assert response.json() == {"detail": "Session storage is unavailable"}
 
 
 def test_session_listing_needs_storage():
-    client, _ = client_for()
-    with client:
+    with opened_client() as (client, _):
         response = client.get("/sessions")
     assert response.status_code == 503 and response.json() == {"detail": "Session storage is unavailable"}
 
@@ -365,8 +369,7 @@ def test_memory_routes_translate_invalid_input():
     def save(memory_id, *_args, **_kwargs):
         raise ValueError(f"invalid {memory_id}")
 
-    client, _ = client_for(runtime_with(harness=FakeHarness(save_memory=save)))
-    with client:
+    with opened_client(runtime_with(save_memory=save)) as (client, _):
         response = client.put("/sessions/s1/memory/m1", json={"content": "note"})
     assert response.status_code == 422 and response.json() == {"detail": "Invalid memory"}
 
@@ -375,8 +378,7 @@ def test_skills_use_the_default_session_and_report_counts():
     runtime = runtime_with(
         skill_mgr=SimpleNamespace(sync_local_skills_to_volume=lambda: 3, build_catalog_xml=lambda: "<skills />")
     )
-    client, _ = client_for(runtime)
-    with client:
+    with opened_client(runtime) as (client, _):
         assert client.post("/skills/push").json() == {"pushed": 3}
         assert client.get("/skills").json() == {"catalog_xml": "<skills />"}
 
@@ -445,8 +447,7 @@ def test_openapi_documents_the_409_on_lock_guarded_routes():
 
 
 def test_deleting_a_session_releases_its_runtime():
-    client, _ = client_for(runtime_with())
-    with client:
+    with opened_client(runtime_with()) as (client, _):
         response = client.delete("/sessions/s1")
     assert response.status_code == 200 and response.json() == {"deleted": "s1"}
 
@@ -454,8 +455,7 @@ def test_deleting_a_session_releases_its_runtime():
 def test_deleting_a_session_without_a_runtime_is_a_404_and_a_busy_one_a_409():
     from fakes import FakeRegistry
 
-    client, _ = client_for(runtime_with())
-    with client:
+    with opened_client(runtime_with()) as (client, _):
         FakeRegistry.evict = lambda _self, _sid: False
         assert client.delete("/sessions/s1").status_code == 404
 
@@ -466,36 +466,12 @@ def test_deleting_a_session_without_a_runtime_is_a_404_and_a_busy_one_a_409():
         assert client.delete("/sessions/s1").status_code == 409
 
 
-def test_attach_treats_an_empty_browser_file_input_as_missing():
-    uploaded: list[str] = []
-    runtime = runtime_with(
-        sandbox_mgr=FakeManager(
-            write_workspace_file_from_path=lambda rel_path, _path: uploaded.append(rel_path) or f"/workspace/{rel_path}"
-        ),
-    )
-    client, _ = client_for(runtime)
-    # What a browser submits for <input type="file"> with nothing chosen: an empty filename and no content.
-    boundary = "fleet-boundary"
-    body = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="file"; filename=""\r\n'
-        "Content-Type: application/octet-stream\r\n\r\n\r\n"
-        f"--{boundary}--\r\n"
-    ).encode()
-
-    response = client.post(
-        "/sessions/session-a/attach",
-        content=body,
-        headers={"content-type": f"multipart/form-data; boundary={boundary}"},
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"] == ["body", "file"]
-    assert response.json()["detail"][0]["type"] == "missing"
-    assert uploaded == []
-
-
-def test_attach_accepts_a_named_zero_byte_file():
+@pytest.mark.parametrize(
+    "filename, content_type, expected_status",
+    [("", "application/octet-stream", 422), ("empty.txt", "text/plain", 200)],
+    ids=["no-selection", "named-zero-byte-file"],
+)
+def test_attach_distinguishes_no_selection_from_a_named_zero_byte_file(filename, content_type, expected_status):
     uploaded: list[tuple[str, bytes]] = []
     runtime = runtime_with(
         sandbox_mgr=FakeManager(
@@ -505,13 +481,11 @@ def test_attach_accepts_a_named_zero_byte_file():
         ),
     )
     client, _ = client_for(runtime)
-    # A chosen file that happens to be empty: a real filename, zero bytes of content. Unlike an unselected input,
-    # this is a legitimate upload and must not be treated as missing.
     boundary = "fleet-boundary"
     body = (
         f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="file"; filename="empty.txt"\r\n'
-        "Content-Type: text/plain\r\n\r\n\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n\r\n"
         f"--{boundary}--\r\n"
     ).encode()
 
@@ -521,6 +495,11 @@ def test_attach_accepts_a_named_zero_byte_file():
         headers={"content-type": f"multipart/form-data; boundary={boundary}"},
     )
 
-    assert response.status_code == 200
-    assert response.json() == {"mounted_path": "/workspace/files/empty.txt", "rel_path": "files/empty.txt"}
-    assert uploaded == [("files/empty.txt", b"")]
+    assert response.status_code == expected_status
+    if filename:
+        assert response.json() == {"mounted_path": "/workspace/files/empty.txt", "rel_path": "files/empty.txt"}
+        assert uploaded == [("files/empty.txt", b"")]
+    else:
+        assert response.json()["detail"][0]["loc"] == ["body", "file"]
+        assert response.json()["detail"][0]["type"] == "missing"
+        assert uploaded == []
