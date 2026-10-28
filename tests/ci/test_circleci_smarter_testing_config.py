@@ -196,6 +196,7 @@ def test_python_selection_survives_circleci_step_shells(tmp_path) -> None:
         assert record.read_text().splitlines() == [version, version]
     assert "sys.version_info[:2] != expected" in verify
     assert "raise SystemExit" in verify
+    assert "<<" not in verify.replace("<< parameters.python-version >>", "3.12")
 
 
 def test_discovery_does_not_install_project_dependencies() -> None:

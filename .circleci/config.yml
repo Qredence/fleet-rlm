@@ -72,13 +72,13 @@ commands:
       - run:
           name: Verify selected Python interpreter
           command: |
-            uv run --locked python - <<'PYTHON'
+            uv run --locked python -c '
             import sys
             expected = tuple(map(int, "<< parameters.python-version >>".split(".")))
             print(f"Python {sys.version}; executable: {sys.executable}")
             if sys.version_info[:2] != expected:
                 raise SystemExit(f"Expected Python {expected}, got {sys.version_info[:2]}")
-            PYTHON
+            '
       - when:
           condition: << parameters.use-cache >>
           steps:
