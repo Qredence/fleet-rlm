@@ -126,6 +126,11 @@ def test_artifact_verification_rejects_unexpected_files(tmp_path: Path) -> None:
         verify_artifacts("0.8.0", tmp_path)
 
 
+def test_registry_wheel_verification_rejects_path_like_version(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="unsupported release version"):
+        verify_registry_wheel("../0.8.0", tmp_path / "fleet_rlm-0.8.0-py3-none-any.whl", tmp_path / "SHA256SUMS")
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

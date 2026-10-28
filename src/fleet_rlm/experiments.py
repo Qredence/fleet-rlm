@@ -40,6 +40,13 @@ class ExperimentBusyError(ValueError):
     """Admission or review conflicts with another owned operation."""
 
 
+def _require_worker_pipes(process: asyncio.subprocess.Process) -> tuple[Any, Any, Any]:
+    """Return the configured worker pipes, failing explicitly if subprocess setup is broken."""
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        raise RuntimeError("Experiment worker subprocess pipes were not created")
+    return process.stdin, process.stdout, process.stderr
+
+
 class ExperimentManager:
     """Own subprocesses until they are reaped, regardless of client disconnection."""
 
@@ -293,14 +300,14 @@ class ExperimentManager:
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
-            assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+            stdin, stdout, stderr = _require_worker_pipes(process)
             readers = [
-                asyncio.create_task(self._read_output(process.stdout, session_id, run_id)),
-                asyncio.create_task(self._discard_output(process.stderr)),
+                asyncio.create_task(self._read_output(stdout, session_id, run_id)),
+                asyncio.create_task(self._discard_output(stderr)),
             ]
-            process.stdin.write(worker_settings_payload(self.settings))
-            await process.stdin.drain()
-            process.stdin.close()
+            stdin.write(worker_settings_payload(self.settings))
+            await stdin.drain()
+            stdin.close()
             await process.wait()
             await asyncio.gather(*readers)
         except asyncio.CancelledError:

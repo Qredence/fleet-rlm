@@ -518,7 +518,10 @@ def _fleet_exec(payload_json: str) -> None:
         _STATE["stdout"] = None
 
 
-os.makedirs(REPLY_DIR, exist_ok=True)
+os.makedirs(REPLY_DIR, mode=0o700, exist_ok=True)
+if os.path.islink(REPLY_DIR) or not os.path.isdir(REPLY_DIR):
+    raise RuntimeError("Fleet sandbox reply path must be a directory, not a symlink")
+os.chmod(REPLY_DIR, 0o700)
 if os.path.isdir(WORKSPACE):
     for _directory in ("files", "artifacts", "memory", "skills", "buffers", "sessions"):
         os.makedirs(os.path.join(WORKSPACE, _directory), exist_ok=True)

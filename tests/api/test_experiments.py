@@ -17,8 +17,14 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.experiments import ExperimentBusyError, ExperimentManager
+from fleet_rlm.experiments import ExperimentBusyError, ExperimentManager, _require_worker_pipes
 from fleet_rlm.optimization_runs import ExperimentOptions
+
+
+def test_worker_pipe_validation_is_always_on():
+    process = SimpleNamespace(stdin=None, stdout=object(), stderr=object())
+    with pytest.raises(RuntimeError, match="pipes were not created"):
+        _require_worker_pipes(process)
 
 
 def test_failed_approval_exposes_sanitized_failure_and_success_clears_it(tmp_path):

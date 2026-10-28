@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)")
+MARKDOWN_LINK = re.compile(r"\[(?>[^\]]*)\]\(\s*<?([^\s)>]+)>?(?:\s+(?>[^)]*))?\)")
 REFERENCE_LINK = re.compile(r"^\s*\[[^\]]+\]:\s*<?([^\s>]+)>?", re.MULTILINE)
 MARKDOWN_PATHS = (ROOT / "README.md", ROOT / "ARCHITECTURE.md", ROOT / "CONTRIBUTING.md", ROOT / "AGENTS.md")
 

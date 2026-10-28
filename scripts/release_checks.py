@@ -66,7 +66,7 @@ def recovery_preflight(version: str, sha: str, branch: str, pipeline_sha: str) -
 
 def _validate_version(version: str) -> None:
     """Restrict release inputs to a single version, without pip requirement syntax."""
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+[a-zA-Z0-9.+-]*", version):
+    if not re.fullmatch(r"[0-9]++\.[0-9]++\.[0-9]++[a-zA-Z0-9.+-]*+", version):
         raise SystemExit(f"unsupported release version: {version}")
 
 
@@ -118,6 +118,7 @@ def verify_manifest(directory: Path) -> None:
 
 def verify_registry_wheel(version: str, wheel: Path, manifest: Path) -> None:
     """Require a registry-downloaded wheel to match the built release manifest."""
+    _validate_version(version)
     if not wheel.is_file() or not wheel.name.startswith(f"fleet_rlm-{version}-") or not wheel.name.endswith(".whl"):
         raise SystemExit(f"PyPI returned an unexpected wheel for fleet-rlm {version}: {wheel.name}")
     verify_manifest(manifest.parent)

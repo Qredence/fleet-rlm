@@ -31,6 +31,6 @@ def test_long_context_sizes_follow_tiers_and_gold_matches_recomputation():
 
 
 def test_long_context_is_deterministic():
-    assert [c.record() for c in evaluation.long_context_cases(seed=2, per_tier=1)] == [
-        c.record() for c in evaluation.long_context_cases(seed=2, per_tier=1)
-    ]
+    first = [case.record() for case in evaluation.long_context_cases(seed=2, per_tier=1)]
+    second = [case.record() for case in evaluation.long_context_cases(seed=2, per_tier=1)]
+    assert first == second

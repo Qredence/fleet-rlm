@@ -36,6 +36,8 @@ def run(sandbox, context, code, *, on_call=no_calls, timeout=30, fence=None, on_
 
 def test_state_persists_and_the_last_expression_is_the_value(sandbox):
     context = repl.create_context(sandbox)
+    reply_dir = Path(sandbox.code_interpreter.translate(repl.REPLY_DIR))
+    assert reply_dir.is_dir() and reply_dir.stat().st_mode & 0o777 == 0o700
     assert run(sandbox, context, "x = 41")["has_value"] is False
     result = run(
         sandbox, context, "import json\nprint('captured')\njson.dumps({'answer': x + value})", variables={"value": 1}
