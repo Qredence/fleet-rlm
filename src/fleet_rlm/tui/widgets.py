@@ -14,8 +14,8 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import OptionList, Static, TextArea
 
-import fleet_rlm.tui.render as render_mod
 from fleet_rlm.tui.render import (
+    TURN_PERSISTED,
     CollapsibleItem,
     TurnTracker,
     _format_tool_payload,
@@ -410,7 +410,7 @@ class _TurnWidget(Vertical):
                     art.append("\nArtifacts: ", style="bold #fbbf24")
                     art.append(", ".join(str(a) for a in ev["artifacts"]), style="#d4d4d8")
                     body_parts.append(art)
-                body_parts.append(Text(f"\n{render_mod.TURN_PERSISTED}", style="#34d399"))
+                body_parts.append(Text(f"\n{TURN_PERSISTED}", style="#34d399"))
             elif ev_type == "turn_cancelled":
                 body_parts.append(
                     Text(f"Turn cancelled: {ev.get('error', 'Cancellation confirmed.')}", style="bold #fbbf24")

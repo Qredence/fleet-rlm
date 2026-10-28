@@ -326,11 +326,11 @@ def smoke(
                 str(python),
                 "-c",
                 "import sys; from importlib.metadata import version; "
-                "assert version('fleet-rlm') == sys.argv[1]; "
-                "from fleet_rlm.api.app import create_app; "
-                "app=create_app(initialize_db=False, configure_observability=False); "
-                "schema=app.openapi(); assert schema['info']['title']=='Fleet-RLM Lite API'; "
-                "assert '/health' in schema['paths']",
+                + "assert version('fleet-rlm') == sys.argv[1]; "
+                + "from fleet_rlm.api.app import create_app; "
+                + "app=create_app(initialize_db=False, configure_observability=False); "
+                + "schema=app.openapi(); assert schema['info']['title']=='Fleet-RLM Lite API'; "
+                + "assert '/health' in schema['paths']",
                 version,
             ],
             deadline,
