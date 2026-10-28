@@ -39,6 +39,7 @@ def test_quality_aggregates_both_full_matrix_and_smarter_testing_jobs() -> None:
     quality = next(job["quality-gate"] for job in jobs if isinstance(job, dict) and "quality-gate" in job)
 
     assert quality["name"] == "quality"
+    assert config["jobs"]["sonarqube"]["steps"][0] == {"checkout": {"method": "full"}}
     assert set(quality["requires"]) >= {
         "static-checks",
         "test-python-3.11",

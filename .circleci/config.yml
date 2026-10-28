@@ -190,7 +190,8 @@ jobs:
       SONAR_SCANNER_VERSION: "8.1.0.6389"
       SONAR_SCANNER_SHA256: "bb8f709f9cb73352f8d1260a3b3c506c0f41146754bc630762c126d795499d0b"
     steps:
-      - checkout
+      - checkout:
+          method: full
       - attach_workspace:
           at: .
       - run:

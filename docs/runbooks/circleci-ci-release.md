@@ -30,7 +30,8 @@ Python range (`>=3.11,<3.14`).
 The `sonarqube` job analyzes `Qredence_fleet-rlm` in the `qredence` organization
 on SonarQube Cloud EU. It uses the official SonarScanner CLI 8.1.0.6389 Linux
 x64 distribution, verifies its pinned SHA-256, and waits up to five minutes for
-the server quality gate. The aggregate `quality` job, and therefore release
+the server quality gate. Its full Git checkout includes the historical blobs
+needed for SonarQube source blame. The aggregate `quality` job, and therefore release
 preflight, requires this job to pass.
 
 Python 3.11's existing full-suite job produces `coverage/coverage.xml` and
