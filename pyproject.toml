@@ -114,9 +114,12 @@ override-dependencies = [
     # litellm is installed only as DSPy's transitive dependency — fleet-rlm does
     # NOT declare it as a direct dep in `[project].dependencies` and does not
     # import it from `src/`. This override floor is the policy mechanism:
-    # DSPy 3.4.0 accepts litellm>=1.65.8, but the CVE remediation family
-    # requires >=1.83.7 and the reviewed floor is pinned below.
-    "litellm>=1.87.0",
+    # DSPy 3.4.0 accepts litellm>=1.65.8, but CVE-2026-114612 needs the 1.101.3
+    # remediation. Pin it exactly so the fix moves nothing else; later releases
+    # also downgrade filelock, which is a separate change to review.
+    "litellm==1.101.3",
+    # dnspython <2.9.0 has an advisory reachable through DNS resolution.
+    "dnspython>=2.9.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
     # multidict <=6.9.0 has a memory leak in attacker-controlled item-view operations.
