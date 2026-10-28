@@ -25,7 +25,7 @@ from fleet_rlm.observability import trace_object as _trace_object
 from fleet_rlm.optimization_runs import add_optimization_arguments, read_worker_settings
 from fleet_rlm.replay import REVIEW_STATUSES
 from fleet_rlm.tui.app import run_interactive_cli
-from fleet_rlm.tui.web import serve_web_client, validate_api_url
+from fleet_rlm.tui.web import serve_web_client, validate_api_url, web_auth_token
 from fleet_rlm.workspace import validate_session_id
 
 _CONSOLE = Console()
@@ -558,6 +558,10 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
         if (args.host in {"0.0.0.0", "::"} or ":" in args.host) and args.public_url is None:
             parser.error("web --public-url is required when binding to a wildcard or IPv6 host")
+        try:
+            web_auth_token(args.host)
+        except ValueError as exc:
+            parser.error(str(exc))
         if args.session is not None:
             try:
                 validate_session_id(args.session)
@@ -572,7 +576,7 @@ def main(argv: list[str] | None = None) -> None:
                 port=settings.port,
                 settings=settings,
             )
-            setup_token = _prepare_owned_api(plan, settings, setup_token)
+            _prepare_owned_api(plan, settings, setup_token)
             _CONSOLE.print(f"MLflow: {target.mode} | {target.tracking_uri} | {target.experiment_name}", markup=False)
             with launcher.running_services(
                 plan,

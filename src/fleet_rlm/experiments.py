@@ -233,9 +233,7 @@ class ExperimentManager:
             if record["status"] not in {"completed", "approving"}:
                 raise ExperimentBusyError("Only a completed or recoverable experiment can be approved")
             try:
-                record = await asyncio.to_thread(
-                    self.store.claim_optimization_review, session_id, run_id, self.owner_id
-                )
+                await asyncio.to_thread(self.store.claim_optimization_review, session_id, run_id, self.owner_id)
             except ValueError as error:
                 raise ExperimentBusyError(str(error)) from None
             record = await asyncio.to_thread(

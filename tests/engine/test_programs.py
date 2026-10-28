@@ -497,6 +497,41 @@ def test_flex_module_source_gets_the_turn_rlm_budgets():
     )
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        'x = dspy.RLM("a -> b",)',
+        'x = dspy.RLM(\n    "a -> b",\n    tools=[lookup],\n)',
+        'x = dspy.RLM("tâche -> réponse")',
+        'x = dspy.RLM("a -> b"); y = dspy.RLM("c -> d",)',
+        "x = dspy.RLM()",
+    ],
+)
+def test_flex_budget_rewrite_preserves_valid_python(source):
+    import ast
+
+    from fleet_rlm.engine.programs import _with_turn_budgets
+
+    rewritten = _with_turn_budgets(source, max_iters=16, max_llm_calls=150)
+    tree = ast.parse(rewritten)
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert calls
+    for call in calls:
+        budgets = {keyword.arg: ast.literal_eval(keyword.value) for keyword in call.keywords if keyword.arg != "tools"}
+        assert budgets == {
+            "max_iters": 16,
+            "max_llm_calls": 150,
+        }
+    assert _with_turn_budgets(rewritten, max_iters=16, max_llm_calls=150) == rewritten
+
+
+def test_flex_budget_rewrite_falls_back_if_insertion_does_not_parse():
+    from fleet_rlm.engine.programs import _with_turn_budgets
+
+    source = 'x = dspy.RLM("a -> b", # trailing comment\n)'
+    assert _with_turn_budgets(source, max_iters=16, max_llm_calls=150) == source
+
+
 def test_engine_binds_the_turn_budgets_into_the_flex_baseline():
     manager = DaytonaSandboxManager("key", "org", "volume", "session-budgets")
     engine = _engine(

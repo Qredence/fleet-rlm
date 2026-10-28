@@ -1535,10 +1535,6 @@ class FleetTextualApp(App[str | None]):
             self._last_ctrl_c = 0.0
             self.cancel_active_turn()
             return
-        if self._optimization_active:
-            self._last_ctrl_c = 0.0
-            self._request_optimizer_stop()
-            return
         now = time.monotonic()
         if self._last_ctrl_c and (now - self._last_ctrl_c) <= 2.5:
             self.exit()

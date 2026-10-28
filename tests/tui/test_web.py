@@ -154,6 +154,65 @@ def test_terminal_rejects_duplicate_security_headers(header):
         asyncio.run(server.handle_websocket(request))
 
 
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "fleet.example.test"])
+@pytest.mark.parametrize("token", [None, "", "short", "x" * 32 + "\n"])
+def test_non_loopback_web_listener_requires_secret(monkeypatch, host, token):
+    monkeypatch.delenv("FLEET_WEB_AUTH_TOKEN", raising=False)
+    if token is not None:
+        monkeypatch.setenv("FLEET_WEB_AUTH_TOKEN", token)
+    with pytest.raises(ValueError, match="FLEET_WEB_AUTH_TOKEN"):
+        web.FleetWebServer("unused", host=host)
+
+
+@pytest.mark.parametrize("authorization", [None, "Bearer wrong", "Basic " + "s" * 32, "duplicate", "valid"])
+def test_non_loopback_websocket_requires_secret_before_start(monkeypatch, authorization):
+    from aiohttp import web as aiohttp_web
+    from aiohttp.test_utils import make_mocked_request
+    from multidict import CIMultiDict
+    from textual_serve.server import Server
+
+    token = "s" * 32
+    monkeypatch.setenv("FLEET_WEB_AUTH_TOKEN", token)
+    accepted = []
+
+    async def handle(_self, request):
+        accepted.append(request)
+        return "accepted"
+
+    monkeypatch.setattr(Server, "handle_websocket", handle)
+    server = web.FleetWebServer("unused", host="0.0.0.0", public_url="https://fleet.example.test")
+    headers = CIMultiDict({"Origin": "https://fleet.example.test", "Host": "fleet.example.test"})
+    if authorization in {"valid", "duplicate"}:
+        headers.add("Authorization", f"Bearer {token}")
+        if authorization == "duplicate":
+            headers.add("Authorization", f"Bearer {token}")
+    elif authorization is not None:
+        headers.add("Authorization", authorization)
+    request = make_mocked_request("GET", "/ws", headers=headers)
+    if authorization == "valid":
+        assert asyncio.run(server.handle_websocket(request)) == "accepted"
+        assert accepted == [request]
+    else:
+        with pytest.raises(aiohttp_web.HTTPUnauthorized):
+            asyncio.run(server.handle_websocket(request))
+        assert accepted == []
+
+
+def test_authenticated_non_loopback_client_still_requires_matching_origin(monkeypatch):
+    from aiohttp import web as aiohttp_web
+    from aiohttp.test_utils import make_mocked_request
+
+    monkeypatch.setenv("FLEET_WEB_AUTH_TOKEN", "s" * 32)
+    server = web.FleetWebServer("unused", host="0.0.0.0", public_url="https://fleet.example.test")
+    request = make_mocked_request(
+        "GET",
+        "/ws",
+        headers={"Authorization": "Bearer " + "s" * 32, "Origin": "https://evil.test", "Host": "fleet.example.test"},
+    )
+    with pytest.raises(aiohttp_web.HTTPForbidden):
+        asyncio.run(server.handle_websocket(request))
+
+
 @pytest.mark.parametrize(
     ("arguments", "expected_session", "mlflow_mode"),
     [

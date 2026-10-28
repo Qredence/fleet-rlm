@@ -1936,6 +1936,7 @@ def test_format_report_shows_measured_diagnostic_counts() -> None:
     evaluation = _evaluation()
     candidate = evaluation["candidate"]
     candidate.update(
+        holdout_errors=2,
         dev_lm_calls=[4, None, 6, 2],
         dev_lm_calls_measured=3,
         dev_lm_calls_median=4,
@@ -1950,6 +1951,7 @@ def test_format_report_shows_measured_diagnostic_counts() -> None:
     assert "runtime median 0.6s (3 examples)" in report
     assert "artifact passes 2/3 applicable" in report
     assert "runtime median unavailable (0 examples)" in report
+    assert "Holdout rollout errors: 2" in report
 
 
 def test_score_split_collects_measured_usage_timing_and_artifact_passes() -> None:

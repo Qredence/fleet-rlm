@@ -381,6 +381,7 @@ def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypat
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     monkeypatch.setattr(cli.get_settings, "cache_clear", lambda: None, raising=False)
     monkeypatch.setattr(cli.launcher, "plan_launch", lambda **_kwargs: plan)
+    monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda *_args: False)
 
     def complete_setup(_args, _backend, token):
         calls["setup_token"] = token
@@ -483,3 +484,16 @@ def test_web_cli_rejects_invalid_public_listener(monkeypatch, capsys, allow_publ
     assert error.value.code == 2
     if message:
         assert message in capsys.readouterr().err
+
+
+def test_web_cli_requires_authentication_before_starting_services(monkeypatch, capsys):
+    settings = FleetSettings(_env_file=None, allow_non_loopback_bind=True)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.delenv("FLEET_WEB_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        cli.launcher, "plan_launch", lambda **_kwargs: pytest.fail("must reject before starting services")
+    )
+    with pytest.raises(SystemExit) as error:
+        cli.main(["web", "--url", "http://fleet.test", "--host", "0.0.0.0", "--public-url", "https://fleet.test"])
+    assert error.value.code == 2
+    assert "FLEET_WEB_AUTH_TOKEN" in capsys.readouterr().err

@@ -197,6 +197,7 @@ See [evaluation](docs/reference/evaluation.md) and the [canary runbook](docs/run
 - The ordinary API has no caller authentication and defaults to `127.0.0.1`.
 - Non-loopback binding requires `FLEET_ALLOW_NON_LOOPBACK_BIND=true` and a secured boundary.
 - Browser terminal WebSockets validate Origin and Host against the configured public URL before acceptance or client process creation.
+- Non-loopback browser terminal listeners also require an environment-only bearer secret supplied by an authenticated TLS reverse proxy.
 - Daytona policy governs generated Python and network access.
 - Live validation requires explicit authorization and saved evidence.
 - Offline tests cannot establish provider availability, isolation, model compatibility, or workload improvement.

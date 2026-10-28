@@ -62,7 +62,7 @@ def _with_turn_budgets(source: str, *, max_iters: int, max_llm_calls: int) -> st
         tree = ast.parse(source)
     except SyntaxError:
         return source
-    lines = source.splitlines(keepends=True)
+    lines = [line.encode("utf-8") for line in source.splitlines(keepends=True)]
     edits: list[tuple[int, int, str]] = []
     for node in ast.walk(tree):
         if not _is_dspy_rlm(node):
@@ -74,11 +74,19 @@ def _with_turn_budgets(source: str, *, max_iters: int, max_llm_calls: int) -> st
             if name not in declared
         ]
         if additions and node.end_lineno is not None and node.end_col_offset is not None:
-            edits.append((node.end_lineno - 1, node.end_col_offset - 1, ", " + ", ".join(additions)))
+            edits.append((node.end_lineno - 1, node.end_col_offset - 1, ", ".join(additions)))
     for line_index, column, insertion in sorted(edits, reverse=True):
         line = lines[line_index]
-        lines[line_index] = line[:column] + insertion + line[column:]
-    return "".join(lines)
+        # AST column offsets count UTF-8 bytes, not Python string characters.
+        prefix = b"".join(lines[:line_index]) + line[:column]
+        separator = b" " if prefix.rstrip().endswith((b",", b"(")) else b", "
+        lines[line_index] = line[:column] + separator + insertion.encode("utf-8") + line[column:]
+    rewritten = b"".join(lines).decode("utf-8")
+    try:
+        ast.parse(rewritten)
+    except SyntaxError:
+        return source
+    return rewritten
 
 
 def _bind_flex_budgets(flex: Any, *, max_iters: int, max_llm_calls: int) -> bool:

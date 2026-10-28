@@ -476,7 +476,7 @@ def format_report(manifest: ArtifactManifest, holdout: list[dspy.Example]) -> st
     lines += [
         "",
         f"Critical deterministic holdout cases: {critical_summary}",
-        f"Critical holdout failures: {candidate.get('holdout_errors', 'unavailable')}",
+        f"Holdout rollout errors: {candidate.get('holdout_errors', 'unavailable')}",
         f"Holdout objectives: {objectives or 'none'}",
         f"Changed components: {changed}",
         f"Gate: {verdict}",
@@ -690,6 +690,7 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                         if getattr(args, "structured_events", False):
                             emit_event({"type": "terminal", "status": "failed", "run_id": version, **outcome})
                 except Exception:
+                    # Preserve the original approval error if recording its outcome also fails.
                     pass
             raise
         finally:

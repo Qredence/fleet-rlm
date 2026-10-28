@@ -58,6 +58,7 @@ source control.
 | `FLEET_HOST` | `127.0.0.1` | Default server bind address. `HOST` is also accepted. |
 | `FLEET_PORT` | `8000` | Default server port. `PORT` is also accepted. |
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. `ALLOW_NON_LOOPBACK_BIND` is also accepted. |
+| `FLEET_WEB_AUTH_TOKEN` | unset | Environment-only proxy bearer secret required for non-loopback web listeners; at least 32 non-whitespace characters. See [CLI](cli.md). |
 
 Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind

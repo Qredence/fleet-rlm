@@ -1352,6 +1352,71 @@ def test_ambiguous_start_retry_reuses_request_id_then_definitive_results_rotate_
     asyncio.run(scenario())
 
 
+def test_ctrl_c_clears_and_quits_during_optimization_while_escape_cancels(monkeypatch):
+    record = _experiment_record("sess_keys-run", "running")
+    transport, _api = _experiment_transport([record])
+
+    async def scenario():
+        async with _running_tui(transport, "sess_keys", (100, 30)) as (_client, tui, pilot):
+            stops = []
+            monkeypatch.setattr(tui, "_request_optimizer_stop", lambda: stops.append(True))
+            tui._optimizer_snapshot(record)
+            inp = tui.query_one("#prompt-input", app._PromptInput)
+            await pilot.press("escape")
+            assert stops == [True]
+            inp.value = "unfinished prompt"
+            await pilot.press("ctrl+c")
+            assert inp.value == "" and tui.is_running
+            assert stops == [True]
+            await pilot.press("ctrl+c")
+            assert not tui.is_running
+            assert stops == [True]
+
+    asyncio.run(scenario())
+
+
+def test_experiment_history_error_keeps_app_observing_after_dismissal():
+    record = _experiment_record("sess_history-run", "running")
+    state = {"fail": False}
+
+    def handler(request):
+        if request.url.path.endswith("/experiments"):
+            if state["fail"]:
+                return httpx.Response(503)
+            active = record["run_id"] if record["status"] == "running" else None
+            return httpx.Response(200, json={"experiments": [record], "active_run_id": active, "accepting": True})
+        if request.url.path.endswith(record["run_id"]):
+            return httpx.Response(200, json={"experiment": record, "comparison": None})
+        return httpx.Response(200, json={})
+
+    async def scenario():
+        async with _running_tui(httpx.MockTransport(handler), "sess_history", (100, 30)) as (_client, tui, pilot):
+            tui._open_experiments()
+            screen = tui.screen
+            for _ in range(30):
+                await pilot.pause(0.05)
+                if screen.records and not screen._polling:
+                    break
+            assert tui._optimization_active
+            state["fail"] = True
+            await screen._refresh_history()
+            assert screen.records == []
+            assert tui._optimization_run_id == record["run_id"]
+            assert tui._optimization_active
+            await screen.dismiss()
+            state["fail"] = False
+            record.update(status="completed", stage="completed")
+            tui._tick_optimizer_snapshot()
+            for _ in range(30):
+                await pilot.pause(0.05)
+                if not tui._optimization_active:
+                    break
+            assert not tui._optimization_active
+            assert tui._optimization_terminal_status == "completed"
+
+    asyncio.run(scenario())
+
+
 def test_experiments_review_and_cancel_use_idempotent_api_requests() -> None:
     running = _experiment_record("sess_active-run", "running")
     completed = _experiment_record("sess_review-run", "completed")

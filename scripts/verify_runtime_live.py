@@ -285,7 +285,8 @@ def main() -> None:
             selection = client.put(f"/sessions/{session}/model", json={"role": "sub", "model": alternate})
             assert selection.status_code == 200, selection.text
             assert manager.sub_lm.model == alternate
-            assert client.put(f"/sessions/{session}/mode", json={"mode": "flex"}).status_code == 200
+            selection = client.put(f"/sessions/{session}/mode", json={"mode": "flex"})
+            assert selection.status_code == 200, selection.text
             configuration = client.get(f"/sessions/{session}/config").json()
             assert configuration["models"] == {"root": args.model, "sub": alternate}
             assert configuration["context"]["workspace_path"] == "files/ledger.csv"
@@ -306,16 +307,19 @@ def main() -> None:
                 ("rlm", "route_rlm", arithmetic, "rlm"),
                 ("flex", "route_flex", arithmetic, "flex"),
             ):
-                assert resumed.put(f"/sessions/{session}/mode", json={"mode": mode}).status_code == 200
+                selection = resumed.put(f"/sessions/{session}/mode", json={"mode": mode})
+                assert selection.status_code == 200, selection.text
                 started = time.monotonic()
                 body = resumed.post(f"/sessions/{session}/turn", json={"task": task_text, "idempotency_key": case})
                 assert body.status_code == 200, body.text
                 route_events = _stream_events(body)
                 report["metrics"][case] = _turn_metrics(route_events, time.monotonic() - started)
                 assert report["metrics"][case]["route"] == expected_route, report["metrics"][case]
-                assert report["metrics"][case]["answer"], report["metrics"][case]
-            assert resumed.delete(f"/sessions/{session}/context").status_code == 200
-            assert resumed.put(f"/sessions/{session}/mode", json={"mode": "hybrid"}).status_code == 200
+                assert report["metrics"][case]["answer"] == "221", report["metrics"][case]
+            cleared = resumed.delete(f"/sessions/{session}/context")
+            assert cleared.status_code == 200, cleared.text
+            selection = resumed.put(f"/sessions/{session}/mode", json={"mode": "hybrid"})
+            assert selection.status_code == 200, selection.text
             started = time.monotonic()
             body = resumed.post(
                 f"/sessions/{session}/turn",
@@ -324,8 +328,9 @@ def main() -> None:
             assert body.status_code == 200, body.text
             hybrid_events = _stream_events(body)
             report["metrics"]["route_hybrid"] = _turn_metrics(hybrid_events, time.monotonic() - started)
-            assert report["metrics"]["route_hybrid"]["answer"], report["metrics"]["route_hybrid"]
-            assert resumed.put(f"/sessions/{session}/context", json={"path": "files/ledger.csv"}).status_code == 200
+            assert report["metrics"]["route_hybrid"]["answer"] == "ACK", report["metrics"]["route_hybrid"]
+            selection = resumed.put(f"/sessions/{session}/context", json={"path": "files/ledger.csv"})
+            assert selection.status_code == 200, selection.text
             manager = resumed.app.state.session_registry._sessions[session].sandbox_mgr
             manager.reset_turn_budget()
             allowance = manager.max_llm_calls

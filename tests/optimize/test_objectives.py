@@ -69,8 +69,8 @@ def test_aggregate_zero_floor_keeps_efficiency_from_offsetting_errors():
 def test_objectives_stay_free_of_services():
     import inspect
 
-    import fleet_rlm.optimize.objectives as objectives
-
+    objectives = inspect.getmodule(aggregate)
+    assert objectives is not None
     source = inspect.getsource(objectives)
     assert "mlflow" not in source
     assert "import dspy" not in source

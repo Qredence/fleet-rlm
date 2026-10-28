@@ -22,6 +22,7 @@ from typing import Any
 
 LATENCY_TOLERANCE = 0.10
 ROUTE_FIELDS = ("route", "outcome", "event_kinds")
+EXPECTED_ANSWERS = {"route_rlm": "221", "route_flex": "221", "route_hybrid": "ACK"}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -49,26 +50,42 @@ def _latency_allowance(baselines: list[float]) -> float:
 def compare(baseline_reports: list[tuple[Path, dict[str, Any]]], after_report: dict[str, Any]) -> dict[str, Any]:
     """Return a verdict with one finding list per measured case.
 
-    Require at least one baseline report. Compare cases present in every baseline;
-    missing cases in the after report fail the verdict, while new cases are ignored.
-    Latency is measured in seconds; absent numeric usage or latency is not compared.
+    Require at least one baseline report. Every case in any baseline must appear
+    in all reports; new after-only cases are ignored. Route-task answers must match
+    their expectations, and measured baseline usage requires a valid after count.
+    Latency is measured in seconds; absent numeric latency is not compared.
     Raise SystemExit if any report did not pass or has no nonempty metrics object.
     """
+    if not baseline_reports:
+        raise ValueError("At least one baseline report is required")
     baseline_cases = [_cases(report, path) for path, report in baseline_reports]
     after_cases = _cases(after_report, Path("after"))
 
-    missing = sorted(set.intersection(*(set(case) for case in baseline_cases)) - set(after_cases))
+    required = set.union(*(set(case) for case in baseline_cases))
+    missing = sorted(required - set(after_cases))
     verdict: dict[str, Any] = {"passed": not missing, "missing_in_after": missing, "cases": {}}
-    for case in sorted(set(after_cases) & set.intersection(*(set(item) for item in baseline_cases))):
+    for case in sorted(set(after_cases) & required):
         findings: list[str] = []
         after = after_cases[case]
-        history = [item[case] for item in baseline_cases]
+        history = [item[case] for item in baseline_cases if case in item]
+        if len(history) != len(baseline_cases):
+            findings.append("case missing from a baseline report")
+        expected = EXPECTED_ANSWERS.get(case)
+        if expected is not None:
+            if after.get("answer") != expected:
+                findings.append(f"answer must be {expected!r}, got {after.get('answer')!r}")
+            if any(item.get("answer") != expected for item in history):
+                findings.append(f"baseline answer must be {expected!r}")
         for field in ROUTE_FIELDS:
             if any(item.get(field) != after.get(field) for item in history):
                 findings.append(f"{field} changed: {[item.get(field) for item in history]} -> {after.get(field)}")
         observed_calls = [item.get("lm_calls") for item in history if isinstance(item.get("lm_calls"), int)]
-        if observed_calls and isinstance(after.get("lm_calls"), int) and after["lm_calls"] > max(observed_calls):
-            findings.append(f"lm_calls rose: {observed_calls} -> {after['lm_calls']}")
+        if observed_calls:
+            calls = after.get("lm_calls")
+            if type(calls) is not int or calls < 0:
+                findings.append("lm_calls is missing or invalid")
+            elif calls > max(observed_calls):
+                findings.append(f"lm_calls rose: {observed_calls} -> {calls}")
         latencies = [item["wall_clock_s"] for item in history if isinstance(item.get("wall_clock_s"), (int, float))]
         if latencies and isinstance(after.get("wall_clock_s"), (int, float)):
             allowance = _latency_allowance(latencies)

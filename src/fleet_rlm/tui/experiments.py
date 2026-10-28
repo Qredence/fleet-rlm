@@ -189,7 +189,7 @@ class ExperimentsScreen(ModalScreen[None]):
         else:
             self.comparison = None
             self.comparison_run_id = None
-        self._sync_progress()
+        self._sync_progress(publish=error is None)
         lines = ["SESSION RUNS", ""]
         lines.extend(
             f"{'>' if record['run_id'] == self.selected_run_id else ' '} {record.get('status', 'unknown'):10} "
@@ -236,15 +236,15 @@ class ExperimentsScreen(ModalScreen[None]):
         """Return the history row matching active_run_id, or None when it is absent."""
         return next((record for record in self.records if record.get("run_id") == self.active_run_id), None)
 
-    def _sync_progress(self) -> None:
-        """Display active or selected progress and notify the observer of the active run."""
+    def _sync_progress(self, *, publish: bool = True) -> None:
+        """Display active or selected progress and optionally notify the observer of the active run."""
         active = self._active_record()
         visible = active or self._selected()
         progress = visible.get("progress") if visible else None
         self.progress = dict(progress) if isinstance(progress, Mapping) else {}
         if visible and not self.progress:
             self.progress = {"stage": visible.get("stage"), "status": visible.get("status")}
-        if self.on_snapshot is not None:
+        if publish and self.on_snapshot is not None:
             self.on_snapshot(active)
 
     def _render_progress(self) -> None:

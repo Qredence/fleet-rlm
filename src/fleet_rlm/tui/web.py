@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
+import ipaddress
+import os
 import shlex
 import sys
 from urllib.parse import urlsplit
@@ -10,6 +13,23 @@ from aiohttp import web
 from textual_serve.server import Server
 
 from fleet_rlm.workspace import validate_session_id
+
+
+def web_auth_token(host: str) -> str | None:
+    """Require a proxy-to-listener secret when the web listener is externally reachable."""
+    if host.lower() == "localhost":
+        return None
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return None
+    except ValueError:
+        pass  # Hostnames other than localhost are conservatively treated as external.
+    token = os.environ.get("FLEET_WEB_AUTH_TOKEN", "")
+    if len(token) < 32 or any(character.isspace() for character in token):
+        raise ValueError(
+            "non-loopback web binding requires FLEET_WEB_AUTH_TOKEN (at least 32 non-whitespace characters)"
+        )
+    return token
 
 
 def _origin(value: str) -> tuple[str, str, int]:
@@ -44,8 +64,25 @@ def _origin(value: str) -> tuple[str, str, int]:
 class FleetWebServer(Server):
     """Guard the terminal handshake before Textual Serve accepts or starts work."""
 
+    def __init__(
+        self,
+        command: str,
+        *,
+        host: str = "localhost",
+        port: int = 8000,
+        title: str | None = None,
+        public_url: str | None = None,
+    ) -> None:
+        self._auth_token = web_auth_token(host)
+        super().__init__(command, host=host, port=port, title=title, public_url=public_url)
+
     async def handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Permit only the configured browser origin, including behind a TLS proxy."""
+        if self._auth_token is not None:
+            authorization = request.headers.getall("Authorization", [])
+            expected = f"Bearer {self._auth_token}".encode()
+            if len(authorization) != 1 or not hmac.compare_digest(authorization[0].encode("utf-8"), expected):
+                raise web.HTTPUnauthorized(text="Terminal connection authentication is required.")
         try:
             public = urlsplit(self.public_url)
             allowed = _origin(f"{public.scheme}://{public.netloc}")

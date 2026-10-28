@@ -31,9 +31,13 @@ its own Session by default. `--session` explicitly makes browser clients share
 one Session. Use `--public-url` when a reverse proxy or wildcard bind needs a
 browser-facing URL (including the WebSocket scheme/path). Binding the web
 listener to a non-loopback interface requires
-`FLEET_ALLOW_NON_LOOPBACK_BIND=true`. Textual Serve does not authenticate
-visitors, so external access must go through a separately authenticated and
-secured boundary; the flag alone is not sufficient protection.
+`FLEET_ALLOW_NON_LOOPBACK_BIND=true` and `FLEET_WEB_AUTH_TOKEN`, an environment-only
+secret of at least 32 non-whitespace characters. Generate a random secret for each
+launch and configure an authenticated TLS reverse proxy to replace the WebSocket
+`Authorization` header with `Bearer <secret>` after authenticating the visitor.
+The listener validates this secret before starting a terminal process. Keep the
+listener reachable only by the proxy, and never expose the secret in browser URLs
+or client commands. Loopback listeners do not require this header.
 
 Terminal WebSockets require an Origin matching `--public-url`, or the generated
 listener URL when that option is omitted. Missing and foreign origins are

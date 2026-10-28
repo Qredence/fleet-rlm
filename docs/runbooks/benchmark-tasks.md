@@ -78,6 +78,6 @@ receipts, and MLflow traces remain evidence of their original protocols. New not
 runs use distinct directories and do not reinterpret them.
 
 Fleet's own [evaluation and optimization](../reference/evaluation.md) remain supported.
-The current shared metric is `fleet-metric-v9` and approval policy is version 5; older
+The current shared metric is `fleet-metric-v9` and approval policy is version 6; older
 candidate evidence requires reevaluation. This cleanup does not migrate stored labels
 or install an optimization candidate.
