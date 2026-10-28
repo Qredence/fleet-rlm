@@ -14,6 +14,7 @@ def test_smarter_testing_discovers_pytest_files_and_emits_junit_and_lcov() -> No
     assert "<< outputs.junit >>" in suite["run"]
     assert "<< outputs.circleci-list >>" in suite["file-mapper"]
     assert "<< outputs.lcov >>" in suite["analysis"]
+    assert "coverage lcov --fail-under=0" in suite["analysis"]
     assert suite["outputs"]["junit"] == "test-results/junit.xml"
 
 

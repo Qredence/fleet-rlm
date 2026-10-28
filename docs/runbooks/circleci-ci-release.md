@@ -168,6 +168,8 @@ circleci testsuite run "ci tests" --run-tests=all --analyze-tests=none
 
 The `test-python-312` job uses dynamic test splitting, dynamic parallelism
 with a maximum of two workers, and one automatic retry for a failed test atom.
+Per-atom LCOV exports use `--fail-under=0` because each file measures partial
+package coverage. The full Python 3.11 suite enforces the 80% coverage floor.
 Review test reruns in CircleCI Test Insights because a retry that passes makes
 the job succeed and suppresses the original test error.
 

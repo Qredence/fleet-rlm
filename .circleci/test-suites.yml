@@ -24,7 +24,8 @@ analysis: |
   COVERAGE_FILE="$coverage_file" uv run --locked coverage run --branch \
     --source=src/fleet_rlm -m pytest -q "$test_path"
   test_status=$?
-  COVERAGE_FILE="$coverage_file" uv run --locked coverage lcov -o "$lcov_file"
+  # Each atom covers only part of the package; the full 3.11 suite enforces 80%.
+  COVERAGE_FILE="$coverage_file" uv run --locked coverage lcov --fail-under=0 -o "$lcov_file"
   report_status=$?
   rm -f "$coverage_file"
   if [ "$test_status" -ne 0 ]; then exit "$test_status"; fi
