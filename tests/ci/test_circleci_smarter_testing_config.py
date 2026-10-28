@@ -45,6 +45,7 @@ def test_quality_aggregates_both_full_matrix_and_smarter_testing_jobs() -> None:
         "test-python-3.13",
         "package-check",
         "security",
+        "sonarqube",
     }
     assert config["experimental"]["dynamic-parallelism"]["test-python-312"] == {
         "key": "ci-tests-parallelism-key",

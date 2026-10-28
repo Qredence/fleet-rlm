@@ -21,6 +21,7 @@ from scripts.release_checks import (
     pypi_canary,
     recovery_preflight,
     send_pypi_canary_failure,
+    smoke,
     validate_webhook_context,
     verify_artifacts,
     verify_manifest,
@@ -275,6 +276,37 @@ def test_pypi_download_uses_only_the_public_pypi_index(tmp_path: Path) -> None:
     assert "--extra-index-url" not in command
     assert environment["PIP_CONFIG_FILE"] == os.devnull
     assert "PIP_EXTRA_INDEX_URL" not in environment
+
+
+@pytest.mark.parametrize("version", ["0.8.*", "0.8.0; python_version > '3'", "0.8.0/../../other", "0.8.0\n--help"])
+def test_release_commands_reject_requirement_and_path_syntax_before_side_effects(tmp_path: Path, version: str):
+    with (
+        patch("scripts.release_checks.subprocess.run") as run,
+        patch("scripts.release_checks.venv.EnvBuilder") as builder,
+        patch("scripts.release_checks.urllib.request.urlopen") as urlopen,
+    ):
+        for operation in (
+            lambda: download_pypi_wheel(version, tmp_path),
+            lambda: smoke(version, "https://pypi.org/simple", None, None),
+            lambda: verify_pypi_artifacts(version, tmp_path / "SHA256SUMS"),
+            lambda: verify_artifacts(version, tmp_path),
+            lambda: pypi_canary(version, tmp_path / "SHA256SUMS", tmp_path / "requirements.txt", "placeholder"),
+            lambda: send_pypi_canary_failure(version, "placeholder"),
+        ):
+            with pytest.raises(SystemExit, match="unsupported release version"):
+                operation()
+        run.assert_not_called()
+        builder.assert_not_called()
+        urlopen.assert_not_called()
+
+
+@pytest.mark.parametrize("version", ["0.8.0", "0.8.1rc1", "0.8.1.post1", "0.8.1+local.1"])
+def test_release_download_preserves_supported_versions(tmp_path: Path, version: str):
+    wheel = tmp_path / f"fleet_rlm-{version}-py3-none-any.whl"
+    wheel.touch()
+    with patch("scripts.release_checks.subprocess.run") as run:
+        assert download_pypi_wheel(version, tmp_path) == wheel
+    assert run.call_args.args[0][-1] == f"fleet-rlm=={version}"
 
 
 def test_pypi_download_retries_temporary_registry_visibility(tmp_path: Path) -> None:

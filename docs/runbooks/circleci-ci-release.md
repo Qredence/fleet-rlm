@@ -25,6 +25,46 @@ circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY
 The Python 3.14 probe is informational and does not change the supported
 Python range (`>=3.11,<3.14`).
 
+## SonarQube Cloud
+
+The `sonarqube` job analyzes `Qredence_fleet-rlm` in the `qredence` organization
+on SonarQube Cloud EU. It uses the official SonarScanner CLI 8.1.0.6389 Linux
+x64 distribution, verifies its pinned SHA-256, and waits up to five minutes for
+the server quality gate. The aggregate `quality` job, and therefore release
+preflight, requires this job to pass.
+
+Python 3.11's existing full-suite job produces `coverage/coverage.xml` and
+shares only that report through the workflow workspace. Coverage.py uses
+relative file paths so the scanner can resolve the report in its own checkout.
+The Python 3.12 selective tests and Python 3.13 full suite keep their existing
+behavior; SonarQube does not use partial or merged matrix coverage. Runtime
+and repository scripts are analyzed, while coverage measures the shipped
+`src/fleet_rlm` package. `sonar-project.properties` declares this scope and the
+supported Python versions explicitly, with scanner automatic configuration
+disabled.
+
+Only the analysis job requests the existing `SonarCloud` context and its
+`SONAR_TOKEN`. The context is restricted to project `rlm`, excludes SSH reruns,
+and rejects API-supplied configuration. Fork PR jobs do not receive secrets.
+Keep the organization's uncertified public-orb setting disabled: this job runs
+the official scanner directly and needs no third-party orb permission.
+
+For the initial migration, finish local validation and obtain authorization to
+publish the reviewed configuration. Immediately before the first push that
+uses it, turn off **Automatic analysis** in the SonarQube project's analysis
+settings. CI analysis and automatic analysis cannot run together; leaving
+automatic analysis on for the integration PR would fail its required scan.
+Then publish the configuration, run the existing `run_ci=true` pipeline on
+`main`, and confirm the `sonarqube` job imports coverage and reports a
+quality-gate result. Until ready to publish, retain automatic analysis so the
+project continues to receive scans. If publication or activation fails, restore
+automatic analysis while reverting or repairing the CI integration.
+
+The [SonarScanner CLI documentation](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/scanners/sonarscanner-cli)
+describes scanner setup, and the
+[Python coverage guide](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/test-coverage/python-test-coverage)
+describes coverage import.
+
 ## Chunk tasks
 
 The Chunk CLI project configuration provides local validations through
@@ -146,6 +186,10 @@ overage needs a separate decision.
 Before starting, confirm the version in `pyproject.toml` has not been published
 and that the intended commit is on `main`. Set the requested version and the
 full 40-character commit SHA to that exact `main` commit:
+
+Release artifact verification, registry downloads, and smoke checks accept one
+version such as `0.8.0` or `0.8.1rc1`. They reject wildcards, requirement markers,
+paths, and command options before running pip or contacting the registry.
 
 ```bash
 circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \

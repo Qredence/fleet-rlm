@@ -99,7 +99,25 @@ jobs:
           name: Run non-live tests
           command: |
             mkdir -p test-results
-            uv run --locked pytest --junitxml=test-results/junit.xml
+            if [ "<< parameters.python-version >>" = "3.11" ]; then
+              mkdir -p coverage
+              uv run --locked coverage run -m pytest --junitxml=test-results/junit.xml
+              uv run --locked coverage report
+              uv run --locked coverage xml -o coverage/coverage.xml
+            else
+              uv run --locked pytest --junitxml=test-results/junit.xml
+            fi
+      - when:
+          condition:
+            equal: ["3.11", << parameters.python-version >>]
+          steps:
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - coverage/coverage.xml
+            - store_artifacts:
+                path: coverage
+                destination: coverage
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -163,6 +181,35 @@ jobs:
       - run:
           name: Audit locked runtime and development dependencies
           command: make check-security
+
+  sonarqube:
+    docker:
+      - image: cimg/base:current
+    resource_class: medium
+    environment:
+      SONAR_SCANNER_VERSION: "8.1.0.6389"
+      SONAR_SCANNER_SHA256: "bb8f709f9cb73352f8d1260a3b3c506c0f41146754bc630762c126d795499d0b"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Analyze with SonarQube Cloud and require its quality gate
+          command: |
+            test -n "${SONAR_TOKEN:-}" || { echo "SONAR_TOKEN is required from the SonarCloud context." >&2; exit 1; }
+            test -s coverage/coverage.xml
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+              git fetch --unshallow
+            fi
+            scanner_archive="sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
+            scanner_dir=$(mktemp -d)
+            trap 'rm -rf "$scanner_dir"' EXIT
+            curl --fail --silent --show-error --location \
+              "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$scanner_archive" \
+              --output "$scanner_dir/$scanner_archive"
+            printf '%s  %s\n' "$SONAR_SCANNER_SHA256" "$scanner_dir/$scanner_archive" | sha256sum --check -
+            unzip -q "$scanner_dir/$scanner_archive" -d "$scanner_dir"
+            "$scanner_dir/sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64/bin/sonar-scanner"
 
   quality-gate:
     docker:
@@ -603,6 +650,10 @@ workflows:
             - list-smarter-tests
       - package-check
       - security
+      - sonarqube:
+          context: SonarCloud
+          requires:
+            - test-python-3.11
       - quality-gate:
           name: quality
           requires:
@@ -612,6 +663,7 @@ workflows:
             - test-python-3.13
             - package-check
             - security
+            - sonarqube
       - validate-release-request:
           filters: pipeline.parameters.run_release or pipeline.parameters.run_python314 or pipeline.parameters.run_ci or pipeline.parameters.run_pypi_recovery
       - validate-pypi-webhook-context:

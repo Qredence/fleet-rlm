@@ -64,10 +64,15 @@ def recovery_preflight(version: str, sha: str, branch: str, pipeline_sha: str) -
     sys.stdout.write(f"Recovery preflight passed for published fleet-rlm {version} from {sha}\n")
 
 
+def _validate_version(version: str) -> None:
+    """Restrict release inputs to a single version, without pip requirement syntax."""
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+[a-zA-Z0-9.+-]*", version):
+        raise SystemExit(f"unsupported release version: {version}")
+
+
 def verify_artifacts(version: str, directory: Path) -> None:
     """Require exactly one matching wheel and source archive."""
-    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[a-zA-Z0-9.+-]*)?", version):
-        raise SystemExit(f"unsupported release version: {version}")
+    _validate_version(version)
     wheels = list(directory.glob(f"fleet_rlm-{version}-*.whl"))
     sdists = list(directory.glob(f"fleet_rlm-{version}.tar.gz"))
     contents = [path for path in directory.iterdir() if path.name != ".gitignore"]
@@ -131,6 +136,7 @@ def verify_registry_wheel(version: str, wheel: Path, manifest: Path) -> None:
 
 def verify_pypi_artifacts(version: str, manifest: Path, deadline: float | None = None) -> None:
     """Verify published files against the release manifest, retrying PyPI propagation delays."""
+    _validate_version(version)
     verify_manifest(manifest.parent)
     expected = {
         match.group(2): match.group(1)
@@ -196,6 +202,7 @@ def _run_with_deadline(command: list[str], deadline: float | None, *, env: dict[
 
 def download_pypi_wheel(version: str, destination: Path, deadline: float | None = None) -> Path:
     """Download only from the public PyPI index, ignoring pip index overrides."""
+    _validate_version(version)
     environment = os.environ.copy()
     environment["PIP_CONFIG_FILE"] = os.devnull
     for key in (
@@ -243,6 +250,7 @@ def download_pypi_wheel(version: str, destination: Path, deadline: float | None 
 
 def send_pypi_canary_failure(version: str, token: str) -> None:
     """Send a matching Smart Deployments failure signal for the PyPI canary."""
+    _validate_version(version)
     payload = {
         "provider": "custom",
         "component_name": "fleet-rlm",
@@ -264,6 +272,7 @@ def send_pypi_canary_failure(version: str, token: str) -> None:
 
 def pypi_canary(version: str, manifest: Path, requirements: Path, token: str) -> None:
     """Smoke-test the public PyPI artifact and signal failed health to CircleCI."""
+    _validate_version(version)
     validate_webhook_context(token)
     try:
         deadline = time.monotonic() + 15 * 60
@@ -296,6 +305,7 @@ def smoke(
     deadline: float | None = None,
 ) -> None:
     """Install a release candidate in isolation and exercise its public entry points."""
+    _validate_version(version)
     with tempfile.TemporaryDirectory(prefix="fleet-release-smoke-") as temp:
         env_dir = Path(temp) / "venv"
         venv.EnvBuilder(with_pip=True).create(env_dir)

@@ -12,6 +12,8 @@ build/
 .coverage
 .coverage.*
 htmlcov/
+coverage/
+.scannerwork/
 # Virtual environments
 .venv/
 venv/

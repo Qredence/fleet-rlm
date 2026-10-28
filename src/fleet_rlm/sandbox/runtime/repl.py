@@ -457,8 +457,11 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
     try:
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             tree = ast.parse(code, mode="exec")
-            last = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
-            assert last is None or isinstance(last, ast.Expr)
+            last = tree.body[-1] if tree.body else None
+            if isinstance(last, ast.Expr):
+                tree.body.pop()
+            else:
+                last = None
             exec(compile(tree, "<fleet_rlm>", "exec"), namespace, namespace)
             value = (
                 eval(compile(ast.Expression(last.value), "<fleet_rlm>", "eval"), namespace)

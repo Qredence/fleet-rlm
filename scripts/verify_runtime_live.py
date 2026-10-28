@@ -58,11 +58,18 @@ def _turn_metrics(events: list[dict], wall_clock: float) -> dict[str, object]:
     return metrics
 
 
+def _require(condition: bool, detail: object = "Runtime acceptance check failed") -> None:
+    """Enforce acceptance checks even when Python optimization is enabled."""
+    if not condition:
+        raise RuntimeError(detail)
+
+
 def main() -> None:
     """Run the `--live` runtime checks and save a report after attempting resource cleanup.
 
     Creates a private database schema and provider sandboxes. Exits unsuccessfully
-    if a check, report write, or cleanup fails.
+    if a check, report write, or cleanup fails. Acceptance checks also run under
+    Python optimization (`-O` or `PYTHONOPTIMIZE`).
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Authorize disposable credential-backed calls")
@@ -147,7 +154,7 @@ def main() -> None:
             schema_created = True
         app = create_app(settings=settings, configure_observability=args.trace)
         with TestClient(app) as client:
-            assert client.get("/health").status_code == 200
+            _require(client.get("/health").status_code == 200)
             # 1.25M records, >10 MB, far above the model context window.
             # Cycles 0..96 independently give sum=3686, negatives=10 per 97.
             count = 1_250_000
@@ -159,12 +166,12 @@ def main() -> None:
                 "negative": cycles * 10 + min(remainder, 10),
             }
             response = client.post(f"/sessions/{session}/attach", files={"file": ("ledger.csv", raw)})
-            assert response.status_code == 200, response.text
+            _require(response.status_code == 200, response.text)
             download = client.get(f"/sessions/{session}/workspace/files/files/ledger.csv")
-            assert download.content == raw
+            _require(download.content == raw)
             report["cases"]["large_roundtrip"] = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
             response = client.put(f"/sessions/{session}/context", json={"path": "files/ledger.csv"})
-            assert response.status_code == 200, response.text
+            _require(response.status_code == 200, response.text)
             task = (
                 "Inspect the entire context ledger using streaming Python csv processing. Count data rows, "
                 "sum the value column as integers, and count values < 0. Write artifacts/summary.json "
@@ -178,19 +185,19 @@ def main() -> None:
             report["metrics"]["ledger_turn_rlm"] = _turn_metrics(events, time.monotonic() - ledger_started)
             report["events"] = events
             outcomes = [e for e in events if e["event"] in {"turn_complete", "error"}]
-            assert len(outcomes) == 1 and outcomes[0]["event"] == "turn_complete", outcomes
+            _require(len(outcomes) == 1 and outcomes[0]["event"] == "turn_complete", outcomes)
             turn_id = outcomes[0]["turn_id"]
             persisted = client.get(f"/sessions/{session}/turns/{turn_id}").json()
-            assert persisted["status"] == "completed"
-            assert persisted["result"]["answer"] == outcomes[0]["answer"]
+            _require(persisted["status"] == "completed")
+            _require(persisted["result"]["answer"] == outcomes[0]["answer"])
             app.state.session_registry._sessions[session].store.finish_turn(
                 session, turn_id, "failed", {"event": "error", "error": "simulated lost delivery"}
             )
-            assert client.get(f"/sessions/{session}/turns/{turn_id}").json()["status"] == "completed"
+            _require(client.get(f"/sessions/{session}/turns/{turn_id}").json()["status"] == "completed")
             report["cases"]["durable_completion_survives_delivery_failure"] = "passed"
             actual_response = client.get(f"/sessions/{session}/workspace/files/artifacts/summary.json")
             actual = actual_response.json()
-            assert actual == expected, (actual, expected)
+            _require(actual == expected, (actual, expected))
             report["cases"]["strict_rlm_analysis"] = {
                 "expected": expected,
                 "actual": actual,
@@ -201,11 +208,11 @@ def main() -> None:
             replay_events = parse_sse(replay.text)
             report["metrics"]["ledger_replay"] = _turn_metrics(replay_events, time.monotonic() - replay_started)
             replay_outcomes = [e for e in replay_events if e["event"] in {"turn_complete", "error"}]
-            assert len(replay_outcomes) == 1 and replay_outcomes[0].get("answer") == outcomes[0]["answer"]
-            assert not any(e["event"] == "repl_code" for e in replay_events)
+            _require(len(replay_outcomes) == 1 and replay_outcomes[0].get("answer") == outcomes[0]["answer"])
+            _require(not any(e["event"] == "repl_code" for e in replay_events))
             report["cases"]["idempotent_replay"] = "passed"
             source = {"files/ledger.csv": hashlib.sha256(raw).hexdigest()}
-            assert (
+            _require(
                 client.put(
                     f"/sessions/{session}/memory/ledger",
                     json={
@@ -217,7 +224,7 @@ def main() -> None:
                 == 200
             )
             matched = client.get(f"/sessions/{session}/memory", params={"q": "reconcile ledger anomalies"}).json()
-            assert [item["memory_id"] for item in matched["memories"]] == ["ledger"]
+            _require([item["memory_id"] for item in matched["memories"]] == ["ledger"])
             report["cases"]["source_backed_memory"] = "passed"
             runtime = app.state.session_registry._sessions[session]
             manager = runtime.sandbox_mgr
@@ -238,7 +245,7 @@ def main() -> None:
                             f"import dspy\nagent = dspy.{kind}('task -> result'{options})\n"
                             "agent(task='Compute 7*19 exactly. Return only the integer in result.').result"
                         )
-                        assert str(result).strip() == "133", (kind, str(result))
+                        _require(str(result).strip() == "133", (kind, str(result)))
                         report["cases"][f"facade_{kind}"] = str(result)
                     manager.write_workspace_file("files/private.txt", b"not approved for the explicit child")
                     scoped = interpreter.execute(
@@ -250,11 +257,11 @@ def main() -> None:
                         "then SUBMIT(findings='checked').\", "
                         "input_paths=['files/ledger.csv'], allowed_tools=[], max_iters=4, max_llm_calls=5)"
                     )
-                    assert isinstance(scoped, dict) and len(scoped["artifacts"]) == 1, scoped
+                    _require(isinstance(scoped, dict) and len(scoped["artifacts"]) == 1, scoped)
                     promoted = scoped["artifacts"][0]
                     promoted_raw = manager.read_workspace_file(promoted["path"])
-                    assert hashlib.sha256(promoted_raw).hexdigest() == promoted["sha256"]
-                    assert json.loads(promoted_raw) == {"private_visible": False, "header": "id,value"}
+                    _require(hashlib.sha256(promoted_raw).hexdigest() == promoted["sha256"])
+                    _require(json.loads(promoted_raw) == {"private_visible": False, "header": "id,value"})
                     report["cases"]["scoped_spawn_and_promotion"] = scoped
                     result = interpreter.execute(
                         "import dspy\n"
@@ -263,37 +270,37 @@ def main() -> None:
                         "13*17 with Python and SUBMIT(result=str(13*17)), "
                         'then SUBMIT(result=str(nested_result.result)).").result'
                     )
-                    assert "221" in str(result), str(result)
+                    _require("221" in str(result), str(result))
                     report["cases"]["nested_facade"] = {"result": str(result), "events": recursive_events}
                 finally:
                     interpreter.shutdown()
                     manager.end_turn()
                     manager.event_callback = None
             ids = {e["sandbox_id"] for e in recursive_events if e["event"] == "sandbox_ready"}
-            assert len(ids) >= 2, "Expected distinct child and grandchild sandboxes"
-            assert not manager._children, "Ephemeral children were not cleaned up"
+            _require(len(ids) >= 2, "Expected distinct child and grandchild sandboxes")
+            _require(not manager._children, "Ephemeral children were not cleaned up")
             discovery = client.get("/models")
-            assert discovery.status_code == 200, discovery.text
+            _require(discovery.status_code == 200, discovery.text)
             models = discovery.json()["models"]
-            assert args.model in models
+            _require(args.model in models)
             alternate = next(model for model in models if model != args.model)
             selection = client.put(f"/sessions/{session}/model", json={"role": "sub", "model": alternate})
-            assert selection.status_code == 200, selection.text
-            assert manager.sub_lm.model == alternate
+            _require(selection.status_code == 200, selection.text)
+            _require(manager.sub_lm.model == alternate)
             selection = client.put(f"/sessions/{session}/mode", json={"mode": "flex"})
-            assert selection.status_code == 200, selection.text
+            _require(selection.status_code == 200, selection.text)
             configuration = client.get(f"/sessions/{session}/config").json()
-            assert configuration["models"] == {"root": args.model, "sub": alternate}
-            assert configuration["context"]["workspace_path"] == "files/ledger.csv"
+            _require(configuration["models"] == {"root": args.model, "sub": alternate})
+            _require(configuration["context"]["workspace_path"] == "files/ledger.csv")
             report["cases"]["model_discovery_selection"] = {"count": len(models), "configuration": configuration}
         # Rebuild the app and root manager: Turns and settings come from PostgreSQL, files from the Volume.
         with TestClient(create_app(settings=settings, configure_observability=False)) as resumed:
             recovered_config = resumed.get(f"/sessions/{session}/config").json()
-            assert recovered_config == configuration
+            _require(recovered_config == configuration)
             report["cases"]["model_configuration_restart"] = "passed"
-            assert resumed.get(f"/sessions/{session}/workspace/files/artifacts/summary.json").json() == expected
-            assert len(resumed.get(f"/sessions/{session}/history").json()["turns"]) == 1
-            assert resumed.get(f"/sessions/{session}/memory").json()["memories"][0]["memory_id"] == "ledger"
+            _require(resumed.get(f"/sessions/{session}/workspace/files/artifacts/summary.json").json() == expected)
+            _require(len(resumed.get(f"/sessions/{session}/history").json()["turns"]) == 1)
+            _require(resumed.get(f"/sessions/{session}/memory").json()["memories"][0]["memory_id"] == "ledger")
             report["cases"]["restart_recovery"] = "passed"
             # Route coverage: pinned modes are deterministic, so their route is a parity check.
             # Direct is only reachable by hybrid triage with no selected context.
@@ -303,29 +310,29 @@ def main() -> None:
                 ("flex", "route_flex", arithmetic, "flex"),
             ):
                 selection = resumed.put(f"/sessions/{session}/mode", json={"mode": mode})
-                assert selection.status_code == 200, selection.text
+                _require(selection.status_code == 200, selection.text)
                 started = time.monotonic()
                 body = resumed.post(f"/sessions/{session}/turn", json={"task": task_text, "idempotency_key": case})
-                assert body.status_code == 200, body.text
+                _require(body.status_code == 200, body.text)
                 route_events = parse_sse(body.text)
                 report["metrics"][case] = _turn_metrics(route_events, time.monotonic() - started)
-                assert report["metrics"][case]["route"] == expected_route, report["metrics"][case]
-                assert report["metrics"][case]["answer"] == "221", report["metrics"][case]
+                _require(report["metrics"][case]["route"] == expected_route, report["metrics"][case])
+                _require(report["metrics"][case]["answer"] == "221", report["metrics"][case])
             cleared = resumed.delete(f"/sessions/{session}/context")
-            assert cleared.status_code == 200, cleared.text
+            _require(cleared.status_code == 200, cleared.text)
             selection = resumed.put(f"/sessions/{session}/mode", json={"mode": "hybrid"})
-            assert selection.status_code == 200, selection.text
+            _require(selection.status_code == 200, selection.text)
             started = time.monotonic()
             body = resumed.post(
                 f"/sessions/{session}/turn",
                 json={"task": "Reply with exactly this text and nothing else: ACK", "idempotency_key": "route_hybrid"},
             )
-            assert body.status_code == 200, body.text
+            _require(body.status_code == 200, body.text)
             hybrid_events = parse_sse(body.text)
             report["metrics"]["route_hybrid"] = _turn_metrics(hybrid_events, time.monotonic() - started)
-            assert report["metrics"]["route_hybrid"]["answer"] == "ACK", report["metrics"]["route_hybrid"]
+            _require(report["metrics"]["route_hybrid"]["answer"] == "ACK", report["metrics"]["route_hybrid"])
             selection = resumed.put(f"/sessions/{session}/context", json={"path": "files/ledger.csv"})
-            assert selection.status_code == 200, selection.text
+            _require(selection.status_code == 200, selection.text)
             manager = resumed.app.state.session_registry._sessions[session].sandbox_mgr
             manager.reset_turn_budget()
             allowance = manager.max_llm_calls
@@ -337,7 +344,7 @@ def main() -> None:
                 raise AssertionError("Over-budget work was admitted")
             except RuntimeError:
                 pass
-            assert manager._llm_calls_used == 3
+            _require(manager._llm_calls_used == 3)
             manager.max_llm_calls = allowance
             report["cases"]["shared_budget_boundary"] = "passed"
             capacity = manager.max_active_children
@@ -348,18 +355,18 @@ def main() -> None:
                 raise AssertionError("Descendant exceeded live sandbox capacity")
             except RuntimeError:
                 pass
-            assert len(manager._children) == 1
+            _require(len(manager._children) == 1)
             child.write_workspace_file("artifacts/cancelled.txt", b"must not be promoted")
             cancellation_events: list[dict] = []
             manager.event_callback = cancellation_events.append
             manager.cancel_turn()
-            assert not manager._children
+            _require(not manager._children)
             try:
                 child.collect_child_artifacts()
                 raise AssertionError("Cancelled child promoted an artifact")
             except RuntimeError:
                 pass
-            assert any(event["event"] == "sandbox_deleted" for event in cancellation_events)
+            _require(any(event["event"] == "sandbox_deleted" for event in cancellation_events))
             report["cases"]["capacity_and_cancellation"] = {
                 "events": cancellation_events,
                 "unauthorized_promotion": False,
