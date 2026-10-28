@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-28
+
 ### Changed
 
 - Consolidate the backend from 70 to 61 Python files. Native compiled-state loading
@@ -24,6 +26,10 @@ All notable changes to this project are documented in this file.
   unresolved request IDs, retry behavior, and lifecycle rendering.
 
 ### Fixed
+
+- Keep CircleCI jobs on their requested Python version across setup, tests, and
+  subprocesses; remove dependency installation from test discovery.
+- Run blocking SonarQube analysis with full Git history and full-suite coverage.
 
 - Supply omitted outer-Flex RLM limits at native construction without editing candidate
   source or rebinding state. Explicit values, aliases, expanded kwargs, model roles,

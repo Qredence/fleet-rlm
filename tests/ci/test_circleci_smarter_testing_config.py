@@ -164,3 +164,43 @@ def test_pypi_recovery_rechecks_existing_artifact_without_uploading() -> None:
     assert '--notes-file "$notes_file"' in recovery_github_command
     assert "--generate-notes" not in recovery_github_command
     assert by_name["github-release-recovery"]["context"] == "fleet-github-release"
+
+
+def test_python_selection_survives_circleci_step_shells(tmp_path) -> None:
+    import os
+    import subprocess
+
+    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
+    steps = config["commands"]["setup-python"]["steps"]
+    commands = [step["run"] for step in steps if isinstance(step, dict) and "run" in step]
+    install = next(step["command"] for step in commands if step["name"] == "Install locked project dependencies")
+    verify = next(step["command"] for step in commands if step["name"] == "Verify selected Python interpreter")
+    binary = tmp_path / "uv"
+    binary.write_text('#!/bin/sh\nprintf "%s\\n" "$UV_PYTHON" >> "$RECORD"\n')
+    binary.chmod(0o755)
+    for version in ("3.11", "3.12", "3.13"):
+        record = tmp_path / f"record-{version}"
+        env = {
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "BASH_ENV": str(tmp_path / f"env-{version}"),
+            "RECORD": str(record),
+        }
+        env.pop("UV_PYTHON", None)
+        for command in (install, verify):
+            subprocess.run(
+                ["bash", "-eo", "pipefail", "-c", command.replace("<< parameters.python-version >>", version)],
+                env=env,
+                check=True,
+            )
+        assert record.read_text().splitlines() == [version, version]
+    assert "sys.version_info[:2] != expected" in verify
+    assert "raise SystemExit" in verify
+
+
+def test_discovery_does_not_install_project_dependencies() -> None:
+    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
+    steps = config["jobs"]["list-smarter-tests"]["steps"]
+    assert steps[0] == "checkout"
+    assert len(steps) == 2
+    assert steps[1]["run"]["command"] == 'circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key'
