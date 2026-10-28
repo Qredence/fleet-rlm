@@ -175,9 +175,9 @@ Review test reruns in CircleCI Test Insights because a retry that passes makes
 the job succeed and suppresses the original test error.
 
 The Qredence Performance plan currently includes 10,000 paid Smarter Testing
-test atoms each month. The current discovery command finds 37 file-level
-atoms; a normal Python 3.12 test-suite run therefore counts 37 atoms even when
-TIA selects only a subset. At 270 complete runs, 9,990 atoms are used. Check
+test atoms each month. The current discovery command finds 67 file-level
+atoms; a normal Python 3.12 test-suite run therefore counts 67 atoms even when
+TIA selects only a subset. At 149 complete runs, 9,983 atoms are used. Recount discovery and check current billing data before forecasting usage. Check
 the monthly atom total and forecast before increasing test volume. Disable
 paid Smart Testing features when the forecast
 would exceed 10,000 atoms. CircleCI config does not enforce a cumulative
@@ -293,3 +293,27 @@ rollback.
 During initial adoption, record job queue and execution time, cache hit rate,
 and CircleCI credit use. The Python 3.12 Smart Testing job is capped at two
 workers; increase that cap only after measuring runtime and credit use.
+
+## CI setup performance baseline
+
+Shared Python setup exports `UV_PYTHON` for the setup shell and subsequent
+CircleCI steps through `BASH_ENV`. A separate check prints the interpreter and
+executable and fails if its major/minor differs from the requested version.
+This keeps Make targets and Smart Testing subprocesses on the prepared Python
+environment despite the developer pin in `.python-version`. Discovery uses
+checkout and shell tools without installing project dependencies.
+
+The successful main workflow `e60962b9-f266-4e29-8e0b-b3d72ff96ea6` at
+`deb0879` took 6m12s. Discovery spent about 13 seconds on unused setup before
+a 1.4-second selection step. The jobs labelled 3.11 and 3.12 rebuilt their
+environments under 3.13; this baseline therefore does not establish correct
+version coverage. Warm cache restoration took about 4–6 seconds.
+
+After publication is authorized, compare at least three comparable successful
+PR/main runs for job and workflow duration, credits, and reruns; separate cold
+cache runs. Confirm each interpreter check matches its job, no later step
+recreates the environment under another version, discovery returns the same
+atoms, and all existing quality gates pass. Savings remain unmeasured until
+these runs complete. Discovery can be reverted independently; if interpreter
+propagation needs repair, use explicit matching `--python` arguments and retain
+the interpreter checks.

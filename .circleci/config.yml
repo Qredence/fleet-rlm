@@ -65,7 +65,20 @@ commands:
                 python-version: << parameters.python-version >>
       - run:
           name: Install locked project dependencies
-          command: uv sync --locked --dev --python << parameters.python-version >>
+          command: |
+            export UV_PYTHON="<< parameters.python-version >>"
+            echo 'export UV_PYTHON="<< parameters.python-version >>"' >> "$BASH_ENV"
+            uv sync --locked --dev --python << parameters.python-version >>
+      - run:
+          name: Verify selected Python interpreter
+          command: |
+            uv run --locked python -c '
+            import sys
+            expected = tuple(map(int, "<< parameters.python-version >>".split(".")))
+            print(f"Python {sys.version}; executable: {sys.executable}")
+            if sys.version_info[:2] != expected:
+                raise SystemExit(f"Expected Python {expected}, got {sys.version_info[:2]}")
+            '
       - when:
           condition: << parameters.use-cache >>
           steps:
@@ -129,8 +142,7 @@ jobs:
       - image: cimg/python:3.12
     resource_class: medium
     steps:
-      - setup-python:
-          python-version: "3.12"
+      - checkout
       - run:
           name: Select Python 3.12 test atoms for dynamic parallelism
           command: circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key
