@@ -101,6 +101,11 @@ def routing_efficiency(used_rlm_or_flex: bool, lm_calls: int) -> tuple[float, st
 
 
 def _equal(actual: Any, expected: Any, tolerance: float, *, csv_numbers: bool = False) -> bool:
+    """Match expected dictionary subsets and ordered lists using absolute numeric tolerance.
+
+    Extra dictionary keys are allowed; list lengths must match. csv_numbers permits
+    numeric strings for numeric expectations, but booleans never match numbers.
+    """
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(
             key in actual and _equal(actual[key], value, tolerance, csv_numbers=csv_numbers)
@@ -125,6 +130,11 @@ def _equal(actual: Any, expected: Any, tolerance: float, *, csv_numbers: bool = 
 
 
 def _file(receipt: dict[str, Any]) -> bytes:
+    """Decode receipt bytes and verify their size and SHA-256 digest.
+
+    Raise ValueError for bytes over MAX_ARTIFACT_BYTES or a digest mismatch;
+    base64 decoding and missing field errors also propagate.
+    """
     raw = base64.b64decode(receipt["base64"], validate=True) if "base64" in receipt else receipt["text"].encode("utf-8")
     if len(raw) > MAX_ARTIFACT_BYTES or hashlib.sha256(raw).hexdigest() != receipt["sha256"]:
         raise ValueError("Invalid artifact digest or size")

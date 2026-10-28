@@ -137,6 +137,11 @@ class ExperimentsScreen(ModalScreen[None]):
         self.run_worker(self._refresh_history(), name="experiments-snapshot", group="experiments", exit_on_error=False)
 
     async def _refresh_history(self) -> None:
+        """Refresh history and selected evidence, discarding stale or detached detail responses.
+
+        Handled history fetch errors show an unavailable message; handled detail fetch
+        errors clear the selected comparison. Coalesce refreshes requested while busy.
+        """
         try:
             payload = await asyncio.to_thread(self._fetch_snapshot)
             if not self.is_mounted or not self.is_attached:
@@ -204,6 +209,10 @@ class ExperimentsScreen(ModalScreen[None]):
             self.refresh_history()
 
     def _fetch_snapshot(self) -> dict[str, Any]:
+        """Fetch this Session's experiment snapshot.
+
+        HTTP and JSON decoding errors propagate; a response that is not an object raises ValueError.
+        """
         response = self.client.get(f"/sessions/{quote(self.session_id, safe='')}/experiments")
         response.raise_for_status()
         value = response.json()
@@ -212,6 +221,10 @@ class ExperimentsScreen(ModalScreen[None]):
         return value
 
     def _fetch_detail(self, run_id: str) -> dict[str, Any]:
+        """Fetch a run's saved evidence within this Session.
+
+        HTTP and JSON decoding errors propagate; a response that is not an object raises ValueError.
+        """
         response = self.client.get(f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}")
         response.raise_for_status()
         value = response.json()
@@ -220,9 +233,11 @@ class ExperimentsScreen(ModalScreen[None]):
         return value
 
     def _active_record(self) -> dict[str, Any] | None:
+        """Return the history row matching active_run_id, or None when it is absent."""
         return next((record for record in self.records if record.get("run_id") == self.active_run_id), None)
 
     def _sync_progress(self) -> None:
+        """Display active or selected progress and notify the observer of the active run."""
         active = self._active_record()
         visible = active or self._selected()
         progress = visible.get("progress") if visible else None
@@ -233,6 +248,7 @@ class ExperimentsScreen(ModalScreen[None]):
             self.on_snapshot(active)
 
     def _render_progress(self) -> None:
+        """Display observed metric-call counts, stage, or terminal status without estimating progress."""
         kind = self.progress.get("type")
         stage = self.progress.get("stage")
         active = self._active_record()
@@ -253,15 +269,18 @@ class ExperimentsScreen(ModalScreen[None]):
         self.query_one("#experiments-progress", Static).update(message)
 
     def _selected(self) -> dict[str, Any] | None:
+        """Return the history row matching selected_run_id, or None when it is absent."""
         return next((record for record in self.records if record.get("run_id") == self.selected_run_id), None)
 
     def _render_detail(self) -> None:
+        """Show evidence or a message when no run is selected, and update the available actions."""
         record = self._selected()
         detail = "No experiment selected." if record is None else self._format_record(record)
         self.query_one("#experiment-detail", Static).update(Text(detail, overflow="fold"))
         self._update_actions(record)
 
     def _format_record(self, record: dict[str, Any]) -> str:
+        """Format saved outcomes and diagnostics, using comparison evidence only for the matching run."""
         run_id = str(record.get("run_id", "unknown"))
         lines = [
             f"RUN  {run_id}",
@@ -361,6 +380,11 @@ class ExperimentsScreen(ModalScreen[None]):
         return "\n".join(lines)
 
     def _update_actions(self, record: dict[str, Any] | None) -> None:
+        """Enable approval only with matching saved evidence and a passing gate.
+
+        Limit rejection to unreviewed completed runs, cancellation to the selected running
+        active run, and new searches to open admission with no active run.
+        """
         is_selected_active = bool(
             record and record.get("run_id") == self.active_run_id and record.get("status") == "running"
         )
@@ -421,6 +445,7 @@ class ExperimentsScreen(ModalScreen[None]):
         self._review_request_ids.pop((run_id, decision), None)
 
     def _render_history(self) -> None:
+        """Render saved Session runs with the selected row marked, or show an empty history."""
         lines = ["SESSION RUNS", ""]
         lines.extend(
             f"{'>' if record['run_id'] == self.selected_run_id else ' '} {record.get('status', 'unknown'):10} "

@@ -752,6 +752,11 @@ class Store:
         return False
 
     def _acquire_optimization_lock(self, scope: str) -> psycopg.Connection:
+        """Acquire a nonblocking advisory lock on a dedicated connection the caller must close.
+
+        Raise RuntimeError if the lock is held. Close the new connection on acquisition
+        failure and propagate database errors.
+        """
         connection = self.connection_class.connect(self.dsn, **self.connection_kwargs)
         try:
             locked = connection.execute("SELECT pg_try_advisory_lock(hashtextextended(%s,17))", (scope,)).fetchone()
@@ -813,7 +818,7 @@ class Store:
 
     @_retry_once
     def get_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
-        """Return one run from the durable ledger."""
+        """Return one run from the durable ledger, or None when the Session/run pair is absent."""
         session_id = validate_session_id(session_id)
         run_id = self._optimization_run_id(run_id)
         with self.pool.connection() as connection:
@@ -850,7 +855,13 @@ class Store:
         owner_id: str | None = None,
         expected_statuses: tuple[str, ...] | None = None,
     ) -> dict[str, Any] | None:
-        """Apply a metadata/status update only while the optional owner and status fence match."""
+        """Apply a metadata/status update only while the optional owner and status fence match.
+
+        Return the updated record, or None for a missing run or failed fence. A completion
+        update becomes cancelled if a stop was already accepted, clearing candidate_version.
+        Raise ValueError for invalid updates, identity changes, or an active-run conflict;
+        other database errors propagate.
+        """
         session_id = validate_session_id(session_id)
         run_id = self._optimization_run_id(run_id)
         if not isinstance(updates, dict):
@@ -1044,24 +1055,28 @@ class Store:
 
     @staticmethod
     def _optimization_run_id(value: Any) -> str:
+        """Return a supported run identity unchanged, raising ValueError for invalid or traversal-like values."""
         if not isinstance(value, str) or not _OPTIMIZATION_RUN_ID.fullmatch(value) or ".." in value:
             raise ValueError("optimization run_id is invalid")
         return value
 
     @staticmethod
     def _optimization_request_id(value: Any) -> str:
+        """Return a nonblank request ID of at most 200 characters, or raise ValueError."""
         if not isinstance(value, str) or not value.strip() or len(value) > 200:
             raise ValueError("optimization request_id must contain 1-200 characters")
         return value
 
     @staticmethod
     def _optimization_owner_id(value: Any) -> str:
+        """Return a nonblank owner ID of at most 200 characters, or raise ValueError."""
         if not isinstance(value, str) or not value.strip() or len(value) > 200:
             raise ValueError("optimization owner_id must contain 1-200 characters")
         return value
 
     @staticmethod
     def _optimization_json(value: dict[str, Any], label: str) -> str:
+        """Serialize finite JSON values, converting serialization failures to a labeled ValueError."""
         try:
             return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
         except (TypeError, ValueError) as exc:

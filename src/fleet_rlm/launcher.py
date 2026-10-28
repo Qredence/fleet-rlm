@@ -328,6 +328,11 @@ def running_services(
     api_ready = False
 
     def cleanup() -> None:
+        """Drain experiments and stop owned services in reverse startup order.
+
+        Wait for API shutdown without a kill deadline, keeping owned MLflow available
+        until then. Temporarily ignore termination signals on the main thread.
+        """
         nonlocal api_ready
         # A second Ctrl-C must not interrupt wait() and abandon owned services.
         handlers = {}

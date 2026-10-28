@@ -97,6 +97,7 @@ class _SanitizeDSPyErrorLog(logging.Filter):
     """Keep DSPy's parallel evaluator from logging raw rollout exceptions."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Replace messages at ERROR or above and exception details with a generic message; retain every record."""
         if record.levelno >= logging.ERROR:
             record.msg = "Optimization rollout failed; a sanitized case record was saved."
             record.args = ()
@@ -114,7 +115,15 @@ def score_split(
     trace_context: Mapping[str, str] | None = None,
     trace_run_id: str | None = None,
 ) -> SplitScore:
-    """Score every example with ``dspy.Evaluate``; a rollout that raises scores 0.0 and counts as an error."""
+    """Score every example with ``dspy.Evaluate``; a rollout that raises scores 0.0 and counts as an error.
+
+    Return scores, available usage, artifact outcomes, and elapsed times in seconds.
+    Per-example timings are collected as attempts finish, independently of score order.
+    Evaluator setup and result processing errors propagate.
+
+    Raises:
+        ValueError: examples is empty.
+    """
     if not examples:
         raise ValueError("validation split must not be empty")
     started = time.perf_counter()
@@ -188,6 +197,7 @@ def score_stage(
     """Score the dev and holdout splits and return the combined metrics for one GEPA stage."""
 
     def context(split: str) -> dict[str, str] | None:
+        """Return validation trace tags only when both stage and pass index are supplied."""
         if stage is None or pass_index is None:
             return None
         return {

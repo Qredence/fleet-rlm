@@ -76,6 +76,11 @@ class GEPAProgressReporter:
         self.emit_events = emit_events
 
     def _persist(self, event: Mapping[str, Any]) -> None:
+        """Save observed search counts when storage and run identity are configured.
+
+        Raise OptimizationCancelledError if the running owner/status fence no longer
+        matches; storage errors propagate.
+        """
         if self.store is None or self.session_id is None or self.run_id is None:
             return
         saved = _update_run(
@@ -146,12 +151,17 @@ def _database_stop_requested(store: Store | None, session_id: str | None, run_id
 
 
 def _check_run_cancelled(stop_file: Path, store: Store | None, session_id: str, run_id: str) -> None:
+    """Raise OptimizationCancelledError for a stop file or a stopped, missing, or inactive ledger run.
+
+    Skip the ledger check when no Store is supplied; storage errors propagate.
+    """
     _check_cancelled(stop_file)
     if _database_stop_requested(store, session_id, run_id):
         raise OptimizationCancelledError("Optimization stop requested")
 
 
 def _emit_stage(stage: str, *, run_id: str, structured: bool) -> None:
+    """Emit a structured stage event only when structured output is enabled."""
     if structured:
         emit_event({"type": "stage", "stage": stage, "run_id": run_id})
 
@@ -336,6 +346,7 @@ class _DatabaseStopper:
         self.run_id = run_id
 
     def __call__(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Return whether the run is missing, inactive, or has a durable stop request."""
         return _database_stop_requested(self.store, self.session_id, self.run_id)
 
 
@@ -508,7 +519,12 @@ def format_report(manifest: ArtifactManifest, holdout: list[dspy.Example]) -> st
 
 
 def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: FleetSettings) -> None:
-    """Approve a candidate, or score the baseline, compile a GEPA candidate, and gate it (never installed)."""
+    """Approve an existing candidate or search and validate a new, uninstalled candidate.
+
+    Record run outcomes in PostgreSQL and flush traces before releasing ownership.
+    Cooperative search cancellation records cancellation and returns; other search
+    failures are recorded and re-raised. Approval errors propagate.
+    """
     session_id = validate_session_id(args.session)
     if not 1 <= args.threads <= 32:
         parser.error("--threads must be between 1 and 32")
@@ -888,6 +904,22 @@ def _compile(
     *,
     owner_id: str | None = None,
 ) -> None:
+    """Search from the Session's incumbent and save a candidate with paired validation evidence.
+
+    Use train/dev examples for GEPA search, then evaluate the selected candidate and
+    incumbent on dev and holdout with serving caches disabled. Save candidate,
+    manifest, and comparison files, log evidence to MLflow, and update the running
+    ledger record without installing the candidate. The caller owns the global
+    optimization lease and terminal run status.
+
+    Raises:
+        OptimizationCancelledError: A stop is requested or a checked ownership/status
+            fence no longer matches.
+        RuntimeError: Code, dependencies, or configuration evidence changes during
+            the run.
+
+    Dataset, provider, storage, and artifact write errors also propagate.
+    """
     settings = settings_for_session(settings, store.runtime_settings(session_id))
     run_id = run_id or f"{session_id}-{uuid.uuid4().hex}"
     directory = Path(settings.compiled_program_dir)
@@ -896,6 +928,7 @@ def _compile(
     structured = getattr(args, "structured_events", False)
 
     def set_stage(name: str) -> None:
+        """Publish and persist a stage, raising OptimizationCancelledError if the running fence fails."""
         _emit_stage(name, run_id=run_id, structured=structured)
         if (
             _update_run(
@@ -964,6 +997,7 @@ def _compile(
         program_trace: Any = None,
     ) -> Any:
         # GEPA passes program_trace by keyword only because this signature declares it.
+        """Score a rollout with the explicit judge and forward GEPA's component and program traces."""
         return fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge_lm)
 
     version = run_id

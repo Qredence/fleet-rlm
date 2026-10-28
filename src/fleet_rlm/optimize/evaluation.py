@@ -256,15 +256,21 @@ def read_evaluation_trace(
 ) -> Any:
     """Wait for one completed trace in the intended destination, including cold warehouse startup.
 
-    One daemon reader polls for the whole window, so a slow SDK request cannot extend the deadline and
-    a poll never abandons a thread behind it. Validation stays on the waiting thread: a trace that is
-    merely not ready yet is re-read, while a wrong destination or a failed state raises at once.
+    Require a successful trace with spans and matching expected_labels when supplied.
+    uc_location selects the Unity Catalog destination check instead of experiment_id.
+    wait_seconds bounds the polling window; a blocked SDK read may finish after the
+    caller stops waiting.
+
+    Raises:
+        EvaluationError: Readback fails, the destination or terminal state is wrong,
+            or the trace and expected labels are not ready before the deadline.
     """
     deadline = time.monotonic() + wait_seconds
     latest: dict[str, Any] = {}
     stop = threading.Event()
 
     def read() -> None:
+        """Refresh trace readback until stopped, retaining read errors for the waiting caller."""
         while not stop.is_set():
             try:
                 latest["trace"] = mlflow.get_trace(trace_id, silent=True, flush=True)

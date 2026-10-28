@@ -792,7 +792,13 @@ def fleet_metric(
     *,
     judge_lm: dspy.LM,
 ) -> dspy.Prediction:
-    """Incorrect answers score zero; correct answers compete on measured execution efficiency."""
+    """Incorrect answers score zero; correct answers compete on measured execution efficiency.
+
+    Return score, feedback, and objective_scores in a Prediction. Missing usage earns
+    no efficiency credit. pred_name and pred_trace target feedback to a component;
+    program_trace adds Flex execution evidence without changing the score. Nonempty
+    answers use judge_lm for correctness; judge and invalid-gold errors propagate.
+    """
     answer = str(getattr(pred, "answer", "") or "").strip()
     if not answer:
         return dspy.Prediction(

@@ -887,6 +887,7 @@ class FleetTextualApp(App[str | None]):
         return hints
 
     def _render_status_left(self) -> Text:
+        """Render Session, context, replay, and status for active work or exit confirmation."""
         left = Text()
         left.append(" Fleet-RLM ", style="bold #f4f4f5 on #27272a")
         left.append(f"  {self.session_id}", style="bold #a1a1aa")
@@ -975,6 +976,7 @@ class FleetTextualApp(App[str | None]):
         )
 
     async def _poll_optimizer_snapshot(self) -> None:
+        """Refresh the active or last observed run, retaining the last state on handled fetch errors."""
         try:
             response = await asyncio.to_thread(
                 self.client.get, f"/sessions/{quote(self.session_id, safe='')}/experiments"
@@ -1309,6 +1311,11 @@ class FleetTextualApp(App[str | None]):
         )
 
     async def _post_optimization(self, options: dict[str, Any]) -> None:
+        """Submit a start request and update the observed run or display an HTTP failure.
+
+        Retain the request ID on transport or server errors so retries reuse it; clear
+        it on success or a 4xx response. Response decoding errors propagate.
+        """
         try:
             response = await asyncio.to_thread(
                 self.client.post, f"/sessions/{quote(self.session_id, safe='')}/experiments", json=options
@@ -1333,6 +1340,7 @@ class FleetTextualApp(App[str | None]):
             self.append_markup(f"[red]Optimization could not start ({type(exc).__name__}).[/red]")
 
     def _review_optimization(self, run_id: str, decision: str, request_id: str) -> None:
+        """Schedule a review request using the supplied retry identity without blocking the UI."""
         self.run_worker(
             self._post_review(run_id, decision, request_id),
             name="experiment-review",
@@ -1341,6 +1349,12 @@ class FleetTextualApp(App[str | None]):
         )
 
     async def _post_review(self, run_id: str, decision: str, request_id: str) -> None:
+        """Submit a review and refresh the observed run or display an HTTP failure.
+
+        Keep the review request ID for transport/server failures; release it on success
+        or a client error while the history screen is open. Response decoding errors
+        propagate.
+        """
         try:
             response = await asyncio.to_thread(
                 self.client.post,
@@ -1377,6 +1391,10 @@ class FleetTextualApp(App[str | None]):
         )
 
     async def _cancel_optimization(self, run_id: str) -> None:
+        """Request a cooperative stop, updating the snapshot or restoring retry controls on HTTP failure.
+
+        Refresh the status controls even when response decoding raises.
+        """
         try:
             response = await asyncio.to_thread(
                 self.client.post,

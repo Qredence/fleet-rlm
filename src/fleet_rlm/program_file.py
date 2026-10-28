@@ -39,6 +39,10 @@ class CompiledProgramFile:
             self._apply(program, self._read())
 
     def _read(self) -> bytes:
+        """Read the configured regular file, rejecting sizes over MAX_BYTES with ValueError.
+
+        Invalid paths raise ValueError; filesystem errors propagate.
+        """
         assert self.path is not None
         if self._regular_stat(self.path).st_size > self.MAX_BYTES:
             raise ValueError("Compiled program exceeds the 10 MB size limit")
@@ -46,11 +50,18 @@ class CompiledProgramFile:
 
     @staticmethod
     def _regular_stat(path: str) -> os.stat_result:
+        """Return file metadata, rejecting symlinks and non-files with ValueError."""
         if os.path.islink(path) or not os.path.isfile(path):
             raise ValueError("Compiled program path must be a regular file")
         return os.stat(path)
 
     def _apply(self, program: dspy.Module, content: bytes) -> None:
+        """Apply JSON program state, retaining existing state for omitted predictors.
+
+        Accept wrapped ``program.`` keys. Track the digest and, when the file exists,
+        its metadata after loading. JSON that is not an object raises ValueError;
+        JSON decoding, DSPy loading, and filesystem errors propagate.
+        """
         state = json.loads(content)
         if not isinstance(state, dict):
             raise ValueError("Compiled program must be a JSON object")

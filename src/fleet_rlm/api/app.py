@@ -43,6 +43,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
+        """Yield with API resources available, releasing acquired resources on exit or startup failure.
+
+        Join experiment workers before closing the Turn executor, Session registry, and
+        owned Store. Setup mode yields without acquiring runtime resources; an injected
+        Store remains owned by the caller. Startup and cleanup errors propagate.
+        """
         async with AsyncExitStack() as resources:
             if application.state.setup_service is not None:
                 resources.push_async_callback(asyncio.to_thread, application.state.setup_service.close)
@@ -52,6 +58,7 @@ def create_app(
             assert resolved is not None
 
             async def flush_traces() -> None:
+                """Flush pending traces when tracing was initialized, suppressing flush errors."""
                 if application.state.mlflow_experiment_id:
                     with suppress(Exception):
                         await asyncio.to_thread(mlflow.flush_trace_async_logging)

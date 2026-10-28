@@ -47,7 +47,13 @@ def _latency_allowance(baselines: list[float]) -> float:
 
 
 def compare(baseline_reports: list[tuple[Path, dict[str, Any]]], after_report: dict[str, Any]) -> dict[str, Any]:
-    """Return a verdict with one finding list per measured case."""
+    """Return a verdict with one finding list per measured case.
+
+    Require at least one baseline report. Compare cases present in every baseline;
+    missing cases in the after report fail the verdict, while new cases are ignored.
+    Latency is measured in seconds; absent numeric usage or latency is not compared.
+    Raise SystemExit if any report did not pass or has no nonempty metrics object.
+    """
     baseline_cases = [_cases(report, path) for path, report in baseline_reports]
     after_cases = _cases(after_report, Path("after"))
 

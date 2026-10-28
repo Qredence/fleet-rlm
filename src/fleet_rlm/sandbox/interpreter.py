@@ -273,6 +273,12 @@ class DaytonaInterpreter:
     }
 
     def _run_jev_batch(self, items: list[str], question: str, choices: list[str]) -> list[dict[str, Any]]:
+        """Classify 1-100 items against 1-20 choices, returning each item, choice, and decision evidence.
+
+        Prefer the Jev LM, then the sub LM, then the ambient DSPy LM. Invalid batch
+        counts raise ValueError; missing typed choices raise RuntimeError. Prediction
+        and result shape errors propagate.
+        """
         if not items or not choices or len(items) > 100 or len(choices) > 20:
             raise ValueError("Jev batch inputs exceed the supported bounds")
         from pydantic import BaseModel

@@ -39,6 +39,10 @@ Experiments = Annotated[ExperimentManager, Depends(get_experiments)]
 
 
 def _error(error: Exception) -> HTTPException:
+    """Map missing runs, conflicts, and invalid input to HTTP 404, 409, and 422.
+
+    Return a generic 503 for other failures without exposing exception details.
+    """
     if isinstance(error, FileNotFoundError):
         return HTTPException(status_code=404, detail="Experiment was not found")
     if isinstance(error, ExperimentBusyError):

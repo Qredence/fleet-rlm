@@ -529,6 +529,16 @@ def _distinct_notes(
 def _prepare_inputs(
     runtime: SessionRuntime, session_id: str, task: str, *, record_replay: bool = False
 ) -> dict[str, Any]:
+    """Sync Skills and assemble workspace digests, memory, history, and the Skill catalog.
+
+    With record_replay, also return base64-encoded workspace bytes in replay_files;
+    otherwise that mapping is empty. Provisioning, storage, and workspace errors
+    propagate.
+
+    Raises:
+        ValueError: A replay file changed after hashing, or total replay file bytes
+            exceed 8,000,000.
+    """
     with phase_span("turn.load_context", session_id=session_id) as phase:
         memory_summary, session_history = runtime.harness.load_context(session_id)
         phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
@@ -652,6 +662,7 @@ def _describe_turn(
 
 
 def _write_learned_note(runtime: SessionRuntime, turn_id: str, note: str, trace_id: str | None) -> None:
+    """Write the Turn's learned note to the shared mount, suppressing ordinary write failures."""
     try:
         with phase_span("turn.write_learned_note", note_chars=len(note)) as phase:
             path = runtime.sandbox_mgr.write_learned_note(turn_id, note, trace_id=trace_id)

@@ -125,7 +125,11 @@ class ExperimentManager:
         }
 
     async def get(self, session_id: str, run_id: str) -> dict[str, Any]:
-        """Resolve Session/run identity before reading derived artifact paths."""
+        """Resolve Session/run identity before reading derived artifact paths.
+
+        Raise FileNotFoundError for a missing run and ValueError for invalid identity;
+        storage errors propagate.
+        """
         record = await asyncio.to_thread(
             self.store.get_optimization_run, validate_session_id(session_id), validate_run_id(run_id)
         )
@@ -141,6 +145,11 @@ class ExperimentManager:
         return {"experiment": public_run(record), "comparison": comparison}
 
     async def _available(self) -> None:
+        """Check admission and worker availability without retaining the optimization lease.
+
+        Raise ExperimentBusyError while draining, while owned work is unfinished, or
+        when another worker holds the global lease. Other storage errors propagate.
+        """
         if not self.accepting or self.busy:
             raise ExperimentBusyError("Experiment admission is draining or another operation is active")
         try:
@@ -248,6 +257,7 @@ class ExperimentManager:
             return record
 
     def _command(self, session_id: str, run_id: str, options: ExperimentOptions, *, approval: bool) -> Sequence[str]:
+        """Build worker argv for search or approval, carrying managed ownership and progress flags."""
         return [
             sys.executable,
             "-m",
@@ -266,6 +276,12 @@ class ExperimentManager:
         ]
 
     async def _execute(self, session_id: str, run_id: str, options: ExperimentOptions, *, approval: bool) -> None:
+        """Run a worker and drain both output pipes before finalizing its ledger outcome.
+
+        Ordinary worker or I/O errors become sanitized failure metadata. Task
+        cancellation requests a cooperative stop for search and is re-raised.
+        Finalization and storage errors can still propagate.
+        """
         process = None
         readers: list[asyncio.Task[None]] = []
         failure: dict[str, str] | None = None
@@ -316,6 +332,12 @@ class ExperimentManager:
         *,
         approval: bool,
     ) -> None:
+        """Finalize an active run still owned by this manager after its worker has drained.
+
+        Unconfirmed or unsuccessful search exits fail; an accepted stop overrides a
+        completed search. Approval uses artifact receipts to recover its outcome.
+        Lookup and persistence errors propagate.
+        """
         record = await self.get(session_id, run_id)
         if record.get("owner_id") != self.owner_id or record["status"] not in ACTIVE_STATUSES:
             return
@@ -359,7 +381,12 @@ class ExperimentManager:
             )
 
     async def _read_output(self, stream: asyncio.StreamReader, session_id: str, run_id: str) -> None:
-        """Drain arbitrary-length lines without StreamReader's readline limit or raw log exposure."""
+        """Drain arbitrary-length lines without StreamReader's readline limit or raw log exposure.
+
+        Persist only matching, nonterminal events up to 20,000 bytes per line. Invalid
+        or oversized lines are ignored. A persistence failure requests a cooperative
+        stop and raises RuntimeError after draining; stream read errors propagate.
+        """
         pending = bytearray()
         oversized = False
         persistence_failed = False
@@ -418,6 +445,7 @@ class ExperimentManager:
 
     @staticmethod
     async def _discard_output(stream: asyncio.StreamReader) -> None:
+        """Drain worker output to EOF without retaining or exposing its contents."""
         while await stream.read(8192):
             pass
 
