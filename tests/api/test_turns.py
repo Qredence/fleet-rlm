@@ -22,6 +22,7 @@ import fleet_rlm.api.app as api_app
 import fleet_rlm.api.deps as api_deps
 import fleet_rlm.api.routes.turns as turns_route
 import fleet_rlm.engine.turn as turn_module
+import fleet_rlm.observability as observability
 from fleet_rlm.api.events import SSERuntimeCallback
 from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
@@ -112,7 +113,6 @@ def traced(monkeypatch):
         yield
 
     import fleet_rlm.lm_usage as lm_usage
-    import fleet_rlm.observability as observability
 
     seen["global_callback"] = object()
     fake_dspy = SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context)
@@ -282,7 +282,6 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
 
 
 def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitization(traced):
-    from fleet_rlm.observability import sanitize_trace_span
     from fleet_rlm.optimize.objectives import artifact_correctness, delegation_correctness
     from fleet_rlm.optimize.scorers import efficiency_metric
 
@@ -326,7 +325,9 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
         response = client.post("/sessions/session-a/turn", json={"task": "Produce reports"})
     assert response.status_code == 200
     sanitized = {}
-    sanitize_trace_span(SimpleNamespace(name="fleet_turn", outputs=traced["outputs"], set_outputs=sanitized.update))
+    observability.sanitize_trace_span(
+        SimpleNamespace(name="fleet_turn", outputs=traced["outputs"], set_outputs=sanitized.update)
+    )
     assert {name: sanitized[name] for name in usage} == usage
     assert efficiency_metric(dspy.Prediction(**sanitized)) == efficiency_metric(dspy.Prediction(**usage))
     assert efficiency_metric(dspy.Prediction(**sanitized)) is not None
