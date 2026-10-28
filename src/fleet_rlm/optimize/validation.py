@@ -222,29 +222,22 @@ def score_stage(
         trace_context=context("holdout"),
         trace_run_id=trace_run_id,
     )
-    return {
-        "dev": dev.mean,
-        "holdout": held.mean,
-        "dev_errors": dev.errors,
-        "holdout_errors": held.errors,
-        "dev_scores": dev.scores,
-        "holdout_scores": held.scores,
-        "dev_critical_scores": dev.critical_scores,
-        "holdout_critical_scores": held.critical_scores,
-        "dev_objectives": dev.objectives,
-        "holdout_objectives": held.objectives,
-        "dev_lm_calls": dev.lm_calls,
-        "holdout_lm_calls": held.lm_calls,
-        "dev_seconds_per_example": dev.seconds_per_example,
-        "holdout_seconds_per_example": held.seconds_per_example,
-        "dev_artifact_passes": dev.artifact_passes,
-        "dev_artifact_cases": dev.artifact_cases,
-        "holdout_artifact_passes": held.artifact_passes,
-        "holdout_artifact_cases": held.artifact_cases,
-        "dev_failures": dev.failures,
-        "holdout_failures": held.failures,
-        "seconds": round(dev.seconds + held.seconds, 1),
-    }
+    result: dict[str, Any] = {"seconds": round(dev.seconds + held.seconds, 1)}
+    for prefix, split in (("dev", dev), ("holdout", held)):
+        result[prefix] = split.mean
+        for field in (
+            "errors",
+            "scores",
+            "critical_scores",
+            "objectives",
+            "lm_calls",
+            "seconds_per_example",
+            "artifact_passes",
+            "artifact_cases",
+            "failures",
+        ):
+            result[f"{prefix}_{field}"] = getattr(split, field)
+    return result
 
 
 def summarize_passes(passes: list[dict[str, Any]]) -> dict[str, Any]:

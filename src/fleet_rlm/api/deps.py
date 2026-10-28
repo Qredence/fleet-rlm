@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.experiments import ExperimentManager
 from fleet_rlm.session import SessionRuntime, SessionRuntimeRegistry
 from fleet_rlm.store import Store
 
@@ -83,8 +84,10 @@ def get_registry(request: Request) -> SessionRuntimeRegistry:
     return registry
 
 
-def get_runtime(session_id: str, registry: Annotated[SessionRuntimeRegistry, Depends(get_registry)]) -> SessionRuntime:
-    """Return the runtime for the path's Session ID, or raise 422 for an invalid ID."""
+def get_runtime(
+    registry: Annotated[SessionRuntimeRegistry, Depends(get_registry)], session_id: str = "default"
+) -> SessionRuntime:
+    """Return the runtime for the path's or query's Session ID, or raise 422 for an invalid ID."""
     with translate("Session runtime is unavailable", invalid="Invalid Session ID"):
         return registry.get(session_id)
 
@@ -95,8 +98,17 @@ def locked_runtime(runtime: Runtime) -> Generator[SessionRuntime, None, None]:
         yield runtime
 
 
+def get_experiments(request: Request) -> ExperimentManager:
+    """Resolve only the lifespan resource; history access never obtains a Session runtime."""
+    manager = request.app.state.experiments
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Experiment storage is unavailable")
+    return manager
+
+
 Settings = Annotated[FleetSettings, Depends(get_settings)]
 StoreDep = Annotated[Store, Depends(get_store)]
 Registry = Annotated[SessionRuntimeRegistry, Depends(get_registry)]
 Runtime = Annotated[SessionRuntime, Depends(get_runtime)]
 LockedRuntime = Annotated[SessionRuntime, Depends(locked_runtime, scope="function")]
+Experiments = Annotated[ExperimentManager, Depends(get_experiments)]

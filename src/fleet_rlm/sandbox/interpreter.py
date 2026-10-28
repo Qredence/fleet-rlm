@@ -215,15 +215,21 @@ class DaytonaInterpreter:
         finally:
             _ACTIVE_MANAGER.reset(active_token)
 
+    def _complete_sub_lm(self, prompt: str, active_lm: Any) -> Any:
+        with dspy.context(lm=active_lm, disable_history=True):
+            return active_lm(prompt)[0]
+
+    @staticmethod
+    def _valid_prompt(value: Any) -> bool:
+        return isinstance(value, str) and len(value) <= 100_000
+
     def _llm_query(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        if len(args) != 1 or not isinstance(args[0], str) or len(args[0]) > 100_000:
+        if len(args) != 1 or not self._valid_prompt(args[0]):
             raise ValueError("llm_query requires one prompt of at most 100000 characters")
         if "llm_query" in self.tools:  # a Flex-registered override
             return self._invoke_tool("llm_query", args, kwargs)
         self.manager.consume_budget()
-        active_lm = self.manager.sub_lm or dspy.settings.lm
-        with dspy.context(lm=active_lm, disable_history=True):
-            return active_lm(args[0])[0]
+        return self._complete_sub_lm(args[0], self.manager.sub_lm or dspy.settings.lm)
 
     def _llm_query_batched(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
         if len(args) != 1:
@@ -233,20 +239,15 @@ class DaytonaInterpreter:
             not isinstance(prompts, list)
             or not prompts
             or len(prompts) > 100
-            or any(not isinstance(prompt, str) or len(prompt) > 100_000 for prompt in prompts)
+            or not all(map(self._valid_prompt, prompts))
         ):
             raise ValueError("llm_query_batched requires 1-100 bounded string prompts")
         if "llm_query_batched" in self.tools:
             return self._invoke_tool("llm_query_batched", args, kwargs)
         self.manager.consume_budget(len(prompts))
         active_lm = self.manager.sub_lm or dspy.settings.lm
-
-        def complete(prompt: str) -> Any:
-            with dspy.context(lm=active_lm, disable_history=True):
-                return active_lm(prompt)[0]
-
         with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
-            return list(pool.map(complete, prompts))
+            return list(pool.map(lambda prompt: self._complete_sub_lm(prompt, active_lm), prompts))
 
     def _jev_decide_batched(self, args: list[Any], _kwargs: dict[str, Any]) -> Any:
         if len(args) != 3:
@@ -254,7 +255,7 @@ class DaytonaInterpreter:
         items, question, choices = args
         if (
             not isinstance(items, list)
-            or any(not isinstance(item, str) or len(item) > 100_000 for item in items)
+            or not all(map(self._valid_prompt, items))
             or not isinstance(question, str)
             or len(question) > 10_000
             or not isinstance(choices, list)

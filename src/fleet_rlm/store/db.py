@@ -24,6 +24,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from fleet_rlm.optimization_runs import validate_run_id
 from fleet_rlm.workspace import _workspace_relative_path, validate_session_id
 
 if TYPE_CHECKING:
@@ -194,6 +195,13 @@ _SCHEMA_MIGRATIONS = (
         ),
     ),
     (6, (_OPTIMIZATION_RUNS_TABLE, _OPTIMIZATION_RUNS_ACTIVE_INDEX)),
+    (
+        7,
+        (
+            "CREATE INDEX IF NOT EXISTS fleet_lite_memories_content_fts "
+            "ON fleet_lite_memories USING GIN (to_tsvector('english', content))",
+        ),
+    ),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -203,7 +211,6 @@ _POOL_MAX_LIFETIME_SECONDS = 50 * 60.0
 _POOL_MAX_IDLE_SECONDS = 10 * 60.0
 _POOL_RECONNECT_TIMEOUT_SECONDS = 60.0
 _OPTIMIZATION_LOCK_SCOPE = "fleet:optimization-global-lease"
-_OPTIMIZATION_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 _P = ParamSpec("_P")
@@ -780,7 +787,7 @@ class Store:
     ) -> dict[str, Any]:
         """Create one globally active run, or return an identical idempotent request retry."""
         session_id = validate_session_id(session_id)
-        run_id = self._optimization_run_id(run_id)
+        run_id = validate_run_id(run_id)
         request_id = self._optimization_request_id(request_id)
         owner_id = self._optimization_owner_id(owner_id)
         if not isinstance(options, dict):
@@ -820,7 +827,7 @@ class Store:
     def get_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
         """Return one run from the durable ledger, or None when the Session/run pair is absent."""
         session_id = validate_session_id(session_id)
-        run_id = self._optimization_run_id(run_id)
+        run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
                 "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s",
@@ -863,7 +870,7 @@ class Store:
         other database errors propagate.
         """
         session_id = validate_session_id(session_id)
-        run_id = self._optimization_run_id(run_id)
+        run_id = validate_run_id(run_id)
         if not isinstance(updates, dict):
             raise ValueError("optimization updates must be an object")
         forbidden = {"session_id", "run_id", "request_id", "options", "owner_id", "managed", "created_at", "updated_at"}
@@ -922,7 +929,7 @@ class Store:
     def request_optimization_stop(self, session_id: str, run_id: str) -> dict[str, Any]:
         """Set a cooperative stop request for a running optimization; repeated requests are safe."""
         session_id = validate_session_id(session_id)
-        run_id = self._optimization_run_id(run_id)
+        run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
                 "UPDATE fleet_lite_optimization_runs SET stop_requested=TRUE, "
@@ -946,7 +953,7 @@ class Store:
     def claim_optimization_review(self, session_id: str, run_id: str, owner_id: str) -> dict[str, Any]:
         """Claim a completed candidate for approval, or take over its recoverable approving state."""
         session_id = validate_session_id(session_id)
-        run_id = self._optimization_run_id(run_id)
+        run_id = validate_run_id(run_id)
         owner_id = self._optimization_owner_id(owner_id)
         try:
             with self.pool.connection() as connection, connection.transaction():
@@ -974,7 +981,7 @@ class Store:
     def reject_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any]:
         """Record a rejection for a completed candidate without deleting its artifacts or history."""
         session_id = validate_session_id(session_id)
-        run_id = self._optimization_run_id(run_id)
+        run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
                 "UPDATE fleet_lite_optimization_runs SET status='rejected',"
@@ -994,7 +1001,7 @@ class Store:
         session_id = validate_session_id(session_id)
         if not isinstance(record, dict) or record.get("session_id") != session_id:
             raise ValueError("optimization run session_id does not match its import target")
-        run_id = self._optimization_run_id(record.get("run_id"))
+        run_id = validate_run_id(record.get("run_id"))
         options = record.get("options", {})
         if not isinstance(options, dict):
             raise ValueError("optimization options must be an object")
@@ -1052,13 +1059,6 @@ class Store:
             return row is not None
         except psycopg.errors.UniqueViolation as exc:
             raise ValueError("optimization run conflicts with an existing run identity or active run") from exc
-
-    @staticmethod
-    def _optimization_run_id(value: Any) -> str:
-        """Return a supported run identity unchanged, raising ValueError for invalid or traversal-like values."""
-        if not isinstance(value, str) or not _OPTIMIZATION_RUN_ID.fullmatch(value) or ".." in value:
-            raise ValueError("optimization run_id is invalid")
-        return value
 
     @staticmethod
     def _optimization_request_id(value: Any) -> str:
@@ -1248,7 +1248,7 @@ class VolumePostgresHarness:
         if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:
             raise ValueError("Turn record exceeds the persistence size limit")
         paths = self.sandbox_mgr.list_workspace_files()
-        if any(not self._valid_vfs_path(path) for path in paths):
+        if not isinstance(paths, list) or any(not self._valid_vfs_path(path) for path in paths):
             raise ValueError("Workspace listing returned an invalid relative path")
         artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
         completion = None

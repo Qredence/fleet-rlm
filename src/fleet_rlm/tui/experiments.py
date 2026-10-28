@@ -113,21 +113,6 @@ class ExperimentsScreen(ModalScreen[None]):
         if self.active_run_id:
             self.on_cancel(self.active_run_id)
 
-    def set_progress(self, event: Mapping[str, Any]) -> None:
-        """Show only stage names or metric-call counts reported by GEPA."""
-        self.progress = dict(event)
-        self._render_progress()
-        self._update_actions(self._selected())
-
-    def focus_run(self, run_id: str) -> None:
-        """Select the active run even if its record has not appeared yet."""
-        self.selected_run_id = run_id
-        self.comparison = None
-        self.comparison_run_id = None
-        if self.is_mounted and self.is_attached:
-            self._render_detail()
-        self.refresh_history()
-
     def refresh_history(self) -> None:
         """Fetch the current API snapshot without blocking Textual's event loop."""
         if self._polling:

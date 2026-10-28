@@ -30,6 +30,10 @@ at most one globally active run or approval; there is no job queue. The record
 stores request idempotency, validated options, owner, managed-worker marker,
 status/stage, cooperative stop intent, and run metadata. Database owner/status
 checks fence stale workers from publishing lifecycle updates.
+Migration 7 adds an expression GIN index matching memory search's
+`to_tsvector('english', content)` predicate. PostgreSQL chooses whether to use
+it; it does not eliminate ranking work. The initial index build runs under the
+existing migration transaction/lock and adds index-maintenance cost to writes.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy
@@ -62,7 +66,15 @@ Mode and context changes take effect in the live runtime only after their
 settings have been saved successfully.
 
 Turn records retain pre-execution SHA-256 values in `context_files` for every
-advertised workspace path, not only the selected dataset. When a caller explicitly
+advertised workspace path, not only the selected dataset. Listing, digests,
+manifests, and replay capture share the managed roots `files/`, `artifacts/`,
+`memory/`, `skills/`, `buffers/`, and `sessions/`. Unmanaged top-level scratch
+files and checkouts are excluded without deleting or moving their bytes.
+Symbolic links are not traversed; a symbolic-link managed root, malformed
+managed path, or invalid inventory response fails the Turn before success
+persistence. A failed commit does not roll back Volume bytes, and its root
+trace reports failure rather than a completed answer.
+When a caller explicitly
 sets `record_replay=true`, Fleet writes the complete bounded input snapshot to
 `fleet_lite_replay_snapshots`, keyed by Session and Turn and protected by a
 content digest. It commits only with successful Turn completion; cascade deletion

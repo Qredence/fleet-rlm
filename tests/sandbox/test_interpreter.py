@@ -147,6 +147,14 @@ def manager_on(sandbox, events=None, name="interp-test", claim=None) -> DaytonaS
     return manager
 
 
+def test_batched_queries_use_scoped_lm_when_manager_has_no_sub_lm(sandbox):
+    manager = manager_on(sandbox)
+    lm = lambda prompt: [f"reply:{prompt}"]  # noqa: E731
+    with dspy.context(lm=lm):
+        interpreter = DaytonaInterpreter(manager)
+        assert interpreter._llm_query_batched([["one", "two"]], {}) == ["reply:one", "reply:two"]
+
+
 @contextmanager
 def recording_span(recorded: list[dict[str, Any]], name: str, span_type: str):
     span: dict[str, Any] = {"name": name, "span_type": span_type, "attributes": {}, "open": True}

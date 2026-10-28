@@ -223,22 +223,19 @@ class SSERuntimeCallback(LMUsageCallback):
         self.manager = manager
         self.clock = clock or time.monotonic
         self.status = AdvisoryStatus()
-        # Workers ingest events while the SSE loop samples status; both touch the scope map.
-        self._status_lock = threading.Lock()
+        # One reentrant lock serializes status ingestion, progress coalescing, call state, and pending futures.
+        self._lock = threading.RLock()
         self._closed = threading.Event()
         self._pending: set[Future] = set()
-        self._pending_lock = threading.Lock()
         self._calls: dict[str, dict[str, Any]] = {}
-        self._calls_lock = threading.Lock()
         # Progress is the lowest-priority event class: one retained value per scope per second.
-        self._progress_lock = threading.Lock()
         self._progress_pending: dict[tuple[str, str], dict[str, Any]] = {}
         self._progress_last: dict[tuple[str, str], float] = {}
 
     def close(self) -> None:
         """Stop accepting events and cancel emits still waiting on the consumer."""
         self._closed.set()
-        with self._pending_lock:
+        with self._lock:
             for future in self._pending:
                 future.cancel()
 
@@ -253,15 +250,14 @@ class SSERuntimeCallback(LMUsageCallback):
         if self._closed.is_set():
             return
         now = self.clock()
-        with self._status_lock:
+        with self._lock:
             if self.status.terminal and payload.get("event") != "done":
                 return
             self.status.ingest(payload, now)
             payload = self.status.annotate(payload, now)
             if self.status.terminal:
-                with self._progress_lock:
-                    self._progress_pending.clear()
-                    self._progress_last.clear()
+                self._progress_pending.clear()
+                self._progress_last.clear()
             if payload.get("event") == "progress":
                 # Observation only: coalesced, never blocking the producer.
                 self._coalesce_progress(payload, now)
@@ -270,7 +266,7 @@ class SSERuntimeCallback(LMUsageCallback):
         # elapsed; it is a non-blocking offer, so a full queue still drops it rather than delaying.
         self._release_progress(now)
         future = asyncio.run_coroutine_threadsafe(self.queue.put(payload), self.loop)
-        with self._pending_lock:
+        with self._lock:
             self._pending.add(future)
             if self._closed.is_set():
                 future.cancel()
@@ -283,7 +279,7 @@ class SSERuntimeCallback(LMUsageCallback):
             future.cancel()
             raise TimeoutError("SSE consumer is too slow") from None
         finally:
-            with self._pending_lock:
+            with self._lock:
                 self._pending.discard(future)
 
     def _progress_key(self, payload: dict[str, Any]) -> tuple[str, str] | None:
@@ -298,7 +294,7 @@ class SSERuntimeCallback(LMUsageCallback):
         key = self._progress_key(payload)
         if key is None:
             return
-        with self._progress_lock:
+        with self._lock:
             self._progress_pending[key] = payload
             last = self._progress_last.get(key)
             if last is not None and now - last < _PROGRESS_INTERVAL_SECONDS:
@@ -316,7 +312,7 @@ class SSERuntimeCallback(LMUsageCallback):
 
         def deliver() -> None:
             """Offer progress only while the stream is live, dropping it if the queue is full."""
-            with self._status_lock:
+            with self._lock:
                 if self._closed.is_set() or self.status.terminal:
                     return
                 with contextlib.suppress(asyncio.QueueFull):
@@ -330,7 +326,7 @@ class SSERuntimeCallback(LMUsageCallback):
 
     def _take_due_progress(self, now: float) -> list[dict[str, Any]]:
         """Pop the newest withheld value for every scope whose one-second window elapsed."""
-        with self._progress_lock:
+        with self._lock:
             due = [
                 key
                 for key in self._progress_pending
@@ -352,7 +348,7 @@ class SSERuntimeCallback(LMUsageCallback):
 
         Called by the stream loop it already owns; no timer or background task is created.
         """
-        with self._status_lock:
+        with self._lock:
             if self._closed.is_set() or self.status.terminal:
                 return
             for payload in self._take_due_progress(self.clock()):
@@ -363,7 +359,7 @@ class SSERuntimeCallback(LMUsageCallback):
 
     def status_event(self) -> dict[str, Any] | None:
         """Return one derived status transition, sampled by the stream loop."""
-        with self._status_lock:
+        with self._lock:
             return self.status.status_event(self.clock())
 
     def _start(self, kind: str, call_id: str, **details: Any) -> None:
@@ -378,12 +374,12 @@ class SSERuntimeCallback(LMUsageCallback):
             else {}
         )
         details["parent_call_id"] = ACTIVE_CALL_ID.get()
-        with self._calls_lock:
+        with self._lock:
             self._calls[call_id] = {"started": time.monotonic(), **identity, **details}
         self._emit({"event": f"{kind}_start", "call_id": call_id, **identity, **details})
 
     def _end(self, kind: str, call_id: str, exception: BaseException | None, **details: Any) -> None:
-        with self._calls_lock:
+        with self._lock:
             started = self._calls.pop(call_id, {})
         timestamp = started.pop("started", None)
         started.pop("inputs", None)

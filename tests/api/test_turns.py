@@ -97,6 +97,7 @@ def traced(monkeypatch):
                 return
             yield SimpleNamespace(
                 trace_id=seen.get("span_trace_id"),
+                set_status=lambda value: seen.__setitem__("status", value),
                 set_inputs=lambda value: seen.__setitem__("inputs", value),
                 set_outputs=lambda value: seen.__setitem__("outputs", value),
                 set_attributes=lambda value: seen.setdefault("attributes", {}).update(value),
@@ -335,6 +336,128 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
     assert artifact_correctness(artifact_gold, sanitized["execution_evidence"])[0] == 1
     assert delegation_correctness(delegation_gold, evidence)[0] == 1
     assert delegation_correctness(delegation_gold, sanitized["execution_evidence"])[0] == 1
+
+
+@pytest.mark.parametrize("record_replay", [False, True])
+@pytest.mark.parametrize("bad_commit", [False, True])
+def test_real_harness_commits_managed_inventory_and_reports_commit_failure(
+    traced, monkeypatch, tmp_path, record_replay, bad_commit
+):
+    import io
+    from contextlib import redirect_stdout
+
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+    from fleet_rlm.store.db import VolumePostgresHarness
+
+    workspace = tmp_path / "workspace"
+    (workspace / "files").mkdir(parents=True)
+    (workspace / "files" / "input.txt").write_bytes(b"source")
+    (workspace / "checkout").mkdir()
+    scratch = workspace / "checkout" / "db.py"
+    scratch.write_bytes(b"sandbox edits")
+    (workspace / "bundle.txt").write_bytes(b"scratch bundle")
+    order = []
+    records = []
+    claims = {}
+    engine_calls = []
+
+    def remote_exec(_self, code):
+        output = io.StringIO()
+        code = code.replace("'/workspace'", repr(str(workspace)))
+        with redirect_stdout(output):
+            exec(code, {})
+        return output.getvalue()
+
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", remote_exec)
+    remote = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    def claim(_session, turn_id, key, digest):
+        if key in claims:
+            return claims[key]
+        claims[key] = {"turn_id": turn_id, "task_sha256": digest, "status": "running", "result": {}}
+        return None
+
+    def persist(_session, **kwargs):
+        order.append("persist")
+        records.append(kwargs)
+        for prior in claims.values():
+            if prior["turn_id"] == kwargs["completion"][0]:
+                prior.update(status="completed", result=kwargs["completion"][1])
+
+    def fail(_session, turn_id, outcome, result):
+        order.append("failed")
+        assert "stop" in order
+        for prior in claims.values():
+            if prior["turn_id"] == turn_id:
+                prior.update(status=outcome, result=result)
+
+    store = store_with(
+        load_session=lambda _session: ("", []),
+        memories=lambda *_args, **_kwargs: [],
+        claim_turn=claim,
+        commit_turn=persist,
+        finish_turn=fail,
+    )
+    manager = FakeManager(
+        session_id="session-a",
+        turn_inputs=remote.turn_inputs,
+        list_workspace_files=remote.list_workspace_files,
+        read_workspace_file=lambda path: (workspace / path).read_bytes(),
+        cancel_turn=lambda: order.append("stop"),
+    )
+
+    def engine(**_kwargs):
+        engine_calls.append(1)
+        (workspace / "artifacts").mkdir(exist_ok=True)
+        (workspace / "artifacts" / "result.txt").write_bytes(b"verified output")
+        if bad_commit:
+            (workspace / "artifacts" / "bad\nname").write_bytes(b"invalid name")
+        return SimpleNamespace(answer="complete", route="flex", lm_calls=1, sandbox_errors=0)
+
+    runtime = runtime_with(
+        sandbox_mgr=manager,
+        harness=VolumePostgresHarness(store, manager),
+        engine=engine,
+    )
+    body = {"task": "produce output", "record_replay": record_replay, "idempotency_key": "inventory-first"}
+    with opened_client(runtime) as (client, _app):
+        response = client.post("/sessions/session-a/turn", json=body)
+        events = events_of(response)
+        assert events[-1]["event"] == "done"
+        terminal = [event for event in events if event["event"] in {"turn_complete", "error", "turn_cancelled"}]
+        assert len(terminal) == 1
+        if bad_commit:
+            assert terminal[0]["event"] == "error"
+            assert order == ["stop", "failed"] and records == []
+            assert traced["status"] == "ERROR"
+            assert traced["outputs"]["outcome"] == "failed"
+            assert "bad" not in traced["outputs"]["error"]
+            assert "answer" not in traced["outputs"]
+        else:
+            assert terminal[0]["event"] == "turn_complete"
+            assert terminal[0]["artifacts"] == ["artifacts/result.txt"]
+            assert order == ["persist"]
+            first = records[0]
+            saved = json.loads(first["turn_record_json"])
+            assert saved["context_files"] == {"files/input.txt": hashlib.sha256(b"source").hexdigest()}
+            if record_replay:
+                snapshot = decode_snapshot(*first["replay_snapshot"])
+                assert snapshot["context_files"] == saved["context_files"]
+                assert snapshot["replay_files"] == {"files/input.txt": base64.b64encode(b"source").decode()}
+            else:
+                assert first["replay_snapshot"] is None
+            replayed = events_of(client.post("/sessions/session-a/turn", json=body))
+            recovered = next(event for event in replayed if event["event"] == "turn_complete")
+            assert {key: value for key, value in recovered.items() if key != "timestamp"} == {
+                key: value for key, value in terminal[0].items() if key != "timestamp"
+            }
+            assert len(engine_calls) == 1 and len(records) == 1
+            second = {**body, "idempotency_key": "inventory-second"}
+            assert events_of(client.post("/sessions/session-a/turn", json=second))[-2]["event"] == "turn_complete"
+            assert len(engine_calls) == 2 and len(records) == 2
+    assert scratch.read_bytes() == b"sandbox edits"
+    assert (workspace / "bundle.txt").read_bytes() == b"scratch bundle"
+    assert (workspace / "artifacts" / "result.txt").read_bytes() == b"verified output"
 
 
 @pytest.mark.parametrize("environment", ["", "Sandbox environment: Python 3.12; pandas available."])
@@ -1065,6 +1188,11 @@ def test_should_trace_preparation_and_persistence_under_the_turn(traced):
     ):
         assert parents[name] == "turn.prepare_inputs"
     assert parents["turn.commit"] == parents["turn.write_learned_note"] == "fleet_turn"
+    prepared = next(row["outputs"] for row in traced["spans"] if row["name"] == "turn.prepare_inputs")
+    assert prepared["task_chars"] == len("hello")
+    assert prepared["workspace_manifest_chars"] == len("/workspace/files (empty)")
+    assert prepared["dataset_preview_chars"] == 0
+    assert all(isinstance(value, int) and value >= 0 for value in prepared.values())
 
 
 def _within(seconds: float, call):

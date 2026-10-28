@@ -16,7 +16,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import dspy
-import httpx
 import psycopg
 from daytona import Daytona, DaytonaConfig, DaytonaNotFoundError, ListSandboxesQuery
 from dspy.primitives.facade import FacadeInvocation
@@ -26,6 +25,7 @@ from psycopg import sql
 from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.optimize.evaluation import parse_sse
 from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
 
 # Reported by the Turn itself, so the harness measures without instrumenting the runtime.
@@ -56,11 +56,6 @@ def _turn_metrics(events: list[dict], wall_clock: float) -> dict[str, object]:
     }
     metrics.update({field: terminal.get(field) for field in _METRIC_FIELDS})
     return metrics
-
-
-def _stream_events(response: httpx.Response) -> list[dict]:
-    """Decode one SSE response body into its JSON envelopes."""
-    return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
 
 
 def main() -> None:
@@ -179,7 +174,7 @@ def main() -> None:
             )
             ledger_started = time.monotonic()
             response = client.post(f"/sessions/{session}/turn", json={"task": task, "idempotency_key": "ledger-v1"})
-            events = _stream_events(response)
+            events = parse_sse(response.text)
             report["metrics"]["ledger_turn_rlm"] = _turn_metrics(events, time.monotonic() - ledger_started)
             report["events"] = events
             outcomes = [e for e in events if e["event"] in {"turn_complete", "error"}]
@@ -203,7 +198,7 @@ def main() -> None:
             }
             replay_started = time.monotonic()
             replay = client.post(f"/sessions/{session}/turn", json={"task": task, "idempotency_key": "ledger-v1"})
-            replay_events = _stream_events(replay)
+            replay_events = parse_sse(replay.text)
             report["metrics"]["ledger_replay"] = _turn_metrics(replay_events, time.monotonic() - replay_started)
             replay_outcomes = [e for e in replay_events if e["event"] in {"turn_complete", "error"}]
             assert len(replay_outcomes) == 1 and replay_outcomes[0].get("answer") == outcomes[0]["answer"]
@@ -312,7 +307,7 @@ def main() -> None:
                 started = time.monotonic()
                 body = resumed.post(f"/sessions/{session}/turn", json={"task": task_text, "idempotency_key": case})
                 assert body.status_code == 200, body.text
-                route_events = _stream_events(body)
+                route_events = parse_sse(body.text)
                 report["metrics"][case] = _turn_metrics(route_events, time.monotonic() - started)
                 assert report["metrics"][case]["route"] == expected_route, report["metrics"][case]
                 assert report["metrics"][case]["answer"] == "221", report["metrics"][case]
@@ -326,7 +321,7 @@ def main() -> None:
                 json={"task": "Reply with exactly this text and nothing else: ACK", "idempotency_key": "route_hybrid"},
             )
             assert body.status_code == 200, body.text
-            hybrid_events = _stream_events(body)
+            hybrid_events = parse_sse(body.text)
             report["metrics"]["route_hybrid"] = _turn_metrics(hybrid_events, time.monotonic() - started)
             assert report["metrics"]["route_hybrid"]["answer"] == "ACK", report["metrics"]["route_hybrid"]
             selection = resumed.put(f"/sessions/{session}/context", json={"path": "files/ledger.csv"})

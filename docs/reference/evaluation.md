@@ -40,6 +40,15 @@ trace ID. Starting another `fleet eval run` starts fresh execution and is not a
 recovery command. `score_evaluation_traces` scores already verified, labeled
 traces without sending another Turn.
 
+For automatic assessments, inspect the registered scorer's schedule and sampling
+configuration separately from this suite. Only interpret a result after the root
+Turn has reached its terminal outcome and its required inputs, outputs, and spans
+are present; an earlier assessment is not a verdict on the completed Turn. Check
+the outcome as well as MLflow's status: historical traces can be marked `OK` even
+when the Turn failed. Preserve old assessments as audit history and use a new
+scoring run for a completed trace. Configuration changes and live scoring require
+explicit authorization.
+
 ## Scorers
 
 `build_mlflow_scorer_suite(judge_model, judge_lm=None, jev_lm=None)` returns:
@@ -119,7 +128,35 @@ traces without sending another Turn.
 
 Retrieval groundedness is applied only to traces containing a `RETRIEVER`
 span. Inapplicable custom scorers return `None`, which MLflow skips, instead of
-logging null feedback without an error. Unity Catalog's JSON-wrapped inputs
+logging null feedback without an error.
+
+### Chat-backed routing judges and registered definitions
+
+The local routing wrapper accepts a trace but explicitly extracts host-owned
+root task/route/usage fields before calling its judge. Construct the suite with
+`FleetSettings.fleet_judge_model` and `jev_lm=None` for chat-backed routing
+judgment; use the existing judge environment/model-format helpers for credentials
+and provider routing. Missing host evidence raises a scorer error before the
+chat call. Serving Jev and its typed rubric/threshold are unaffected.
+
+A registered `InstructionsJudge` is separate from this wrapper. Even instructions
+that reference only `{{ inputs }}` and `{{ outputs }}` can trigger MLflow's
+agentic trace fallback if a failed trace has no root outputs. A decision-only
+`gateway:/typesafe` model cannot perform that trace-based tool calling. Use a
+chat-capable judge for trace evaluation, or the local wrapper's explicit
+structured state; never manufacture success outputs to make a failed trace
+judgeable. A route judgment is not evidence that the Turn committed.
+
+Changing repository code does not update registered scorers. Before an explicitly
+authorized registry replacement, retain the current version, complete definition,
+and scheduling/sampling configuration; construct a chat-backed replacement with
+the same rubric and validate it directly against representative saved traces.
+Register only the intended scorer, read back its new identity/configuration, and
+verify subsequent assessment metadata. Do not restore an old definition blindly
+or change the eight-execution diagnostic limit to accommodate a historical trace.
+Live evaluation and shared registry changes require explicit authorization.
+
+Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
 The GEPA objective uses `fleet-metric-v9`; changes to that metric invalidate
 earlier metric feedback and candidate approval evidence. Candidate approval uses

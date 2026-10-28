@@ -268,20 +268,27 @@ def read_evaluation_trace(
     deadline = time.monotonic() + wait_seconds
     latest: dict[str, Any] = {}
     stop = threading.Event()
+    next_poll = threading.Event()
+    ready = threading.Event()
+    next_poll.set()
 
     def read() -> None:
         """Refresh trace readback until stopped, retaining read errors for the waiting caller."""
-        while not stop.is_set():
+        while next_poll.wait() and not stop.is_set():
+            next_poll.clear()
             try:
                 latest["trace"] = mlflow.get_trace(trace_id, silent=True, flush=True)
                 latest["error"] = None
             except Exception as exc:
                 latest["error"] = exc
-            stop.wait(1.0)
+            ready.set()
 
     threading.Thread(target=read, daemon=True).start()
     try:
         while (remaining := deadline - time.monotonic()) > 0:
+            if not ready.wait(timeout=max(0.0, remaining)):
+                break
+            ready.clear()
             error = latest.get("error")
             if error is not None:
                 raise EvaluationError(
@@ -310,9 +317,14 @@ def read_evaluation_trace(
                     saved = labels_of(trace)
                     if all(saved.get(key) == value for key, value in expected_labels.items()):
                         return trace
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             time.sleep(min(1.0, max(0.0, remaining)))
+            next_poll.set()
     finally:
         stop.set()
+        next_poll.set()
     raise EvaluationError(
         f"Trace {trace_id} was not ready within {wait_seconds:g}s; recover this trace without rerunning"
     )

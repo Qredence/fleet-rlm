@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,7 +15,38 @@ import pytest
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.sandbox import manager as manager_module
 from fleet_rlm.sandbox import repl as repl_module
+from fleet_rlm.sandbox import workspace_io
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+def test_inventory_and_artifact_collection_record_only_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    spans: dict[str, Any] = {}
+
+    @contextmanager
+    def phase(name: str):
+        yield SimpleNamespace(set_outputs=lambda value: spans.__setitem__(name, value))
+
+    monkeypatch.setattr(workspace_io, "phase_span", phase)
+    monkeypatch.setattr(workspace_io.mlflow, "get_current_active_span", lambda: object())
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: json.dumps(["artifacts/private.txt"])
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, _path, **_kwargs: b"secret")
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager._sandbox = object()
+
+    evidence = manager.execution_evidence()
+
+    assert evidence["artifacts"]["complete"] is True
+    assert spans == {
+        "sandbox.workspace_inventory": {"files": 1},
+        "sandbox.artifact_collection": {"files": 1, "complete": True},
+    }
+    spans.clear()
+    monkeypatch.setattr(workspace_io.mlflow, "get_current_active_span", lambda: None)
+    assert manager.list_workspace_files() == ["artifacts/private.txt"]
+    assert manager.execution_evidence()["artifacts"]["complete"] is True
+    assert not spans
 
 
 def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -832,14 +864,75 @@ def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypat
 
     assert len(calls) == 1
     # Symbolic links are skipped and never traversed.
-    assert inputs["digests"] == {
-        "files/a.txt": hashlib.sha256(b"alpha").hexdigest(),
-        "outside/secret.txt": hashlib.sha256(b"secret").hexdigest(),
-    }
+    assert inputs["digests"] == {"files/a.txt": hashlib.sha256(b"alpha").hexdigest()}
     assert inputs["notes"] == [{"file": "s-1.md", "summary": "Use Chudnovsky"}]
     assert inputs["environment"].startswith("Sandbox environment: Python ")
     assert "installed: " in inputs["environment"] and "not installed: " in inputs["environment"]
     assert "set_int_max_str_digits(0)" in inputs["environment"]
+
+
+def test_workspace_listing_and_digests_share_managed_roots_without_touching_scratch(monkeypatch, tmp_path):
+    from fleet_rlm.workspace import _ALLOWED_WORKSPACE_ROOTS
+
+    workspace = tmp_path / "workspace"
+    expected = {}
+    for root in _ALLOWED_WORKSPACE_ROOTS:
+        directory = workspace / root / "nested"
+        directory.mkdir(parents=True)
+        (directory / "source.txt").write_bytes(b"source")
+        expected[f"{root}/nested/source.txt"] = hashlib.sha256(b"source").hexdigest()
+    (workspace / "checkout").mkdir()
+    scratch = workspace / "checkout" / "db.py"
+    scratch.write_bytes(b"unmanaged edits")
+    (workspace / "bundle.txt").write_bytes(b"bundle")
+    (workspace / "files" / "link").symlink_to(workspace / "checkout", target_is_directory=True)
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    assert manager.list_workspace_files() == sorted(expected)
+    assert manager.turn_inputs()["digests"] == expected
+    assert scratch.read_bytes() == b"unmanaged edits"
+    assert (workspace / "bundle.txt").read_bytes() == b"bundle"
+
+
+@pytest.mark.parametrize("method", ["list_workspace_files", "turn_inputs"])
+@pytest.mark.parametrize("unsafe", ["root-symlink", "backslash", "control"])
+def test_workspace_inventory_rejects_unsafe_managed_entries(monkeypatch, tmp_path, method, unsafe):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    if unsafe == "root-symlink":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret").write_bytes(b"secret")
+        (workspace / "files").symlink_to(outside, target_is_directory=True)
+    else:
+        (workspace / "files").mkdir()
+        name = "bad\\name" if unsafe == "backslash" else "bad\nname"
+        (workspace / "files" / name).write_bytes(b"source")
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+
+    with pytest.raises(ValueError, match=r"workspace|Workspace"):
+        getattr(manager, method)()
+
+
+@pytest.mark.parametrize("response", ["", "{}", "null", '"files/a"', "[1]", '{"files/a": 1}'])
+def test_workspace_listing_rejects_malformed_responses(monkeypatch, response):
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda *_args: response)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    with pytest.raises((ValueError, RuntimeError)):
+        manager.list_workspace_files()
+
+
+@pytest.mark.parametrize(
+    "response",
+    ["", "{}", "null", '{"digests": {"files/a": "short"}}', '{"digests": {"outside/a": "' + "a" * 64 + '"}}'],
+)
+def test_workspace_digests_reject_malformed_responses(monkeypatch, response):
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda *_args: response)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    with pytest.raises((ValueError, RuntimeError)):
+        manager.turn_inputs()
 
 
 def test_turn_inputs_skips_notes_without_the_shared_mount(monkeypatch, tmp_path) -> None:
@@ -1455,7 +1548,7 @@ def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) 
     assert creations[-1][1] == {"timeout": 45, "on_logs": None}
 
     with pytest.raises(ValueError, match="FLEET_DAYTONA_API_KEY"):
-        snapshot_module.verify_snapshot(api_key="   ", org_id="explicit-org")
+        snapshot_module.build_snapshot(api_key="   ", org_id="explicit-org")
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
@@ -1783,12 +1876,12 @@ def test_child_deadline_inherits_the_parents_absolute_deadline(monkeypatch: pyte
 def test_a_stale_watchdog_cannot_cancel_a_later_turn() -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-stale-watchdog")
     manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
-    first_generation = manager.turn_generation
+    first_generation = manager._turn_generation
     first_watchdog = manager._watchdog
     assert first_watchdog is not None
     try:
         manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
-        assert manager.turn_generation > first_generation
+        assert manager._turn_generation > first_generation
         # Fire the previous Turn's callback exactly as its timer thread would.
         first_watchdog.function()
         assert not manager._cancelled.is_set(), "a stale watchdog is a no-op for the current Turn"
@@ -1800,7 +1893,7 @@ def test_watchdog_cancellation_cannot_cross_a_turn_reset(monkeypatch: pytest.Mon
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-racing-watchdog")
     manager.reset_turn_budget(deadline_seconds=900, deadline_source="request")
-    generation = manager.turn_generation
+    generation = manager._turn_generation
     entered = threading.Event()
     release = threading.Event()
     original = DaytonaSandboxManager.request_cancellation
@@ -1823,7 +1916,7 @@ def test_watchdog_cancellation_cannot_cross_a_turn_reset(monkeypatch: pytest.Mon
                 release.set()
             watchdog.result(timeout=5)
             reset.result(timeout=5)
-        assert manager.turn_generation > generation
+        assert manager._turn_generation > generation
         assert manager.turn_active
         assert not manager._cancelled.is_set(), "the watchdog belongs only to the preceding Turn"
     finally:

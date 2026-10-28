@@ -265,13 +265,12 @@ async def operation_events(
 ) -> AsyncIterator[ServerSentEvent]:
     """Replay retained progress and stream until one terminal outcome."""
     while True:
-        events, finished = operation.read(after)
+        events, finished = await asyncio.to_thread(operation.wait_for_events, after, 0.15)
         for event in events:
             after = event["seq"]
             yield ServerSentEvent(data=event, id=str(after))
         if finished or await request.is_disconnected():
             break
-        await asyncio.sleep(0.15)
 
 
 @router.post("/apply")

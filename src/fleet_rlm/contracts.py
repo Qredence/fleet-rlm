@@ -131,13 +131,10 @@ TRIAGE_INSTRUCTION = (
 
 def make_choice_type(options: tuple[tuple[str, str], ...]) -> type[BaseModel]:
     """Build a validated DSPy Choice model from runtime options."""
-    specialize = getattr(Choice, "__class_getitem__", None)
-    if not callable(specialize):
-        raise RuntimeError("This DSPy version cannot construct typed Choice options")
-    result = specialize(options)
+    result = cast("Any", Choice)[options]
     if not isinstance(result, type) or not issubclass(result, BaseModel):
         raise RuntimeError("DSPy returned an invalid typed Choice model")
-    return cast("type[BaseModel]", result)
+    return result
 
 
 TRIAGE_ROUTE = make_choice_type(tuple((route.value, item["triage"]) for route, item in ROUTE_DESCRIPTIONS.items()))

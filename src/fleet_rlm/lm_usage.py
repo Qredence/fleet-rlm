@@ -70,6 +70,17 @@ class _DecisionWorkerUsage(BaseCallback):
             scope.__exit__(None, None, None)
 
 
+_TOKEN_KEY_MAP = (
+    ("prompt_tokens", "input_tokens"),
+    ("completion_tokens", "output_tokens"),
+    ("total_tokens", "total_tokens"),
+)
+
+
+def _to_mlflow_token_usage(usage: dict[str, int | float]) -> dict[str, int | float]:
+    return {target: usage[source] for source, target in _TOKEN_KEY_MAP if source in usage}
+
+
 @contextmanager
 def decision_usage(span: Any) -> Generator[None, None, None]:
     """Receipt TypeSafe usage on its manual span and roll it into DSPy exactly once.
@@ -89,13 +100,8 @@ def decision_usage(span: Any) -> Generator[None, None, None]:
         for model, entries in tracker.usage_data.items():
             for entry in entries:
                 usage = _usage_summary(entry)
-                for source, target in (
-                    ("prompt_tokens", "input_tokens"),
-                    ("completion_tokens", "output_tokens"),
-                    ("total_tokens", "total_tokens"),
-                ):
-                    if source in usage:
-                        totals[target] = totals.get(target, 0) + usage[source]
+                for target, count in _to_mlflow_token_usage(usage).items():
+                    totals[target] = totals.get(target, 0) + count
                 if parent is not None:
                     parent.add_usage(model, {**entry, **usage})
         if totals:
@@ -143,15 +149,7 @@ class LMUsageCallback(BaseCallback):
             usage = _usage_summary(tracker.get_total_tokens().get(model, {}), derive_total=False)
             span = mlflow.get_current_active_span()
             if usage and span is not None and span.span_type in (SpanType.LLM, SpanType.CHAT_MODEL):
-                tokens = {
-                    target: usage[source]
-                    for source, target in (
-                        ("prompt_tokens", "input_tokens"),
-                        ("completion_tokens", "output_tokens"),
-                        ("total_tokens", "total_tokens"),
-                    )
-                    if source in usage
-                }
+                tokens = _to_mlflow_token_usage(usage)
                 if tokens:
                     span.set_attribute("mlflow.chat.tokenUsage", tokens)
             return usage

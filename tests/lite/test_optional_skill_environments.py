@@ -7,7 +7,13 @@ import pytest
 
 from fleet_rlm.skills import BUNDLED_SKILLS_DIR, SANDBOX_SKILL_HELPERS_CODE
 
-BUNDLED_SKILLS = ("delegation", "long-context-search", "skill-creator", "tabular-analysis")
+BUNDLED_SKILLS = (
+    "delegation",
+    "long-context-search",
+    "repository-inspection",
+    "skill-creator",
+    "tabular-analysis",
+)
 
 
 def test_bundled_skill_discovery_and_activation_do_not_install_packages(tmp_path: Path, monkeypatch) -> None:

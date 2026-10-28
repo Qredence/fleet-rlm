@@ -35,6 +35,12 @@ Databricks tracking workspace URL (`null` for local tracking). API reuse and
 evaluation preflight compare it along with the experiment and trace destination.
 Named tracking profiles resolve their own workspace rather than the model gateway host.
 
+Workspace listings and Turn input inventories include regular files beneath
+`files/`, `artifacts/`, `memory/`, `skills/`, `buffers/`, and `sessions/` only.
+Unmanaged top-level scratch files are left intact but are not advertised or
+captured in replay snapshots. Symbolic links are not traversed. Invalid managed
+paths or malformed inventory responses fail rather than becoming empty listings.
+
 Routes that change or read workspace, context, memory, Skill, mode, or model state take the
 session lock. While a Turn holds it they answer `409` after two seconds rather than queueing.
 `POST /sessions/{session_id}/turn` takes the same lock and answers `409` the same way when another Turn

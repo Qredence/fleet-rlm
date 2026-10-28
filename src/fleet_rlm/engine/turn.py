@@ -164,6 +164,9 @@ def run_turn(
                     phase.set_outputs(
                         {
                             "context_files": len(inputs["context_files"]),
+                            "task_chars": len(task),
+                            "workspace_manifest_chars": len(inputs["manifest"]),
+                            "dataset_preview_chars": len(runtime.context.rlm_preview()) if runtime.context else 0,
                             "skills_catalog_chars": len(inputs["skills_catalog"]),
                             "memory_summary_chars": len(inputs["memory_summary"]),
                             "session_history_chars": len(inputs["session_history"]),
@@ -340,6 +343,8 @@ def run_turn(
                     trace_id=trace_id,
                     started_at=started_at,
                 )
+                span.set_status("ERROR")
+                span.set_outputs(terminal_event)
                 span.set_attributes(
                     {
                         "turn_id": turn_id,

@@ -578,12 +578,15 @@ def build_mlflow_scorer_suite(
         payload, _ = _trace_evidence_context(trace)
         if jev_lm is not None:
             return _jev_route_feedback(jev_lm, payload)
+        state = _route_evidence_state(payload)
+        if state is None:
+            raise ScorerEvidenceError("Route suitability requires host-recorded task, route, and usage evidence")
         result = route_judge(
-            inputs={"task": payload["task"]},
+            inputs={"task": state["task"]},
             outputs={
-                "route": payload["route"],
-                "lm_calls": payload["lm_calls"],
-                "sandbox_errors": payload["sandbox_errors"],
+                "route": state["route"],
+                "lm_calls": state["lm_calls"],
+                "sandbox_errors": state["sandbox_errors"],
             },
         )
         feedback = _validated_bool_feedback(result, name="jev_routing_efficiency_judge")

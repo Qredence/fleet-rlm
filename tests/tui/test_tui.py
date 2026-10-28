@@ -14,6 +14,7 @@ from rich.console import Console
 import fleet_rlm.tui.app as app
 import fleet_rlm.tui.commands as commands
 import fleet_rlm.tui.render as render
+import fleet_rlm.tui.widgets as widgets
 
 
 def use_console(monkeypatch, console):
@@ -484,6 +485,37 @@ def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
     assert "Optimization completed" in output.getvalue()
 
 
+def test_non_tty_optimize_deduplicates_repeated_stage_output(monkeypatch) -> None:
+    import time
+
+    polls = 0
+    run_id = "sess_cli-dedupe"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if request.method == "POST":
+            return httpx.Response(202, json={"experiment": {"run_id": run_id, "status": "running", "stage": "search"}})
+        polls += 1
+        if polls < 3:
+            return httpx.Response(200, json={"experiment": {"run_id": run_id, "status": "running", "stage": "search"}})
+        if polls == 3:
+            return httpx.Response(
+                200, json={"experiment": {"run_id": run_id, "status": "running", "stage": "validation"}}
+            )
+        return httpx.Response(200, json={"experiment": {"run_id": run_id, "status": "completed", "stage": "completed"}})
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    output, _console = _capture_console(monkeypatch, width=100)
+    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handler)) as client:
+        ctx = commands.Context(client, "sess_cli")
+        commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
+
+    rendered = output.getvalue()
+    assert rendered.count("Optimization stage: search") == 1
+    assert rendered.count("Optimization stage: validation") == 1
+    assert "Optimization completed" in rendered
+
+
 def test_optimize_reuses_pending_start_request_until_definitive_outcome() -> None:
     state = commands.SessionState()
     ctx = commands.Context(httpx.Client(base_url="http://fleet.test"), "sess_retry", state)
@@ -798,9 +830,23 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
             repl_item = state.last_tracker.items[0]
             assert repl_item.expanded is False
 
-            step_widget = tui.query_one(app._StepWidget)
+            step_widget = tui.query_one(widgets._StepWidget)
             collapsed_render = str(step_widget.render())
             assert "▸" in collapsed_render and "Python #1" in collapsed_render
+
+            # Spinner ticks must not invalidate every step's cached rendering.
+            with monkeypatch.context() as patch:
+                refreshed = []
+                patch.setattr(step_widget, "refresh", lambda **kwargs: refreshed.append(kwargs))
+                for _ in range(5):
+                    tui.query_one(app._TurnWidget).sync_from_tracker()
+                assert len(refreshed) == 5
+                refreshed.clear()
+                patch.setattr(tui, "_turn_active", True)
+                patch.setattr(tui, "_active_turn_widget", tui.query_one(app._TurnWidget))
+                for _ in range(5):
+                    tui._tick_live_turn()
+                assert refreshed == []
 
             # Pressing Ctrl+O toggles the REPL cell open in place.
             await pilot.press("ctrl+o")
@@ -808,7 +854,7 @@ def test_fullscreen_tui_docks_input_streams_turns_and_toggles_repl_cells(
             assert repl_item.expanded is True
 
             # Clicking the step widget toggles it closed again.
-            await pilot.click(app._StepWidget)
+            await pilot.click(widgets._StepWidget)
             await pilot.pause(0.05)
             assert repl_item.expanded is False
 
@@ -969,12 +1015,10 @@ def test_tui_progress_evidence_does_not_leak_between_scopes() -> None:
     tracker.ingest({"event": "progress", "phase": "start", "scope": "second", "expect_seconds": 10})
     assert tracker.status_scope == "second"
     assert tracker.status_checkpoint is None
-    assert tracker.status_expect_seconds == 10
 
     tracker.ingest({"event": "status", "status": "progress_unknown"})
     assert tracker.status_scope is None
     assert tracker.status_checkpoint is None
-    assert tracker.status_expect_seconds is None
     assert "second" not in tracker.status_line().plain
 
 

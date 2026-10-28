@@ -194,8 +194,6 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
 
 def _eval_command(args: argparse.Namespace, settings: Any) -> None:
     """Build the eval dataset, label a trace, or run the synthetic cases against a live server."""
-    import os
-
     import mlflow
 
     from fleet_rlm.optimize import evaluation
@@ -214,19 +212,16 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         return
     if not target.eval_experiment_name:
         raise SystemExit(f"set FLEET_MLFLOW_{target.mode.upper()}_EVAL_EXPERIMENT_NAME to the evaluation experiment")
-    if target.mode == "databricks":
-        from mlflow.entities.trace_location import UnityCatalog
+    from fleet_rlm.observability import set_mlflow_trace_experiment
 
-        experiment = mlflow.set_experiment(
-            target.eval_experiment_name,
-            trace_location=UnityCatalog(
-                catalog_name=settings.mlflow_trace_catalog,
-                schema_name=settings.mlflow_trace_schema,
-                table_prefix=settings.mlflow_eval_trace_table_prefix,
-            ),
-        )
-    else:
-        experiment = mlflow.set_experiment(target.eval_experiment_name)
+    experiment = set_mlflow_trace_experiment(
+        target.eval_experiment_name,
+        databricks=target.mode == "databricks",
+        trace_catalog=getattr(settings, "mlflow_trace_catalog", ""),
+        trace_schema=getattr(settings, "mlflow_trace_schema", ""),
+        trace_table_prefix=getattr(settings, "mlflow_eval_trace_table_prefix", ""),
+        tracing_sql_warehouse_id=getattr(settings, "mlflow_tracing_sql_warehouse_id", ""),
+    )
     cases = evaluation.synthetic_cases(seed=args.seed)
     if args.eval_command == "dataset":
         name = args.name or (
@@ -269,8 +264,6 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
 
 def _trace_verify_command(args: argparse.Namespace, settings: Any) -> None:
     """Flush pending export and verify one trace is readable from its configured destination."""
-    import os
-
     import mlflow
 
     target = settings.mlflow_target()
@@ -489,8 +482,6 @@ def main(argv: list[str] | None = None) -> None:
         settings = managed_settings or get_settings(backend)
         overrides = {}
         if getattr(args, "mlflow_port", None) is not None:
-            if backend != "local":
-                parser.error("--mlflow-port is only supported with local MLflow")
             overrides["mlflow_local_port"] = args.mlflow_port
         if getattr(args, "mlflow_experiment", None) is not None:
             overrides[f"mlflow_{backend}_experiment_name"] = args.mlflow_experiment

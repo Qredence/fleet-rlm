@@ -16,6 +16,8 @@ import mlflow
 import yaml
 from mlflow.entities import SpanType
 
+from fleet_rlm.sandbox.runtime.fs_ops import export_skills_code, inspect_skills_code
+
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
@@ -336,23 +338,7 @@ class SkillManager:
             if count > MAX_SKILL_FILES:
                 raise ValueError("Too many local Skills to synchronize")
 
-        remote_manifest = json.dumps([relative for relative, _ in staged_files])
-        inspection_code = (
-            "import hashlib,json,os\n"
-            "root='/workspace'\n"
-            f"paths=json.loads({remote_manifest!r})\n"
-            "result={}\n"
-            "for rel in paths:\n"
-            " path=os.path.join(root,rel)\n"
-            " current=root\n"
-            " for part in rel.split('/'):\n"
-            "  current=os.path.join(current,part)\n"
-            "  if os.path.islink(current): raise ValueError('Existing Skill path traverses a symbolic link: '+rel)\n"
-            " if os.path.isfile(path) and not os.path.islink(path):\n"
-            "  with open(path,'rb') as handle: result[rel]=hashlib.sha256(handle.read()).hexdigest()\n"
-            " elif os.path.lexists(path): raise ValueError('Existing Skill path is not a regular file: '+rel)\n"
-            "print(json.dumps(result))"
-        )
+        inspection_code = inspect_skills_code([relative for relative, _ in staged_files])
         with mlflow.start_span(name="skills.inspect_remote", span_type=SpanType.TOOL) as span:
             span.set_inputs({"file_count": len(staged_files)})
             try:
@@ -386,27 +372,7 @@ class SkillManager:
 
     def export_volume_skills_to_local(self) -> list[str]:
         """Pull runtime-authored Skills into the separate local Fleet Skills folder."""
-        code = (
-            "import base64,json,os\n"
-            "root='/workspace/skills'\n"
-            "items=[]\n"
-            "total=0\n"
-            "for parent,dirs,files in os.walk(root, followlinks=False):\n"
-            " dirs[:]=[d for d in dirs if not os.path.islink(os.path.join(parent,d))]\n"
-            " for name in files:\n"
-            "  path=os.path.join(parent,name)\n"
-            "  if os.path.islink(path) or not os.path.isfile(path): continue\n"
-            "  size=os.path.getsize(path)\n"
-            "  if size>1000000: raise ValueError('Skill file exceeds the size limit')\n"
-            "  with open(path,'rb') as handle: raw=handle.read(size+1)\n"
-            "  if len(raw)!=size: raise ValueError('Skill changed during export')\n"
-            "  total+=size\n"
-            "  if total>5000000 or len(items)>=200: raise ValueError('Skill export exceeds "
-            "the synchronization bounds')\n"
-            "  items.append({'rel':os.path.relpath(path,root),'b64':base64.b64encode(raw).decode()})\n"
-            "print(json.dumps(items))"
-        )
-        files = json.loads(self.sandbox_mgr.exec_remote_python(code) or "[]")
+        files = json.loads(self.sandbox_mgr.exec_remote_python(export_skills_code()) or "[]")
         if not isinstance(files, list):
             raise ValueError("Exported Skill manifest is invalid")
         validated: list[tuple[PurePosixPath, bytes]] = []

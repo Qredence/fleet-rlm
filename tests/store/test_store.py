@@ -98,7 +98,7 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
     version, statements = _SCHEMA_MIGRATIONS[4]
     assert version == 5
     assert statements == (
@@ -107,7 +107,7 @@ def test_migration_five_records_the_environment_observation_on_the_session_row()
 
 
 def test_migration_six_adds_a_global_optimization_ledger_without_session_cascade():
-    version, statements = _SCHEMA_MIGRATIONS[-1]
+    version, statements = _SCHEMA_MIGRATIONS[5]
     assert version == 6
     create_table, active_index = statements
     assert "fleet_lite_optimization_runs" in create_table
@@ -118,6 +118,24 @@ def test_migration_six_adds_a_global_optimization_ledger_without_session_cascade
     assert "metadata JSONB NOT NULL" in create_table
     assert "CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run" in active_index
     assert "WHERE status IN ('running', 'approving')" in active_index
+
+
+def test_migration_seven_indexes_the_memory_search_expression_and_upgrades_version_six():
+    statements = dict(_SCHEMA_MIGRATIONS)[7]
+    assert statements == (
+        "CREATE INDEX IF NOT EXISTS fleet_lite_memories_content_fts "
+        "ON fleet_lite_memories USING GIN (to_tsvector('english', content))",
+    )
+    store, pool = make_store([], [], [(6,)])
+    store.initialize()
+    sql = [statement for statement, _ in pool.conn.statements]
+    assert statements[0] in sql
+    assert not any("CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in statement for statement in sql)
+    assert (
+        "INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s) ON CONFLICT DO NOTHING",
+        (7,),
+    ) in pool.conn.statements
+    assert sql[-1] == "COMMIT"
 
 
 def test_claim_environment_report_is_one_atomic_update_per_session():
@@ -546,10 +564,13 @@ def _harness(store: Any, files: list[str]) -> VolumePostgresHarness:
     return VolumePostgresHarness(store, sandbox)  # ty: ignore[invalid-argument-type]
 
 
-def test_harness_rejects_an_invalid_workspace_listing_before_any_sql_runs():
+@pytest.mark.parametrize("paths", [["../escape"], ["outside/a"], ["files/a\\b"], ["files/a\nb"], [1], {}, "", None])
+def test_harness_rejects_an_invalid_workspace_listing_before_any_sql_runs(paths):
     store, pool = make_store()
+    harness = _harness(store, [])
+    harness.sandbox_mgr.list_workspace_files = lambda: paths
     with pytest.raises(ValueError, match="invalid relative path"):
-        _harness(store, ["../escape"]).commit_turn("s1", {"turn_id": "t1"})
+        harness.commit_turn("s1", {"turn_id": "t1"})
     assert pool.borrowed == 0
 
 

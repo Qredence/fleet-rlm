@@ -79,9 +79,9 @@ def test_wait_ready_times_out_and_stop_terminates_the_process(tmp_path: Path) ->
     process.start()
     with pytest.raises(LaunchError, match="not ready after"):
         process.wait_ready(lambda: False, timeout=0.3, interval=0.05)
-    assert process.running
+    assert process._process is not None and process._process.poll() is None
     process.stop(grace=5)
-    assert not process.running
+    assert process._process is not None and process._process.poll() is not None
 
 
 def test_wait_ready_returns_once_the_check_passes(tmp_path: Path) -> None:

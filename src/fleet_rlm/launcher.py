@@ -145,11 +145,6 @@ class ManagedProcess:
                 start_new_session=True,
             )
 
-    @property
-    def running(self) -> bool:
-        """Return True while the started process has not exited."""
-        return self._process is not None and self._process.poll() is None
-
     def tail(self, lines: int = 15) -> str:
         """Return the last `lines` lines of the log, or an empty string if it cannot be read."""
         try:

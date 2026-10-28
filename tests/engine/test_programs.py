@@ -476,6 +476,8 @@ def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -
 
 
 def test_flex_module_source_gets_the_turn_rlm_budgets():
+    import ast
+
     from fleet_rlm.engine.programs import _with_turn_budgets
 
     source = (
@@ -486,6 +488,60 @@ def test_flex_module_source_gets_the_turn_rlm_budgets():
     rewritten = _with_turn_budgets(source, max_iters=16, max_llm_calls=150)
     assert "tools=[lookup], max_iters=16, max_llm_calls=150)" in rewritten
     assert _with_turn_budgets(rewritten, max_iters=16, max_llm_calls=150) == rewritten
+    ast.parse(rewritten)
+
+    for grouped in ('x = dspy.RLM(("task -> answer"))', 'x = dspy.RLM(\n    ("task -> answer"),\n)'):
+        result = _with_turn_budgets(grouped, max_iters=16, max_llm_calls=150)
+        call = ast.parse(result).body[0].value
+        assert isinstance(call, ast.Call)
+        assert isinstance(call.args[0], ast.Constant) and call.args[0].value == "task -> answer"
+        assert {item.arg: item.value.value for item in call.keywords} == {"max_iters": 16, "max_llm_calls": 150}
+        assert _with_turn_budgets(result, max_iters=16, max_llm_calls=150) == result
+
+    # A multi-line call with a trailing comma must not produce double commas.
+    multiline_trailing = (
+        "class M(dspy.Module):\n"
+        "    def __init__(self):\n"
+        "        self.rlm = dspy.RLM(\n"
+        '            "task -> answer",\n'
+        "            tools=[lookup],\n"
+        "        )\n"
+    )
+    rewritten_ml_trailing = _with_turn_budgets(multiline_trailing, max_iters=16, max_llm_calls=150)
+    assert "tools=[lookup], max_iters=16, max_llm_calls=150," in rewritten_ml_trailing
+    assert _with_turn_budgets(rewritten_ml_trailing, max_iters=16, max_llm_calls=150) == rewritten_ml_trailing
+    ast.parse(rewritten_ml_trailing)
+
+    # A multi-line call without a trailing comma.
+    multiline_no_trailing = (
+        "class M(dspy.Module):\n"
+        "    def __init__(self):\n"
+        "        self.rlm = dspy.RLM(\n"
+        '            "task -> answer",\n'
+        "            tools=[lookup]\n"
+        "        )\n"
+    )
+    rewritten_ml_no_trailing = _with_turn_budgets(multiline_no_trailing, max_iters=16, max_llm_calls=150)
+    assert "tools=[lookup], max_iters=16, max_llm_calls=150" in rewritten_ml_no_trailing
+    assert _with_turn_budgets(rewritten_ml_no_trailing, max_iters=16, max_llm_calls=150) == rewritten_ml_no_trailing
+    ast.parse(rewritten_ml_no_trailing)
+
+    # A call with no arguments must not insert a leading comma.
+    bare = "class M(dspy.Module):\n    def __init__(self):\n        self.rlm = dspy.RLM()\n"
+    rewritten_bare = _with_turn_budgets(bare, max_iters=16, max_llm_calls=150)
+    assert "dspy.RLM(max_iters=16, max_llm_calls=150)" in rewritten_bare
+    assert _with_turn_budgets(rewritten_bare, max_iters=16, max_llm_calls=150) == rewritten_bare
+    ast.parse(rewritten_bare)
+
+    # Non-ASCII characters (e.g. signature arrows) must not shift character offsets.
+    unicode_sig = (
+        'class M(dspy.Module):\n    def __init__(self):\n        self.rlm = dspy.RLM("task → answer", tools=[lookup])\n'
+    )
+    rewritten_unicode = _with_turn_budgets(unicode_sig, max_iters=16, max_llm_calls=150)
+    assert 'dspy.RLM("task → answer", tools=[lookup], max_iters=16, max_llm_calls=150)' in rewritten_unicode
+    assert _with_turn_budgets(rewritten_unicode, max_iters=16, max_llm_calls=150) == rewritten_unicode
+    ast.parse(rewritten_unicode)
+
     # A source with no RLM construction, or no parseable source, is left alone.
     plain = "class M(dspy.Module):\n    def forward(self, **inputs):\n        return dspy.Prediction(answer='x')\n"
     assert _with_turn_budgets(plain, max_iters=16, max_llm_calls=150) == plain
@@ -566,6 +622,22 @@ def test_flex_budget_rebinding_uses_public_state_api_and_preserves_runtime_objec
     assert flex.get_lm() is lm
     # Flex exposes no interpreter-factory getter; rebinding must leave its bridge config intact.
     assert flex._interpreter_factory is interpreter_factory
+
+    # Multi-line trailing-comma source must load cleanly without SyntaxError.
+    ml_source = (
+        "class FleetTaskModule(dspy.Module):\n"
+        "    def __init__(self):\n"
+        "        super().__init__()\n"
+        "        self.rlm = dspy.RLM(\n"
+        '            "task -> answer",\n'
+        "        )\n"
+        "    def forward(self, **inputs):\n"
+        "        return self.rlm(**inputs)\n"
+    )
+    flex.load_state({"module_src": ml_source})
+    flex.set_lm(lm)
+    assert _bind_flex_budgets(flex, max_iters=16, max_llm_calls=23)
+    assert "max_iters=16, max_llm_calls=23" in flex.module_src
 
 
 def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypatch) -> None:

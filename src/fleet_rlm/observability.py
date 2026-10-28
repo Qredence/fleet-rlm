@@ -79,52 +79,33 @@ def activity_text(text: str, *, limit: int = 20_000) -> str:
     return text[:limit] + ("… [truncated]" if len(text) > limit else "")
 
 
-def activity_preview(value: Any, *, limit: int = 4000) -> str:
-    """Preview JSON-like tool data, never arbitrary object reprs or predictor internals.
-
-    This is not a DLP boundary: unlabelled secrets in free text cannot be reliably
-    detected. Limit depth, collection sizes, and the entire serialized preview.
-    """
-    remaining_nodes = 80
-
-    def clean(item: Any, depth: int) -> Any:
-        nonlocal remaining_nodes
-        remaining_nodes -= 1
-        if remaining_nodes < 0:
-            return "[preview limit]"
-        if depth > 4:
-            return "[depth limit]"
-        if isinstance(item, str):
-            return activity_text(item, limit=limit)
-        if item is None or isinstance(item, (bool, int, float)):
-            return item
-        if isinstance(item, dict):
-            result = {
-                str(k)[:100]: "[redacted]" if _PRIVATE_KEY.search(str(k)) else clean(v, depth + 1)
-                for k, v in islice(item.items(), 20)
-            }
-            if len(item) > 20:
-                result["…"] = "[truncated]"
-            return result
-        if isinstance(item, (list, tuple)):
-            return [clean(v, depth + 1) for v in item[:20]] + (["[truncated]"] if len(item) > 20 else [])
-        return f"[{type(item).__name__} omitted]"
-
-    text = json.dumps(clean(value, 0), ensure_ascii=False)
-    return text[:limit] + ("… [truncated]" if len(text) > limit else "")
-
-
-def trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
-    """Bound and redact framework-captured trace data before MLflow exports it."""
+def _sanitize_tree(
+    value: Any,
+    *,
+    nodes: list[int],
+    depth: int,
+    max_nodes: int,
+    max_depth: int,
+    max_dict_items: int,
+    max_seq_items: int,
+    string_limit: int,
+    key_pattern: re.Pattern[str],
+    node_limit_marker: str,
+    depth_limit_marker: str,
+    decode_base64_artifacts: bool = False,
+) -> Any:
+    """Shared recursive tree sanitizer for UI activity previews and MLflow trace spans."""
     nodes[0] += 1
-    if nodes[0] > _TRACE_NODE_LIMIT:
-        return "[trace size limit]"
-    if depth > 8:
-        return "[trace depth limit]"
+    if nodes[0] > max_nodes:
+        return node_limit_marker
+    if depth > max_depth:
+        return depth_limit_marker
     if isinstance(value, str):
-        return activity_text(value, limit=_TRACE_STRING_LIMIT)
+        return activity_text(value, limit=string_limit)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
     if isinstance(value, dict):
-        if "base64" in value and "sha256" in value:
+        if decode_base64_artifacts and "base64" in value and "sha256" in value:
             import base64
 
             # Encoded artifact bytes must not bypass recursive credential redaction.
@@ -134,23 +115,93 @@ def trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
             except (ValueError, TypeError, UnicodeError):
                 value = {"sha256": value["sha256"], "text": "[binary artifact omitted]"}
         result = {}
-        for key, child in islice(value.items(), _TRACE_NODE_LIMIT):
+        for key, child in islice(value.items(), max_dict_items):
             name = str(key)[:100]
             result[name] = (
-                "[redacted]" if _TRACE_PRIVATE_KEY.search(name) else trace_value(child, nodes=nodes, depth=depth + 1)
+                "[redacted]"
+                if key_pattern.search(name)
+                else _sanitize_tree(
+                    child,
+                    nodes=nodes,
+                    depth=depth + 1,
+                    max_nodes=max_nodes,
+                    max_depth=max_depth,
+                    max_dict_items=max_dict_items,
+                    max_seq_items=max_seq_items,
+                    string_limit=string_limit,
+                    key_pattern=key_pattern,
+                    node_limit_marker=node_limit_marker,
+                    depth_limit_marker=depth_limit_marker,
+                    decode_base64_artifacts=decode_base64_artifacts,
+                )
             )
-        if len(value) > _TRACE_NODE_LIMIT:
+        if len(value) > max_dict_items:
             result["…"] = "[truncated]"
         return result
     if isinstance(value, (list, tuple)):
-        items = list(islice(value, 50))
-        result = [trace_value(child, nodes=nodes, depth=depth + 1) for child in items]
+        items = list(islice(value, max_seq_items))
+        result = [
+            _sanitize_tree(
+                child,
+                nodes=nodes,
+                depth=depth + 1,
+                max_nodes=max_nodes,
+                max_depth=max_depth,
+                max_dict_items=max_dict_items,
+                max_seq_items=max_seq_items,
+                string_limit=string_limit,
+                key_pattern=key_pattern,
+                node_limit_marker=node_limit_marker,
+                depth_limit_marker=depth_limit_marker,
+                decode_base64_artifacts=decode_base64_artifacts,
+            )
+            for child in items
+        ]
         if len(value) > len(items):
             result.append("[truncated]")
         return result
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
     return f"[{type(value).__name__} omitted]"
+
+
+def activity_preview(value: Any, *, limit: int = 4000) -> str:
+    """Preview JSON-like tool data, never arbitrary object reprs or predictor internals.
+
+    This is not a DLP boundary: unlabelled secrets in free text cannot be reliably
+    detected. Limit depth, collection sizes, and the entire serialized preview.
+    """
+    cleaned = _sanitize_tree(
+        value,
+        nodes=[0],
+        depth=0,
+        max_nodes=81,
+        max_depth=4,
+        max_dict_items=20,
+        max_seq_items=20,
+        string_limit=limit,
+        key_pattern=_PRIVATE_KEY,
+        node_limit_marker="[preview limit]",
+        depth_limit_marker="[depth limit]",
+    )
+    text = json.dumps(cleaned, ensure_ascii=False)
+    return text[:limit] + ("… [truncated]" if len(text) > limit else "")
+
+
+def trace_value(value: Any, *, nodes: list[int], depth: int = 0) -> Any:
+    """Bound and redact framework-captured trace data before MLflow exports it."""
+    return _sanitize_tree(
+        value,
+        nodes=nodes,
+        depth=depth,
+        max_nodes=_TRACE_NODE_LIMIT,
+        max_depth=8,
+        max_dict_items=_TRACE_NODE_LIMIT,
+        max_seq_items=50,
+        string_limit=_TRACE_STRING_LIMIT,
+        key_pattern=_TRACE_PRIVATE_KEY,
+        node_limit_marker="[trace size limit]",
+        depth_limit_marker="[trace depth limit]",
+        decode_base64_artifacts=True,
+    )
 
 
 def sanitize_trace_span(span: Any) -> None:
@@ -176,6 +227,32 @@ def sanitize_trace_span(span: Any) -> None:
                 setattr_fn(cleaned)
 
 
+def set_mlflow_trace_experiment(
+    experiment_name: str,
+    *,
+    databricks: bool = False,
+    trace_catalog: str = "",
+    trace_schema: str = "",
+    trace_table_prefix: str = "",
+    tracing_sql_warehouse_id: str = "",
+) -> Any:
+    """Activate an MLflow experiment, binding Unity Catalog trace storage when targeting Databricks."""
+    if not databricks:
+        return mlflow.set_experiment(experiment_name)
+    from mlflow.entities.trace_location import UnityCatalog
+
+    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = tracing_sql_warehouse_id
+    if trace_table_prefix:
+        trace_location = UnityCatalog(
+            catalog_name=trace_catalog,
+            schema_name=trace_schema,
+            table_prefix=trace_table_prefix,
+        )
+    else:
+        trace_location = UnityCatalog(catalog_name=trace_catalog, schema_name=trace_schema)
+    return mlflow.set_experiment(experiment_name, trace_location=trace_location)
+
+
 def configure_mlflow_observability(
     experiment_name: str = "fleet-rlm-production",
     tracking_uri: str = "sqlite:///mlflow.db",
@@ -190,21 +267,14 @@ def configure_mlflow_observability(
         mlflow.set_tracking_uri(tracking_uri)
     # DSPy autolog captures nested prompts and tool payloads; sanitize those spans before export.
     mlflow.tracing.configure(span_processors=[sanitize_trace_span])
-    if tracking_uri.startswith("databricks"):
-        from mlflow.entities.trace_location import UnityCatalog
-
-        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = tracing_sql_warehouse_id
-        if trace_table_prefix:
-            trace_location = UnityCatalog(
-                catalog_name=trace_catalog,
-                schema_name=trace_schema,
-                table_prefix=trace_table_prefix,
-            )
-        else:
-            trace_location = UnityCatalog(catalog_name=trace_catalog, schema_name=trace_schema)
-        mlflow.set_experiment(experiment_name, trace_location=trace_location)
-    else:
-        mlflow.set_experiment(experiment_name)
+    set_mlflow_trace_experiment(
+        experiment_name,
+        databricks=tracking_uri.startswith("databricks"),
+        trace_catalog=trace_catalog,
+        trace_schema=trace_schema,
+        trace_table_prefix=trace_table_prefix,
+        tracing_sql_warehouse_id=tracing_sql_warehouse_id,
+    )
     mlflow.dspy.autolog(log_traces=True, log_traces_from_compile=False, log_traces_from_eval=False)
     experiment = mlflow.get_experiment_by_name(experiment_name)
     return experiment.experiment_id if experiment is not None else None

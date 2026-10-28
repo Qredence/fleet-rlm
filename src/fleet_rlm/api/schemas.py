@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from fleet_rlm.config import validate_turn_timeout_seconds
+from fleet_rlm.optimization_runs import ExperimentOptions
 
 MAX_TASK_CHARS = 100_000
 
@@ -87,6 +88,19 @@ class ModelRequest(_Request):
     model: str = Field(
         min_length=1, max_length=300, pattern=r"^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$"
     )
+
+
+class StartExperiment(ExperimentOptions):
+    """Validated search controls and a retry-safe caller identity."""
+
+    request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ReviewExperiment(_Request):
+    """An explicit human decision, never an implicit promotion after optimization."""
+
+    decision: Literal["approved", "rejected"]
+    request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 # Responses

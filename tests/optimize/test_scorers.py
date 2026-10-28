@@ -229,7 +229,22 @@ def test_jev_route_judge_falls_back_to_generative_judge_without_typesafe_key(mon
     feedback = _route_judge(jev_lm=None)(trace=_route_trace())
     assert feedback.value is True
     assert feedback.metadata["fleet.judge_backend"] == "generative"
-    assert calls and calls[0][0] == "jev_routing_efficiency_judge"
+    assert calls and calls[0] == (
+        "jev_routing_efficiency_judge",
+        {"inputs": {"task": "Inspect the file"}, "outputs": {"route": "flex", "lm_calls": 4, "sandbox_errors": 0}},
+    )
+    definition = calls.definitions["jev_routing_efficiency_judge"]
+    assert definition["model"] == "databricks:/test-judge"
+    assert "{{ trace }}" not in definition["instructions"]
+
+
+@pytest.mark.parametrize("outputs", [None, {}, {"outcome": "failed", "error": "Turn failed"}])
+def test_chat_route_judge_rejects_missing_host_evidence_before_model_dispatch(monkeypatch, outputs):
+    calls = _judge_responses(monkeypatch, {"jev_routing_efficiency_judge": (True, "must not be used")})
+    trace = _trace(_span("fleet_turn", inputs={"task": "Inspect the file"}, outputs=outputs))
+    with pytest.raises(ScorerEvidenceError, match="host-recorded"):
+        _route_judge(jev_lm=None)(trace=trace)
+    assert calls == []
 
 
 def test_route_judgment_signature_keeps_routing_guardrails():

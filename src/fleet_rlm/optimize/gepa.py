@@ -13,7 +13,7 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Mapping
-from contextlib import suppress
+from contextlib import ExitStack, closing, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from importlib.metadata import distributions
@@ -298,6 +298,8 @@ DIGEST_SOURCES = (
     "program_file.py",
     "sandbox/interpreter.py",
     "sandbox/manager.py",
+    "sandbox/runtime/fs_ops.py",
+    "sandbox/workspace_io.py",
 )
 
 
@@ -549,20 +551,149 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
     except ValueError as error:
         parser.error(str(error))
     if args.approve:
-        version = args.approve
-        if Path(version).name != version or not version.startswith(session_id + "-"):
-            parser.error("Version must be a candidate belonging to this session")
-        if managed_run_id and managed_run_id != version:
-            parser.error("A managed approval must use the candidate's run ID")
-        directory = Path(settings.compiled_program_dir)
-        candidate_path = directory / "candidates" / f"{version}.json"
-        manifest = ArtifactManifest(**json.loads(candidate_path.with_suffix(".manifest.json").read_bytes()))
-        if manifest.version != version:
-            raise ValueError("Candidate manifest does not match the requested experiment")
-        store = _open_optimization_store(settings, initialize=not bool(managed_run_id))
-        lease = None
+        _run_approval(
+            args,
+            parser,
+            settings,
+            session_id=session_id,
+            managed_run_id=managed_run_id,
+            managed_owner_id=managed_owner_id,
+        )
+        return
+    directory = Path(settings.compiled_program_dir)
+    run_id = managed_run_id or f"{session_id}-{uuid.uuid4().hex}"
+    owner_id = managed_owner_id or uuid.uuid4().hex
+    structured = getattr(args, "structured_events", False)
+    options_dict = options.model_dump()
+    store = None
+    status = "failed"
+    failure: BaseException | None = None
+    worker_outcome: dict[str, Any] | None = None
+    with ExitStack() as stack:
         try:
-            lease = store.acquire_optimization_lease()
+            store = _open_optimization_store(
+                settings,
+                max_size=max(2, args.threads),
+                initialize=not bool(managed_run_id),
+            )
+            stack.enter_context(closing(store.acquire_optimization_lease()))
+            import_legacy_runs(store, directory)
+            if managed_run_id:
+                record = store.get_optimization_run(session_id, run_id)
+                if (
+                    record is None
+                    or record.get("owner_id") != owner_id
+                    or record.get("status") != "running"
+                    or record.get("options") != options_dict
+                ):
+                    raise ValueError("Managed experiment is missing, stale, or owned by another worker")
+            else:
+                reconcile_abandoned_running_runs(store)
+                store.create_optimization_run(
+                    session_id,
+                    run_id,
+                    request_id=uuid.uuid4().hex,
+                    options=options_dict,
+                    owner_id=owner_id,
+                    managed=False,
+                )
+            started = _update_run(
+                store,
+                session_id,
+                run_id,
+                owner_id=owner_id,
+                expected_statuses=("running",),
+                stage="preparing",
+                candidate_version=run_id,
+                started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            )
+            if started is None:
+                raise ValueError("Experiment could not be claimed by this optimizer process")
+            if structured:
+                emit_event({"type": "started", "run_id": run_id, "stage": "preparing"})
+
+            target = settings.mlflow_target()
+            experiment_id = configure_mlflow_observability(
+                target.optimization_experiment_name,
+                target.tracking_uri,
+                trace_catalog=settings.mlflow_trace_catalog,
+                trace_schema=(
+                    settings.mlflow_optimization_trace_schema
+                    if target.mode == "databricks"
+                    else settings.mlflow_trace_schema
+                ),
+                trace_table_prefix=(
+                    settings.mlflow_optimization_trace_table_prefix
+                    if target.mode == "databricks"
+                    else settings.mlflow_trace_table_prefix
+                ),
+                tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
+            )
+            if experiment_id:
+                mlflow.set_experiment(experiment_id=experiment_id)
+            mlflow.dspy.autolog(
+                log_traces=options_dict["trace_search"],
+                log_traces_from_compile=options_dict["trace_search"],
+                log_traces_from_eval=options_dict["trace_search"],
+                log_compiles=True,
+            )
+            _compile(args, settings, store, session_id, target, run_id, owner_id=owner_id)
+            status = "completed"
+        except OptimizationCancelledError:
+            status = "cancelled"
+        except KeyboardInterrupt as error:
+            status, failure = "cancelled", error
+        except Exception as error:
+            status, failure = "failed", error
+        finally:
+            if store is not None:
+                status, failure, worker_outcome = _finalize_optimization_run(
+                    store,
+                    directory,
+                    session_id=session_id,
+                    run_id=run_id,
+                    owner_id=owner_id,
+                    managed_run_id=managed_run_id,
+                    status=status,
+                    failure=failure,
+                )
+    if structured:
+        event = {"type": "terminal", "status": status, "run_id": run_id}
+        if managed_run_id and worker_outcome is not None:
+            event["worker_outcome"] = worker_outcome
+        emit_event(event)
+    if failure is not None:
+        raise failure
+
+
+def _run_approval(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    settings: FleetSettings,
+    *,
+    session_id: str,
+    managed_run_id: str | None,
+    managed_owner_id: str | None,
+) -> None:
+    version = args.approve
+    if Path(version).name != version or not version.startswith(session_id + "-"):
+        parser.error("Version must be a candidate belonging to this session")
+    if managed_run_id and managed_run_id != version:
+        parser.error("A managed approval must use the candidate's run ID")
+    directory = Path(settings.compiled_program_dir)
+    candidate_path = directory / "candidates" / f"{version}.json"
+    manifest = ArtifactManifest(**json.loads(candidate_path.with_suffix(".manifest.json").read_bytes()))
+    if manifest.version != version:
+        raise ValueError("Candidate manifest does not match the requested experiment")
+    store = _open_optimization_store(settings, initialize=not bool(managed_run_id))
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(closing(store.acquire_optimization_lease()))
+        except Exception:
+            store.close()
+            raise
+        stack.callback(store.close)
+        try:
             # No approval decision is persisted until pending MLflow evidence has flushed.
             mlflow.flush_trace_async_logging()
             import_legacy_runs(store, directory)
@@ -662,8 +793,8 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
             if saved is None:
                 raise ValueError("Approval outcome could not be recorded; inspect the active artifact digest")
         except Exception as error:
-            if managed_run_id and store is not None:
-                try:
+            if managed_run_id:
+                with suppress(Exception):
                     current_record = store.get_optimization_run(session_id, version)
                     if (
                         current_record is not None
@@ -689,210 +820,116 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                         )
                         if getattr(args, "structured_events", False):
                             emit_event({"type": "terminal", "status": "failed", "run_id": version, **outcome})
-                except Exception:
-                    # Preserve the original approval error if recording its outcome also fails.
-                    pass
             raise
-        finally:
-            try:
-                store.close()
-            finally:
-                if lease is not None:
-                    lease.close()
-        print(f"Approved {version} (digest {manifest.digest[:12]}); Session {session_id} serves it from its next Turn.")
-        if getattr(args, "structured_events", False):
-            emit_event({"type": "terminal", "status": "approved", "run_id": version})
-        return
-    directory = Path(settings.compiled_program_dir)
-    run_id = managed_run_id or f"{session_id}-{uuid.uuid4().hex}"
-    owner_id = managed_owner_id or uuid.uuid4().hex
-    structured = getattr(args, "structured_events", False)
-    options = options.model_dump()
-    store = None
-    lease = None
-    status = "failed"
-    failure: BaseException | None = None
+    print(f"Approved {version} (digest {manifest.digest[:12]}); Session {session_id} serves it from its next Turn.")
+    if getattr(args, "structured_events", False):
+        emit_event({"type": "terminal", "status": "approved", "run_id": version})
+
+
+def _finalize_optimization_run(
+    store: Store,
+    directory: Path,
+    *,
+    session_id: str,
+    run_id: str,
+    owner_id: str,
+    managed_run_id: str | None,
+    status: str,
+    failure: BaseException | None,
+) -> tuple[str, BaseException | None, dict[str, Any] | None]:
     worker_outcome: dict[str, Any] | None = None
     try:
-        store = _open_optimization_store(
-            settings,
-            max_size=max(2, args.threads),
-            initialize=not bool(managed_run_id),
-        )
-        lease = store.acquire_optimization_lease()
-        import_legacy_runs(store, directory)
+        mlflow.flush_trace_async_logging()
+    except Exception as error:
+        if failure is None:
+            status, failure = "failed", error
+    try:
+        # The DDL pool closes before terminal state is published. The runtime
+        # pool remains available to save a failed cleanup outcome.
+        store.close_migration_pool()
+    except Exception as error:
+        if failure is None:
+            status, failure = "failed", error
+    if status == "completed" and (
+        (directory / "runs" / run_id / "gepa.stop").exists() or _database_stop_requested(store, session_id, run_id)
+    ):
+        status = "cancelled"
+    details: dict[str, Any] = {
+        "status": status,
+        "stage": status,
+        "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "candidate_version": run_id if status == "completed" else None,
+    }
+    if failure is not None:
+        details["failure"] = {
+            "type": type(failure).__name__,
+            "detail": "Optimization failed; exception details omitted.",
+        }
+    try:
         if managed_run_id:
-            record = store.get_optimization_run(session_id, run_id)
-            if (
-                record is None
-                or record.get("owner_id") != owner_id
-                or record.get("status") != "running"
-                or record.get("options") != options
-            ):
-                raise ValueError("Managed experiment is missing, stale, or owned by another worker")
-        else:
-            reconcile_abandoned_running_runs(store)
-            store.create_optimization_run(
+            worker_outcome = details
+            saved = _update_run(
+                store,
                 session_id,
                 run_id,
-                request_id=uuid.uuid4().hex,
-                options=options,
                 owner_id=owner_id,
-                managed=False,
+                expected_statuses=("running",),
+                worker_outcome=details,
             )
-        started = _update_run(
-            store,
-            session_id,
-            run_id,
-            owner_id=owner_id,
-            expected_statuses=("running",),
-            stage="preparing",
-            candidate_version=run_id,
-            started_at=datetime.now(UTC).isoformat(timespec="seconds"),
-        )
-        if started is None:
-            raise ValueError("Experiment could not be claimed by this optimizer process")
-        if structured:
-            emit_event({"type": "started", "run_id": run_id, "stage": "preparing"})
-
-        target = settings.mlflow_target()
-        experiment_id = configure_mlflow_observability(
-            target.optimization_experiment_name,
-            target.tracking_uri,
-            trace_catalog=settings.mlflow_trace_catalog,
-            trace_schema=(
-                settings.mlflow_optimization_trace_schema
-                if target.mode == "databricks"
-                else settings.mlflow_trace_schema
-            ),
-            trace_table_prefix=(
-                settings.mlflow_optimization_trace_table_prefix
-                if target.mode == "databricks"
-                else settings.mlflow_trace_table_prefix
-            ),
-            tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
-        )
-        if experiment_id:
-            mlflow.set_experiment(experiment_id=experiment_id)
-        mlflow.dspy.autolog(
-            log_traces=options["trace_search"],
-            log_traces_from_compile=options["trace_search"],
-            log_traces_from_eval=options["trace_search"],
-            log_compiles=True,
-        )
-        _compile(args, settings, store, session_id, target, run_id, owner_id=owner_id)
-        status = "completed"
-    except OptimizationCancelledError:
-        status = "cancelled"
-    except KeyboardInterrupt as error:
-        status, failure = "cancelled", error
+        else:
+            saved = _update_run(
+                store,
+                session_id,
+                run_id,
+                owner_id=owner_id,
+                expected_statuses=("running",),
+                **details,
+            )
+        if saved is None and failure is None:
+            status = "cancelled"
+            worker_outcome = {**details, "status": status, "stage": status}
     except Exception as error:
         status, failure = "failed", error
-    finally:
-        if store is not None:
-            try:
-                try:
-                    mlflow.flush_trace_async_logging()
-                except Exception as error:
-                    if failure is None:
-                        status, failure = "failed", error
-                try:
-                    # The DDL pool closes before terminal state is published. The runtime
-                    # pool remains available to save a failed cleanup outcome.
-                    store.close_migration_pool()
-                except Exception as error:
-                    if failure is None:
-                        status, failure = "failed", error
-                if status == "completed" and (
-                    (directory / "runs" / run_id / "gepa.stop").exists()
-                    or _database_stop_requested(store, session_id, run_id)
-                ):
-                    status = "cancelled"
-                details: dict[str, Any] = {
-                    "status": status,
-                    "stage": status,
-                    "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                    "candidate_version": run_id if status == "completed" else None,
-                }
-                if failure is not None:
-                    details["failure"] = {
-                        "type": type(failure).__name__,
-                        "detail": "Optimization failed; exception details omitted.",
-                    }
-                try:
-                    if managed_run_id:
-                        worker_outcome = details
-                        saved = _update_run(
-                            store,
-                            session_id,
-                            run_id,
-                            owner_id=owner_id,
-                            expected_statuses=("running",),
-                            worker_outcome=details,
-                        )
-                    else:
-                        saved = _update_run(
-                            store,
-                            session_id,
-                            run_id,
-                            owner_id=owner_id,
-                            expected_statuses=("running",),
-                            **details,
-                        )
-                    if saved is None and failure is None:
-                        status = "cancelled"
-                        worker_outcome = {**details, "status": status, "stage": status}
-                except Exception as error:
-                    status, failure = "failed", error
-                    worker_outcome = {"status": status, "failure": {"type": type(error).__name__}}
-                try:
-                    store.close()
-                except Exception as error:
-                    status, failure = "failed", error
-                    cleanup_failure = {
-                        "type": type(error).__name__,
-                        "detail": "Optimization cleanup failed.",
-                    }
-                    if not managed_run_id:
-                        with suppress(Exception):
-                            _update_run(
-                                store,
-                                session_id,
-                                run_id,
-                                owner_id=owner_id,
-                                expected_statuses=("completed", "cancelled", "failed"),
-                                status="failed",
-                                stage="failed",
-                                candidate_version=None,
-                                failure=cleanup_failure,
-                            )
-                    elif worker_outcome is not None:
-                        worker_outcome = {
-                            **worker_outcome,
-                            "status": "failed",
-                            "stage": "failed",
-                            "candidate_version": None,
-                            "failure": cleanup_failure,
-                        }
-                        with suppress(Exception):
-                            _update_run(
-                                store,
-                                session_id,
-                                run_id,
-                                owner_id=owner_id,
-                                expected_statuses=("running",),
-                                worker_outcome=worker_outcome,
-                            )
-            finally:
-                if lease is not None:
-                    lease.close()
-    if structured:
-        event = {"type": "terminal", "status": status, "run_id": run_id}
-        if managed_run_id and worker_outcome is not None:
-            event["worker_outcome"] = worker_outcome
-        emit_event(event)
-    if failure is not None:
-        raise failure
+        worker_outcome = {"status": status, "failure": {"type": type(error).__name__}}
+    try:
+        store.close()
+    except Exception as error:
+        status, failure = "failed", error
+        cleanup_failure = {
+            "type": type(error).__name__,
+            "detail": "Optimization cleanup failed.",
+        }
+        if not managed_run_id:
+            with suppress(Exception):
+                _update_run(
+                    store,
+                    session_id,
+                    run_id,
+                    owner_id=owner_id,
+                    expected_statuses=("completed", "cancelled", "failed"),
+                    status="failed",
+                    stage="failed",
+                    candidate_version=None,
+                    failure=cleanup_failure,
+                )
+        elif worker_outcome is not None:
+            worker_outcome = {
+                **worker_outcome,
+                "status": "failed",
+                "stage": "failed",
+                "candidate_version": None,
+                "failure": cleanup_failure,
+            }
+            with suppress(Exception):
+                _update_run(
+                    store,
+                    session_id,
+                    run_id,
+                    owner_id=owner_id,
+                    expected_statuses=("running",),
+                    worker_outcome=worker_outcome,
+                )
+    return status, failure, worker_outcome
 
 
 def _compile(

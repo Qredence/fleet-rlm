@@ -60,7 +60,7 @@ def build_snapshot(
 
     Omitted credentials come from Fleet settings; `name` overrides only the provider name.
     The build streams logs and waits up to 20 minutes by default. A timeout does not
-    guarantee the remote build stopped: inspect it with verify_snapshot before retrying.
+    guarantee the remote build stopped: inspect provider state before retrying.
 
     Raises:
         ValueError: Credentials are empty or the build timeout is not finite and positive.
@@ -148,22 +148,3 @@ def activate_snapshot(
                     "Activation is not confirmed; verify provider state before retrying.", state="pending"
                 ) from None
         time.sleep(min(2, max(0, deadline - time.monotonic())))
-
-
-def verify_snapshot(
-    *, name: str = SNAPSHOT_NAME, api_key: str | None = None, org_id: str | None = None
-) -> SnapshotIdentity:
-    """Read the snapshot back from the provider and enforce the Turn state and floors.
-
-    Refreshes the cached identity. Omitted credentials come from Fleet settings.
-
-    Raises:
-        ValueError: An API key or organization is empty after credential resolution.
-        SnapshotUnavailableError: The snapshot lookup fails, is not active, or is below a
-            resource floor.
-
-    Settings and provider client initialization errors propagate.
-    """
-    key, organization = _resolved_credentials(api_key, org_id)
-    client = Daytona(DaytonaConfig(api_key=key, organization_id=organization))
-    return preflight(client.snapshot, name=name, api_key=key, org_id=organization, refresh=True)

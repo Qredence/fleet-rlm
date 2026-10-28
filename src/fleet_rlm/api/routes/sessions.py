@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from fleet_rlm.api.deps import LOCKED, LockedRuntime, Registry, Runtime, Settings, StoreDep, session_lock, translate
 from fleet_rlm.api.schemas import (
@@ -30,7 +29,7 @@ from fleet_rlm.api.schemas import (
     Status,
     TurnStatus,
 )
-from fleet_rlm.session import SessionRuntime, runtime_configuration
+from fleet_rlm.session import runtime_configuration
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 router = APIRouter(tags=["sessions"])
@@ -225,26 +224,8 @@ def remove_memory(memory_id: str, runtime: LockedRuntime) -> Deleted:
     return Deleted(deleted=memory_id)
 
 
-def skills_runtime(registry: Registry, session_id: str = "default") -> SessionRuntime:
-    """Resolve the Session runtime that a Skills request operates on."""
-    with translate("Session runtime is unavailable", invalid="Invalid Session ID"):
-        return registry.get(session_id)
-
-
-SkillsRuntime = Annotated[SessionRuntime, Depends(skills_runtime)]
-
-
-def locked_skills_runtime(runtime: SkillsRuntime) -> Generator[SessionRuntime, None, None]:
-    """Lock the implicit default Session for one Skills operation."""
-    with session_lock(runtime):
-        yield runtime
-
-
-LockedSkillsRuntime = Annotated[SessionRuntime, Depends(locked_skills_runtime, scope="function")]
-
-
 @skills_router.get("/skills", responses=LOCKED)
-def get_skills_catalog(runtime: LockedSkillsRuntime) -> Catalog:
+def get_skills_catalog(runtime: LockedRuntime) -> Catalog:
     """Sync local Skills to the Session's volume and return the catalog XML."""
     with translate("Session Skill catalog is unavailable"):
         runtime.skill_mgr.sync_local_skills_to_volume()
@@ -252,14 +233,14 @@ def get_skills_catalog(runtime: LockedSkillsRuntime) -> Catalog:
 
 
 @skills_router.post("/skills/pull", responses=LOCKED)
-def pull_skills_to_local(runtime: LockedSkillsRuntime) -> Exported:
+def pull_skills_to_local(runtime: LockedRuntime) -> Exported:
     """Export the Session's volume Skills to local storage."""
     with translate("Skill export is unavailable"):
         return Exported(exported=runtime.skill_mgr.export_volume_skills_to_local())
 
 
 @skills_router.post("/skills/push", responses=LOCKED)
-def push_skills(runtime: LockedSkillsRuntime) -> Pushed:
+def push_skills(runtime: LockedRuntime) -> Pushed:
     """Push local Skills to the Session's volume and return the count."""
     with translate("Skill push is unavailable"):
         return Pushed(pushed=int(runtime.skill_mgr.sync_local_skills_to_volume()))

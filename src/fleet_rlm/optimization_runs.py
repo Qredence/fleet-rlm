@@ -127,7 +127,7 @@ def add_optimization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--approve", metavar="VERSION", help="install a candidate after checking current evidence")
 
 
-def validate_run_id(run_id: str) -> str:
+def validate_run_id(run_id: object) -> str:
     """Reject traversal and unsupported run identities before filesystem access."""
     if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id) or ".." in run_id:
         raise ValueError("run_id is invalid")

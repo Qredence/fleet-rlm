@@ -388,6 +388,7 @@ def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypat
         return True
 
     monkeypatch.setattr(cli, "_onboard", complete_setup)
+    monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
 
     def running_services(selected_plan, **kwargs):
         calls["serving_plan"] = selected_plan

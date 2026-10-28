@@ -11,11 +11,14 @@ src/fleet_rlm/
 ├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
 ├── skills.py          # User Skill validation, sync, and catalog
 ├── sandbox/
-│   ├── manager.py     # Daytona root/child sandboxes, budgets, workspace files, learned notes
+│   ├── manager.py     # Daytona root/child sandboxes, lifecycle, and budgets
+│   ├── workspace_io.py # Session workspace files, context datasets, and learned notes mixin
 │   ├── interpreter.py # DSPy CodeInterpreter and host-tool dispatch
 │   ├── repl.py        # run_code transport and stdout bridge protocol
 │   ├── snapshots/     # Packaged definition, runtime preflight, operator operations
-│   └── runtime/repl.py # Sandbox-side namespace, output capture, and bridge
+│   └── runtime/
+│       ├── repl.py    # Sandbox-side namespace, output capture, and bridge
+│       └── fs_ops.py  # Sandbox-side filesystem, staging, digest, notes, and Skill scripts
 ├── workspace.py       # Session ID and workspace path validation, serializable dataset handles
 ├── engine/
 │   ├── signatures.py  # Every DSPy signature GEPA tunes (route vocabulary lives in contracts)
@@ -45,7 +48,9 @@ src/fleet_rlm/
 ├── session.py         # Per-Session runtime and registry
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli` and `fleet web`
 ├── tui/
-│   ├── app.py         # Prompt loop and Turn stream reader
+│   ├── app.py         # Fullscreen Textual application and non-TTY fallback loop
+│   ├── widgets.py     # Prompt composer, command menu, collapsible steps, and Turn widget
+│   ├── stream.py      # Turn SSE request and event stream parser
 │   ├── setup.py       # FastAPI-backed startup checklist
 │   ├── commands.py    # Slash-command table (dispatch, /help, completion)
 │   ├── experiments.py # API-backed optimization lifecycle and review screen
