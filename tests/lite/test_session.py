@@ -12,7 +12,7 @@ from fleet_rlm.session import SessionRuntime
 def _runtime(**overrides) -> SessionRuntime:
     dependencies = {
         "sandbox_mgr": SimpleNamespace(),
-        "harness": SimpleNamespace(),
+        "store": SimpleNamespace(),
         "skill_mgr": SimpleNamespace(),
         "engine": SimpleNamespace(),
     }
@@ -72,7 +72,7 @@ def test_a_dropped_lease_is_renewed_on_a_fresh_connection_when_the_lock_is_still
     store = SimpleNamespace(acquire_session_lease=lambda session_id: renewed if session_id == "s1" else None)
     runtime = _runtime(
         sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set, session_id="s1"),
-        harness=SimpleNamespace(store=store),
+        store=store,
         lease=DroppedLease(),  # type: ignore[arg-type]
     )
     runtime.start_lease_monitor(interval_seconds=0.001)
@@ -318,7 +318,7 @@ def test_lease_acquired_after_close_times_out_is_closed_without_publication(monk
 
     runtime = _runtime(
         sandbox_mgr=SimpleNamespace(session_id="s1"),
-        harness=SimpleNamespace(store=SimpleNamespace(acquire_session_lease=acquire)),
+        store=SimpleNamespace(acquire_session_lease=acquire),
         lease=SimpleNamespace(execute=probe, close=old_closed.set),  # type: ignore[arg-type]
     )
     runtime.start_lease_monitor(interval_seconds=0.001)
@@ -358,11 +358,6 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
         claim_environment_report=claim,
     )
     monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
-    monkeypatch.setattr(
-        session_module,
-        "VolumePostgresHarness",
-        lambda *_args: SimpleNamespace(ensure_session=lambda _session_id: None),
-    )
     monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
     monkeypatch.setattr(session_module, "AdaptiveFleetEngine", lambda **_kwargs: SimpleNamespace())
     registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]

@@ -36,8 +36,8 @@ from pathlib import Path
 
 SKILL_ROOT = Path("/workspace/skills")
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_MAX_SKILL_BYTES = 1000000
-_MAX_SKILL_FILES = 200
+_MAX_SKILL_BYTES = __FLEET_SKILL_BYTES__
+_MAX_SKILL_FILES = __FLEET_SKILL_FILES__
 
 def _skill_dir(name):
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
@@ -243,7 +243,7 @@ def save_skill(name, description, instructions_md, scripts=None, references=None
             raise ValueError("Skill resource cannot replace a symbolic link")
         destination.write_text(content, encoding="utf-8")
     return "Saved Skill " + name
-'''
+'''.replace("__FLEET_SKILL_BYTES__", str(MAX_SKILL_FILE_BYTES)).replace("__FLEET_SKILL_FILES__", str(MAX_SKILL_FILES))
 
 
 def parse_and_validate_skill_md(folder_name: str, raw_text: str) -> tuple[dict[str, str], str]:
@@ -372,7 +372,12 @@ class SkillManager:
 
     def export_volume_skills_to_local(self) -> list[str]:
         """Pull runtime-authored Skills into the separate local Fleet Skills folder."""
-        files = json.loads(self.sandbox_mgr.exec_remote_python(export_skills_code()) or "[]")
+        files = json.loads(
+            self.sandbox_mgr.exec_remote_python(
+                export_skills_code(MAX_SKILL_FILE_BYTES, MAX_SKILL_FILES, MAX_SKILL_TOTAL_BYTES)
+            )
+            or "[]"
+        )
         if not isinstance(files, list):
             raise ValueError("Exported Skill manifest is invalid")
         validated: list[tuple[PurePosixPath, bytes]] = []

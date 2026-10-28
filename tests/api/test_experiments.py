@@ -519,10 +519,10 @@ def test_initialization_failure_releases_owner_lease_on_cleanup(tmp_path, monkey
     async def scenario():
         store, manager = _manager_with_store(tmp_path)
 
-        def fail(*_args):
+        def fail(*_args, **_kwargs):
             raise RuntimeError("history unavailable")
 
-        monkeypatch.setattr("fleet_rlm.experiments.import_legacy_runs", fail)
+        monkeypatch.setattr(ExperimentManager, "_recover_stale_runs", fail)
         with pytest.raises(RuntimeError, match="history unavailable"):
             await manager.initialize()
         assert store.optimization_owner_alive(manager.owner_id)
@@ -566,57 +566,6 @@ def test_recovery_keeps_workers_active_until_global_lease_is_released(tmp_path: 
         snapshot = await cli_manager.list(standalone["session_id"])
         assert snapshot["experiments"][0]["status"] == "interrupted"
         await cli_manager.close()
-
-    asyncio.run(scenario())
-
-
-def test_legacy_approving_history_is_imported_inactive_then_recovered_idempotently(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        store = MemoryStore()
-        history = tmp_path / "experiments" / "sess_legacy"
-        history.mkdir(parents=True)
-        candidates = tmp_path / "candidates"
-        candidates.mkdir()
-        installed = b"installed candidate"
-        digest = hashlib.sha256(installed).hexdigest()
-        for suffix in ("approved", "interrupted"):
-            current = f"sess_legacy-{suffix}"
-            (history / f"{current}.json").write_text(
-                json.dumps(
-                    {
-                        "session_id": "sess_legacy",
-                        "run_id": current,
-                        "request_id": f"request-{suffix}",
-                        "options": {},
-                        "owner_id": "legacy-owner",
-                        "managed": False,
-                        "status": "approving",
-                        "stage": "approving",
-                    }
-                )
-            )
-            (candidates / f"{current}.manifest.json").write_text(
-                json.dumps(
-                    {
-                        "version": current,
-                        "digest": digest if suffix == "approved" else "other",
-                        "gate": {"passed": True},
-                        "dependencies": {"incumbent_digest": "incumbent"},
-                    }
-                )
-            )
-        (tmp_path / "sess_legacy.json").write_bytes(installed)
-        manager = ExperimentManager(_settings(tmp_path), store)  # type: ignore[arg-type]
-        await manager.initialize()
-        rows = await asyncio.to_thread(store.list_optimization_runs, "sess_legacy")
-        assert {row["status"] for row in rows} == {"approved", "interrupted"}
-        assert all(row["approval_pending"] is False for row in rows)
-        await manager.initialize()
-        assert {row["status"] for row in await asyncio.to_thread(store.list_optimization_runs, "sess_legacy")} == {
-            "approved",
-            "interrupted",
-        }
-        await manager.close()
 
     asyncio.run(scenario())
 

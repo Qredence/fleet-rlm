@@ -15,7 +15,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from fleet_rlm.optimization_runs import ACTIVE_STATUSES
-from fleet_rlm.setup.service import SECTIONS, Operation, SetupConflictError, SetupService
+from fleet_rlm.setup import SECTIONS, Operation, SetupConflictError, SetupService
 
 _bearer = HTTPBearer(auto_error=False)
 

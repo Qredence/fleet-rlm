@@ -51,7 +51,7 @@ class ExperimentsScreen(ModalScreen[None]):
         client: httpx.Client,
         session_id: str,
         *,
-        on_run: Callable[[dict[str, Any] | str], None],
+        on_run: Callable[[], None],
         on_cancel: Callable[[str], None],
         on_review: Callable[[str, str, str], None],
         on_snapshot: Callable[[dict[str, Any] | None], None] | None = None,
@@ -175,17 +175,10 @@ class ExperimentsScreen(ModalScreen[None]):
             self.comparison = None
             self.comparison_run_id = None
         self._sync_progress(publish=error is None)
-        lines = ["SESSION RUNS", ""]
-        lines.extend(
-            f"{'>' if record['run_id'] == self.selected_run_id else ' '} {record.get('status', 'unknown'):10} "
-            f"{record['run_id']}  ·  {record.get('stage', '—')}"
-            for record in self.records
-        )
-        if not self.records:
-            lines.append("No optimization runs for this Session.")
         if error:
-            lines = [error]
-        self.query_one("#experiment-history", Static).update(Text("\n".join(lines), overflow="fold"))
+            self.query_one("#experiment-history", Static).update(Text(error, overflow="fold"))
+        else:
+            self._render_history()
         self._render_progress()
         self._render_detail()
         self._polling = False
@@ -393,7 +386,7 @@ class ExperimentsScreen(ModalScreen[None]):
         if button_id == "experiment-close":
             self.dismiss()
         elif button_id == "experiment-run":
-            self.on_run("")
+            self.on_run()
         elif button_id == "experiment-cancel":
             if self.selected_run_id:
                 self.on_cancel(self.selected_run_id)

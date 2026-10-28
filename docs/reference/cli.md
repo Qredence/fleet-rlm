@@ -186,7 +186,7 @@ loads an approved candidate at the start of the next Turn.
 writes gold labels onto a trace; partial updates preserve existing expectations.
 `--critical` requires at least one supplied or previously saved expected value and pins the complete source group
 to GEPA holdout; a candidate must achieve quality 1 for every critical case in
-each of three paired validation passes. A promotion is refused if no critical
+each of three paired validation passes. Search fails during preparation, before GEPA compilation, if no critical
 holdout case is labeled. `--status` defaults to
 `approved` for a new label; updates preserve status and source group unless supplied.
 A new source group defaults to the trace's session id. The trace ID is printed after
@@ -194,7 +194,7 @@ each Turn and by `/trace`.
 
 `fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
-`--validation-ratio`, and `--approve VERSION`. Reflection calls and the three paired
+`--validation-ratio` (inclusive 0.1–0.5, default 0.35), and `--approve VERSION`. Reflection calls and the three paired
 final validation passes are additional work, not covered by the search budget.
 Native GEPA checks the metric-call budget between batches, so it may overshoot.
 `--reflection-minibatch-size N` (default 3) sets the native reflection batch size;

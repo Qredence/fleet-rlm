@@ -202,7 +202,7 @@ search, environment interpolation or hot reload. Every file must declare
 The configuration digest includes the selected backend and both profiles.
 Existing GEPA approval evidence with a different identity requires reevaluation.
 Removing the former snapshot setting (`[daytona] snapshot` and its environment
-override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots/definition.py`
+override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots.py`
 and cannot be selected through the environment or TOML) intentionally changes
 `configuration()`'s digest. Treat that as an intentional configuration identity
 break: prior digests identify a different configuration, so dependent GEPA approval

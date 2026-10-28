@@ -12,7 +12,7 @@ import dspy
 import pytest
 from dspy.utils.usage_tracker import UsageTracker
 
-from fleet_rlm.lm_usage import LMUsageCallback, _usage_summary, decision_usage, usage_callbacks
+from fleet_rlm.observability import LMUsageCallback, _usage_summary, decision_usage, usage_callbacks
 
 
 @pytest.mark.parametrize(
@@ -45,7 +45,7 @@ def test_usage_summary_derives_only_from_complete_receipts(entry, expected):
 def usage_span(monkeypatch):
     attributes = {}
     span = SimpleNamespace(span_type="LLM", set_attribute=lambda key, value: attributes.__setitem__(key, value))
-    monkeypatch.setattr("fleet_rlm.lm_usage.mlflow.get_current_active_span", lambda: span)
+    monkeypatch.setattr("fleet_rlm.observability.mlflow.get_current_active_span", lambda: span)
     return attributes
 
 
@@ -113,7 +113,7 @@ def test_generation_restores_native_scope_when_span_annotation_fails(monkeypatch
         raise RuntimeError("annotation failed")
 
     span = SimpleNamespace(span_type="LLM", set_attribute=reject_attribute)
-    monkeypatch.setattr("fleet_rlm.lm_usage.mlflow.get_current_active_span", lambda: span)
+    monkeypatch.setattr("fleet_rlm.observability.mlflow.get_current_active_span", lambda: span)
     collector = LMUsageCallback()
     parent = UsageTracker()
     with dspy.context(usage_tracker=parent):
@@ -223,7 +223,7 @@ from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.contracts import Route
 from fleet_rlm.adapters import FleetRLMChatAdapter
-from fleet_rlm.lm_usage import decision_usage, usage_callbacks
+from fleet_rlm.observability import decision_usage, usage_callbacks
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 class Engine:
@@ -304,7 +304,7 @@ print(f"Verified offline trace {trace_id}: {len(trace.data.spans)} spans, 3 mode
 def test_turn_callbacks_compose_ambient_callbacks_with_one_usage_collector():
     import dspy
 
-    from fleet_rlm.lm_usage import LMUsageCallback, ambient_callbacks, turn_callbacks
+    from fleet_rlm.observability import LMUsageCallback, ambient_callbacks, turn_callbacks
 
     marker = object()
     with dspy.context(callbacks=[marker]):
@@ -320,7 +320,7 @@ def test_typesafe_callbacks_drop_the_mlflow_dspy_hook():
     import dspy
     from mlflow.dspy.callback import MlflowCallback
 
-    from fleet_rlm.lm_usage import typesafe_callbacks
+    from fleet_rlm.observability import typesafe_callbacks
 
     marker = object()
     with dspy.context(callbacks=[MlflowCallback(), marker]):
@@ -330,7 +330,7 @@ def test_typesafe_callbacks_drop_the_mlflow_dspy_hook():
 def test_stream_callbacks_append_without_reordering():
     import dspy
 
-    from fleet_rlm.lm_usage import stream_callbacks
+    from fleet_rlm.observability import stream_callbacks
 
     marker, collector = object(), object()
     with dspy.context(callbacks=[marker]):

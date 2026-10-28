@@ -1142,7 +1142,7 @@ def clear_snapshot_preflight_cache():
 
     from fleet_rlm.config import get_settings
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     snapshot_module.clear_preflight_cache()
     get_settings.cache_clear()
@@ -1264,7 +1264,7 @@ def test_preflight_unusable_snapshot_treats_provider_error_as_missing(monkeypatc
 
 def test_preflight_surfaces_provider_failures_and_refresh_evicts_stale_cache() -> None:
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     active = _SnapshotDTO(id="snap-1", state="active", cpu=4, mem=8, disk=8)
 
@@ -1332,7 +1332,7 @@ def test_provider_build_metadata_is_hashed_and_not_copied_to_provenance() -> Non
 
 def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     now = [100.0]
     monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
@@ -1350,7 +1350,7 @@ def test_preflight_expires_success_after_sixty_seconds(monkeypatch) -> None:
 @pytest.mark.parametrize("old_failure", [False, True])
 def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation, old_failure) -> None:
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     started = threading.Event()
     release = threading.Event()
@@ -1389,7 +1389,7 @@ def test_new_preflight_does_not_join_or_get_overwritten_by_old_flight(operation,
 
 def test_concurrent_failed_preflight_releases_waiters_and_can_retry(monkeypatch) -> None:
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     started = threading.Event()
     joined = threading.Event()
@@ -1435,7 +1435,7 @@ def test_preflight_classifies_daytona_errors_without_exposing_the_provider_messa
 
     from daytona import DaytonaError, DaytonaNotFoundError
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     error_class = DaytonaNotFoundError if status == 404 else DaytonaError
     service = _RecordingSnapshotService(error=error_class("private provider detail", status_code=status))
@@ -1471,7 +1471,7 @@ def test_preflight_resources_enforce_floors(monkeypatch, tmp_path, cpu, mem, dis
 
 def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.preflight")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     first_started = threading.Event()
     second_arrived = threading.Event()
@@ -1504,7 +1504,7 @@ def test_concurrent_preflight_shares_single_inflight_lookup() -> None:
 
 def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) -> None:
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     monkeypatch.chdir(tmp_path)
     for name in ("FLEET_DAYTONA_API_KEY", "FLEET_DAYTONA_ORG_ID", "DAYTONA_API_KEY", "DAYTONA_ORG_ID", "FLEET_CONFIG"):
@@ -1554,7 +1554,7 @@ def test_build_and_verify_snapshot_credential_resolution(monkeypatch, tmp_path) 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
 def test_build_snapshot_rejects_unbounded_or_invalid_timeouts_before_contacting_daytona(timeout, monkeypatch):
 
-    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots.operations")
+    snapshot_module = importlib.import_module("fleet_rlm.sandbox.snapshots")
 
     monkeypatch.setattr(snapshot_module, "Daytona", lambda *_args: pytest.fail("No provider call expected"))
     with pytest.raises(ValueError, match="finite and positive"):

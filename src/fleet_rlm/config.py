@@ -314,6 +314,15 @@ class FleetSettings(BaseSettings):
         """Return which source supplied a setting, or `default` when it was not configured."""
         return self._configuration_sources.get(name, "default")
 
+    def for_session(self, saved: dict[str, Any]) -> FleetSettings:
+        """Apply only the supported persisted mode/model overrides, never credentials or provider endpoints."""
+        overrides = {}
+        if "mode" in saved:
+            overrides["execution_mode"] = saved["mode"]
+        if saved.get("models"):
+            overrides.update({f"fleet_{role}_model": saved["models"][role] for role in ("root", "sub")})
+        return self.with_explicit_overrides(**overrides)
+
     def with_explicit_overrides(self, **values: Any) -> FleetSettings:
         """Validate CLI overrides while retaining the provenance of unchanged settings."""
         unknown = values.keys() - type(self).model_fields.keys()

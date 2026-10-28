@@ -448,6 +448,37 @@ def test_fullscreen_optimize_submits_options_to_api_worker() -> None:
     assert captured[0]["request_id"]
 
 
+def test_fullscreen_review_uses_typed_callback_without_launch_roundtrip():
+    launches, reviews = [], []
+    state = commands.SessionState(
+        fullscreen=True,
+        optimizer_launcher=launches.append,
+        optimizer_reviewer=lambda *args: reviews.append(args),
+    )
+    ctx = type("Context", (), {"session_id": "sess_tui", "state": state})()
+    commands.COMMANDS["/optimize"].run(ctx, "--approve sess_tui-version")
+    assert launches == []
+    assert len(reviews) == 1 and reviews[0][:2] == ("sess_tui-version", "approved")
+    assert len(reviews[0][2]) == 36
+
+
+def test_default_button_and_slash_share_request_and_unresolved_id():
+    from types import SimpleNamespace
+
+    launches = []
+    state = commands.SessionState(fullscreen=True, optimizer_launcher=launches.append)
+    ctx = commands.Context(None, "sess_tui", state)
+    commands.COMMANDS["/optimize"].run(ctx, "")
+    fake = SimpleNamespace(
+        client=None,
+        session_id="sess_tui",
+        state=state,
+        _start_optimization=launches.append,
+    )
+    app.FleetTextualApp._start_default_optimization(fake)
+    assert len(launches) == 2 and launches[0] == launches[1]
+
+
 def test_fullscreen_optimize_rejects_session_override_and_mlflow_mismatch() -> None:
     calls: list[Any] = []
     state = commands.SessionState(fullscreen=True, optimizer_launcher=calls.append)
@@ -1335,7 +1366,7 @@ def test_experiments_disconnect_keeps_observing_run_and_reopen_shows_final_recor
                     break
             assert not tui._optimization_active
             assert not tui._optimization_stopping
-            assert tui._optimization_terminal_status == "completed"
+            assert running["status"] == "completed"
             assert not any(request.url.path.endswith("/cancel") for request in api["requests"])
 
             tui._open_experiments()

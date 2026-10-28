@@ -16,7 +16,7 @@ from typing import Any
 import dspy
 import pytest
 from dspy import AdapterParseError
-from fakes import FakeHarness, FakeManager, api_settings, client_for, opened_client, runtime_with, store_with
+from fakes import FakeManager, api_settings, client_for, opened_client, runtime_with, store_with
 
 import fleet_rlm.api.app as api_app
 import fleet_rlm.api.deps as api_deps
@@ -113,13 +113,11 @@ def traced(monkeypatch):
         seen["callbacks"].extend(callbacks)
         yield
 
-    import fleet_rlm.lm_usage as lm_usage
-
     seen["global_callback"] = object()
     fake_dspy = SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context)
     monkeypatch.setattr(turn_module, "dspy", fake_dspy)
-    # Callback composition lives in lm_usage, so the same ambient list must be visible there.
-    monkeypatch.setattr(lm_usage, "dspy", fake_dspy)
+    # Callback composition lives in observability, so the same ambient list must be visible there.
+    monkeypatch.setattr(observability, "dspy", fake_dspy)
     # The phase-span helper lives in observability, so the same recorder must be visible there.
     monkeypatch.setattr(observability.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "start_span", span)
@@ -180,7 +178,8 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
             notes=[{"file": "older.md", "summary": "prior hint"}],
             write_learned_note=write_note,
         ),
-        harness=FakeHarness(load_context=lambda _session: ("summary", "prior history"), commit_turn=persist),
+        load_context=lambda _session: ("summary", "prior history"),
+        commit_turn=persist,
         engine=run_engine,
         context=WorkspaceDataset("files/input.txt"),
     )
@@ -265,7 +264,7 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
     evidence = {"artifacts": {"complete": True, "files": {path: {"sha256": digest}}}}
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
-        harness=FakeHarness(commit_turn=lambda **kwargs: records.append(kwargs["turn_record"]) or [path]),
+        commit_turn=lambda **kwargs: records.append(kwargs["turn_record"]) or [path],
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", execution_evidence=evidence),
     )
     with opened_client(runtime) as (client, _app):
@@ -319,7 +318,7 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
             list_workspace_files=lambda: paths,
             read_workspace_file=lambda _path: raw,
         ),
-        harness=FakeHarness(commit_turn=lambda **_kwargs: paths),
+        commit_turn=lambda **_kwargs: paths,
         engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
     )
     with opened_client(runtime) as (client, _app):
@@ -340,14 +339,13 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
 
 @pytest.mark.parametrize("record_replay", [False, True])
 @pytest.mark.parametrize("bad_commit", [False, True])
-def test_real_harness_commits_managed_inventory_and_reports_commit_failure(
+def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
     traced, monkeypatch, tmp_path, record_replay, bad_commit
 ):
     import io
     from contextlib import redirect_stdout
 
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
-    from fleet_rlm.store.db import VolumePostgresHarness
 
     workspace = tmp_path / "workspace"
     (workspace / "files").mkdir(parents=True)
@@ -416,7 +414,8 @@ def test_real_harness_commits_managed_inventory_and_reports_commit_failure(
 
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=VolumePostgresHarness(store, manager),
+        store=store,
+        real_policy=True,
         engine=engine,
     )
     body = {"task": "produce output", "record_replay": record_replay, "idempotency_key": "inventory-first"}
@@ -475,9 +474,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
                 "environment": environment,
             },
         ),
-        harness=FakeHarness(
-            commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
-        ),
+        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         engine=lambda **_kwargs: SimpleNamespace(
             answer="17", route="flex", learned_skill_note="", lm_calls=1, sandbox_errors=0
         ),
@@ -528,7 +525,7 @@ def test_turn_provenance_matches_across_span_record_replay_and_terminal(traced) 
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
         sandbox_mgr=FakeManager(snapshot_provenance=lambda: dict(provenance)),
-        harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
+        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", lm_calls=1, sandbox_errors=0),
     )
     with opened_client(runtime) as (client, _app):
@@ -584,7 +581,7 @@ def test_snapshot_provenance_survives_a_preparation_failure_after_preflight(trac
     monkeypatch.setattr(turn_module, "encode_snapshot", oversized_replay)
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
     with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute", "record_replay": True})
@@ -619,7 +616,7 @@ def test_a_reused_snapshot_identity_reaches_the_span_before_preparation(traced) 
     )
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
     with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute"})
@@ -637,7 +634,7 @@ def test_no_snapshot_provenance_is_invented_when_preflight_never_resolved(traced
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(turn_inputs=explode),
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
     with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute"})
@@ -666,10 +663,8 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
         raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
 
     runtime = runtime_with(
-        harness=FakeHarness(
-            load_context=hydrate,
-            store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
-        ),
+        load_context=hydrate,
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
         engine=failing_engine,
     )
     with opened_client(runtime) as (client, app):
@@ -718,7 +713,7 @@ def _run_turn_direct(
 
 
 def _failed_turn_runtime(manager: FakeManager, stored: list[tuple[str, str, dict[str, Any]]], engine: Any):
-    return runtime_with(sandbox_mgr=manager, harness=FakeHarness(store=_recording_store(stored)), engine=engine)
+    return runtime_with(sandbox_mgr=manager, store=_recording_store(stored), engine=engine)
 
 
 def _recording_store(stored: list[tuple[str, str, dict[str, Any]]]) -> SimpleNamespace:
@@ -747,7 +742,7 @@ def test_a_completed_turn_records_not_required_and_never_stops_the_root(traced) 
     manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
     runtime = runtime_with(
         sandbox_mgr=manager,
-        harness=FakeHarness(commit_turn=persist),
+        commit_turn=persist,
         engine=engine,
     )
     emitted: list[dict[str, Any]] = []
@@ -776,7 +771,7 @@ def test_provider_bounds_are_reported_on_event_record_and_span_without_a_deadlin
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(provider_bounds=lambda: bounds),
-        harness=FakeHarness(commit_turn=persist),
+        commit_turn=persist,
         engine=lambda **_kwargs: SimpleNamespace(answer="kept warm", route="direct"),
     )
     emitted: list[dict[str, Any]] = []
@@ -798,7 +793,7 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(live_sandbox_id="sandbox-warm-root"),
-        harness=FakeHarness(commit_turn=persist),
+        commit_turn=persist,
         engine=lambda **_kwargs: SimpleNamespace(answer="kept warm", route="direct"),
     )
     for index in range(2):
@@ -939,7 +934,7 @@ def test_a_replayed_unknown_outcome_creates_no_new_execution() -> None:
         return SimpleNamespace(answer="unreachable", route="direct")
 
     runtime = runtime_with(
-        harness=FakeHarness(claim_turn=lambda *_args: prior),
+        claim_turn=lambda *_args: prior,
         engine=never,
     )
     emitted: list[dict[str, Any]] = []
@@ -987,7 +982,7 @@ def test_snapshot_preflight_refusal_reaches_the_client_and_the_stored_failure(st
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(turn_inputs=refuse),
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
     with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute pi"})
@@ -1018,7 +1013,7 @@ def test_other_preparation_failures_stay_sanitized_on_both_surfaces() -> None:
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(turn_inputs=explode),
-        harness=FakeHarness(store=store_with(finish_turn=lambda _session, *args: finished.append(args))),
+        store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
     )
     with opened_client(runtime) as (client, _app):
         response = client.post("/sessions/session-a/turn", json={"task": "compute pi"})
@@ -1043,7 +1038,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
         raise AssertionError("a replayed turn must not run the engine")
 
     runtime = runtime_with(
-        harness=FakeHarness(claim_turn=lambda *_args: prior),
+        claim_turn=lambda *_args: prior,
         engine=never,
     )
     store = store_with(
@@ -1079,7 +1074,7 @@ def test_reusing_an_idempotency_key_for_another_task_names_the_conflict() -> Non
     def conflict(*_args):
         raise IdempotencyConflictError("Idempotency key already belongs to another task")
 
-    with opened_client(runtime_with(harness=FakeHarness(claim_turn=conflict))) as (client, _):
+    with opened_client(runtime_with(claim_turn=conflict)) as (client, _):
         response = client.post("/sessions/session-a/turn", json={"task": "other", "idempotency_key": "k"})
 
     events = events_of(response)
@@ -1596,7 +1591,7 @@ def test_deadline_provenance_matches_across_span_turn_record_and_replay(
     monkeypatch.setattr(turn_module, "resolve_turn_deadline", counting)
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
-        harness=FakeHarness(commit_turn=lambda **kwargs: persisted.append(kwargs) or []),
+        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
         engine=lambda **_kwargs: SimpleNamespace(answer="done", route="direct"),
     )
     client, _ = client_for(runtime, settings=settings)

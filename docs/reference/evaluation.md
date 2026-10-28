@@ -101,7 +101,7 @@ explicit authorization.
   of either field with a preview. Missing, empty, oversized, or already truncated
   evidence produces a scorer error before any judge call. Diagnostic version
   `fleet-trace-assessments-v7` invalidates comparisons with earlier partial-text
-  judgments; the shared `fleet-metric-v9` and GEPA objectives are unchanged.
+  judgments. This diagnostic does not change the shared metric or GEPA objectives.
 - `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
   actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
   cover `use_skill`, `read_skill_reference`, `run_skill_script`, and `save_skill`,
@@ -158,7 +158,7 @@ Live evaluation and shared registry changes require explicit authorization.
 
 Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
-The GEPA objective uses `fleet-metric-v9`; changes to that metric invalidate
+The GEPA objective uses `fleet-metric-v10`; changes to that metric invalidate
 earlier metric feedback and candidate approval evidence. Candidate approval uses
 policy version 6; older evidence requires reevaluation.
 
@@ -166,7 +166,7 @@ The v7 trace-assessment identity also invalidates comparisons with the earlier
 routing rubric; Jev route probabilities retain their full precision in assessment metadata.
 Trace diagnostic rubric changes use the independent
 `fleet.trace_scorer_version` plus MLflow scorer name/version metadata. They do not change
-`fleet-metric-v9` or GEPA candidate identity. The code-based Fleet suite is the
+`fleet-metric-v10` or GEPA candidate identity. The code-based Fleet suite is the
 source for Fleet-managed evaluations; historical and manually created MLflow
 assessments remain in the trace as audit history. Re-score a saved trace with
 `score_evaluation_traces` to add new assessments without executing its Turn,
@@ -176,6 +176,13 @@ These custom code-based scorers run in offline evaluation; they are not
 automatically registered for production monitoring.
 
 ## Metrics
+
+Expected numeric values match complete signed decimal or exponent tokens, with
+optional correctly grouped thousands commas. Numeric equality is exact (Decimal,
+no tolerance): `12` rejects `-12` and `12.5`, and `1` rejects `1.25`; `+12`,
+`12.0`, and `1.2e1` are equal. Text expectations retain case-insensitive word
+matching and comma removal. Presence is not proof of answer correctness; semantic
+judging remains separate. This correction advances the shared scorer to v10.
 
 Native DSPy GEPA tunes the Turn program (`AdaptiveFleetEngine`) end to end,
 including predictor instructions and generated Flex code through DSPy's built-in
@@ -229,7 +236,7 @@ max(0, 1 - 0.015 * max(0, lm_calls - 3)
 All three counters must be explicit nonnegative integers. Missing legacy rejection
 counts are unknown, not zero: efficiency is omitted, `usage_available` is zero,
 and no efficiency credit or promotion evidence is granted. Existing feedback and
-candidate evidence must be reevaluated under `fleet-metric-v9`; old traces remain
+candidate evidence must be reevaluated under `fleet-metric-v10`; old traces remain
 inspectable.
 Latency and token usage remain diagnostic rather than weighted objectives.
 
@@ -358,15 +365,24 @@ contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
 API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
 
 LM and serving-adapter overrides use scoped `dspy.context` calls. DSPy's evaluator
-owns worker context propagation. Fleet uses public Flex parameter traversal and
-`Flex.load_state` to apply missing nested RLM limits while preserving the host
-SandboxLM and interpreter factory. JSON state preserves optimized instructions
+owns worker context propagation. Fleet uses native predictor/parameter traversal
+and native state loading. Missing RLM limits are supplied only by the outer Flex
+interpreter's constructor adapter, not by source rewriting or a second state load.
+DSPy support is pinned to the tested 3.4.1 release because this facade protocol is internal. JSON state preserves optimized instructions
 and Flex source; the host reconstructs the Daytona interpreter and current
 credentials. Runtime and configuration digests, a digest of optimization source,
 and a versioned fingerprint of installed distribution names and versions are
 captured before search and rechecked before the candidate manifest is written and
 again at approval. Evidence format 2 does not depend on finding a source-tree
 `uv.lock` at runtime.
+Source identity includes engine/optimizer/sandbox Python (including additions and
+removals), snapshot requirements, bundled Skill resources, and the shared
+configuration, contracts, instrumentation, evidence, replay, workspace, Skills,
+session, and Store owners. Presentation-only API/TUI code is excluded. Historical
+evidence remains readable, but changed code, dependencies, scorer, configuration,
+incumbent, or candidate bytes require reevaluation before installation. Static
+recipe identity does not prove every remote environment's identity.
+
 See [settings and context](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/settings-and-context.md)
 and [saving and loading](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/saving-and-loading.md).
 
@@ -378,6 +394,32 @@ disposable Daytona runtimes. Its deliberately incorrect seed checks source
 rewriting, held-out execution, and JSON reload; it does not establish production
 quality improvement or approve an artifact. Reports are local under
 `.scratch/gepa-validation/`.
+
+### Offline native boundary checks
+
+The locked source paths are `dspy.primitives.facade.FacadeInvocation.install`,
+`construct`, `_build_predictor`, and `call`; Flex's `BridgeRuntime` installs the
+shim and registers `__dspy_construct__` with nested `kwargs`. Native signature
+resolution, tool decoding, handles, LM scoping, and factory propagation remain
+native. Fleet copies only omitted `max_iters` / `max_llm_calls`, leaving explicit
+values (including `None`) and malformed payloads to native behavior. Propagated
+factories do not pass these defaults into deeper interpreters.
+
+`tests/sandbox/test_native_defaults.py` executes real native Flex source through
+an emulated Daytona transport, including aliases, expanded kwargs, multiple
+constructors, source save/load, factory isolation, and host-budget exhaustion.
+`tests/lite/test_dspy_contracts.py` covers native query metering, child lifecycle,
+and success-only promotion. Semantic `llm_query` calls are not code-executing
+children. Native nested RLMs retain the Daytona backend and host cleanup;
+Fleet-managed `spawn_agent` / `spawn_agents` retain input selection, allowlisted
+tools, slices, concurrent contexts, findings/artifact contracts, and failure
+classification. Primary RLM actions use root LM and queries use sub LM; Flex's
+baseline RLM inherits root LM, while explicit children use sub LM. No child
+scheduler or adapter equivalence is claimed by this consolidation.
+
+Validation still runs three paired passes before component comparison, even for
+unchanged candidates. No early no-candidate outcome, unattended recovery, or
+measured optimization gain is introduced.
 
 ## Judges
 
@@ -400,6 +442,12 @@ non-secret configuration, timeout, and Fleet version. Total workspace input is
 limited to 8 MB; oversized
 selected Turns fail before model execution. Snapshot bytes remain in Lakebase;
 the GEPA dataset carries only the Session/Turn reference and digest.
+
+The validation ratio is inclusive `0.1–0.5`, default `0.35`, across CLI, HTTP,
+slash commands, and direct curation. After grouped curation, nonempty train/dev/
+holdout splits and at least one critical holdout case are required before native
+search. Failure diagnostics show example/group counts and retain the existing
+failed-preparation lifecycle record.
 
 GEPA accepts only approved gold-labeled traces whose selected snapshot exists,
 passes its integrity checks, and matches the trace task, manifest, and file

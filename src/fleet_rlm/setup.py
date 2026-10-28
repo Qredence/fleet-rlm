@@ -22,8 +22,7 @@ from dotenv import dotenv_values, set_key
 from pydantic import ValidationError
 
 from fleet_rlm.config import FleetSettings, _toml_settings
-from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError
-from fleet_rlm.sandbox.snapshots.operations import activate_snapshot, build_snapshot
+from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError, activate_snapshot, build_snapshot
 
 # A deliberately bounded editor. Values retain FleetSettings' existing validation and precedence.
 FIELDS: dict[str, tuple[str, str, bool]] = {
@@ -395,14 +394,14 @@ class SetupService:
         import psycopg
         from psycopg import sql
 
-        from fleet_rlm.store.db import SCHEMA_VERSION
+        from fleet_rlm.store import SCHEMA_VERSION
 
         connection_class = psycopg.Connection
         if settings.fleet_lakebase_endpoint:
             from databricks.sdk import WorkspaceClient
             from databricks.sdk.core import Config
 
-            from fleet_rlm.store.db import lakebase_connection_class
+            from fleet_rlm.store import lakebase_connection_class
 
             if settings.mlflow_mode == "databricks" and settings.mlflow_tracking_uri == "databricks":
                 auth = Config(

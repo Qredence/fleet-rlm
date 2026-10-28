@@ -22,9 +22,10 @@ from dspy.primitives.facade import SandboxLM
 
 from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.optimize.artifacts import IsolatedFleetProgram, digest_bytes
+from fleet_rlm.optimize.artifacts import digest_bytes
 from fleet_rlm.optimize.gepa import build_instruction_proposer, build_proposal_stop_callback
 from fleet_rlm.optimize.scorers import fleet_metric
+from fleet_rlm.optimize.validation import IsolatedFleetProgram
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 _SEED = """class Addition(dspy.Module):

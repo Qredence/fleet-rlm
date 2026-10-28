@@ -25,7 +25,7 @@ from psycopg import sql
 from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.optimize.evaluation import parse_sse
+from fleet_rlm.contracts import parse_sse
 from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
 
 # Reported by the Turn itself, so the harness measures without instrumenting the runtime.
@@ -183,7 +183,7 @@ def main() -> None:
             persisted = client.get(f"/sessions/{session}/turns/{turn_id}").json()
             assert persisted["status"] == "completed"
             assert persisted["result"]["answer"] == outcomes[0]["answer"]
-            app.state.session_registry._sessions[session].harness.store.finish_turn(
+            app.state.session_registry._sessions[session].store.finish_turn(
                 session, turn_id, "failed", {"event": "error", "error": "simulated lost delivery"}
             )
             assert client.get(f"/sessions/{session}/turns/{turn_id}").json()["status"] == "completed"

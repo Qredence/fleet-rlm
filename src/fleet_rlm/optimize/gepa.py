@@ -3,21 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
 import json
-import os
-import platform
-import re
-import tempfile
-import threading
 import uuid
 from collections.abc import Mapping
 from contextlib import ExitStack, closing, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
-from importlib.metadata import distributions
-from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
@@ -25,36 +16,36 @@ import dspy
 import mlflow
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimization_runs import (
     ExperimentOptions,
     emit_event,
-    import_legacy_runs,
     reconcile_abandoned_running_runs,
 )
 from fleet_rlm.optimize.artifacts import (
-    APPROVAL_EVIDENCE_VERSION,
     APPROVAL_POLICY_VERSION,
     VALIDATION_PASSES,
     ArtifactManifest,
-    IsolatedFleetProgram,
+    approval_evidence,
     approve_candidate,
-    changed_components,
     component_diffs,
     digest_bytes,
+    format_report,
     promotion_gate,
     write_manifest,
 )
-from fleet_rlm.optimize.dataset import curate_dataset
+from fleet_rlm.optimize.dataset import curate_dataset, dataset_digest
 from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
-from fleet_rlm.optimize.validation import score_stage, summarize_passes
-from fleet_rlm.replay import selected_snapshot
-from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
-from fleet_rlm.session import settings_for_session
+from fleet_rlm.optimize.validation import (
+    IsolatedFleetProgram,
+    build_isolated_engine_factory,
+    score_stage,
+    summarize_passes,
+)
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.store import Store
-from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
+from fleet_rlm.workspace import validate_session_id
 
 
 class GEPAProgressReporter:
@@ -185,100 +176,6 @@ def _update_run(
     )
 
 
-def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
-    """Return a factory that builds disposable replay engines with verified immutable inputs.
-
-    Each engine receives a temporary copy of the candidate program. Serving LMs are
-    shared within this factory; callers own cleanup of returned engines and program files.
-    """
-    from fleet_rlm.execution_evidence import verification_entries
-
-    verifications = {
-        (item.source_session, item.replay_turn_id, item.replay_snapshot_sha256): verification_entries(
-            getattr(item, "structured_expectations", {}) or {}
-        )
-        for item in examples
-    }
-
-    shared: list[Any] = []
-    shared_lock = threading.Lock()
-
-    def language_models() -> tuple[Any, Any, Any]:
-        """Build the serving LMs once per factory; rollouts share them instead of rebuilding per example."""
-        with shared_lock:
-            if not shared:
-                root, sub, _reflection, jev = settings.build_lms()
-                shared.extend((root, sub, jev))
-            return shared[0], shared[1], shared[2]
-
-    def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
-        """Restore one reviewed replay into a disposable engine using the candidate program.
-
-        Reject inconsistent replay metadata with ValueError. Failures after the temporary
-        program file is created trigger sandbox shutdown and file-removal attempts.
-        """
-        snapshot = selected_snapshot(
-            store, example.source_session, example.replay_turn_id, example.replay_snapshot_sha256
-        )
-        if any(snapshot[name] != getattr(example, name) for name in (*ENGINE_INPUT_FIELDS, "context_files")):
-            raise ValueError("Curated replay snapshot does not match the reviewed example")
-        if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
-            raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")
-        root_lm, sub_lm, jev_lm = language_models()
-        replay_context = snapshot.get("dataset_context")
-        replay_files = snapshot["replay_files"]
-        namespace = validate_session_id(f"opt-{uuid.uuid4().hex}")
-        manager = DaytonaSandboxManager(
-            api_key=settings.fleet_daytona_api_key,
-            org_id=settings.fleet_daytona_org_id,
-            volume_id=settings.fleet_daytona_volume_id,
-            session_id=namespace,
-            auto_stop_minutes=settings.daytona_auto_stop_minutes,
-            sub_lm=sub_lm,
-            jev_lm=jev_lm,
-            max_llm_calls=settings.max_llm_calls_per_turn,
-            max_depth=settings.max_agent_depth,
-            max_children=settings.max_child_sandboxes,
-            max_active_children=settings.max_active_children,
-            turn_timeout_seconds=settings.turn_timeout_seconds,
-            linked_children=settings.linked_children,
-            disposable=True,
-        )
-        descriptor, program_path = tempfile.mkstemp(prefix="fleet-optimization-", suffix=".json")
-        os.close(descriptor)
-        try:
-            program.save(program_path)
-            for path, encoded in replay_files.items():
-                content = base64.b64decode(encoded, validate=True)
-                manager.write_workspace_file(path, content)
-            engine = AdaptiveFleetEngine(
-                sandbox_mgr=manager,
-                root_lm=root_lm,
-                sub_lm=sub_lm,
-                jev_lm=jev_lm,
-                compiled_path=program_path,
-                execution_mode=settings.execution_mode,
-            )
-            engine.optimization = OptimizationInputs(
-                context=WorkspaceDataset(**replay_context) if replay_context else None,
-                artifact_path=program_path,
-                verifications=tuple(
-                    verifications.get(
-                        (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256), []
-                    )
-                ),
-            )
-            return engine
-        except BaseException:
-            try:
-                manager.shutdown()
-            finally:
-                Path(program_path).unlink(missing_ok=True)
-            raise
-
-    return create
-
-
 # A proposed instruction replaces one predictor's instructions wholesale. FleetTask carries the
 # stopping rules (about 2.3k characters), so the bound leaves room for them plus Turn conventions.
 INSTRUCTION_MAX_CHARS = 4000
@@ -286,20 +183,6 @@ _PROPOSER_GUIDANCE = (
     "Write imperative instructions for one DSPy predictor inside Fleet's Turn program. "
     "Keep every input and output field name unchanged, keep the keyword-only SUBMIT contract, "
     "and do not restate the stopping rules you were given."
-)
-# Only what can change Turn behavior or scoring invalidates a candidate; docs, api, tui and store do not.
-DIGEST_SOURCES = (
-    "adapters.py",
-    "config.py",
-    "contracts.py",
-    "execution_evidence.py",
-    "lm_usage.py",
-    "optimization_runs.py",
-    "program_file.py",
-    "sandbox/interpreter.py",
-    "sandbox/manager.py",
-    "sandbox/runtime/fs_ops.py",
-    "sandbox/workspace_io.py",
 )
 
 
@@ -352,64 +235,6 @@ class _DatabaseStopper:
         return _database_stop_requested(self.store, self.session_id, self.run_id)
 
 
-def dataset_digest(splits: dict[str, list[dspy.Example]]) -> str:
-    """Identify the exact examples in each split, so a manifest names the data it was scored on."""
-    rows = {
-        name: sorted(
-            (example.toDict() for example in items),
-            key=lambda row: json.dumps(row, sort_keys=True, ensure_ascii=False, default=str),
-        )
-        for name, items in splits.items()
-    }
-    return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
-
-
-def optimization_code_digest() -> str:
-    """Hash the runtime/evaluation source that determines candidate behavior and scoring."""
-    package = Path(__file__).parents[1]
-    paths = {package / name for name in DIGEST_SOURCES}
-    paths |= set((package / "engine").rglob("*.py"))
-    paths |= set((package / "optimize").rglob("*.py"))
-    material = [
-        (path.relative_to(package).as_posix(), digest_bytes(path.read_bytes()))
-        for path in sorted(paths)
-        if path.is_file()
-    ]
-    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
-
-
-def installed_dependency_fingerprint() -> str:
-    """Hash the installed environment, independent of source-tree or wheel layout."""
-    installed = sorted(
-        (
-            re.sub(r"[-_.]+", "-", distribution.metadata["Name"]).lower(),
-            distribution.version,
-        )
-        for distribution in distributions()
-        if distribution.metadata["Name"]
-    )
-    if not installed:
-        raise RuntimeError("No installed Python distributions are available for approval evidence")
-    return hashlib.sha256(json.dumps(installed, separators=(",", ":")).encode()).hexdigest()
-
-
-def approval_evidence(settings: FleetSettings, incumbent_digest: str) -> dict[str, str]:
-    """Evidence must still match when a separately invoked approval installs the candidate."""
-    return {
-        "evidence_format": str(APPROVAL_EVIDENCE_VERSION),
-        "dspy": dspy.__version__,
-        "gepa": package_version("gepa"),
-        "mlflow": mlflow.__version__,
-        "fleet_rlm": package_version("fleet-rlm"),
-        "python": platform.python_version(),
-        "scorer": SCORER_VERSION,
-        "configuration_digest": settings.configuration()["digest"],
-        "code_digest": optimization_code_digest(),
-        "dependency_fingerprint": installed_dependency_fingerprint(),
-        "incumbent_digest": incumbent_digest,
-    }
-
-
 def _open_optimization_store(
     settings: FleetSettings,
     *,
@@ -447,79 +272,6 @@ def _enable_validation_tracing(*, trace_search: bool) -> None:
     )
 
 
-def format_report(manifest: ArtifactManifest, holdout: list[dspy.Example]) -> str:
-    """Scores per stage and per holdout example, so whoever approves can tell a gain from noise."""
-    baseline, candidate = manifest.evaluation["baseline"], manifest.evaluation["candidate"]
-    lines = [
-        f"## Fleet-RLM Lite GEPA candidate `{manifest.version}`",
-        "",
-        "| Split | Baseline | Candidate | Delta |",
-        "|---|---:|---:|---:|",
-    ]
-    for split in ("dev", "holdout"):
-        lines.append(
-            f"| {split} | {baseline[split]:.3f} | {candidate[split]:.3f} | {candidate[split] - baseline[split]:+.3f} |"
-        )
-    lines += ["", "| Holdout example | Baseline | Candidate |", "|---|---:|---:|"]
-    for example, before, after in zip(holdout, baseline["holdout_scores"], candidate["holdout_scores"], strict=True):
-        lines.append(f"| {' '.join(str(example.task).split())[:60]} | {before:.3f} | {after:.3f} |")
-    verdict = "PASS" if manifest.gate["passed"] else "FAIL: " + "; ".join(manifest.gate["reasons"])
-    changed = ", ".join(candidate.get("changed_components") or []) or "none"
-    objectives = ", ".join(
-        f"{name} {baseline['holdout_objectives'].get(name, 0):.2f}->{value:.2f}"
-        for name, value in candidate.get("holdout_objectives", {}).items()
-    )
-    critical_scores = candidate.get("holdout_critical_scores", [])
-    critical_summary = (
-        f"{sum(score == 1.0 for score in critical_scores)}/{len(critical_scores)} passed"
-        if critical_scores
-        else "none labeled"
-    )
-    lines += [
-        "",
-        f"Critical deterministic holdout cases: {critical_summary}",
-        f"Holdout rollout errors: {candidate.get('holdout_errors', 'unavailable')}",
-        f"Holdout objectives: {objectives or 'none'}",
-        f"Changed components: {changed}",
-        f"Gate: {verdict}",
-    ]
-    for split in ("dev", "holdout"):
-        for side in ("baseline", "candidate"):
-            diagnostics = manifest.evaluation[side]
-            calls = diagnostics.get(f"{split}_lm_calls", [])
-            calls_median = diagnostics.get(f"{split}_lm_calls_median")
-            calls_measured = diagnostics.get(f"{split}_lm_calls_measured", 0)
-            runtime_values = diagnostics.get(f"{split}_seconds_per_example", [])
-            runtime_median = diagnostics.get(f"{split}_seconds_per_example_median")
-            artifact_passes = diagnostics.get(f"{split}_artifact_passes", 0)
-            artifact_cases = diagnostics.get(f"{split}_artifact_cases", 0)
-            calls_text = f"{calls_median:g}" if isinstance(calls_median, (int, float)) else "unavailable"
-            runtime_text = f"{runtime_median:g}s" if isinstance(runtime_median, (int, float)) else "unavailable"
-            lines.append(
-                f"{split.title()} {side} diagnostics: LM calls median {calls_text} "
-                f"({calls_measured}/{len(calls)} measured); runtime median {runtime_text} "
-                f"({len(runtime_values)} examples); artifact passes {artifact_passes}/{artifact_cases} applicable"
-            )
-    failures = [(split, failure) for split in ("dev", "holdout") for failure in candidate.get(f"{split}_failures", [])]
-    if failures:
-        lines += ["", "## Validation failures", "| Split | Case | Error | Detail |", "|---|---|---|---|"]
-        for split, failure in failures:
-            detail = " ".join(str(failure.get("detail", "")).split())[:500].replace("|", "\\|")
-            lines.append(
-                f"| {split} | `{failure.get('case_id', 'unknown')}` | {failure.get('type', 'Error')} | {detail} |"
-            )
-    component_changes = candidate.get("component_diffs") or []
-    if component_changes:
-        lines += ["", "## Candidate diffs"]
-        for item in component_changes:
-            lines += [f"### `{item['component']}`", "```diff", item["diff"].rstrip(), "```"]
-    elif not candidate.get("changed_components"):
-        lines += ["", "No predictor instructions or Flex source changed."]
-    else:
-        lines += ["", "Component diff unavailable for this saved candidate."]
-    return "\n".join(lines)
-
-
 def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: FleetSettings) -> None:
     """Approve an existing candidate or search and validate a new, uninstalled candidate.
 
@@ -528,14 +280,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
     failures are recorded and re-raised. Approval errors propagate.
     """
     session_id = validate_session_id(args.session)
-    if not 1 <= args.threads <= 32:
-        parser.error("--threads must be between 1 and 32")
-    if args.max_metric_calls is not None and args.max_metric_calls < 1:
-        parser.error("--max-metric-calls must be positive")
-    if getattr(args, "reflection_minibatch_size", 3) < 1:
-        parser.error("--reflection-minibatch-size must be positive")
-    if (proposals := getattr(args, "max_candidate_proposals", None)) is not None and proposals < 1:
-        parser.error("--max-candidate-proposals must be positive")
     managed_run_id = getattr(args, "managed_run_id", None)
     managed_owner_id = getattr(args, "managed_owner_id", None)
     if bool(managed_run_id) != bool(managed_owner_id):
@@ -577,7 +321,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 initialize=not bool(managed_run_id),
             )
             stack.enter_context(closing(store.acquire_optimization_lease()))
-            import_legacy_runs(store, directory)
             if managed_run_id:
                 record = store.get_optimization_run(session_id, run_id)
                 if (
@@ -696,7 +439,6 @@ def _run_approval(
         try:
             # No approval decision is persisted until pending MLflow evidence has flushed.
             mlflow.flush_trace_async_logging()
-            import_legacy_runs(store, directory)
             if not managed_run_id:
                 reconcile_abandoned_running_runs(store)
             record = store.get_optimization_run(session_id, version)
@@ -707,10 +449,8 @@ def _run_approval(
             active = directory / f"{session_id}.json"
             incumbent = digest_bytes(active.read_bytes()) if active.exists() else ""
             recorded_incumbent = record.get("incumbent_digest") or manifest.dependencies.get("incumbent_digest", "")
-            approval_pending = record.get("status") == "interrupted" and record.get("approval_pending") is True
-            recoverable_approval = record.get("status") == "approving" or approval_pending
+            recoverable_approval = record.get("status") == "approving"
             recovered = (record.get("status") == "approved" or recoverable_approval) and incumbent == manifest.digest
-            recovered_legacy_install = approval_pending and recovered
             preclaimed = bool(
                 managed_run_id and record.get("status") == "approving" and record.get("owner_id") == managed_owner_id
             )
@@ -718,6 +458,20 @@ def _run_approval(
                 raise ValueError("approved candidate is no longer active; reevaluation is required")
             if recoverable_approval and not recovered and not preclaimed:
                 if incumbent != recorded_incumbent:
+                    # `approving` holds the global single-active slot; fence the run before
+                    # refusing so a rejected approval cannot block every future optimization.
+                    _update_run(
+                        store,
+                        session_id,
+                        version,
+                        expected_statuses=("approving",),
+                        status="interrupted",
+                        stage="interrupted",
+                        failure={
+                            "type": "ApprovalInterrupted",
+                            "detail": "Interrupted approval has an unknown incumbent; reevaluation is required.",
+                        },
+                    )
                     raise ValueError("interrupted approval has an unknown incumbent; reevaluation is required")
                 restored = _update_run(
                     store,
@@ -738,9 +492,14 @@ def _run_approval(
                 review_owner_id = managed_owner_id or uuid.uuid4().hex
                 if not preclaimed:
                     record = store.claim_optimization_review(session_id, version, review_owner_id)
-                current = settings_for_session(settings, store.runtime_settings(session_id))
+                current = settings.for_session(store.runtime_settings(session_id))
                 try:
-                    approve_candidate(candidate_path, manifest, active, evidence=approval_evidence(current, incumbent))
+                    approve_candidate(
+                        candidate_path,
+                        manifest,
+                        active,
+                        evidence=approval_evidence(current, incumbent, scorer_version=SCORER_VERSION),
+                    )
                 except Exception:
                     observed = digest_bytes(active.read_bytes()) if active.exists() else ""
                     if observed == incumbent and not managed_run_id:
@@ -757,17 +516,6 @@ def _run_approval(
             decision_at = datetime.now(UTC).isoformat(timespec="seconds")
             if record.get("status") == "approved":
                 saved = record
-            elif recovered_legacy_install:
-                saved = _update_run(
-                    store,
-                    session_id,
-                    version,
-                    expected_statuses=("interrupted",),
-                    status="approved",
-                    approval_pending=False,
-                    decision="approved",
-                    decision_at=decision_at,
-                )
             elif managed_run_id:
                 saved = _update_run(
                     store,
@@ -958,7 +706,7 @@ def _compile(
 
     Dataset, provider, storage, and artifact write errors also propagate.
     """
-    settings = settings_for_session(settings, store.runtime_settings(session_id))
+    settings = settings.for_session(store.runtime_settings(session_id))
     run_id = run_id or f"{session_id}-{uuid.uuid4().hex}"
     directory = Path(settings.compiled_program_dir)
     stop_file = directory / "runs" / run_id / "gepa.stop"
@@ -991,6 +739,13 @@ def _compile(
         validation_ratio=args.validation_ratio,
         evaluation_experiment_name=target.eval_experiment_name,
     )
+    splits = {"train": trainset, "dev": devset, "holdout": holdout}
+    counts = {
+        name: {"examples": len(items), "groups": len({item.source_group for item in items})}
+        for name, items in splits.items()
+    }
+    if any(not items for items in splits.values()) or not any(getattr(item, "critical", False) for item in holdout):
+        raise ValueError(f"GEPA requires nonempty train/dev/holdout and critical holdout; found {counts}")
     examples = [*trainset, *devset, *holdout]
     root_lm, sub_lm, reflection_lm, jev_lm = settings.build_lms()
     if settings.fleet_reflection_model == settings.fleet_root_model:
@@ -1011,7 +766,7 @@ def _compile(
     incumbent_digest = template.compiled.digest
     # Snapshot all identities before native search starts. Completion checks the same
     # values again, so the manifest cannot certify code or dependencies changed mid-run.
-    search_evidence = approval_evidence(settings, incumbent_digest)
+    search_evidence = approval_evidence(settings, incumbent_digest, scorer_version=SCORER_VERSION)
     evidence_record = _update_run(
         store,
         session_id,
@@ -1126,12 +881,13 @@ def _compile(
             "policy_version": APPROVAL_POLICY_VERSION,
             **{stage: summarize_passes(passes) for stage, passes in paired.items()},
         }
-        evaluation["candidate"]["changed_components"] = changed_components(template, optimized.program)
-        evaluation["candidate"]["component_diffs"] = component_diffs(template, optimized.program)
+        changes = component_diffs(template, optimized.program)
+        evaluation["candidate"]["component_diffs"] = changes
+        evaluation["candidate"]["changed_components"] = [item["component"] for item in changes]
         evaluation["validation_cache"] = "serving_response_cache_disabled"
         gate = promotion_gate(evaluation)
         _check_run_cancelled(stop_file, store, session_id, run_id)
-        final_evidence = approval_evidence(settings, incumbent_digest)
+        final_evidence = approval_evidence(settings, incumbent_digest, scorer_version=SCORER_VERSION)
         if final_evidence != search_evidence:
             raise RuntimeError("Optimization evidence changed during the run; candidate requires reevaluation")
         destination = directory / "candidates" / f"{version}.json"

@@ -6,6 +6,7 @@ This module is a leaf. The runtime (`engine`, `sandbox`) and the offline tooling
 
 from __future__ import annotations
 
+import json
 import math
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
@@ -48,6 +49,18 @@ class OptimizationInputs:
     context: Any = None
     artifact_path: str | None = None
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+
+
+def parse_sse(text: str) -> list[dict[str, Any]]:
+    """Decode the JSON data lines from a Fleet SSE response, ignoring malformed lines."""
+    events = []
+    for line in text.splitlines():
+        if line.startswith("data: "):
+            try:
+                events.append(json.loads(line[6:]))
+            except json.JSONDecodeError:
+                continue
+    return events
 
 
 def catalog_entries(catalog: str) -> list[tuple[str, str]] | None:

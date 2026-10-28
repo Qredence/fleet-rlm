@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from test_store import make_store
 
-from fleet_rlm.store.db import _OPTIMIZATION_LOCK_SCOPE
+from fleet_rlm.store import _OPTIMIZATION_LOCK_SCOPE
 
 
 def run_row(**changes: Any) -> dict[str, Any]:
@@ -207,29 +207,6 @@ def test_reject_optimization_run_keeps_candidate_metadata_and_records_decision()
 
     assert rejected["status"] == "rejected" and rejected["candidate_version"] == "candidate-1"
     assert "metadata=metadata || CASE WHEN status='rejected'" in pool.conn.statements[0][0]
-
-
-def test_import_optimization_run_is_idempotent_and_rejects_mismatched_session():
-    legacy = {
-        "session_id": "s1",
-        "run_id": "run-legacy",
-        "status": "completed",
-        "stage": "completed",
-        "options": {"max_metric_calls": 12},
-        "candidate_version": "run-legacy",
-        "report": {"pass": True},
-    }
-    store, pool = make_store([("run-legacy",)], [])
-
-    assert store.import_optimization_run("s1", legacy) is True
-    assert store.import_optimization_run("s1", legacy) is False
-    statement, params = pool.conn.statements[0]
-    assert "ON CONFLICT (session_id,run_id) DO NOTHING RETURNING run_id" in statement
-    assert params[:6] == ("s1", "run-legacy", "run-legacy", '{"max_metric_calls":12}', "imported", False)
-    assert '{"candidate_version":"run-legacy","report":{"pass":true}}' in params[9]
-
-    with pytest.raises(ValueError, match="does not match"):
-        store.import_optimization_run("s2", legacy)
 
 
 def test_optimization_lease_uses_a_dedicated_connection_and_distinct_lock_scope(monkeypatch):

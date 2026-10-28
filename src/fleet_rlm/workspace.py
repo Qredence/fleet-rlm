@@ -61,7 +61,7 @@ import difflib, hashlib, json, os
 from pathlib import Path
 
 class Workspace:
-    roots = {'files', 'artifacts', 'memory', 'skills', 'buffers', 'sessions'}
+    roots = __FLEET_WORKSPACE_ROOTS__
 
     def resolve(self, relative):
         if not isinstance(relative, str) or not relative or '\\' in relative or len(relative)>1024:
@@ -168,7 +168,7 @@ class WorkspaceDatasetView:
         return out
 
 workspace = Workspace()
-"""
+""".replace("__FLEET_WORKSPACE_ROOTS__", repr(tuple(sorted(_ALLOWED_WORKSPACE_ROOTS))))
 
 
 @dataclass(frozen=True)

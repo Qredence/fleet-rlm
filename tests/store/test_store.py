@@ -11,12 +11,13 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.store import IdempotencyConflictError, Store
-from fleet_rlm.store.db import (
+from fleet_rlm.session import SessionRuntime
+from fleet_rlm.store import (
     _SCHEMA_MIGRATIONS,
     SCHEMA_STATEMENTS,
     SCHEMA_VERSION,
-    VolumePostgresHarness,
+    IdempotencyConflictError,
+    Store,
     lakebase_connection_class,
 )
 
@@ -257,7 +258,7 @@ def test_custom_schema_is_created_by_migration_pool_and_runtime_uses_runtime_poo
 
 
 def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(monkeypatch):
-    import fleet_rlm.store.db as store_db
+    import fleet_rlm.store as store_db
 
     opened = []
 
@@ -300,7 +301,7 @@ def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(
 
 
 def test_schema_bootstrap_does_not_rerun_an_applied_migration():
-    from fleet_rlm.store.db import SCHEMA_VERSION
+    from fleet_rlm.store import SCHEMA_VERSION
 
     store, pool = make_store([], [], [(SCHEMA_VERSION,)])
     store.initialize()
@@ -399,7 +400,7 @@ def test_snapshot_provenance_round_trips_into_the_turn_status_payload():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **SNAPSHOT_PROVENANCE}
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
     (session_id,), kwargs = calls[0]
     assert session_id == "s1"
     turn_id, result = kwargs["completion"]
@@ -417,7 +418,7 @@ def test_turn_metadata_round_trips_into_the_stored_turn_and_status_payload(field
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", field: value}
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -439,7 +440,7 @@ def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preser
         "cleanup": "not_required",
         **SNAPSHOT_PROVENANCE,
     }
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -468,7 +469,7 @@ def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():
         "provider_owned": True,
     }
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **bounds}
-    _harness(store, []).commit_turn("s1", turn_record)
+    _runtime(store, []).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -559,22 +560,22 @@ def test_replay_without_snapshot_provenance_is_readable(deadline_fields, expecte
     assert encode_snapshot(historical) == (digest, compressed)
 
 
-def _harness(store: Any, files: list[str]) -> VolumePostgresHarness:
+def _runtime(store: Any, files: list[str]) -> SessionRuntime:
     sandbox = SimpleNamespace(session_id="s1", list_workspace_files=lambda: list(files))
-    return VolumePostgresHarness(store, sandbox)  # ty: ignore[invalid-argument-type]
+    return SessionRuntime(sandbox_mgr=sandbox, store=store, skill_mgr=None, engine=None)
 
 
 @pytest.mark.parametrize("paths", [["../escape"], ["outside/a"], ["files/a\\b"], ["files/a\nb"], [1], {}, "", None])
-def test_harness_rejects_an_invalid_workspace_listing_before_any_sql_runs(paths):
+def test_runtime_rejects_an_invalid_workspace_listing_before_any_sql_runs(paths):
     store, pool = make_store()
-    harness = _harness(store, [])
-    harness.sandbox_mgr.list_workspace_files = lambda: paths
+    runtime = _runtime(store, [])
+    runtime.sandbox_mgr.list_workspace_files = lambda: paths
     with pytest.raises(ValueError, match="invalid relative path"):
-        harness.commit_turn("s1", {"turn_id": "t1"})
+        runtime.commit_turn("s1", {"turn_id": "t1"})
     assert pool.borrowed == 0
 
 
-def test_harness_reports_artifacts_and_records_the_completion_without_reading_files():
+def test_runtime_reports_artifacts_and_records_the_completion_without_reading_files():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     usage = {
@@ -583,7 +584,7 @@ def test_harness_reports_artifacts_and_records_the_completion_without_reading_fi
         "submit_rejections": 2,
         "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
     }
-    artifacts = _harness(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
+    artifacts = _runtime(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
         "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1", **usage}
     )
     assert artifacts == ["artifacts/out.txt"]
@@ -599,13 +600,13 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
     prior = {"turn_id": "t0", "task_sha256": "other", "status": "running", "result": {}}
     store = SimpleNamespace(claim_turn=lambda *_args: prior)
     with pytest.raises(IdempotencyConflictError, match="another task"):
-        _harness(store, []).claim_turn("t1", "key", "task")
+        _runtime(store, []).claim_turn("t1", "key", "task")
 
 
 def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
     import psycopg
 
-    import fleet_rlm.store.db as store_db
+    import fleet_rlm.store as store_db
 
     paused: list[float] = []
     monkeypatch.setattr(store_db, "_RETRY_DELAY_SECONDS", 0.25)
@@ -658,9 +659,9 @@ def test_commit_turn_requires_a_turn_id_so_a_connection_retry_cannot_duplicate_t
     assert pool.borrowed == 0
 
 
-def test_harness_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
+def test_runtime_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
     calls: list = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     with pytest.raises(ValueError, match="turn_id"):
-        _harness(store, []).commit_turn("s1", {"answer": "42"})
+        _runtime(store, []).commit_turn("s1", {"answer": "42"})
     assert calls == []

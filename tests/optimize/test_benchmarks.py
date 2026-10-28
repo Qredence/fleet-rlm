@@ -1,6 +1,6 @@
 from collections import Counter
 
-from fleet_rlm.optimize import benchmarks
+from fleet_rlm.optimize import evaluation
 
 
 def _events(case):
@@ -13,7 +13,7 @@ def _events(case):
 
 
 def test_long_context_sizes_follow_tiers_and_gold_matches_recomputation():
-    cases = benchmarks.long_context_cases(seed=5, tiers=(20_000, 50_000), per_tier=4)
+    cases = evaluation.long_context_cases(seed=5, tiers=(20_000, 50_000), per_tier=4)
     assert len(cases) == 8
     for case in cases:
         tier = int(case.case_id.split("-")[1].rstrip("k")) * 1000
@@ -31,6 +31,6 @@ def test_long_context_sizes_follow_tiers_and_gold_matches_recomputation():
 
 
 def test_long_context_is_deterministic():
-    assert [c.record() for c in benchmarks.long_context_cases(seed=2, per_tier=1)] == [
-        c.record() for c in benchmarks.long_context_cases(seed=2, per_tier=1)
+    assert [c.record() for c in evaluation.long_context_cases(seed=2, per_tier=1)] == [
+        c.record() for c in evaluation.long_context_cases(seed=2, per_tier=1)
     ]

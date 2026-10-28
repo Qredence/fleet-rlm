@@ -6,34 +6,42 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
-- One scoring source: every pure objective now lives in `optimize/objectives.py`, and the
-  MLflow sinks and the GEPA metric derive their numbers from it. The GEPA metric reads the
-  documented `program_trace` argument and reports it as evidence; the scalar score is
-  unchanged, so the same predictions still score identically. `fleet-metric` moves to v9.
-- The routing-budget gauge is monotonic: a direct Turn is no longer scored `1.0` after
-  spending up to fifteen budget units, and the score no longer rises from `0.95` to `0.98`
-  at the bounded-route boundary. Trace assessments move to v7 and the approval policy to 6,
-  so earlier candidate evidence requires reevaluation.
-- `engine/` and `sandbox/` no longer import the offline optimizer. Route vocabulary,
-  stopping rules, runtime input names, and execution evidence moved to neutral modules
-  (`contracts`, `program_file`, `execution_evidence`), and `dspy_support` is replaced by
-  `adapters`, `metering`, and the neutral modules.
-- The FastAPI app is documented as the primary application; `fleet optimize` and
-  `fleet eval` are offline tooling. Importing `fleet_rlm.api.app` no longer loads the
-  optimizer.
+- Consolidate the backend from 70 to 61 Python files. Native compiled-state loading
+  lives with engine assembly; usage callbacks live with observability. Store, setup,
+  and snapshots are single modules; release checks live in the repository script.
+  SessionRuntime directly owns memory/history/Turn-record policies using a shared Store.
+  See [Python import changes](docs/reference/source-layout.md#python-import-changes).
+- Retain native DSPy signatures, traversal, GEPA, evaluation, and explicit RLM children.
+  Isolated replay construction/execution, artifact identity/reporting, and dataset
+  identity now live with their respective owners. No SQL or saved-state key changes.
+- Pin DSPy support to the verified 3.4.1 facade protocol; resolved dependencies are unchanged.
+- Share inclusive validation-ratio bounds (0.1–0.5, default 0.35) across entry points.
+  Unusable curated splits, especially missing critical holdout, fail before search.
+- Expand approval-source identity to cover runtime, Store review selection, replay,
+  snapshot requirements, and bundled Skills, including relevant file additions/deletions.
+  Historical evidence remains readable; incompatible evidence cannot install.
+- Pass typed TUI launch/review actions directly to existing operations, preserving
+  unresolved request IDs, retry behavior, and lifecycle rendering.
 
 ### Fixed
 
-- A Flex Turn now gets the Turn's RLM budgets instead of DSPy's defaults, applied to every
-  `dspy.RLM` construction in the module source, including GEPA-authored source.
-- A child agent failure is a value returned to the parent whether the child was spawned
-  alone or in a batch; delegation shape no longer changes whether an error is fatal.
-- Route-error redaction reads the credential from the LM's `kwargs` and proxy chain, so it
-  redacts on the production path instead of only for `TypeSafe` clients.
-- Live evaluation labels a multi-value case without a fabricated joined `expected_answer`,
-  and trace readback uses one reader per window instead of one thread per poll.
-- `optimization_code_digest` covers behavior-affecting modules only; documentation, API,
-  TUI, and Store edits no longer invalidate every candidate.
+- Supply omitted outer-Flex RLM limits at native construction without editing candidate
+  source or rebinding state. Explicit values, aliases, expanded kwargs, model roles,
+  aggregate host budgets, and deeper/explicit-child limits retain their contracts.
+- Match complete signed decimal/exponent numeric tokens instead of partial numbers.
+  Equality is exact, with grouped thousands separators; the shared scorer advances to
+  `fleet-metric-v10`, requiring reevaluation of earlier candidate evidence.
+- Derive changed-component names and display records from one membership-aware comparison;
+  a newly added empty component counts as changed. Paired validation is not skipped.
+- Generate remote workspace roots and Skill limits from their existing host owners.
+- Preserve ordinary child failures as parent-visible values, route-credential redaction,
+  separate gold labels, and monotonic routing-budget gauges from the earlier branch work.
+  Trace assessments remain v7 and approval policy remains version 6.
+
+`fleet_metric` retains its five positional GEPA arguments, optional program-trace
+feedback, and Prediction score/feedback/objective result. This consolidation introduces
+no early no-candidate completion, automatic installation, durable cleanup recovery, or
+measured workload improvement.
 
 ## [0.8.1] - 2026-10-23
 

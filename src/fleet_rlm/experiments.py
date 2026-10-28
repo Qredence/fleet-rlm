@@ -24,7 +24,6 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.optimization_runs import (
     ACTIVE_STATUSES,
     ExperimentOptions,
-    import_legacy_runs,
     parse_event,
     public_run,
     read_comparison,
@@ -60,10 +59,9 @@ class ExperimentManager:
         return self._task is not None and not self._task.done()
 
     async def initialize(self) -> None:
-        """Import old history and fence abandoned API workers without rerunning them."""
+        """Fence abandoned API workers without rerunning them."""
         async with self._lock:
             await self._ensure_owner_lease()
-        await asyncio.to_thread(import_legacy_runs, self.store, self.root)
         await self._recover_stale_runs()
 
     async def _ensure_owner_lease(self) -> None:

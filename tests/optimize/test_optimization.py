@@ -13,19 +13,18 @@ from dspy.utils import DummyLM
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.optimization_runs import add_optimization_arguments
-from fleet_rlm.optimize import dataset, validation
+from fleet_rlm.optimize import artifacts, dataset, validation
 from fleet_rlm.optimize import gepa as workflow
 from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
-    IsolatedFleetProgram,
     approve_candidate,
     digest_bytes,
     promotion_gate,
     tunable_components,
 )
 from fleet_rlm.optimize.dataset import grouped_split
-from fleet_rlm.optimize.scorers import fleet_metric
-from fleet_rlm.optimize.validation import score_split
+from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
+from fleet_rlm.optimize.validation import IsolatedFleetProgram, score_split
 from fleet_rlm.replay import encode_snapshot
 
 
@@ -515,8 +514,8 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
         def shutdown(self):
             pass
 
-    monkeypatch.setattr(workflow, "DaytonaSandboxManager", Manager)
-    monkeypatch.setattr(workflow, "AdaptiveFleetEngine", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(validation, "DaytonaSandboxManager", Manager)
+    monkeypatch.setattr(validation, "AdaptiveFleetEngine", lambda **kwargs: SimpleNamespace(**kwargs))
     current = FleetSettings(
         _env_file=None, execution_mode="flex", turn_timeout_seconds=123, fleet_root_model="openai/current-deployment"
     )
@@ -700,7 +699,6 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
     evidence = {"evidence_format": "2", "incumbent_digest": "", "configuration_digest": "current"}
     manifest = _manifest(candidate, "s1-1", _evaluation())
     manifest = replace(manifest, dependencies=evidence)
-    from fleet_rlm.optimize.scorers import SCORER_VERSION
 
     legacy = replace(manifest, dependencies={**evidence, "scorer": "fleet-metric-v5"})
     with pytest.raises(ValueError, match="stale"):
@@ -720,18 +718,18 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
 
 def test_approval_evidence_uses_sorted_installed_distribution_identity(monkeypatch) -> None:
     monkeypatch.setattr(
-        workflow,
+        artifacts,
         "distributions",
         lambda: [
             SimpleNamespace(metadata={"Name": "zeta_lib"}, version="2.0"),
             SimpleNamespace(metadata={"Name": "Alpha.Lib"}, version="1.4"),
         ],
     )
-    monkeypatch.setattr(workflow, "package_version", lambda _name: "pinned")
-    monkeypatch.setattr(workflow, "optimization_code_digest", lambda: "code")
+    monkeypatch.setattr(artifacts, "package_version", lambda _name: "pinned")
+    monkeypatch.setattr(artifacts, "optimization_code_digest", lambda: "code")
     expected_fingerprint = hashlib.sha256(b'[["alpha-lib","1.4"],["zeta-lib","2.0"]]').hexdigest()
 
-    evidence = workflow.approval_evidence(FleetSettings(_env_file=None), "incumbent")
+    evidence = artifacts.approval_evidence(FleetSettings(_env_file=None), "incumbent", scorer_version=SCORER_VERSION)
 
     assert evidence["evidence_format"] == "2"
     assert evidence["dependency_fingerprint"] == expected_fingerprint
@@ -976,7 +974,7 @@ def test_changed_components_detects_flex_source_and_predictor_instruction_change
     baseline = AdaptiveFleetEngine(DaytonaSandboxManager("k", "o", "v", "a"), lm, lm)
     candidate = AdaptiveFleetEngine(DaytonaSandboxManager("k", "o", "v", "b"), lm, lm)
     assert "flex_agent" in tunable_components(baseline)
-    assert workflow.changed_components(baseline, candidate) == []
+    assert [item["component"] for item in workflow.component_diffs(baseline, candidate)] == []
 
     state = candidate.dump_state()
     state["flex_agent"]["module_src"] += "\n# GEPA rewrite\n"
@@ -988,10 +986,12 @@ def test_changed_components_detects_flex_source_and_predictor_instruction_change
 
     predictor_baseline, predictor_candidate = Predictors(), Predictors()
     predictor_candidate.second.signature = predictor_candidate.second.signature.with_instructions("Rewritten.")
-    assert workflow.changed_components(predictor_baseline, predictor_candidate) == ["second"]
+    assert [item["component"] for item in workflow.component_diffs(predictor_baseline, predictor_candidate)] == [
+        "second"
+    ]
 
     candidate.load_state(state)
-    assert workflow.changed_components(baseline, candidate) == ["flex_agent"]
+    assert [item["component"] for item in workflow.component_diffs(baseline, candidate)] == ["flex_agent"]
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
@@ -1025,7 +1025,7 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
         {},
         _evaluation(),
         {"passed": True},
-        workflow.approval_evidence(settings, ""),
+        artifacts.approval_evidence(settings, "", scorer_version=SCORER_VERSION),
     )
     store = MemoryOptimizationStore(
         [
@@ -1078,7 +1078,7 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     candidate = tmp_path / "candidates" / f"{version}.json"
     candidate.parent.mkdir()
     candidate.write_bytes(b"candidate bytes")
-    evidence = workflow.approval_evidence(settings, "")
+    evidence = artifacts.approval_evidence(settings, "", scorer_version=SCORER_VERSION)
     if stale_evidence:
         evidence = {**evidence, "configuration_digest": "stale"}
     manifest = ArtifactManifest(
@@ -1254,6 +1254,32 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
     assert record["failure"]["detail"] == "Optimization cleanup failed."
 
 
+def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypatch, tmp_path):
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    store = MemoryOptimizationStore(
+        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
+    )
+    splits = tuple([dspy.Example(task=name, source_group=name)] for name in ("train", "dev", "holdout"))
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kwargs: splits)
+    monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: None)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Unusable splits must not start search or build serving models")
+
+    monkeypatch.setattr(FleetSettings, "build_lms", forbidden)
+    monkeypatch.setattr(dspy, "GEPA", forbidden)
+    with pytest.raises(ValueError, match=r"critical holdout.*'holdout'.*'examples': 1"):
+        workflow._compile(
+            SimpleNamespace(validation_ratio=0.35),
+            settings,
+            store,
+            "s1",
+            SimpleNamespace(experiment_name="offline", eval_experiment_name="offline"),
+            "s1-run",
+            owner_id="owner",
+        )
+
+
 @pytest.mark.parametrize(
     "cancel_after_validation",
     [False, True, "finalization", "evidence_change", "interrupt_search", "interrupt_validation"],
@@ -1286,7 +1312,9 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     store.settings["s1"] = {"mode": "flex", "models": {"root": "openai/deployed-root", "sub": "openai/deployed-sub"}}
     monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (lm, lm, lm, None))
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
-    train, dev, holdout = [[dspy.Example(task=name)] for name in ("train", "dev", "holdout")]
+    train, dev, holdout = [
+        [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
+    ]
     monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
     factories = []
     monkeypatch.setattr(
@@ -1338,7 +1366,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             digest_calls += 1
             return "before-search" if digest_calls == 1 else "changed-during-search"
 
-        monkeypatch.setattr(workflow, "optimization_code_digest", changing_digest)
+        monkeypatch.setattr(artifacts, "optimization_code_digest", changing_digest)
     monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kw: nullcontext())
     for name in ("set_tags", "log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
         monkeypatch.setattr(workflow.mlflow, name, lambda *_args, **_kw: None)
@@ -1431,7 +1459,7 @@ def test_relabelling_a_trace_overrides_the_earlier_label() -> None:
 
 
 def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
-    from fleet_rlm.optimize.gepa import DIGEST_SOURCES, optimization_code_digest
+    from fleet_rlm.optimize.artifacts import DIGEST_SOURCES, optimization_code_digest
 
     digest = optimization_code_digest()
     assert len(digest) == 64 and digest == optimization_code_digest()
@@ -1440,10 +1468,12 @@ def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
         "contracts.py",
         "execution_evidence.py",
         "optimization_runs.py",
-        "program_file.py",
+        "observability.py",
+        "session.py",
+        "store.py",
     } <= set(DIGEST_SOURCES)
     # Docs, the API layer, the TUI, and the Store cannot change Turn behavior or scoring.
-    for excluded in ("api/", "tui/", "store/", "dspy_support.py"):
+    for excluded in ("api/", "tui/", "dspy_support.py"):
         assert not any(name.startswith(excluded) for name in DIGEST_SOURCES)
 
 
@@ -1498,33 +1528,6 @@ def test_gepa_progress_callback_persists_latest_snapshot_without_transport_event
     assert capsys.readouterr().out == ""
 
 
-def test_legacy_history_import_is_idempotent_and_never_restarts_running_runs(tmp_path) -> None:
-    from fleet_rlm.optimization_runs import import_legacy_runs
-
-    history = tmp_path / "experiments" / "s1"
-    history.mkdir(parents=True)
-    old_records = [
-        {"run_id": "s1-complete", "session_id": "s1", "status": "completed", "candidate_version": "s1-complete"},
-        {"run_id": "s1-running", "session_id": "s1", "status": "running", "candidate_version": "s1-running"},
-        {"run_id": "s1-approving", "session_id": "s1", "status": "approving", "candidate_version": "s1-approving"},
-    ]
-    for record in old_records:
-        (history / f"{record['run_id']}.json").write_text(json.dumps(record))
-    store = MemoryOptimizationStore()
-
-    import_legacy_runs(store, tmp_path)
-    import_legacy_runs(store, tmp_path)
-
-    records = {record["run_id"]: record for record in store.list_optimization_runs("s1")}
-    assert len(records) == 3
-    assert records["s1-complete"]["status"] == "completed"
-    assert records["s1-running"]["status"] == "interrupted"
-    assert records["s1-running"]["candidate_version"] is None
-    assert records["s1-approving"]["status"] == "interrupted"
-    assert records["s1-approving"]["approval_pending"] is True
-    assert json.loads((history / "s1-running.json").read_text())["status"] == "running"
-
-
 @pytest.mark.parametrize(
     ("scenario", "expected_status"),
     [
@@ -1554,7 +1557,7 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
         "unknown-active": b"unrecognized active bytes",
     }[scenario]
     active_path.write_bytes(active_bytes)
-    dependencies = workflow.approval_evidence(settings, digest_bytes(incumbent_bytes))
+    dependencies = artifacts.approval_evidence(settings, digest_bytes(incumbent_bytes), scorer_version=SCORER_VERSION)
     if scenario == "incumbent-stale-evidence":
         dependencies = {**dependencies, "configuration_digest": "stale-config"}
     manifest = ArtifactManifest(
@@ -1567,22 +1570,20 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
         dependencies=dependencies,
     )
     workflow.write_manifest(candidate_path.with_suffix(".manifest.json"), manifest)
-    legacy_dir = tmp_path / "experiments" / "sess"
-    legacy_dir.mkdir(parents=True)
-    (legacy_dir / f"{version}.json").write_text(
-        json.dumps(
-            {
-                "session_id": "sess",
-                "run_id": version,
-                "status": "approving",
-                "stage": "approving",
-                "candidate_version": version,
-                "incumbent_digest": digest_bytes(incumbent_bytes),
-                "options": ExperimentOptions().model_dump(),
-            }
-        )
-    )
     store = MemoryOptimizationStore()
+    store.records[("sess", version)] = {
+        "session_id": "sess",
+        "run_id": version,
+        "request_id": "legacy-request",
+        "options": ExperimentOptions().model_dump(),
+        "owner_id": "legacy-owner",
+        "managed": False,
+        "status": "approving",
+        "stage": "approving",
+        "stop_requested": False,
+        "candidate_version": version,
+        "incumbent_digest": digest_bytes(incumbent_bytes),
+    }
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     parser = _optimization_parser()
@@ -1600,13 +1601,11 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
     assert record["status"] == expected_status
     if scenario in {"candidate-active", "incumbent-current-evidence"}:
         assert record["decision"] == "approved"
-        assert record["approval_pending"] is False
         assert active_path.read_bytes() == candidate_path.read_bytes()
     elif scenario == "incumbent-stale-evidence":
-        assert record["approval_pending"] is False
         assert active_path.read_bytes() == incumbent_bytes
     else:
-        assert record["approval_pending"] is True
+        assert record["failure"]["type"] == "ApprovalInterrupted"
         assert active_path.read_bytes() == active_bytes
 
 
@@ -1842,17 +1841,11 @@ def test_run_records_failed_lifecycle_with_sanitized_details(tmp_path, monkeypat
     assert records[0]["failure"]["detail"] == "Optimization failed; exception details omitted."
 
 
-def test_legacy_history_rejects_path_traversal_and_symlinked_experiments_root(tmp_path) -> None:
-    from fleet_rlm.optimization_runs import import_legacy_runs, validate_run_id
+def test_run_id_rejects_path_traversal() -> None:
+    from fleet_rlm.optimization_runs import validate_run_id
 
     with pytest.raises(ValueError, match="run_id"):
         validate_run_id("../other")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "s1").mkdir()
-    (tmp_path / "experiments").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(ValueError, match="history directory"):
-        import_legacy_runs(MemoryOptimizationStore(), tmp_path)
 
 
 def test_component_diffs_retain_before_and_after_instruction_text() -> None:

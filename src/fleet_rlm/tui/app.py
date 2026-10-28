@@ -8,7 +8,6 @@ import shlex
 import sys
 import threading
 import time
-import uuid
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -338,10 +337,10 @@ class FleetTextualApp(App[str | None]):
         self._optimization_stopping = False
         self._optimizer_stop_requested = False
         self._optimizer_snapshot_polling = False
-        self._optimization_terminal_status: str | None = None
-        self._optimization_progress: dict[str, Any] = {}
         self._optimization_run_id: str | None = None
+        self._optimization_terminal_status: str | None = None
         self.state.optimizer_launcher = self._start_optimization
+        self.state.optimizer_reviewer = self._review_optimization
         self.state.experiments_opener = self._open_experiments
         self._history_entries: list[str] = []
         self._history_index: int = 0
@@ -800,23 +799,21 @@ class FleetTextualApp(App[str | None]):
             ExperimentsScreen(
                 self.client,
                 self.session_id,
-                on_run=self._start_optimization,
+                on_run=self._start_default_optimization,
                 on_cancel=self._request_optimizer_stop,
                 on_review=self._review_optimization,
                 on_snapshot=self._optimizer_snapshot,
             )
         )
 
-    def _start_optimization(self, options: dict[str, Any] | str) -> None:
+    def _start_default_optimization(self) -> None:
+        """Build the same default request as the slash-command launch."""
+        parsed = commands_mod._parse_optimizer_arguments(Context(self.client, self.session_id, self.state), "")
+        if parsed is not None:
+            self._start_optimization(parsed[0])
+
+    def _start_optimization(self, options: dict[str, Any]) -> None:
         """Submit an API-owned optimization; closing the screen only stops observation."""
-        if isinstance(options, str):
-            parsed = commands_mod._parse_optimizer_arguments(Context(self.client, self.session_id, self.state), options)
-            if parsed is None:
-                return
-            options, approve_run = parsed
-            if approve_run:
-                self._review_optimization(approve_run, "approved", str(uuid.uuid4()))
-                return
         self._open_experiments()
         self.run_worker(
             self._post_optimization(options),
@@ -939,10 +936,6 @@ class FleetTextualApp(App[str | None]):
             self._optimizer_stop_requested = False
         terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
         self._optimization_terminal_status = status if status in terminal else None
-        progress = record.get("progress") if record else None
-        self._optimization_progress = (
-            dict(progress) if isinstance(progress, dict) else {"stage": record.get("stage")} if record else {}
-        )
         if self.is_running:
             self.refresh_chrome()
 

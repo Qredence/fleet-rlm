@@ -14,7 +14,7 @@ def _canary_namespace():
 
 
 def test_canary_rollout_satisfies_isolated_program_runtime_contract():
-    from fleet_rlm.optimize.artifacts import IsolatedFleetProgram
+    from fleet_rlm.optimize.validation import IsolatedFleetProgram
 
     namespace = _canary_namespace()
     cleanup = []

@@ -2,18 +2,154 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import os
+import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from statistics import median
 from typing import Any
 
 import dspy
 import mlflow
+
+from fleet_rlm.config import FleetSettings
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
+from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.replay import selected_snapshot
+from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
+from fleet_rlm.store import Store
+from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
+
+
+class IsolatedFleetProgram(dspy.Module):
+    """Expose candidate predictors while giving every rollout a private runtime."""
+
+    def __init__(self, program: dspy.Module, engine_factory: Any):
+        """Wrap the program so each forward call builds its own engine."""
+        super().__init__()
+        self.program = program
+        self.engine_factory = engine_factory
+
+    def forward(self, **inputs: Any) -> dspy.Prediction:
+        """Run one rollout in a fresh engine and always shut that engine's sandbox down.
+
+        The rollout's optimization artifact file is removed even when the call raises.
+        """
+        engine = self.engine_factory(dspy.Example(**inputs), self.program)
+        try:
+            arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
+            if engine.optimization is not None:
+                arguments["context"] = engine.optimization.context
+            return engine(**arguments)
+        finally:
+            try:
+                engine.sandbox_mgr.shutdown()
+            finally:
+                artifact_path = engine.optimization.artifact_path if engine.optimization else None
+                if artifact_path:
+                    Path(artifact_path).unlink(missing_ok=True)
+
+
+def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
+    """Return a factory that builds disposable replay engines with verified immutable inputs.
+
+    Each engine receives a temporary copy of the candidate program. Serving LMs are
+    shared within this factory; callers own cleanup of returned engines and program files.
+    """
+    from fleet_rlm.execution_evidence import verification_entries
+
+    verifications = {
+        (item.source_session, item.replay_turn_id, item.replay_snapshot_sha256): verification_entries(
+            getattr(item, "structured_expectations", {}) or {}
+        )
+        for item in examples
+    }
+
+    shared: list[Any] = []
+    shared_lock = threading.Lock()
+
+    def language_models() -> tuple[Any, Any, Any]:
+        """Build the serving LMs once per factory; rollouts share them instead of rebuilding per example."""
+        with shared_lock:
+            if not shared:
+                root, sub, _reflection, jev = settings.build_lms()
+                shared.extend((root, sub, jev))
+            return shared[0], shared[1], shared[2]
+
+    def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
+        """Restore one reviewed replay into a disposable engine using the candidate program.
+
+        Reject inconsistent replay metadata with ValueError. Failures after the temporary
+        program file is created trigger sandbox shutdown and file-removal attempts.
+        """
+        snapshot = selected_snapshot(
+            store, example.source_session, example.replay_turn_id, example.replay_snapshot_sha256
+        )
+        if any(snapshot[name] != getattr(example, name) for name in (*ENGINE_INPUT_FIELDS, "context_files")):
+            raise ValueError("Curated replay snapshot does not match the reviewed example")
+        if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
+            raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")
+        root_lm, sub_lm, jev_lm = language_models()
+        replay_context = snapshot.get("dataset_context")
+        replay_files = snapshot["replay_files"]
+        namespace = validate_session_id(f"opt-{uuid.uuid4().hex}")
+        manager = DaytonaSandboxManager(
+            api_key=settings.fleet_daytona_api_key,
+            org_id=settings.fleet_daytona_org_id,
+            volume_id=settings.fleet_daytona_volume_id,
+            session_id=namespace,
+            auto_stop_minutes=settings.daytona_auto_stop_minutes,
+            sub_lm=sub_lm,
+            jev_lm=jev_lm,
+            max_llm_calls=settings.max_llm_calls_per_turn,
+            max_depth=settings.max_agent_depth,
+            max_children=settings.max_child_sandboxes,
+            max_active_children=settings.max_active_children,
+            turn_timeout_seconds=settings.turn_timeout_seconds,
+            linked_children=settings.linked_children,
+            disposable=True,
+        )
+        descriptor, program_path = tempfile.mkstemp(prefix="fleet-optimization-", suffix=".json")
+        os.close(descriptor)
+        try:
+            program.save(program_path)
+            for path, encoded in replay_files.items():
+                content = base64.b64decode(encoded, validate=True)
+                manager.write_workspace_file(path, content)
+            engine = AdaptiveFleetEngine(
+                sandbox_mgr=manager,
+                root_lm=root_lm,
+                sub_lm=sub_lm,
+                jev_lm=jev_lm,
+                compiled_path=program_path,
+                execution_mode=settings.execution_mode,
+            )
+            engine.optimization = OptimizationInputs(
+                context=WorkspaceDataset(**replay_context) if replay_context else None,
+                artifact_path=program_path,
+                verifications=tuple(
+                    verifications.get(
+                        (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256), []
+                    )
+                ),
+            )
+            return engine
+        except BaseException:
+            try:
+                manager.shutdown()
+            finally:
+                Path(program_path).unlink(missing_ok=True)
+            raise
+
+    return create
 
 
 @dataclass(frozen=True, slots=True)

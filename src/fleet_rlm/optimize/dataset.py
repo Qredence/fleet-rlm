@@ -11,6 +11,7 @@ import mlflow
 
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, LINEAGE_INPUT_FIELDS
 from fleet_rlm.observability import trace_object
+from fleet_rlm.optimization_runs import VALIDATION_RATIO_DEFAULT, VALIDATION_RATIO_MAX, VALIDATION_RATIO_MIN
 from fleet_rlm.replay import decode_snapshot, selected_snapshot, validate_review_labels
 from fleet_rlm.store import Store
 from fleet_rlm.workspace import validate_session_id
@@ -20,6 +21,18 @@ MIN_EXAMPLES = 8
 MIN_GROUPS = 3
 # Model inputs plus the immutable reference checked by the isolated runtime factory.
 _INPUTS = (*ENGINE_INPUT_FIELDS, *LINEAGE_INPUT_FIELDS)
+
+
+def dataset_digest(splits: dict[str, list[dspy.Example]]) -> str:
+    """Identify the exact examples in each split, so a manifest names the data it was scored on."""
+    rows = {
+        name: sorted(
+            (example.toDict() for example in items),
+            key=lambda row: json.dumps(row, sort_keys=True, ensure_ascii=False, default=str),
+        )
+        for name, items in splits.items()
+    }
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 def grouped_split(
@@ -94,10 +107,7 @@ def _example(snapshot: dict[str, Any], labels: dict[str, Any], digest: str, prov
     """Both curation sources expose exactly the same verified replay inputs."""
     validate_review_labels(labels, require_gold=True)
     return dspy.Example(
-        **{
-            name: snapshot[name]
-            for name in ("workspace_manifest", "skills_catalog", "memory_summary", "session_history", "task")
-        },
+        **{name: snapshot[name] for name in ENGINE_INPUT_FIELDS},
         answer=labels.get("expected_answer") or "",
         expected_values=labels.get("expected_values") or [],
         structured_expectations=labels.get("structured_expectations") or {},
@@ -194,12 +204,12 @@ def curate_dataset(
     experiment_name: str,
     session_id: str,
     *,
-    validation_ratio: float = 0.35,
+    validation_ratio: float = VALIDATION_RATIO_DEFAULT,
     evaluation_experiment_name: str | None = None,
 ) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
     """Return train/dev/holdout from reviewed examples; refuse to optimize on too little data."""
-    if not 0.1 <= validation_ratio <= 0.5:
-        raise ValueError("validation_ratio must be between 0.1 and 0.5")
+    if not VALIDATION_RATIO_MIN <= validation_ratio <= VALIDATION_RATIO_MAX:
+        raise ValueError(f"validation_ratio must be between {VALIDATION_RATIO_MIN} and {VALIDATION_RATIO_MAX}")
     examples = load_examples_from_postgres(store, session_id)
     examples.extend(load_examples_from_mlflow(experiment_name, store=store))
     if evaluation_experiment_name and evaluation_experiment_name != experiment_name:

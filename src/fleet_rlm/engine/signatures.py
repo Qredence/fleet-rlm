@@ -1,7 +1,7 @@
-"""Every DSPy signature Fleet uses, in one place.
+"""Static DSPy signatures for Fleet execution and judging.
 
-GEPA tunes these instructions; keep field names stable. The route vocabulary, stopping
-rules, and runtime input names come from `fleet_rlm.contracts`.
+Shared route and decision policy comes from contracts. GEPA optimizes eligible
+components of the candidate program; judging remains separate.
 """
 
 from typing import Any

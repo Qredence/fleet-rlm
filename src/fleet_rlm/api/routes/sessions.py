@@ -111,7 +111,7 @@ def select_model(
         with session_lock(runtime):
             models = {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model, body.role: body.model}
             engine = registry.engine_for_models(runtime, models)
-            runtime.harness.store.save_runtime_settings(session_id, {"models": models})
+            runtime.store.save_runtime_settings(session_id, {"models": models})
             runtime.set_engine(engine)
     return ModelSelection(role=body.role, model=body.model)
 
@@ -130,7 +130,7 @@ def set_mode(session_id: str, body: ModeRequest, runtime: LockedRuntime) -> Mode
     """
     with translate("Session runtime is unavailable", invalid="Invalid Session ID or mode"):
         context = runtime.context.to_descriptor() if runtime.context else None
-        runtime.harness.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
+        runtime.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
         runtime.set_mode(body.mode)
     return Mode(mode=body.mode)
 
@@ -178,7 +178,7 @@ def select_context(session_id: str, body: ContextRequest, runtime: LockedRuntime
             size_bytes=metadata["size_bytes"],
             sha256=metadata["sha256"],
         )
-        runtime.harness.store.save_runtime_settings(
+        runtime.store.save_runtime_settings(
             session_id, {"mode": runtime.engine.execution_mode, "context": context.to_descriptor()}
         )
         runtime.context = context
@@ -189,9 +189,7 @@ def select_context(session_id: str, body: ContextRequest, runtime: LockedRuntime
 def clear_context(session_id: str, runtime: LockedRuntime) -> Status:
     """Clear the Session's selected context and persist the change."""
     with translate("Context selection is unavailable"):
-        runtime.harness.store.save_runtime_settings(
-            session_id, {"mode": runtime.engine.execution_mode, "context": None}
-        )
+        runtime.store.save_runtime_settings(session_id, {"mode": runtime.engine.execution_mode, "context": None})
         runtime.context = None
     return Status(status="cleared")
 
@@ -203,16 +201,14 @@ def list_memory(
 ) -> Memories:
     """List a Session's memory entries that match an optional query."""
     with translate("Session memory is unavailable"):
-        return Memories(memories=runtime.harness.memories(q))
+        return Memories(memories=runtime.memories(q))
 
 
 @memory_router.put("/sessions/{session_id}/memory/{memory_id}", responses=LOCKED)
 def put_memory(memory_id: str, body: MemoryRequest, runtime: LockedRuntime) -> MemorySaved:
     """Save one memory entry under the given ID."""
     with translate("Session memory is unavailable", invalid="Invalid memory"):
-        runtime.harness.save_memory(
-            memory_id, body.content, sources=body.sources, kind=body.kind, reviewed=body.reviewed
-        )
+        runtime.save_memory(memory_id, body.content, sources=body.sources, kind=body.kind, reviewed=body.reviewed)
     return MemorySaved(memory_id=memory_id)
 
 
@@ -220,7 +216,7 @@ def put_memory(memory_id: str, body: MemoryRequest, runtime: LockedRuntime) -> M
 def remove_memory(memory_id: str, runtime: LockedRuntime) -> Deleted:
     """Delete one memory entry by ID."""
     with translate("Session memory is unavailable", invalid="Invalid memory ID"):
-        runtime.harness.delete_memory(memory_id)
+        runtime.delete_memory(memory_id)
     return Deleted(deleted=memory_id)
 
 

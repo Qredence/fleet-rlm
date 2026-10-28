@@ -52,6 +52,9 @@ The experiments routes do not acquire a Session runtime lease. A `POST` start
 body contains the shared optimizer options (`gepa_budget` or `max_metric_calls`,
 `threads`, `reflection_minibatch_size`, `max_candidate_proposals`,
 `validation_ratio`, and `trace_search`) plus a caller-generated `request_id`.
+`validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls return
+`422` before run creation. Unusable curated splits, including missing critical
+holdout, fail preparation before search.
 Repeating the same request ID with the same options returns the existing run;
 reusing it with different options returns `409`. The API owns the accepted job
 across client disconnection. It runs the existing optimizer as a subprocess,

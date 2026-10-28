@@ -118,7 +118,7 @@ def create_app(
     app.state.setup_apply_lock = asyncio.Lock()
     app.state.setup_service = None
     if setup_token:
-        from fleet_rlm.setup.service import SetupService
+        from fleet_rlm.setup import SetupService
 
         app.state.setup_service = SetupService(project_dir or Path.cwd(), setup_backend)
     app.include_router(setup.router)

@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 from fakes import (
-    FakeHarness,
     FakeManager,
     api_settings,
     client_for,
@@ -115,7 +114,7 @@ def test_session_settings_only_change_after_successful_persistence(operation, fa
         saved.update(data)
 
     runtime = runtime_with(
-        harness=FakeHarness(store=store_with(save_runtime_settings=lambda _session, data: save(data))),
+        store=store_with(save_runtime_settings=lambda _session, data: save(data)),
         sandbox_mgr=FakeManager(read_workspace_file=lambda _path: b"new data"),
         context=WorkspaceDataset("files/old.csv", sha256="a" * 64),
     )
@@ -161,7 +160,7 @@ def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failur
 
     runtime = runtime_with(
         engine=old_engine,
-        harness=FakeHarness(store=store_with(save_runtime_settings=lambda _session, data: save(data))),
+        store=store_with(save_runtime_settings=lambda _session, data: save(data)),
         execution_mode="rlm",
         sandbox_mgr=FakeManager(
             sub_lm=old_engine.sub_lm, max_llm_calls=7, max_depth=2, max_children=3, max_active_children=1
@@ -370,7 +369,7 @@ def test_memory_routes_translate_invalid_input():
     def save(memory_id, *_args, **_kwargs):
         raise ValueError(f"invalid {memory_id}")
 
-    with opened_client(runtime_with(harness=FakeHarness(save_memory=save))) as (client, _):
+    with opened_client(runtime_with(save_memory=save)) as (client, _):
         response = client.put("/sessions/s1/memory/m1", json={"content": "note"})
     assert response.status_code == 422 and response.json() == {"detail": "Invalid memory"}
 

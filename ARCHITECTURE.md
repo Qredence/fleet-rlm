@@ -39,9 +39,11 @@ flowchart LR
 - `engine/turn.py` runs each Turn on a worker thread; `sandbox_mgr.turn_scope()` is the one
   place that decides whether a caller owns a Turn, so a program nested inside an API Turn
   never resets its budget or tears it down.
-- Each runtime combines a Daytona manager, PostgreSQL harness, Skill manager, and DSPy engine.
+- Each runtime combines a Daytona manager, shared Store reference, Skill manager, and DSPy engine.
+  `SessionRuntime` owns memory, history, idempotency, and Turn-record policies; Store owns SQL and transactions.
 - The runtime does not import the offline optimizer: shared route, input, and evidence
-  contracts live in neutral modules (`contracts`, `program_file`, `execution_evidence`).
+  contracts live in neutral modules (`contracts`, `execution_evidence`). The bounded native
+  compiled-program loader lives beside the engine in `engine/programs.py`.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
@@ -135,8 +137,9 @@ Deadlines:
 - Routing errors or unknown labels fall back to RLM.
 - Selected datasets cannot use context-free direct answers.
 - RLM tunes instructions. Flex rewrites module source and initially wraps RLM when given tools.
-- Both execution routes carry the Turn's RLM budgets: the Flex source is rewritten so its
-  inner `dspy.RLM` gets the same iteration and call caps as the primary RLM.
+- Both execution routes carry the Turn's RLM budgets. The outer Flex interpreter supplies
+  omitted `max_iters` / `max_llm_calls` at native RLM construction, without editing source.
+  Explicit values are preserved; deeper factories and explicit child limits do not inherit these defaults.
 - Both RLM and Flex can delegate.
 - Optional Jev Skill selection preloads up to three instructions and consumes shared budget.
 - Ordinary Skill selection failures retain the catalog.
@@ -144,6 +147,10 @@ Deadlines:
 
 Child execution:
 
+- Native `llm_query` / `llm_query_batched` are semantic model queries, not full child agents.
+- Explicit children execute fresh native `dspy.RLM(ChildTask, ...)` instances on the metered sub LM.
+  Fleet retains selected inputs, allowlisted tools, bounded slices, concurrent context propagation,
+  failure classification, success-only promotion, and cleanup.
 - Explicit children receive Skills plus selected inputs.
 - Native nested RLMs copy their parent's `files/` and `skills/`.
 - Children use isolated Volume paths and promote only successful changed outputs.
@@ -180,6 +187,7 @@ Progress events:
 - Route assessments identify Jev or generative backends.
 - Diagnostic scorers do not automatically become GEPA objectives.
 - Search uses approved immutable replays grouped by lineage in isolated runtimes.
+  Nonempty train/dev/holdout splits and critical holdout are required before native search.
 - Gold stays outside program inputs. Host receipts support artifact and delegation scoring.
 - Train/dev search excludes holdout.
 - Paired validation, critical cases, correctness, execution errors, and measured usage gate promotion.

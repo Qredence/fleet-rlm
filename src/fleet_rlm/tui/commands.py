@@ -48,7 +48,8 @@ class SessionState:
     fullscreen: bool = False
     setup_available: bool = False
     pending_model_choice: tuple[str, list[str]] | None = None
-    optimizer_launcher: Callable[[dict[str, Any] | str], None] | None = field(default=None, repr=False)
+    optimizer_launcher: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
+    optimizer_reviewer: Callable[[str, str, str], None] | None = field(default=None, repr=False)
     experiments_opener: Callable[[], None] | None = field(default=None, repr=False)
     pending_optimizer_request: dict[str, Any] | None = field(default=None, repr=False)
 
@@ -568,12 +569,15 @@ def _optimize(ctx: Context, arg: str) -> None:
         return
     payload, approve_run = parsed
     if ctx.state.fullscreen:
-        if ctx.state.optimizer_launcher is None:
+        callback = ctx.state.optimizer_reviewer if approve_run is not None else ctx.state.optimizer_launcher
+        if callback is None:
             _out(ctx).print("[red]The fullscreen experiments screen is unavailable.[/red]")
             return
         if approve_run is not None:
-            ctx.state.optimizer_launcher(f"--approve {approve_run}")
+            assert ctx.state.optimizer_reviewer is not None
+            ctx.state.optimizer_reviewer(approve_run, "approved", str(uuid.uuid4()))
         else:
+            assert ctx.state.optimizer_launcher is not None
             ctx.state.optimizer_launcher(payload)
         return
     if approve_run is not None:

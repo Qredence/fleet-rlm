@@ -52,6 +52,35 @@ def test_worker_snapshot_ignores_unrelated_dotenv_keys(tmp_path):
     assert received.configuration_source("turn_timeout_seconds") == "dotenv"
 
 
+@pytest.mark.parametrize("ratio", [0.1, 0.5])
+def test_ratio_bounds_agree_across_entry_points(ratio, monkeypatch):
+    from fleet_rlm.api.schemas import StartExperiment
+    from fleet_rlm.optimize import dataset
+    from fleet_rlm.tui.commands import Context, SessionState, _parse_optimizer_arguments
+
+    parser = argparse.ArgumentParser()
+    add_optimization_arguments(parser)
+    options = ExperimentOptions.from_namespace(parser.parse_args(["--session", "s1", "--validation-ratio", str(ratio)]))
+    assert options.validation_ratio == ratio
+    assert StartExperiment(request_id="request", validation_ratio=ratio).validation_ratio == ratio
+    payload, review = _parse_optimizer_arguments(Context(None, "s1", SessionState()), f"--validation-ratio {ratio}")
+    assert payload["validation_ratio"] == ratio and review is None
+    monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
+    monkeypatch.setattr(dataset, "load_examples_from_mlflow", lambda *_args, **_kwargs: [])
+    with pytest.raises(ValueError, match="approved examples"):
+        dataset.curate_dataset(None, "offline", "s1", validation_ratio=ratio)
+
+
+@pytest.mark.parametrize("ratio", [0, 0.09, 0.51, 1, float("nan"), float("inf")])
+def test_invalid_ratio_rejected_by_shared_and_direct_contract(ratio):
+    from fleet_rlm.optimize.dataset import curate_dataset
+
+    with pytest.raises(ValidationError):
+        ExperimentOptions(validation_ratio=ratio)
+    with pytest.raises(ValueError, match="validation_ratio"):
+        curate_dataset(None, "offline", "s1", validation_ratio=ratio)
+
+
 def test_cli_and_http_search_controls_have_one_validated_contract():
     parser = argparse.ArgumentParser()
     add_optimization_arguments(parser)

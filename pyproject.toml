@@ -31,8 +31,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Flex is experimental; the lock pins DSPy 3.4.1 and GEPA 0.1.4 contracts.
-    "dspy[typesafe]>=3.4.1,<3.5",
+    # Flex uses an internal constructor protocol verified only on DSPy 3.4.1 (GEPA lock: 0.1.4).
+    "dspy[typesafe]==3.4.1",
     "daytona==0.224.0",
     "mlflow==3.17.2",
     "databricks-sdk>=0.153.0,<1",
@@ -133,7 +133,7 @@ override-dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fleet_rlm"]
-force-include = { "src/fleet_rlm/sandbox/snapshots/snapshot-requirements.txt" = "fleet_rlm/sandbox/snapshots/snapshot-requirements.txt" }
+force-include = { "src/fleet_rlm/sandbox/snapshot-requirements.txt" = "fleet_rlm/sandbox/snapshot-requirements.txt" }
 
 # Ship only what builds and tests the package; agent, editor, and CI config stay out.
 # Hatch always adds pyproject.toml, the readme, and the license files.

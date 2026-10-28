@@ -24,8 +24,7 @@ from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import Route
-from fleet_rlm.lm_usage import stream_callbacks
-from fleet_rlm.observability import phase_span
+from fleet_rlm.observability import phase_span, stream_callbacks
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
 from fleet_rlm.sandbox.manager import (
     CLEANUP_NOT_REQUIRED,
@@ -131,7 +130,7 @@ def run_turn(
             deadline_seconds=policy.effective_seconds,
             deadline_source=policy.source,
         )
-        prior = runtime.harness.claim_turn(turn_id, idempotency_key or turn_id, task)
+        prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task)
         if prior is not None:
             emit({**_replayed(prior), "turn_id": prior["turn_id"]})
             return
@@ -278,7 +277,7 @@ def run_turn(
                     _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                 }
                 with phase_span("turn.commit", turn_id=turn_id, learned_note=bool(learned_note)) as phase:
-                    artifacts = runtime.harness.commit_turn(
+                    artifacts = runtime.commit_turn(
                         session_id=session_id,
                         turn_record=turn_record,
                         new_memory_note=learned_note,
@@ -449,7 +448,7 @@ def _terminal_failure(
     if trace_id:
         failure["trace_id"] = trace_id
     with suppress(Exception):
-        runtime.harness.store.finish_turn(session_id, turn_id, outcome, failure)
+        runtime.store.finish_turn(session_id, turn_id, outcome, failure)
     return failure
 
 
@@ -545,7 +544,7 @@ def _prepare_inputs(
             exceed 8,000,000.
     """
     with phase_span("turn.load_context", session_id=session_id) as phase:
-        memory_summary, session_history = runtime.harness.load_context(session_id)
+        memory_summary, session_history = runtime.load_context(session_id)
         phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
     # Skills land first so their files are hashed; everything else remote arrives in one exec.
     with phase_span("turn.sync_skills") as phase:
@@ -587,7 +586,7 @@ def _prepare_inputs(
                 replay_files[path] = base64.b64encode(content).decode("ascii")
             phase.set_outputs({"files": len(replay_files), "bytes": replay_bytes})
     with phase_span("turn.reviewed_memories", task_chars=len(task)) as phase:
-        memories = runtime.harness.memories(task, reviewed_only=True)
+        memories = runtime.memories(task, reviewed_only=True)
         phase.set_outputs({"memories": len(memories)})
     with phase_span("turn.skill_catalog") as phase:
         skills_catalog = runtime.skill_mgr.build_catalog_xml()

@@ -2570,8 +2570,8 @@ components:
           title: Max Candidate Proposals
         validation_ratio:
           type: number
-          exclusiveMaximum: 1.0
-          exclusiveMinimum: 0.0
+          maximum: 0.5
+          minimum: 0.1
           title: Validation Ratio
           default: 0.35
         trace_search:

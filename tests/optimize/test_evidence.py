@@ -152,7 +152,7 @@ def test_python_verification_runs_only_via_daytona_transport(monkeypatch):
 
 
 def test_structured_labels_change_dataset_digest_without_entering_inputs():
-    from fleet_rlm.optimize.gepa import dataset_digest
+    from fleet_rlm.optimize.dataset import dataset_digest
 
     example = dspy.Example(task="compute", structured_expectations={}).with_inputs("task")
     original = dataset_digest({"train": [example]})

@@ -7,7 +7,7 @@ src/fleet_rlm/
 ├── config.py          # FleetSettings and model construction
 ├── contracts.py       # Route vocabulary, stopping rules, runtime input names, decision evidence
 ├── adapters.py        # Fleet's DSPy ChatAdapter: raw-Python fence and one format re-ask
-├── program_file.py    # Compiled-program loading: bounded, atomic, rolled back on failure
+├── observability.py   # Redaction, native usage receipts, callbacks, MLflow instrumentation
 ├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
 ├── skills.py          # User Skill validation, sync, and catalog
 ├── sandbox/
@@ -15,27 +15,26 @@ src/fleet_rlm/
 │   ├── workspace_io.py # Session workspace files, context datasets, and learned notes mixin
 │   ├── interpreter.py # DSPy CodeInterpreter and host-tool dispatch
 │   ├── repl.py        # run_code transport and stdout bridge protocol
-│   ├── snapshots/     # Packaged definition, runtime preflight, operator operations
+│   ├── snapshots.py   # Packaged definition, runtime preflight/cache, explicit operator operations
+│   ├── snapshot-requirements.txt # Packaged hash-locked Python environment
 │   └── runtime/
 │       ├── repl.py    # Sandbox-side namespace, output capture, and bridge
 │       └── fs_ops.py  # Sandbox-side filesystem, staging, digest, notes, and Skill scripts
 ├── workspace.py       # Session ID and workspace path validation, serializable dataset handles
 ├── engine/
-│   ├── signatures.py  # Every DSPy signature GEPA tunes (route vocabulary lives in contracts)
-│   ├── programs.py    # The Turn program: route selection, then direct / Flex / RLM
+│   ├── signatures.py  # Static native execution and judge declarations
+│   ├── programs.py    # Native program assembly and bounded compiled-state loader
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # spawn_agent, spawn_agents
-├── store/
-│   └── db.py          # Store, numbered additive migrations, one pool, Turn commits
+├── store.py          # SQL, numbered additive migrations, one pool, Turn transactions
 ├── optimize/          # GEPA/evaluation worker modules; imported by CLI subprocesses only
 │   ├── objectives.py  # Pure scoring objectives: no MLflow, LM, or filesystem
-│   ├── artifacts.py   # Isolated rollouts, manifests, promotion gate, approval
-│   ├── validation.py  # Paired per-case validation and trace evidence
-│   ├── dataset.py     # Reviewed examples from Postgres/MLflow, grouped splits
+│   ├── artifacts.py   # Identity, manifests, reports, promotion gate, approval
+│   ├── validation.py  # Isolated replay engines, paired validation, trace evidence
+│   ├── dataset.py     # Reviewed examples, grouped splits, canonical dataset identity
 │   ├── scorers.py     # MLflow scorer sinks, judge suite, and the GEPA metric
 │   ├── gepa.py        # `fleet optimize`
-│   ├── evaluation.py  # Eval cases, gold labels, `fleet eval` runs
-│   └── benchmarks.py  # Synthetic long-context task generators
+│   └── evaluation.py  # Eval cases, synthetic generators, gold labels, `fleet eval` runs
 ├── optimization_runs.py # CLI/API-neutral options, events, import, and artifact reads
 ├── experiments.py     # API-owned optimizer process and lifecycle manager
 ├── api/
@@ -44,8 +43,8 @@ src/fleet_rlm/
 │   ├── schemas.py     # Request and response models
 │   ├── events.py      # DSPy activity callback and SSE envelope
 │   └── routes/        # sessions (+ memory, skills), workspace, turns, experiments
-├── setup/             # Configuration draft, readiness probes, serialized setup operations
-├── session.py         # Per-Session runtime and registry
+├── setup.py           # Configuration draft, readiness probes, serialized setup operations
+├── session.py         # Runtime, registry, leases, memory/history/Turn-record policies
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli` and `fleet web`
 ├── tui/
 │   ├── app.py         # Fullscreen Textual application and non-TTY fallback loop
@@ -68,6 +67,29 @@ PostgreSQL stores API-owned and standalone CLI run lifecycle. `fleet optimize`
 remains an independently callable synchronous CLI workflow. `optimization_runs.py`
 is neutral to the serving boundary and holds shared options, worker events, and
 legacy history import without rewriting the source files.
+
+The package contains 61 Python files: 53 implementation modules and eight package
+initializers. Resources bring the tracked source/resource target to 68 files. This
+reduces navigation boundaries, not the number of application capabilities. Release
+checks live in repository tooling at `scripts/release_checks.py`, outside the wheel.
+
+### Python import changes
+
+- `fleet_rlm.program_file.CompiledProgramFile` → `fleet_rlm.engine.programs.CompiledProgramFile`.
+- `fleet_rlm.lm_usage` → `fleet_rlm.observability`.
+- `fleet_rlm.store.db` → `fleet_rlm.store`; `fleet_rlm.setup.service` → `fleet_rlm.setup`.
+- Snapshot definition, preflight, and operations now share `fleet_rlm.sandbox.snapshots`.
+- Synthetic generators moved from `fleet_rlm.optimize.benchmarks` to `fleet_rlm.optimize.evaluation`.
+- Isolated engine construction and `IsolatedFleetProgram` live in `optimize.validation`;
+  identity/report helpers live in `optimize.artifacts`; `dataset_digest` lives in `optimize.dataset`.
+- Saved mode/root/sub overrides use `FleetSettings.for_session`; the former harness
+  methods live directly on `SessionRuntime`, with `runtime.store` for persistence.
+
+Old submodule paths have no compatibility shims. CLI/HTTP operations and native JSON
+state keys (including the isolated wrapper's `program.` prefix) remain stable.
+`engine/signatures.py` remains a declaration boundary; GEPA traverses the instantiated
+student, not declaration files. `contracts.py` stays a leaf. Optimizer dependencies
+flow from `gepa` to dataset/validation/artifacts/scorers, never back into orchestration.
 
 The corresponding implementation areas are covered by `tests/`. Repository
 commands are defined in the root `Makefile`; CI runs the Lite quality targets

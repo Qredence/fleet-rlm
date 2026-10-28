@@ -11,7 +11,7 @@ from rich.console import Console
 from textual.widgets import Button, Input
 
 from fleet_rlm.api.app import create_app
-from fleet_rlm.setup.service import SECTIONS, SetupService
+from fleet_rlm.setup import SECTIONS, SetupService
 from fleet_rlm.tui.setup import SetupApp, run_setup
 
 

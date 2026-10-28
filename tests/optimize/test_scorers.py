@@ -974,7 +974,7 @@ def test_should_reject_a_stopping_verdict_with_an_unknown_execution_citation(mon
 def test_metric_names_the_program_trace_without_changing_the_score():
     from fleet_rlm.optimize.scorers import SCORER_VERSION
 
-    assert SCORER_VERSION == "fleet-metric-v9"
+    assert SCORER_VERSION == "fleet-metric-v10"
     gold = dspy.Example(task="Convert 72F", answer="22.2", expected_values=["22.2"], route="flex")
     pred = dspy.Prediction(answer="22.2", route="flex", lm_calls=4, sandbox_errors=0, submit_rejections=0)
     program_trace = [("FlexModule", {"task": "Convert 72F"}, {"answer": "22.2"})]

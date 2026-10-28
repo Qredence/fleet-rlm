@@ -101,17 +101,8 @@ def store_with(**overrides: Any) -> SimpleNamespace:
     return SimpleNamespace(**{**defaults, **overrides})
 
 
-class FakeHarness(SimpleNamespace):
-    def __init__(self, **overrides: Any) -> None:
-        defaults: dict[str, Any] = {
-            "claim_turn": lambda *_args: None,
-            "memories": lambda *_args, **_kwargs: [],
-            "load_context": lambda _session: ("", ""),
-            "commit_turn": lambda **_kwargs: [],
-            "turn_status": lambda _turn_id: None,
-            "store": store_with(),
-        }
-        super().__init__(**{**defaults, **overrides})
+class FakeRuntime(SessionRuntime):
+    """Allow individual runtime policy methods to be replaced in boundary tests."""
 
 
 def engine_with(root: str = "openai/system.ai.root", sub: str = "openai/system.ai.sub") -> SimpleNamespace:
@@ -127,9 +118,23 @@ def runtime_with(**parts: Any) -> SessionRuntime:
     engine = parts.pop("engine", engine_with())
     execution_mode = parts.pop("execution_mode", getattr(engine, "execution_mode", "hybrid"))
     engine.execution_mode = execution_mode
-    return SessionRuntime(
+    real_policy = parts.pop("real_policy", False)
+    policy = {
+        name: parts.pop(name)
+        for name in (
+            "claim_turn",
+            "memories",
+            "load_context",
+            "commit_turn",
+            "turn_status",
+            "save_memory",
+            "delete_memory",
+        )
+        if name in parts
+    }
+    runtime = FakeRuntime(
         sandbox_mgr=parts.pop("sandbox_mgr", FakeManager()),
-        harness=parts.pop("harness", FakeHarness()),
+        store=parts.pop("store", store_with()),
         skill_mgr=parts.pop(
             "skill_mgr",
             SimpleNamespace(sync_local_skills_to_volume=lambda: 0, build_catalog_xml=lambda: "<available_skills />"),
@@ -137,6 +142,17 @@ def runtime_with(**parts: Any) -> SessionRuntime:
         engine=engine,
         **parts,
     )
+    if not real_policy:
+        defaults = {
+            "claim_turn": lambda *_args: None,
+            "memories": lambda *_args, **_kwargs: [],
+            "load_context": lambda _session: ("", ""),
+            "commit_turn": lambda **_kwargs: [],
+            "turn_status": lambda _turn: None,
+        }
+        for name, method in (defaults | policy).items():
+            setattr(runtime, name, method)
+    return runtime
 
 
 class FakeRegistry:

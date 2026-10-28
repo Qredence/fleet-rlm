@@ -74,7 +74,7 @@ for that Session. See the [configuration reference](docs/reference/configuration
 for model settings, database permissions, and tracking profiles.
 
 The versioned execution snapshot is defined in
-[sandbox/snapshots/definition.py](src/fleet_rlm/sandbox/snapshots/definition.py).
+[sandbox/snapshots.py](src/fleet_rlm/sandbox/snapshots.py).
 `fleet cli` checks service readiness through FastAPI and opens a setup checklist
 when configuration or snapshot preparation needs attention. The checklist can
 save missing settings to `.env`, select or create a Daytona Volume, build a

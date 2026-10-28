@@ -15,8 +15,7 @@ from typing import Any
 
 from dspy.utils.callback import ACTIVE_CALL_ID
 
-from fleet_rlm.lm_usage import LMUsageCallback
-from fleet_rlm.observability import activity_preview, activity_text
+from fleet_rlm.observability import LMUsageCallback, activity_preview, activity_text
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, DaytonaSandboxManager
 
 # Advisory labels derived from events Fleet already emits. Nothing here can act on a Turn.

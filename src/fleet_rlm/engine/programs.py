@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import ast
+import hashlib
+import json
 import logging
+import os
 from functools import partial
-from typing import Any, TypeGuard
+from pathlib import Path
+from typing import Any
 
 import dspy
 import mlflow
@@ -24,9 +27,7 @@ from fleet_rlm.contracts import (
 )
 from fleet_rlm.engine.children import ChildAgents, turn_is_over
 from fleet_rlm.engine.signatures import DirectAnswer, FleetTask, SkillRelevance, TurnTriage
-from fleet_rlm.lm_usage import turn_callbacks, typed_decision_scope
-from fleet_rlm.observability import activity_text, evidence_span
-from fleet_rlm.program_file import CompiledProgramFile
+from fleet_rlm.observability import activity_text, evidence_span, turn_callbacks, typed_decision_scope
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import WorkspaceDataset
@@ -38,76 +39,6 @@ _MAX_PRELOADED_SKILL_CHARS = 20_000
 # A Flex baseline is dspy.RLM with DSPy's defaults (20 iterations, 50 sub-LLM calls). The rlm route
 # uses the Turn's own budgets, so the flex route gets the same ones.
 _FLEX_MAX_ITERS = 16
-
-
-def _is_dspy_rlm(node: ast.AST) -> TypeGuard[ast.Call]:
-    """True for a `dspy.RLM(...)` call in generated Flex source."""
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "RLM"
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "dspy"
-    )
-
-
-def _with_turn_budgets(source: str, *, max_iters: int, max_llm_calls: int) -> str:
-    """Add the Turn's RLM budgets to every `dspy.RLM(...)` call in generated Flex source.
-
-    The rewrite is AST-driven, so nested signature text and quoting cannot confuse it, and a source
-    that already sets a budget keeps its own value. Source that does not parse, or holds no RLM
-    construction, is returned unchanged.
-    """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return source
-    lines = [line.encode("utf-8") for line in source.splitlines(keepends=True)]
-    edits: list[tuple[int, int, str]] = []
-    for node in ast.walk(tree):
-        if not _is_dspy_rlm(node):
-            continue
-        declared = {keyword.arg for keyword in node.keywords}
-        additions = [
-            f"{name}={value}"
-            for name, value in (("max_iters", max_iters), ("max_llm_calls", max_llm_calls))
-            if name not in declared
-        ]
-        if additions and node.end_lineno is not None and node.end_col_offset is not None:
-            edits.append((node.end_lineno - 1, node.end_col_offset - 1, ", ".join(additions)))
-    for line_index, column, insertion in sorted(edits, reverse=True):
-        line = lines[line_index]
-        # AST column offsets count UTF-8 bytes, not Python string characters.
-        prefix = b"".join(lines[:line_index]) + line[:column]
-        separator = b" " if prefix.rstrip().endswith((b",", b"(")) else b", "
-        lines[line_index] = line[:column] + separator + insertion.encode("utf-8") + line[column:]
-    rewritten = b"".join(lines).decode("utf-8")
-    try:
-        ast.parse(rewritten)
-    except SyntaxError:
-        return source
-    return rewritten
-
-
-def _bind_flex_budgets(flex: Any, *, max_iters: int, max_llm_calls: int) -> bool:
-    """Apply the Turn's RLM budgets to a Flex module source; True when the source changed.
-
-    DSPy's Flex bridge scopes the call-time LM, so a sandbox-built `dspy.RLM` has no `sub_lm` hook:
-    its sub-queries run on the serving LM, metered, with DSPy's default call cap. Fleet supplies
-    missing source-level limits; shared aggregate usage remains enforced by host metering.
-    """
-    source = flex.module_src or ""
-    rewritten = _with_turn_budgets(source, max_iters=max_iters, max_llm_calls=max_llm_calls)
-    if not source or rewritten == source:
-        return False
-    # Flex.load_state is the public rebinding interface. It resets ``lm`` when the
-    # supplied state omits one, so preserve the host-owned metered LM explicitly.
-    lm = flex.get_lm()
-    try:
-        flex.load_state({"module_src": rewritten})
-    finally:
-        flex.set_lm(lm)
-    return True
 
 
 def _lm_api_key(lm: Any) -> str | None:
@@ -135,6 +66,72 @@ def _safe_route_error(exc: Exception, route_lm: Any) -> str:
     return detail[:500] or "no exception message"
 
 
+class CompiledProgramFile:
+    """The one path from a compiled-program file to a live engine: bounded, atomic, rolled back on failure.
+
+    Accepts artifacts saved from the engine itself and from the IsolatedFleetProgram wrapper
+    (whose state keys carry a ``program.`` prefix).
+    """
+
+    MAX_BYTES = 10_000_000
+
+    def __init__(self, path: str | None) -> None:
+        """Record the artifact path before any file is read or applied."""
+        self.path = path
+        self.digest = ""
+        self._stat: tuple[int, int] | None = None
+
+    def load_initial(self, program: dspy.Module) -> None:
+        """Apply the artifact at startup when it exists; a missing file keeps the program unchanged."""
+        if self.path and os.path.lexists(self.path):
+            self._apply(program, self._read())
+
+    def reload_if_changed(self, program: dspy.Module) -> None:
+        """Reapply the artifact only when its mtime or size has changed since the last load."""
+        if not self.path or not os.path.lexists(self.path):
+            return
+        stat = self._regular_stat(self.path)
+        if (stat.st_mtime_ns, stat.st_size) != self._stat:
+            self._apply(program, self._read())
+
+    def _read(self) -> bytes:
+        """Read the configured regular file, rejecting sizes over MAX_BYTES with ValueError.
+
+        Invalid paths raise ValueError; filesystem errors propagate.
+        """
+        assert self.path is not None
+        if self._regular_stat(self.path).st_size > self.MAX_BYTES:
+            raise ValueError("Compiled program exceeds the 10 MB size limit")
+        return Path(self.path).read_bytes()
+
+    @staticmethod
+    def _regular_stat(path: str) -> os.stat_result:
+        """Return file metadata, rejecting symlinks and non-files with ValueError."""
+        if os.path.islink(path) or not os.path.isfile(path):
+            raise ValueError("Compiled program path must be a regular file")
+        return os.stat(path)
+
+    def _apply(self, program: dspy.Module, content: bytes) -> None:
+        """Apply JSON program state, retaining existing state for omitted predictors.
+
+        Accept wrapped ``program.`` keys. Track the digest and, when the file exists,
+        its metadata after loading. JSON that is not an object raises ValueError;
+        JSON decoding, DSPy loading, and filesystem errors propagate.
+        """
+        state = json.loads(content)
+        if not isinstance(state, dict):
+            raise ValueError("Compiled program must be a JSON object")
+        if state and all(key.startswith("program.") or key == "metadata" for key in state):
+            state = {key.removeprefix("program."): value for key, value in state.items()}
+        # A program saved before a predictor existed keeps that predictor's current state.
+        state = {**program.dump_state(), **state}
+        program.load_state(state)  # DSPy trial-loads a copy first, so a bad artifact leaves `program` unchanged.
+        if self.path and os.path.lexists(self.path):
+            stat = self._regular_stat(self.path)
+            self._stat = (stat.st_mtime_ns, stat.st_size)
+        self.digest = hashlib.sha256(content).hexdigest()
+
+
 class AdaptiveFleetEngine(dspy.Module):
     """Optional Jev triage with a GEPA-optimizable Flex/RLM execution core."""
 
@@ -157,7 +154,6 @@ class AdaptiveFleetEngine(dspy.Module):
         if execution_mode not in {"rlm", "flex", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
-        self.optimization_context: WorkspaceDataset | None = None
         self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
@@ -171,7 +167,10 @@ class AdaptiveFleetEngine(dspy.Module):
         self.flex_agent = dspy.Flex(
             FleetTask,
             tools=tools,
-            interpreter_factory=self.sandbox_mgr.interpreter_factory(tools=toolset),
+            interpreter_factory=self.sandbox_mgr.interpreter_factory(
+                tools=toolset,
+                rlm_defaults={"max_iters": _FLEX_MAX_ITERS, "max_llm_calls": sandbox_mgr.max_llm_calls},
+            ),
         )
         self.primary_rlm = dspy.RLM(
             FleetTask,
@@ -185,11 +184,6 @@ class AdaptiveFleetEngine(dspy.Module):
         # Set by the optimizer's per-example factory; IsolatedFleetProgram clears it after the rollout.
         self.optimization: OptimizationInputs | None = None
         self.compiled.load_initial(self)
-        self._apply_flex_budgets()
-
-    def _apply_flex_budgets(self) -> None:
-        """Give the Flex module source the Turn's RLM budgets after construction or an artifact reload."""
-        _bind_flex_budgets(self.flex_agent, max_iters=_FLEX_MAX_ITERS, max_llm_calls=self.sandbox_mgr.max_llm_calls)
 
     def forward(
         self,
@@ -259,8 +253,6 @@ class AdaptiveFleetEngine(dspy.Module):
         cancellation, and execution errors propagate.
         """
         self.compiled.reload_if_changed(self)
-        # A reloaded artifact carries its own Flex source, so the budgets are re-applied here too.
-        self._apply_flex_budgets()
         self.sandbox_mgr.check_turn()
         mode = execution_mode or self.execution_mode
         if mode not in {"rlm", "flex", "hybrid"}:

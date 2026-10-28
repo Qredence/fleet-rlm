@@ -50,6 +50,29 @@ def test_missing_values_respects_token_boundaries():
     assert missing_values("the total is 120 and 1.25", [12, 120, 1.25]) == [12]
 
 
+@pytest.mark.parametrize(
+    "answer,expected,present",
+    [
+        ("-12", 12, False),
+        ("12.5", 12, False),
+        ("1.25", 1, False),
+        ("+12", 12, True),
+        ("-12.0", -12, True),
+        ("1.2e1", 12, True),
+        ("12e-1", 12, False),
+        ("1,200.00", 1200, True),
+        ("12,34", 1234, False),
+        ("1.000001", 1, False),
+        ("identifier12", 12, False),
+        ("12kg", 12, False),
+        ("0.5", ".5", True),
+        ("EXACT wording", "exact", True),
+    ],
+)
+def test_complete_numeric_tokens_and_text(answer, expected, present):
+    assert (missing_values(answer, [expected]) == []) is present
+
+
 def test_expected_values_and_route_metrics():
     gold = type("Gold", (), {"expected_values": ["42"], "route": "rlm"})()
     assert expected_values_metric(gold, "answer 42") == (1.0, "all present")

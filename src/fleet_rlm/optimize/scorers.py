@@ -16,8 +16,7 @@ from mlflow.genai.scorers import RelevanceToQuery, RetrievalGroundedness, scorer
 
 from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, make_choice_type, parse_route
 from fleet_rlm.engine.signatures import AnswerJudge, TurnJudge
-from fleet_rlm.lm_usage import typed_decision_scope
-from fleet_rlm.observability import activity_preview, activity_text, evidence_span, trace_object
+from fleet_rlm.observability import activity_preview, activity_text, evidence_span, trace_object, typed_decision_scope
 from fleet_rlm.optimize.objectives import (
     Metric,
     aggregate,
@@ -29,7 +28,7 @@ from fleet_rlm.optimize.objectives import (
     routing_efficiency,
 )
 
-SCORER_VERSION = "fleet-metric-v9"
+SCORER_VERSION = "fleet-metric-v10"
 TRACE_ASSESSMENT_VERSION = "fleet-trace-assessments-v7"
 
 _MAX_EXECUTION_SPANS = 8

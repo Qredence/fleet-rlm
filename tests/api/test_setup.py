@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.session import SessionRuntimeRegistry
-from fleet_rlm.setup.service import SECTIONS, Operation, SetupConflictError, SetupService
+from fleet_rlm.setup import SECTIONS, Operation, SetupConflictError, SetupService
 
 TOKEN = "local-test-operator-token"
 
@@ -417,7 +417,7 @@ def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environmen
     import databricks.sdk
     import databricks.sdk.core
 
-    from fleet_rlm.store import db
+    import fleet_rlm.store as db
 
     observed = []
 

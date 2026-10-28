@@ -233,7 +233,7 @@ def inspect_skills_code(rel_paths: list[str]) -> str:
     )
 
 
-def export_skills_code() -> str:
+def export_skills_code(max_file_bytes: int, max_files: int, max_total_bytes: int) -> str:
     """Build the remote Python script to export runtime-authored Skills from `/workspace/skills`."""
     return (
         "import base64,json,os\n"
@@ -246,11 +246,11 @@ def export_skills_code() -> str:
         "  path=os.path.join(parent,name)\n"
         "  if os.path.islink(path) or not os.path.isfile(path): continue\n"
         "  size=os.path.getsize(path)\n"
-        "  if size>1000000: raise ValueError('Skill file exceeds the size limit')\n"
+        f"  if size>{max_file_bytes}: raise ValueError('Skill file exceeds the size limit')\n"
         "  with open(path,'rb') as handle: raw=handle.read(size+1)\n"
         "  if len(raw)!=size: raise ValueError('Skill changed during export')\n"
         "  total+=size\n"
-        "  if total>5000000 or len(items)>=200: raise ValueError('Skill export exceeds "
+        f"  if total>{max_total_bytes} or len(items)>={max_files}: raise ValueError('Skill export exceeds "
         "the synchronization bounds')\n"
         "  items.append({'rel':os.path.relpath(path,root),'b64':base64.b64encode(raw).decode()})\n"
         "print(json.dumps(items))"

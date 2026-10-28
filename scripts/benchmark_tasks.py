@@ -20,9 +20,8 @@ from urllib.parse import quote
 
 import httpx
 
-from fleet_rlm.contracts import parse_route
+from fleet_rlm.contracts import parse_route, parse_sse
 from fleet_rlm.optimize.artifacts import atomic_write
-from fleet_rlm.optimize.evaluation import parse_sse
 from fleet_rlm.workspace import validate_session_id
 
 

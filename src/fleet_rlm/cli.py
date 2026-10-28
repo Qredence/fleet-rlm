@@ -229,10 +229,10 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
             if target.mode == "databricks"
             else "fleet_rlm_eval_cases"
         )
-        from fleet_rlm.optimize import benchmarks
+        from fleet_rlm.optimize import evaluation
 
         if args.long_context:
-            cases += benchmarks.long_context_cases()
+            cases += evaluation.long_context_cases()
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
         _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
         return

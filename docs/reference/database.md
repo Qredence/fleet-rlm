@@ -5,6 +5,12 @@ Workspace files live on the Session's Daytona Volume. Configure the
 connection with `FLEET_DATABASE_URL`; the default DSN is local PostgreSQL at
 `postgresql://postgres:postgres@localhost:5432/fleet`.
 
+`store.py` owns SQL, migrations, pooling, and transactions. `SessionRuntime`
+owns memory validation, bounded history, idempotency, and Turn-record policies,
+using one shared `runtime.store` reference rather than a separate harness. Session
+rows are created before lease acquisition; releasing a runtime closes its lease,
+not the registry's Store. The consolidation changes no SQL or schema version.
+
 At startup, Fleet takes a transaction-scoped advisory lock, reads the
 `fleet_lite_schema_migrations` ledger, and applies each pending migration once.
 The initial migration creates additive tables for

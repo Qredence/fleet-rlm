@@ -14,6 +14,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
 from fleet_rlm.contracts import parse_route
@@ -36,11 +37,28 @@ def efficiency(lm_calls: int, sandbox_errors: int, submit_rejections: int) -> fl
     return round(max(0.0, 1.0 - 0.015 * max(0, lm_calls - 3) - 0.15 * (sandbox_errors + submit_rejections)), 3)
 
 
+_NUMBER = r"[+-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+_NUMERIC_TOKEN = re.compile(rf"(?<![\w.+-]){_NUMBER}(?![\w.]|,\d)")
+
+
 def missing_values(answer: str, expected: list[Any]) -> list[Any]:
-    """Gold values absent from the answer; thousands separators are ignored."""
+    """Match complete signed decimal/exponent tokens, with optional grouped thousands.
+
+    Numeric equality is exact (Decimal; no tolerance). Text expectations retain
+    case-insensitive word matching and comma removal, independently of numbers.
+    """
+    numbers = {Decimal(match.group().replace(",", "")) for match in _NUMERIC_TOKEN.finditer(answer)}
     text = answer.lower().replace(",", "")
-    # Boundaries stop "12" from matching inside "120" or "1.25".
-    return [value for value in expected if not re.search(rf"(?<![\w.]){re.escape(str(value).lower())}(?![\w])", text)]
+    missing = []
+    for value in expected:
+        literal = str(value)
+        if re.fullmatch(_NUMBER, literal):
+            present = Decimal(literal.replace(",", "")) in numbers
+        else:
+            present = re.search(rf"(?<![\w.]){re.escape(literal.lower())}(?![\w])", text) is not None
+        if not present:
+            missing.append(value)
+    return missing
 
 
 def expected_values_metric(gold: Any, answer: str) -> Metric:

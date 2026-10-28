@@ -27,6 +27,9 @@ EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _MAX_REPORT_BYTES = 4_000_000
+VALIDATION_RATIO_MIN = 0.1
+VALIDATION_RATIO_MAX = 0.5
+VALIDATION_RATIO_DEFAULT = 0.35
 
 
 def reconcile_abandoned_running_runs(store: Store, *, inactive_owner_id: str | None = None) -> None:
@@ -73,7 +76,9 @@ class ExperimentOptions(BaseModel):
     threads: int = Field(default=4, ge=1, le=32, strict=True)
     reflection_minibatch_size: int = Field(default=3, ge=1, strict=True)
     max_candidate_proposals: int | None = Field(default=None, ge=1, strict=True)
-    validation_ratio: float = Field(default=0.35, gt=0, lt=1, allow_inf_nan=False)
+    validation_ratio: float = Field(
+        default=VALIDATION_RATIO_DEFAULT, ge=VALIDATION_RATIO_MIN, le=VALIDATION_RATIO_MAX, allow_inf_nan=False
+    )
     trace_search: bool = False
 
     @model_validator(mode="after")
@@ -113,7 +118,7 @@ def add_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--reflection-minibatch-size", type=int, default=3)
     parser.add_argument("--max-candidate-proposals", type=int)
-    parser.add_argument("--validation-ratio", type=float, default=0.35)
+    parser.add_argument("--validation-ratio", type=float, default=VALIDATION_RATIO_DEFAULT)
     parser.add_argument("--trace-search", action="store_true", help="also trace search rollouts in MLflow")
 
 
@@ -154,49 +159,6 @@ def parse_event(line: str) -> dict[str, Any] | None:
     if not isinstance(value, dict) or not isinstance(value.get("type"), str):
         raise ValueError("invalid Fleet optimization event")
     return value
-
-
-def read_run_history(root: Path, session_id: str) -> list[dict[str, Any]]:
-    """Read historical file records only; new runs live exclusively in PostgreSQL."""
-    history = Path(root) / "experiments"
-    directory = history / validate_session_id(session_id)
-    for folder in (history, directory):
-        if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
-            raise ValueError("optimization history directory is invalid")
-    records = []
-    for path in sorted(directory.glob("*.json")):
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > _MAX_REPORT_BYTES:
-            raise ValueError("optimization run record is invalid")
-        record = json.loads(path.read_bytes())
-        if not isinstance(record, dict) or record.get("session_id") != session_id or record.get("run_id") != path.stem:
-            raise ValueError("optimization run record identity is invalid")
-        validate_run_id(record["run_id"])
-        records.append(record)
-    return sorted(records, key=lambda item: (str(item.get("updated_at", "")), item["run_id"]), reverse=True)
-
-
-def import_legacy_runs(store: Store, root: Path) -> None:
-    """Import old records once without rewriting files or starting provider work."""
-    history = Path(root) / "experiments"
-    if history.is_symlink() or (history.exists() and not history.is_dir()):
-        raise ValueError("optimization history directory is invalid")
-    for directory in sorted(history.glob("*")):
-        if directory.is_symlink() or not directory.is_dir():
-            raise ValueError("optimization history directory is invalid")
-        for record in read_run_history(root, directory.name):
-            # An old process cannot publish into this ledger; preserve unfinished work as evidence.
-            if record.get("status") == "running":
-                record = {**record, "status": "interrupted", "candidate_version": None, "stage": "interrupted"}
-            elif record.get("status") == "approving":
-                # Multiple pre-ledger approvals can coexist. Import them as inactive evidence,
-                # then reconcile each under the current global optimization lease.
-                record = {
-                    **record,
-                    "status": "interrupted",
-                    "stage": "interrupted",
-                    "approval_pending": True,
-                }
-            store.import_optimization_run(directory.name, record)
 
 
 def request_run_stop(root: Path, session_id: str, run_id: str) -> bool:

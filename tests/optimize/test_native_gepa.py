@@ -12,7 +12,8 @@ from dspy import ChatAdapter, JSONAdapter
 from dspy.primitives.facade import SHIM_SETUP
 from dspy.utils import DummyLM
 
-from fleet_rlm.optimize.artifacts import IsolatedFleetProgram, changed_components, tunable_components
+from fleet_rlm.optimize.artifacts import component_diffs, tunable_components
+from fleet_rlm.optimize.validation import IsolatedFleetProgram
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 
 BASELINE_SOURCE = """\
@@ -137,7 +138,7 @@ def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_tr
     if bounded_canary:
         assert candidate.detailed_results.total_metric_calls == 8
 
-    assert changed_components(baseline, candidate) == ["self"]
+    assert [item["component"] for item in component_diffs(baseline, candidate)] == ["self"]
     assert candidate.module_src.strip() == REVISED_SOURCE.strip()
     reflected = json.dumps(reflection_lm.history, default=str)
     assert "Whole-program answer must be right." in reflected

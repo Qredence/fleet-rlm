@@ -1135,9 +1135,15 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
         tools: Mapping[str, Callable[..., Any]] | None = None,
         *,
         input_paths: list[str] | None = None,
+        rlm_defaults: Mapping[str, int] | None = None,
     ) -> Callable[[], DaytonaInterpreter]:
-        """Return the zero-argument fresh interpreter factory required by DSPy 3.4."""
+        """Return the fresh interpreter factory required by the pinned DSPy bridge.
+
+        Copy optional RLM defaults for outer Flex construction only. Native facade
+        propagation allocates children without inheriting this omitted-value policy.
+        """
         captured_input_paths = tuple(input_paths) if input_paths is not None else None
+        captured_defaults = dict(rlm_defaults or {})
 
         def create() -> DaytonaInterpreter:
             from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
@@ -1155,6 +1161,9 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 tools=dict(tools or {}),
                 owns_manager=active is not None,
                 native_input_paths=captured_input_paths,
+                # Native facade propagation reuses this factory for deeper RLMs. Defaults
+                # belong only to the outer Flex interpreter, not its allocated children.
+                rlm_defaults=captured_defaults if active is None else None,
             )
 
         create.execution_instructions = (  # ty: ignore[unresolved-attribute]

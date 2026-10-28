@@ -21,8 +21,7 @@ from mlflow.entities import SpanType
 from pydantic_core import to_jsonable_python
 
 from fleet_rlm.contracts import decision_evidence, item_decision
-from fleet_rlm.lm_usage import typed_decision_scope
-from fleet_rlm.observability import activity_preview, activity_text, evidence_span
+from fleet_rlm.observability import activity_preview, activity_text, evidence_span, typed_decision_scope
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.workspace import _child_input_path
@@ -64,10 +63,12 @@ class DaytonaInterpreter:
         tools: dict[str, Callable[..., Any]] | None = None,
         owns_manager: bool = False,
         native_input_paths: tuple[str, ...] | None = None,
+        rlm_defaults: Mapping[str, int] | None = None,
     ):
         """Create an interpreter with a fresh namespace and validated bridged tool names."""
         self.manager = manager
         self.owns_manager = owns_manager
+        self.rlm_defaults = dict(rlm_defaults or {})
         self.native_input_paths = (
             tuple(_child_input_path(path) for path in native_input_paths) if native_input_paths is not None else None
         )
@@ -140,6 +141,14 @@ class DaytonaInterpreter:
                             or "/workspace/files (empty)",
                         },
                     }
+            if tool_name == "__dspy_construct__" and kwargs.get("kind") == "RLM" and self.rlm_defaults:
+                native_kwargs = kwargs.get("kwargs")
+                # Leave malformed payloads and explicit field values to native validation.
+                if native_kwargs is None or isinstance(native_kwargs, dict):
+                    effective = dict(native_kwargs or {})
+                    for name, default in self.rlm_defaults.items():
+                        effective.setdefault(name, default)
+                    kwargs = {**kwargs, "kwargs": effective}
             value = self.tools[tool_name](*args, **kwargs)
             if tool_name == "__dspy_construct__" and isinstance(value, str):
                 self._code_agent_handles.discard(value)

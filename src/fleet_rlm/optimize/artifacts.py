@@ -1,4 +1,4 @@
-"""Compiled-program artifacts: isolated rollouts, manifests, the promotion gate, approval, and the loader."""
+"""Candidate identity, component comparisons, manifests, reports, promotion gates, and approval."""
 
 from __future__ import annotations
 
@@ -7,15 +7,20 @@ import hashlib
 import json
 import math
 import os
+import platform
+import re
 import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
+from importlib.metadata import distributions
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, cast
 
 import dspy
+import mlflow
 
-from fleet_rlm.contracts import ENGINE_INPUT_FIELDS
+from fleet_rlm.config import FleetSettings
 
 _FLEX_TYPE = cast(type[dspy.Module], dspy.Flex)
 
@@ -24,33 +29,142 @@ APPROVAL_EVIDENCE_VERSION = 2
 VALIDATION_PASSES = 3
 
 
-class IsolatedFleetProgram(dspy.Module):
-    """Expose candidate predictors while giving every rollout a private runtime."""
+# Execution, review selection, and scoring affect approval; presentation-only code does not.
+DIGEST_SOURCES = (
+    "adapters.py",
+    "config.py",
+    "contracts.py",
+    "execution_evidence.py",
+    "optimization_runs.py",
+    "observability.py",
+    "replay.py",
+    "workspace.py",
+    "skills.py",
+    "session.py",
+    "store.py",
+)
 
-    def __init__(self, program: dspy.Module, engine_factory: Any):
-        """Wrap the program so each forward call builds its own engine."""
-        super().__init__()
-        self.program = program
-        self.engine_factory = engine_factory
 
-    def forward(self, **inputs: Any) -> dspy.Prediction:
-        """Run one rollout in a fresh engine and always shut that engine's sandbox down.
+def optimization_code_digest() -> str:
+    """Hash the runtime/evaluation source that determines candidate behavior and scoring."""
+    package = Path(__file__).parents[1]
+    paths = {package / name for name in DIGEST_SOURCES}
+    paths |= set((package / "engine").rglob("*.py"))
+    paths |= set((package / "optimize").rglob("*.py"))
+    paths |= set((package / "sandbox").rglob("*.py"))
+    paths |= set((package / "sandbox").rglob("snapshot-requirements.txt"))
+    paths |= {path for path in (package / "bundled_skills").rglob("*") if path.is_file()}
+    material = [
+        (path.relative_to(package).as_posix(), digest_bytes(path.read_bytes()))
+        for path in sorted(paths)
+        if path.is_file()
+    ]
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
-        The rollout's optimization artifact file is removed even when the call raises.
-        """
-        engine = self.engine_factory(dspy.Example(**inputs), self.program)
-        try:
-            arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
-            if engine.optimization is not None:
-                arguments["context"] = engine.optimization.context
-            return engine(**arguments)
-        finally:
-            try:
-                engine.sandbox_mgr.shutdown()
-            finally:
-                artifact_path = engine.optimization.artifact_path if engine.optimization else None
-                if artifact_path:
-                    Path(artifact_path).unlink(missing_ok=True)
+
+def installed_dependency_fingerprint() -> str:
+    """Hash the installed environment, independent of source-tree or wheel layout."""
+    installed = sorted(
+        (
+            re.sub(r"[-_.]+", "-", distribution.metadata["Name"]).lower(),
+            distribution.version,
+        )
+        for distribution in distributions()
+        if distribution.metadata["Name"]
+    )
+    if not installed:
+        raise RuntimeError("No installed Python distributions are available for approval evidence")
+    return hashlib.sha256(json.dumps(installed, separators=(",", ":")).encode()).hexdigest()
+
+
+def approval_evidence(settings: FleetSettings, incumbent_digest: str, *, scorer_version: str) -> dict[str, str]:
+    """Evidence must still match when a separately invoked approval installs the candidate."""
+    return {
+        "evidence_format": str(APPROVAL_EVIDENCE_VERSION),
+        "dspy": dspy.__version__,
+        "gepa": package_version("gepa"),
+        "mlflow": mlflow.__version__,
+        "fleet_rlm": package_version("fleet-rlm"),
+        "python": platform.python_version(),
+        "scorer": scorer_version,
+        "configuration_digest": settings.configuration()["digest"],
+        "code_digest": optimization_code_digest(),
+        "dependency_fingerprint": installed_dependency_fingerprint(),
+        "incumbent_digest": incumbent_digest,
+    }
+
+
+def format_report(manifest: ArtifactManifest, holdout: list[dspy.Example]) -> str:
+    """Scores per stage and per holdout example, so whoever approves can tell a gain from noise."""
+    baseline, candidate = manifest.evaluation["baseline"], manifest.evaluation["candidate"]
+    lines = [
+        f"## Fleet-RLM Lite GEPA candidate `{manifest.version}`",
+        "",
+        "| Split | Baseline | Candidate | Delta |",
+        "|---|---:|---:|---:|",
+    ]
+    for split in ("dev", "holdout"):
+        lines.append(
+            f"| {split} | {baseline[split]:.3f} | {candidate[split]:.3f} | {candidate[split] - baseline[split]:+.3f} |"
+        )
+    lines += ["", "| Holdout example | Baseline | Candidate |", "|---|---:|---:|"]
+    for example, before, after in zip(holdout, baseline["holdout_scores"], candidate["holdout_scores"], strict=True):
+        lines.append(f"| {' '.join(str(example.task).split())[:60]} | {before:.3f} | {after:.3f} |")
+    verdict = "PASS" if manifest.gate["passed"] else "FAIL: " + "; ".join(manifest.gate["reasons"])
+    changed = ", ".join(candidate.get("changed_components") or []) or "none"
+    objectives = ", ".join(
+        f"{name} {baseline['holdout_objectives'].get(name, 0):.2f}->{value:.2f}"
+        for name, value in candidate.get("holdout_objectives", {}).items()
+    )
+    critical_scores = candidate.get("holdout_critical_scores", [])
+    critical_summary = (
+        f"{sum(score == 1.0 for score in critical_scores)}/{len(critical_scores)} passed"
+        if critical_scores
+        else "none labeled"
+    )
+    lines += [
+        "",
+        f"Critical deterministic holdout cases: {critical_summary}",
+        f"Holdout rollout errors: {candidate.get('holdout_errors', 'unavailable')}",
+        f"Holdout objectives: {objectives or 'none'}",
+        f"Changed components: {changed}",
+        f"Gate: {verdict}",
+    ]
+    for split in ("dev", "holdout"):
+        for side in ("baseline", "candidate"):
+            diagnostics = manifest.evaluation[side]
+            calls = diagnostics.get(f"{split}_lm_calls", [])
+            calls_median = diagnostics.get(f"{split}_lm_calls_median")
+            calls_measured = diagnostics.get(f"{split}_lm_calls_measured", 0)
+            runtime_values = diagnostics.get(f"{split}_seconds_per_example", [])
+            runtime_median = diagnostics.get(f"{split}_seconds_per_example_median")
+            artifact_passes = diagnostics.get(f"{split}_artifact_passes", 0)
+            artifact_cases = diagnostics.get(f"{split}_artifact_cases", 0)
+            calls_text = f"{calls_median:g}" if isinstance(calls_median, (int, float)) else "unavailable"
+            runtime_text = f"{runtime_median:g}s" if isinstance(runtime_median, (int, float)) else "unavailable"
+            lines.append(
+                f"{split.title()} {side} diagnostics: LM calls median {calls_text} "
+                f"({calls_measured}/{len(calls)} measured); runtime median {runtime_text} "
+                f"({len(runtime_values)} examples); artifact passes {artifact_passes}/{artifact_cases} applicable"
+            )
+    failures = [(split, failure) for split in ("dev", "holdout") for failure in candidate.get(f"{split}_failures", [])]
+    if failures:
+        lines += ["", "## Validation failures", "| Split | Case | Error | Detail |", "|---|---|---|---|"]
+        for split, failure in failures:
+            detail = " ".join(str(failure.get("detail", "")).split())[:500].replace("|", "\\|")
+            lines.append(
+                f"| {split} | `{failure.get('case_id', 'unknown')}` | {failure.get('type', 'Error')} | {detail} |"
+            )
+    component_changes = candidate.get("component_diffs") or []
+    if component_changes:
+        lines += ["", "## Candidate diffs"]
+        for item in component_changes:
+            lines += [f"### `{item['component']}`", "```diff", item["diff"].rstrip(), "```"]
+    elif not candidate.get("changed_components"):
+        lines += ["", "No predictor instructions or Flex source changed."]
+    else:
+        lines += ["", "Component diff unavailable for this saved candidate."]
+    return "\n".join(lines)
 
 
 def digest_bytes(data: bytes) -> str:
@@ -67,12 +181,6 @@ def tunable_components(program: dspy.Module) -> dict[str, str]:
     return components
 
 
-def changed_components(baseline: dspy.Module, candidate: dspy.Module) -> list[str]:
-    """Return components whose instruction text or Flex source changed."""
-    before = tunable_components(baseline)
-    return sorted(name for name, text in tunable_components(candidate).items() if before.get(name) != text)
-
-
 _COMPONENT_DIFF_MAX_CHARS = 8000
 
 
@@ -82,7 +190,7 @@ def component_diffs(baseline: dspy.Module, candidate: dspy.Module) -> list[dict[
     changes = []
     for name in sorted(after):
         old, new = before.get(name, ""), after[name]
-        if old == new:
+        if name in before and old == new:
             continue
         diff = "".join(
             difflib.unified_diff(
