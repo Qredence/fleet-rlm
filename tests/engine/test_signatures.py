@@ -36,6 +36,9 @@ def test_stopping_rules_have_one_source():
 
     factory = DaytonaSandboxManager("key", "org", "volume", "sess_sig").interpreter_factory()
     assert STOPPING_RULES.strip()
+    assert "materializing lazy results" in STOPPING_RULES
+    assert "extracting the answer" in STOPPING_RULES
+    assert "local computation time separately" in STOPPING_RULES
     assert FleetTask.instructions.count(STOPPING_RULES) == 1
     assert factory.execution_instructions.count(STOPPING_RULES) == 1
     assert factory.execution_instructions.endswith(STOPPING_RULES)

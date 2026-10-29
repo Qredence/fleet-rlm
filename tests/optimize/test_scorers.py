@@ -139,6 +139,7 @@ def test_scorer_suite_includes_route_correctness():
     assert "jev_routing_efficiency_judge" in names
     assert "jev_routing_efficiency" in names
     assert "execution_evidence_diagnostics" in names
+    assert "stopping_discipline" in names
     assert "output_instruction_compliance" in names
     assert "agent_skills_progressive_disclosure" in names
 
@@ -937,6 +938,52 @@ def test_should_refuse_stopping_judgment_when_computation_code_is_truncated(monk
     with pytest.raises(ScorerEvidenceError, match="evidence context limit"):
         judge(trace=trace)
     assert not calls
+
+
+@pytest.mark.parametrize("scenario", ["redundant_precision", "submit", "failed_check", "requested_verification"])
+def test_stopping_review_receives_same_library_checks_in_execution_order(monkeypatch, scenario):
+    # These scripted verdicts test evidence transport, not live judge accuracy.
+    passes = scenario != "redundant_precision"
+    calls = _judge_responses(
+        monkeypatch, {"stopping_discipline": (passes, "Check and next action in span_id=2222222222222222.")}
+    )
+    task = "Compute a specified digit of pi"
+    if scenario == "requested_verification":
+        task += "; verify by increasing precision"
+    first = _span(
+        "sandbox.exec",
+        span_id="1111111111111111",
+        attributes={"phase": "task"},
+        inputs={"code": "mp.dps = pos + 100\ns = str(mp.pi)\nprint(s[pos + 1])"},
+        outputs={"stdout": "5", "error": False},
+        status=_execution_status(),
+    )
+    check = "print(s[2:52] == known_prefix)\n"
+    next_action = (
+        "SUBMIT(answer=s[pos + 1], learned_skill_note='')"
+        if scenario == "submit"
+        else ("mp.dps = pos + 500\ns2 = str(mp.pi)\nprint(s2[pos + 1])")
+    )
+    second = _span(
+        "sandbox.exec",
+        span_id="2222222222222222",
+        attributes={"phase": "task"},
+        inputs={"code": check + next_action},
+        outputs={"stdout": "False\n5" if scenario == "failed_check" else "True\n5", "error": False},
+        status=_execution_status(),
+    )
+    first.start_time_ns, second.start_time_ns = 10, 20
+    root = _span("fleet_turn", inputs={"task": task}, outputs={"answer": "5"})
+    feedback = _scorer("stopping_discipline")(trace=_trace(root, second, first))
+    assert feedback.value is passes
+    evidence = calls[0][1]["inputs"]["sandbox_exec_spans"]
+    assert [record["span_id"] for record in evidence] == [first.span_id, second.span_id]
+    assert evidence[1]["code"] == check + next_action
+    assert evidence[1]["stdout"] == second.outputs["stdout"]
+    assert calls[0][1]["inputs"]["task"] == task
+    rules = calls.definitions["stopping_discipline"]["instructions"]
+    assert "same code block" in rules
+    assert "known leading-digit" in rules and "failed" in rules and "requests verification" in rules
 
 
 def test_should_preserve_both_methods_in_a_single_execution_for_stopping_review(monkeypatch):

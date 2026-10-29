@@ -32,6 +32,26 @@ input-size indicators, not per-model token attribution. The
 time managed file listing and evidence collection and report counts, not file
 names or contents. Model-call spans retain their existing usage and duration data.
 
+Within an active trace, workspace transfers expose separate remote-operation spans:
+`sandbox.workspace_metadata` validates source paths and sizes;
+`sandbox.workspace_prepare` validates destinations and creates parent directories;
+`sandbox.workspace_download` and `sandbox.workspace_upload` time batched transfers.
+These retain the surrounding `sandbox.input_read`, `sandbox.input_write`, and
+`sandbox.input_copy` spans. Each operation records `files_requested`, `attempts`,
+and `retry_delay_seconds` (the cumulative requested backoff); transfer spans also
+record `bytes_requested`. Failed operations retain their attempt counts and report
+`completed: false`. Counts exclude payloads, filenames, and credentials. Span
+durations include retries and their backoff; nested durations must not be summed.
+The finer spans distinguish slow path checks from slow transfers before choosing
+an optimization. File validation, child isolation, and success-only input receipts
+still apply. Ambiguous generated-code execution is never retried.
+
+Local computation timers must include materializing lazy values, representation
+conversion, and answer extraction. They measure a different interval from a
+host-observed sandbox execution or a full Turn. The DSPy RLM/Flex program generates
+task-specific computation and verification code and executes it in the Daytona
+REPL. Shared instructions guide timing and stopping behavior across tasks.
+
 The curated input is
 [`config/daytona-snapshot-requirements.in`](../../config/daytona-snapshot-requirements.in).
 Its header contains the uv command to regenerate the Linux/Python 3.13

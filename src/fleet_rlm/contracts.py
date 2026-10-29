@@ -103,6 +103,9 @@ STOPPING_RULES = (
     "within the same code block: do not append a second full computation after a sufficient check. "
     "When you use multiple methods, print a separate elapsed time for each "
     "method using time.perf_counter(), along with its result and precision parameters. "
+    "Measure through materializing lazy results, converting the result to the required representation, "
+    "and extracting the answer; timing only a lazy constant or handle assignment is insufficient. "
+    "Label local computation time separately from sandbox or Turn wall time. "
     "Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. "
     "Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary."
 )

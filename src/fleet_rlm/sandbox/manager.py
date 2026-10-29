@@ -448,6 +448,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     @contextmanager
     def _lifecycle_span(self, name: str) -> Generator[Any, None, None]:
         # Manual spans deliberately record only identity and numeric transfer metadata, never self/credentials.
+        failure: BaseException | None = None
         with mlflow.start_span(name=name, span_type=SpanType.TOOL) as span:
             span.set_attributes(
                 {"agent_id": self.agent_id, "parent_agent_id": self.parent.agent_id if self.parent else None}
@@ -457,9 +458,15 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             try:
                 yield span
                 completed = True
+            except BaseException as exc:
+                # Close the span before propagating provider messages or workspace paths.
+                failure = exc
+                span.set_status("ERROR")
             finally:
                 span.set_attribute("sandbox_id", getattr(self._sandbox, "id", None))
                 span.set_outputs({"completed": completed})
+        if failure is not None:
+            raise failure
 
     def _allocate_child(self, *, input_paths: list[str] | None = None) -> DaytonaSandboxManager:
         """Reserve and provision a child sandbox, copying the requested or default inputs into it.
@@ -848,13 +855,15 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             with_retries(lambda: client.start(sandbox), before_retry=self.check_turn)
             self._contexts.clear()
 
-    def _remote_exec(self, sandbox: Any, code: str, *, timeout: int | None = None, retry: bool = True) -> str:
+    def _remote_exec(
+        self, sandbox: Any, code: str, *, timeout: int | None = None, retry: bool = True, retry_span: Any = None
+    ) -> str:
         encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
         command = (
             "python3 -c 'import base64; exec(compile(base64.b64decode(\"" + encoded + '"), "<fleet-remote>", "exec"))\''
         )
         if retry:
-            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout))
+            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout), span=retry_span)
         else:
             result = sandbox.process.exec(command, timeout=timeout)
         if getattr(result, "exit_code", 0) != 0:

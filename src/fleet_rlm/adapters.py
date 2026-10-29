@@ -10,7 +10,7 @@ from dspy import AdapterParseError, ChatAdapter, Signature
 _RAW_PYTHON_FENCE = re.compile(
     r"\s*(?P<reasoning>.*?)```(?:python|py|python3|py3)?[ \t]*\r?\n(?P<code>.*?)\r?\n```[ \t]*"
     r"(?:\r?\n(?:[ \t]*\r?\n)*[ \t]*```[ \t]*)?\s*"
-    r"(?:\[\[ ## completed ## \]\]\s*)?",
+    r"(?:(?:\[\[ ## completed ## \]\]|<\[\[ ## completed ## \]\]>)\s*)?",
     re.IGNORECASE | re.DOTALL,
 )
 

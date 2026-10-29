@@ -156,6 +156,15 @@ verify subsequent assessment metadata. Do not restore an old definition blindly
 or change the eight-execution diagnostic limit to accommodate a historical trace.
 Live evaluation and shared registry changes require explicit authorization.
 
+In particular, `stopping_discipline` is included in the offline suite but may be
+absent from a production trace's automatic assessments. Its absence is not a
+passing verdict. Check the registered scorer's identity, schedule, sampling, and
+assessment errors before attributing missing feedback to runtime wiring. Offline
+regressions preserve complete chronological receipts for same-library precision
+rechecks, immediate submission, failed checks, and requested verification. Their
+scripted judge responses verify evidence transport and rubric contracts; they do
+not demonstrate that a live judge classifies those cases correctly.
+
 Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
 The GEPA objective uses `fleet-metric-v10`; changes to that metric invalidate
