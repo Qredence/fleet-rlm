@@ -52,6 +52,21 @@ host-observed sandbox execution or a full Turn. The DSPy RLM/Flex program genera
 task-specific computation and verification code and executes it in the Daytona
 REPL. Shared instructions guide timing and stopping behavior across tasks.
 
+Semantic `llm_query_batched` calls delegate to injected native DSPy tools first.
+The outer Flex fallback reserves the whole prompt list once and runs at most
+eight workers, each with a separate copy of the submitting Turn's ContextVars.
+Results remain in input order and worker exceptions propagate. Skill relevance
+and item decision batches use native DSPy batching with `timeout=0` to disable
+speculative straggler resubmission; Fleet's independent Turn deadline still applies.
+These logical budget units differ from observable model requests and token usage.
+
+Flex/RLM and explicit children use native ChatAdapter execution and JSON recovery
+with a temporary native-first parser for two recorded gateway formats. Valid
+native responses are never preprocessed, and Fleet makes no corrective request.
+The direct route retains its separate adapter policy. See the
+[native DSPy implementation report](../runbooks/native-dspy-integration.md)
+for offline coverage and the remaining compatibility gate.
+
 The curated input is
 [`config/daytona-snapshot-requirements.in`](../../config/daytona-snapshot-requirements.in).
 Its header contains the uv command to regenerate the Linux/Python 3.13

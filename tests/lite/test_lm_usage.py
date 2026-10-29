@@ -232,7 +232,7 @@ class Engine:
         self.responses = iter([
             "[[ ## reasoning ## ]]\nchecked\n[[ ## answer ## ]]\n5\n[[ ## completed ## ]]",
             "invalid output",
-            "[[ ## answer ## ]]\n5\n[[ ## completed ## ]]",
+            '{"answer": "5"}',
         ])
     def complete(self, request):
         self.count += 1

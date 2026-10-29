@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +18,49 @@ from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.engine.signatures import FleetTask
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+@pytest.mark.parametrize("timeout,expected_dispatches", [(0, 1), (0.001, 2)])
+def test_native_batch_straggler_resubmission_is_disabled_by_zero(monkeypatch, timeout, expected_dispatches):
+    import dspy.utils.parallelizer as parallelizer
+
+    started, release, duplicate = threading.Event(), threading.Event(), threading.Event()
+    dispatches = []
+    real_wait = parallelizer.wait
+    waits = 0
+
+    class Decision(dspy.Module):
+        def forward(self, item):
+            dispatches.append(item)
+            if len(dispatches) == 1:
+                started.set()
+                assert release.wait(10)
+            else:
+                duplicate.set()
+            return dspy.Prediction(answer=item)
+
+    def wait(futures, **kwargs):
+        nonlocal waits
+        waits += 1
+        if waits == 1:
+            assert started.wait(10)
+            return set(), set(futures)
+        if timeout:
+            assert duplicate.wait(10)
+        release.set()
+        return real_wait(futures, **kwargs)
+
+    ticks = iter([100, 200, 300, 400])
+    monkeypatch.setattr(parallelizer, "time", SimpleNamespace(time=lambda: next(ticks, 500)))
+    monkeypatch.setattr(parallelizer, "wait", wait)
+    try:
+        results = Decision().batch(
+            [dspy.Example(item="slow").with_inputs("item")], num_threads=2, timeout=timeout, disable_progress_bar=True
+        )
+    finally:
+        release.set()
+    assert [p.answer for p in results] == ["slow"]
+    assert dispatches == ["slow"] * expected_dispatches
 
 
 def test_api_app_import_does_not_pull_the_optimizer():
@@ -181,12 +225,18 @@ def test_batch_decisions_keep_alignment_and_evidence(monkeypatch):
         SimpleNamespace(decision=choice(value=v, confidence=0.7, probabilities={"a": 0.7, "b": 0.3}))
         for v in ["a", "b"]
     ]
-    monkeypatch.setattr(
-        module.dspy, "Predict", lambda _signature: SimpleNamespace(batch=lambda *_args, **_kwargs: predictions)
-    )
+
+    def batch(examples, *, num_threads, timeout):
+        assert len(examples) == 2 and num_threads == 2 and timeout == 0
+        return predictions
+
+    monkeypatch.setattr(module.dspy, "Predict", lambda _signature: SimpleNamespace(batch=batch))
     m = manager()
     m.jev_lm = None
-    results = DaytonaInterpreter(m)._run_jev_batch(["one", "two"], "choose", ["a", "b"])
+    charged = []
+    m.consume_budget = lambda count, *, category: charged.append((count, category))
+    results = DaytonaInterpreter(m)._jev_decide_batched([["one", "two"], "choose", ["a", "b"]], {})
+    assert charged == [(2, "other_decisions")]
     assert [(r["item"], r["decision"]) for r in results] == [("one", "a"), ("two", "b")]
     assert all(r["confidence"] == 0.7 and r["probabilities"] == {"a": 0.7, "b": 0.3} for r in results)
 

@@ -340,13 +340,41 @@ def _spawn_agent_with_fake_child(monkeypatch, child_call):
 
 
 def test_spawn_agent_promotes_artifacts_only_after_clean_completion_and_always_shuts_down(monkeypatch) -> None:
-    spawn_agent, interpreter, calls = _spawn_agent_with_fake_child(
-        monkeypatch, lambda **_kwargs: SimpleNamespace(findings="done")
-    )
+    from fleet_rlm.adapters import FleetRLMChatAdapter
+
+    def child_call(**_kwargs):
+        assert isinstance(dspy.settings.adapter, FleetRLMChatAdapter)
+        assert dspy.settings.adapter.use_json_adapter_fallback
+        return SimpleNamespace(findings="done")
+
+    spawn_agent, interpreter, calls = _spawn_agent_with_fake_child(monkeypatch, child_call)
 
     assert spawn_agent(subtask="investigate", input_paths=[])["findings"] == "done"
     assert interpreter.owns_manager is False
     assert calls == ["collect", "shutdown"]
+
+
+@pytest.mark.parametrize("route", ["direct", "rlm", "flex"])
+def test_execution_adapter_policy_is_scoped_and_direct_keeps_ambient_policy(route):
+    from fleet_rlm.adapters import FleetRLMChatAdapter
+    from fleet_rlm.contracts import Route
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "adapter-policy")
+    engine = _engine(manager)
+    ambient = dspy.ChatAdapter(use_json_adapter_fallback=False)
+
+    def execute(**_kwargs):
+        selected = dspy.settings.adapter
+        if route == "direct":
+            assert selected is ambient
+        else:
+            assert isinstance(selected, FleetRLMChatAdapter) and selected.use_json_adapter_fallback
+        return dspy.Prediction(answer="ok", learned_skill_note="")
+
+    setattr(engine, {"direct": "direct_cot", "rlm": "primary_rlm", "flex": "flex_agent"}[route], execute)
+    with dspy.context(adapter=ambient):
+        assert engine._execute(Route(route), "", "", "test", "", "", None).answer == "ok"
+        assert dspy.settings.adapter is ambient
 
 
 def test_spawn_agent_failure_does_not_promote_unverified_child_files(monkeypatch) -> None:
@@ -380,7 +408,8 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
     )
     seen: dict[str, Any] = {"budget": 0, "events": [], "batched": []}
 
-    def batch(examples, **_kwargs):
+    def batch(examples, *, num_threads, timeout):
+        assert timeout == 0 and num_threads == min(8, len(examples))
         seen["batched"].extend(example.skill_name for example in examples)
         return [
             SimpleNamespace(

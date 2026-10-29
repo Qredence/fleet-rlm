@@ -8,7 +8,9 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -153,6 +155,82 @@ def test_batched_queries_use_scoped_lm_when_manager_has_no_sub_lm(sandbox):
     with dspy.context(lm=lm):
         interpreter = DaytonaInterpreter(manager)
         assert interpreter._llm_query_batched([["one", "two"]], {}) == ["reply:one", "reply:two"]
+
+
+def test_fallback_batch_preserves_full_context_and_isolates_simultaneous_turns(sandbox):
+    from dspy.utils.usage_tracker import UsageTracker
+
+    from fleet_rlm.observability import LMUsageCallback
+    from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER
+
+    sentinel = ContextVar("batch_turn_sentinel")
+    rendezvous = threading.Barrier(4)
+
+    def turn(name):
+        manager = manager_on(sandbox, name=name)
+        tracker, callback = UsageTracker(), LMUsageCallback()
+
+        def complete(prompt):
+            rendezvous.wait(timeout=10)
+            assert sentinel.get() == name
+            assert _ACTIVE_MANAGER.get() is manager
+            assert dspy.settings.usage_tracker is tracker
+            assert dspy.settings.callbacks == [callback]
+            assert dspy.settings.lm is complete and dspy.settings.disable_history
+            sentinel.set("worker-local mutation")
+            tracker.add_usage(name, {"prompt_tokens": 2, "completion_tokens": 1})
+            return [f"{name}:{prompt}"]
+
+        token = sentinel.set(name)
+        active = _ACTIVE_MANAGER.set(manager)
+        try:
+            with dspy.context(lm=complete, callbacks=[callback], usage_tracker=tracker):
+                results = DaytonaInterpreter(manager)._llm_query_batched([["one", "two"]], {})
+            assert sentinel.get() == name
+            assert results == [f"{name}:one", f"{name}:two"]
+            assert manager.turn_usage()["lm_calls"] == 2
+            assert tracker.get_total_tokens()[name] == {"prompt_tokens": 4, "completion_tokens": 2}
+        finally:
+            _ACTIVE_MANAGER.reset(active)
+            sentinel.reset(token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(turn, name) for name in ("turn-one", "turn-two")]
+        for future in futures:
+            future.result(timeout=15)
+
+
+@pytest.mark.parametrize("error", [ValueError("provider"), TimeoutError("deadline"), RuntimeError("cancelled")])
+def test_fallback_batch_precharges_once_and_propagates_worker_errors(sandbox, error):
+    manager = manager_on(sandbox)
+
+    def complete(_prompt):
+        raise error
+
+    with dspy.context(lm=complete), pytest.raises(type(error)) as caught:
+        DaytonaInterpreter(manager)._llm_query_batched([["one", "two"]], {})
+    assert caught.value is error
+    assert manager.turn_usage()["lm_calls"] == 2
+
+
+def test_injected_batch_never_constructs_fallback_executor(sandbox, monkeypatch):
+    def forbidden(**_kwargs):
+        pytest.fail("native batching must bypass the fallback executor")
+
+    monkeypatch.setattr(interpreter_module, "ThreadPoolExecutor", forbidden)
+    calls = []
+    manager = manager_on(sandbox)
+
+    def native(prompts):
+        calls.append(prompts)
+        manager.consume_budget(len(prompts))
+        return [p.upper() for p in prompts]
+
+    interpreter = DaytonaInterpreter(manager)
+    # Native RLM injects these reserved tools after interpreter construction.
+    interpreter.tools["llm_query_batched"] = native
+    assert interpreter._llm_query_batched([["one", "two"]], {}) == ["ONE", "TWO"]
+    assert calls == [["one", "two"]] and manager.turn_usage()["lm_calls"] == 2
 
 
 @contextmanager

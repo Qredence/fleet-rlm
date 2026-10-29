@@ -256,7 +256,13 @@ class DaytonaInterpreter:
         self.manager.consume_budget(len(prompts))
         active_lm = self.manager.sub_lm or dspy.settings.lm
         with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
-            return list(pool.map(lambda prompt: self._complete_sub_lm(prompt, active_lm), prompts))
+            # Each worker needs the submitting Turn's full context, with its own Context
+            # so simultaneous workers cannot enter the same Context concurrently.
+            futures = [
+                pool.submit(contextvars.copy_context().run, self._complete_sub_lm, prompt, active_lm)
+                for prompt in prompts
+            ]
+            return [future.result() for future in futures]
 
     def _jev_decide_batched(self, args: list[Any], _kwargs: dict[str, Any]) -> Any:
         if len(args) != 3:
@@ -302,7 +308,8 @@ class DaytonaInterpreter:
             inputs={"item_count": len(items), "question": activity_text(question), "choices": choices},
         ) as span:
             with typed_decision_scope(lm=active_lm, span=span, typesafe=typesafe):
-                predictions = predictor.batch(examples, num_threads=min(8, len(items)))
+                # Decisions are prepaid; disable DSPy's speculative straggler resubmission.
+                predictions = predictor.batch(examples, num_threads=min(8, len(items)), timeout=0)
             results: list[dict[str, Any]] = []
             for item, prediction in zip(items, predictions, strict=True):
                 decision = getattr(prediction, "decision", None)

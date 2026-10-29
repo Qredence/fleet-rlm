@@ -282,7 +282,8 @@ class AdaptiveFleetEngine(dspy.Module):
                 "typesafe_skill_selection", inputs={"task": activity_text(task), "skills": [name for name, _ in skills]}
             ) as span:
                 with typed_decision_scope(lm=self.jev_lm, span=span, typesafe=True):
-                    predictions = self.skill_selector.batch(examples, num_threads=min(8, len(examples)))
+                    # Decisions are prepaid; disable DSPy's speculative straggler resubmission.
+                    predictions = self.skill_selector.batch(examples, num_threads=min(8, len(examples)), timeout=0)
                 decisions = []
                 for (name, _), prediction in zip(skills, predictions, strict=True):
                     decision = getattr(prediction, "relevance", None)
@@ -387,6 +388,7 @@ class AdaptiveFleetEngine(dspy.Module):
         agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
         if route is Route.FLEX and isinstance(context, WorkspaceDataset):
             context = context.flex_input()
+        # Native ChatAdapter recovery, with only recorded gateway parse compatibility.
         with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
             prediction = agent(
                 workspace_manifest=workspace_manifest,
