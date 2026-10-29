@@ -749,8 +749,10 @@ def test_should_trace_child_copy_lineage_and_preserve_failure_cleanup(monkeypatc
                 set_attribute=lambda k, v: row["attributes"].__setitem__(k, v),
                 set_inputs=lambda v: row.__setitem__("inputs", v),
                 set_outputs=lambda v: row.__setitem__("outputs", v),
+                set_status=lambda v: row.__setitem__("status", v.lower()),
             )
-            row["status"] = "ok"
+            if row["status"] == "running":
+                row["status"] = "ok"
         except BaseException:
             row["status"] = "error"
             raise
