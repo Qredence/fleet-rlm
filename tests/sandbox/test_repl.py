@@ -18,6 +18,27 @@ from fleet_rlm.sandbox import repl
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 
 
+@pytest.mark.parametrize("transient", [True, False])
+def test_retry_metrics_survive_exhaustion_without_recording_exception_values(monkeypatch, transient):
+    attributes = {}
+    delays = []
+    calls = []
+    span = SimpleNamespace(set_attributes=attributes.update, set_attribute=attributes.__setitem__)
+    monkeypatch.setattr(repl.time, "sleep", delays.append)
+    monkeypatch.setattr(repl.random, "random", lambda: 0.5)
+    error = DaytonaConnectionError("private provider response") if transient else ValueError("private input")
+
+    def fail():
+        calls.append(1)
+        raise error
+
+    with pytest.raises(type(error)):
+        repl.with_retries(fail, span=span)
+    assert attributes == {"attempts": 3 if transient else 1, "retry_delay_seconds": 1.5 if transient else 0.0}
+    assert len(calls) == (3 if transient else 1)
+    assert delays == ([0.5, 1.0] if transient else [])
+
+
 def no_calls(call: dict[str, Any]) -> dict[str, Any]:
     raise AssertionError(f"unexpected host call {call}")
 

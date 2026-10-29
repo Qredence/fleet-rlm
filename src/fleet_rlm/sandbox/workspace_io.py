@@ -202,27 +202,32 @@ class WorkspaceIOMixin:
             max_bytes=max_bytes,
             include_digest=include_digest,
         )
-        metadata = json.loads(self._remote_exec(sandbox, code))
-        if (
-            not isinstance(metadata, list)
-            or len(metadata) != len(rel_paths)
-            or not all(
-                isinstance(item, dict)
-                and (item.get("size") is None or type(item["size"]) is int)
-                and (
-                    not include_digest
-                    or (
-                        type(item.get("size")) is int
-                        and item["size"] >= 0
-                        and isinstance(item.get("sha256"), str)
-                        and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is not None
+        name = "sandbox.workspace_prepare" if create_parents else "sandbox.workspace_metadata"
+        trace = self._lifecycle_span(name) if mlflow.get_current_active_span() else nullcontext(None)
+        with trace as phase:
+            if phase is not None:
+                phase.set_attribute("files_requested", len(rel_paths))
+            metadata = json.loads(self._remote_exec(sandbox, code, retry_span=phase))
+            if (
+                not isinstance(metadata, list)
+                or len(metadata) != len(rel_paths)
+                or not all(
+                    isinstance(item, dict)
+                    and (item.get("size") is None or type(item["size"]) is int)
+                    and (
+                        not include_digest
+                        or (
+                            type(item.get("size")) is int
+                            and item["size"] >= 0
+                            and isinstance(item.get("sha256"), str)
+                            and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is not None
+                        )
                     )
+                    for item in metadata
                 )
-                for item in metadata
-            )
-        ):
-            raise RuntimeError("Invalid workspace file metadata")
-        return metadata
+            ):
+                raise RuntimeError("Invalid workspace file metadata")
+            return metadata
 
     def read_workspace_files(
         self: DaytonaSandboxManager, rel_paths: list[str], *, max_total_bytes: int = 100_000_000
@@ -238,20 +243,31 @@ class WorkspaceIOMixin:
         metadata = self._workspace_files_metadata(sandbox, clean_paths, create_parents=False, max_bytes=25_000_000)
         if sum(item["size"] for item in metadata) > max_total_bytes:
             raise ValueError("Workspace batch exceeds the transfer quota")
-        responses = with_retries(
-            lambda: sandbox.fs.download_files(
-                [FileDownloadRequest(source=f"/workspace/{path}") for path in clean_paths], 1800
-            )
+        trace = (
+            self._lifecycle_span("sandbox.workspace_download")
+            if mlflow.get_current_active_span()
+            else nullcontext(None)
         )
-        by_source = {response.source: response for response in responses}
-        contents: dict[str, bytes] = {}
-        for path, item in zip(clean_paths, metadata, strict=True):
-            response = by_source.get(f"/workspace/{path}")
-            content = getattr(response, "result", None)
-            if response is None or response.error or not isinstance(content, bytes) or len(content) != item["size"]:
-                raise RuntimeError(f"Workspace file changed or could not be downloaded: {path}")
-            contents[path] = content
-        return contents
+        with trace as phase:
+            if phase is not None:
+                phase.set_attributes(
+                    {"files_requested": len(clean_paths), "bytes_requested": sum(item["size"] for item in metadata)}
+                )
+            responses = with_retries(
+                lambda: sandbox.fs.download_files(
+                    [FileDownloadRequest(source=f"/workspace/{path}") for path in clean_paths], 1800
+                ),
+                span=phase,
+            )
+            by_source = {response.source: response for response in responses}
+            contents: dict[str, bytes] = {}
+            for path, item in zip(clean_paths, metadata, strict=True):
+                response = by_source.get(f"/workspace/{path}")
+                content = getattr(response, "result", None)
+                if response is None or response.error or not isinstance(content, bytes) or len(content) != item["size"]:
+                    raise RuntimeError(f"Workspace file changed or could not be downloaded: {path}")
+                contents[path] = content
+            return contents
 
     def write_workspace_files(self: DaytonaSandboxManager, files: dict[str, bytes]) -> None:
         """Write several validated files beneath this Session's Volume with one check and one upload."""
@@ -263,7 +279,15 @@ class WorkspaceIOMixin:
         sandbox = self.ensure_sandbox()
         self._workspace_files_metadata(sandbox, list(clean), create_parents=True)
         uploads = [FileUpload(source=content, destination=f"/workspace/{path}") for path, content in clean.items()]
-        with_retries(lambda: sandbox.fs.upload_files(uploads, timeout=1800))
+        trace = (
+            self._lifecycle_span("sandbox.workspace_upload") if mlflow.get_current_active_span() else nullcontext(None)
+        )
+        with trace as phase:
+            if phase is not None:
+                phase.set_attributes(
+                    {"files_requested": len(clean), "bytes_requested": sum(len(data) for data in clean.values())}
+                )
+            with_retries(lambda: sandbox.fs.upload_files(uploads, timeout=1800), span=phase)
 
     def delete_workspace_file(self: DaytonaSandboxManager, rel_path: str) -> None:
         """Delete one validated workspace file, refusing symbolic links."""

@@ -26,7 +26,7 @@ def test_dspy_history_is_disabled_for_session_turn_contexts() -> None:
 
 
 @pytest.mark.parametrize("reasoning", ["", "The header is `id,value`. I'll stream the full file.\n\n"])
-@pytest.mark.parametrize("suffix", ["", "\n\n[[ ## completed ## ]]\n"])
+@pytest.mark.parametrize("suffix", ["", "\n\n[[ ## completed ## ]]\n", "\n\n<[[ ## completed ## ]]> \n"])
 @pytest.mark.parametrize("closing", ["```", "```\n```", "```  \r\n\r\n  ```  "])
 def test_fleet_rlm_adapter_accepts_code_only_python_fences(reasoning: str, suffix: str, closing: str) -> None:
     signature = dspy.Signature("task -> reasoning, code")
@@ -66,6 +66,8 @@ def test_fleet_rlm_adapter_drops_leaked_thinking_before_the_answer() -> None:
         "```python\nprint(1)\n```\nTrailing explanation",
         "```python\nprint(1)\n```\n```\n```",
         "```python\nprint(1)\n``` ```",
+        "```python\nprint(1)\n```\n<[[ ## completed ## ]]>\nTrailing explanation",
+        "```python\nprint(1)\n```\n<[[ ## completed ## ]]",
     ],
 )
 def test_adapter_rejects_ambiguous_or_empty_fences(completion: str) -> None:
@@ -126,6 +128,11 @@ def _invoke(adapter, lm, signature, *, asynchronous=False, lm_kwargs=None, demos
     "response,signature,expected",
     [
         ("```python\nprint(3.14)\n```\n```", "task -> reasoning, code", {"reasoning": "", "code": "print(3.14)"}),
+        (
+            "```python\nprint(3.14)\n```\n\n<[[ ## completed ## ]]> ",
+            "task -> reasoning, code",
+            {"reasoning": "", "code": "print(3.14)"},
+        ),
         ("[[ ## answer ## ]]\n42", "task -> answer: int", {"answer": 42}),
     ],
 )

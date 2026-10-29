@@ -848,13 +848,15 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             with_retries(lambda: client.start(sandbox), before_retry=self.check_turn)
             self._contexts.clear()
 
-    def _remote_exec(self, sandbox: Any, code: str, *, timeout: int | None = None, retry: bool = True) -> str:
+    def _remote_exec(
+        self, sandbox: Any, code: str, *, timeout: int | None = None, retry: bool = True, retry_span: Any = None
+    ) -> str:
         encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
         command = (
             "python3 -c 'import base64; exec(compile(base64.b64decode(\"" + encoded + '"), "<fleet-remote>", "exec"))\''
         )
         if retry:
-            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout))
+            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout), span=retry_span)
         else:
             result = sandbox.process.exec(command, timeout=timeout)
         if getattr(result, "exit_code", 0) != 0:

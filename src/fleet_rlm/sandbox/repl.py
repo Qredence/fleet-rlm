@@ -68,19 +68,29 @@ def is_transient(exc: BaseException) -> bool:
     return isinstance(status, int) and status >= 500
 
 
-def with_retries(operation: Callable[[], _T], *, before_retry: Callable[[], None] | None = None) -> _T:
+def with_retries(
+    operation: Callable[[], _T], *, before_retry: Callable[[], None] | None = None, span: Any = None
+) -> _T:
     """Run an idempotent Daytona call, retrying transient failures with jittered exponential backoff.
 
     Never wrap `run_code`: a timed-out or disconnected execution may have run, and must not be replayed.
+    An optional operation span records attempts and cumulative requested backoff seconds, including on failure.
     """
+    delay_total = 0.0
     for attempt in range(_RETRY_ATTEMPTS):
+        if span is not None:
+            span.set_attributes({"attempts": attempt + 1, "retry_delay_seconds": delay_total})
         try:
             return operation()
         except Exception as exc:
             if attempt == _RETRY_ATTEMPTS - 1 or not is_transient(exc):
                 raise
             _LOGGER.warning("Transient Daytona error (%s); retrying", type(exc).__name__)
-            time.sleep(_RETRY_BASE_SECONDS * (2**attempt) * (0.5 + random.random()))
+            delay = _RETRY_BASE_SECONDS * (2**attempt) * (0.5 + random.random())
+            time.sleep(delay)
+            delay_total += delay
+            if span is not None:
+                span.set_attribute("retry_delay_seconds", delay_total)
             if before_retry is not None:
                 before_retry()
     raise AssertionError("unreachable")

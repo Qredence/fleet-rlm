@@ -69,7 +69,7 @@ def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypa
     manager._client = object()
     manager._sandbox = sandbox
 
-    def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str) -> str:
+    def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str, **_kwargs) -> str:
         assert sandbox_arg is sandbox
         assert len(code.encode("utf-8")) < 10_000
         if "if not os.path.isfile(target)" in code:
@@ -225,7 +225,7 @@ def test_terminal_teardown_stops_the_root_once_and_records_the_outcome() -> None
 
 def test_a_raising_provider_stop_records_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
 
-    monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
+    monkeypatch.setattr(manager_module, "with_retries", lambda call, **_kwargs: call())
     manager = DaytonaSandboxManager("key", "org", "volume", "stop-failure")
 
     def refuse(*_args: Any, **_kwargs: Any) -> None:
@@ -405,7 +405,7 @@ def test_cancellation_observes_an_unconfirmed_join_rather_than_an_early_success(
 
     # A failed provider delete must surface as unconfirmed; the join must not be skipped or retried
     # outside the caller that observes it.
-    monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
+    monkeypatch.setattr(manager_module, "with_retries", lambda call, **_kwargs: call())
     root = DaytonaSandboxManager("key", "org", "volume", "state-test")
     started, release = threading.Event(), threading.Event()
     attempts: list[str] = []
@@ -458,7 +458,7 @@ def test_a_local_journal_unlink_failure_keeps_provider_confirmation(
 ) -> None:
     import pathlib
 
-    monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
+    monkeypatch.setattr(manager_module, "with_retries", lambda call, **_kwargs: call())
     root = DaytonaSandboxManager("key", "org", "volume", "state-test")
     deleted: list[str] = []
     child = _child_with_provider(root, 1, deleted)
@@ -488,7 +488,7 @@ def test_a_failed_child_provider_delete_keeps_the_child_registered_for_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
-    monkeypatch.setattr(manager_module, "with_retries", lambda call: call())
+    monkeypatch.setattr(manager_module, "with_retries", lambda call, **_kwargs: call())
     root, calls = _manager_with(SimpleNamespace(id="sandbox-retry-root", state="started"))
     attempts: list[str] = []
     child = DaytonaSandboxManager("key", "org", "volume", "state-test", parent=root)
@@ -1028,7 +1028,7 @@ def _batch_manager(monkeypatch, filesystem, sizes):
     monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: sandbox)
     checks: list[str] = []
 
-    def remote_exec(_self, _sandbox, code):
+    def remote_exec(_self, _sandbox, code, **_kwargs):
         checks.append(code)
         return json.dumps([{"size": size} for size in sizes])
 
@@ -1079,7 +1079,7 @@ def test_batched_metadata_check_refuses_symbolic_links(monkeypatch, tmp_path, ba
     (tmp_path / "files" / "link.txt").symlink_to(tmp_path / "outside" / "secret.txt")
     (tmp_path / "linked-dir").symlink_to(tmp_path / "outside")
 
-    def run_locally(_self, _sandbox, code):
+    def run_locally(_self, _sandbox, code, **_kwargs):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             exec(code.replace("os.path.realpath('/workspace')", f"os.path.realpath({str(tmp_path)!r})"), {})

@@ -2,12 +2,100 @@
 
 from __future__ import annotations
 
+import json
+from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+@pytest.mark.parametrize("retry_stage", [None, "metadata", "download", "prepare", "upload"])
+def test_transfer_spans_separate_remote_checks_and_io_without_payloads(monkeypatch, retry_stage):
+    import mlflow
+    from daytona.common.errors import DaytonaConnectionError
+
+    from fleet_rlm.sandbox import repl
+
+    rows, stack, delays = [], [], []
+    attempts = Counter()
+    content = b"private payload"
+
+    @contextmanager
+    def start_span(name, span_type):
+        assert span_type == "TOOL"
+        row = {"name": name, "parent": stack[-1] if stack else None, "attributes": {}}
+        rows.append(row)
+        stack.append(name)
+        try:
+            yield SimpleNamespace(
+                set_attributes=row["attributes"].update,
+                set_attribute=lambda k, v: row["attributes"].__setitem__(k, v),
+                set_inputs=lambda v: row.__setitem__("inputs", v),
+                set_outputs=lambda v: row.__setitem__("outputs", v),
+            )
+        finally:
+            stack.pop()
+
+    def attempt(stage):
+        attempts[stage] += 1
+        if stage == retry_stage and attempts[stage] == 1:
+            raise DaytonaConnectionError("transient")
+
+    def execute(_command, *, timeout):
+        assert timeout is None
+        stage = "prepare" if stack[-1] == "sandbox.workspace_prepare" else "metadata"
+        attempt(stage)
+        return SimpleNamespace(exit_code=0, result=json.dumps([{"size": len(content)}]))
+
+    def download(requests, timeout):
+        assert timeout == 1800
+        assert stack[-1] == "sandbox.workspace_download"
+        attempt("download")
+        return [SimpleNamespace(source=r.source, result=content, error=None) for r in requests]
+
+    def upload(files, *, timeout):
+        assert timeout == 1800
+        assert stack[-1] == "sandbox.workspace_upload"
+        assert files[0].source == content
+        attempt("upload")
+
+    sandbox = SimpleNamespace(
+        process=SimpleNamespace(exec=execute),
+        fs=SimpleNamespace(
+            download_files=download,
+            upload_files=upload,
+        ),
+    )
+    monkeypatch.setattr(mlflow, "get_current_active_span", lambda: object())
+    monkeypatch.setattr(mlflow, "start_span", start_span)
+    monkeypatch.setattr(repl.time, "sleep", delays.append)
+    monkeypatch.setattr(repl.random, "random", lambda: 0.5)
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: sandbox)
+    manager = DaytonaSandboxManager("private-key", "org", "volume", "transfer")
+
+    assert manager.read_workspace_files(["files/private.txt"]) == {"files/private.txt": content}
+    manager.write_workspace_files({"files/private.txt": content})
+
+    assert [row["name"] for row in rows] == [
+        "sandbox.workspace_metadata",
+        "sandbox.workspace_download",
+        "sandbox.workspace_prepare",
+        "sandbox.workspace_upload",
+    ]
+    for stage, row in zip(["metadata", "download", "prepare", "upload"], rows, strict=True):
+        assert row["outputs"] == {"completed": True}
+        assert row["attributes"]["files_requested"] == 1
+        assert row["attributes"]["attempts"] == (2 if retry_stage == stage else 1)
+        assert row["attributes"]["retry_delay_seconds"] == (0.5 if retry_stage == stage else 0)
+    assert rows[1]["attributes"]["bytes_requested"] == len(content)
+    assert rows[3]["attributes"]["bytes_requested"] == len(content)
+    assert delays == ([0.5] if retry_stage else [])
+    recorded = json.dumps(rows)
+    assert all(secret not in recorded for secret in ["private-key", "private payload", "files/private.txt"])
 
 
 @pytest.mark.parametrize("case", ["file", "empty", "missing", "symlink", "parent_symlink", "oversized", "changed"])
@@ -46,7 +134,7 @@ def test_remote_stat_checks_size_digest_and_paths_without_downloads(monkeypatch,
 
     remote_os = SimpleNamespace(**{**vars(os), "fstat": stat})
 
-    def execute(_self, _sandbox, code):
+    def execute(_self, _sandbox, code, **_kwargs):
         calls.append(code)
         out = io.StringIO()
         code = code.replace("import base64,hashlib,json,os", "import base64,hashlib,json")
@@ -91,7 +179,7 @@ def test_remote_stat_rejects_invalid_metadata(monkeypatch, metadata):
     import json
 
     monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: object())
-    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", lambda *_args: json.dumps([metadata]))
+    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", lambda *_args, **_kwargs: json.dumps([metadata]))
     with pytest.raises(RuntimeError, match="Invalid workspace file metadata"):
         DaytonaSandboxManager("key", "org", "volume", "stat-test").stat_workspace_file("files/data.txt")
 
