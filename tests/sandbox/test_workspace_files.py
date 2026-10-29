@@ -70,7 +70,7 @@ def test_transfer_spans_separate_remote_checks_and_io_without_payloads(monkeypat
             upload_files=upload,
         ),
     )
-    monkeypatch.setattr(mlflow, "get_current_active_span", lambda: object())
+    monkeypatch.setattr(mlflow, "get_current_active_span", object)
     monkeypatch.setattr(mlflow, "start_span", start_span)
     monkeypatch.setattr(repl.time, "sleep", delays.append)
     monkeypatch.setattr(repl.random, "random", lambda: 0.5)
