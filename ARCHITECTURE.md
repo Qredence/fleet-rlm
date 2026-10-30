@@ -118,8 +118,13 @@ Outcomes and cleanup:
 - Each Turn has one terminal outcome and one teardown owner.
 - Failure, cancellation, or expiry triggers teardown; disconnect cancellation is serialized
   with commit and preserves a durably completed outcome even before delivery.
-- Teardown cancels and fences host work, shuts down children, and stops the root before acknowledgment and `done`.
+- Teardown cancels and fences host work, interrupts the root before child deletion,
+  and attempts all required cleanup before acknowledgment and `done`.
 - Cleanup records `stopped` or `unconfirmed`. Success records `not_required` and keeps the warm root.
+- Unconfirmed cleanup retains root/allocation identity and fences provisioning and
+  workspace access across Turn resets. Registry eviction retains the fenced runtime
+  and its lease until a later shutdown confirms cleanup. This in-memory guard does
+  not establish safety after process restart; see the [F0 acceptance report](docs/fleet-rlm-prds/F0-acceptance.md).
 - Reply fences refuse late successful results once, without retry.
 - Error and cancellation replies remain deliverable.
 - Fencing does not interrupt provider calls or replace child shutdown.

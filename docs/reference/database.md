@@ -66,7 +66,8 @@ compatibility schema `public`, while the checked-in config selects
 must already exist with appropriate permissions.
 
 `fleet_lite_sessions` stores each session's timestamp, memory summary, bounded
-turn history as JSONB, and the once-per-Session environment-observation marker.
+turn history as JSONB, the once-per-Session environment-observation marker, and
+the bounded sandbox-ownership record described under migration 8.
 Releasing a runtime keeps the row, so reopening the Session does not repeat the
 observation. A Turn's record, memory note, optional replay
 snapshot and completion commit in one transaction; workspace file bytes are not
