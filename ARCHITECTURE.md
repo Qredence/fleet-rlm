@@ -113,13 +113,16 @@ Execution boundaries:
 Outcomes and cleanup:
 
 - Each Turn has one terminal outcome and one teardown owner.
-- Failure, cancellation, expiry, or disconnect before a reported outcome triggers teardown.
+- Failure, cancellation, or expiry triggers teardown; disconnect cancellation is serialized
+  with commit and preserves a durably completed outcome even before delivery.
 - Teardown cancels and fences host work, shuts down children, and stops the root before acknowledgment and `done`.
 - Cleanup records `stopped` or `unconfirmed`. Success records `not_required` and keeps the warm root.
 - Reply fences refuse late successful results once, without retry.
 - Error and cancellation replies remain deliverable.
 - Fencing does not interrupt provider calls or replace child shutdown.
 - Watchdogs bind to Turn generations and serialize with Turn end/reset.
+- Successful commit ends the execution deadline before optional observation and delivery.
+  Session assembles one [canonical result](docs/reference/turn-results.md) for Store, live SSE and reconnect.
 
 Deadlines:
 

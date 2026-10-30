@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from threading import Event, Lock
 from typing import Annotated, Any
 
 import anyio
@@ -95,8 +96,8 @@ async def stream_turn(
 
     The stream ends with one outcome event followed by the terminal `done` envelope when `run_turn`
     reached it; a worker that stops earlier still closes the stream with one terminal event.
-    A client disconnect cancels a Turn without an observed outcome; after an outcome it preserves
-    the completed Turn's warm root. The Session stays locked until sandbox work has drained.
+    A client disconnect cancels an uncommitted Turn. Durable success preserves the warm root
+    even before its outcome can be queued. The Session stays locked until sandbox work has drained.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
@@ -106,6 +107,8 @@ async def stream_turn(
     # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
     # in them, so the Turn runs in a copy of the request's context.
     context = contextvars.copy_context()
+    completion_committed = Event()
+    completion_lock = Lock()
     job = executor.submit(
         context.run,
         run_turn,
@@ -120,8 +123,13 @@ async def stream_turn(
         emit=callback.emit,
         record_replay=req.record_replay,
         timeout_seconds=req.timeout_seconds,
+        completion_committed=completion_committed,
+        completion_lock=completion_lock,
     )
     worker = asyncio.wrap_future(job)
+    # The wrapper owns a separate exception notification. Always retrieve it, even
+    # if it settles after finalization; raw exception text must not reach asyncio logs.
+    worker.add_done_callback(lambda completed: None if completed.cancelled() else completed.exception())
     getter: asyncio.Future[dict[str, Any]] | None = None
     connected = True
     finished = False
@@ -151,7 +159,7 @@ async def stream_turn(
                 if connected and await request.is_disconnected():
                     connected = False
                     if not reported:
-                        await _cancel(runtime)
+                        await _cancel(runtime, completion_committed, completion_lock)
                 continue
             getter = None
             if event is None:
@@ -161,7 +169,7 @@ async def stream_turn(
             if connected and await request.is_disconnected():
                 connected = False
                 if not reported:
-                    await _cancel(runtime)
+                    await _cancel(runtime, completion_committed, completion_lock)
             if connected:
                 wrapped = envelope.wrap(event)
                 yield ServerSentEvent(data=wrapped, id=str(wrapped["seq"]))
@@ -170,7 +178,7 @@ async def stream_turn(
                 # consuming it, so an HTTP client can tell a clean termination from a dropped stream.
                 finished = True
                 break
-        if connected and not reported:
+        if connected and not reported and not completion_committed.is_set():
             failure = envelope.wrap(
                 {"event": "error", "request_id": turn_id, "error": f"The Turn failed (request {turn_id})."}
             )
@@ -183,7 +191,7 @@ async def stream_turn(
         with anyio.CancelScope(shield=True):
             if not job.cancel() and not job.done():
                 if not finished and not reported:
-                    await _cancel(runtime)
+                    await _cancel(runtime, completion_committed, completion_lock)
                 await asyncio.wait({worker})
         _log_failure(job, turn_id)
 
@@ -198,10 +206,16 @@ async def _acquire(runtime: SessionRuntime) -> bool:
     return True
 
 
-async def _cancel(runtime: SessionRuntime) -> None:
+async def _cancel(runtime: SessionRuntime, completion_committed: Event, completion_lock: Lock) -> None:
     """Claim the disconnected Turn's one teardown; a racing terminal branch joins it instead."""
+
+    def cancel_uncommitted() -> None:
+        with completion_lock:
+            if not completion_committed.is_set():
+                runtime.sandbox_mgr.request_cancellation()
+
     with suppress(Exception):
-        await asyncio.to_thread(runtime.sandbox_mgr.request_cancellation)
+        await asyncio.to_thread(cancel_uncommitted)
 
 
 def _log_failure(job: Any, turn_id: str) -> None:

@@ -10,13 +10,15 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import dspy
 import pytest
 from dspy import AdapterParseError
-from fakes import FakeManager, api_settings, client_for, opened_client, runtime_with, store_with
+from fakes import FakeManager, api_settings, client_for, completion_for, opened_client, runtime_with, store_with
 
 import fleet_rlm.api.app as api_app
 import fleet_rlm.api.deps as api_deps
@@ -33,6 +35,389 @@ from fleet_rlm.workspace import WorkspaceDataset
 
 def events_of(response) -> list[dict[str, Any]]:
     return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+
+
+@pytest.fixture
+def turn_results():
+    return json.loads((Path(__file__).parents[1] / "fixtures" / "turn_results.json").read_text())
+
+
+@pytest.mark.usefixtures("traced")
+def test_baseline_live_success_and_failure_fields_are_preserved(turn_results):
+    runtime, _state = durable_runtime()
+    success = []
+    _run_turn_direct(runtime, emitted=success, turn_id="fixture-turn", timeout_seconds=0)
+    assert success[0]["duration_seconds"] >= 0
+    assert {**success[0], "duration_seconds": 0.0} == turn_results["live_success"]
+
+    stored = []
+
+    def fail(**_kwargs):
+        raise RuntimeError("private response")
+
+    runtime = _failed_turn_runtime(FakeManager(), stored, fail)
+    failure = []
+    _run_turn_direct(runtime, emitted=failure, turn_id="fixture-turn")
+    assert {**failure[0], "duration_seconds": 0.0} == turn_results["live_failure"]
+    assert stored[0][2] == failure[0]
+
+
+@pytest.mark.usefixtures("traced")
+def test_historical_recovery_preserves_unknown_fields_and_only_normalizes_at_read_boundary(turn_results):
+    for row in turn_results["legacy_rows"]:
+        prior = deepcopy(row)
+        runtime = runtime_with(claim_turn=lambda *_args, prior=prior: prior)
+        store = store_with(
+            turn_status=lambda *_args, prior=prior: {**deepcopy(prior), "updated_at": "2026-10-01T00:00:00Z"}
+        )
+        expected = {**row["result"], "turn_id": row["turn_id"]}
+        with opened_client(runtime, store=store) as (client, _app):
+            replay = events_of(client.post("/sessions/session-a/turn", json={"task": "old"}))
+            status = client.get(f"/sessions/session-a/turns/{row['turn_id']}").json()
+        assert {"event": replay[1]["event"], **replay[1]["payload"]} == expected
+        state = status["result"].pop("provenance_state")
+        assert state == ("unresolved" if "deadline_source" in row["result"] else "pre-provenance")
+        assert status["result"] == expected and prior == row
+        replayed = turn_module._replayed(prior)
+        replayed["historical_extension"] = "changed by consumer"
+        assert prior == row
+
+
+def durable_runtime(*, lose_ack=False, unavailable_readback=False):
+    """Exercise real Session policies over a JSON-owning Store fake."""
+    rows, commits, executions, cancellations = {}, [], [], []
+
+    def claim(_session, turn_id, key, digest):
+        if key in rows:
+            return deepcopy(rows[key])
+        rows[key] = {"turn_id": turn_id, "task_sha256": digest, "status": "running", "result": {}}
+        return None
+
+    def persist(_session, **kwargs):
+        commits.append(deepcopy(kwargs))
+        turn_id, result = kwargs["completion"]
+        row = next(row for row in rows.values() if row["turn_id"] == turn_id)
+        row.update(status="completed", result=json.loads(json.dumps(result)))
+        if lose_ack:
+            raise ConnectionError("private provider response")
+
+    def status(_session, turn_id):
+        if unavailable_readback:
+            raise ConnectionError("private database response")
+        row = next((row for row in rows.values() if row["turn_id"] == turn_id), None)
+        return {**deepcopy(row), "updated_at": "2026-10-01T00:00:00Z"} if row else None
+
+    def finish(*_args):
+        pytest.fail("a committed or uncertain Turn must not be written as failed")
+
+    def engine(**_kwargs):
+        executions.append(1)
+        return SimpleNamespace(
+            answer="verified",
+            route="flex",
+            learned_skill_note="A reusable hint.",
+            lm_calls=4,
+            sandbox_errors=1,
+            submit_rejections=2,
+            budget_breakdown={"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
+        )
+
+    manager = FakeManager(
+        session_id="session-a",
+        list_workspace_files=lambda: ["artifacts/report.txt"],
+        snapshot_provenance=lambda: {
+            "snapshot_name": "fleet-test",
+            "snapshot_id": "snap-1",
+            "snapshot_cpu": 4,
+            "snapshot_mem": 8,
+            "snapshot_disk": 8,
+            "snapshot_definition_digest": "a" * 64,
+            "snapshot_build_digest": "b" * 64,
+        },
+        live_sandbox_id="warm-root",
+        provider_bounds=lambda: {
+            "ttl_minutes": 1440,
+            "auto_stop_interval": 60,
+            "maximum_lifespan_minutes": None,
+            "provider_owned": True,
+        },
+        cancel_turn=lambda: cancellations.append(1),
+    )
+    store = store_with(
+        claim_turn=claim,
+        commit_turn=persist,
+        turn_status=status,
+        finish_turn=finish,
+        load_session=lambda _session: ("", []),
+        memories=lambda *_args, **_kwargs: [],
+    )
+    return runtime_with(real_policy=True, sandbox_mgr=manager, store=store, engine=engine), SimpleNamespace(
+        rows=rows,
+        commits=commits,
+        executions=executions,
+        cancellations=cancellations,
+    )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        None,
+        "phase_outputs",
+        "phase_exit",
+        "span_outputs",
+        "span_attributes",
+        "final_attribute",
+        "span_exit",
+        "phase_and_span_exit",
+        "trace",
+        "note",
+        "end_turn",
+    ],
+)
+def test_canonical_completion_survives_postcommit_observation_faults(traced, monkeypatch, caplog, fault):
+    runtime, state = durable_runtime()
+    original = turn_module.mlflow.start_span
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("private provider response")
+
+    @contextmanager
+    def span(**kwargs):
+        with original(**kwargs) as active:
+            root = kwargs["name"] == "fleet_turn"
+            commit = kwargs["name"] == "turn.commit"
+            if (commit and fault in {"phase_outputs", "phase_and_span_exit"}) or (root and fault == "span_outputs"):
+                active.set_outputs = broken
+            if root and fault == "span_attributes":
+                original_attributes = active.set_attributes
+                active.set_attributes = lambda values: broken() if state.commits else original_attributes(values)
+            if root and fault == "final_attribute":
+                original_attribute = active.set_attribute
+                active.set_attribute = lambda key, value: (
+                    broken() if key == "cleanup" else original_attribute(key, value)
+                )
+            yield active
+        if (commit and fault == "phase_exit") or (root and fault in {"span_exit", "phase_and_span_exit"}):
+            broken()
+
+    monkeypatch.setattr(turn_module.mlflow, "start_span", span)
+    if fault == "trace":
+        update = turn_module.mlflow.update_current_trace
+        monkeypatch.setattr(
+            turn_module.mlflow,
+            "update_current_trace",
+            lambda **kw: broken() if "response_preview" in kw else update(**kw),
+        )
+    if fault == "note":
+        monkeypatch.setattr(turn_module, "_write_learned_note", broken)
+    ended = []
+    if fault == "end_turn":
+
+        def end_turn():
+            ended.append(1)
+            broken()
+
+        runtime.sandbox_mgr.end_turn = end_turn
+    traced["span_trace_id"] = "canonical-trace"
+    body = {"task": "verify", "idempotency_key": "canonical", "timeout_seconds": 0}
+    with opened_client(runtime, store=runtime.store) as (client, app):
+        app.state.mlflow_experiment_id = "test-experiment"
+        live = events_of(client.post("/sessions/session-a/turn", json=body))
+        replay = events_of(client.post("/sessions/session-a/turn", json=body))
+        status = client.get(f"/sessions/session-a/turns/{state.rows['canonical']['turn_id']}").json()
+    stored = state.rows["canonical"]["result"]
+    assert [event["event"] for event in live] == ["turn_status", "turn_complete", "done"]
+    assert [event["event"] for event in replay] == ["turn_status", "turn_complete", "done"]
+    assert {"event": live[1]["event"], **live[1]["payload"]} == stored
+    assert {"event": replay[1]["event"], **replay[1]["payload"]} == stored
+    assert status["result"].pop("provenance_state") == "recorded"
+    assert status["result"] == stored
+    assert stored["effective_seconds"] is None and stored["maximum_lifespan_minutes"] is None
+    assert stored["root_sandbox_id"] == "warm-root" and stored["trace_id"] == "canonical-trace"
+    assert len(state.executions) == len(state.commits) == 1 and state.cancellations == []
+    if fault == "end_turn":
+        assert ended == [1, 1], "one finalization attempt per live/replayed request"
+    assert "private provider response" not in caplog.text
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+@pytest.mark.usefixtures("traced")
+def test_commit_acknowledgment_loss_uses_claimed_identity_without_reexecution(unavailable):
+    runtime, state = durable_runtime(lose_ack=True, unavailable_readback=unavailable)
+    emitted = []
+    _run_turn_direct(runtime, emitted=emitted, idempotency_key="lost-ack")
+    assert emitted[0]["event"] == ("error" if unavailable else "turn_complete")
+    assert emitted[-1] == {"event": "done"}
+    assert state.rows["lost-ack"]["status"] == "completed"
+    replay = []
+    _run_turn_direct(runtime, emitted=replay, idempotency_key="lost-ack")
+    assert replay[0] == state.rows["lost-ack"]["result"]
+    assert len(state.executions) == len(state.commits) == 1
+    assert state.cancellations == ([1] if unavailable else [])
+
+
+@pytest.mark.usefixtures("traced")
+def test_terminal_delivery_failure_does_not_cancel_committed_turn(caplog):
+    runtime, state = durable_runtime()
+    emitted = []
+
+    def emit(event):
+        emitted.append(event)
+        if event["event"] == "turn_complete":
+            raise ConnectionError("private client response")
+
+    turn_module.run_turn(
+        runtime,
+        api_settings(),
+        session_id="session-a",
+        turn_id="delivery-turn",
+        task="verify termination",
+        idempotency_key="delivery",
+        mlflow_experiment_id=None,
+        callback=object(),
+        emit=emit,
+    )
+    assert [event["event"] for event in emitted] == ["turn_complete", "done"]
+    replay = []
+    _run_turn_direct(runtime, emitted=replay, idempotency_key="delivery")
+    assert replay[0] == state.rows["delivery"]["result"]
+    assert state.cancellations == [] and len(state.executions) == 1
+    assert "private client response" not in caplog.text
+
+
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("fault", ["execution", "lease", "cancelled"])
+def test_failure_before_commit_keeps_terminal_cleanup_and_never_completes(fault):
+    runtime, state = durable_runtime()
+    finished = []
+    execute = runtime.engine
+
+    def engine(**kwargs):
+        if fault == "execution":
+            raise RuntimeError("private execution response")
+        prediction = execute(**kwargs)
+        if fault == "lease":
+            runtime.lease_lost.set()
+        else:
+            runtime.sandbox_mgr._cancelled.set()
+        return prediction
+
+    runtime.engine = engine
+    runtime.engine.execution_mode = "hybrid"
+    runtime.store.finish_turn = lambda *args: finished.append(args)
+    emitted = []
+    _run_turn_direct(runtime, emitted=emitted)
+    outcome = "cancelled" if fault == "cancelled" else "failed"
+    assert [event["event"] for event in emitted] == ["turn_cancelled" if fault == "cancelled" else "error", "done"]
+    assert finished[0][2] == emitted[0]["outcome"] == outcome
+    assert state.commits == [] and state.cancellations == [1]
+
+
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("readback", ["running", "missing", "unavailable"])
+def test_unproven_commit_never_reexecutes_and_preserves_unavailable_intent(readback):
+    runtime, state = durable_runtime()
+    reads, writes = [], []
+
+    def commit(*_args, **_kwargs):
+        raise ConnectionError("private commit response")
+
+    def status(_session, turn_id):
+        reads.append(turn_id)
+        if readback == "unavailable":
+            raise ConnectionError("private readback response")
+        return deepcopy(state.rows["uncertain"]) if readback == "running" else None
+
+    def finish(_session, turn_id, outcome, result):
+        writes.append(turn_id)
+        state.rows["uncertain"].update(status=outcome, result=deepcopy(result))
+
+    runtime.store.commit_turn = commit
+    runtime.store.turn_status = status
+    runtime.store.finish_turn = finish
+    emitted = []
+    _run_turn_direct(runtime, emitted=emitted, idempotency_key="uncertain")
+    assert [event["event"] for event in emitted] == ["error", "done"]
+    assert reads == ["turn-teardown"]
+    assert state.rows["uncertain"]["status"] == ("failed" if readback == "running" else "running")
+    assert writes == (["turn-teardown"] if readback == "running" else [])
+    replay = []
+    _run_turn_direct(runtime, emitted=replay, idempotency_key="uncertain")
+    assert replay[0]["event"] == "error" and "not replayed" in replay[0]["error"]
+    assert len(state.executions) == 1 and state.cancellations == [1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disconnect", ["poll", "close"])
+@pytest.mark.parametrize("boundary", ["commit", "note"])
+@pytest.mark.usefixtures("traced")
+async def test_disconnect_during_postcommit_observation_preserves_success(monkeypatch, disconnect, boundary):
+    runtime, state = durable_runtime()
+    observing, release = threading.Event(), threading.Event()
+    ended = threading.Event()
+    runtime.sandbox_mgr.end_turn = ended.set
+
+    def observe(*_args):
+        if boundary == "note":
+            assert ended.is_set(), "the execution deadline must end before postcommit observation"
+        observing.set()
+        assert release.wait(timeout=5)
+
+    async def is_disconnected():
+        if observing.is_set():
+            asyncio.get_running_loop().call_later(0.05, release.set)
+            return True
+        return False
+
+    if boundary == "note":
+        monkeypatch.setattr(turn_module, "_write_learned_note", observe)
+    else:
+        persist = runtime.store.commit_turn
+
+        def commit(*args, **kwargs):
+            persist(*args, **kwargs)
+            observe()
+
+        runtime.store.commit_turn = commit
+    monkeypatch.setattr(turns_route, "_DISCONNECT_POLL_SECONDS", 0.01)
+    with turns_route.create_turn_executor() as executor:
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(mlflow_experiment_id=None)),
+            is_disconnected=is_disconnected,
+        )
+        stream = turns_route.stream_turn(
+            "session-a",
+            turns_route.TurnRequest(task="verify", idempotency_key="disconnected"),
+            request,
+            runtime,
+            api_settings(),
+            executor,
+            None,
+        )
+        try:
+            assert (await anext(stream)).data["event"] == "turn_status"
+            assert await asyncio.to_thread(observing.wait, 2)
+            if disconnect == "close":
+                asyncio.get_running_loop().call_later(0.05, release.set)
+                await stream.aclose()
+            else:
+                assert all(event.data["event"] == "status" for event in [event async for event in stream])
+        finally:
+            release.set()
+            await stream.aclose()
+    assert state.rows["disconnected"]["status"] == "completed"
+    assert state.cancellations == []
+    monkeypatch.setattr(turn_module, "_write_learned_note", lambda *_args: None)
+    with opened_client(runtime) as (client, _app):
+        events = events_of(
+            client.post(
+                "/sessions/session-a/turn",
+                json={"task": "verify", "idempotency_key": "disconnected"},
+            )
+        )
+    assert {"event": events[1]["event"], **events[1]["payload"]} == state.rows["disconnected"]["result"]
+    assert len(state.executions) == len(state.commits) == 1
 
 
 @pytest.mark.parametrize("complete", [False, True])
@@ -163,7 +548,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     def persist(**kwargs):
         records.append(kwargs["turn_record"])
         order.append("sync")
-        return ["artifacts/result.csv"]
+        return completion_for(kwargs["turn_record"], ["artifacts/result.csv"])
 
     def write_note(turn_id, note, trace_id=None):
         order.append("write")
@@ -264,7 +649,9 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
     evidence = {"artifacts": {"complete": True, "files": {path: {"sha256": digest}}}}
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
-        commit_turn=lambda **kwargs: records.append(kwargs["turn_record"]) or [path],
+        commit_turn=lambda **kwargs: (
+            records.append(kwargs["turn_record"]) or completion_for(kwargs["turn_record"], [path])
+        ),
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", execution_evidence=evidence),
     )
     with opened_client(runtime) as (client, _app):
@@ -318,7 +705,7 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
             list_workspace_files=lambda: paths,
             read_workspace_file=lambda _path: raw,
         ),
-        commit_turn=lambda **_kwargs: paths,
+        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], paths),
         engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
     )
     with opened_client(runtime) as (client, _app):
@@ -395,6 +782,7 @@ def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
         claim_turn=claim,
         commit_turn=persist,
         finish_turn=fail,
+        turn_status=lambda _session, turn_id: next((row for row in claims.values() if row["turn_id"] == turn_id), None),
     )
     manager = FakeManager(
         session_id="session-a",
@@ -474,7 +862,9 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
                 "environment": environment,
             },
         ),
-        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
+        commit_turn=lambda **kwargs: (
+            persisted.append(kwargs) or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
+        ),
         engine=lambda **_kwargs: SimpleNamespace(
             answer="17", route="flex", learned_skill_note="", lm_calls=1, sandbox_errors=0
         ),
@@ -525,7 +915,9 @@ def test_turn_provenance_matches_across_span_record_replay_and_terminal(traced) 
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
         sandbox_mgr=FakeManager(snapshot_provenance=lambda: dict(provenance)),
-        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
+        commit_turn=lambda **kwargs: (
+            persisted.append(kwargs) or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
+        ),
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", lm_calls=1, sandbox_errors=0),
     )
     with opened_client(runtime) as (client, _app):
@@ -690,6 +1082,7 @@ def _run_turn_direct(
     order: list[str] | None = None,
     turn_id: str = "turn-teardown",
     timeout_seconds: int | None = None,
+    idempotency_key: str | None = None,
 ) -> None:
     """Run one Turn with an ordered emit log, so `done` is observable outside the SSE route."""
 
@@ -704,7 +1097,7 @@ def _run_turn_direct(
         session_id="session-a",
         turn_id=turn_id,
         task="verify termination",
-        idempotency_key=turn_id,
+        idempotency_key=idempotency_key or turn_id,
         mlflow_experiment_id=None,
         callback=object(),
         emit=emit,
@@ -735,9 +1128,9 @@ def test_a_completed_turn_records_not_required_and_never_stops_the_root(traced) 
     def engine(**_kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(answer="kept warm", route="direct")
 
-    def persist(**kwargs: Any) -> list[str]:
+    def persist(**kwargs: Any) -> dict[str, Any]:
         records.append(kwargs["turn_record"])
-        return []
+        return completion_for(kwargs["turn_record"])
 
     manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
     runtime = runtime_with(
@@ -749,7 +1142,7 @@ def test_a_completed_turn_records_not_required_and_never_stops_the_root(traced) 
     _run_turn_direct(runtime, emitted=emitted, order=order)
 
     assert "cancel_turn" not in order, "a completed Turn must not stop its root sandbox"
-    assert order == ["turn_complete", "end_turn", "done"]
+    assert order == ["end_turn", "turn_complete", "done"]
     assert [event["event"] for event in emitted] == ["turn_complete", "done"]
     assert emitted[0]["cleanup"] == CLEANUP_NOT_REQUIRED
     assert records[0]["cleanup"] == CLEANUP_NOT_REQUIRED
@@ -765,9 +1158,9 @@ def test_provider_bounds_are_reported_on_event_record_and_span_without_a_deadlin
         "provider_owned": True,
     }
 
-    def persist(**kwargs: Any) -> list[str]:
+    def persist(**kwargs: Any) -> dict[str, Any]:
         records.append(kwargs["turn_record"])
-        return []
+        return completion_for(kwargs["turn_record"])
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(provider_bounds=lambda: bounds),
@@ -787,9 +1180,9 @@ def test_provider_bounds_are_reported_on_event_record_and_span_without_a_deadlin
 def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> None:
     records: list[dict[str, Any]] = []
 
-    def persist(**kwargs: Any) -> list[str]:
+    def persist(**kwargs: Any) -> dict[str, Any]:
         records.append(kwargs["turn_record"])
-        return []
+        return completion_for(kwargs["turn_record"])
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(live_sandbox_id="sandbox-warm-root"),
@@ -1591,7 +1984,9 @@ def test_deadline_provenance_matches_across_span_turn_record_and_replay(
     monkeypatch.setattr(turn_module, "resolve_turn_deadline", counting)
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
-        commit_turn=lambda **kwargs: persisted.append(kwargs) or [],
+        commit_turn=lambda **kwargs: (
+            persisted.append(kwargs) or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
+        ),
         engine=lambda **_kwargs: SimpleNamespace(answer="done", route="direct"),
     )
     client, _ = client_for(runtime, settings=settings)

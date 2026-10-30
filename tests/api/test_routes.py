@@ -326,7 +326,7 @@ def test_turn_status_and_history_read_durable_store_without_runtime(turn_id, res
     assert status.json() == {
         "turn_id": turn_id,
         "status": "completed",
-        "result": expected_result,
+        "result": {**expected_result, "turn_id": turn_id},
         "updated_at": "2026-10-20T00:00:00",
     }
     assert missing.status_code == 404

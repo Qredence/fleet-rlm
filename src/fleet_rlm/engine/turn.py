@@ -13,8 +13,10 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import nullcontext, suppress
+from copy import deepcopy
 from importlib.metadata import version
+from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
 
 import dspy
@@ -99,6 +101,8 @@ def run_turn(
     emit: Emit,
     record_replay: bool = False,
     timeout_seconds: int | None = None,
+    completion_committed: Event | None = None,
+    completion_lock: Lock | None = None,
 ) -> None:
     """Run one Turn for a Session, claiming its id and emitting progress events through emit.
 
@@ -109,7 +113,10 @@ def run_turn(
     An existing idempotency claim replays its stored outcome. New work persists its
     completion and optionally captures immutable replay inputs. Ordinary failures
     become terminal events after teardown; success keeps the root sandbox warm.
-    Finalization and event-delivery errors can still propagate to the caller.
+    Observation and delivery errors after commit cannot reverse the durable outcome.
+    `completion_committed` lets the transport preserve success across a disconnect
+    before the terminal event can be queued. `completion_lock` serializes that signal
+    and the commit/readback with disconnect cancellation. Finalization errors may propagate.
     """
     manager = runtime.sandbox_mgr
     started_at = time.monotonic()
@@ -121,8 +128,53 @@ def run_turn(
     previous_event_callback = manager.event_callback
     previous_snapshot_callback: Any = getattr(manager, "snapshot_resolved_callback", None)
     trace_id: str | None = None
-    # The single terminal outcome reported after teardown; None means this Turn completed.
+    committed: dict[str, Any] | None = None
+    commit_attempted = False
     terminal_event: dict[str, Any] | None = None
+    turn_ended = False
+
+    def end_execution() -> None:
+        """End the execution deadline once, before observing or delivering committed success."""
+        nonlocal turn_ended
+        if not turn_ended:
+            turn_ended = True
+            manager.end_turn()
+
+    def resolve_exception(exc: Exception) -> None:
+        """Fence both span scopes with the same durable outcome and bounded readback."""
+        nonlocal committed, terminal_event
+        uncertain = False
+        if committed is None and terminal_event is None and commit_attempted:
+            try:
+                prior = runtime.store.turn_status(session_id, turn_id)
+            except Exception:
+                uncertain = True
+            else:
+                if prior is None or prior["turn_id"] != turn_id:
+                    uncertain = True
+                elif prior["status"] == "completed":
+                    committed = _replayed(prior)
+                    if completion_committed is not None:
+                        completion_committed.set()
+                    end_execution()
+        if committed is not None or terminal_event is not None:
+            _LOGGER.warning("Turn %s observation failed (%s)", turn_id, type(exc).__name__)
+            return
+        terminal_event = _terminal_failure(
+            runtime,
+            manager,
+            session_id=session_id,
+            turn_id=turn_id,
+            exc=exc,
+            trace_id=trace_id,
+            started_at=started_at,
+            persist=not uncertain,
+        )
+        if uncertain:
+            # Leave intent intact: a later idempotency lookup may prove completion. Never
+            # overwrite an unknown transaction outcome or rerun the generated code.
+            terminal_event["error"] = "Prior turn has an uncertain or failed outcome; it was not replayed."
+
     try:
         runtime.assert_lease_held()
         manager.event_callback = emit
@@ -130,10 +182,15 @@ def run_turn(
             deadline_seconds=policy.effective_seconds,
             deadline_source=policy.source,
         )
-        prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task)
-        if prior is not None:
-            emit({**_replayed(prior), "turn_id": prior["turn_id"]})
-            return
+        with completion_lock if completion_lock is not None else nullcontext():
+            prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task)
+            if prior is not None:
+                terminal_event = {**_replayed(prior), "turn_id": prior["turn_id"]}
+                if prior["status"] == "completed":
+                    committed, terminal_event = terminal_event, None
+                    if completion_committed is not None:
+                        completion_committed.set()
+                return
         # The destination travels with the span: `mlflow.set_experiment` is process-wide and would race
         # across Sessions that trace to different experiments.
         destination = MlflowExperimentLocation(mlflow_experiment_id) if mlflow_experiment_id else None
@@ -277,13 +334,25 @@ def run_turn(
                     _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                 }
                 with phase_span("turn.commit", turn_id=turn_id, learned_note=bool(learned_note)) as phase:
-                    artifacts = runtime.commit_turn(
-                        session_id=session_id,
-                        turn_record=turn_record,
-                        new_memory_note=learned_note,
-                        replay_snapshot=replay_snapshot,
-                    )
-                    phase.set_outputs({"artifacts": len(artifacts or [])})
+                    with completion_lock if completion_lock is not None else nullcontext():
+                        if manager._cancelled.is_set():
+                            raise RuntimeError("Turn was cancelled before commit")
+                        runtime.assert_lease_held()
+                        commit_attempted = True
+                        try:
+                            committed = runtime.commit_turn(
+                                session_id=session_id,
+                                turn_record=turn_record,
+                                new_memory_note=learned_note,
+                                replay_snapshot=replay_snapshot,
+                            )
+                        except Exception as exc:
+                            resolve_exception(exc)
+                            raise
+                        if completion_committed is not None:
+                            completion_committed.set()
+                        end_execution()
+                    phase.set_outputs({"artifacts": len(committed["artifacts"])})
                 _write_learned_note(runtime, turn_id, learned_note, trace_id)
                 # The span carries the same join keys as the record, status payload, and terminal
                 # event so one turn_id resolves all four surfaces without re-deriving anything.
@@ -305,7 +374,7 @@ def run_turn(
                         # Keep usage and host receipts ahead of diagnostic artifact summaries.
                         **usage,
                         "execution_evidence": evidence,
-                        "artifacts": artifacts,
+                        "artifacts": deepcopy(committed["artifacts"]),
                         "artifact_changes": artifact_changes,
                         _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                     }
@@ -315,33 +384,11 @@ def run_turn(
                     "compiled_program_digest", getattr(getattr(runtime.engine, "compiled", None), "digest", "")
                 )
                 mlflow.update_current_trace(response_preview=answer[:_TRACE_PREVIEW_CHARS], tags={"fleet.route": route})
-                completion: dict[str, Any] = {
-                    "event": "turn_complete",
-                    "turn_id": turn_id,
-                    "answer": answer,
-                    "route": route,
-                    "outcome": "completed",
-                    "duration_seconds": duration_seconds,
-                    "learned_skill_note": learned_note,
-                    "artifacts": artifacts,
-                    **usage,
-                    **environment,
-                    _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
-                }
-                if trace_id:
-                    completion["trace_id"] = trace_id
             except Exception as exc:
-                # Resolve the outcome before teardown sets `_cancelled`, then stop this Turn's work
-                # before anything is acknowledged. A completed Turn never reaches this branch.
-                terminal_event = _terminal_failure(
-                    runtime,
-                    manager,
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    exc=exc,
-                    trace_id=trace_id,
-                    started_at=started_at,
-                )
+                resolve_exception(exc)
+                if committed is not None:
+                    return
+                assert terminal_event is not None
                 span.set_status("ERROR")
                 span.set_outputs(terminal_event)
                 span.set_attributes(
@@ -359,29 +406,23 @@ def run_turn(
                     span.set_attribute(_ROOT_SANDBOX_ATTRIBUTE, terminal_event[_ROOT_SANDBOX_ATTRIBUTE])
             else:
                 span.set_attribute(_CLEANUP_ATTRIBUTE, CLEANUP_NOT_REQUIRED)
-        if terminal_event is None:
-            emit(completion)
     except Exception as exc:
-        terminal_event = _terminal_failure(
-            runtime,
-            manager,
-            session_id=session_id,
-            turn_id=turn_id,
-            exc=exc,
-            trace_id=trace_id,
-            started_at=started_at,
-        )
+        resolve_exception(exc)
     finally:
         try:
             # Teardown precedes acknowledgement: the terminal event and `done` follow this call.
-            manager.end_turn()
+            end_execution()
         finally:
             # The stream's end marker must survive a failing sandbox cleanup.
             manager.event_callback = previous_event_callback
             manager.snapshot_resolved_callback = previous_snapshot_callback
             try:
-                if terminal_event is not None:
-                    emit(terminal_event)
+                terminal = committed if committed is not None else terminal_event
+                if terminal is not None:
+                    try:
+                        emit(deepcopy(terminal))
+                    except Exception as exc:
+                        _LOGGER.warning("Turn %s delivery failed (%s)", turn_id, type(exc).__name__)
             finally:
                 emit({"event": "done"})
 
@@ -419,6 +460,7 @@ def _terminal_failure(
     exc: BaseException,
     trace_id: str | None,
     started_at: float,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """Resolve one failed or cancelled outcome, tear the Turn down, and store it before acknowledgment.
 
@@ -426,11 +468,18 @@ def _terminal_failure(
     `_cancelled` itself. A transport failure may already have requested teardown, but its
     unknown execution outcome remains a failure. Teardown runs once; a provider stop that
     raises is recorded as `unconfirmed` and never truncates the stream.
+    `persist=False` performs the same cleanup while leaving an uncertain commit's
+    durable intent untouched for later idempotency recovery.
     """
     cancelled = manager._cancelled.is_set() and not isinstance(exc, ExecutionOutcomeUnknownError)
     # Read the live handle and provider bounds before teardown discards the handle.
     environment = _turn_environment(manager)
-    _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
+    if persist:
+        _LOGGER.error("Turn %s failed for Session %s (%s)", turn_id, session_id, type(exc).__name__)
+    else:
+        _LOGGER.error(
+            "Turn %s commit outcome is uncertain for Session %s (%s)", turn_id, session_id, type(exc).__name__
+        )
     outcome = "cancelled" if cancelled else "failed"
     cleanup = _stop_terminal_turn(manager)
     # Measured after teardown so the recorded wall duration covers everything before acknowledgment.
@@ -447,8 +496,9 @@ def _terminal_failure(
     }
     if trace_id:
         failure["trace_id"] = trace_id
-    with suppress(Exception):
-        runtime.store.finish_turn(session_id, turn_id, outcome, failure)
+    if persist:
+        with suppress(Exception):
+            runtime.store.finish_turn(session_id, turn_id, outcome, failure)
     return failure
 
 
@@ -472,7 +522,7 @@ def _failure_message(exc: BaseException, turn_id: str) -> str:
 def _replayed(prior: dict[str, Any]) -> dict[str, Any]:
     """The stored outcome of an earlier attempt with the same idempotency key; never re-executed."""
     if prior["status"] == "completed":
-        return prior["result"]
+        return {**deepcopy(prior["result"]), "turn_id": prior["turn_id"]}
     return {
         "event": "error",
         "request_id": prior["turn_id"],

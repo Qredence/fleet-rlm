@@ -58,6 +58,11 @@ Releasing a runtime keeps the row, so reopening the Session does not repeat the
 observation. A Turn's record, memory note, optional replay
 snapshot and completion commit in one transaction; workspace file bytes are not
 copied to PostgreSQL.
+The successful result JSON is also the live/reconnected completion payload and
+includes `turn_id` for new Turns. Historical readers obtain a missing `turn_id`
+from the row and preserve unknown result fields; no migration or backfill is
+needed. See the [result field and legacy inventory](turn-results.md) for commit
+readback, uncertain outcomes, copy ownership and rollback.
 
 Structured memories retain their kind, review status, and source digests.
 Retrieval uses bounded full-text relevance and recency ranking. Turn
