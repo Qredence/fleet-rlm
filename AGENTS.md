@@ -21,7 +21,6 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries; cons
 - Execute generated Python in Daytona; keep credentials and host-mediated tools on the server. Preserve shared Turn budgets, isolated children, success-only artifact promotion, and provenance.
 - Preserve one terminal outcome and teardown owner per Turn. On failure, cancellation, expiry, or disconnect before an outcome, fence host work, shut down children, and stop the root before acknowledgment. Success retains the warm root.
 - Preserve execution reply fences and generation-bound watchdogs serialized with Turn end/reset; fencing alone does not interrupt providers or stop children.
-- Keep the 900-second default; request overrides configuration, and exactly `0` disables only Fleet's deadline. `/timeout` is client-local; child deadlines cannot exceed the parent's.
 - Progress is advisory; synchronize ingestion/SSE sampling, discard pending progress after an outcome, and keep `done` last.
 - Preserve snapshot resource floors and provider-resolved provenance, historical `pre-provenance` readability, Store migrations, and runtime lease fencing. Stored history cannot restore live interpreter state.
 - Keep ordinary API access loopback by default, explicit non-loopback opt-in, and a secured boundary for external exposure.
