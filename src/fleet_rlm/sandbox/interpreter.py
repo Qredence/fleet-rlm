@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, ClassVar
 
 import dspy
@@ -262,6 +262,13 @@ class DaytonaInterpreter:
                 pool.submit(contextvars.copy_context().run, self._complete_sub_lm, prompt, active_lm)
                 for prompt in prompts
             ]
+            try:
+                for future in as_completed(futures):
+                    future.result()
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
             return [future.result() for future in futures]
 
     def _jev_decide_batched(self, args: list[Any], _kwargs: dict[str, Any]) -> Any:

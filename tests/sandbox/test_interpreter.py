@@ -213,6 +213,34 @@ def test_fallback_batch_precharges_once_and_propagates_worker_errors(sandbox, er
     assert manager.turn_usage()["lm_calls"] == 2
 
 
+def test_fallback_batch_cancels_queued_work_on_failure(sandbox, monkeypatch):
+    from concurrent.futures import Future
+
+    futures = []
+
+    class Pool:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def submit(self, *_args):
+            future = Future()
+            futures.append(future)
+            if len(futures) == 2:
+                future.set_exception(ValueError("provider"))
+            return future
+
+    monkeypatch.setattr(interpreter_module, "ThreadPoolExecutor", Pool)
+    with dspy.context(lm=lambda prompt: [prompt]), pytest.raises(ValueError, match="provider"):
+        DaytonaInterpreter(manager_on(sandbox))._llm_query_batched([["slow", "fail", "queued"]], {})
+    assert futures[0].cancelled() and futures[2].cancelled()
+
+
 def test_injected_batch_never_constructs_fallback_executor(sandbox, monkeypatch):
     def forbidden(**_kwargs):
         pytest.fail("native batching must bypass the fallback executor")
