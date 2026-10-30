@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import statistics
 import time
 import uuid
@@ -173,6 +174,20 @@ def collect(path: Path, arm: str, base_url: str, experiment_id: str) -> None:
     expected_digest = experiment_plan()["input_digest"]
     if len(report["observations"]) != 39 or report["input_digest"] != expected_digest:
         raise ValueError("Comparison plan changed")
+    run_id = report.get("run_id")
+    if not isinstance(run_id, str) or not re.fullmatch(r"latency-[0-9a-f]{12}", run_id):
+        raise ValueError("Invalid comparison run identity")
+    expected = {
+        (name, case, repetition) for name in ARMS for case in CASES for repetition in range(1 if case == "pi" else 3)
+    }
+    identities = []
+    for row in report["observations"]:
+        identity = (row.get("arm"), row.get("case"), row.get("repetition"))
+        if identity not in expected or row.get("session_id") != f"{run_id}-{identity[0]}-{identity[1]}-{identity[2]}":
+            raise ValueError("Invalid comparison observation identity")
+        identities.append(identity)
+    if len(set(identities)) != len(expected):
+        raise ValueError("Duplicate comparison observation identity")
     targets = [row for row in report["observations"] if row["arm"] == arm]
     if len(targets) != 13 or any(row["status"] not in {"planned", "measured"} for row in targets):
         raise ValueError("Arm has an unresolved attempt; recover recorded Sessions/trace IDs without repeating Turns")

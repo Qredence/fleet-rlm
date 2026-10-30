@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -102,6 +103,29 @@ def test_observation_failure_is_sanitized_and_does_not_raise(monkeypatch, caplog
     assert obs.associate_turn_agent(engine(), "config", "1", span) is None
     assert span.attributes["fleet.agent.identity_status"] == "unversioned"
     assert "credential-that-must-never-be-logged" not in caplog.text
+
+
+@pytest.mark.usefixtures("registry")
+def test_slow_lookup_does_not_block_other_cached_identities(monkeypatch):
+    cached = obs.associate_turn_agent(engine("cached"), "config", "1", Span())
+    entered, release = Event(), Event()
+    original = obs.mlflow.search_logged_models
+
+    def slow_search(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(**kwargs)
+
+    monkeypatch.setattr(obs.mlflow, "search_logged_models", slow_search)
+    monkeypatch.setattr(obs, "_AGENT_LOOKUP_WAIT_SECONDS", 0.01)
+    span = Span()
+    try:
+        assert obs.associate_turn_agent(engine("slow"), "config", "1", span) is None
+        assert entered.is_set()
+        assert span.attributes["fleet.agent.identity_status"] == "unversioned"
+        assert obs.associate_turn_agent(engine("cached"), "config", "1", Span()) == cached
+    finally:
+        release.set()
 
 
 def test_startup_snapshot_is_frozen_and_wheel_needs_no_git(tmp_path, monkeypatch):

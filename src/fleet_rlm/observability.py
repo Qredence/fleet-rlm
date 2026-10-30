@@ -29,6 +29,8 @@ AGENT_IDENTITY_SCHEME = "fleet-agent-v1"
 _AGENT_LOCK = threading.Lock()
 _STARTUP_IDENTITY: dict[str, str] | None = None
 _AGENT_MODELS: dict[tuple[str, str, str], str] = {}
+_AGENT_INFLIGHT: dict[tuple[str, str, str], threading.Event] = {}
+_AGENT_LOOKUP_WAIT_SECONDS = 0.2
 
 
 def _identity_digest(value: Any) -> str:
@@ -83,6 +85,7 @@ def serving_snapshot(package: Path | None = None) -> dict[str, str]:
         if re.fullmatch(r"[0-9a-f]{40,64}", commit):
             result.update({"fleet.agent.git_commit": commit, "fleet.agent.git_dirty": str(bool(dirty)).lower()})
     except (OSError, subprocess.SubprocessError):
+        # Git metadata is optional for installed wheels.
         pass
     return result
 
@@ -106,7 +109,8 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
     if not experiment_id:
         return None
     try:
-        if _STARTUP_IDENTITY is None:
+        startup_identity = _STARTUP_IDENTITY
+        if startup_identity is None:
             raise ValueError("No startup identity")
 
         # dump_state reflects the actually loaded native program, including partial artifacts.
@@ -119,7 +123,7 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
             return value
 
         program_digest = _identity_digest(program_state(engine.dump_state()))
-        identity = {key: value for key, value in _STARTUP_IDENTITY.items() if ".git_" not in key}
+        identity = {key: value for key, value in startup_identity.items() if ".git_" not in key}
         identity.update(
             {
                 "fleet.agent.scheme": AGENT_IDENTITY_SCHEME,
@@ -132,28 +136,50 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
         key = (destination, experiment_id, fingerprint)
         with _AGENT_LOCK:
             model_id = _AGENT_MODELS.get(key)
-            if model_id is None:
-                models = mlflow.search_logged_models(
-                    experiment_ids=[experiment_id],
-                    filter_string=f"tags.`fleet.agent.fingerprint` = '{fingerprint}'",
-                    output_format="list",
-                )
-                matches = [model for model in models if model.tags.get("fleet.agent.scheme") == AGENT_IDENTITY_SCHEME]
-                model = (
-                    min(matches, key=lambda model: model.model_id)
-                    if matches
-                    else mlflow.create_external_model(
-                        name=f"fleet-rlm-{fingerprint[:16]}",
-                        experiment_id=experiment_id,
-                        tags={**_STARTUP_IDENTITY, **identity, "fleet.agent.fingerprint": fingerprint},
-                        model_type="agent",
-                    )
-                )
-                model_id = model.model_id
-                _AGENT_MODELS[key] = model_id
+            pending = _AGENT_INFLIGHT.get(key)
+            if model_id is None and pending is None:
+                pending = threading.Event()
+                _AGENT_INFLIGHT[key] = pending
+
+                def resolve_model() -> None:
+                    try:
+                        models = mlflow.search_logged_models(
+                            experiment_ids=[experiment_id],
+                            filter_string=f"tags.`fleet.agent.fingerprint` = '{fingerprint}'",
+                            output_format="list",
+                        )
+                        matches = [m for m in models if m.tags.get("fleet.agent.scheme") == AGENT_IDENTITY_SCHEME]
+                        model = (
+                            min(matches, key=lambda m: m.model_id)
+                            if matches
+                            else mlflow.create_external_model(
+                                name=f"fleet-rlm-{fingerprint[:16]}",
+                                experiment_id=experiment_id,
+                                tags={**startup_identity, **identity, "fleet.agent.fingerprint": fingerprint},
+                                model_type="agent",
+                            )
+                        )
+                        with _AGENT_LOCK:
+                            _AGENT_MODELS[key] = model.model_id
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning("Agent model lookup unavailable (%s)", type(exc).__name__)
+                    finally:
+                        with _AGENT_LOCK:
+                            _AGENT_INFLIGHT.pop(key, None)
+                            pending.set()
+
+                threading.Thread(target=resolve_model, daemon=True, name="fleet-agent-lookup").start()
+        if model_id is None:
+            assert pending is not None
+            pending.wait(_AGENT_LOOKUP_WAIT_SECONDS)
+            with _AGENT_LOCK:
+                model_id = _AGENT_MODELS.get(key)
+        if model_id is None:
+            span.set_attribute("fleet.agent.identity_status", "unversioned")
+            return None
         mlflow.update_current_trace(model_id=model_id)
         span.set_attributes(
-            {**_STARTUP_IDENTITY, **identity, "fleet.agent.fingerprint": fingerprint, "fleet.agent.model_id": model_id}
+            {**startup_identity, **identity, "fleet.agent.fingerprint": fingerprint, "fleet.agent.model_id": model_id}
         )
         return model_id
     except Exception as exc:

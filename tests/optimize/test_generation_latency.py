@@ -282,3 +282,13 @@ def test_collection_journals_intent_and_never_sends_gold_or_repeats_an_attempt(m
         with pytest.raises(ValueError, match=r"caps|learned notes"):
             latency.collect(path, "baseline", "http://offline.invalid", "1")
         assert calls == []
+
+
+def test_collection_rejects_tampered_session_before_contacting_server(tmp_path, monkeypatch):
+    report = latency.experiment_plan()
+    report["observations"][0]["session_id"] = "../../other-session"
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report))
+    monkeypatch.setattr(latency.httpx, "Client", lambda **_kwargs: pytest.fail("unexpected network access"))
+    with pytest.raises(ValueError, match="observation identity"):
+        latency.collect(path, "baseline", "http://offline.invalid", "1")

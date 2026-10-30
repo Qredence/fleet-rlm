@@ -54,7 +54,9 @@ startup source/resource snapshot, installed dependencies, the effective configur
 digest, and the actually loaded DSPy state digest. Git commit/dirty status is metadata;
 raw diffs are never uploaded. Concurrent Sessions use per-trace association, without
 switching the process's active model. Source changes require a process restart.
-Identity failures are advisory and leave the Turn outcome intact. Historical traces
+Identity lookup waits at most 0.2 seconds; a slower lookup leaves that trace unversioned
+and can populate the cache for later Turns. Identity failures are advisory and leave the
+Turn outcome intact. Historical traces
 remain unversioned unless their original model identity was recorded; evaluating an
 old trace never assigns the current serving version to it.
 
