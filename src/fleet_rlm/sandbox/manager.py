@@ -31,7 +31,7 @@ from mlflow.entities import SpanType
 from fleet_rlm.config import validate_shared_notes_subpath
 from fleet_rlm.contracts import STOPPING_RULES
 from fleet_rlm.sandbox import repl
-from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, provider_not_found, with_retries
 from fleet_rlm.sandbox.runtime.fs_ops import (
     CLEAR_WORKSPACE_CODE,
 )
@@ -148,6 +148,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     # Durable once-per-Session marker owned by the Store. It must outlive a released or rebuilt
     # runtime, so it is claimed atomically instead of relying on in-process state.
     environment_report_claim: Callable[[str], bool] | None = field(default=None, repr=False)
+    ownership_epoch: int | None = field(default=None, repr=False)
+    ownership_resource_mutate: Callable[[str, dict[str, Any] | None], bool] | None = field(default=None, repr=False)
     # Called the instant preflight resolves the Turn identity, before any later preparation step
     # can fail, so a caller can record provenance without re-deriving it.
     snapshot_resolved_callback: Callable[[SnapshotIdentity], None] | None = field(default=None, repr=False)
@@ -519,6 +521,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 max_llm_calls=root.max_llm_calls,
                 parent=self,
                 linked_children=root.linked_children,
+                ownership_epoch=root.ownership_epoch,
+                ownership_resource_mutate=root.ownership_resource_mutate,
             )
             root._children[child.agent_id] = child
             root._allocations += 1
@@ -798,9 +802,11 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 )
                 self.emit("sandbox_provisioning")
                 self._record_allocation("requested")
+                self._persist_ownership_resource("create", None)
                 self._creation_pending = True
                 self._sandbox = self._client.create(params)
                 self._creation_pending = False
+                self._persist_ownership_resource("stop" if not child else "delete", self._sandbox.id)
                 self._record_allocation("ready")
                 self.check_turn()
                 self.emit("sandbox_ready", depth=self.depth)
@@ -812,6 +818,81 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     def _list_sandboxes(self, query: ListSandboxesQuery) -> list[Any]:
         assert self._client is not None
         return list(self._client.list(query))
+
+    def _persist_ownership_resource(self, action: str, provider_id: str | None) -> None:
+        """Persist this agent's cleanup intent before remote work, fenced by the Session epoch."""
+        if self.ownership_resource_mutate is None and self.ownership_epoch is None:
+            # Standalone disposable/test managers have no persisted Session owner.
+            return
+        if self.ownership_resource_mutate is None or self.ownership_epoch is None:
+            raise RuntimeError("Durable sandbox ownership is unavailable")
+        resource = (
+            None
+            if action == "confirmed"
+            else {
+                "allocation_nonce": self.agent_id,
+                "provider_id": provider_id,
+                "parent_agent_id": self.parent.agent_id if self.parent else None,
+                "action": action,
+                "intended_action": "delete" if self.parent is not None or self.disposable else "stop",
+                "confirmed": False,
+            }
+        )
+        if not self.ownership_resource_mutate(self.agent_id, resource):
+            raise RuntimeError("Session ownership epoch changed; sandbox operation is fenced")
+
+    def reconcile_sandbox_ownership(self, resources: list[dict[str, Any]]) -> None:
+        """Confirm cleanup for bounded persisted Daytona resources before Session admission.
+
+        A resource the provider reports as absent cannot still write, so its not-found answer is
+        treated as confirmation and its record is dropped. Every other provider failure keeps the
+        Session fenced.
+        """
+        if self.ownership_resource_mutate is None or self.ownership_epoch is None:
+            raise RuntimeError("Durable sandbox ownership is unavailable")
+        if not resources:
+            # Nothing outstanding: admission must not depend on a provider round trip.
+            return
+        client = _shared_daytona_client(self.api_key, self.org_id)
+        for entry in resources:
+            agent_id = entry.get("agent_id")
+            provider_id = entry.get("provider_id")
+            action = entry.get("action")
+            intended_action = entry.get("intended_action")
+            nonce = entry.get("allocation_nonce")
+            if (
+                not isinstance(agent_id, str)
+                or not isinstance(nonce, str)
+                or action not in {"create", "stop", "delete"}
+                or intended_action not in {"stop", "delete"}
+            ):
+                raise RuntimeError("Stored sandbox ownership record is invalid")
+            try:
+                if not isinstance(provider_id, str) or not provider_id:
+                    query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": nonce})
+                    matches = with_retries(functools.partial(lambda q: list(client.list(q)), query))
+                    if len(matches) != 1:
+                        raise RuntimeError("Sandbox allocation outcome is uncertain; Session admission remains fenced")
+                    sandbox = matches[0]
+                    provider_id = getattr(sandbox, "id", None)
+                    if not isinstance(provider_id, str) or not provider_id:
+                        raise RuntimeError("Labeled sandbox has no provider identity")
+                else:
+                    sandbox = with_retries(lambda provider_id=provider_id: client.get(provider_id))
+                if intended_action == "delete":
+                    with_retries(lambda sandbox=sandbox: client.delete(sandbox, timeout=60, wait=True))
+                else:
+                    with_retries(lambda sandbox=sandbox: client.stop(sandbox, timeout=60))
+            except Exception as exc:
+                if not provider_not_found(exc):
+                    raise
+                _LOGGER.info(
+                    "Recorded sandbox for Session %s agent %s is gone; treating absence as confirmed cleanup",
+                    self.session_id,
+                    agent_id,
+                )
+            if not self.ownership_resource_mutate(agent_id, None):
+                raise RuntimeError("Session ownership epoch changed during sandbox reconciliation")
 
     def _resume_if_needed(self) -> None:
         """Start a sandbox the provider has stopped, archived, or paused since the handle was cached.
@@ -1229,6 +1310,10 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             if sandbox is not None:
                 if client is None:
                     raise RuntimeError("Sandbox cleanup has no provider client")
+                self._persist_ownership_resource(
+                    "delete" if self.parent is not None or self.disposable else "stop",
+                    sandbox.id,
+                )
                 if self.parent is not None or self.disposable:
                     self._notify("sandbox_deleting", sandbox_id=sandbox.id)
                     try:
@@ -1243,6 +1328,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                     with_retries(lambda: client.stop(sandbox, timeout=60))
                 with self._lock:
                     self._sandbox = None
+                self._persist_ownership_resource("confirmed", None)
             confirmed = True
         except Exception as exc:
             _LOGGER.warning(

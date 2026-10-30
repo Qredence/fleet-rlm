@@ -48,6 +48,7 @@ class SessionRuntime:
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
     context: WorkspaceDataset | None = None
     lease: psycopg.Connection | None = None
+    ownership_epoch: int | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
     restart_requested: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -98,7 +99,8 @@ class SessionRuntime:
     def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
         """Persist intent before side effects; an uncertain running turn is never replayed."""
         digest = hashlib.sha256(task.encode()).hexdigest()
-        prior = self.store.claim_turn(self.session_id, turn_id, key, digest)
+        ownership = {"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}
+        prior = self.store.claim_turn(self.session_id, turn_id, key, digest, **ownership)
         if prior is not None and prior["task_sha256"] != digest:
             raise IdempotencyConflictError("Idempotency key already belongs to another task")
         return prior
@@ -233,6 +235,7 @@ class SessionRuntime:
             memory_note=new_memory_note,
             completion=completion,
             replay_snapshot=replay_snapshot,
+            **({"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}),
         )
         return result
 
@@ -460,6 +463,30 @@ class SessionRuntimeRegistry:
         runtime.ensure_session(session_id)
         runtime.lease = store.acquire_session_lease(session_id)
         try:
+            ownership_epoch = store.advance_sandbox_ownership_epoch(session_id)
+            if ownership_epoch is None:
+                raise RuntimeError(
+                    "Session sandbox ownership is unknown; reconcile legacy resources before writable admission"
+                )
+            runtime.ownership_epoch = ownership_epoch
+            ownership = store.sandbox_ownership(session_id)
+            if ownership is None:
+                raise RuntimeError(
+                    "Prior sandbox cleanup is unresolved; reconcile recorded provider resources before admission"
+                )
+            sandbox_mgr.ownership_epoch = runtime.ownership_epoch
+
+            # Resolve the epoch at call time: a manager that outlives a newer owner must fence,
+            # not write under the identity it captured at admission.
+            def mutate_sandbox_resource(agent_id: str, resource: dict[str, Any] | None) -> bool:
+                epoch = runtime.ownership_epoch
+                if epoch is None:
+                    raise RuntimeError("Session ownership epoch is unavailable; sandbox write is fenced")
+                return store.mutate_sandbox_resource(session_id, epoch, agent_id, resource)
+
+            sandbox_mgr.ownership_resource_mutate = mutate_sandbox_resource
+            sandbox_mgr.reconcile_sandbox_ownership(ownership["resources"])
+            store.fail_interrupted_turns(session_id, ownership_epoch)
             saved = store.runtime_settings(session_id)
             if "mode" in saved:
                 runtime.set_mode(settings.for_session(saved).execution_mode)

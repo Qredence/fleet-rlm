@@ -201,6 +201,10 @@ _SCHEMA_MIGRATIONS = (
             "ON fleet_lite_memories USING GIN (to_tsvector('english', content))",
         ),
     ),
+    (
+        8,
+        ("ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB",),
+    ),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -361,11 +365,83 @@ class Store:
 
     @_retry_once
     def ensure_session(self, session_id: str) -> None:
-        """Create the Session row if it does not exist."""
+        """Create a new Session with known-empty ownership; legacy rows remain unknown."""
         with self.pool.connection() as connection:
             connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
+                "INSERT INTO fleet_lite_sessions (session_id,sandbox_ownership) "
+                "VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING",
+                (session_id, json.dumps({"epoch": 0, "resources": []})),
             )
+
+    @_retry_once
+    def advance_sandbox_ownership_epoch(self, session_id: str) -> int | None:
+        """Advance the current owner epoch, or return None when legacy provenance is unknown."""
+        with self.pool.connection() as connection, connection.transaction():
+            row = connection.execute(
+                "UPDATE fleet_lite_sessions SET sandbox_ownership = "
+                "jsonb_set(sandbox_ownership, '{epoch}', to_jsonb((sandbox_ownership->>'epoch')::bigint + 1)) "
+                "WHERE session_id=%s AND sandbox_ownership IS NOT NULL RETURNING sandbox_ownership->>'epoch'",
+                (session_id,),
+            ).fetchone()
+        return int(row[0]) if row else None
+
+    @_retry_once
+    def sandbox_ownership(self, session_id: str) -> dict[str, Any] | None:
+        """Read bounded sandbox ownership intent; None means the Session predates ownership tracking."""
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT sandbox_ownership FROM fleet_lite_sessions WHERE session_id=%s", (session_id,)
+            ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        value = row[0]
+        if isinstance(value, str):
+            value = json.loads(value)
+        if (
+            not isinstance(value, dict)
+            or type(value.get("epoch")) is not int
+            or not isinstance(value.get("resources"), list)
+            or len(value["resources"]) > 32
+        ):
+            raise RuntimeError("Stored sandbox ownership record is invalid")
+        return value
+
+    @_retry_once
+    def mutate_sandbox_resource(
+        self, session_id: str, epoch: int, agent_id: str, resource: dict[str, Any] | None
+    ) -> bool:
+        """Atomically upsert or remove one bounded resource under its current ownership epoch."""
+        if not agent_id or len(agent_id) > 64:
+            raise ValueError("Invalid sandbox agent identity")
+        encoded = json.dumps(resource, separators=(",", ":")) if resource is not None else None
+        if encoded is not None and len(encoded) > 2_000:
+            raise ValueError("Sandbox resource intent exceeds its size limit")
+        with self.pool.connection() as connection, connection.transaction():
+            cursor = connection.cursor(row_factory=dict_row)
+            row = cursor.execute(
+                "SELECT sandbox_ownership FROM fleet_lite_sessions WHERE session_id=%s FOR UPDATE",
+                (session_id,),
+            ).fetchone()
+            ownership = (row or {}).get("sandbox_ownership")
+            if isinstance(ownership, str):
+                ownership = json.loads(ownership)
+            if not isinstance(ownership, dict) or ownership.get("epoch") != epoch:
+                return False
+            resources = ownership.get("resources")
+            if not isinstance(resources, list):
+                raise RuntimeError("Stored sandbox ownership record is invalid")
+            resources = [entry for entry in resources if entry.get("agent_id") != agent_id]
+            if resource is not None:
+                if len(resources) >= 32:
+                    raise RuntimeError("Session sandbox ownership resource limit reached")
+                resources.append({"agent_id": agent_id, **resource})
+            ownership["resources"] = resources
+            cursor.execute(
+                "UPDATE fleet_lite_sessions SET sandbox_ownership=%s::jsonb WHERE session_id=%s "
+                "AND sandbox_ownership->>'epoch'=%s",
+                (json.dumps(ownership, separators=(",", ":")), session_id, str(epoch)),
+            )
+        return True
 
     @_retry_once
     def claim_environment_report(self, session_id: str) -> bool:
@@ -486,9 +562,19 @@ class Store:
     # Turns
 
     @_retry_once
-    def claim_turn(self, session_id: str, turn_id: str, key: str, task_sha256: str) -> dict[str, Any] | None:
+    def claim_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        key: str,
+        task_sha256: str,
+        *,
+        ownership_epoch: int | None = None,
+    ) -> dict[str, Any] | None:
         """Record intent; None when newly claimed, else the prior attempt with the same key."""
-        with self.pool.connection() as connection:
+        with self.pool.connection() as connection, connection.transaction():
+            if ownership_epoch is not None:
+                self._assert_ownership_epoch(connection, session_id, ownership_epoch)
             inserted = connection.execute(
                 "INSERT INTO fleet_lite_turns(session_id,turn_id,idempotency_key,task_sha256) "
                 "VALUES (%s,%s,%s,%s) ON CONFLICT(session_id,idempotency_key) DO NOTHING RETURNING turn_id",
@@ -510,14 +596,58 @@ class Store:
         return prior
 
     @_retry_once
-    def finish_turn(self, session_id: str, turn_id: str, status: str, result: dict[str, Any]) -> None:
+    def finish_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        status: str,
+        result: dict[str, Any],
+        *,
+        ownership_epoch: int | None = None,
+    ) -> None:
         """Set a Turn's terminal status and result unless it is already completed."""
         with self.pool.connection() as connection:
+            if ownership_epoch is not None:
+                with connection.transaction():
+                    self._assert_ownership_epoch(connection, session_id, ownership_epoch)
+                    connection.execute(
+                        "UPDATE fleet_lite_turns SET status=%s,result=%s::jsonb,updated_at=NOW() "
+                        "WHERE session_id=%s AND turn_id=%s AND status <> 'completed'",
+                        (status, json.dumps(result), session_id, turn_id),
+                    )
+                return
             connection.execute(
                 "UPDATE fleet_lite_turns SET status=%s,result=%s::jsonb,updated_at=NOW() "
                 "WHERE session_id=%s AND turn_id=%s AND status <> 'completed'",
                 (status, json.dumps(result), session_id, turn_id),
             )
+
+    @staticmethod
+    def _assert_ownership_epoch(connection: Any, session_id: str, ownership_epoch: int) -> None:
+        row = connection.execute(
+            "SELECT sandbox_ownership->>'epoch' FROM fleet_lite_sessions WHERE session_id=%s FOR UPDATE",
+            (session_id,),
+        ).fetchone()
+        current = int(row[0]) if row and row[0] is not None else None
+        if current != ownership_epoch:
+            raise RuntimeError("Session ownership epoch changed; stale Turn write was fenced")
+
+    @_retry_once
+    def fail_interrupted_turns(self, session_id: str, ownership_epoch: int) -> list[str]:
+        """Terminalize prior running Turns after a new lease owner reconciles their sandbox resources."""
+        result = {
+            "event": "error",
+            "outcome": "failed",
+            "error": "Turn interrupted by process restart; generated code was not replayed.",
+        }
+        with self.pool.connection() as connection, connection.transaction():
+            self._assert_ownership_epoch(connection, session_id, ownership_epoch)
+            rows = connection.execute(
+                "UPDATE fleet_lite_turns SET status='failed',result=%s::jsonb,updated_at=NOW() "
+                "WHERE session_id=%s AND status='running' RETURNING turn_id",
+                (json.dumps(result), session_id),
+            ).fetchall()
+        return [str(row[0]) for row in rows]
 
     @_retry_once
     def turn_status(self, session_id: str, turn_id: str) -> dict[str, Any] | None:
@@ -558,6 +688,7 @@ class Store:
         memory_note: str = "",
         completion: tuple[str, dict[str, Any]] | None = None,
         replay_snapshot: tuple[str, bytes] | None = None,
+        ownership_epoch: int | None = None,
     ) -> None:
         """In one transaction: append the Turn record and memory note, store a selected replay, complete the Turn.
 
@@ -578,6 +709,8 @@ class Store:
             connection.execute(
                 "SELECT session_id FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE", (session_id,)
             )
+            if ownership_epoch is not None:
+                self._assert_ownership_epoch(connection, session_id, ownership_epoch)
             note = memory_note[:10_000]
             connection.execute(_APPEND_TURN, (turn_record_json, max_turns, note, note, session_id, turn_id, turn_id))
             if replay_snapshot is not None:

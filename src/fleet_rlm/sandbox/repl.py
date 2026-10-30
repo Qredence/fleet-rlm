@@ -19,7 +19,13 @@ from functools import cache
 from pathlib import Path
 from typing import Any, TypeVar
 
-from daytona.common.errors import DaytonaConnectionError, DaytonaError, DaytonaRateLimitError, DaytonaTimeoutError
+from daytona.common.errors import (
+    DaytonaConnectionError,
+    DaytonaError,
+    DaytonaNotFoundError,
+    DaytonaRateLimitError,
+    DaytonaTimeoutError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 CALL_MARK = "\x1eFLEET_CALL "
@@ -66,6 +72,21 @@ def is_transient(exc: BaseException) -> bool:
         return True
     status = exc.status_code if isinstance(exc, DaytonaError) else None
     return isinstance(status, int) and status >= 500
+
+
+def provider_not_found(exc: BaseException) -> bool:
+    """Recognize a provider not-found answer without hiding other failures.
+
+    A resource the provider has already forgotten cannot still write, so cleanup callers treat
+    this as confirmed absence rather than as an unresolved operation.
+    """
+    if isinstance(exc, DaytonaNotFoundError):
+        return True
+    for attr in ("status", "status_code", "http_status"):
+        if getattr(exc, attr, None) == 404:
+            return True
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None) == 404
 
 
 def with_retries(

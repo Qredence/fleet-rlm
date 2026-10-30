@@ -49,6 +49,25 @@ def test_commit_does_not_return_a_completion_when_storage_raises() -> None:
         runtime.commit_turn("s1", {"turn_id": "t1"})
 
 
+def test_turn_intent_and_completion_are_fenced_by_the_runtime_ownership_epoch() -> None:
+    claims = []
+    commits = []
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s1", list_workspace_files=lambda: []),
+        store=SimpleNamespace(
+            claim_turn=lambda *args, **kwargs: claims.append((args, kwargs)),
+            commit_turn=lambda *args, **kwargs: commits.append((args, kwargs)),
+        ),
+        ownership_epoch=12,
+    )
+
+    runtime.claim_turn("turn-1", "key-1", "task")
+    runtime.commit_turn("s1", {"turn_id": "turn-1"})
+
+    assert claims[0][1] == {"ownership_epoch": 12}
+    assert commits[0][1]["ownership_epoch"] == 12
+
+
 @pytest.mark.parametrize("paths", [[], ["files/input.txt", "artifacts/out.txt", "artifacts/out.txt"], ["../escape"]])
 def test_captured_artifact_view_uses_existing_path_validation_without_relisting(paths) -> None:
     saved = []
@@ -470,10 +489,12 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     from fleet_rlm.session import SessionRuntimeRegistry
 
     captured: dict[str, object] = {}
+    calls: list[object] = []
 
     class RecordingManager:
         def __init__(self, *_args: object, **kwargs: object) -> None:
             captured.update(kwargs)
+            self.reconcile_sandbox_ownership = lambda _resources: calls.append("reconcile")
 
     def claim(_session_id: str) -> bool:
         return True
@@ -481,6 +502,9 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     store = SimpleNamespace(
         ensure_session=lambda _session_id: None,
         acquire_session_lease=lambda _session_id: SimpleNamespace(execute=lambda _statement: None, close=lambda: None),
+        advance_sandbox_ownership_epoch=lambda _session_id: 1,
+        sandbox_ownership=lambda _session_id: {"epoch": 1, "resources": []},
+        fail_interrupted_turns=lambda _session_id, epoch: calls.append(("fail-interrupted", epoch)) or ["old-turn"],
         runtime_settings=lambda _session_id: {},
         claim_environment_report=claim,
     )
@@ -492,4 +516,88 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     runtime = registry._build("s1")
 
     assert captured["environment_report_claim"] is claim
+    assert calls == ["reconcile", ("fail-interrupted", 1)]
     runtime.close_lease()
+
+
+def test_build_does_not_terminalize_running_turns_when_resource_reconciliation_fails(monkeypatch) -> None:
+    from fleet_rlm import session as session_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    calls: list[str] = []
+
+    class RecordingManager:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            def fail_reconcile(_resources: object) -> None:
+                calls.append("reconcile")
+                raise RuntimeError("provider cleanup remains uncertain")
+
+            self.reconcile_sandbox_ownership = fail_reconcile
+
+    store = SimpleNamespace(
+        ensure_session=lambda _session_id: None,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(
+            execute=lambda _statement: None,
+            close=lambda: calls.append("lease-close"),
+        ),
+        advance_sandbox_ownership_epoch=lambda _session_id: 2,
+        sandbox_ownership=lambda _session_id: {"epoch": 2, "resources": [{"action": "stop"}]},
+        fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
+        runtime_settings=lambda _session_id: {},
+        claim_environment_report=lambda _session_id: True,
+    )
+    monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
+    monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(session_module, "AdaptiveFleetEngine", lambda **_kwargs: SimpleNamespace())
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="provider cleanup remains uncertain"):
+        registry._build("s1")
+
+    assert calls == ["reconcile", "lease-close"]
+
+
+@pytest.mark.parametrize(
+    ("epoch", "ownership", "message"),
+    [
+        (None, None, "ownership is unknown"),
+        (4, None, "cleanup is unresolved"),
+    ],
+)
+def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
+    monkeypatch, epoch: int | None, ownership: dict | None, message: str
+) -> None:
+    """A Session predating the ownership record is fenced, not treated as having no compute."""
+    from fleet_rlm import session as session_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    calls: list[str] = []
+
+    class RecordingManager:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            # Any provider work here would mean the refusal happened too late.
+            self.reconcile_sandbox_ownership = lambda _resources: calls.append("reconcile")
+
+    store = SimpleNamespace(
+        ensure_session=lambda _session_id: None,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(
+            execute=lambda _statement: None,
+            close=lambda: calls.append("lease-close"),
+        ),
+        advance_sandbox_ownership_epoch=lambda _session_id: epoch,
+        sandbox_ownership=lambda _session_id: ownership,
+        fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
+        runtime_settings=lambda _session_id: {},
+        claim_environment_report=lambda _session_id: True,
+    )
+    monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
+    monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(session_module, "AdaptiveFleetEngine", lambda **_kwargs: SimpleNamespace())
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match=message):
+        registry._build("s1")
+
+    assert calls == ["lease-close"]

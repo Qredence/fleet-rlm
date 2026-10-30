@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +19,390 @@ from fleet_rlm.sandbox import manager as manager_module
 from fleet_rlm.sandbox import repl as repl_module
 from fleet_rlm.sandbox import workspace_io
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+
+def test_persisted_sandbox_ownership_reconciles_known_provider_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    sandbox = SimpleNamespace(id="sandbox-old")
+    actions = []
+    client = SimpleNamespace(
+        get=lambda provider_id: sandbox if provider_id == sandbox.id else None,
+        stop=lambda observed, timeout: actions.append(("stop", observed.id, timeout)),
+    )
+    writes = []
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: client)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 7
+    manager.ownership_resource_mutate = lambda agent_id, resource: writes.append((agent_id, resource)) or True
+
+    manager.reconcile_sandbox_ownership(
+        [
+            {
+                "agent_id": "root-agent",
+                "allocation_nonce": "root-agent",
+                "provider_id": "sandbox-old",
+                "action": "stop",
+                "intended_action": "stop",
+            }
+        ]
+    )
+
+    assert actions == [("stop", "sandbox-old", 60)]
+    assert writes == [("root-agent", None)]
+
+
+def test_provider_confirmed_absence_reconciles_as_confirmed_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resource the provider has forgotten cannot still write, so a 404 must not fence admission."""
+    from daytona.common.errors import DaytonaNotFoundError
+
+    writes: list[tuple[str, dict[str, Any] | None]] = []
+
+    def not_found(*_args: Any, **_kwargs: Any) -> Any:
+        raise DaytonaNotFoundError("gone")
+
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: SimpleNamespace(get=not_found))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 3
+    manager.ownership_resource_mutate = lambda agent_id, resource: writes.append((agent_id, resource)) or True
+
+    manager.reconcile_sandbox_ownership(
+        [
+            {
+                "agent_id": "root-agent",
+                "allocation_nonce": "root-agent",
+                "provider_id": "sandbox-vanished",
+                "action": "stop",
+                "intended_action": "stop",
+            }
+        ]
+    )
+
+    assert writes == [("root-agent", None)]
+
+
+def test_other_provider_failures_still_fence_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daytona.common.errors import DaytonaError
+
+    class ServerError(DaytonaError):
+        status_code = 500
+
+    def failing(*_args: Any, **_kwargs: Any) -> Any:
+        raise ServerError("provider unavailable")
+
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: SimpleNamespace(get=failing))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 3
+    manager.ownership_resource_mutate = lambda *_args: pytest.fail("a failed cleanup must stay recorded")
+
+    with pytest.raises(ServerError):
+        manager.reconcile_sandbox_ownership(
+            [
+                {
+                    "agent_id": "root-agent",
+                    "allocation_nonce": "root-agent",
+                    "provider_id": "sandbox-unknown",
+                    "action": "stop",
+                    "intended_action": "stop",
+                }
+            ]
+        )
+
+
+def test_empty_ownership_never_builds_a_provider_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admission with nothing outstanding must not depend on a provider round trip."""
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: pytest.fail("no client may be built"))
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 1
+    manager.ownership_resource_mutate = lambda *_args: pytest.fail("nothing to mutate")
+
+    manager.reconcile_sandbox_ownership([])
+
+
+def test_persisted_ambiguous_create_stays_fenced_when_labels_do_not_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(list=lambda _query: [])
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: client)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 8
+    manager.ownership_resource_mutate = lambda *_args: pytest.fail("ambiguous resource must remain recorded")
+
+    with pytest.raises(RuntimeError, match="outcome is uncertain"):
+        manager.reconcile_sandbox_ownership(
+            [
+                {
+                    "agent_id": "root-agent",
+                    "allocation_nonce": "root-agent",
+                    "provider_id": None,
+                    "action": "create",
+                    "intended_action": "stop",
+                }
+            ]
+        )
+
+
+def test_reconciliation_uses_unique_allocation_label_and_keeps_stale_owner_fenced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = SimpleNamespace(id="sandbox-created-before-ack")
+    actions: list[tuple[str, str]] = []
+    client = SimpleNamespace(
+        list=lambda query: (
+            [sandbox] if query.labels == {"fleet_session": "session-a", "fleet_agent": "agent-a"} else []
+        ),
+        stop=lambda observed, **_kwargs: actions.append(("stop", observed.id)),
+    )
+    writes: list[tuple[str, dict[str, Any] | None]] = []
+
+    def fenced_write(agent_id: str, resource: dict[str, Any] | None) -> bool:
+        writes.append((agent_id, resource))
+        return False  # a takeover advanced the ownership epoch during the provider operation
+
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: client)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 12
+    manager.ownership_resource_mutate = fenced_write
+
+    with pytest.raises(RuntimeError, match="epoch changed during sandbox reconciliation"):
+        manager.reconcile_sandbox_ownership(
+            [
+                {
+                    "agent_id": "agent-a",
+                    "allocation_nonce": "agent-a",
+                    "provider_id": None,
+                    "action": "create",
+                    "intended_action": "stop",
+                }
+            ]
+        )
+
+    assert actions == [("stop", "sandbox-created-before-ack")]
+    assert writes == [("agent-a", None)]
+
+
+def test_ownership_lease_loss_prevents_remote_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+
+    class Provider:
+        snapshot = object()
+
+        def create(self, _params: Any) -> None:
+            events.append("create")
+
+    monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(DaytonaSandboxManager, "_record_allocation", lambda _self, *_args: None)
+    monkeypatch.setattr(DaytonaSandboxManager, "reconcile_allocations", lambda _self: None)
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager.ownership_epoch = 4
+    manager.ownership_resource_mutate = lambda *_args: events.append("lease_lost") or False
+    manager._client = Provider()
+
+    with pytest.raises(RuntimeError, match="ownership epoch changed"):
+        manager._ensure_sandbox()
+
+    assert events == ["lease_lost"]
+
+
+def test_stale_create_response_cannot_replace_new_owner_intent(monkeypatch: pytest.MonkeyPatch) -> None:
+    sandbox = SimpleNamespace(id="sandbox-late-create", state="started")
+    current_epoch = [1]
+    ownership: dict[str, Any] = {"epoch": 1, "resources": []}
+    events: list[str] = []
+
+    def mutate(epoch: int, agent_id: str, resource: dict[str, Any] | None) -> bool:
+        if epoch != current_epoch[0]:
+            return False
+        ownership["resources"] = [item for item in ownership["resources"] if item["agent_id"] != agent_id]
+        if resource is not None:
+            ownership["resources"].append({"agent_id": agent_id, **resource})
+        return True
+
+    class Provider:
+        snapshot = object()
+
+        def create(self, _params: Any) -> Any:
+            events.append("provider_created")
+            current_epoch[0] = 2
+            return sandbox
+
+        def list(self, _query: Any) -> list[Any]:
+            return [sandbox]
+
+        def stop(self, observed: Any, **_kwargs: Any) -> None:
+            events.append(f"stopped:{observed.id}")
+
+    monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(DaytonaSandboxManager, "_record_allocation", lambda _self, *_args: None)
+    monkeypatch.setattr(DaytonaSandboxManager, "reconcile_allocations", lambda _self: None)
+    provider = Provider()
+    old_owner = DaytonaSandboxManager("key", "org", "volume", "session-a", agent_id="root-agent")
+    old_owner.ownership_epoch = 1
+    old_owner.ownership_resource_mutate = lambda agent_id, resource: mutate(1, agent_id, resource)
+    old_owner._client = provider
+
+    with pytest.raises(RuntimeError, match="ownership epoch changed"):
+        old_owner._ensure_sandbox()
+
+    assert events == ["provider_created"]
+    assert ownership["resources"] == [
+        {
+            "agent_id": "root-agent",
+            "allocation_nonce": "root-agent",
+            "provider_id": None,
+            "parent_agent_id": None,
+            "action": "create",
+            "intended_action": "stop",
+            "confirmed": False,
+        }
+    ]
+
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: provider)
+    new_owner = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    new_owner.ownership_epoch = 2
+    new_owner.ownership_resource_mutate = lambda agent_id, resource: mutate(2, agent_id, resource)
+    new_owner.reconcile_sandbox_ownership(ownership["resources"])
+
+    assert events == ["provider_created", "stopped:sandbox-late-create"]
+    assert ownership["resources"] == []
+
+
+@pytest.mark.parametrize("crash_point", ["create_before_ack", "before_create_call", "stop_before_confirmation"])
+def test_subprocess_crash_leaves_durable_intent_for_the_next_owner(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, crash_point: str
+) -> None:
+    ownership_path = tmp_path / "ownership.json"
+    provider_path = tmp_path / "provider.json"
+    ownership_path.write_text(json.dumps({"epoch": 1, "resources": []}), encoding="utf-8")
+    if crash_point == "stop_before_confirmation":
+        provider_path.write_text(json.dumps({"id": "sandbox-before-stop", "stop_count": 0}), encoding="utf-8")
+
+    worker = r"""
+import json
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+from fleet_rlm.sandbox import manager as manager_module
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+ownership_path, provider_path = map(Path, sys.argv[1:3])
+crash_point = sys.argv[3]
+
+def persist(agent_id, resource):
+    record = json.loads(ownership_path.read_text(encoding="utf-8"))
+    record["resources"] = [item for item in record["resources"] if item["agent_id"] != agent_id]
+    if resource is not None:
+        record["resources"].append({"agent_id": agent_id, **resource})
+    temporary = ownership_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(record), encoding="utf-8")
+    os.replace(temporary, ownership_path)
+    return True
+
+class Provider:
+    snapshot = object()
+
+    def create(self, _params):
+        if crash_point == "before_create_call":
+            # Intent is already durable and no provider call happened: nothing to reconcile but
+            # the recorded reservation, which must not be mistaken for a created sandbox.
+            os._exit(75)
+        provider_path.write_text(json.dumps({
+            "id": "sandbox-created-before-ack",
+            "labels": {"fleet_session": "session-a", "fleet_agent": manager.agent_id},
+            "stop_count": 0,
+        }), encoding="utf-8")
+        os._exit(73)
+
+    def stop(self, sandbox, **_kwargs):
+        record = json.loads(provider_path.read_text(encoding="utf-8"))
+        record["stop_count"] += 1
+        provider_path.write_text(json.dumps(record), encoding="utf-8")
+        os._exit(74)
+
+manager_module.preflight = lambda *_args, **_kwargs: object()
+DaytonaSandboxManager._record_allocation = lambda self, *_args: None
+DaytonaSandboxManager.reconcile_allocations = lambda self: None
+manager = DaytonaSandboxManager("key", "org", "volume", "session-a", agent_id="root-agent")
+manager.ownership_epoch = 1
+manager.ownership_resource_mutate = persist
+manager._client = Provider()
+if crash_point == "stop_before_confirmation":
+    manager._sandbox = SimpleNamespace(id="sandbox-before-stop", state="started")
+    manager.shutdown()
+else:
+    manager._ensure_sandbox()
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", worker, str(ownership_path), str(provider_path), crash_point],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    expected_exit = {"create_before_ack": 73, "before_create_call": 75, "stop_before_confirmation": 74}[crash_point]
+    assert completed.returncode == expected_exit, completed.stderr
+
+    ownership = json.loads(ownership_path.read_text(encoding="utf-8"))
+    assert ownership["epoch"] == 1
+    assert len(ownership["resources"]) == 1
+    intent = ownership["resources"][0]
+    assert intent["action"] == ("stop" if crash_point == "stop_before_confirmation" else "create")
+    assert intent["provider_id"] == ("sandbox-before-stop" if crash_point == "stop_before_confirmation" else None)
+
+    # A new owner takes over, confirms cleanup by labels or provider ID, then clears the intent.
+    ownership["epoch"] = 2
+    ownership_path.write_text(json.dumps(ownership), encoding="utf-8")
+    if crash_point == "before_create_call":
+        # No sandbox was ever created: an empty label lookup is still not proof, so the new owner
+        # must stay fenced rather than admit against an unverified reservation.
+        provider_record = {"id": "sandbox-created-before-ack"}
+    else:
+        provider_record = json.loads(provider_path.read_text(encoding="utf-8"))
+    sandbox = SimpleNamespace(id=provider_record["id"])
+    stop_calls: list[str] = []
+
+    def mutate(agent_id: str, resource: dict[str, Any] | None) -> bool:
+        record = json.loads(ownership_path.read_text(encoding="utf-8"))
+        if record["epoch"] != 2:
+            return False
+        record["resources"] = [item for item in record["resources"] if item["agent_id"] != agent_id]
+        if resource is not None:
+            record["resources"].append({"agent_id": agent_id, **resource})
+        ownership_path.write_text(json.dumps(record), encoding="utf-8")
+        return True
+
+    client = SimpleNamespace(
+        get=lambda provider_id: sandbox if provider_id == sandbox.id else None,
+        list=lambda query: (
+            []
+            if crash_point == "before_create_call"
+            else (
+                [sandbox]
+                if query.labels.get("fleet_session") == "session-a"
+                and query.labels.get("fleet_agent") == intent["allocation_nonce"]
+                else []
+            )
+        ),
+        stop=lambda observed, **_kwargs: stop_calls.append(observed.id),
+    )
+    monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: client)
+    owner = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    owner.ownership_epoch = 2
+    owner.ownership_resource_mutate = mutate
+
+    if crash_point == "before_create_call":
+        # An empty label lookup never proves the reservation produced nothing, so admission stays fenced.
+        with pytest.raises(RuntimeError, match="outcome is uncertain"):
+            owner.reconcile_sandbox_ownership(ownership["resources"])
+        assert json.loads(ownership_path.read_text(encoding="utf-8"))["resources"] == ownership["resources"]
+        return
+
+    owner.reconcile_sandbox_ownership(ownership["resources"])
+
+    assert stop_calls == [sandbox.id]
+    assert json.loads(ownership_path.read_text(encoding="utf-8"))["resources"] == []
 
 
 def test_inventory_and_artifact_collection_record_only_counts(monkeypatch: pytest.MonkeyPatch) -> None:

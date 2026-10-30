@@ -513,7 +513,13 @@ def _terminal_failure(
         failure["trace_id"] = trace_id
     if persist:
         with suppress(Exception):
-            runtime.store.finish_turn(session_id, turn_id, outcome, failure)
+            runtime.store.finish_turn(
+                session_id,
+                turn_id,
+                outcome,
+                failure,
+                **({"ownership_epoch": runtime.ownership_epoch} if runtime.ownership_epoch is not None else {}),
+            )
     return failure
 
 

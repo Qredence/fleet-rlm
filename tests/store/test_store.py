@@ -99,7 +99,9 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 7
+    assert SCHEMA_VERSION == 8
+    assert _SCHEMA_MIGRATIONS[7][0] == 8
+    assert "ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB" in _SCHEMA_MIGRATIONS[7][1][0]
     version, statements = _SCHEMA_MIGRATIONS[4]
     assert version == 5
     assert statements == (
@@ -154,6 +156,50 @@ def test_claim_environment_report_is_one_atomic_update_per_session():
     store, pool = make_store([])
     assert store.claim_environment_report("s1") is False
     assert "RETURNING session_id" in pool.conn.statements[0][0]
+
+
+def test_sandbox_resource_mutation_locks_session_and_rejects_stale_owner_epoch():
+    store, pool = make_store([{"sandbox_ownership": {"epoch": 9, "resources": []}}])
+
+    assert store.mutate_sandbox_resource("s1", 8, "agent-a", {"action": "create"}) is False
+
+    sql = [statement for statement, _parameters in pool.conn.statements]
+    assert "SELECT sandbox_ownership FROM fleet_lite_sessions WHERE session_id=%s FOR UPDATE" in sql
+    assert not any(statement.startswith("UPDATE fleet_lite_sessions SET sandbox_ownership=") for statement in sql)
+    assert "COMMIT" in sql
+
+
+def test_sandbox_resource_mutation_replaces_one_identity_under_the_current_epoch():
+    store, pool = make_store([{"sandbox_ownership": {"epoch": 9, "resources": []}}], [])
+
+    assert (
+        store.mutate_sandbox_resource(
+            "s1",
+            9,
+            "agent-a",
+            {"allocation_nonce": "agent-a", "provider_id": "sandbox-a", "action": "stop"},
+        )
+        is True
+    )
+
+    update, parameters = pool.conn.statements[-2]
+    assert update == (
+        "UPDATE fleet_lite_sessions SET sandbox_ownership=%s::jsonb WHERE session_id=%s "
+        "AND sandbox_ownership->>'epoch'=%s"
+    )
+    ownership = json.loads(parameters[0])
+    assert ownership == {
+        "epoch": 9,
+        "resources": [
+            {
+                "agent_id": "agent-a",
+                "allocation_nonce": "agent-a",
+                "provider_id": "sandbox-a",
+                "action": "stop",
+            }
+        ],
+    }
+    assert parameters[1:] == ("s1", "9")
 
 
 def test_review_labels_require_the_selected_immutable_replay_before_writing():
@@ -363,6 +409,49 @@ def test_committing_a_turn_is_one_transaction_with_the_completion():
     assert "%s::text IS NULL" in append_sql
     assert "NOT EXISTS" in append_sql and append_params[-2:] == ("turn-1", "turn-1")
     assert sql[-2].startswith("UPDATE fleet_lite_turns SET status='completed'")
+
+
+def test_interrupted_running_turns_are_failed_only_under_the_current_ownership_epoch():
+    store, pool = make_store([("8",)], [("turn-old",), ("turn-stale",)])
+
+    assert store.fail_interrupted_turns("s1", 8) == ["turn-old", "turn-stale"]
+
+    sql = [statement for statement, _ in pool.conn.statements]
+    assert sql[0] == "BEGIN"
+    assert "sandbox_ownership->>'epoch'" in sql[1] and sql[1].endswith("FOR UPDATE")
+    assert "WHERE session_id=%s AND status='running' RETURNING turn_id" in sql[2]
+    payload = json.loads(pool.conn.statements[2][1][0])
+    assert payload["outcome"] == "failed" and "not replayed" in payload["error"]
+    assert sql[-1] == "COMMIT"
+
+
+def test_stale_ownership_epoch_cannot_finalize_a_turn():
+    store, pool = make_store([("9",)])
+
+    with pytest.raises(RuntimeError, match="stale Turn write was fenced"):
+        store.finish_turn("s1", "turn-old", "failed", {"event": "error"}, ownership_epoch=8)
+
+    assert not any(statement.startswith("UPDATE fleet_lite_turns") for statement, _ in pool.conn.statements)
+
+
+def test_stale_ownership_epoch_cannot_claim_a_turn():
+    store, pool = make_store([("9",)])
+
+    with pytest.raises(RuntimeError, match="stale Turn write was fenced"):
+        store.claim_turn("s1", "turn-old", "key", "digest", ownership_epoch=8)
+
+    assert not any(statement.startswith("INSERT INTO fleet_lite_turns") for statement, _ in pool.conn.statements)
+
+
+def test_stale_ownership_epoch_cannot_commit_a_turn_record():
+    store, pool = make_store([], [("s1",)], [("9",)])
+
+    with pytest.raises(RuntimeError, match="stale Turn write was fenced"):
+        store.commit_turn("s1", turn_record_json='{"turn_id":"turn-old"}', ownership_epoch=8)
+
+    assert not any(
+        statement.startswith("UPDATE fleet_lite_sessions SET turns") for statement, _ in pool.conn.statements
+    )
 
 
 def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
