@@ -1106,6 +1106,35 @@ def _run_turn_direct(
     )
 
 
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("failure", [None, "preparation", "generation"])
+def test_turn_associates_actual_engine_before_root_closes(monkeypatch, failure):
+    observed = []
+
+    def load(_session):
+        if failure == "preparation":
+            raise RuntimeError("prepare failed")
+        return "", ""
+
+    def engine(**_kwargs):
+        if failure == "generation":
+            raise RuntimeError("generate failed")
+        return SimpleNamespace(answer="verified", route="flex", learned_skill_note="")
+
+    runtime = runtime_with(load_context=load, engine=engine)
+
+    def associate(actual, config_digest, experiment, span):
+        observed.append((actual, config_digest, experiment, span))
+
+    monkeypatch.setattr(turn_module, "associate_turn_agent", associate)
+    emitted = []
+    _run_turn_direct(runtime, emitted=emitted)
+    assert len(observed) == 1
+    assert observed[0][0] is runtime.engine and len(observed[0][1]) == 64
+    assert emitted[-1] == {"event": "done"}
+    assert emitted[-2]["event"] == ("error" if failure else "turn_complete")
+
+
 def _failed_turn_runtime(manager: FakeManager, stored: list[tuple[str, str, dict[str, Any]]], engine: Any):
     return runtime_with(sandbox_mgr=manager, store=_recording_store(stored), engine=engine)
 

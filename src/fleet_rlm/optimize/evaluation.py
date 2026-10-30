@@ -240,10 +240,14 @@ def read_evaluation_trace(
     uc_location: tuple[str, str, str] | None = None,
     wait_seconds: float = 180.0,
     expected_labels: dict[str, Any] | None = None,
+    allow_error: bool = False,
+    require_model_id: bool = False,
 ) -> Any:
     """Wait for one completed trace in the intended destination, including cold warehouse startup.
 
     Require a successful trace with spans and matching expected_labels when supplied.
+    Comparisons may opt into error traces to retain failed observations without replay.
+    require_model_id waits for native association metadata, which can arrive after spans.
     uc_location selects the Unity Catalog destination check instead of experiment_id.
     wait_seconds bounds the polling window; a blocked SDK read may finish after the
     caller stops waiting.
@@ -296,9 +300,11 @@ def read_evaluation_trace(
                 if not matches:
                     raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
                 state = str(trace.info.state)
-                if state not in {"OK", "IN_PROGRESS"}:
+                completed_states = {"OK", "ERROR"} if allow_error else {"OK"}
+                if state not in completed_states | {"IN_PROGRESS"}:
                     raise EvaluationError(f"Trace {trace_id} completed with state {state}")
-                if state == "OK" and trace.data.spans:
+                association_ready = not require_model_id or bool(trace.info.trace_metadata.get("mlflow.modelId"))
+                if state in completed_states and trace.data.spans and association_ready:
                     if expected_labels is None:
                         return trace
                     saved = labels_of(trace)

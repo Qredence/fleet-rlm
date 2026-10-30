@@ -703,6 +703,22 @@ def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sa
     assert fixture["neighborhood"][10] == fixture["answer"]
 
 
+@pytest.mark.parametrize("note,figure", [("Use guard=100", "100"), ("Works at 1.49M digits", "1.49")])
+def test_observed_pi_note_warnings_remain_advisory(sandbox, note, figure):
+    events = []
+    manager = manager_on(sandbox, events)
+    interpreter = DaytonaInterpreter(manager)
+    interpreter.output_fields = [{"name": "answer"}, {"name": "learned_skill_note"}]
+    interpreter.execute("result = 17\nprint(result)\nprint(1492252)")
+    final = interpreter.execute(f"SUBMIT(answer=result, learned_skill_note={note!r})")
+    assert final.output["answer"] == 17
+    [warning] = [event for event in events if event["event"] == "learned_note_warning"]
+    assert warning["figures"] == [figure]
+    assert manager.turn_usage()["submit_rejections"] == 0
+    with pytest.raises(CodeExecutionError, match="SUBMIT rejected"):
+        interpreter.execute("SUBMIT(answer='unobserved 426880', learned_skill_note='')")
+
+
 _OBSERVED_ENVIRONMENT = (
     "Sandbox environment: Python 3.13.13; installed: numpy 2.5.1, pandas 3.0.5, mpmath 1.4.1; "
     "not installed: scipy, sympy, gmpy2, polars, pyarrow, sklearn; call "

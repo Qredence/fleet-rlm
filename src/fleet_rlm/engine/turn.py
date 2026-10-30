@@ -26,7 +26,7 @@ from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import Route
-from fleet_rlm.observability import phase_span, stream_callbacks
+from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
 from fleet_rlm.sandbox.manager import (
     CLEANUP_NOT_REQUIRED,
@@ -407,6 +407,20 @@ def run_turn(
                     span.set_attribute(_ROOT_SANDBOX_ATTRIBUTE, terminal_event[_ROOT_SANDBOX_ATTRIBUTE])
             else:
                 span.set_attribute(_CLEANUP_ATTRIBUTE, CLEANUP_NOT_REQUIRED)
+            finally:
+                # Stay inside the root span on success, preparation failure, and observation failure.
+                # The loaded state can differ from the artifact currently on disk.
+                from fleet_rlm.session import runtime_configuration
+
+                try:
+                    associate_turn_agent(
+                        runtime.engine,
+                        runtime_configuration(settings, runtime)["digest"],
+                        mlflow_experiment_id,
+                        span,
+                    )
+                except Exception as exc:
+                    _LOGGER.warning("Turn identity configuration unavailable (%s)", type(exc).__name__)
     except Exception as exc:
         resolve_exception(exc)
     finally:

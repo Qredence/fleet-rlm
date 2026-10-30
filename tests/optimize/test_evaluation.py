@@ -254,6 +254,21 @@ def test_evaluation_readback_waits_for_complete_nonempty_trace(monkeypatch):
     assert evaluation.read_evaluation_trace("tr-1", experiment_id="e1") is ready
 
 
+@pytest.mark.parametrize("state", ["OK", "ERROR"])
+def test_comparison_readback_waits_for_native_model_association(monkeypatch, state):
+    location = SimpleNamespace(experiment_id="e1")
+    early = _evaluation_trace(location, state=state)
+    early.info.trace_metadata = {}
+    ready = _evaluation_trace(location, state=state)
+    ready.info.trace_metadata = {"mlflow.modelId": "m-original"}
+    traces = iter([early, ready])
+    monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *_args, **_kwargs: next(traces))
+    monkeypatch.setattr(evaluation.time, "sleep", lambda _seconds: None)
+    assert (
+        evaluation.read_evaluation_trace("tr-1", experiment_id="e1", allow_error=True, require_model_id=True) is ready
+    )
+
+
 def test_evaluation_readback_waits_for_eventually_visible_expectations(monkeypatch):
     trace = _evaluation_trace(SimpleNamespace(experiment_id="e1"))
     labels = iter([{"route": "direct"}, {"route": "direct", "critical": True}])
@@ -307,6 +322,10 @@ def test_evaluation_readback_rejects_failed_trace_and_sanitizes_sdk_errors(monke
     )
     with pytest.raises(evaluation.EvaluationError, match="completed with state ERROR"):
         evaluation.read_evaluation_trace("tr-1", experiment_id="e1")
+    failed = evaluation.read_evaluation_trace("tr-1", experiment_id="e1", allow_error=True)
+    assert failed.info.state == "ERROR"
+    with pytest.raises(evaluation.EvaluationError, match="outside the configured"):
+        evaluation.read_evaluation_trace("tr-1", experiment_id="other", allow_error=True)
 
     def fail(*_args, **_kwargs):
         raise RuntimeError("private credential detail")

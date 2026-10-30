@@ -255,6 +255,7 @@ def _mlflow_process(mlflow_port: int, data_dir: str) -> ManagedProcess:
             str(mlflow_port),
         ],
         STATE_DIR / "logs" / "mlflow.log",
+        env={"MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS": "true"},
     )
 
 

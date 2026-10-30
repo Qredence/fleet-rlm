@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import math
 import os
+import platform
 import re
+import subprocess
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager, nullcontext, suppress
+from importlib.metadata import distributions
 from itertools import islice
+from pathlib import Path
 from typing import Any
 
 import dspy
@@ -18,6 +24,143 @@ from dspy import track_usage
 from dspy.utils import BaseCallback
 from dspy.utils.usage_tracker import UsageTracker
 from mlflow.entities import SpanType
+
+AGENT_IDENTITY_SCHEME = "fleet-agent-v1"
+_AGENT_LOCK = threading.Lock()
+_STARTUP_IDENTITY: dict[str, str] | None = None
+_AGENT_MODELS: dict[tuple[str, str, str], str] = {}
+
+
+def _identity_digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def serving_snapshot(package: Path | None = None) -> dict[str, str]:
+    """Hash packaged serving code/resources, never working-directory data or raw Git diffs.
+
+    The caller captures this once at tracing startup. Wheels need neither Git nor a lockfile.
+    Only hashes and curated Git metadata leave this process.
+    """
+    package = package or Path(__file__).parent
+    paths = [
+        path
+        for path in package.rglob("*")
+        if path.is_file()
+        and not path.is_symlink()
+        and not any(part.startswith(".") for part in path.relative_to(package).parts)
+        and not {"optimize", "tui", "__pycache__"}.intersection(path.relative_to(package).parts)
+        and (
+            path.suffix == ".py"
+            or "bundled_skills" in path.relative_to(package).parts
+            or path.name == "snapshot-requirements.txt"
+        )
+    ]
+    material = [
+        (path.relative_to(package).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest()) for path in sorted(paths)
+    ]
+    if not material:
+        raise ValueError("Serving source snapshot is empty")
+    installed = sorted(
+        (re.sub(r"[-_.]+", "-", dist.metadata["Name"]).lower(), dist.version)
+        for dist in distributions()
+        if dist.metadata["Name"]
+    )
+    if not installed:
+        raise ValueError("Installed dependency snapshot is empty")
+    result = {
+        "fleet.agent.source_digest": _identity_digest(material),
+        "fleet.agent.dependency_digest": _identity_digest(installed),
+        "fleet.agent.python": platform.python_version(),
+    }
+    # Metadata only: dirty unrelated files cannot change an agent's fingerprint.
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=package, capture_output=True, text=True, check=True, timeout=2
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=package, capture_output=True, text=True, check=True, timeout=2
+        ).stdout
+        if re.fullmatch(r"[0-9a-f]{40,64}", commit):
+            result.update({"fleet.agent.git_commit": commit, "fleet.agent.git_dirty": str(bool(dirty)).lower()})
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return result
+
+
+def capture_serving_snapshot() -> None:
+    """Freeze identity before serving requests; source edits require a process restart."""
+    global _STARTUP_IDENTITY
+    with _AGENT_LOCK:
+        if _STARTUP_IDENTITY is None:
+            try:
+                _STARTUP_IDENTITY = serving_snapshot()
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Agent startup identity unavailable (%s)", type(exc).__name__)
+
+
+def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: str | None, span: Any) -> str | None:
+    """Resolve a native LoggedModel and associate only this active trace, including failures.
+
+    No active-model global is changed. Failed observation never reverses a Turn outcome.
+    """
+    if not experiment_id:
+        return None
+    try:
+        if _STARTUP_IDENTITY is None:
+            raise ValueError("No startup identity")
+
+        # dump_state reflects the actually loaded native program, including partial artifacts.
+        # Only its digest is retained; no prompts, demos, credentials or program bytes are logged.
+        def program_state(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: program_state(child) for key, child in value.items() if key != "lm"}
+            if isinstance(value, list):
+                return [program_state(child) for child in value]
+            return value
+
+        program_digest = _identity_digest(program_state(engine.dump_state()))
+        identity = {key: value for key, value in _STARTUP_IDENTITY.items() if ".git_" not in key}
+        identity.update(
+            {
+                "fleet.agent.scheme": AGENT_IDENTITY_SCHEME,
+                "fleet.agent.configuration_digest": configuration_digest,
+                "fleet.agent.program_digest": program_digest,
+            }
+        )
+        fingerprint = _identity_digest(identity)
+        destination = mlflow.get_tracking_uri()
+        key = (destination, experiment_id, fingerprint)
+        with _AGENT_LOCK:
+            model_id = _AGENT_MODELS.get(key)
+            if model_id is None:
+                models = mlflow.search_logged_models(
+                    experiment_ids=[experiment_id],
+                    filter_string=f"tags.`fleet.agent.fingerprint` = '{fingerprint}'",
+                    output_format="list",
+                )
+                matches = [model for model in models if model.tags.get("fleet.agent.scheme") == AGENT_IDENTITY_SCHEME]
+                model = (
+                    min(matches, key=lambda model: model.model_id)
+                    if matches
+                    else mlflow.create_external_model(
+                        name=f"fleet-rlm-{fingerprint[:16]}",
+                        experiment_id=experiment_id,
+                        tags={**_STARTUP_IDENTITY, **identity, "fleet.agent.fingerprint": fingerprint},
+                        model_type="agent",
+                    )
+                )
+                model_id = model.model_id
+                _AGENT_MODELS[key] = model_id
+        mlflow.update_current_trace(model_id=model_id)
+        span.set_attributes(
+            {**_STARTUP_IDENTITY, **identity, "fleet.agent.fingerprint": fingerprint, "fleet.agent.model_id": model_id}
+        )
+        return model_id
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Turn agent association unavailable (%s)", type(exc).__name__)
+        with suppress(Exception):
+            span.set_attribute("fleet.agent.identity_status", "unversioned")
+        return None
 
 
 def _usage_summary(entry: dict[str, Any], *, derive_total: bool = True) -> dict[str, int | float]:
@@ -460,6 +603,7 @@ def configure_mlflow_observability(
     tracing_sql_warehouse_id: str = "",
 ) -> str | None:
     """Configure the MLflow destination and DSPy tracing, returning the initialized experiment ID."""
+    capture_serving_snapshot()
     if tracking_uri:
         mlflow.set_tracking_uri(tracking_uri)
     # DSPy autolog captures nested prompts and tool payloads; sanitize those spans before export.

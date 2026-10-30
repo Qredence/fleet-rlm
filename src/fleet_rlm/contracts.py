@@ -106,7 +106,9 @@ STOPPING_RULES = (
     "Measure through materializing lazy results, converting the result to the required representation, "
     "and extracting the answer; timing only a lazy constant or handle assignment is insufficient. "
     "Label local computation time separately from sandbox or Turn wall time. "
-    "Print any precision parameters you retain in a learned note; otherwise omit those parameters from the note. "
+    "Retain only exact observed representations in a learned note; do not rescale figures (for example to M). "
+    "Print any retained precision parameters during the computation; otherwise omit them from the note. "
+    "Never add an execution solely to create or complete an optional learned note. "
     "Keep the final submission action short: reuse the result variable and omit a learned note if unnecessary."
 )
 

@@ -339,6 +339,104 @@ def _execution_judge_payload(
     )
 
 
+@pytest.mark.parametrize("rationale", ["No issues found.", "The agent used tools correctly.", "placeholder rationale"])
+def test_execution_weak_rationales_cannot_support_a_verdict(monkeypatch, rationale):
+    _judge_responses(
+        monkeypatch,
+        {
+            "execution_evidence_diagnostics": (
+                _execution_judge_payload(verification_rationale=rationale, integrity_rationale=rationale),
+                "structured",
+            )
+        },
+    )
+    with pytest.raises(ScorerEvidenceError, match=r"citing|placeholder"):
+        _scorer("execution_evidence_diagnostics")(trace=_pi_execution_trace())
+
+
+def test_execution_diagnostics_reject_missing_task_and_unsupported_passing_receipts():
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence
+
+    def judge(**_kwargs):
+        return SimpleNamespace(value=_execution_judge_payload())
+
+    with pytest.raises(ScorerEvidenceError, match="task and answer"):
+        diagnose_execution_evidence(_trace(_span("fleet_turn")), judge, judge_model="offline")
+    no_receipts = _trace(_span("fleet_turn", inputs={"task": "Compute Pi"}, outputs={"answer": "5"}))
+    with pytest.raises(ScorerEvidenceError, match="requires sandbox execution receipts"):
+        diagnose_execution_evidence(no_receipts, judge, judge_model="offline")
+
+
+def test_passing_verification_cannot_cite_only_failed_receipts():
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence
+
+    trace = _pi_execution_trace()
+    for span in trace.search_spans():
+        if span.name == "sandbox.exec":
+            span.status = _execution_status("ERROR")
+            span.attributes["outcome"] = "remote_code_error"
+    with pytest.raises(ScorerEvidenceError, match="successful execution receipt"):
+        diagnose_execution_evidence(
+            trace, lambda **_kw: SimpleNamespace(value=_execution_judge_payload()), judge_model="offline"
+        )
+
+
+@pytest.mark.parametrize("passed", [True, False])
+def test_native_boolean_map_uses_the_same_strict_evidence_validator(passed):
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence, make_execution_evidence_judge
+
+    # The pinned MLflow constructor must accept this schema without contacting a provider.
+    assert make_execution_evidence_judge("openai:/offline") is not None
+    result = SimpleNamespace(
+        value={"verification_applicable": True, "verification_pass": passed, "integrity_pass": passed},
+        rationale="Verification and tool claims are checked against span_id=1111111111111111.",
+    )
+    feedback = diagnose_execution_evidence(_pi_execution_trace(), lambda **_kw: result, judge_model="offline")
+    assert [item.value for item in feedback] == [passed, passed]
+    assert all(item.rationale == result.rationale for item in feedback)
+
+
+@pytest.mark.parametrize("bad_value", ["true", 1, None])
+def test_native_boolean_map_rejects_non_boolean_values(bad_value):
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence
+
+    result = SimpleNamespace(
+        value={"verification_applicable": True, "verification_pass": bad_value, "integrity_pass": True},
+        rationale="Verification and tool claims cite span_id=1111111111111111.",
+    )
+    with pytest.raises(ScorerEvidenceError, match="non-boolean"):
+        diagnose_execution_evidence(_pi_execution_trace(), lambda **_kw: result, judge_model="offline")
+
+
+@pytest.mark.parametrize("rationale", ["No problems found.", "Placeholder", "span_id=ffffffffffffffff is sufficient."])
+def test_native_boolean_map_still_rejects_weak_or_fabricated_citations(rationale):
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence
+
+    result = SimpleNamespace(
+        value={"verification_applicable": True, "verification_pass": True, "integrity_pass": True}, rationale=rationale
+    )
+    with pytest.raises(ScorerEvidenceError):
+        diagnose_execution_evidence(_pi_execution_trace(), lambda **_kw: result, judge_model="offline")
+
+
+@pytest.mark.parametrize("target", [None, "m-original-agent"])
+def test_execution_evaluation_keeps_original_target_identity(monkeypatch, target):
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence
+
+    trace = _pi_execution_trace()
+    trace.info = SimpleNamespace(trace_metadata={"mlflow.modelId": target} if target else {})
+    monkeypatch.setattr("mlflow.active_run", lambda: SimpleNamespace(info=SimpleNamespace(run_id="eval-new")))
+    monkeypatch.setattr("mlflow.update_current_trace", lambda **_kw: pytest.fail("Historical agent was relabeled"))
+    result = diagnose_execution_evidence(
+        trace, lambda **_kw: SimpleNamespace(value=_execution_judge_payload()), judge_model="openai:/judge"
+    )
+    for feedback in result:
+        assert feedback.metadata["fleet.target_agent_model_id"] == (target or "unversioned")
+        assert feedback.metadata["fleet.evaluation.run_id"] == "eval-new"
+        assert feedback.metadata["fleet.diagnostic.judge_model"] == "openai:/judge"
+        assert len(feedback.metadata["fleet.diagnostic.code_digest"]) == 64
+
+
 def test_execution_assessments_use_bounded_sandbox_evidence_and_version(monkeypatch):
     calls = _judge_responses(
         monkeypatch,
