@@ -8,6 +8,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -149,17 +150,22 @@ class SessionRuntime:
         turn_record: dict[str, Any],
         new_memory_note: str = "",
         replay_snapshot: tuple[str, bytes] | None = None,
-    ) -> list[str]:
-        """Record a finished Turn and return its sorted, unique `artifacts/` workspace paths.
+        *,
+        artifact_paths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Commit and return the canonical completion, including the current artifact inventory.
 
         Commits the record, memory note, completion payload, and optional immutable replay
         together. `replay_snapshot` is the digest and compressed bytes selected by the record.
+        `artifact_paths` optionally supplies a captured workspace view; by default the
+        current workspace is listed. Both paths use the same validation and sorting.
 
         Raises:
             ValueError: Replay selection metadata or digest is inconsistent, the Turn ID is
                 missing, the Session ID is invalid, the record is oversized, or a workspace
                 path is invalid.
 
+        The returned payload owns its nested values independently of the record and Store.
         Serialization, workspace listing, and storage errors propagate.
         """
         if bool(turn_record.get("replay_snapshot_selected")) != (replay_snapshot is not None):
@@ -168,58 +174,58 @@ class SessionRuntime:
             raise ValueError("Turn replay digest does not match the immutable snapshot")
         if not turn_record.get("turn_id"):
             raise ValueError("Turn record must carry a turn_id")
+        turn_record = deepcopy(turn_record)
         session_id = validate_session_id(session_id)
         record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
         if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:
             raise ValueError("Turn record exceeds the persistence size limit")
-        paths = self.sandbox_mgr.list_workspace_files()
+        paths = self.sandbox_mgr.list_workspace_files() if artifact_paths is None else artifact_paths
         if not isinstance(paths, list) or any(not self._valid_vfs_path(path) for path in paths):
             raise ValueError("Workspace listing returned an invalid relative path")
         artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
-        completion = None
-        if turn_record.get("turn_id"):
-            from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
+        from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
 
-            result = {
-                "event": "turn_complete",
-                "answer": turn_record.get("answer", ""),
-                "route": turn_record.get("route", ""),
-                "learned_skill_note": turn_record.get("learned_skill_note", ""),
-                "artifacts": artifacts,
-                **{
-                    key: turn_record[key]
-                    for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
-                    if key in turn_record
-                },
-                # The status payload carries the same provider-resolved identity as the record.
-                **{key: turn_record[key] for key in PROVENANCE_KEYS if key in turn_record},
-                # Deadline, outcome, and wall duration join the same turn_id across the terminal
-                # event, the stored record, and the fleet_turn span. `effective_seconds=None` is
-                # preserved explicitly rather than substituted with a default.
-                **{
-                    key: turn_record[key]
-                    for key in (
-                        "deadline_source",
-                        "effective_seconds",
-                        "outcome",
-                        "duration_seconds",
-                    )
-                    if key in turn_record
-                },
-            }
-            if turn_record.get("trace_id"):
-                result["trace_id"] = turn_record["trace_id"]
-            # The status payload reports the same teardown outcome as the stored Turn and span.
-            if turn_record.get("cleanup"):
-                result["cleanup"] = turn_record["cleanup"]
-            # Provider-owned lifecycle bounds are surfaced unchanged; they are not Fleet limits.
-            for key in ("ttl_minutes", "auto_stop_interval", "maximum_lifespan_minutes", "provider_owned"):
-                if key in turn_record:
-                    result[key] = turn_record[key]
-            # The live root handle this Turn used, when it provisioned one.
-            if turn_record.get("root_sandbox_id"):
-                result["root_sandbox_id"] = turn_record["root_sandbox_id"]
-            completion = (turn_record["turn_id"], result)
+        result = {
+            "event": "turn_complete",
+            "turn_id": turn_record["turn_id"],
+            "answer": turn_record.get("answer", ""),
+            "route": turn_record.get("route", ""),
+            "learned_skill_note": turn_record.get("learned_skill_note", ""),
+            "artifacts": artifacts,
+            **{
+                key: turn_record[key]
+                for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
+                if key in turn_record
+            },
+            # The status payload carries the same provider-resolved identity as the record.
+            **{key: turn_record[key] for key in PROVENANCE_KEYS if key in turn_record},
+            # Deadline, outcome, and wall duration join the same turn_id across the terminal
+            # event, the stored record, and the fleet_turn span. `effective_seconds=None` is
+            # preserved explicitly rather than substituted with a default.
+            **{
+                key: turn_record[key]
+                for key in (
+                    "deadline_source",
+                    "effective_seconds",
+                    "outcome",
+                    "duration_seconds",
+                )
+                if key in turn_record
+            },
+        }
+        if turn_record.get("trace_id"):
+            result["trace_id"] = turn_record["trace_id"]
+        # The status payload reports the same teardown outcome as the stored Turn and span.
+        if turn_record.get("cleanup"):
+            result["cleanup"] = turn_record["cleanup"]
+        # Provider-owned lifecycle bounds are surfaced unchanged; they are not Fleet limits.
+        for key in ("ttl_minutes", "auto_stop_interval", "maximum_lifespan_minutes", "provider_owned"):
+            if key in turn_record:
+                result[key] = turn_record[key]
+        # The live root handle this Turn used, when it provisioned one.
+        if turn_record.get("root_sandbox_id"):
+            result["root_sandbox_id"] = turn_record["root_sandbox_id"]
+        completion = (turn_record["turn_id"], deepcopy(result))
         self.store.commit_turn(
             session_id,
             turn_record_json=record_json,
@@ -228,7 +234,7 @@ class SessionRuntime:
             completion=completion,
             replay_snapshot=replay_snapshot,
         )
-        return artifacts
+        return result
 
     @staticmethod
     def _valid_vfs_path(rel_path: str) -> bool:

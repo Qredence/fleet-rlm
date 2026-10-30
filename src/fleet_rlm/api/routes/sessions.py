@@ -160,7 +160,10 @@ def turn_status(session_id: str, turn_id: str, store: StoreDep) -> TurnStatus:
     if isinstance(stored, dict):
         from fleet_rlm.sandbox.snapshots import provenance_state
 
-        result = {**result, "result": {**stored, "provenance_state": provenance_state(stored)}}
+        payload = {**stored, "provenance_state": provenance_state(stored)}
+        if result["status"] == "completed":
+            payload["turn_id"] = result["turn_id"]
+        result = {**result, "result": payload}
     return TurnStatus.model_validate(result)
 
 

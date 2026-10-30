@@ -584,13 +584,14 @@ def test_runtime_reports_artifacts_and_records_the_completion_without_reading_fi
         "submit_rejections": 2,
         "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
     }
-    artifacts = _runtime(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
+    completion = _runtime(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
         "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1", **usage}
     )
-    assert artifacts == ["artifacts/out.txt"]
+    assert completion["artifacts"] == ["artifacts/out.txt"]
     (session_id,), kwargs = calls[0]
     assert session_id == "s1"
     turn_id, result = kwargs["completion"]
+    assert completion == result and completion["turn_id"] == turn_id
     assert turn_id == "t1" and result["trace_id"] == "tr-1" and result["artifacts"] == ["artifacts/out.txt"]
     assert json.loads(kwargs["turn_record_json"])["route"] == "flex"
     assert {key: result[key] for key in usage} == usage

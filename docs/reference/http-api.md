@@ -212,8 +212,18 @@ An optional idempotency key persists intent before execution. Completed requests
 replay their recorded outcome; failed/uncertain requests do not replay side effects.
 Replay outcome events carry the original persisted `turn_id`, so the status route
 can recover that same outcome rather than looking up the retry's preparation ID.
-A completed outcome commits in the same transaction as files and turn history;
-a lost response or later delivery failure cannot downgrade that durable completion.
+A successful completion is assembled once and committed with the Turn record,
+memory note and optional replay snapshot in one transaction. New result JSON includes
+`turn_id`; historical completion reads supply it from the enclosing row without
+rewriting history. Live completion and idempotent replay use the same committed
+payload; the status route additionally derives `provenance_state`. See the
+[result field and legacy inventory](turn-results.md).
+Post-commit tracing, learned-note and delivery errors cannot downgrade success or
+request cancellation. Disconnect cancellation is serialized with commit/readback;
+a lost connection may deliver no completion, which a reconnect can recover. A lost
+commit acknowledgment triggers a bounded readback of the claimed Turn. If it cannot
+establish the outcome, Fleet stops remote work, leaves durable intent untouched and
+blocks reexecution. Workspace file bytes do not participate in the SQL transaction.
 A PostgreSQL advisory lease rejects a second worker owning the same session.
 The lease covers Turn execution and mutations. History and Turn status are
 durable reads that use the shared pool and do not take it, so they remain
@@ -242,8 +252,8 @@ remaining deadline, so a bridged call never outlives a bounded Turn, and only a
 bounded Turn arms the watchdog. A deadline-free Turn sends `run_code(timeout=0)`
 explicitly and no Fleet component substitutes a fallback bound, so the call waits
 until it returns or the Turn is cancelled; Daytona's provider TTL and idle bounds
-still apply. Closing a stream before the server observes an outcome requests remote
-cancellation and drains the worker. After an observed outcome, disconnecting
+still apply. Closing a stream before durable completion requests remote
+cancellation and drains the worker, serialized against commit/readback. After durable completion, disconnecting
 preserves a successful Turn's warm root while the worker finishes. Reconnection
 is not an automatic side-effect retry.
 

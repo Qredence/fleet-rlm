@@ -1,0 +1,58 @@
+{
+  "live_success": {
+    "event": "turn_complete",
+    "turn_id": "fixture-turn",
+    "answer": "verified",
+    "route": "flex",
+    "outcome": "completed",
+    "duration_seconds": 0.0,
+    "learned_skill_note": "A reusable hint.",
+    "artifacts": ["artifacts/report.txt"],
+    "lm_calls": 4,
+    "sandbox_errors": 1,
+    "submit_rejections": 2,
+    "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
+    "snapshot_name": "fleet-test",
+    "snapshot_id": "snap-1",
+    "snapshot_cpu": 4,
+    "snapshot_mem": 8,
+    "snapshot_disk": 8,
+    "snapshot_definition_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "snapshot_build_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "deadline_source": "request",
+    "effective_seconds": null,
+    "root_sandbox_id": "warm-root",
+    "ttl_minutes": 1440,
+    "auto_stop_interval": 60,
+    "maximum_lifespan_minutes": null,
+    "provider_owned": true,
+    "cleanup": "not_required"
+  },
+  "live_failure": {
+    "event": "error",
+    "turn_id": "fixture-turn",
+    "outcome": "failed",
+    "duration_seconds": 0.0,
+    "request_id": "fixture-turn",
+    "error": "The Turn failed (request fixture-turn).",
+    "cleanup": "stopped",
+    "deadline_source": "configuration",
+    "effective_seconds": 900
+  },
+  "legacy_rows": [
+    {
+      "turn_id": "historical-minimal",
+      "status": "completed",
+      "result": {"event": "turn_complete", "answer": "old answer", "route": "rlm", "historical_extension": {"kept": true}}
+    },
+    {
+      "turn_id": "historical-deadline",
+      "status": "completed",
+      "result": {
+        "event": "turn_complete", "answer": "deadline disabled", "route": "direct",
+        "deadline_source": "request", "effective_seconds": null, "cleanup": "not_required",
+        "lm_calls": null, "historical_extension": ["unchanged"]
+      }
+    }
+  ]
+}

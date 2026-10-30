@@ -97,6 +97,7 @@ def store_with(**overrides: Any) -> SimpleNamespace:
         "turn_status": lambda _session, _turn: None,
         "save_runtime_settings": lambda *_args: None,
         "finish_turn": lambda *_args: None,
+        "commit_turn": lambda *_args, **_kwargs: None,
     }
     return SimpleNamespace(**{**defaults, **overrides})
 
@@ -147,12 +148,22 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "claim_turn": lambda *_args: None,
             "memories": lambda *_args, **_kwargs: [],
             "load_context": lambda _session: ("", ""),
-            "commit_turn": lambda **_kwargs: [],
             "turn_status": lambda _turn: None,
         }
         for name, method in (defaults | policy).items():
             setattr(runtime, name, method)
     return runtime
+
+
+def completion_for(
+    turn_record: dict[str, Any],
+    artifacts: list[str] | None = None,
+    *,
+    replay_snapshot: tuple[str, bytes] | None = None,
+) -> dict[str, Any]:
+    """Use the real canonical writer for tests replacing the commit boundary."""
+    runtime = runtime_with(sandbox_mgr=FakeManager(list_workspace_files=lambda: artifacts or []))
+    return runtime.commit_turn("session-a", turn_record, replay_snapshot=replay_snapshot)
 
 
 class FakeRegistry:

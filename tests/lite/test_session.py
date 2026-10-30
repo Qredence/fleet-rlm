@@ -20,6 +20,51 @@ def _runtime(**overrides) -> SessionRuntime:
     return SessionRuntime(**dependencies)
 
 
+def test_committed_completion_owns_nested_values_separately_from_record_and_store() -> None:
+    saved = []
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: ["artifacts/out.txt", "artifacts/out.txt"]),
+        store=SimpleNamespace(commit_turn=lambda *_args, **kw: saved.append(kw)),
+    )
+    record = {"turn_id": "t1", "answer": "verified", "budget_breakdown": {"routing": 1}}
+    result = runtime.commit_turn("s1", record)
+    stored = saved[0]["completion"][1]
+    assert result == stored and result["turn_id"] == "t1"
+    record["budget_breakdown"]["routing"] = 100
+    assert result["budget_breakdown"] == stored["budget_breakdown"] == {"routing": 1}
+    result["budget_breakdown"]["routing"] = 200
+    result["artifacts"].clear()
+    assert stored["budget_breakdown"] == {"routing": 1} and stored["artifacts"] == ["artifacts/out.txt"]
+
+
+def test_commit_does_not_return_a_completion_when_storage_raises() -> None:
+    def fail(*_args, **_kwargs):
+        raise ConnectionError("commit acknowledgment lost")
+
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: []),
+        store=SimpleNamespace(commit_turn=fail),
+    )
+    with pytest.raises(ConnectionError):
+        runtime.commit_turn("s1", {"turn_id": "t1"})
+
+
+@pytest.mark.parametrize("paths", [[], ["files/input.txt", "artifacts/out.txt", "artifacts/out.txt"], ["../escape"]])
+def test_captured_artifact_view_uses_existing_path_validation_without_relisting(paths) -> None:
+    saved = []
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: pytest.fail("captured view must not be relisted")),
+        store=SimpleNamespace(commit_turn=lambda *_args, **kw: saved.append(kw)),
+    )
+    if "../escape" in paths:
+        with pytest.raises(ValueError, match="invalid relative path"):
+            runtime.commit_turn("s1", {"turn_id": "t1"}, artifact_paths=paths)
+        assert saved == []
+    else:
+        result = runtime.commit_turn("s1", {"turn_id": "t1"}, artifact_paths=paths)
+        assert result["artifacts"] == sorted({p for p in paths if p.startswith("artifacts/")})
+
+
 def test_lost_session_lease_cancels_remote_work_and_fences_runtime() -> None:
     probed = threading.Event()
     cancelled = threading.Event()
