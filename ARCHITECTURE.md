@@ -79,7 +79,9 @@ See [configuration](docs/reference/configuration.md) and [setup API](docs/refere
 - Stored history cannot restore live Python variables.
 - Daytona Volumes hold Session workspaces.
 - Successful Turns preserve the warm root interpreter.
-- Failed or cancelled Turns discard it. The next Turn cold-resumes durable state.
+- Failed or cancelled Turns stop it. Confirmed cleanup permits the next Turn to
+  cold-resume durable state; unconfirmed cleanup retains resource identity and
+  denies writable reuse in the live process.
 
 Workspace inputs:
 

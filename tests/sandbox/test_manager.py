@@ -176,7 +176,7 @@ def test_cancelled_manager_cannot_restart_remote_execution(monkeypatch: pytest.M
     assert len(client.created) == 2
 
 
-def test_an_unconfirmed_stop_discards_the_root_and_is_not_stopped_again(
+def test_an_unconfirmed_stop_retains_the_root_and_fences_writable_reuse(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     service = _RecordingSnapshotService(_SnapshotDTO(id="snap-1", state="active", cpu=4, mem=8, disk=8))
@@ -191,14 +191,25 @@ def test_an_unconfirmed_stop_discards_the_root_and_is_not_stopped_again(
     client.stop = refuse
     manager.cancel_turn()
     assert manager.cleanup_outcome == "unconfirmed"
-    assert manager.live_sandbox_id is None, "a root whose stop is unconfirmed must be discarded"
+    assert manager.live_sandbox_id == "sandbox-1", "retain the unresolved provider identity"
 
     manager.reset_turn_budget()
     manager.end_turn()
-    assert stops == ["sandbox-1"], "end_turn must not stop a discarded root again"
-    # Discarding is not reuse: the next Turn provisions a new root instead of retrying this one.
-    assert manager.ensure_sandbox().id == "sandbox-2"
+    for operation in (
+        manager.ensure_sandbox,
+        lambda: manager.write_workspace_file("files/new.txt", b"unsafe"),
+        manager.allocate_child,
+    ):
+        with pytest.raises(RuntimeError, match="cleanup is unconfirmed"):
+            operation()
+    assert len(client.created) == 1
     assert stops == ["sandbox-1"]
+    client.stop = lambda sandbox, **_kwargs: stops.append(sandbox.id)
+    assert manager.shutdown() is True
+    manager.reset_turn_budget()
+    manager.end_turn()
+    assert manager.ensure_sandbox().id == "sandbox-2"
+    assert stops == ["sandbox-1", "sandbox-1"]
 
 
 def test_terminal_teardown_stops_the_root_once_and_records_the_outcome() -> None:
@@ -241,7 +252,7 @@ def test_a_raising_provider_stop_records_unconfirmed(monkeypatch: pytest.MonkeyP
 def test_a_raising_notification_never_skips_child_or_root_teardown(caplog: pytest.LogCaptureFixture) -> None:
     sandbox = SimpleNamespace(id="sandbox-notify-failure", state="started")
     manager, calls = _manager_with(sandbox)
-    manager._children["child-1"] = SimpleNamespace(shutdown=lambda: calls.append("child_shutdown"))
+    manager._children["child-1"] = SimpleNamespace(shutdown=lambda: calls.append("child_shutdown") or True)
 
     def refuse_notification(_event: dict[str, Any]) -> None:
         raise RuntimeError("stream closed; payload=secret")
@@ -252,7 +263,7 @@ def test_a_raising_notification_never_skips_child_or_root_teardown(caplog: pytes
         manager.cancel_turn()
 
     # The notification is a side channel: every other teardown step still ran, in order.
-    assert calls == ["child_shutdown", "stop"]
+    assert calls == ["stop", "child_shutdown"]
     assert manager.cleanup_outcome == "stopped"
     assert manager._contexts == {}
     warnings = [record for record in caplog.records if record.levelname == "WARNING"]
@@ -264,7 +275,7 @@ def test_a_raising_notification_never_skips_child_or_root_teardown(caplog: pytes
     caplog.clear()
     with caplog.at_level("WARNING", logger="fleet_rlm.sandbox.manager"):
         manager.cancel_turn()
-    assert calls == ["child_shutdown", "stop"]
+    assert calls == ["stop", "child_shutdown"]
     assert manager.cleanup_outcome == "stopped"
     assert not [record for record in caplog.records if record.levelname == "WARNING"]
 
@@ -302,6 +313,106 @@ def test_a_raising_child_shutdown_still_attempts_the_root_stop() -> None:
 
     assert calls == ["stop"], "the root stop is attempted even when a child refused to shut down"
     assert manager.cleanup_outcome == "unconfirmed"
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["shutdown", "cancel"])
+def test_root_interruption_precedes_blocked_child_cleanup(cancel: bool) -> None:
+    manager, calls = _manager_with(SimpleNamespace(id="root-first", state="started"))
+    child_started, release = threading.Event(), threading.Event()
+    outcomes: list[Any] = []
+
+    def blocked_child() -> bool:
+        child_started.set()
+        assert release.wait(timeout=5)
+        return True
+
+    manager._children["blocked"] = SimpleNamespace(shutdown=blocked_child)
+    cleanup = threading.Thread(target=lambda: outcomes.append(manager.cancel_turn() if cancel else manager.shutdown()))
+    cleanup.start()
+    try:
+        assert child_started.wait(timeout=2)
+        assert calls == ["stop"], "interrupt the root before waiting for child deletion"
+        assert not outcomes, "acknowledgment still waits for all required cleanup"
+        with pytest.raises(RuntimeError, match="cancelled"):
+            manager.ensure_sandbox()
+    finally:
+        release.set()
+        cleanup.join(timeout=5)
+        manager.end_turn()
+    assert not cleanup.is_alive()
+    assert outcomes == ([None] if cancel else [True])
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_shutdown_aggregates_child_failures_and_keeps_admission_fenced(raises: bool) -> None:
+    manager, calls = _manager_with(SimpleNamespace(id="root-aggregate", state="started"))
+
+    def failed_child() -> bool:
+        calls.append("failed-child")
+        if raises:
+            raise RuntimeError("delete refused")
+        return False
+
+    manager._children["failed"] = SimpleNamespace(shutdown=failed_child)
+    manager._children["healthy"] = SimpleNamespace(shutdown=lambda: calls.append("healthy-child") or True)
+    assert manager.shutdown() is False
+    assert calls == ["stop", "failed-child", "healthy-child"]
+    manager.reset_turn_budget()
+    manager.end_turn()
+    with pytest.raises(RuntimeError, match="cleanup is unconfirmed"):
+        manager.write_workspace_file("files/unsafe.txt", b"unsafe")
+    manager._children["failed"].shutdown = lambda: True
+    assert manager.shutdown() is True
+
+
+def test_shutdown_preserves_ambiguous_create_until_a_resource_can_be_stopped() -> None:
+    manager = DaytonaSandboxManager("key", "org", "volume", "uncertain-create")
+    manager._creation_pending = True
+    matches: list[Any] = []
+    stopped: list[str] = []
+    manager._client = SimpleNamespace(
+        list=lambda _query: matches,
+        stop=lambda sandbox, **_kwargs: stopped.append(sandbox.id),
+    )
+    assert manager.shutdown() is False, "an empty lookup is not confirmed absence"
+    assert manager._creation_pending is True
+    manager.reset_turn_budget()
+    manager.end_turn()
+    with pytest.raises(RuntimeError, match="cleanup is unconfirmed"):
+        manager.ensure_sandbox()
+    matches.append(SimpleNamespace(id="allocated-before-ack"))
+    assert manager.shutdown() is True
+    assert stopped == ["allocated-before-ack"]
+    assert manager._creation_pending is False
+    assert manager._sandbox is None
+
+
+def test_concurrent_root_shutdowns_cannot_report_confirmation_before_stop() -> None:
+    manager, _calls = _manager_with(SimpleNamespace(id="root-concurrent", state="started"))
+    started, release = threading.Event(), threading.Event()
+    stopped: list[str] = []
+
+    def stop(sandbox: Any, **_kwargs: Any) -> None:
+        stopped.append(sandbox.id)
+        started.set()
+        assert release.wait(timeout=5)
+
+    manager._client.stop = stop
+    outcomes: list[bool] = []
+    first = threading.Thread(target=lambda: outcomes.append(manager.shutdown()))
+    second = threading.Thread(target=lambda: outcomes.append(manager.shutdown()))
+    first.start()
+    assert started.wait(timeout=2)
+    second.start()
+    try:
+        second.join(timeout=0.1)
+        assert not outcomes
+    finally:
+        release.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+    assert outcomes == [True, True]
+    assert stopped == ["root-concurrent"]
 
 
 def _child_with_provider(root: DaytonaSandboxManager, index: int, deleted: list[str]) -> DaytonaSandboxManager:

@@ -302,12 +302,14 @@ class SessionRuntime:
         with self._lease_lock:
             self._lease_monitor_stop.set()
             self.lease_lost.set()
-            lease, self.lease = self.lease, None
+            lease = self.lease
         if self._lease_monitor is not None:
             self._lease_monitor.join(timeout=_LEASE_MONITOR_JOIN_SECONDS)
             self._lease_monitor = None
         if lease is not None:
             lease.close()
+            with self._lease_lock:
+                self.lease = None
 
     def set_mode(self, mode: str) -> None:
         """Set the execution mode on the engine and record its Session-level provenance."""
@@ -487,7 +489,8 @@ class SessionRuntimeRegistry:
     def evict(self, session_id: str) -> bool:
         """Stop one Session's sandbox and release its lease; False when it has no runtime in this process.
 
-        Stored history is untouched, and the next request rebuilds the runtime.
+        Stored history is untouched. Unconfirmed cleanup retains the fenced runtime and lease
+        and raises RuntimeError; retry eviction to reconcile before rebuilding.
         """
         session_id = validate_session_id(session_id)
         with self._rebuild_lock:
@@ -506,27 +509,45 @@ class SessionRuntimeRegistry:
                 if self._sessions.get(session_id) is not runtime:
                     return False
                 runtime.lease_lost.set()
+            if runtime.sandbox_mgr.shutdown() is not True:
+                raise RuntimeError("Session sandbox cleanup is unconfirmed; runtime retained for cleanup retry")
+            runtime.close_lease()
+            with self._lock:
                 self._sessions.pop(session_id, None)
-            try:
-                runtime.sandbox_mgr.shutdown()
-            finally:
-                runtime.close_lease()
         finally:
             runtime.turn_lock.release()
         return True
 
     def close(self) -> None:
-        """Shut down every Session sandbox, then release each lease."""
+        """Attempt all shutdowns, retaining fenced runtimes/leases whose cleanup is unconfirmed."""
         with self._rebuild_lock:
             with self._lock:
                 runtimes = tuple(self._sessions.values())
                 for runtime in runtimes:
                     runtime.lease_lost.set()
-                self._sessions.clear()
-            try:
-                if runtimes:
-                    with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
-                        list(pool.map(lambda runtime: runtime.sandbox_mgr.shutdown(), runtimes))
-            finally:
-                for runtime in runtimes:
-                    runtime.close_lease()
+
+            def shutdown(runtime: SessionRuntime) -> bool:
+                try:
+                    return runtime.sandbox_mgr.shutdown() is True
+                except Exception:
+                    _LOGGER.warning("Session shutdown failed; retaining unresolved runtime")
+                    return False
+
+            unresolved = False
+            if runtimes:
+                with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
+                    confirmations = list(pool.map(shutdown, runtimes))
+                for runtime, confirmed in zip(runtimes, confirmations, strict=True):
+                    if confirmed:
+                        try:
+                            runtime.close_lease()
+                        except Exception:
+                            unresolved = True
+                            _LOGGER.warning("Session lease release failed; retaining fenced runtime")
+                            continue
+                        with self._lock:
+                            self._sessions.pop(runtime.sandbox_mgr.session_id, None)
+                    else:
+                        unresolved = True
+            if unresolved:
+                raise RuntimeError("Session sandbox cleanup is unconfirmed; runtimes retained for cleanup retry")

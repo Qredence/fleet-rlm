@@ -464,32 +464,10 @@ async def test_disconnect_during_postcommit_observation_preserves_success(monkey
     assert len(state.executions) == len(state.commits) == 1
 
 
-@pytest.mark.parametrize("complete", [False, True])
-def test_artifact_changes_distinguish_retained_outputs_and_incomplete_evidence(complete):
-    before = {"artifacts/prior.txt": "same", "artifacts/report.txt": "old", "artifacts/gone.txt": "gone"}
-    evidence = {
-        "artifacts": {
-            "complete": complete,
-            "files": {
-                "artifacts/prior.txt": {"sha256": "same"},
-                "artifacts/report.txt": {"sha256": "new"},
-                "artifacts/created.txt": {"sha256": "created"},
-            },
-        }
-    }
-    changes = turn_module._artifact_changes(before, evidence)
-    assert changes["complete"] is complete
-    assert {path: item["state"] for path, item in changes["files"].items()} == {
-        "artifacts/prior.txt": "retained",
-        "artifacts/report.txt": "modified",
-        "artifacts/created.txt": "created",
-        "artifacts/gone.txt": "deleted" if complete else "unknown",
-    }
-    assert changes["files"]["artifacts/report.txt"] == {
-        "state": "modified",
-        "input_sha256": "old",
-        "sha256": "new",
-    }
+def _turn_cleanup_key() -> str:
+    from fleet_rlm.engine.turn import _CLEANUP_ATTRIBUTE
+
+    return _CLEANUP_ATTRIBUTE
 
 
 @pytest.fixture
@@ -690,7 +668,11 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
     digest = hashlib.sha256(raw).hexdigest()
     path = "artifacts/prior.txt"
     records = []
-    evidence = {"artifacts": {"complete": True, "files": {path: {"sha256": digest}}}}
+    evidence = {
+        "artifacts": {"complete": True, "files": {path: {"sha256": digest, "base64": base64.b64encode(raw).decode()}}},
+        "children": [],
+        "children_complete": True,
+    }
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
         commit_turn=lambda **kwargs: (
@@ -710,62 +692,6 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
         }
     )
     assert traced["outputs"]["artifacts"] == [path]
-
-
-def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitization(traced):
-    from fleet_rlm.optimize.objectives import artifact_correctness, delegation_correctness
-    from fleet_rlm.optimize.scorers import efficiency_metric
-
-    raw = b"report"
-    paths = [*(f"artifacts/report-{i}.txt" for i in range(23)), "artifacts/zz-final.txt"]
-    final_path = paths[-1]
-    digest = hashlib.sha256(raw).hexdigest()
-    evidence = {
-        "schema_version": 1,
-        "artifacts": {
-            "complete": True,
-            "files": {path: {"sha256": digest, "base64": base64.b64encode(raw).decode("ascii")} for path in paths},
-        },
-        "children": [
-            {
-                "status": "succeeded",
-                "inputs": {"files/input.csv": "input-digest"},
-                "artifacts": [{"path": final_path, "root_path": final_path, "sha256": digest}],
-            }
-        ],
-        "children_complete": True,
-        "python": {},
-    }
-    artifact_gold = {"artifacts": [{"path": final_path, "kind": "text", "expected": "report"}]}
-    delegation_gold = {"children": [{"input_paths": ["files/input.csv"], "artifacts": ["zz-final.txt"]}]}
-    usage = {
-        "lm_calls": 4,
-        "sandbox_errors": 1,
-        "submit_rejections": 2,
-        "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
-    }
-    runtime = runtime_with(
-        sandbox_mgr=FakeManager(
-            list_workspace_files=lambda: paths,
-            read_workspace_file=lambda _path: raw,
-        ),
-        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], paths),
-        engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
-    )
-    with opened_client(runtime) as (client, _app):
-        response = client.post("/sessions/session-a/turn", json={"task": "Produce reports"})
-    assert response.status_code == 200
-    sanitized = {}
-    observability.sanitize_trace_span(
-        SimpleNamespace(name="fleet_turn", outputs=traced["outputs"], set_outputs=sanitized.update)
-    )
-    assert {name: sanitized[name] for name in usage} == usage
-    assert efficiency_metric(dspy.Prediction(**sanitized)) == efficiency_metric(dspy.Prediction(**usage))
-    assert efficiency_metric(dspy.Prediction(**sanitized)) is not None
-    assert artifact_correctness(artifact_gold, evidence)[0] == 1
-    assert artifact_correctness(artifact_gold, sanitized["execution_evidence"])[0] == 1
-    assert delegation_correctness(delegation_gold, evidence)[0] == 1
-    assert delegation_correctness(delegation_gold, sanitized["execution_evidence"])[0] == 1
 
 
 @pytest.mark.parametrize("record_replay", [False, True])

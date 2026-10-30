@@ -98,6 +98,12 @@ def test_selected_artifacts_are_copied_and_unchanged_copies_are_not_promoted(
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", list_files)
     monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", read)
     monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", write)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "write_workspace_files",
+        lambda self, files: [write(self, p, b) for p, b in files.items()],
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", lambda _self, _code: "[]")
     monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: object())
     monkeypatch.setattr(DaytonaSandboxManager, "shutdown", lambda _self: None)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import threading
 import weakref
@@ -75,6 +76,8 @@ class FakeManager(SimpleNamespace):
             self.reset_turn_budget = reset_turn_budget
         if "stat_workspace_file" not in overrides:
             self.stat_workspace_file = self._stat_file
+        if "execution_evidence" not in overrides:
+            self.execution_evidence = self._execution_evidence
         if "turn_inputs" not in overrides:
             # Derived from the other fakes so tests that only fake listing, contents, or notes stay consistent.
             self.turn_inputs = lambda: {
@@ -90,13 +93,29 @@ class FakeManager(SimpleNamespace):
         content = self.read_workspace_file(path)
         return {"path": path, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
+    def _execution_evidence(self) -> dict[str, Any]:
+        files = {}
+        for path in self.list_workspace_files():
+            if path.startswith("artifacts/"):
+                content = self.read_workspace_file(path)
+                files[path] = {
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "base64": base64.b64encode(content).decode(),
+                }
+        return {
+            "schema_version": 1,
+            "artifacts": {"complete": True, "files": files},
+            "children": [],
+            "children_complete": True,
+        }
+
 
 def store_with(**overrides: Any) -> SimpleNamespace:
     defaults: dict[str, Any] = {
         "history": lambda _session: [],
         "turn_status": lambda _session, _turn: None,
         "save_runtime_settings": lambda *_args: None,
-        "finish_turn": lambda *_args: None,
+        "finish_turn": lambda *_args, **_kwargs: None,
         "commit_turn": lambda *_args, **_kwargs: None,
     }
     return SimpleNamespace(**{**defaults, **overrides})
@@ -163,7 +182,8 @@ def completion_for(
 ) -> dict[str, Any]:
     """Use the real canonical writer for tests replacing the commit boundary."""
     runtime = runtime_with(sandbox_mgr=FakeManager(list_workspace_files=lambda: artifacts or []))
-    return runtime.commit_turn("session-a", turn_record, replay_snapshot=replay_snapshot)
+    captured_paths = turn_record.get("artifact_capture", {}).get("paths")
+    return runtime.commit_turn("session-a", turn_record, replay_snapshot=replay_snapshot, artifact_paths=captured_paths)
 
 
 class FakeRegistry:

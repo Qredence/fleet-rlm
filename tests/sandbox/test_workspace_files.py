@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from contextlib import contextmanager
@@ -133,7 +134,6 @@ def test_transfer_spans_separate_remote_checks_and_io_without_payloads(monkeypat
 @pytest.mark.parametrize("case", ["file", "empty", "missing", "symlink", "parent_symlink", "oversized", "changed"])
 def test_remote_stat_checks_size_digest_and_paths_without_downloads(monkeypatch, tmp_path, case):
     import contextlib
-    import hashlib
     import io
     import os
 

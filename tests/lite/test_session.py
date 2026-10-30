@@ -148,7 +148,7 @@ def _buildable_registry(runtime, *, max_active_sessions: int = 64):
 
 def _stale_runtime(events: list[str]) -> SessionRuntime:
     runtime = _runtime(
-        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown")),
+        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown") or True),
         lease=SimpleNamespace(close=lambda: events.append("lease")),  # type: ignore[arg-type]
     )
     runtime.lease_lost.set()
@@ -274,7 +274,7 @@ def test_get_rebuilds_a_stale_session_at_capacity(monkeypatch) -> None:
 def test_evicting_a_session_stops_its_sandbox_releases_the_lease_and_forgets_the_runtime() -> None:
     events: list[str] = []
     runtime = _runtime(
-        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown")),
+        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown") or True),
         lease=SimpleNamespace(close=lambda: events.append("lease")),  # type: ignore[arg-type]
     )
     registry = _registry_with(runtime)
@@ -299,14 +299,96 @@ def test_evicting_a_busy_session_is_refused_and_keeps_the_runtime(monkeypatch) -
     assert registry._sessions["s1"] is runtime
 
 
+@pytest.mark.parametrize("raises", [False, True])
+def test_unconfirmed_eviction_retains_runtime_and_lease_until_cleanup_succeeds(monkeypatch, raises) -> None:
+    events: list[str] = []
+
+    def unconfirmed() -> bool:
+        events.append("shutdown")
+        if raises:
+            raise RuntimeError("provider refused cleanup")
+        return False
+
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(shutdown=unconfirmed),
+        lease=SimpleNamespace(close=lambda: events.append("lease")),
+    )
+    registry = _buildable_registry(runtime)
+    fresh = _runtime()
+    monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
+    with pytest.raises(RuntimeError):
+        registry.evict("s1")
+    assert runtime.lease_lost.is_set()
+    assert registry._sessions["s1"] is runtime
+    assert events == ["shutdown"]
+    with pytest.raises(RuntimeError):
+        registry.get("s1")
+    assert registry._sessions["s1"] is runtime
+    assert events == ["shutdown", "shutdown"]
+    runtime.sandbox_mgr.shutdown = lambda: events.append("confirmed") or True
+    assert registry.get("s1") is fresh
+    assert events == ["shutdown", "shutdown", "confirmed", "lease"]
+
+
+def test_registry_close_attempts_every_runtime_and_retains_unresolved_ones() -> None:
+    events: list[str] = []
+    unresolved = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s1", shutdown=lambda: False),
+        lease=SimpleNamespace(close=lambda: events.append("unresolved-lease")),
+    )
+    healthy = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s2", shutdown=lambda: events.append("shutdown-s2") or True),
+        lease=SimpleNamespace(close=lambda: events.append("healthy-lease")),
+    )
+    registry = _registry_with(unresolved)
+    registry._sessions["s2"] = healthy
+    with pytest.raises(RuntimeError, match="cleanup is unconfirmed"):
+        registry.close()
+    assert registry._sessions == {"s1": unresolved}
+    assert unresolved.lease_lost.is_set()
+    assert events == ["shutdown-s2", "healthy-lease"]
+    unresolved.sandbox_mgr.shutdown = lambda: True
+    registry.close()
+    assert not registry._sessions
+    assert events[-1] == "unresolved-lease"
+
+
+def test_registry_close_retries_failed_lease_release_and_attempts_other_runtimes() -> None:
+    events: list[str] = []
+
+    def failed_close() -> None:
+        events.append("failed-lease")
+        raise RuntimeError("connection close failed")
+
+    lease = SimpleNamespace(close=failed_close)
+    unresolved = _runtime(sandbox_mgr=SimpleNamespace(session_id="s1", shutdown=lambda: True), lease=lease)
+    healthy = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s2", shutdown=lambda: True),
+        lease=SimpleNamespace(close=lambda: events.append("healthy-lease")),
+    )
+    registry = _registry_with(unresolved)
+    registry._sessions["s2"] = healthy
+    with pytest.raises(RuntimeError, match="unconfirmed"):
+        registry.close()
+    assert events == ["failed-lease", "healthy-lease"]
+    assert registry._sessions == {"s1": unresolved}
+    assert unresolved.lease is lease
+    lease.close = lambda: events.append("retried-lease")
+    registry.close()
+    assert unresolved.lease is None
+    assert not registry._sessions
+    assert events[-1] == "retried-lease"
+
+
 def test_eviction_fences_a_resolved_runtime_before_releasing_its_turn_lock() -> None:
     shutdown_started = threading.Event()
     finish_shutdown = threading.Event()
     rejected = threading.Event()
 
-    def shutdown() -> None:
+    def shutdown() -> bool:
         shutdown_started.set()
         assert finish_shutdown.wait(timeout=2)
+        return True
 
     runtime = _runtime(sandbox_mgr=SimpleNamespace(shutdown=shutdown))
     registry = _registry_with(runtime)
