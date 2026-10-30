@@ -169,8 +169,7 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
                             pending.set()
 
                 threading.Thread(target=resolve_model, daemon=True, name="fleet-agent-lookup").start()
-        if model_id is None:
-            assert pending is not None
+        if model_id is None and pending is not None:
             pending.wait(_AGENT_LOOKUP_WAIT_SECONDS)
             with _AGENT_LOCK:
                 model_id = _AGENT_MODELS.get(key)
