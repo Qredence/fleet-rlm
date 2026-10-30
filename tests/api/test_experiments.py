@@ -847,8 +847,38 @@ def test_experiment_routes_keep_run_after_response_and_cancel_only_by_request(
         )
 
     monkeypatch.setattr(ExperimentManager, "_execute", fake_execute)
-    _app, client = _app_client(tmp_path, store)
+    app, client = _app_client(tmp_path, store)
     with client:
+        schema = app.openapi()
+        operations = schema["paths"]
+        assert operations["/sessions/{session_id}/experiments"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"] == {"$ref": "#/components/schemas/ExperimentList"}
+        for path, method in (
+            ("/sessions/{session_id}/experiments", "post"),
+            ("/sessions/{session_id}/experiments/{run_id}/cancel", "post"),
+            ("/sessions/{session_id}/experiments/{run_id}/review", "post"),
+        ):
+            assert operations[path][method]["responses"]["202"]["content"]["application/json"]["schema"] == {
+                "$ref": "#/components/schemas/ExperimentEnvelope"
+            }
+        assert operations["/sessions/{session_id}/experiments/{run_id}"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"] == {"$ref": "#/components/schemas/ExperimentDetail"}
+        for path, method in (
+            ("/sessions/{session_id}/experiments", "get"),
+            ("/sessions/{session_id}/experiments", "post"),
+            ("/sessions/{session_id}/experiments/{run_id}", "get"),
+            ("/sessions/{session_id}/experiments/{run_id}/cancel", "post"),
+            ("/sessions/{session_id}/experiments/{run_id}/review", "post"),
+        ):
+            responses = operations[path][method]["responses"]
+            for status in ("404", "409", "422", "503"):
+                assert status in responses
+                assert (
+                    responses[status]["content"]["application/json"]["schema"]["$ref"]
+                    == "#/components/schemas/ApiError"
+                )
         request = {"request_id": "run_once", "max_metric_calls": 9}
         response = client.post("/sessions/sess_http/experiments", json=request)
         assert response.status_code == 202, response.text

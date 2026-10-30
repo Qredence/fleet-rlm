@@ -71,6 +71,13 @@ def test_private_experiment_drain_is_authenticated_and_apply_refuses_active_work
             return {"accepting": self.accepting, "busy": self.busy, "experiments": active}
 
     with opened_client(tmp_path) as (client, app):
+        schema = app.openapi()
+        for path, method in (
+            ("/setup/experiments/drain", "post"),
+            ("/setup/experiments/status", "get"),
+        ):
+            response = schema["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+            assert response == {"$ref": "#/components/schemas/ExperimentManagerStatus"}
         finish(client, client.post("/setup/verify", json={"request_id": "ready"}))
         manager = Manager()
         app.state.experiments = manager
@@ -85,6 +92,17 @@ def test_private_experiment_drain_is_authenticated_and_apply_refuses_active_work
         manager.busy = False
         active.clear()
         assert not client.get("/setup/experiments/status").json()["busy"]
+
+
+def test_experiment_status_without_manager_has_same_named_contract(tmp_path):
+    with opened_client(tmp_path) as (client, app):
+        status = client.get("/setup/experiments/status")
+        drain = client.post("/setup/experiments/drain")
+
+    expected = {"accepting": False, "busy": False, "experiments": []}
+    assert status.status_code == drain.status_code == 200
+    assert status.json() == drain.json() == expected
+    assert "ExperimentManagerStatus" in app.openapi()["components"]["schemas"]
 
 
 @pytest.mark.parametrize("sub_scope", ["team.models", "other.serving"])

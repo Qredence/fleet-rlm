@@ -49,7 +49,7 @@ def list_workspace_tree(session_id: str, runtime: LockedRuntime) -> Files:
     return _list_files(session_id, runtime)
 
 
-@router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", responses=LOCKED)
+@router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", response_model=FileStat, responses=LOCKED)
 def workspace_stat(rel_path: str, runtime: LockedRuntime) -> FileStat:
     """Return the size and SHA-256 digest of one workspace file."""
     with translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404):
@@ -81,7 +81,7 @@ def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
     )
 
 
-@router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", responses=LOCKED)
+@router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=FileWritten, responses=LOCKED)
 def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> FileWritten:
     """Write one workspace file from text or base64 content, capped at 25 MB.
 
@@ -91,8 +91,6 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
     Return the relative and mounted paths, byte count, and SHA-256 digest.
     """
     with translate("Workspace write failed", invalid="Invalid workspace path or content"):
-        if (body.content is None) == (body.content_base64 is None):
-            raise HTTPException(status_code=422, detail="Supply exactly one of content or content_base64")
         content = (
             body.content.encode("utf-8")
             if body.content is not None

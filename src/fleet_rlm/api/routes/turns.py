@@ -20,6 +20,7 @@ from fleet_rlm.api import deps
 from fleet_rlm.api.deps import LOCKED, Runtime, Settings
 from fleet_rlm.api.events import Envelope, SSERuntimeCallback
 from fleet_rlm.api.schemas import TurnRequest
+from fleet_rlm.api.stream_contracts import frame_envelope
 from fleet_rlm.engine.turn import run_turn
 from fleet_rlm.session import SessionRuntime
 
@@ -136,7 +137,7 @@ async def stream_turn(
     reported = False
     try:
         status = envelope.wrap({"event": "turn_status", "phase": "preparation"})
-        yield ServerSentEvent(data=status, id=str(status["seq"]))
+        yield frame_envelope(status)
         while True:
             getter = getter or asyncio.ensure_future(queue.get())
             # Release withheld progress and sample the derived label on the loop this stream owns.
@@ -147,7 +148,7 @@ async def stream_turn(
             )
             if derived is not None and connected and not getter.done() and worker not in done:
                 wrapped_status = envelope.wrap(derived)
-                yield ServerSentEvent(data=wrapped_status, id=str(wrapped_status["seq"]))
+                yield frame_envelope(wrapped_status)
             if getter.done():
                 event: dict[str, Any] | None = getter.result()
             elif worker in done:
@@ -165,14 +166,19 @@ async def stream_turn(
             if event is None:
                 finished = True
                 break
+            wrapped = envelope.wrap(event)
+            framed = frame_envelope(wrapped)
+            # A valid outcome received from the worker remains authoritative even
+            # if the peer disconnected before this frame could be sent. Validation
+            # must succeed first so malformed outcomes still enter uncommitted
+            # teardown in finally.
             reported = reported or event.get("event") in _OUTCOMES
             if connected and await request.is_disconnected():
                 connected = False
                 if not reported:
                     await _cancel(runtime, completion_committed, completion_lock)
             if connected:
-                wrapped = envelope.wrap(event)
-                yield ServerSentEvent(data=wrapped, id=str(wrapped["seq"]))
+                yield framed
             if event.get("event") == "done":
                 # `done` follows teardown and is the Turn's last event; deliver it instead of
                 # consuming it, so an HTTP client can tell a clean termination from a dropped stream.
@@ -182,7 +188,7 @@ async def stream_turn(
             failure = envelope.wrap(
                 {"event": "error", "request_id": turn_id, "error": f"The Turn failed (request {turn_id})."}
             )
-            yield ServerSentEvent(data=failure, id=str(failure["seq"]))
+            yield frame_envelope(failure)
     finally:
         if getter is not None:
             getter.cancel()

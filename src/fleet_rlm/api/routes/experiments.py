@@ -9,13 +9,26 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from fleet_rlm.api.deps import Experiments
-from fleet_rlm.api.schemas import ReviewExperiment, StartExperiment
+from fleet_rlm.api.schemas import (
+    ApiError,
+    ExperimentDetail,
+    ExperimentEnvelope,
+    ExperimentList,
+    ReviewExperiment,
+    StartExperiment,
+)
 from fleet_rlm.experiments import ExperimentBusyError
 from fleet_rlm.optimization_runs import ExperimentOptions, public_run
 
 __all__ = ["Experiments", "router"]
 
 router = APIRouter(prefix="/sessions/{session_id}/experiments", tags=["experiments"])
+_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"model": ApiError, "description": "The requested experiment does not exist."},
+    409: {"model": ApiError, "description": "The operation conflicts with the run or current manager state."},
+    422: {"model": ApiError, "description": "The request or experiment identity is invalid."},
+    503: {"model": ApiError, "description": "Experiment storage or worker service is unavailable."},
+}
 
 
 def _error(error: Exception) -> HTTPException:
@@ -40,14 +53,20 @@ def _experiment_errors() -> Generator[None, None, None]:
         raise _error(error) from None
 
 
-@router.get("")
+@router.get("", response_model=ExperimentList, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
 async def list_experiments(session_id: str, manager: Experiments) -> dict[str, Any]:
     """List persisted history and the active run for one Session."""
     with _experiment_errors():
         return await manager.list(session_id)
 
 
-@router.post("", status_code=202)
+@router.post(
+    "",
+    status_code=202,
+    response_model=ExperimentEnvelope,
+    response_model_exclude_unset=True,
+    responses=_ERROR_RESPONSES,
+)
 async def start_experiment(session_id: str, body: StartExperiment, manager: Experiments) -> dict[str, Any]:
     """Start once per request ID; a busy server rejects instead of queueing work."""
     with _experiment_errors():
@@ -55,21 +74,33 @@ async def start_experiment(session_id: str, body: StartExperiment, manager: Expe
         return {"experiment": public_run(await manager.start(session_id, body.request_id, options))}
 
 
-@router.get("/{run_id}")
+@router.get("/{run_id}", response_model=ExperimentDetail, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
 async def experiment_detail(session_id: str, run_id: str, manager: Experiments) -> dict[str, Any]:
     """Return a snapshot and its bounded saved comparison."""
     with _experiment_errors():
         return await manager.detail(session_id, run_id)
 
 
-@router.post("/{run_id}/cancel", status_code=202)
+@router.post(
+    "/{run_id}/cancel",
+    status_code=202,
+    response_model=ExperimentEnvelope,
+    response_model_exclude_unset=True,
+    responses=_ERROR_RESPONSES,
+)
 async def cancel_experiment(session_id: str, run_id: str, manager: Experiments) -> dict[str, Any]:
     """Request a cooperative stop; terminal status follows actual worker cleanup."""
     with _experiment_errors():
         return {"experiment": public_run(await manager.cancel(session_id, run_id))}
 
 
-@router.post("/{run_id}/review", status_code=202)
+@router.post(
+    "/{run_id}/review",
+    status_code=202,
+    response_model=ExperimentEnvelope,
+    response_model_exclude_unset=True,
+    responses=_ERROR_RESPONSES,
+)
 async def review_experiment(
     session_id: str, run_id: str, body: ReviewExperiment, manager: Experiments
 ) -> dict[str, Any]:

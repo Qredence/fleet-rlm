@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from importlib.metadata import version
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import mlflow
 from fastapi import FastAPI
@@ -97,14 +97,46 @@ def create_app(
             yield
 
     app = FastAPI(title="Fleet-RLM Lite API", version=VERSION, lifespan=lifespan)
+    native_openapi = app.openapi
+
+    def openapi_contract() -> dict[str, Any]:
+        """Keep native SSE documentation valid under the declared OpenAPI 3.1 version."""
+        schema = native_openapi()
+        # FastAPI 0.162 adds the OpenAPI 3.2 Media Type itemSchema to SSE routes.
+        # Only correct these media declarations; retain native components and framing.
+        for path_name in ("/sessions/{session_id}/turn", "/setup/operations/{operation_id}/events"):
+            path = schema.get("paths", {}).get(path_name, {})
+            for operation in path.values():
+                if not isinstance(operation, dict):
+                    continue
+                for status, response in operation.get("responses", {}).items():
+                    media = response.get("content", {}).get("text/event-stream")
+                    if media is not None:
+                        if not str(status).startswith("2"):
+                            # Setup failures happen before streaming and use SetupError JSON.
+                            response["content"].pop("text/event-stream")
+                            response["content"]["application/json"] = {
+                                "schema": {"$ref": "#/components/schemas/SetupError"}
+                            }
+                            continue
+                        media.pop("itemSchema", None)
+                        media["schema"] = {"type": "string"}
+        return schema
+
+    app.openapi = openapi_contract  # ty: ignore[invalid-assignment] -- FastAPI's supported OpenAPI hook.
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):
-        """Do not echo setup credential input in validation error responses."""
+        """Keep setup and workspace content out of request validation responses."""
         if request.url.path.startswith("/setup/"):
             return JSONResponse(
                 status_code=422, content={"detail": "Invalid setup request; check the submitted fields."}
             )
+        if "/workspace/files/" in request.url.path and any(
+            error.get("type") == "workspace_content_xor" for error in exc.errors()
+        ):
+            # Preserve the existing XOR status and response body without echoing the submitted file content.
+            return JSONResponse(status_code=422, content={"detail": "Supply exactly one of content or content_base64"})
         return await request_validation_exception_handler(request, exc)
 
     app.state.settings = resolved

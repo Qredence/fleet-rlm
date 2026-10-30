@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_core import PydanticCustomError
 
-from fleet_rlm.config import validate_turn_timeout_seconds
 from fleet_rlm.optimization_runs import ExperimentOptions
 
 MAX_TASK_CHARS = 100_000
+
+DisabledDeadline = Annotated[int, Field(strict=True, ge=0, le=0)]
+BoundedDeadline = Annotated[int, Field(strict=True, ge=10, le=3600)]
+DeadlineValue = DisabledDeadline | BoundedDeadline | None
 
 
 # Requests
@@ -31,25 +35,13 @@ class TurnRequest(_Request):
         default=False,
         description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",
     )
-    timeout_seconds: int | None = Field(
+    timeout_seconds: DeadlineValue = Field(
         default=None,
-        strict=True,
         description=(
             "Fleet deadline for this Turn in seconds. Omitted or null inherits the configured "
             "value; 0 disables the Fleet deadline; otherwise the value must be 10..3600."
         ),
     )
-
-    @field_validator("timeout_seconds", mode="before")
-    @classmethod
-    def timeout_is_zero_or_bounded(cls, value: Any) -> int | None:
-        """Preserve None for inheritance; accept integer 0 or 10..3600 seconds.
-
-        Raise ValueError for other values, including booleans, floats, and strings.
-        """
-        if value is None:
-            return None
-        return validate_turn_timeout_seconds(value, field="timeout_seconds")
 
 
 class ModeRequest(_Request):
@@ -61,8 +53,25 @@ class ModeRequest(_Request):
 class WorkspaceWriteRequest(_Request):
     """File content for a workspace write, as text or base64; supply exactly one."""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {"required": ["content"], "properties": {"content": {"type": "string"}}},
+                {"required": ["content_base64"], "properties": {"content_base64": {"type": "string"}}},
+            ]
+        },
+    )
+
     content: str | None = Field(default=None, max_length=25_000_000)
     content_base64: str | None = Field(default=None, max_length=34_000_000)
+
+    @model_validator(mode="after")
+    def exactly_one_content(self) -> WorkspaceWriteRequest:
+        """Require exactly one non-null content representation while allowing empty files."""
+        if (self.content is None) == (self.content_base64 is None):
+            raise PydanticCustomError("workspace_content_xor", "Supply exactly one of content or content_base64")
+        return self
 
 
 class ContextRequest(_Request):
@@ -283,3 +292,63 @@ class Attached(BaseModel):
 
     mounted_path: str
     rel_path: str
+
+
+class ApiError(BaseModel):
+    """Sanitized HTTP error detail or FastAPI's standard validation issue list."""
+
+    detail: str | list[dict[str, Any]]
+
+
+class ExperimentRun(BaseModel):
+    """Public view of a persisted optimization run, including additive public fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+    run_id: str
+    session_id: str
+    status: str
+    stage: str | None = None
+    options: dict[str, Any] | None = None
+    started_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+    candidate_version: str | None = None
+    gate: dict[str, Any] | None = None
+    dataset_sizes: dict[str, Any] | None = None
+    mlflow_run_id: str | None = None
+    progress: dict[str, Any] | None = None
+    failure: dict[str, Any] | None = None
+    decision: str | None = None
+    decision_at: str | None = None
+    stop_requested: bool | None = None
+
+
+class ExperimentList(BaseModel):
+    """History snapshot and admission state for one Session's experiments."""
+
+    experiments: list[ExperimentRun]
+    active_run_id: str | None
+    accepting: bool
+
+
+class ExperimentEnvelope(BaseModel):
+    """One public run returned by start, cancel, or review."""
+
+    experiment: ExperimentRun
+
+
+class ExperimentDetail(BaseModel):
+    """One public run and its optional saved comparison evidence."""
+
+    experiment: ExperimentRun
+    comparison: dict[str, Any] | None
+
+
+class ExperimentManagerStatus(BaseModel):
+    """Admission and active-run state observed by the local launcher."""
+
+    accepting: bool
+    busy: bool
+    experiments: list[ExperimentRun]

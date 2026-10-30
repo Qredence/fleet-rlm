@@ -79,6 +79,7 @@ dev = [
     "pip-audit>=2.10.1,<3",
     "twine>=7.0.0,<8",
     "coverage>=7.6,<8",
+    "openapi-spec-validator>=0.7,<0.9",
 ]
 # Notebook tooling; opt in with `uv sync --locked --group benchmarks`.
 benchmarks = [
