@@ -77,7 +77,7 @@ def test_historical_recovery_preserves_unknown_fields_and_only_normalizes_at_rea
         assert {"event": replay[1]["event"], **replay[1]["payload"]} == expected
         state = status["result"].pop("provenance_state")
         assert state == ("unresolved" if "deadline_source" in row["result"] else "pre-provenance")
-        assert status["result"] == expected and prior == row
+        assert status["result"] == expected
         replayed = turn_module._replayed(prior)
         replayed["historical_extension"] = "changed by consumer"
         assert prior == row
@@ -231,7 +231,8 @@ def test_canonical_completion_survives_postcommit_observation_faults(traced, mon
     assert [event["event"] for event in replay] == ["turn_status", "turn_complete", "done"]
     assert {"event": live[1]["event"], **live[1]["payload"]} == stored
     assert {"event": replay[1]["event"], **replay[1]["payload"]} == stored
-    assert status["result"].pop("provenance_state") == "recorded"
+    provenance_state = status["result"].pop("provenance_state")
+    assert provenance_state == "recorded"
     assert status["result"] == stored
     assert stored["effective_seconds"] is None and stored["maximum_lifespan_minutes"] is None
     assert stored["root_sandbox_id"] == "warm-root" and stored["trace_id"] == "canonical-trace"

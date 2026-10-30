@@ -388,7 +388,8 @@ def run_turn(
                 resolve_exception(exc)
                 if committed is not None:
                     return
-                assert terminal_event is not None
+                if terminal_event is None:
+                    raise RuntimeError("Turn exception resolution produced no terminal event") from exc
                 span.set_status("ERROR")
                 span.set_outputs(terminal_event)
                 span.set_attributes(
