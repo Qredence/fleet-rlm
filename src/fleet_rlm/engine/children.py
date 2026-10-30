@@ -90,6 +90,7 @@ class ChildAgents:
             max_llm_calls=max_llm_calls,
         )
         try:
+            # Match the parent's native-first, fixture-bounded parsing policy.
             with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
                 result = child(subtask=subtask)
         except Exception as exc:

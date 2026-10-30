@@ -6,7 +6,7 @@ The active runtime is deliberately compact:
 src/fleet_rlm/
 ├── config.py          # FleetSettings and model construction
 ├── contracts.py       # Route vocabulary, stopping rules, runtime input names, decision evidence
-├── adapters.py        # Fleet's DSPy ChatAdapter: raw-Python fence and one format re-ask
+├── adapters.py        # Native ChatAdapter recovery with recorded gateway parse compatibility
 ├── observability.py   # Redaction, native usage receipts, callbacks, MLflow instrumentation
 ├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
 ├── skills.py          # User Skill validation, sync, and catalog

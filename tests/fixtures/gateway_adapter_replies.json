@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "provenance": "Browser verification session dspy-verify-20261029, local MLflow. Frozen parser completions only: prompts, headers, configuration and shared memory excluded. Declared output values checked against protocol; native parsed values are authoritative for valid replies. Invalid attempts retained separately.",
+  "cases": [
+    {
+      "id": "direct-01",
+      "route": "direct",
+      "signature": "task -> reasoning, answer",
+      "completion": "[[ ## reasoning ## ]]\nThe task explicitly asks for the exact literal reply \"FLEET_WEB_DIRECT_OK\" and notes no tools are needed. No memory or session history is relevant.\n\n[[ ## answer ## ]]\nFLEET_WEB_DIRECT_OK\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "The task explicitly asks for the exact literal reply \"FLEET_WEB_DIRECT_OK\" and notes no tools are needed. No memory or session history is relevant.",
+        "answer": "FLEET_WEB_DIRECT_OK"
+      },
+      "compatibility": "native",
+      "legacy_preserved": true,
+      "provenance": {
+        "trace_id": "tr-3b93962b0658dfc872fa22477ae21085",
+        "span_id": "5069e268a538a24f",
+        "parser": "ChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "rlm-02",
+      "route": "rlm",
+      "signature": "task -> reasoning, code",
+      "completion": "[[ ## reasoning ## ]]\nThe task is simple: compute sum(n*n for n in range(1,11)) = 385, set marker = \"</>\", print it unchanged, and submit an answer containing FLEET_WEB_RLM_OK, the computed total, and the literal marker. Do not create or modify workspace files. I'll do this in one code block, verifying the sum with a quick self-consistency check (closed form).\n\n[[ ## code ## ]]\n```python\ntotal = sum(n*n for n in range(1, 11))\nmarker = \"</>\"\nprint(marker)\nprint(\"total =\", total)\n\n# self-consistency check: closed-form sum of squares for n=1..10\nn = 10\nclosed_form = n*(n+1)*(2*n+1)//6\nprint(\"closed_form =\", closed_form)\nassert total == closed_form == 385\n\nanswer = f\"FLEET_WEB_RLM_OK | total={total} | marker={marker}\"\nprint(answer)\n```\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "The task is simple: compute sum(n*n for n in range(1,11)) = 385, set marker = \"</>\", print it unchanged, and submit an answer containing FLEET_WEB_RLM_OK, the computed total, and the literal marker. Do not create or modify workspace files. I'll do this in one code block, verifying the sum with a quick self-consistency check (closed form).",
+        "code": "```python\ntotal = sum(n*n for n in range(1, 11))\nmarker = \"</>\"\nprint(marker)\nprint(\"total =\", total)\n\n# self-consistency check: closed-form sum of squares for n=1..10\nn = 10\nclosed_form = n*(n+1)*(2*n+1)//6\nprint(\"closed_form =\", closed_form)\nassert total == closed_form == 385\n\nanswer = f\"FLEET_WEB_RLM_OK | total={total} | marker={marker}\"\nprint(answer)\n```"
+      },
+      "compatibility": "native",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-33370765356dc75ceeedf8a0f293287d",
+        "span_id": "2374a2f1e07666a0",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "rlm-03",
+      "route": "rlm",
+      "signature": "task -> reasoning, code",
+      "completion": "[[ ## reasoning ## ]]\nThe computation is complete and verified: `total = 385`, confirmed by the closed-form sum of squares (n(n+1)(2n+1)/6 = 385). The marker `</>` was printed unchanged. The answer string `FLEET_WEB_RLM_OK | total=385 | marker=</>` was already constructed. No workspace files were created or modified. All that remains is to submit, reusing the existing `answer` variable.\n\n[[ ## code ## ]]\n```python\nSUBMIT(answer=answer, learned_skill_note=\"\")\n```\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "The computation is complete and verified: `total = 385`, confirmed by the closed-form sum of squares (n(n+1)(2n+1)/6 = 385). The marker `</>` was printed unchanged. The answer string `FLEET_WEB_RLM_OK | total=385 | marker=</>` was already constructed. No workspace files were created or modified. All that remains is to submit, reusing the existing `answer` variable.",
+        "code": "```python\nSUBMIT(answer=answer, learned_skill_note=\"\")\n```"
+      },
+      "compatibility": "native",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-33370765356dc75ceeedf8a0f293287d",
+        "span_id": "ef77b99cf72bd8d1",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "flex-04",
+      "route": "flex",
+      "signature": "task -> reasoning, code",
+      "completion": "I'll first inspect the environment for the required tools, then run the batched query and decision calls.\n\n```python\nimport inspect\n\n# Check what batched helpers are available in the outer interpreter\nnames = [n for n in dir() if 'batched' in n.lower() or 'jev' in n.lower() or 'llm_query' in n.lower()]\nprint(\"matching names:\", names)\nprint(\"llm_query_batched exists:\", 'llm_query_batched' in dir())\nprint(\"jev_decide_batched exists:\", 'jev_decide_batched' in dir())\ntry:\n    print(\"jev signature:\", inspect.signature(jev_decide_batched))\nexcept Exception as e:\n    print(\"signature unavailable:\", type(e).__name__, e)\n```\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "I'll first inspect the environment for the required tools, then run the batched query and decision calls.",
+        "code": "import inspect\n\n# Check what batched helpers are available in the outer interpreter\nnames = [n for n in dir() if 'batched' in n.lower() or 'jev' in n.lower() or 'llm_query' in n.lower()]\nprint(\"matching names:\", names)\nprint(\"llm_query_batched exists:\", 'llm_query_batched' in dir())\nprint(\"jev_decide_batched exists:\", 'jev_decide_batched' in dir())\ntry:\n    print(\"jev signature:\", inspect.signature(jev_decide_batched))\nexcept Exception as e:\n    print(\"signature unavailable:\", type(e).__name__, e)"
+      },
+      "compatibility": "raw-python-fence",
+      "legacy_preserved": true,
+      "provenance": {
+        "trace_id": "tr-afa68337820131f038286d9cadf6ff54",
+        "span_id": "9da11ba18cc613d0",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "flex-05",
+      "route": "flex",
+      "signature": "task -> reasoning, code",
+      "completion": "I have both helpers available with the expected signatures. Now I'll execute the batched queries and decisions directly, print them, and assert correctness.",
+      "expected": null,
+      "compatibility": "invalid",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-afa68337820131f038286d9cadf6ff54",
+        "span_id": "f904e2af2bb05c8a",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "flex-06",
+      "route": "flex",
+      "signature": "task -> reasoning, code",
+      "completion": "I have both helpers available with the expected signatures. Now I'll execute the batched queries and decisions directly, print them, and assert correctness.",
+      "expected": null,
+      "compatibility": "invalid",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-afa68337820131f038286d9cadf6ff54",
+        "span_id": "905cb99aa32bb930",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "flex-07",
+      "route": "flex",
+      "signature": "task -> reasoning, code",
+      "completion": "[[ ## reasoning ## ]]\nBoth helpers exist with `jev_decide_batched(items, question, choices)`. I'll execute the batched query, assert the stripped replies, then run the batched decision call and print ordered results.\n\n[[ ## code ## ]]\n```python\nresponses = llm_query_batched([\"Reply exactly ALPHA\", \"Reply exactly BETA\"])\nprint(\"responses:\", responses)\nassert [r.strip() for r in responses] == [\"ALPHA\", \"BETA\"], responses\n\ndecisions = jev_decide_batched([\"apple\", \"carrot\"], \"Classify each item as fruit or vegetable\", [\"fruit\", \"vegetable\"])\nprint(\"decisions:\", decisions)\nprint(\"len:\", len(decisions))\n\nanswer = f\"FLEET_WEB_FLEX_OK | replies={[r.strip() for r in responses]} | decisions={list(decisions)}\"\nprint(answer)\n```\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "Both helpers exist with `jev_decide_batched(items, question, choices)`. I'll execute the batched query, assert the stripped replies, then run the batched decision call and print ordered results.",
+        "code": "```python\nresponses = llm_query_batched([\"Reply exactly ALPHA\", \"Reply exactly BETA\"])\nprint(\"responses:\", responses)\nassert [r.strip() for r in responses] == [\"ALPHA\", \"BETA\"], responses\n\ndecisions = jev_decide_batched([\"apple\", \"carrot\"], \"Classify each item as fruit or vegetable\", [\"fruit\", \"vegetable\"])\nprint(\"decisions:\", decisions)\nprint(\"len:\", len(decisions))\n\nanswer = f\"FLEET_WEB_FLEX_OK | replies={[r.strip() for r in responses]} | decisions={list(decisions)}\"\nprint(answer)\n```"
+      },
+      "compatibility": "native",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-afa68337820131f038286d9cadf6ff54",
+        "span_id": "e184661d3eb8cf03",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "flex-08",
+      "route": "flex",
+      "signature": "task -> reasoning, code",
+      "completion": "[[ ## reasoning ## ]]\nStep 2 already produced all required outputs: `llm_query_batched` returned `['ALPHA', 'BETA']` (asserted, stripped values match in input order), and `jev_decide_batched` returned ordered decisions `fruit` for apple and `vegetable` for carrot. The self-consistency check (assert on stripped replies and matching decision order/length 2) passed. The answer string `answer` was constructed from those executed outputs, so I'll submit it directly reusing the existing variables.\n\n[[ ## code ## ]]\n```python\nSUBMIT(answer=answer, learned_skill_note=\"Outer Flex exposes llm_query_batched and jev_decide_batched(items, question, choices); decisions return dicts in input order.\")\n```\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "Step 2 already produced all required outputs: `llm_query_batched` returned `['ALPHA', 'BETA']` (asserted, stripped values match in input order), and `jev_decide_batched` returned ordered decisions `fruit` for apple and `vegetable` for carrot. The self-consistency check (assert on stripped replies and matching decision order/length 2) passed. The answer string `answer` was constructed from those executed outputs, so I'll submit it directly reusing the existing variables.",
+        "code": "```python\nSUBMIT(answer=answer, learned_skill_note=\"Outer Flex exposes llm_query_batched and jev_decide_batched(items, question, choices); decisions return dicts in input order.\")\n```"
+      },
+      "compatibility": "native",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-afa68337820131f038286d9cadf6ff54",
+        "span_id": "5c3f6e4d4af2bcb8",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "rlm-literal-09",
+      "route": "rlm",
+      "signature": "task -> reasoning, code",
+      "completion": "\n\n[[ ## reasoning ## ]]\nThe task is straightforward: construct the marker from chr codes, print it and its bytes, assert the bytes match the expected list, then build the answer string. No files or agents needed. This should all be done in one code block, then submit on the next action as instructed.\n\n[[ ## code ## ]]\n```python\nmarker = \"\".join(map(chr, [60,47,116,104,105,110,107,62]))\nprint(\"marker:\", marker)\nprint(\"bytes:\", list(marker.encode()))\nassert list(marker.encode()) == [60,47,116,104,105,110,107,62]\nanswer = \"FLEET_WEB_LITERAL_OK \" + marker\nprint(\"answer:\", answer)\n```\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "The task is straightforward: construct the marker from chr codes, print it and its bytes, assert the bytes match the expected list, then build the answer string. No files or agents needed. This should all be done in one code block, then submit on the next action as instructed.",
+        "code": "```python\nmarker = \"\".join(map(chr, [60,47,116,104,105,110,107,62]))\nprint(\"marker:\", marker)\nprint(\"bytes:\", list(marker.encode()))\nassert list(marker.encode()) == [60,47,116,104,105,110,107,62]\nanswer = \"FLEET_WEB_LITERAL_OK \" + marker\nprint(\"answer:\", answer)\n```"
+      },
+      "compatibility": "native",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-8d24ad71cc525a569e770e4d87ca4acb",
+        "span_id": "ffeed7fee93dc43d",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "rlm-literal-10",
+      "route": "rlm",
+      "signature": "task -> reasoning, code",
+      "completion": "\" \u2014 wait, let's decode: 60='<', 47='/', 116='t', 104='h', 105='i', 110='n', 107='k', 62='>'. So marker = \"</think>\". The output shows \"marker: \" followed by something that might be rendered as nothing in the output preview... Actually the output shows \"marker: \" then \"bytes: ...\". The marker likely is \"</think>\" which may have been stripped in display. Regardless, the assertion passed since there was no error.\n\nNow on the next action, SUBMIT(answer=answer, learned_skill_note=\"\") without retyping the marker. Keep it short.</think>[[ ## reasoning ## ]]\nThe marker was constructed from the chr codes, printed, and its UTF-8 bytes asserted equal to the expected list `[60, 47, 116, 104, 105, 110, 107, 62]` without error. The `answer` variable is already built in the REPL. Per the task instructions, the next action is to submit reusing `answer` and not retyping the marker.\n\n[[ ## code ## ]]\n```python\nSUBMIT(answer=answer, learned_skill_note=\"\")\n```\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "The marker was constructed from the chr codes, printed, and its UTF-8 bytes asserted equal to the expected list `[60, 47, 116, 104, 105, 110, 107, 62]` without error. The `answer` variable is already built in the REPL. Per the task instructions, the next action is to submit reusing `answer` and not retyping the marker.",
+        "code": "```python\nSUBMIT(answer=answer, learned_skill_note=\"\")\n```"
+      },
+      "compatibility": "leaked-inline-header",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-8d24ad71cc525a569e770e4d87ca4acb",
+        "span_id": "a0746e4ae7438f71",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    },
+    {
+      "id": "rlm-inline-code-11",
+      "route": "rlm",
+      "signature": "task -> reasoning, code",
+      "completion": "[[ ## reasoning ## ]]\nThe task is a native adapter verification: call spawn_agent once with a simple subtask, check findings contain 42 and no error, construct a marker string in root Python, assert its bytes, print marker + findings, then submit answer prefixed NATIVE_RLM_CHILD_OK.\n\nFirst step: inspect the environment briefly and make the single spawn_agent call. I should do the spawn_agent call first since it's the required action. Let me do it in one code block along with the marker construction and checks.\n\nNote: task says do not create files or learned notes. Let me just run the call and checks.\n\nI'll write code that: constructs marker, asserts bytes, calls spawn_agent, checks findings.\n\nNote SUBMIT must be a separate action after seeing output. So this block prints results, then next block SUBMITs.</think>[[ ## code ## ]]\n```python\nimport json\n\n# Construct the marker in root Python\nmarker = \"\".join(map(chr, [60, 47, 116, 104, 105, 110, 107, 62]))\nassert marker.encode() == b\"</think>\", marker.encode()\nprint(\"marker:\", repr(marker), \"bytes:\", marker.encode())\n\n# Single spawn_agent call per task specification\nsubtask = \"Compute 6*7 in Python and return findings containing CHILD_NATIVE_OK and the number\"\nres = spawn_agent(\n    subtask=subtask,\n    input_paths=[],\n    allowed_tools=[],\n    max_iters=3,\n    max_llm_calls=8,\n)\nprint(\"spawn_agent result type:\", type(res))\nprint(\"spawn_agent result:\", res)\n\nfindings = res.get(\"findings\", \"\") if isinstance(res, dict) else str(res)\nprint(\"findings:\", findings)\nprint(\"contains 42:\", \"42\" in findings)\nprint(\"contains CHILD_NATIVE_OK:\", \"CHILD_NATIVE_OK\" in findings)\nprint(\"error key:\", res.get(\"error\") if isinstance(res, dict) else None)\n```\n\n[[ ## completed ## ]]",
+      "expected": {
+        "reasoning": "The task is a native adapter verification: call spawn_agent once with a simple subtask, check findings contain 42 and no error, construct a marker string in root Python, assert its bytes, print marker + findings, then submit answer prefixed NATIVE_RLM_CHILD_OK.\n\nFirst step: inspect the environment briefly and make the single spawn_agent call. I should do the spawn_agent call first since it's the required action. Let me do it in one code block along with the marker construction and checks.\n\nNote: task says do not create files or learned notes. Let me just run the call and checks.\n\nI'll write code that: constructs marker, asserts bytes, calls spawn_agent, checks findings.\n\nNote SUBMIT must be a separate action after seeing output. So this block prints results, then next block SUBMITs.</think>",
+        "code": "```python\nimport json\n\n# Construct the marker in root Python\nmarker = \"\".join(map(chr, [60, 47, 116, 104, 105, 110, 107, 62]))\nassert marker.encode() == b\"</think>\", marker.encode()\nprint(\"marker:\", repr(marker), \"bytes:\", marker.encode())\n\n# Single spawn_agent call per task specification\nsubtask = \"Compute 6*7 in Python and return findings containing CHILD_NATIVE_OK and the number\"\nres = spawn_agent(\n    subtask=subtask,\n    input_paths=[],\n    allowed_tools=[],\n    max_iters=3,\n    max_llm_calls=8,\n)\nprint(\"spawn_agent result type:\", type(res))\nprint(\"spawn_agent result:\", res)\n\nfindings = res.get(\"findings\", \"\") if isinstance(res, dict) else str(res)\nprint(\"findings:\", findings)\nprint(\"contains 42:\", \"42\" in findings)\nprint(\"contains CHILD_NATIVE_OK:\", \"CHILD_NATIVE_OK\" in findings)\nprint(\"error key:\", res.get(\"error\") if isinstance(res, dict) else None)\n```"
+      },
+      "compatibility": "leaked-inline-header",
+      "legacy_preserved": false,
+      "provenance": {
+        "trace_id": "tr-543f5f79fcb36616420a0b9c3987e592",
+        "span_id": "e9207baf0193481d",
+        "parser": "FleetRLMChatAdapter.parse",
+        "captured_at": "2026-10-29",
+        "dspy_version": "3.4.1",
+        "model": "openai/system.ai.deepseek-v4-1-flash-1017"
+      }
+    }
+  ]
+}
