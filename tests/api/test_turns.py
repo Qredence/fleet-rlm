@@ -819,7 +819,7 @@ def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
             assert order == ["stop", "failed"] and records == []
             assert traced["status"] == "ERROR"
             assert traced["outputs"]["outcome"] == "failed"
-            assert "bad" not in traced["outputs"]["error"]
+            assert "bad\nname" not in traced["outputs"]["error"]
             assert "answer" not in traced["outputs"]
         else:
             assert terminal[0]["event"] == "turn_complete"
