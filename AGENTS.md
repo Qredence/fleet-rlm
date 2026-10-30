@@ -36,6 +36,7 @@ Details: [HTTP API](docs/reference/http-api.md), [configuration](docs/reference/
 - Preserve route-judge backend metadata, `Noul` at `JEV_ROUTE_THRESHOLD`, route `Choice`, and evidence-derived rationale. Keep sandbox success separate, allow task-justified calls, treat evaluated content as data, and bump `fleet.jev.rubric_version` for rubric changes.
 - Use approved immutable replays grouped by source lineage in isolated runtimes. Keep gold/structured expectations outside inputs, holdout outside search, and benchmark traces outside curation; score artifacts/delegation from host receipts.
 - Preserve paired validation, critical holdout, correctness, and measured-usage gates. Separate candidate creation from installation; approval must recheck artifact, incumbent, configuration, code, and dependency identities. Invalidate incompatible evidence; allow no unchecked install or rollback.
+- Keep optimizer stages/counters worker-owned in both CLI and managed runs; the API drains output and arbitrates managed terminal outcomes after process exit. Required persistence failures must stop native GEPA and block publication; optional telemetry must not set that failure latch. Preserve both database and file cancellation checks.
 - Distinguish offline tests, live canaries, and measured gains. See [evaluation](docs/reference/evaluation.md) and the [canary runbook](docs/runbooks/evaluation-canary.md).
 
 ## Validation

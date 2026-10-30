@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import sys
 import uuid
 from collections.abc import Mapping
-from contextlib import ExitStack, closing, suppress
+from contextlib import ExitStack, closing, contextmanager, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import dspy
@@ -47,9 +50,15 @@ from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.store import Store
 from fleet_rlm.workspace import validate_session_id
 
+logger = logging.getLogger(__name__)
+
+
+class OptimizationPersistenceError(RuntimeError):
+    """Required optimization persistence or ownership could not be confirmed."""
+
 
 class GEPAProgressReporter:
-    """Forward documented GEPA budget updates as structured CLI progress events."""
+    """Own durable worker observations and bridge callback failures to native stopping."""
 
     def __init__(
         self,
@@ -65,62 +74,91 @@ class GEPAProgressReporter:
         self.session_id = session_id
         self.owner_id = owner_id
         self.emit_events = emit_events
+        self._lock = RLock()
+        self._failure: Exception | None = None
+        self._progress: dict[str, Any] = {}
+        self._diagnostic_failed = False
+
+    def should_stop(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Request GEPA's native safe-point stop after the first required failure."""
+        with self._lock:
+            return self._failure is not None
+
+    def raise_if_failed(self) -> None:
+        """Reject partial native results even when GEPA swallowed a callback exception."""
+        with self._lock:
+            if self._failure is not None:
+                raise OptimizationPersistenceError("Required optimization persistence failed") from self._failure
+
+    def update(self, **updates: Any) -> None:
+        """Persist a required owner-fenced write; retain its first failure for native stopping."""
+        with self._lock:
+            self.raise_if_failed()
+            if self.store is None or self.session_id is None or self.run_id is None:
+                return
+            try:
+                saved = _update_run(
+                    self.store,
+                    self.session_id,
+                    self.run_id,
+                    owner_id=self.owner_id,
+                    expected_statuses=("running",),
+                    **updates,
+                )
+                if saved is None:
+                    raise OptimizationPersistenceError("Optimization ownership or status changed")
+            except Exception as error:
+                self._failure = error
+                self.raise_if_failed()
 
     def _persist(self, event: Mapping[str, Any]) -> None:
-        """Save observed search counts when storage and run identity are configured.
-
-        Raise OptimizationCancelledError if the running owner/status fence no longer
-        matches; storage errors propagate.
-        """
-        if self.store is None or self.session_id is None or self.run_id is None:
-            return
-        saved = _update_run(
-            self.store,
-            self.session_id,
-            self.run_id,
-            owner_id=self.owner_id,
-            expected_statuses=("running",),
-            progress={
+        with self._lock:
+            progress = {
                 key: value
                 for key, value in event.items()
                 if key in {"iteration", "metric_calls_used", "metric_calls_delta", "metric_calls_remaining"}
-            },
-            stage="search",
-        )
-        if saved is None:
-            raise OptimizationCancelledError("Optimization ownership or status changed")
+            }
+            # Only the cumulative total is monotonic. Delta and remaining are observations.
+            if "metric_calls_used" in progress and progress["metric_calls_used"] < self._progress.get(
+                "metric_calls_used", 0
+            ):
+                return
+            snapshot = self._progress | progress
+            self.update(progress=snapshot, stage="search")
+            self._progress = snapshot
+
+    def _observe(self, progress: Mapping[str, Any]) -> None:
+        try:
+            self._persist(progress)
+        except OptimizationPersistenceError:
+            # Native GEPA catches callback exceptions. The stop predicate and explicit
+            # stage boundaries, rather than exception propagation, enforce durability.
+            return
+        if self.emit_events:
+            try:
+                _emit_diagnostic({"type": "progress", **progress, **({"run_id": self.run_id} if self.run_id else {})})
+            except Exception:
+                with self._lock:
+                    if not self._diagnostic_failed:
+                        logger.warning("Optimization diagnostic emission failed; sensitive details omitted.")
+                        self._diagnostic_failed = True
 
     def on_budget_updated(self, event: Mapping[str, Any]) -> None:
-        """Publish observed search metric-call counts without estimating unrelated work."""
-        event = {
-            "stage": "search",
-            "iteration": event["iteration"],
-            "metric_calls_used": event["metric_calls_used"],
-            "metric_calls_delta": event["metric_calls_delta"],
-            "metric_calls_remaining": event.get("metric_calls_remaining"),
-        }
-        self._persist(event)
-        if self.emit_events:
-            emit_event(
-                {
-                    "type": "progress",
-                    **event,
-                    **({"run_id": self.run_id} if self.run_id else {}),
-                }
-            )
+        """Persist known counters without estimating unrelated or remaining work."""
+        self._observe(
+            {
+                "stage": "search",
+                **{
+                    key: event[key]
+                    for key in ("iteration", "metric_calls_used", "metric_calls_delta", "metric_calls_remaining")
+                    if key in event
+                },
+            }
+        )
 
     def on_optimization_end(self, event: Mapping[str, Any]) -> None:
-        """Include GEPA's final observed count, including seed-only searches."""
-        progress = {"stage": "search", "metric_calls_used": event["total_metric_calls"]}
-        self._persist(progress)
-        if self.emit_events:
-            emit_event(
-                {
-                    "type": "progress",
-                    **progress,
-                    **({"run_id": self.run_id} if self.run_id else {}),
-                }
-            )
+        """Retain prior counters while updating GEPA's final observed total."""
+        self._observe({"stage": "search", "metric_calls_used": event["total_metric_calls"]})
 
 
 class OptimizationCancelledError(Exception):
@@ -151,10 +189,53 @@ def _check_run_cancelled(stop_file: Path, store: Store | None, session_id: str, 
         raise OptimizationCancelledError("Optimization stop requested")
 
 
-def _emit_stage(stage: str, *, run_id: str, structured: bool) -> None:
-    """Emit a structured stage event only when structured output is enabled."""
-    if structured:
-        emit_event({"type": "stage", "stage": stage, "run_id": run_id})
+def _emit_diagnostic(event: Mapping[str, Any]) -> None:
+    """Avoid pipe backpressure in callback/control paths; API output is discarded."""
+    import os
+    import stat
+    import sys
+
+    try:
+        if stat.S_ISFIFO(os.fstat(sys.stdout.fileno()).st_mode):
+            return
+    except (AttributeError, OSError, ValueError):
+        pass
+    emit_event(event)
+
+
+def _optional_event(event: Mapping[str, Any]) -> None:
+    """Emit a lifecycle diagnostic independently of durable run correctness."""
+    try:
+        _emit_diagnostic(event)
+    except Exception:
+        logger.warning("Optimization diagnostic emission failed; sensitive details omitted.")
+
+
+def _optional_mlflow(operation: Any, *args: Any, **kwargs: Any) -> Any:
+    """Keep optional tracking failures separate from required evidence and Store writes."""
+    try:
+        return operation(*args, **kwargs)
+    except Exception:
+        logger.warning("Optional optimization tracking failed; sensitive details omitted.")
+        return None
+
+
+@contextmanager
+def _tracking_run(name: str) -> Any:
+    """Enter and close optional tracking without swallowing errors from the optimization."""
+    context = None
+    active = None
+    try:
+        context = mlflow.start_run(run_name=name)
+        active = context.__enter__()
+    except Exception:
+        logger.warning("Optional optimization tracking setup failed; sensitive details omitted.")
+        context = None
+    try:
+        yield active
+    finally:
+        if context is not None:
+            _optional_mlflow(context.__exit__, *sys.exc_info())
 
 
 def _update_run(
@@ -353,10 +434,11 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
             if started is None:
                 raise ValueError("Experiment could not be claimed by this optimizer process")
             if structured:
-                emit_event({"type": "started", "run_id": run_id, "stage": "preparing"})
+                _optional_event({"type": "started", "run_id": run_id, "stage": "preparing"})
 
             target = settings.mlflow_target()
-            experiment_id = configure_mlflow_observability(
+            experiment_id = _optional_mlflow(
+                configure_mlflow_observability,
                 target.optimization_experiment_name,
                 target.tracking_uri,
                 trace_catalog=settings.mlflow_trace_catalog,
@@ -373,8 +455,9 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
             )
             if experiment_id:
-                mlflow.set_experiment(experiment_id=experiment_id)
-            mlflow.dspy.autolog(
+                _optional_mlflow(mlflow.set_experiment, experiment_id=experiment_id)
+            _optional_mlflow(
+                mlflow.dspy.autolog,
                 log_traces=options_dict["trace_search"],
                 log_traces_from_compile=options_dict["trace_search"],
                 log_traces_from_eval=options_dict["trace_search"],
@@ -404,7 +487,7 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         event = {"type": "terminal", "status": status, "run_id": run_id}
         if managed_run_id and worker_outcome is not None:
             event["worker_outcome"] = worker_outcome
-        emit_event(event)
+        _optional_event(event)
     if failure is not None:
         raise failure
 
@@ -586,11 +669,7 @@ def _finalize_optimization_run(
     failure: BaseException | None,
 ) -> tuple[str, BaseException | None, dict[str, Any] | None]:
     worker_outcome: dict[str, Any] | None = None
-    try:
-        mlflow.flush_trace_async_logging()
-    except Exception as error:
-        if failure is None:
-            status, failure = "failed", error
+    _optional_mlflow(mlflow.flush_trace_async_logging)
     try:
         # The DDL pool closes before terminal state is published. The runtime
         # pool remains available to save a failed cleanup outcome.
@@ -598,10 +677,15 @@ def _finalize_optimization_run(
     except Exception as error:
         if failure is None:
             status, failure = "failed", error
-    if status == "completed" and (
-        (directory / "runs" / run_id / "gepa.stop").exists() or _database_stop_requested(store, session_id, run_id)
-    ):
-        status = "cancelled"
+    if status == "completed":
+        try:
+            record = store.get_optimization_run(session_id, run_id)
+            if record is None or record.get("owner_id") != owner_id or record.get("status") != "running":
+                raise OptimizationPersistenceError("Optimization ownership or status changed")
+            if (directory / "runs" / run_id / "gepa.stop").exists() or record.get("stop_requested"):
+                status = "cancelled"
+        except Exception as error:
+            status, failure = "failed", error
     details: dict[str, Any] = {
         "status": status,
         "stage": status,
@@ -634,8 +718,7 @@ def _finalize_optimization_run(
                 **details,
             )
         if saved is None and failure is None:
-            status = "cancelled"
-            worker_outcome = {**details, "status": status, "stage": status}
+            raise OptimizationPersistenceError("Optimization outcome could not be recorded")
     except Exception as error:
         status, failure = "failed", error
         worker_outcome = {"status": status, "failure": {"type": type(error).__name__}}
@@ -711,26 +794,32 @@ def _compile(
     directory = Path(settings.compiled_program_dir)
     stop_file = directory / "runs" / run_id / "gepa.stop"
     stop_file.parent.mkdir(parents=True, exist_ok=True)
-    structured = getattr(args, "structured_events", False)
+
+    reporter = GEPAProgressReporter(
+        run_id,
+        store=store,
+        session_id=session_id,
+        owner_id=owner_id,
+        emit_events=False,
+    )
+
+    def check_boundary() -> None:
+        reporter.raise_if_failed()
+        _check_cancelled(stop_file)
+        record = store.get_optimization_run(session_id, run_id)
+        if record is None or (owner_id is not None and record.get("owner_id") != owner_id):
+            raise OptimizationPersistenceError("Optimization ownership changed")
+        if record.get("stop_requested"):
+            raise OptimizationCancelledError("Optimization stop requested")
+        if record.get("status") != "running":
+            raise OptimizationPersistenceError("Optimization status changed")
 
     def set_stage(name: str) -> None:
-        """Publish and persist a stage, raising OptimizationCancelledError if the running fence fails."""
-        _emit_stage(name, run_id=run_id, structured=structured)
-        if (
-            _update_run(
-                store,
-                session_id,
-                run_id,
-                owner_id=owner_id,
-                expected_statuses=("running",),
-                stage=name,
-            )
-            is None
-        ):
-            raise OptimizationCancelledError("Optimization ownership or status changed")
+        check_boundary()
+        reporter.update(stage=name)
 
     set_stage("preparing")
-    _check_run_cancelled(stop_file, store, session_id, run_id)
+    check_boundary()
     judge_lm = settings.build_judge_lm()
     trainset, devset, holdout = curate_dataset(
         store,
@@ -749,7 +838,8 @@ def _compile(
     examples = [*trainset, *devset, *holdout]
     root_lm, sub_lm, reflection_lm, jev_lm = settings.build_lms()
     if settings.fleet_reflection_model == settings.fleet_root_model:
-        print("[gepa] FLEET_REFLECTION_MODEL equals the serving model; GEPA proposes better with a stronger one.")
+        with suppress(Exception):
+            print("[gepa] FLEET_REFLECTION_MODEL equals the serving model; GEPA proposes better with a stronger one.")
     # This manager is a serialization template only; no sandbox is provisioned.
     template_manager = DaytonaSandboxManager(
         settings.fleet_daytona_api_key,
@@ -767,17 +857,7 @@ def _compile(
     # Snapshot all identities before native search starts. Completion checks the same
     # values again, so the manifest cannot certify code or dependencies changed mid-run.
     search_evidence = approval_evidence(settings, incumbent_digest, scorer_version=SCORER_VERSION)
-    evidence_record = _update_run(
-        store,
-        session_id,
-        run_id,
-        owner_id=owner_id,
-        expected_statuses=("running",),
-        incumbent_digest=incumbent_digest,
-        evidence=search_evidence,
-    )
-    if evidence_record is None:
-        raise OptimizationCancelledError("Optimization ownership or status changed")
+    reporter.update(incumbent_digest=incumbent_digest, evidence=search_evidence)
     factory = build_isolated_engine_factory(settings, store, [*trainset, *devset])
     baseline = IsolatedFleetProgram(template, factory)
 
@@ -796,40 +876,30 @@ def _compile(
     version = run_id
     budget = {"max_metric_calls": args.max_metric_calls} if args.max_metric_calls else {"auto": args.gepa_budget}
     gepa_kwargs = {"mlflow_attach_existing": True}
-    stop_callbacks = [build_stop_file_callback(stop_file), _DatabaseStopper(store, session_id, run_id)]
+    stop_callbacks = [
+        build_stop_file_callback(stop_file),
+        _DatabaseStopper(store, session_id, run_id),
+        reporter.should_stop,
+    ]
     if (proposals := getattr(args, "max_candidate_proposals", None)) is not None:
         stop_callbacks.append(build_proposal_stop_callback(proposals))
     gepa_kwargs["stop_callbacks"] = stop_callbacks
-    gepa_kwargs["callbacks"] = [
-        GEPAProgressReporter(
-            run_id,
-            store=store,
-            session_id=session_id,
-            owner_id=owner_id,
-            emit_events=structured,
-        )
-    ]
+    gepa_kwargs["callbacks"] = [reporter]
     set_stage("search")
-    _check_run_cancelled(stop_file, store, session_id, run_id)
-    with mlflow.start_run(run_name=f"fleet-gepa-{session_id}") as active_run:
+    check_boundary()
+    with _tracking_run(f"fleet-gepa-{session_id}") as active_run:
         mlflow_run_id = getattr(getattr(active_run, "info", None), "run_id", None)
         if mlflow_run_id:
-            _update_run(
-                store,
-                session_id,
-                run_id,
-                owner_id=owner_id,
-                expected_statuses=("running",),
-                mlflow_run_id=mlflow_run_id,
-            )
-        mlflow.set_tags(
+            reporter.update(mlflow_run_id=mlflow_run_id)
+        _optional_mlflow(
+            mlflow.set_tags,
             {
                 "fleet.version": version,
                 "fleet.session_id": session_id,
                 "fleet.optimization.run_id": run_id,
                 "fleet.judge_model": settings.fleet_judge_model,
                 "fleet.trace_search": str(bool(getattr(args, "trace_search", False))).lower(),
-            }
+            },
         )
         optimized = dspy.GEPA(
             metric=metric,
@@ -841,15 +911,15 @@ def _compile(
             seed=0,
             log_dir=str(directory / "runs" / version),
             # Stream GEPA's per-iteration scores into this run instead of opening a second one.
-            use_mlflow=True,
+            use_mlflow=bool(mlflow_run_id),
             gepa_kwargs=gepa_kwargs,
             **budget,
         ).compile(baseline, trainset=trainset, valset=devset)
-        _check_run_cancelled(stop_file, store, session_id, run_id)
+        check_boundary()
         set_stage("validation")
         # GEPA compile/evaluation autologging suppresses DSPy Evaluate traces by default.
         # Enable them only after search so final paired cases export with our context tags.
-        _enable_validation_tracing(trace_search=bool(getattr(args, "trace_search", False)))
+        _optional_mlflow(_enable_validation_tracing, trace_search=bool(getattr(args, "trace_search", False)))
         # The selected candidate is final before either program sees the holdout.
         validation_settings = settings.with_explicit_overrides(fleet_root_cache=False, fleet_sub_cache=False)
         validation_factory = build_isolated_engine_factory(validation_settings, store, examples)
@@ -860,7 +930,7 @@ def _compile(
             # Alternate order to reduce systematic warmup/order effects.
             order = ("baseline", "candidate") if pass_index % 2 == 0 else ("candidate", "baseline")
             for stage in order:
-                _check_run_cancelled(stop_file, store, session_id, run_id)
+                check_boundary()
                 program = incumbent_validation if stage == "baseline" else candidate_validation
                 paired[stage].append(
                     score_stage(
@@ -874,8 +944,8 @@ def _compile(
                         pass_index=pass_index,
                     )
                 )
-                _check_run_cancelled(stop_file, store, session_id, run_id)
-        _check_run_cancelled(stop_file, store, session_id, run_id)
+                check_boundary()
+        check_boundary()
         set_stage("finalization")
         evaluation: dict[str, Any] = {
             "policy_version": APPROVAL_POLICY_VERSION,
@@ -886,7 +956,7 @@ def _compile(
         evaluation["candidate"]["changed_components"] = [item["component"] for item in changes]
         evaluation["validation_cache"] = "serving_response_cache_disabled"
         gate = promotion_gate(evaluation)
-        _check_run_cancelled(stop_file, store, session_id, run_id)
+        check_boundary()
         final_evidence = approval_evidence(settings, incumbent_digest, scorer_version=SCORER_VERSION)
         if final_evidence != search_evidence:
             raise RuntimeError("Optimization evidence changed during the run; candidate requires reevaluation")
@@ -910,7 +980,7 @@ def _compile(
             dependencies=search_evidence,
         )
         write_manifest(destination.with_suffix(".manifest.json"), manifest)
-        _check_run_cancelled(stop_file, store, session_id, run_id)
+        check_boundary()
         report = format_report(manifest, holdout)
         report_path = destination.with_suffix(".comparison.md")
         full_report_path = destination.with_suffix(".comparison.json")
@@ -918,34 +988,31 @@ def _compile(
         full_report_path.write_text(
             json.dumps({"manifest": asdict(manifest), "report": report}, ensure_ascii=False, indent=2) + "\n"
         )
-        _check_run_cancelled(stop_file, store, session_id, run_id)
-        mlflow.log_metrics(
+        check_boundary()
+        _optional_mlflow(
+            mlflow.log_metrics,
             {
                 f"{stage}_{split}": evaluation[stage][split]
                 for stage in ("baseline", "candidate")
                 for split in ("dev", "holdout")
             }
-            | {"gate_passed": float(gate.passed)}
+            | {"gate_passed": float(gate.passed)},
         )
-        mlflow.log_artifact(str(destination), artifact_path="candidate")
-        mlflow.log_dict(asdict(manifest), "candidate/manifest.json")
-        mlflow.log_dict(optimized.detailed_results.to_dict(), "search/results.json")
-        mlflow.log_params(
+        _optional_mlflow(mlflow.log_artifact, str(destination), artifact_path="candidate")
+        _optional_mlflow(mlflow.log_dict, asdict(manifest), "candidate/manifest.json")
+        _optional_mlflow(mlflow.log_dict, optimized.detailed_results.to_dict(), "search/results.json")
+        _optional_mlflow(
+            mlflow.log_params,
             {
                 "validation_passes": VALIDATION_PASSES,
                 "validation_rollouts": 2 * VALIDATION_PASSES * (len(devset) + len(holdout)),
                 "search_metric_calls": optimized.detailed_results.total_metric_calls,
-            }
+            },
         )
-        mlflow.log_text(report, artifact_file="comparison.md")
-        mlflow.log_artifact(str(full_report_path), artifact_path="candidate")
-        _check_run_cancelled(stop_file, store, session_id, run_id)
-        saved = _update_run(
-            store,
-            session_id,
-            run_id,
-            owner_id=owner_id,
-            expected_statuses=("running",),
+        _optional_mlflow(mlflow.log_text, report, artifact_file="comparison.md")
+        _optional_mlflow(mlflow.log_artifact, str(full_report_path), artifact_path="candidate")
+        check_boundary()
+        reporter.update(
             candidate_path=str(destination),
             manifest_path=str(destination.with_suffix(".manifest.json")),
             report_path=str(report_path),
@@ -954,9 +1021,9 @@ def _compile(
             gate={"passed": gate.passed, "reasons": list(gate.reasons)},
             dataset_sizes={"train": len(trainset), "dev": len(devset), "holdout": len(holdout)},
         )
-        if saved is None:
-            raise OptimizationCancelledError("Optimization ownership or status changed")
-    print(report)
-    print(f"Candidate saved at {destination}; not installed.")
-    if gate.passed:
-        print(f"Approve with: fleet optimize --session {session_id} --approve {version}")
+        check_boundary()
+    with suppress(Exception):
+        print(report)
+        print(f"Candidate saved at {destination}; not installed.")
+        if gate.passed:
+            print(f"Approve with: fleet optimize --session {session_id} --approve {version}")

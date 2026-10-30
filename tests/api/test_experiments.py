@@ -75,7 +75,7 @@ def test_invalid_approval_manifest_becomes_interrupted_without_install(tmp_path,
     asyncio.run(scenario())
 
 
-def test_progress_storage_failure_still_drains_worker_output(tmp_path):
+def test_output_drain_never_writes_progress_even_when_storage_is_unavailable(tmp_path):
     async def scenario():
         store = MemoryStore()
         manager = ExperimentManager(FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path)), store)
@@ -89,10 +89,9 @@ def test_progress_storage_failure_still_drains_worker_output(tmp_path):
         stream.feed_data(b'FLEET_EVENT {"type":"progress","run_id":"s1-run","metric_calls_used":1}\n')
         stream.feed_data(b"x" * 90_000 + b"\nordinary output\n")
         stream.feed_eof()
-        with pytest.raises(RuntimeError, match="could not be persisted"):
-            await asyncio.wait_for(manager._read_output(stream, "s1", "s1-run"), timeout=2)
+        await asyncio.wait_for(manager._discard_output(stream), timeout=2)
         assert stream.at_eof()
-        assert (tmp_path / "runs" / "s1-run" / "gepa.stop").exists()
+        assert not (tmp_path / "runs" / "s1-run" / "gepa.stop").exists()
 
     asyncio.run(scenario())
 
@@ -651,7 +650,7 @@ def test_interrupted_run_keeps_its_saved_comparison_when_terminal_candidate_vers
     assert detail["comparison"] == {"report": "partial diagnostics"}
 
 
-def test_managed_subprocess_gets_settings_on_stdin_and_only_bounded_progress_is_persisted(
+def test_managed_subprocess_drains_noisy_output_without_replaying_progress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def scenario() -> None:
@@ -697,13 +696,21 @@ def test_managed_subprocess_gets_settings_on_stdin_and_only_bounded_progress_is_
             captured["spawn_kwargs"] = kwargs
             run_id = args[args.index("--managed-run-id") + 1]
             run_id_holder["run_id"] = run_id
+            from fleet_rlm.optimize.gepa import GEPAProgressReporter
+
+            reporter = GEPAProgressReporter(
+                run_id, store=store, session_id="sess_worker", owner_id=manager.owner_id, emit_events=False
+            )
+            reporter.on_budget_updated({"metric_calls_used": 20, "iteration": 2})
+            assert store.get_optimization_run("sess_worker", run_id)["progress"]["metric_calls_used"] == 20
             stdout = asyncio.StreamReader()
             stdout.feed_data(
                 b"x" * 90_000
                 + b"\n"
                 + (
                     f'FLEET_EVENT {{"type":"progress","run_id":"{run_id}","stage":"search",'
-                    '"metric_calls_used":4,"prompt":"must not persist"}\n'
+                    '"metric_calls_used":10,"prompt":"must not persist"}\n'
+                    f'FLEET_EVENT {{"type":"stage","run_id":"{run_id}","stage":"validation"}}\n'
                     f'FLEET_EVENT {{"type":"terminal","run_id":"{run_id}","status":"completed"}}\n'
                 ).encode()
             )
@@ -727,13 +734,7 @@ def test_managed_subprocess_gets_settings_on_stdin_and_only_bounded_progress_is_
         await manager._task
         record = await manager.get("sess_worker", run_id_holder["run_id"])
         assert record["status"] == "completed"
-        assert record["progress"] == {
-            "type": "progress",
-            "stage": "search",
-            "run_id": run_id_holder["run_id"],
-            "metric_calls_used": 4,
-        }
-        assert "prompt" not in record["progress"]
+        assert record["progress"] == {"metric_calls_used": 20, "iteration": 2}
         assert captured["stdin_closed"] is True
         assert b"secret-token" in captured["stdin"]
         assert "secret-token" not in command
@@ -802,12 +803,10 @@ def test_terminal_event_does_not_release_global_slot_until_worker_reaped(
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
         record = await manager.start("sess_reap", "reap-request", ExperimentOptions())
         assert await asyncio.to_thread(spawned.wait, 2)
-        # Let the output reader observe both the progress and terminal event while wait() is blocked.
-        for _ in range(50):
-            current = store.get_optimization_run("sess_reap", record["run_id"])
-            if current.get("progress", {}).get("metric_calls_used") == 1:
-                break
-            await asyncio.sleep(0.01)
+        # Output has no authority while the managed child is still running.
+        await asyncio.sleep(0.01)
+        current = store.get_optimization_run("sess_reap", record["run_id"])
+        assert "progress" not in current
         assert current["status"] == "running"
         with pytest.raises(ExperimentBusyError):
             await manager.start("sess_other", "second", ExperimentOptions())
@@ -1004,3 +1003,45 @@ def test_rejection_records_decision_and_preserves_candidate_and_comparison(tmp_p
         detail = client.get(f"/sessions/sess_reject_http/experiments/{run_id}")
         assert detail.status_code == 200
         assert detail.json()["comparison"] == {"manifest": {"review": "evidence"}}
+
+
+def test_database_cancel_remains_authoritative_when_stop_file_signal_fails(tmp_path, monkeypatch):
+    from fleet_rlm.optimize.gepa import OptimizationCancelledError, _check_run_cancelled, _DatabaseStopper
+
+    async def scenario():
+        store = MemoryStore()
+        manager = ExperimentManager(FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path)), store)
+        store.create_optimization_run("s1", "s1-run", "request", {}, manager.owner_id, managed=True)
+
+        def fail_signal(*_args):
+            raise OSError("cannot create stop marker")
+
+        monkeypatch.setattr("fleet_rlm.experiments.request_run_stop", fail_signal)
+        with pytest.raises(OSError, match="stop marker"):
+            await manager.cancel("s1", "s1-run")
+        stop_file = tmp_path / "runs" / "s1-run" / "gepa.stop"
+        assert not stop_file.exists()
+        assert _DatabaseStopper(store, "s1", "s1-run")(None)
+        with pytest.raises(OptimizationCancelledError):
+            _check_run_cancelled(stop_file, store, "s1", "s1-run")
+        store.update_optimization_run("s1", "s1-run", {"worker_outcome": {"status": "completed"}})
+        await manager._finish("s1", "s1-run", SimpleNamespace(returncode=0), None, approval=False)
+        assert store.get_optimization_run("s1", "s1-run")["status"] == "cancelled"
+
+    asyncio.run(scenario())
+
+
+def test_managed_persistence_failure_keeps_sanitized_worker_diagnostic(tmp_path):
+    async def scenario():
+        store = MemoryStore()
+        manager = ExperimentManager(FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path)), store)
+        store.create_optimization_run("s1", "s1-run", "request", {}, manager.owner_id, managed=True)
+        failure = {"type": "OptimizationPersistenceError", "detail": "Optimization failed; exception details omitted."}
+        store.update_optimization_run("s1", "s1-run", {"worker_outcome": {"status": "failed", "failure": failure}})
+        await manager._finish("s1", "s1-run", SimpleNamespace(returncode=1), None, approval=False)
+        record = store.get_optimization_run("s1", "s1-run")
+        assert record["status"] == "failed"
+        assert record["failure"] == failure
+        assert record["candidate_version"] is None
+
+    asyncio.run(scenario())

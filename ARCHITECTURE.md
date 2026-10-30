@@ -32,7 +32,8 @@ flowchart LR
 - `launcher.py` owns the local API and optional local MLflow.
 - Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
-- The API owns TUI optimization jobs through one subprocess slot. The worker runs the existing CLI optimizer; PostgreSQL owns lifecycle state, while MLflow stores run traces and candidate evidence. The API does not import GEPA.
+- The API owns TUI optimization jobs through one subprocess slot. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
+- The API drains both worker pipes without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and pipe draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
 - A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
 - A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer.
 - `session.py` owns the runtime registry and Session leases.
@@ -195,6 +196,7 @@ Progress events:
 - Train/dev search excludes holdout.
 - Paired validation, critical cases, correctness, execution errors, and measured usage gate promotion.
 - Candidate creation and installation are separate.
+- Required worker persistence failures latch a native GEPA stop request and block validation, publication and successful finalization at explicit boundaries. Partial callbacks and stage changes preserve known counters. Database and file cancellation checks both remain active; provider calls stop cooperatively at native safe points. Optional tracking/diagnostic failures do not acquire control over run success.
 - Approval rechecks artifact, incumbent, configuration, code, and dependency identities.
 - Installed distribution identities, rather than source-tree lockfile paths, identify dependencies.
 - Incompatible evidence requires reevaluation.
