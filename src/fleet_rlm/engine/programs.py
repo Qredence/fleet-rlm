@@ -181,7 +181,7 @@ class AdaptiveFleetEngine(dspy.Module):
             max_llm_calls=sandbox_mgr.max_llm_calls,
         )
         self.compiled = CompiledProgramFile(compiled_path)
-        # Set by the optimizer's per-example factory; IsolatedFleetProgram clears it after the rollout.
+        # Set by the optimizer's per-example factory on disposable rollout engines.
         self.optimization: OptimizationInputs | None = None
         self.compiled.load_initial(self)
 

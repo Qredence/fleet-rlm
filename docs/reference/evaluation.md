@@ -487,7 +487,21 @@ GEPA accepts only approved gold-labeled traces whose selected snapshot exists,
 passes its integrity checks, and matches the trace task, manifest, and file
 digests. Unselected, missing, changed, or malformed snapshots are excluded. The
 isolated rollout restores the captured file bytes and Skills revision rather
-than reading the mutable current workspace or local Skills. The `compiled_program_digest`
+than reading the mutable current workspace or local Skills. Each rollout constructs
+a fresh manager and engine, then loads a deep copy of the bare candidate engine's
+native DSPy state. Candidate state is transferred in memory, with no temporary
+candidate JSON file. Setup failures shut down the manager in the factory; after
+setup, the isolated program owns shutdown on success or execution failure. Cleanup
+errors remain visible to the caller.
+
+Root, sub and Jev model roles, execution mode and Turn budgets come from the
+current deployment constructors. Native predictor/Flex LM state uses DSPy's default
+safe-loading policy. Published candidates still use native JSON save, manifest and
+digest approval, and the bounded serving loader, including historical `program.`
+wrapper keys. This evaluation code change invalidates prior code-identity evidence;
+collect fresh evidence before approving a candidate.
+
+The `compiled_program_digest`
 attribute names the approved program that served the Turn (empty when none is
 installed). Selected replay snapshots expire after 30 days and are pruned when
 the Store initializes; their Lakebase curation rows are deleted with them. Do

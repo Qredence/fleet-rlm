@@ -6,14 +6,12 @@ import base64
 import hashlib
 import json
 import logging
-import os
-import tempfile
 import threading
 import time
 import uuid
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from statistics import median
 from typing import Any
 
@@ -39,10 +37,7 @@ class IsolatedFleetProgram(dspy.Module):
         self.engine_factory = engine_factory
 
     def forward(self, **inputs: Any) -> dspy.Prediction:
-        """Run one rollout in a fresh engine and always shut that engine's sandbox down.
-
-        The rollout's optimization artifact file is removed even when the call raises.
-        """
+        """Run one rollout in a fresh engine and always shut that engine's sandbox down."""
         engine = self.engine_factory(dspy.Example(**inputs), self.program)
         try:
             arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
@@ -50,19 +45,14 @@ class IsolatedFleetProgram(dspy.Module):
                 arguments["context"] = engine.optimization.context
             return engine(**arguments)
         finally:
-            try:
-                engine.sandbox_mgr.shutdown()
-            finally:
-                artifact_path = engine.optimization.artifact_path if engine.optimization else None
-                if artifact_path:
-                    Path(artifact_path).unlink(missing_ok=True)
+            engine.sandbox_mgr.shutdown()
 
 
 def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
     """Return a factory that builds disposable replay engines with verified immutable inputs.
 
-    Each engine receives a temporary copy of the candidate program. Serving LMs are
-    shared within this factory; callers own cleanup of returned engines and program files.
+    Each fresh engine receives an independent copy of the candidate's native state.
+    Serving LMs are shared within this factory; callers own cleanup of returned engines.
     """
     from fleet_rlm.execution_evidence import verification_entries
 
@@ -87,8 +77,8 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
     def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
         """Restore one reviewed replay into a disposable engine using the candidate program.
 
-        Reject inconsistent replay metadata with ValueError. Failures after the temporary
-        program file is created trigger sandbox shutdown and file-removal attempts.
+        Reject inconsistent replay metadata with ValueError. Setup failures trigger
+        sandbox shutdown; no partially loaded engine is returned.
         """
         snapshot = selected_snapshot(
             store, example.source_session, example.replay_turn_id, example.replay_snapshot_sha256
@@ -97,6 +87,8 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             raise ValueError("Curated replay snapshot does not match the reviewed example")
         if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
             raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")
+        if not isinstance(program, AdaptiveFleetEngine):
+            raise TypeError("Isolated rollout requires a Fleet engine candidate")
         root_lm, sub_lm, jev_lm = language_models()
         replay_context = snapshot.get("dataset_context")
         replay_files = snapshot["replay_files"]
@@ -117,10 +109,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             linked_children=settings.linked_children,
             disposable=True,
         )
-        descriptor, program_path = tempfile.mkstemp(prefix="fleet-optimization-", suffix=".json")
-        os.close(descriptor)
         try:
-            program.save(program_path)
             for path, encoded in replay_files.items():
                 content = base64.b64decode(encoded, validate=True)
                 manager.write_workspace_file(path, content)
@@ -129,12 +118,12 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
                 root_lm=root_lm,
                 sub_lm=sub_lm,
                 jev_lm=jev_lm,
-                compiled_path=program_path,
+                compiled_path=None,
                 execution_mode=settings.execution_mode,
             )
+            engine.load_state(deepcopy(program.dump_state()))
             engine.optimization = OptimizationInputs(
                 context=WorkspaceDataset(**replay_context) if replay_context else None,
-                artifact_path=program_path,
                 verifications=tuple(
                     verifications.get(
                         (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256), []
@@ -143,10 +132,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
             )
             return engine
         except BaseException:
-            try:
-                manager.shutdown()
-            finally:
-                Path(program_path).unlink(missing_ok=True)
+            manager.shutdown()
             raise
 
     return create
