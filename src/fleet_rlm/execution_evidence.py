@@ -14,9 +14,12 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# Gold and structured-expectation payloads stay small: they are review metadata, not output.
 MAX_EVIDENCE_BYTES = 256_000
-MAX_ARTIFACT_BYTES = 64_000
-MAX_ARTIFACTS = 32
+# Observed artifacts follow the workspace limits, so a healthy Turn cannot exceed its own capture.
+MAX_ARTIFACT_BYTES = 25_000_000
+MAX_ARTIFACT_EVIDENCE_BYTES = 25_000_000
+MAX_ARTIFACTS = 100
 
 
 def artifact_path(value: str) -> str:
@@ -153,7 +156,7 @@ def collect_artifacts(manager: Any) -> dict[str, Any]:
             artifact_path(path)
             raw = manager.read_workspace_file(path, max_bytes=MAX_ARTIFACT_BYTES)
             total += len(raw)
-            if total > MAX_EVIDENCE_BYTES:
+            if total > MAX_ARTIFACT_EVIDENCE_BYTES:
                 complete = False
                 break
             files[path] = {"sha256": hashlib.sha256(raw).hexdigest(), "base64": base64.b64encode(raw).decode()}

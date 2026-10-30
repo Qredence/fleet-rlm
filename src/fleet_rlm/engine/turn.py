@@ -7,6 +7,7 @@ with ``{"event": "done"}``; the caller decides how to deliver them (the API stre
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -299,8 +300,13 @@ def run_turn(
                 }
                 learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
                 route = str(getattr(prediction, "route", Route.RLM.value))
-                evidence = getattr(prediction, "execution_evidence", {})
-                artifact_changes = _artifact_changes(inputs["context_files"], evidence)
+                evidence = deepcopy(getattr(prediction, "execution_evidence", {}))
+                if not evidence and callable(getattr(manager, "execution_evidence", None)):
+                    # Alternate engines may omit evidence; collect one host view at the same
+                    # completion boundary instead of letting Session relist later.
+                    evidence = deepcopy(manager.execution_evidence())
+                artifact_capture = _capture_artifact_view(evidence)
+                artifact_changes = _artifact_changes(inputs["context_files"], artifact_capture)
                 runtime.assert_lease_held()
                 # The successful Turn deliberately keeps its warm root, so this is the handle the
                 # next Turn will reuse; record it and provider bounds alongside provenance.
@@ -327,6 +333,7 @@ def run_turn(
                     **usage,
                     **environment,
                     "context_files": inputs["context_files"],
+                    "artifact_capture": artifact_capture,
                     "artifact_changes": artifact_changes,
                     "replay_snapshot_selected": record_replay,
                     "replay_snapshot_sha256": replay_snapshot[0] if replay_snapshot else None,
@@ -345,6 +352,7 @@ def run_turn(
                                 turn_record=turn_record,
                                 new_memory_note=learned_note,
                                 replay_snapshot=replay_snapshot,
+                                artifact_paths=artifact_capture["paths"],
                             )
                         except Exception as exc:
                             resolve_exception(exc)
@@ -371,12 +379,14 @@ def run_turn(
                         "route": route,
                         "outcome": "completed",
                         "duration_seconds": duration_seconds,
-                        # Keep usage and host receipts ahead of diagnostic artifact summaries.
+                        # Cheap scalar facts go before the evidence tree: MLflow sanitizes a span
+                        # with a fixed node budget, and an artifact-heavy capture would otherwise
+                        # truncate the route, usage, and cleanup facts recorded after it.
                         **usage,
+                        _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                         "execution_evidence": evidence,
                         "artifacts": deepcopy(committed["artifacts"]),
                         "artifact_changes": artifact_changes,
-                        _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                     }
                 )
                 # Read after the engine ran: it reloads an approved program at the start of the Turn.
@@ -551,28 +561,102 @@ def _replayed(prior: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _artifact_changes(before: dict[str, str], evidence: dict[str, Any]) -> dict[str, Any]:
+def _artifact_changes(before: dict[str, str], capture: dict[str, Any]) -> dict[str, Any]:
     """Compare host digests; unchanged content is retained, not evidence of a new write.
 
-    The existing artifacts list remains the Session inventory. Missing bounded
-    evidence cannot prove deletion, so those entries explicitly remain unknown.
+    The existing artifacts list remains the Session inventory. The capture is always complete by
+    the time this runs, because an incomplete one fails the Turn earlier.
     """
-    observed = evidence.get("artifacts", {})
-    complete = observed.get("complete") is True
-    files = observed.get("files", {})
+    files = {entry["path"]: entry for entry in capture["files"]}
     inputs = {path: digest for path, digest in before.items() if path.startswith("artifacts/")}
     changes = {}
     for path in sorted(inputs.keys() | files.keys()):
         old = inputs.get(path)
         new = files.get(path, {}).get("sha256")
         if new is None:
-            state = "deleted" if complete else "unknown"
+            state = "deleted"
         elif old is None:
             state = "created"
         else:
             state = "retained" if old == new else "modified"
         changes[path] = {"state": state, "input_sha256": old, "sha256": new}
-    return {"complete": complete, "files": changes}
+    return {"complete": True, "files": changes}
+
+
+def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
+    """Validate one host evidence capture and retain its logical inventory for Turn replay."""
+    from fleet_rlm.execution_evidence import (
+        MAX_ARTIFACT_BYTES,
+        MAX_ARTIFACT_EVIDENCE_BYTES,
+        MAX_ARTIFACTS,
+        artifact_path,
+    )
+
+    if not isinstance(evidence, dict):
+        raise RuntimeError("Artifact evidence is invalid")
+    observed = evidence.get("artifacts")
+    if (
+        not isinstance(observed, dict)
+        or observed.get("complete") is not True
+        or not isinstance(observed.get("files"), dict)
+        or evidence.get("children_complete") is not True
+        or not isinstance(evidence.get("children"), list)
+    ):
+        raise RuntimeError("Artifact capture is incomplete")
+    files = observed["files"]
+    if len(files) > MAX_ARTIFACTS:
+        raise RuntimeError("Artifact capture exceeds its file limit")
+    child_sources: dict[str, tuple[str, str]] = {}
+    for child in evidence["children"]:
+        if not isinstance(child, dict) or child.get("status") == "running":
+            raise RuntimeError("Artifact child capture is incomplete")
+        receipts = child.get("artifacts", [])
+        if not isinstance(receipts, list):
+            raise RuntimeError("Artifact child capture is invalid")
+        for receipt in receipts:
+            if (
+                not isinstance(receipt, dict)
+                or not isinstance(receipt.get("root_path"), str)
+                or not isinstance(receipt.get("agent_id"), str)
+                or not isinstance(receipt.get("sha256"), str)
+            ):
+                raise RuntimeError("Artifact child capture is invalid")
+            child_sources[receipt["root_path"]] = (receipt["agent_id"], receipt["sha256"])
+    if not set(child_sources).issubset(files):
+        raise RuntimeError("Promoted child artifacts are missing from the capture")
+    captured = []
+    total = 0
+    for path in sorted(files):
+        entry = files[path]
+        if not isinstance(path, str) or not isinstance(entry, dict):
+            raise RuntimeError("Artifact capture is invalid")
+        artifact_path(path)
+        encoded = entry.get("base64")
+        digest = entry.get("sha256")
+        if not isinstance(encoded, str) or not isinstance(digest, str):
+            raise RuntimeError("Artifact capture is invalid")
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise RuntimeError("Artifact capture is invalid") from exc
+        if len(raw) > MAX_ARTIFACT_BYTES or hashlib.sha256(raw).hexdigest() != digest:
+            raise RuntimeError("Artifact capture hash or size is invalid")
+        total += len(raw)
+        if total > MAX_ARTIFACT_EVIDENCE_BYTES:
+            raise RuntimeError("Artifact capture exceeds its byte limit")
+        child_source = child_sources.get(path)
+        if child_source is not None and child_source[1] != digest:
+            raise RuntimeError("Promoted child artifact does not match its host receipt")
+        captured.append(
+            {
+                "path": path,
+                "size_bytes": len(raw),
+                "sha256": digest,
+                "source": "child" if child_source else "workspace",
+                **({"agent_id": child_source[0]} if child_source else {}),
+            }
+        )
+    return {"complete": True, "paths": sorted(files), "files": captured}
 
 
 def _note_words(summary: str) -> set[str]:
