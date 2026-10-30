@@ -7,11 +7,142 @@ import json
 from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Lock
 from types import SimpleNamespace
 
 import pytest
 
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.workspace_io import WorkspaceIOMixin
+
+
+def test_child_promotion_quota_preflight_performs_no_public_writes() -> None:
+    writes = []
+    child_files = [f"artifacts/{index:03}.txt" for index in range(101)]
+    root = SimpleNamespace(
+        _budget_lock=Lock(),
+        _child_receipts={"child": {"inputs": {}}},
+        _children={},
+    )
+    parent = SimpleNamespace(
+        list_workspace_files=lambda: [],
+        exec_remote_python=lambda _code: "[]",
+        write_workspace_files=lambda files: writes.append(files),
+    )
+    child = SimpleNamespace(
+        parent=parent,
+        root=root,
+        agent_id="child",
+        check_turn=lambda: None,
+        list_workspace_files=lambda: child_files,
+        read_workspace_file=lambda _path: b"x",
+        emit=lambda *_args, **_kwargs: None,
+        record_child_outcome=lambda *_args: None,
+    )
+
+    with pytest.raises(ValueError, match="quota"):
+        WorkspaceIOMixin.collect_child_artifacts(child)
+
+    assert writes == []
+
+
+@pytest.mark.parametrize(
+    ("child_files", "content_size", "existing", "occupied", "reason"),
+    [
+        (["artifacts/a.txt"], 1, ["artifacts/child/a.txt"], [], "already exists"),
+        (["artifacts/a.txt"], 1, [], ["artifacts/child/a.txt"], "already exists"),
+        (["artifacts/a.txt", "artifacts/b.txt"], 13_000_001, [], [], "quota"),
+        (["artifacts/a.txt", "artifacts/b.txt"], 12_500_001, [], [], "quota"),
+    ],
+)
+def test_child_promotion_collision_and_byte_quota_preflight_have_zero_writes(
+    child_files: list[str], content_size: int, existing: list[str], occupied: list[str], reason: str
+) -> None:
+    writes = []
+    root = SimpleNamespace(_budget_lock=Lock(), _child_receipts={"child": {"inputs": {}}}, _children={})
+    parent = SimpleNamespace(
+        list_workspace_files=lambda: existing,
+        exec_remote_python=lambda _code: json.dumps(occupied),
+        # An occupied destination whose bytes differ is incompatible, never a completed retry.
+        stat_workspace_file=lambda _path: {"sha256": hashlib.sha256(b"someone else's bytes").hexdigest()},
+        write_workspace_files=lambda files: writes.append(files),
+    )
+    child = SimpleNamespace(
+        parent=parent,
+        root=root,
+        agent_id="child",
+        check_turn=lambda: None,
+        list_workspace_files=lambda: child_files,
+        read_workspace_file=lambda _path: b"x" * content_size,
+        emit=lambda *_args, **_kwargs: None,
+        record_child_outcome=lambda *_args: None,
+    )
+
+    with pytest.raises(ValueError, match=reason):
+        WorkspaceIOMixin.collect_child_artifacts(child)
+
+    assert writes == []
+
+
+def test_child_promotion_retry_skips_an_already_published_identical_destination() -> None:
+    """A destination holding the same bytes is a completed publication, so a retry is idempotent."""
+    writes: list[dict[str, bytes]] = []
+    raw = b"promoted"
+    root = SimpleNamespace(_budget_lock=Lock(), _child_receipts={"child": {"inputs": {}}}, _children={})
+    parent = SimpleNamespace(
+        parent=None,
+        list_workspace_files=lambda: ["artifacts/child/a.txt", "artifacts/child/b.txt"],
+        exec_remote_python=lambda _code: json.dumps(["artifacts/child/a.txt", "artifacts/child/b.txt"]),
+        stat_workspace_file=lambda _path: {"sha256": hashlib.sha256(raw).hexdigest()},
+        write_workspace_files=lambda files: writes.append(files),
+    )
+    child = SimpleNamespace(
+        parent=parent,
+        root=root,
+        agent_id="child",
+        check_turn=lambda: None,
+        list_workspace_files=lambda: ["artifacts/a.txt", "artifacts/b.txt"],
+        read_workspace_file=lambda _path: raw,
+        emit=lambda *_args, **_kwargs: None,
+        record_child_outcome=lambda *_args: None,
+    )
+
+    results = WorkspaceIOMixin.collect_child_artifacts(child)
+
+    assert writes == [{}]
+    assert [row["path"] for row in results] == ["artifacts/child/a.txt", "artifacts/child/b.txt"]
+
+
+def test_child_promotion_stops_reading_once_the_file_quota_is_exceeded() -> None:
+    """A runaway child is refused without buffering its whole output on the host."""
+    reads: list[str] = []
+    root = SimpleNamespace(_budget_lock=Lock(), _child_receipts={"child": {"inputs": {}}}, _children={})
+    parent = SimpleNamespace(
+        list_workspace_files=lambda: [],
+        exec_remote_python=lambda _code: "[]",
+        stat_workspace_file=lambda _path: {},
+        write_workspace_files=lambda _files: pytest.fail("no write may happen after a quota refusal"),
+    )
+
+    def read(path: str) -> bytes:
+        reads.append(path)
+        return b"x"
+
+    child = SimpleNamespace(
+        parent=parent,
+        root=root,
+        agent_id="child",
+        check_turn=lambda: None,
+        list_workspace_files=lambda: [f"artifacts/{index:03}.txt" for index in range(500)],
+        read_workspace_file=read,
+        emit=lambda *_args, **_kwargs: None,
+        record_child_outcome=lambda *_args: None,
+    )
+
+    with pytest.raises(ValueError, match="quota"):
+        WorkspaceIOMixin.collect_child_artifacts(child)
+
+    assert len(reads) <= 101
 
 
 def test_failed_download_span_omits_private_exception_details(monkeypatch, tmp_path):
@@ -134,6 +265,7 @@ def test_transfer_spans_separate_remote_checks_and_io_without_payloads(monkeypat
 @pytest.mark.parametrize("case", ["file", "empty", "missing", "symlink", "parent_symlink", "oversized", "changed"])
 def test_remote_stat_checks_size_digest_and_paths_without_downloads(monkeypatch, tmp_path, case):
     import contextlib
+    import hashlib
     import io
     import os
 
