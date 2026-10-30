@@ -49,6 +49,31 @@ when the Turn failed. Preserve old assessments as audit history and use a new
 scoring run for a completed trace. Configuration changes and live scoring require
 explicit authorization.
 
+Serving traces now associate explicitly with a native MLflow LoggedModel using a
+startup source/resource snapshot, installed dependencies, the effective configuration
+digest, and the actually loaded DSPy state digest. Git commit/dirty status is metadata;
+raw diffs are never uploaded. Concurrent Sessions use per-trace association, without
+switching the process's active model. Source changes require a process restart.
+Identity lookup waits at most 0.2 seconds; a slower lookup leaves that trace unversioned
+and can populate the cache for later Turns. Identity failures are advisory and leave the
+Turn outcome intact. Historical traces
+remain unversioned unless their original model identity was recorded; evaluating an
+old trace never assigns the current serving version to it.
+
+Execution diagnostic rubric `execution-evidence-v2` uses MLflow's native boolean-map
+result and its separate rationale, avoiding nested JSON encoded inside a string.
+The rationale covers both assessments; strict boolean, receipt and citation validation
+still applies. Recorded five-field JSON responses retain their original strict parser.
+
+The portable `execution_evidence_diagnostics` registration imports the same validator
+as the suite and reads the worker's `FLEET_JUDGE_MODEL` and provider environment.
+Its two assessments retain the original target model ID and record executing code,
+rubric, judge, evaluation run, and native registration identities separately.
+See [assessment and latency rollout](../runbooks/assessment-latency-rollout.md) for
+the read-only reconciliation review, saved-evidence validation, rollback, and opt-in
+39-Turn comparison. These tools do not activate schedules or change generation defaults
+merely by being installed.
+
 ## Scorers
 
 `build_mlflow_scorer_suite(judge_model, judge_lm=None, jev_lm=None)` returns:
@@ -537,12 +562,14 @@ choice and the effective route/override reason. Missing evidence remains null.
 Generative confidence is not calibrated confidence. No thresholds are fitted in
 ordinary turns, and no additional runtime judge calls are introduced.
 
-Configuration comparison uses three repetitions each of direct answer,
-computation/dataset and explicit parallel tasks, plus the exact Pi task once per
-configuration. Keep context and model inputs fixed, capture configuration digests,
-and report correctness, calls and latency separately. Root/sub token candidates
-16384/8192 are adopted only if the documented acceptance gates pass; otherwise
-retain provider-controlled settings. ReAnchor remains deferred; native GEPA integration is covered by the offline and live canaries.
+Configuration comparison uses three repetitions each of direct answer, Flex arithmetic,
+file analysis and explicit children, plus one large-Pi canary per arm (39 Turns maximum).
+Compare root/sub caps 16384/provider-default, 8192/8192 and 4096/8192 with other generation
+settings unchanged. Keep shared learned notes disabled and gold outside agent inputs.
+Promotion requires at least 10% lower median short-task latency, no correctness or
+truncation regression, no aggregate observable generation-call increase and a successful
+Pi canary. Missing version or finish-reason evidence blocks promotion. Otherwise retain
+current defaults. ReAnchor remains deferred; native GEPA integration is covered by the offline and live canaries.
 
 Stopping instructions apply within generated code blocks as well as between
 REPL actions. When multiple computation methods are used, the agent is
@@ -550,3 +577,6 @@ instructed to print each method's elapsed time and precision parameters.
 Parameters retained in learned notes should be printed with the result;
 omitting them from the note is also valid. These are model instructions;
 offline contract tests do not establish live compliance or latency gains.
+Only exact observed representations belong in notes: scaled `1.49M` and unprinted
+`guard=100` can produce advisory numeric-grounding warnings. A warning never blocks a
+verified answer. Do not add an execution solely to manufacture an optional learned note.
