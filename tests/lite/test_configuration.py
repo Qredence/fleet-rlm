@@ -31,6 +31,7 @@ def test_gateway_claude_reflection_uses_native_json_prompt_without_forced_tools(
         databricks_host="https://workspace.example",
         databricks_token="private-test-token",
         fleet_reflection_model="openai/system.ai.claude-haiku-5-5",
+        fleet_root_model="openai/test-root",
     )
     root, _sub, reflection, _jev = settings.build_lms()
     calls = []
@@ -493,3 +494,30 @@ def test_snapshot_environment_variable_creates_no_field_or_digest_change(monkeyp
     assert not hasattr(overridden, "fleet_daytona_snapshot")
     assert "fleet_daytona_snapshot" not in overridden.configuration()["values"]
     assert overridden.configuration()["digest"] == baseline.configuration()["digest"]
+
+
+@pytest.mark.parametrize("role", ["root", "sub", "reflection"])
+@pytest.mark.parametrize("service", ["system.ai.deepseek-v4-1-flash", "system.ai.deepseek-v4-1-flash-1017"])
+def test_gateway_deepseek_flash_advertises_native_json_mode_without_schema(role, service):
+    settings = FleetSettings(_env_file=None, databricks_host="https://workspace.example", databricks_token="test-token")
+    lm = settings._build_lm("openai/" + service, role=role)
+    assert "response_format" in lm.supported_params
+    assert lm.supports_function_calling
+    assert not lm.supports_response_schema
+    assert lm.model.endswith("/" + service)
+    assert lm.copy().supported_params == lm.supported_params
+    assert settings._build_lm("openai/" + service, role=role).model == lm.model
+
+
+@pytest.mark.parametrize(
+    "base_url,model",
+    [
+        ("https://compatible.example/v1", "openai/system.ai.deepseek-v4-1-flash-1017"),
+        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/system.ai.unknown-model"),
+        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/system.ai.deepseek-v4-pro-0813"),
+    ],
+)
+def test_gateway_json_declaration_does_not_guess_other_model_capabilities(base_url, model):
+    settings = FleetSettings(_env_file=None, fleet_llm_base_url=base_url, databricks_token="test-token")
+    lm = settings._build_lm(model)
+    assert lm.model == model

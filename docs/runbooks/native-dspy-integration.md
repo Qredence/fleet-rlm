@@ -227,3 +227,64 @@ compatibility outcome, with an owner and removal conditions, rather than an
 unfinished native execution/recovery migration. Broader provider compatibility,
 production quality, transport-level retries, cost, and measured gains remain
 outside this canary's evidence.
+
+
+## Unity Gateway JSON recovery follow-up, 30 October 2026
+
+The failed browser Turn `03b9361c6ba847a68e8c74f32aaa9b0a`, trace
+`tr-5abd7fb28483827996ab326556af881e`, exposed a capability gap for the configured
+`system.ai.deepseek-v4-1-flash-1017` service. Its action response simulated multiple
+code executions without a native code field. Native rejection was correct; selecting
+an arbitrary fence would confuse generated text with execution evidence. The existing
+native JSON fallback also failed. Its request was prompt-only: DSPy's model catalog
+did not recognize the Unity service ID, so `supported_params` omitted `response_format`.
+The durable failed outcome confirmed cleanup `stopped`; this attempt remains failed.
+
+`FleetSettings._build_lm` now declares native DSPy provider capabilities for the Unity
+Gateway versions `deepseek-v4-1-flash` and `deepseek-v4-1-flash-1017`, across LM roles.
+[Databricks' function-calling documentation](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling)
+includes DeepSeek V4.1 Flash; its
+[structured-output contract](https://docs.databricks.com/aws/en/machine-learning/model-serving/structured-outputs)
+defines JSON mode. The declaration enables documented function calling but leaves
+schema output disabled. Pinned DSPy consequently sends `response_format={"type":"json_object"}`
+on its existing JSON fallback. A real one-call gateway probe accepted that request
+and returned the expected `reasoning` and `code` fields. No JSON schema capability
+is inferred for this service.
+
+The provider alias is stable for a gateway/service pair. Other services and non-Unity
+URLs retain their existing routing, and Claude reflection remains prompt-only to avoid
+its forced-tool incompatibility. Parser rules, native-first selection, native retry
+count, metering, signatures and credentials remain unchanged. There is no dependency,
+configuration-field, or database migration. Existing approval evidence must still
+match the current code identity. Roll back this capability declaration independently
+of the earlier parser compatibility cases; do not accept simulated output as an action.
+
+Before the change, all eight new positive recovery/capability cases failed. After it,
+216 focused adapter/configuration/gateway tests passed. They exercise native sync and
+async fallback through `SandboxLM`, assert one JSON-mode recovery and two metered
+attempts, and retain explicit rejection of ambiguous simulated execution. Guards cover
+unknown services, other DeepSeek models, non-Unity endpoints, roles and LM copies.
+The original gateway corpus and its compatibility rules are unchanged.
+
+Live verification restarted `uv run fleet web` with a fresh API at `127.0.0.1:8002`,
+web at `127.0.0.1:8080`, Session `web-adapter-fix-20261030`. The original complex
+4096-subset task completed as Turn `d2ed24c4f55a4c45a9ab95e2da72b1f6`, trace
+`tr-71052daae4464e7b49284da31f258b38`, in 134.035 seconds / 17 logical units.
+Both native JSON recoveries in that trace parsed successfully and the trace reached
+`OK`. Two sandbox API-use errors were recovered before success. The independently
+verified budget-25 winner was A/B/D/H/K, objective 94, cost 25, hours 31; however,
+budget sensitivity above 25 was initially wrong because the generated program reused
+a pool filtered at 25. That task-quality failure is retained separately from the
+adapter recovery result. A subsequent web interaction corrected and verified the files:
+Turn `c4ba6aa7bc5c462bb1b7f17cb2f7f363`, trace
+`tr-0b4acd7e87c07a98d3c6e5c0b44aef41`, completed in 167.038 seconds with zero
+sandbox errors. The child lacked the earlier artifacts and reconstructed the data from
+context, so the independent verifier also checked all original project values. All 11
+sensitivity rows, the winner, three alternatives and host artifact hashes then matched.
+Both successful Turns remained in history after browser reload. This interactive task
+correction changes generated artifacts, not Fleet's runtime or benchmark policy.
+
+`make check` passed with 1,794 tests passed, one skipped, 83% aggregate coverage,
+Ruff lint/format, ty, documentation links, OpenAPI and both package builds. These
+checks and the live JSON recoveries support this route-specific integration fix;
+they do not establish arbitrary-model compatibility or guarantee task correctness.
