@@ -839,22 +839,28 @@ class FleetSettings(BaseSettings):
             for name in ("max_tokens", "temperature", "num_retries", "cache")
         }
         base_url = self._gateway_base_url()
-        if (
-            role == "reflection"
-            and urlsplit(base_url).path == "/ai-gateway/mlflow/v1"
-            and model.rsplit(".", 1)[-1].startswith("claude-")
-        ):
+        service = model.removeprefix("openai/")
+        model_name = service.rsplit(".", 1)[-1]
+        chat_only_reflection = role == "reflection" and model_name.startswith("claude-")
+        deepseek_json_mode = service in {"system.ai.deepseek-v4-1-flash", "system.ai.deepseek-v4-1-flash-1017"}
+        if urlsplit(base_url).path == "/ai-gateway/mlflow/v1" and (chat_only_reflection or deepseek_json_mode):
             from dspy.lm15 import AccessPolicy, ModelSupport, OpenAIChatCompat, ProviderDefinition, register_provider
 
-            # Gateway translates response_format into forced Anthropic tool use,
-            # which newer Claude deployments reject. Declare this chat-only route
-            # so native JSONAdapter requests/parses JSON without forcing API tools.
-            provider = "fleet-gateway-reflection-" + hashlib.sha256(base_url.encode()).hexdigest()[:12]
+            if chat_only_reflection:
+                # Gateway translates schema output into forced Anthropic tools,
+                # which these reflection deployments reject. Keep prompt-only JSON.
+                provider = "fleet-gateway-reflection-" + hashlib.sha256(base_url.encode()).hexdigest()[:12]
+            else:
+                # Unity service IDs are unknown to DSPy's model catalog. Declare
+                # documented DeepSeek Flash tool support so native JSON recovery
+                # sends response_format=json_object. Schema output stays disabled.
+                identity = base_url + "/" + service
+                provider = "fleet-gateway-json-" + hashlib.sha256(identity.encode()).hexdigest()[:12]
             register_provider(
                 ProviderDefinition.chat(AccessPolicy(provider=provider, base_url=base_url), compat=OpenAIChatCompat()),
-                supports=ModelSupport(function_calling=False, response_schema=False),
+                supports=ModelSupport(function_calling=deepseek_json_mode, response_schema=False),
             )
-            model = provider + "/" + model.removeprefix("openai/")
+            model = provider + "/" + service
         return dspy.LM(
             model,
             api_base=base_url,

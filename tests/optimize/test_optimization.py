@@ -1282,7 +1282,21 @@ def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypa
 
 @pytest.mark.parametrize(
     "cancel_after_validation",
-    [False, True, "finalization", "evidence_change", "interrupt_search", "interrupt_validation"],
+    [
+        False,
+        True,
+        "finalization",
+        "evidence_change",
+        "interrupt_search",
+        "interrupt_validation",
+        "callback_failure",
+        "validation_write_failure",
+        "owner_loss",
+        "db_cancel",
+        "optional_tracking",
+        "optional_stdout",
+        "optional_tracking_setup",
+    ],
 )
 def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     monkeypatch, tmp_path, cancel_after_validation
@@ -1333,6 +1347,25 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         def compile(self, baseline, *, trainset, valset):
             if cancel_after_validation == "interrupt_search":
                 raise KeyboardInterrupt
+            reporter = optimizer_kwargs["gepa_kwargs"]["callbacks"][0]
+            if cancel_after_validation == "callback_failure":
+                from gepa.core.callbacks import notify_callbacks
+
+                original = store.update_optimization_run
+
+                def fail_progress(*args, **kwargs):
+                    if "progress" in args[2]:
+                        raise RuntimeError("private persistence credential")
+                    return original(*args, **kwargs)
+
+                store.update_optimization_run = fail_progress
+                notify_callbacks([reporter], "on_budget_updated", {"metric_calls_used": 20})
+                assert any(stop(None) for stop in optimizer_kwargs["gepa_kwargs"]["stop_callbacks"])
+            if cancel_after_validation == "owner_loss":
+                store.records[("s1", "s1-run")]["owner_id"] = "another-owner"
+            if cancel_after_validation == "db_cancel":
+                store.records[("s1", "s1-run")]["stop_requested"] = True
+                assert optimizer_kwargs["gepa_kwargs"]["stop_callbacks"][1](None)
             assert trainset is train and valset is dev
             assert baseline.program.direct_cot.predict.signature.instructions == "INCUMBENT"
             assert baseline.program.execution_mode == "flex"
@@ -1380,6 +1413,27 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             (Path(optimizer_kwargs["log_dir"]) / "gepa.stop").touch()
 
         monkeypatch.setattr(workflow, "write_manifest", write_then_cancel)
+    if cancel_after_validation == "validation_write_failure":
+        original = store.update_optimization_run
+
+        def fail_validation(*args, **kwargs):
+            if args[2].get("stage") == "validation":
+                raise RuntimeError("private write failure")
+            return original(*args, **kwargs)
+
+        store.update_optimization_run = fail_validation
+    if cancel_after_validation in {"optional_tracking", "optional_stdout", "optional_tracking_setup"}:
+
+        def unavailable(*_args, **_kwargs):
+            raise RuntimeError("private telemetry credential")
+
+        if cancel_after_validation == "optional_stdout":
+            monkeypatch.setattr(workflow, "print", unavailable, raising=False)
+        elif cancel_after_validation == "optional_tracking_setup":
+            monkeypatch.setattr(workflow.mlflow, "start_run", unavailable)
+        else:
+            for name in ("log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
+                monkeypatch.setattr(workflow.mlflow, name, unavailable)
     args = SimpleNamespace(
         validation_ratio=0.35, max_metric_calls=4, gepa_budget="light", threads=1, structured_events=True
     )
@@ -1402,6 +1456,18 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         assert store.closed and store.migration_pool_closed
         assert store.events[-1][0] == "lease.close"
         return
+    if cancel_after_validation in {"callback_failure", "validation_write_failure", "owner_loss"}:
+        with pytest.raises(workflow.OptimizationPersistenceError):
+            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert not measured
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        return
+    if cancel_after_validation == "db_cancel":
+        with pytest.raises(workflow.OptimizationCancelledError):
+            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert not measured
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        return
     if cancel_after_validation == "evidence_change":
         with pytest.raises(RuntimeError, match="evidence changed during the run"):
             workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
@@ -1409,7 +1475,11 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
         return
-    if cancel_after_validation:
+    if cancel_after_validation and cancel_after_validation not in {
+        "optional_tracking",
+        "optional_stdout",
+        "optional_tracking_setup",
+    }:
         with pytest.raises(workflow.OptimizationCancelledError, match="stop requested"):
             workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
         assert len(measured) == 6
@@ -1423,7 +1493,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     assert any(
         isinstance(callback, workflow.GEPAProgressReporter) for callback in optimizer_kwargs["gepa_kwargs"]["callbacks"]
     )
-    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 2
+    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 3
     assert measured == [False, True, True, False, False, True]
     assert all(config.fleet_root_model == "openai/deployed-root" for config in factories)
     assert factories[0].fleet_root_cache and not factories[1].fleet_root_cache
@@ -1823,11 +1893,13 @@ def test_run_records_failed_lifecycle_with_sanitized_details(tmp_path, monkeypat
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     monkeypatch.setattr(
         workflow,
-        "configure_mlflow_observability",
+        "_compile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("Authorization: Bearer secret-token; task payload: private-test-vector-917")
         ),
     )
+    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     parser = _optimization_parser()
 
     with pytest.raises(RuntimeError, match="Authorization"):
@@ -1970,3 +2042,208 @@ def test_score_split_collects_measured_usage_timing_and_artifact_passes() -> Non
     assert len(result.seconds_per_example) == 2
     assert all(seconds >= 0 for seconds in result.seconds_per_example)
     assert (result.artifact_passes, result.artifact_cases) == (1, 1)
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_worker_partial_progress_is_one_write_and_retains_final_counters(managed):
+    store = MemoryOptimizationStore(
+        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner", "managed": managed}]
+    )
+    reporter = workflow.GEPAProgressReporter(
+        "s1-run", store=store, session_id="s1", owner_id="owner", emit_events=False
+    )
+    reporter.on_budget_updated(
+        {"iteration": 4, "metric_calls_used": 20, "metric_calls_delta": 2, "metric_calls_remaining": None}
+    )
+    assert len(store.events) == 1
+    reporter.on_budget_updated({"stage": "search"})
+    reporter.on_budget_updated({"iteration": 1, "metric_calls_used": 10})
+    reporter.on_optimization_end({"total_metric_calls": 21})
+    reporter.update(stage="validation")
+    record = store.get_optimization_run("s1", "s1-run")
+    assert record["stage"] == "validation"
+    assert record["progress"] == {
+        "iteration": 4,
+        "metric_calls_used": 21,
+        "metric_calls_delta": 2,
+        "metric_calls_remaining": None,
+    }
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_lifecycle_events_preserve_standalone_pipe_output(monkeypatch, managed):
+    import os
+    import sys
+
+    events = []
+    reader, writer = os.pipe()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "stdout", SimpleNamespace(fileno=lambda: writer))
+            patch.setattr(workflow, "emit_event", events.append)
+            for kind in ("started", "terminal"):
+                workflow._optional_event({"type": kind}, managed=managed)
+    finally:
+        os.close(reader)
+        os.close(writer)
+    assert events == ([] if managed else [{"type": "started"}, {"type": "terminal"}])
+
+
+def test_optional_callback_emission_failure_is_bounded_and_does_not_stop(monkeypatch, caplog):
+    def fail(_event):
+        raise RuntimeError("private diagnostic credential")
+
+    monkeypatch.setattr(workflow, "emit_event", fail)
+    reporter = workflow.GEPAProgressReporter()
+    for _ in range(3):
+        reporter.on_budget_updated({"metric_calls_used": 1})
+    assert not reporter.should_stop(None)
+    reporter.raise_if_failed()
+    assert caplog.text.count("diagnostic emission failed") == 1
+    assert "private diagnostic credential" not in caplog.text
+
+
+def test_locked_native_gepa_observes_required_persistence_stop_without_provider_calls(tmp_path):
+    class Student(dspy.Module):
+        def __init__(self):
+            super().__init__()
+            self.predict = dspy.Predict("question -> answer")
+
+        def forward(self, question):
+            return dspy.Prediction(answer=question)
+
+    store = MemoryOptimizationStore(
+        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
+    )
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("private database credential")
+
+    store.update_optimization_run = fail
+    reporter = workflow.GEPAProgressReporter(
+        "s1-run", store=store, session_id="s1", owner_id="owner", emit_events=False
+    )
+
+    def metric(_gold, _pred, _trace=None, _pred_name=None, _pred_trace=None):
+        return dspy.Prediction(score=1.0, feedback="correct")
+
+    example = dspy.Example(question="offline", answer="offline").with_inputs("question")
+    stop_observations = []
+
+    def native_stop(state):
+        stopped = reporter.should_stop(state)
+        stop_observations.append(stopped)
+        return stopped
+
+    optimized = dspy.GEPA(
+        metric=metric,
+        max_metric_calls=2,
+        num_threads=1,
+        track_stats=True,
+        instruction_proposer=lambda *_args, **_kwargs: pytest.fail("must stop before reflection"),
+        log_dir=str(tmp_path),
+        gepa_kwargs={"callbacks": [reporter], "stop_callbacks": [native_stop]},
+    ).compile(Student(), trainset=[example], valset=[example])
+    assert optimized is not None
+    assert True in stop_observations
+    assert reporter.should_stop(None)
+    with pytest.raises(workflow.OptimizationPersistenceError, match="Required optimization persistence"):
+        reporter.raise_if_failed()
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("failure_at", ["validation", "finalization", "candidate", "outcome", "ownership"])
+def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch, managed, failure_at):
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    store = MemoryOptimizationStore()
+    parser = _optimization_parser()
+    argv = ["--session", "s1"]
+    if managed:
+        from fleet_rlm.optimization_runs import ExperimentOptions
+
+        store.create_optimization_run(
+            "s1", "s1-run", "request", ExperimentOptions().model_dump(), "owner", managed=True
+        )
+        argv += ["--managed-run-id", "s1-run", "--managed-owner-id", "owner", "--structured-events"]
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
+    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
+    original = store.update_optimization_run
+    failed = False
+
+    def update(session_id, run_id, updates, **kwargs):
+        nonlocal failed
+        boundary = updates.get("stage") == failure_at or (failure_at == "candidate" and "candidate_path" in updates)
+        outcome = failure_at == "outcome" and ("worker_outcome" in updates or updates.get("status") == "completed")
+        if not failed and (boundary or outcome):
+            failed = True
+            raise RuntimeError("private required write credential")
+        return original(session_id, run_id, updates, **kwargs)
+
+    store.update_optimization_run = update
+
+    def compile_stub(_args, _settings, _store, session_id, _target, run_id, *, owner_id):
+        reporter = workflow.GEPAProgressReporter(run_id, store=store, session_id=session_id, owner_id=owner_id)
+        if failure_at == "ownership":
+            store.records[(session_id, run_id)]["owner_id"] = "replacement"
+            return
+        reporter.update(stage="validation")
+        reporter.update(stage="finalization")
+        reporter.update(candidate_path="candidate.json")
+
+    monkeypatch.setattr(workflow, "_compile", compile_stub)
+    with pytest.raises((workflow.OptimizationPersistenceError, RuntimeError)):
+        workflow.run(parser.parse_args(argv), parser, settings)
+    record = store.list_optimization_runs()[0]
+    assert record["status"] != "completed"
+    assert (record.get("worker_outcome") or {}).get("status") != "completed"
+    assert store.closed
+    assert store.events[-1][0] == "lease.close"
+
+
+@pytest.mark.parametrize("operation", ["setup", "flush"])
+def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch, caplog, operation):
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    store = MemoryOptimizationStore()
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
+    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("private telemetry credential")
+
+    if operation == "setup":
+        monkeypatch.setattr(workflow, "configure_mlflow_observability", fail)
+    else:
+        monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", fail)
+    parser = _optimization_parser()
+    workflow.run(parser.parse_args(["--session", "s1"]), parser, settings)
+    assert store.list_optimization_runs()[0]["status"] == "completed"
+    assert "private telemetry credential" not in caplog.text
+
+
+def test_optional_tracking_close_receives_body_failure_and_preserves_it(monkeypatch, caplog):
+    exits = []
+
+    class TrackingContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exception):
+            exits.append(exception)
+            raise RuntimeError("private telemetry teardown credential")
+
+    monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kwargs: TrackingContext())
+    error = ValueError("required optimization failure")
+
+    def failing_body():
+        with workflow._tracking_run("offline"):
+            raise error
+
+    with pytest.raises(ValueError, match="required optimization failure"):
+        failing_body()
+    assert exits[0][0] is ValueError and exits[0][1] is error and exits[0][2] is not None
+    assert "private telemetry teardown credential" not in caplog.text

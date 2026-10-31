@@ -580,3 +580,43 @@ offline contract tests do not establish live compliance or latency gains.
 Only exact observed representations belong in notes: scaled `1.49M` and unprinted
 `guard=100` can produce advisory numeric-grounding warnings. A warning never blocks a
 verified answer. Do not add an execution solely to manufacture an optional learned note.
+
+## Optimization ledger ownership
+
+The optimizer worker is the sole durable writer of running stages and search counters
+for both standalone CLI and API-managed experiments. GEPA budget callbacks persist
+one coherent snapshot per observation. Partial callbacks and stage changes retain
+known counters; the final callback updates the cumulative metric-call total without
+clearing iteration, delta, or remaining observations. Unknown remaining budget stays
+unknown. Only the cumulative metric-call count is monotonic.
+
+| Responsibility | Authority and failure policy |
+| --- | --- |
+| Admission, options, owner leases and process startup | API for managed runs; CLI for standalone runs. Required Store persistence. |
+| Session settings, reviewed replay data, incumbent/evidence identity | Worker reads and records required data; errors block success. MLflow-backed replay input access remains required. |
+| Running preparation, search, validation and finalization stages/counters | Worker only, with Store owner/status compare-and-swap fences. |
+| Candidate paths, manifest digest, gate and dataset sizes | Required worker Store writes backed by local artifact/evidence writes. Failure prevents eligible completion. |
+| Cancellation intent | API commits the database stop flag before signaling the stop file. Worker checks both at native safe points and stage boundaries. |
+| Managed worker outcome | Worker records the required database handoff; stdout terminal events have no authority. |
+| Managed terminal outcome | API confirms process exit and drains both pipes before owner/status-fenced terminal arbitration. Accepted cancellation overrides completion. |
+| Standalone terminal outcome | Worker persists after required cleanup and cancellation/ownership checks, before releasing its lease. |
+| MLflow setup, tracking logs and trace flush; CLI diagnostic events | Best effort, with sanitized diagnostics. These failures do not set the required-persistence stop latch. Approval evidence flush policy is unchanged. |
+
+The API drains stdout and stderr in fixed-size chunks without parsing progress or
+retaining a diagnostic tail. Delayed progress or stage events cannot replay older
+observations into PostgreSQL. Worker callback/control events are omitted on pipes;
+the supervisor uses the database and keeps draining native optimizer output even
+when the client disconnects. Explicit cancellation remains cooperative, and does not
+promise immediate interruption of an in-flight provider call.
+
+The reporter retains the first required-write failure across callback threads and
+adds its predicate to native GEPA stop callbacks alongside the file and database
+stoppers. Explicit checks after compile and before validation, publication and
+success finalization reject partial results even if native callback dispatch catches
+an exception. Ownership loss is a persistence failure; accepted stop intent is
+cancellation. Local candidate files alone never authorize approval of a failed run.
+
+No SQL migration or new wire fields are required. Historical progress snapshots
+remain readable. Deploy API and worker changes together after draining old pairs:
+an older API can otherwise continue replaying stdout. Roll back the pair together;
+do not re-enable concurrent stdout replay into worker-owned progress.

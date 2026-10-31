@@ -1,6 +1,6 @@
 # PRD D — Optimizer ownership
 
-**Status:** proposed. **Priority:** high. **Baseline:** [`61bea5095dbbc992db2aeb8049a05e079b0bda10`](https://github.com/Qredence/fleet-rlm/commit/61bea5095dbbc992db2aeb8049a05e079b0bda10), DSPy 3.4.1 / GEPA 0.1.4. [Index](README.md).
+**Status:** implemented (offline acceptance; see report below). **Priority:** high. **Baseline:** [`61bea5095dbbc992db2aeb8049a05e079b0bda10`](https://github.com/Qredence/fleet-rlm/commit/61bea5095dbbc992db2aeb8049a05e079b0bda10), DSPy 3.4.1 / GEPA 0.1.4. [Index](README.md).
 
 **Revision:** 2 - review amendments applied directly, 29 October 2026. This is a source-based document update, not a new repository audit or implementation. Evidence labels and baseline limitations are defined in [README](README.md#evidence-and-baseline).
 
@@ -114,11 +114,45 @@ Native callbacks may run at safe points, so stop latency is bounded by native ex
 
 ## 10. Codex-ready checklist
 
-- [ ] Inventory stage/progress, cancellation, worker-outcome and terminal writers separately.
-- [ ] Remove only duplicate API progress writes; retain bounded pipe drains and process ownership.
-- [ ] Preserve counters on partial updates; add only a local reporter failure field and native stop integration for required writes, not optional telemetry.
-- [ ] Test locked native exception swallowing and safe-boundary failure behavior.
-- [ ] Pass D-T1–D-T9 and repository gates; document mixed-version migration/rollback.
-- [ ] Report observed write count reduction; keep GEPA/search/approval algorithms native and unchanged.
+- [x] Inventory stage/progress, cancellation, worker-outcome and terminal writers separately.
+- [x] Remove only duplicate API progress writes; retain bounded pipe drains and process ownership.
+- [x] Preserve counters on partial updates; add only a local reporter failure field and native stop integration for required writes, not optional telemetry.
+- [x] Test locked native exception swallowing and safe-boundary failure behavior.
+- [x] Pass D-T1–D-T9 and repository gates; document mixed-version migration/rollback.
+- [x] Report observed write count reduction; keep GEPA/search/approval algorithms native and unchanged.
 
 Use the [common acceptance report](README.md#acceptance-report). Report the removal of API progress ingestion separately from retained API process/cancellation/terminal writes; a single progress writer does not mean a single writer for the whole run record.
+
+## Implementation acceptance report
+
+- Start SHA: `959d372fcc376c672594af54456a166c7b4610f9`; implementation is recorded in the
+  current branch. DSPy 3.4.1 / GEPA 0.1.4 remain locked.
+  The pre-existing `AGENTS.md` deletion is preserved; its optimizer guidance and
+  `ARCHITECTURE.md` are refreshed with authorization. `.codex/` is outside this implementation.
+- Native reuse: `dspy.GEPA.compile`, native callback dispatch and native file/database
+  stop callbacks remain. The existing reporter owns a locked first-failure field and
+  coherent counter snapshot; explicit worker boundaries reject partial native results.
+- Simplification: removed API `_read_output` and its progress parser/writer, reusing
+  `_discard_output` for both pipes. Retained admission, cancellation, owner recovery,
+  process exit confirmation and terminal arbitration. No modules moved or added.
+- Contracts: no SQL migration, new status, or response field. Historical snapshots
+  remain readable. Managed and standalone worker observations follow the same policy.
+  Optional tracking setup/logging/flush and diagnostic emission cannot fail required
+  persistence. MLflow-backed input data and approval evidence remain required.
+- D-T1–D-T3: regressions count one worker write per callback in both modes, persist 20
+  before delayed stdout 10 plus a stage event, and retain known final/unknown counters.
+- D-T4–D-T9: native dispatcher/locked DSPy-GEPA coverage, required-write and ownership
+  failure injection before validation/finalization/outcome, database cancellation,
+  optional telemetry failures, noisy output, process exit and existing owner/terminal
+  race regressions. Ordinary checks use no paid providers, live Daytona or database.
+- Measured ownership result: one durable worker progress write per callback, zero API
+  progress writes (previous path: two total). No search-quality gain is claimed.
+- Migration/rollback: drain mixed-version pairs and release or roll back CLI/API
+  together, as documented in the evaluation reference. No schema rollback needed.
+- Validation: `uv run pytest tests/optimize/test_optimization.py
+  tests/api/test_experiments.py tests/store/test_optimization_runs.py
+  tests/lite/test_optimization_contracts.py` — 184 passed.
+  Final `make check` — 1,782 passed, 1 skipped, 83% coverage; Ruff lint/format,
+  ty, documentation links, OpenAPI contract and sdist/wheel builds passed.
+  `git diff --check` passed. Dependency deprecation warnings remain; no live canary
+  or search-quality measurement was performed.

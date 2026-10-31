@@ -13,7 +13,6 @@ import os
 import sys
 import uuid
 from collections.abc import Sequence
-from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,7 +23,6 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.optimization_runs import (
     ACTIVE_STATUSES,
     ExperimentOptions,
-    parse_event,
     public_run,
     read_comparison,
     reconcile_abandoned_running_runs,
@@ -302,7 +300,7 @@ class ExperimentManager:
             )
             stdin, stdout, stderr = _require_worker_pipes(process)
             readers = [
-                asyncio.create_task(self._read_output(stdout, session_id, run_id)),
+                asyncio.create_task(self._discard_output(stdout)),
                 asyncio.create_task(self._discard_output(stderr)),
             ]
             stdin.write(worker_settings_payload(self.settings))
@@ -363,10 +361,11 @@ class ExperimentManager:
                 or status not in {"completed", "cancelled", "failed"}
             ):
                 status = "failed"
-                failure = failure or {
-                    "type": "ProcessExit",
-                    "detail": "Worker exited without a confirmed successful outcome.",
-                }
+                failure = (
+                    failure
+                    or (outcome.get("failure") if isinstance(outcome, dict) else None)
+                    or {"type": "ProcessExit", "detail": "Worker exited without a confirmed successful outcome."}
+                )
             if status == "completed" and record.get("stop_requested"):
                 status = "cancelled"
             updates = {"status": status, "stage": status, "finished_at": datetime.now(UTC).isoformat()}
@@ -382,69 +381,6 @@ class ExperimentManager:
                 owner_id=self.owner_id,
                 expected_statuses=("running",),
             )
-
-    async def _read_output(self, stream: asyncio.StreamReader, session_id: str, run_id: str) -> None:
-        """Drain arbitrary-length lines without StreamReader's readline limit or raw log exposure.
-
-        Persist only matching, nonterminal events up to 20,000 bytes per line. Invalid
-        or oversized lines are ignored. A persistence failure requests a cooperative
-        stop and raises RuntimeError after draining; stream read errors propagate.
-        """
-        pending = bytearray()
-        oversized = False
-        persistence_failed = False
-        while chunk := await stream.read(8192):
-            for piece in chunk.splitlines(keepends=True):
-                if not oversized:
-                    pending.extend(piece)
-                    oversized = len(pending) > 20_000
-                if piece.endswith(b"\n"):
-                    if not oversized:
-                        try:
-                            event = parse_event(pending.decode("utf-8", errors="replace").rstrip("\r\n"))
-                        except (ValueError, json.JSONDecodeError):
-                            event = None
-                        if (
-                            event
-                            and event.get("run_id") == run_id
-                            and event["type"] != "terminal"
-                            and not persistence_failed
-                        ):
-                            safe = {
-                                key: value
-                                for key, value in event.items()
-                                if key
-                                in {
-                                    "type",
-                                    "stage",
-                                    "run_id",
-                                    "iteration",
-                                    "metric_calls_used",
-                                    "metric_calls_delta",
-                                    "metric_calls_remaining",
-                                }
-                            }
-                            try:
-                                saved = await asyncio.to_thread(
-                                    self.store.update_optimization_run,
-                                    session_id,
-                                    run_id,
-                                    {"progress": safe},
-                                    owner_id=self.owner_id,
-                                    expected_statuses=("running", "approving"),
-                                )
-                                if saved is None:
-                                    raise ValueError("Experiment ownership changed")
-                            except Exception:
-                                # Keep draining: abandoning a reader can block the child's stdout,
-                                # preventing its finally blocks and the parent's wait() from finishing.
-                                persistence_failed = True
-                                with suppress(OSError, ValueError):
-                                    await asyncio.to_thread(request_run_stop, self.root, session_id, run_id)
-                    pending.clear()
-                    oversized = False
-        if persistence_failed:
-            raise RuntimeError("Experiment progress could not be persisted")
 
     @staticmethod
     async def _discard_output(stream: asyncio.StreamReader) -> None:

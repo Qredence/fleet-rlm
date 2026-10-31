@@ -270,3 +270,51 @@ def test_native_fallback_preserves_signature_demos_inputs_and_kwargs(asynchronou
     ]
     assert (kwargs, demos, inputs) == original and signature.instructions == "Return the answer."
     assert all("Format correction" not in str(call) for call in lm.calls)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+def test_gateway_native_json_recovery_requests_json_mode_and_preserves_budget(monkeypatch, asynchronous):
+    from fleet_rlm.config import FleetSettings
+
+    settings = FleetSettings(
+        _env_file=None,
+        databricks_host="https://workspace.example",
+        databricks_token="test-token",
+        fleet_root_model="openai/system.ai.deepseek-v4-1-flash-1017",
+        fleet_llm_base_url="",
+    )
+    lm = settings._build_lm(settings.fleet_root_model)
+    calls, charged = [], []
+    expected = {"reasoning": "Run real Python, without simulated results.", "code": "print(6 * 7)"}
+
+    def complete(_self, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("response_format") == {"type": "json_object"}:
+            return [json.dumps(expected)]
+        # Minimized shape of the recorded failure: model-simulated execution is not
+        # an executable action. A prompt-only JSON retry repeats the same problem.
+        return ["[[ ## reasoning ## ]]\nPlan</think>\nCode:\n```python\nprint(6 * 7)\n```\nOutput:\n42"]
+
+    async def acomplete(self, **kwargs):
+        return complete(self, **kwargs)
+
+    monkeypatch.setattr(dspy.LM, "__call__", complete)
+    monkeypatch.setattr(dspy.LM, "acall", acomplete)
+    assert _invoke(
+        FleetRLMChatAdapter(),
+        SandboxLM(lm, charged.append),
+        dspy.Signature("task -> reasoning, code"),
+        asynchronous=asynchronous,
+    ) == [expected]
+    assert len(calls) == 2 and charged == [1, 1]
+    assert "response_format" not in calls[0]
+    assert calls[1]["response_format"] == {"type": "json_object"}
+
+
+def test_ambiguous_simulated_execution_is_not_accepted_as_a_python_action():
+    response = (
+        "[[ ## reasoning ## ]]\nPlan</think>\nCode:\n```python\nprint(6 * 7)\n```\n"
+        'Output:\n42\nCode:\n```python\nSUBMIT(answer="pretend result")\n```'
+    )
+    with pytest.raises(AdapterParseError):
+        FleetRLMChatAdapter().parse(dspy.Signature("task -> reasoning, code"), response)
