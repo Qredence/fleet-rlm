@@ -531,6 +531,41 @@ def test_incomplete_or_invalid_artifact_capture_is_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("bound", ["count", "bytes"])
+@pytest.mark.usefixtures("traced")
+def test_large_session_inventory_keeps_success_and_replay_without_claiming_complete_evidence(bound):
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS, collect_artifacts
+
+    runtime, state = durable_runtime()
+    manager = runtime.sandbox_mgr
+    paths = [f"artifacts/{index:03}.txt" for index in range(MAX_ARTIFACTS + 1)]
+    if bound == "bytes":
+        paths = paths[:2]
+    manager.list_workspace_files = lambda: paths
+    manager.read_workspace_file = lambda _path, **_kwargs: b"x" * (13_000_000 if bound == "bytes" else 1)
+    manager.execution_evidence = lambda: {
+        "artifacts": collect_artifacts(manager),
+        "children": [],
+        "children_complete": True,
+    }
+    with opened_client(runtime) as (client, _app):
+        first = events_of(
+            client.post("/sessions/session-a/turn", json={"task": "continue", "idempotency_key": "large-session"})
+        )
+        replay = events_of(
+            client.post("/sessions/session-a/turn", json={"task": "continue", "idempotency_key": "large-session"})
+        )
+    result = state.rows["large-session"]["result"]
+    assert result["event"] == "turn_complete" and result["artifacts"] == paths
+    assert any(event["event"] == "turn_complete" for event in first)
+    assert next(event["payload"] for event in replay if event["event"] == "turn_complete")["artifacts"] == paths
+    assert len(state.executions) == 1
+    record = json.loads(state.commits[0]["turn_record_json"])
+    assert record["artifact_capture"]["complete"] is False
+    assert record["artifact_changes"]["complete"] is False
+    assert {item["state"] for item in record["artifact_changes"]["files"].values()} == {"unknown"}
+
+
 def test_artifact_capture_accepts_the_full_workspace_artifact_set() -> None:
     """33 artifacts and a 300 KB file are ordinary Turns, not invalid captures."""
     from fleet_rlm.execution_evidence import MAX_ARTIFACTS

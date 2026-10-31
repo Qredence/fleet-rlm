@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Gold and structured-expectation payloads stay small: they are review metadata, not output.
 MAX_EVIDENCE_BYTES = 256_000
-# Observed artifacts follow the workspace limits, so a healthy Turn cannot exceed its own capture.
+# Byte evidence is bounded independently of the persistent Session inventory.
 MAX_ARTIFACT_BYTES = 25_000_000
 MAX_ARTIFACT_EVIDENCE_BYTES = 25_000_000
 MAX_ARTIFACTS = 100
@@ -146,9 +146,8 @@ def collect_artifacts(manager: Any) -> dict[str, Any]:
     files: dict[str, Any] = {}
     total = 0
     complete = True
-    for path in sorted(manager.list_workspace_files()):
-        if not path.startswith("artifacts/"):
-            continue
+    paths = sorted({path for path in manager.list_workspace_files() if path.startswith("artifacts/")})
+    for path in paths:
         if len(files) >= MAX_ARTIFACTS:
             complete = False
             break
@@ -162,7 +161,7 @@ def collect_artifacts(manager: Any) -> dict[str, Any]:
             files[path] = {"sha256": hashlib.sha256(raw).hexdigest(), "base64": base64.b64encode(raw).decode()}
         except (ValueError, OSError):
             complete = False
-    return {"complete": complete, "files": files}
+    return {"complete": complete, "files": files, "paths": paths}
 
 
 def parse_expectations_file(path: str) -> dict[str, Any]:

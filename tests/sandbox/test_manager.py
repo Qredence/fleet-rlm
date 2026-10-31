@@ -751,6 +751,54 @@ def test_shutdown_aggregates_child_failures_and_keeps_admission_fenced(raises: b
     assert manager.shutdown() is True
 
 
+@pytest.mark.parametrize("pending", [False, True])
+def test_shutdown_hands_stale_epoch_resources_to_new_owner(pending: bool) -> None:
+    manager, calls = _manager_with(SimpleNamespace(id="taken-over", state="started"))
+    child = DaytonaSandboxManager("key", "org", "volume", manager.session_id, parent=manager)
+    child._creation_pending = True
+    manager._children[child.agent_id] = child
+    manager.ownership_epoch = 1
+    writes = []
+    manager.ownership_resource_mutate = lambda agent, resource: writes.append((agent, resource)) or False
+    manager._creation_pending = pending
+    assert manager.shutdown() is True
+    assert calls == []
+    assert len(writes) == 1 and writes[0][1] is not None
+    assert manager._sandbox is None and not manager._children
+    assert child._ownership_lost is True
+    assert manager.shutdown() is True and len(writes) == 1
+    manager.reset_turn_budget()
+    manager.end_turn()
+    with pytest.raises(manager_module.SandboxOwnershipLostError):
+        manager.ensure_sandbox()
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 408, 422, 429, 500, None])
+def test_create_rejection_clears_only_definitive_allocation_intent(monkeypatch, status):
+    from daytona.common.errors import DaytonaError
+
+    error = DaytonaError("rejected", status_code=status)
+    writes = []
+    monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(DaytonaSandboxManager, "_record_allocation", lambda *_args: None)
+    monkeypatch.setattr(DaytonaSandboxManager, "_discard_allocation_journal", lambda *_args: None)
+    monkeypatch.setattr(DaytonaSandboxManager, "reconcile_allocations", lambda *_args: None)
+
+    def reject(_params):
+        raise error
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    manager._client = SimpleNamespace(snapshot=object(), create=reject)
+    manager.ownership_epoch = 1
+    manager.ownership_resource_mutate = lambda agent, resource: writes.append((agent, resource)) or True
+    with pytest.raises(DaytonaError) as caught:
+        manager._ensure_sandbox()
+    assert caught.value is error
+    definitive = status in {400, 401, 403, 404, 422}
+    assert manager._creation_pending is not definitive
+    assert (writes[-1][1] is None) is definitive
+
+
 def test_shutdown_preserves_ambiguous_create_until_a_resource_can_be_stopped() -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "uncertain-create")
     manager._creation_pending = True

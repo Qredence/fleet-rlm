@@ -26,7 +26,7 @@ No extra model Turns were submitted to replace failed matrix cases. The intended
 - Daytona label lookup after teardown confirmed all five roots for both canary Sessions were `STOPPED`: `645b8af1-9ba1-4f54-a9b7-f79abc1a999c`, `a6b713db-5e25-4824-ac81-c5735c99e624`, `465f0cdd-d179-452d-b98f-1cfe62770856`, `f668a849-7402-463b-a41b-88fa3f4eaa65`, and `89488755-bf6a-41f3-aa1f-7c452f6669e6`. No child sandbox appeared in either canary Session's label query.
 - Publication probe sandbox `9ee35300-3cdf-4c0e-a971-116194978648` was deleted; a subsequent label lookup returned zero probe sandboxes.
 - Probe staging prefix `f4eb24985147409b9646095c0215362d` was removed and remote readback confirmed it absent.
-- Owned Fleet API, web TUI, and MLflow listeners on 18000, 18080, 18081, and 15001 were stopped. T11 had reached durable `cancelled` status before shutdown; T9 remains durably `running` despite its root being confirmed stopped.
+- Owned Fleet API, web TUI, and MLflow listeners on 18000, 18080, 18081, and 15001 were stopped. T11 had reached durable `cancelled` status before shutdown; T9 was durably `running` at teardown and was later terminalized as `failed` by epoch-fenced recovery, with readback confirming the result.
 - Monetary cost is unknown. No GEPA run was started.
 
 ## Screenshots

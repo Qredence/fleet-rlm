@@ -317,7 +317,7 @@ class WorkspaceIOMixin:
         for path in self.list_workspace_files():
             if not path.startswith("artifacts/"):
                 continue
-            if len(selected) >= _MAX_PROMOTED_FILES:
+            if len(selected) >= _MAX_PROMOTED_FILES and path not in inputs:
                 raise ValueError("Child output promotion quota exceeded")
             raw = self.read_workspace_file(path)
             if inputs.get(path) == hashlib.sha256(raw).hexdigest():
@@ -327,6 +327,8 @@ class WorkspaceIOMixin:
                 raise ValueError("Child output promotion quota exceeded")
             target = f"artifacts/{self.agent_id}/{path.removeprefix('artifacts/')}"
             selected.append((path, target, raw))
+            if len(selected) > _MAX_PROMOTED_FILES:
+                raise ValueError("Child output promotion quota exceeded")
 
         # Preflight the complete changed set before the first public write. Upload failures remain
         # provider failures and may leave partial bytes; deterministic input violations cannot.

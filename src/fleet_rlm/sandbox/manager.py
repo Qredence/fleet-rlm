@@ -26,6 +26,7 @@ from daytona import (
     ListSandboxesQuery,
     VolumeMount,
 )
+from daytona.common.errors import DaytonaError, DaytonaValidationError
 from mlflow.entities import SpanType
 
 from fleet_rlm.config import validate_shared_notes_subpath
@@ -71,6 +72,10 @@ _CHILD_TTL_MINUTES = 30
 
 _DAYTONA_CLIENTS: dict[tuple[str, str], Daytona] = {}
 _DAYTONA_CLIENTS_LOCK = threading.Lock()
+
+
+class SandboxOwnershipLostError(RuntimeError):
+    """A newer Session epoch owns reconciliation; stale managers must not mutate it."""
 
 
 def _host_call_bound(remaining: float | None) -> int | None:
@@ -185,6 +190,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     _turn_active: bool = field(default=False, init=False, repr=False)
     _watchdog: threading.Timer | None = field(default=None, init=False, repr=False)
     _sandbox: Any = field(default=None, init=False, repr=False)
+    _ownership_lost: bool = field(default=False, init=False, repr=False)
     _snapshot_identity: SnapshotIdentity | None = field(default=None, init=False, repr=False)
     _client: Daytona | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
@@ -743,6 +749,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
 
         The caller holds this manager's lock, or is single-threaded before provisioning starts.
         """
+        if self._ownership_lost or self.root._ownership_lost:
+            raise SandboxOwnershipLostError("Session ownership epoch changed; sandbox operation is fenced")
         if self._cleanup_pending or self.root._cleanup_pending:
             raise RuntimeError("Session sandbox cleanup is unconfirmed; retry shutdown before writable reuse")
 
@@ -804,7 +812,26 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 self._record_allocation("requested")
                 self._persist_ownership_resource("create", None)
                 self._creation_pending = True
-                self._sandbox = self._client.create(params)
+                try:
+                    self._sandbox = self._client.create(params)
+                except DaytonaError as exc:
+                    # A request rejection allocated no sandbox. Conflict, timeout, rate-limit,
+                    # transport, and server errors still require allocation reconciliation.
+                    if isinstance(exc, DaytonaValidationError) or exc.status_code in {
+                        400,
+                        401,
+                        403,
+                        404,
+                        405,
+                        410,
+                        413,
+                        415,
+                        422,
+                    }:
+                        self._persist_ownership_resource("confirmed", None)
+                        self._creation_pending = False
+                        self._discard_allocation_journal()
+                    raise
                 self._creation_pending = False
                 self._persist_ownership_resource("stop" if not child else "delete", self._sandbox.id)
                 self._record_allocation("ready")
@@ -839,7 +866,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             }
         )
         if not self.ownership_resource_mutate(self.agent_id, resource):
-            raise RuntimeError("Session ownership epoch changed; sandbox operation is fenced")
+            self._ownership_lost = True
+            raise SandboxOwnershipLostError("Session ownership epoch changed; sandbox operation is fenced")
 
     def reconcile_sandbox_ownership(self, resources: list[dict[str, Any]]) -> None:
         """Confirm cleanup for bounded persisted Daytona resources before Session admission.
@@ -1295,9 +1323,12 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 interpreter._closed = True
         confirmed = False
         try:
+            if self._ownership_lost or self.root._ownership_lost:
+                raise SandboxOwnershipLostError("Sandbox cleanup belongs to the new Session owner")
             if self._creation_pending:
                 # An ambiguous create may have succeeded without returning its handle. Empty
                 # lookup is not proof of absence; retain the allocation labels for another attempt.
+                self._persist_ownership_resource("create", None)
                 if client is None:
                     raise RuntimeError("Pending allocation has no provider client")
                 query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
@@ -1329,6 +1360,14 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 with self._lock:
                     self._sandbox = None
                 self._persist_ownership_resource("confirmed", None)
+            confirmed = True
+        except SandboxOwnershipLostError:
+            # The durable record belongs to the new epoch, whose admission reconciles it.
+            # Drop only local handles; a stale provider stop could interrupt the new owner.
+            with self._lock:
+                self._ownership_lost = True
+                self._sandbox = None
+                self._creation_pending = False
             confirmed = True
         except Exception as exc:
             _LOGGER.warning(

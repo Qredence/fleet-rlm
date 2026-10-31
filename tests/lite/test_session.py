@@ -195,6 +195,25 @@ def test_get_rebuilds_a_runtime_after_lease_loss(monkeypatch, caplog) -> None:
     assert "ownership lease was lost" in caplog.text
 
 
+def test_get_releases_epoch_fenced_runtime_without_stopping_new_owner(monkeypatch) -> None:
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+    events = []
+    manager = DaytonaSandboxManager("key", "org", "volume", "s1")
+    manager._sandbox = SimpleNamespace(id="taken-over")
+    manager._client = SimpleNamespace(stop=lambda *_args, **_kwargs: pytest.fail("stale provider stop"))
+    manager.ownership_epoch = 1
+    manager.ownership_resource_mutate = lambda *_args: False
+    stale = _stale_runtime(events)
+    stale.sandbox_mgr = manager
+    registry = _buildable_registry(stale)
+    fresh = _runtime()
+    monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
+    assert registry.get("s1") is fresh
+    assert registry._sessions["s1"] is fresh and events == ["lease"]
+    assert manager._ownership_lost is True and manager._sandbox is None
+
+
 def test_get_keeps_a_stale_runtime_while_its_turn_is_still_draining(monkeypatch) -> None:
     from fleet_rlm import session as session_module
 

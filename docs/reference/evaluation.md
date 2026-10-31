@@ -533,12 +533,13 @@ Each `fleet_turn` trace records `request_preview` and `response_preview`
 Root outputs also carry host-derived `artifact_changes`: `created`, `modified`,
 `retained`, `deleted`, or `unknown` when evidence is incomplete, with before/after
 SHA-256 values. Host evidence collects up to 100 `artifacts/` files totalling at
-most 25 MB, matching the workspace file limits, so a healthy Turn's own output
-set is not reported as incomplete; exceeding either bound marks the evidence
-incomplete rather than failing the Turn. Reviewed gold keeps a separate, much
-smaller limit because it is review metadata, not output. A capture that is
-incomplete on a route that requires one fails the Turn instead of publishing a
-partial inventory. The existing `artifacts` list is the Session inventory, not a list
+most 25 MB. The persistent Session inventory can grow beyond these byte-evidence
+bounds: exceeding either bound marks the evidence incomplete, with change states
+`unknown`, while the Turn retains the full path inventory and can complete.
+Malformed byte evidence and incomplete child lifecycle receipts still fail the Turn.
+Reviewed gold keeps a separate, much smaller limit because it is review metadata,
+not output. Structured scoring continues to require complete evidence.
+The existing `artifacts` list is the Session inventory, not a list
 of files produced by that Turn. This diagnostic does not change scoring or gold
 approval semantics. Prior answers in history and unreviewed learned notes remain
 program inputs; a continuation with those inputs does not measure unseen-task

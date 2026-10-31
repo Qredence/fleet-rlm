@@ -45,14 +45,19 @@ Session needs to reconcile sandbox resources that a previous process may have
 left unresolved. The value is `{epoch, resources}`: `epoch` advances whenever a
 process acquires the Session lease (so a stale owner's writes are rejected by
 comparison, not by trust), and `resources` holds at most 32 bounded entries
-describing one pending create/stop/delete per agent. The whole record is capped
-at 32 KB. New Session rows start with an explicit empty record. Rows created
+describing one pending create/stop/delete per agent, with at most 2,000 serialized
+characters per resource. New Session rows start with an explicit empty record. Rows created
 before migration 8 stay `NULL` and are refused for writable admission until an
 operator reconciles them: an absent provenance record is not evidence that no
 remote compute exists. Rollback must keep the reader or keep writable admission
 disabled; dropping unresolved intent restores the unsafe reclamation this record
 exists to prevent. Resource entries are removed only after the provider confirms
 cleanup, where a provider not-found answer counts as confirmation.
+A definitive create rejection clears its pending intent; conflicts, timeouts,
+rate limits, transport errors, and server failures retain it for reconciliation.
+After an epoch takeover, the stale process fences local handles and releases its
+runtime without provider mutations. The new owner reconciles the durable resources
+before admitting writable work; the stale manager cannot be reused.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy

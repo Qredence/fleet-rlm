@@ -113,6 +113,36 @@ def test_child_promotion_retry_skips_an_already_published_identical_destination(
     assert [row["path"] for row in results] == ["artifacts/child/a.txt", "artifacts/child/b.txt"]
 
 
+def test_child_promotion_allows_exact_quota_followed_by_unchanged_input() -> None:
+    writes = []
+    paths = [f"artifacts/{index:03}.txt" for index in range(100)]
+    unchanged = "artifacts/z-input.txt"
+    root = SimpleNamespace(
+        _budget_lock=Lock(),
+        _child_receipts={"child": {"inputs": {unchanged: hashlib.sha256(b"x").hexdigest()}}},
+        _children={},
+    )
+    parent = SimpleNamespace(
+        parent=None,
+        list_workspace_files=lambda: [],
+        exec_remote_python=lambda _code: "[]",
+        write_workspace_files=writes.append,
+    )
+    child = SimpleNamespace(
+        parent=parent,
+        root=root,
+        agent_id="child",
+        check_turn=lambda: None,
+        list_workspace_files=lambda: [*paths, unchanged],
+        read_workspace_file=lambda _path: b"x",
+        emit=lambda *_args, **_kwargs: None,
+        record_child_outcome=lambda *_args: None,
+    )
+    receipts = WorkspaceIOMixin.collect_child_artifacts(child)
+    assert len(receipts) == len(writes[0]) == 100
+    assert all(not receipt["path"].endswith("z-input.txt") for receipt in receipts)
+
+
 def test_child_promotion_stops_reading_once_the_file_quota_is_exceeded() -> None:
     """A runaway child is refused without buffering its whole output on the host."""
     reads: list[str] = []
@@ -142,7 +172,7 @@ def test_child_promotion_stops_reading_once_the_file_quota_is_exceeded() -> None
     with pytest.raises(ValueError, match="quota"):
         WorkspaceIOMixin.collect_child_artifacts(child)
 
-    assert len(reads) <= 101
+    assert len(reads) == 100
 
 
 def test_failed_download_span_omits_private_exception_details(monkeypatch, tmp_path):

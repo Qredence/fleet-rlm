@@ -564,23 +564,26 @@ def _replayed(prior: dict[str, Any]) -> dict[str, Any]:
 def _artifact_changes(before: dict[str, str], capture: dict[str, Any]) -> dict[str, Any]:
     """Compare host digests; unchanged content is retained, not evidence of a new write.
 
-    The existing artifacts list remains the Session inventory. The capture is always complete by
-    the time this runs, because an incomplete one fails the Turn earlier.
+    The existing artifacts list remains the Session inventory. Missing byte evidence cannot
+    establish whether an existing file changed or was deleted.
     """
     files = {entry["path"]: entry for entry in capture["files"]}
     inputs = {path: digest for path, digest in before.items() if path.startswith("artifacts/")}
     changes = {}
-    for path in sorted(inputs.keys() | files.keys()):
+    complete = capture["complete"]
+    for path in sorted(inputs.keys() | set(capture["paths"])):
         old = inputs.get(path)
         new = files.get(path, {}).get("sha256")
-        if new is None:
+        if not complete:
+            state = "unknown"
+        elif new is None:
             state = "deleted"
         elif old is None:
             state = "created"
         else:
             state = "retained" if old == new else "modified"
         changes[path] = {"state": state, "input_sha256": old, "sha256": new}
-    return {"complete": True, "files": changes}
+    return {"complete": complete, "files": changes}
 
 
 def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
@@ -597,13 +600,23 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
     observed = evidence.get("artifacts")
     if (
         not isinstance(observed, dict)
-        or observed.get("complete") is not True
+        or not isinstance(observed.get("complete"), bool)
         or not isinstance(observed.get("files"), dict)
         or evidence.get("children_complete") is not True
         or not isinstance(evidence.get("children"), list)
     ):
         raise RuntimeError("Artifact capture is incomplete")
     files = observed["files"]
+    complete = observed["complete"]
+    # Historical complete captures used the file mapping as their inventory. A partial byte
+    # capture needs the separately collected full path list from the same host observation.
+    paths = observed.get("paths", sorted(files) if complete else None)
+    if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+        raise RuntimeError("Artifact inventory is incomplete")
+    for path in paths:
+        artifact_path(path)
+    if not set(files).issubset(paths) or (complete and set(paths) != set(files)):
+        raise RuntimeError("Artifact inventory does not match its capture")
     if len(files) > MAX_ARTIFACTS:
         raise RuntimeError("Artifact capture exceeds its file limit")
     child_sources: dict[str, tuple[str, str]] = {}
@@ -622,7 +635,7 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
             ):
                 raise RuntimeError("Artifact child capture is invalid")
             child_sources[receipt["root_path"]] = (receipt["agent_id"], receipt["sha256"])
-    if not set(child_sources).issubset(files):
+    if not set(child_sources).issubset(paths) or (complete and not set(child_sources).issubset(files)):
         raise RuntimeError("Promoted child artifacts are missing from the capture")
     captured = []
     total = 0
@@ -656,7 +669,7 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
                 **({"agent_id": child_source[0]} if child_source else {}),
             }
         )
-    return {"complete": True, "paths": sorted(files), "files": captured}
+    return {"complete": complete, "paths": sorted(set(paths)), "files": captured}
 
 
 def _note_words(summary: str) -> set[str]:

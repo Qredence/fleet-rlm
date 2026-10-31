@@ -187,7 +187,9 @@ class SessionRuntime:
         artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
         capture = turn_record.get("artifact_capture")
         if capture is not None and (
-            not isinstance(capture, dict) or capture.get("complete") is not True or capture.get("paths") != artifacts
+            not isinstance(capture, dict)
+            or not isinstance(capture.get("complete"), bool)
+            or capture.get("paths") != artifacts
         ):
             raise ValueError("Canonical artifact inventory does not match its captured view")
         from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
