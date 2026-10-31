@@ -1,6 +1,6 @@
 # PRD E — Native rollout state
 
-**Status:** proposed. **Priority:** medium. **Baseline:** [`61bea5095dbbc992db2aeb8049a05e079b0bda10`](https://github.com/Qredence/fleet-rlm/commit/61bea5095dbbc992db2aeb8049a05e079b0bda10), DSPy 3.4.1. [Index](README.md).
+**Status:** implemented; offline acceptance recorded below. **Priority:** medium. **Baseline:** [`61bea5095dbbc992db2aeb8049a05e079b0bda10`](https://github.com/Qredence/fleet-rlm/commit/61bea5095dbbc992db2aeb8049a05e079b0bda10), DSPy 3.4.1. [Index](README.md).
 
 **Revision:** 2 - review amendments applied directly, 29 October 2026. This is a source-based document update, not a new repository audit or implementation. Evidence labels and baseline limitations are defined in [README](README.md#evidence-and-baseline).
 
@@ -102,11 +102,26 @@ Native state may include values with behavior beyond JSON equality; compare actu
 
 ## 10. Codex-ready checklist
 
-- [ ] Audit native engine/wrapper state topology and supported historical artifacts.
-- [ ] Complete the E1 parity spike and E-T1–E-T5/E-T7 using actual locked native methods before deleting transport; stop on unsupported state.
-- [ ] Apply copied state into fresh engine with no compiled path; preserve reviewed-input checks.
-- [ ] Remove temporary candidate lifecycle and artifact_path consumers; retain publication/serving loader.
-- [ ] Pass E-T1–E-T7 and repository gates, report isolation and identity effects.
-- [ ] Keep rollback bounded to transport; make no unmeasured latency claim.
+- [x] Audit native engine/wrapper state topology and supported historical artifacts.
+- [x] Complete the E1 parity spike and E-T1–E-T5/E-T7 using actual locked native methods before deleting transport; stop on unsupported state.
+- [x] Apply copied state into fresh engine with no compiled path; preserve reviewed-input checks.
+- [x] Remove temporary candidate lifecycle and artifact_path consumers; retain publication/serving loader.
+- [x] Pass E-T1–E-T7 and repository gates, report isolation and identity effects (exporter setting below).
+- [x] Keep rollback bounded to transport; make no unmeasured latency claim.
 
 Use the [common acceptance report](README.md#acceptance-report). Retain the existing factory as the owner of the small state handoff; no general clone API, selectable transport registry, or parallel native-state format is authorized.
+
+## Implementation acceptance — 30 October 2026
+
+| Item | Evidence |
+|---|---|
+| Coordinates | Start SHA `b429cf1cf3303fd0d16f6d2adce04b393202c650`; final implementation is the PR E diff on `codex/native-rollout-cleanup-publication`. Installed locked versions: DSPy 3.4.1, GEPA 0.1.4, Daytona 0.224.0. Existing untracked `.codex/` work is untouched. |
+| Native reuse | Eight parity tests passed before transport deletion, using actual engine dump/load and bare/wrapped durable saves. Native Flex rebinding, predictor demos, typed field annotations/criteria and safe LM loading match the durable loader across hybrid/flex/rlm modes. Native load reconstructs signature classes; field annotations and decision state, rather than class identity, define parity. |
+| Simplification | Removed candidate `mkstemp`, descriptor close, save, two unlink cleanup paths, three imports and `OptimizationInputs.artifact_path`. The existing factory owns copied native state loading; setup and execution retain their respective manager shutdown owners. No new runtime module or clone abstraction. |
+| Contracts/data | No SQL, HTTP or published JSON format changes. Removed an internal optimization-only field after caller audit. Historical wrapper-prefixed and pre-consolidation fixtures still load. Publication bytes and digest approval remain on the existing path. |
+| Correctness | `tests/optimize/test_rollout_state.py`: 19 offline tests cover E-T1–E-T7, including actual native GEPA wrapper return/unwrap, native typed Choice parsing for every route, direct/Flex execution and an RLM execution double, concurrent demos/instructions/source/workspace mutation, copy/load/restore/execution failures and visible cleanup uncertainty. The PRD focused command plus this file passed: 182 tests; the expanded route assertions also passed in the 19-test state suite. |
+| Identity | Existing code fingerprint coverage includes `optimize/validation.py`, `contracts.py` and `engine/programs.py`; the implementation changes that identity. Fresh evaluation evidence is required before approval. |
+| Repository gates | `MLFLOW_ENABLE_ASYNC_TRACE_LOGGING=false make check` passed: 1,813 tests passed, one skipped, 84% coverage, lint, formatting, types, docs, OpenAPI and build. The default invocation stalled at `test_failed_download_span_omits_private_exception_details` after 1,504 passing tests and was interrupted; the remaining tests passed separately (309 passed, one skipped). The exporter flag applies only to the validation invocation; no project setting changed. |
+| Measurement | Instrumented rollout tests observe zero candidate save/tempfile/unlink calls: transport files and descriptors each fall from one to zero per rollout. Provider latency, cost and performance gains were not measured. |
+| Rollback | Revert factory transport and internal field removal together. Existing published artifacts require no conversion; publication and serving-loader safeguards are retained. |
+| Limits | Offline tests do not establish live provider cleanup confirmation or workload gains. An initial fake-interpreter test omitted provider mocking and attempted a snapshot lookup with dummy credentials; authentication failed. The final suite explicitly rejects sandbox provisioning and mocks interpreter/provider work. |

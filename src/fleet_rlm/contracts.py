@@ -47,7 +47,6 @@ class OptimizationInputs:
     """What only an isolated optimization rollout supplies; absent on every ordinary Turn."""
 
     context: Any = None
-    artifact_path: str | None = None
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 

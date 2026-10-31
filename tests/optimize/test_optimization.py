@@ -515,7 +515,15 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             pass
 
     monkeypatch.setattr(validation, "DaytonaSandboxManager", Manager)
-    monkeypatch.setattr(validation, "AdaptiveFleetEngine", lambda **kwargs: SimpleNamespace(**kwargs))
+
+    class Engine(SimpleNamespace):
+        def dump_state(self):
+            return {}
+
+        def load_state(self, state):
+            assert state == {}
+
+    monkeypatch.setattr(validation, "AdaptiveFleetEngine", Engine)
     current = FleetSettings(
         _env_file=None, execution_mode="flex", turn_timeout_seconds=123, fleet_root_model="openai/current-deployment"
     )
@@ -531,7 +539,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
         memory_summary=replay["memory_summary"],
         session_history=replay["session_history"],
     )
-    program = SimpleNamespace(save=lambda path: Path(path).write_text("{}"))
+    program = Engine()
     if snapshot != "complete":
         with pytest.raises(
             ValueError,
@@ -540,12 +548,10 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             factory(example, program)
     else:
         engine = factory(example, program)
-        try:
-            assert {path: (tmp_path / path).read_bytes() for path in files} == files
-            assert built_models == ["openai/current-deployment"]
-            assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
-        finally:
-            Path(engine.optimization.artifact_path).unlink(missing_ok=True)
+        assert {path: (tmp_path / path).read_bytes() for path in files} == files
+        assert built_models == ["openai/current-deployment"]
+        assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
+        assert engine.compiled_path is None
 
 
 def test_grouped_split_is_stable_and_keeps_same_task_lineage_together() -> None:
