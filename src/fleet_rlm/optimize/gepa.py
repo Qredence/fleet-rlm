@@ -189,24 +189,25 @@ def _check_run_cancelled(stop_file: Path, store: Store | None, session_id: str, 
         raise OptimizationCancelledError("Optimization stop requested")
 
 
-def _emit_diagnostic(event: Mapping[str, Any]) -> None:
+def _emit_diagnostic(event: Mapping[str, Any], *, suppress_fifo: bool = True) -> None:
     """Avoid pipe backpressure in callback/control paths; API output is discarded."""
     import os
     import stat
     import sys
 
     try:
-        if stat.S_ISFIFO(os.fstat(sys.stdout.fileno()).st_mode):
+        if suppress_fifo and stat.S_ISFIFO(os.fstat(sys.stdout.fileno()).st_mode):
             return
     except (AttributeError, OSError, ValueError):
+        # In-memory/test streams may lack a descriptor; they can still accept events.
         pass
     emit_event(event)
 
 
-def _optional_event(event: Mapping[str, Any]) -> None:
+def _optional_event(event: Mapping[str, Any], *, managed: bool = False) -> None:
     """Emit a lifecycle diagnostic independently of durable run correctness."""
     try:
-        _emit_diagnostic(event)
+        _emit_diagnostic(event, suppress_fifo=managed)
     except Exception:
         logger.warning("Optimization diagnostic emission failed; sensitive details omitted.")
 
@@ -434,7 +435,9 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
             if started is None:
                 raise ValueError("Experiment could not be claimed by this optimizer process")
             if structured:
-                _optional_event({"type": "started", "run_id": run_id, "stage": "preparing"})
+                _optional_event(
+                    {"type": "started", "run_id": run_id, "stage": "preparing"}, managed=bool(managed_run_id)
+                )
 
             target = settings.mlflow_target()
             experiment_id = _optional_mlflow(
@@ -487,7 +490,7 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         event = {"type": "terminal", "status": status, "run_id": run_id}
         if managed_run_id and worker_outcome is not None:
             event["worker_outcome"] = worker_outcome
-        _optional_event(event)
+        _optional_event(event, managed=bool(managed_run_id))
     if failure is not None:
         raise failure
 

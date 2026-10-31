@@ -515,6 +515,8 @@ def test_gateway_deepseek_flash_advertises_native_json_mode_without_schema(role,
         ("https://compatible.example/v1", "openai/system.ai.deepseek-v4-1-flash-1017"),
         ("https://workspace.example/ai-gateway/mlflow/v1", "openai/system.ai.unknown-model"),
         ("https://workspace.example/ai-gateway/mlflow/v1", "openai/system.ai.deepseek-v4-pro-0813"),
+        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/production.ai.deepseek-v4-1-flash"),
+        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/production.ai.deepseek-v4-1-flash-1017"),
     ],
 )
 def test_gateway_json_declaration_does_not_guess_other_model_capabilities(base_url, model):

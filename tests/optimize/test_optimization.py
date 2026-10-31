@@ -2070,6 +2070,25 @@ def test_worker_partial_progress_is_one_write_and_retains_final_counters(managed
     }
 
 
+@pytest.mark.parametrize("managed", [False, True])
+def test_lifecycle_events_preserve_standalone_pipe_output(monkeypatch, managed):
+    import os
+    import sys
+
+    events = []
+    reader, writer = os.pipe()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "stdout", SimpleNamespace(fileno=lambda: writer))
+            patch.setattr(workflow, "emit_event", events.append)
+            for kind in ("started", "terminal"):
+                workflow._optional_event({"type": kind}, managed=managed)
+    finally:
+        os.close(reader)
+        os.close(writer)
+    assert events == ([] if managed else [{"type": "started"}, {"type": "terminal"}])
+
+
 def test_optional_callback_emission_failure_is_bounded_and_does_not_stop(monkeypatch, caplog):
     def fail(_event):
         raise RuntimeError("private diagnostic credential")
@@ -2219,7 +2238,12 @@ def test_optional_tracking_close_receives_body_failure_and_preserves_it(monkeypa
 
     monkeypatch.setattr(workflow.mlflow, "start_run", lambda **_kwargs: TrackingContext())
     error = ValueError("required optimization failure")
-    with pytest.raises(ValueError, match="required optimization failure"), workflow._tracking_run("offline"):
-        raise error
+
+    def failing_body():
+        with workflow._tracking_run("offline"):
+            raise error
+
+    with pytest.raises(ValueError, match="required optimization failure"):
+        failing_body()
     assert exits[0][0] is ValueError and exits[0][1] is error and exits[0][2] is not None
     assert "private telemetry teardown credential" not in caplog.text

@@ -842,7 +842,7 @@ class FleetSettings(BaseSettings):
         service = model.removeprefix("openai/")
         model_name = service.rsplit(".", 1)[-1]
         chat_only_reflection = role == "reflection" and model_name.startswith("claude-")
-        deepseek_json_mode = model_name in {"deepseek-v4-1-flash", "deepseek-v4-1-flash-1017"}
+        deepseek_json_mode = service in {"system.ai.deepseek-v4-1-flash", "system.ai.deepseek-v4-1-flash-1017"}
         if urlsplit(base_url).path == "/ai-gateway/mlflow/v1" and (chat_only_reflection or deepseek_json_mode):
             from dspy.lm15 import AccessPolicy, ModelSupport, OpenAIChatCompat, ProviderDefinition, register_provider
 
