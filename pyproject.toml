@@ -87,7 +87,7 @@ benchmarks = [
     "ipykernel>=7.4.0",
     "longcot @ git+https://github.com/LongHorizonReasoning/longcot@fb9649423f15f5b0091f8e988b100596cac592ca",
     "pandas>=3.0.6,<4",
-    "python-dateutil>=2.9.0,<3",
+    "python-dateutil>=2.9.0,<4",
 ]
 
 [tool.uv]
