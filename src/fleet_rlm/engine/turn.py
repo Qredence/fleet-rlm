@@ -635,8 +635,9 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
             ):
                 raise RuntimeError("Artifact child capture is invalid")
             child_sources[receipt["root_path"]] = (receipt["agent_id"], receipt["sha256"])
-    if not set(child_sources).issubset(paths) or (complete and not set(child_sources).issubset(files)):
-        raise RuntimeError("Promoted child artifacts are missing from the capture")
+    # Promotion receipts describe an earlier host boundary. The root can legitimately
+    # remove, move, or rewrite those outputs before the final workspace observation.
+    superseded = {path for path in child_sources if path not in paths}
     captured = []
     total = 0
     for path in sorted(files):
@@ -659,7 +660,8 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
             raise RuntimeError("Artifact capture exceeds its byte limit")
         child_source = child_sources.get(path)
         if child_source is not None and child_source[1] != digest:
-            raise RuntimeError("Promoted child artifact does not match its host receipt")
+            superseded.add(path)
+            child_source = None
         captured.append(
             {
                 "path": path,
@@ -669,7 +671,12 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
                 **({"agent_id": child_source[0]} if child_source else {}),
             }
         )
-    return {"complete": complete, "paths": sorted(set(paths)), "files": captured}
+    return {
+        "complete": complete,
+        "paths": sorted(set(paths)),
+        "files": captured,
+        **({"superseded_child_receipts": sorted(superseded)} if superseded else {}),
+    }
 
 
 def _note_words(summary: str) -> set[str]:

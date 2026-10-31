@@ -541,7 +541,10 @@ Reviewed gold keeps a separate, much smaller limit because it is review metadata
 not output. Structured scoring continues to require complete evidence.
 The existing `artifacts` list is the Session inventory, not a list
 of files produced by that Turn. This diagnostic does not change scoring or gold
-approval semantics. Prior answers in history and unreviewed learned notes remain
+approval semantics. A root rewrite or removal of promoted child output records
+`superseded_child_receipts` in the final capture; rewritten files use workspace
+provenance, while the original promotion receipt remains in execution evidence.
+Prior answers in history and unreviewed learned notes remain
 program inputs; a continuation with those inputs does not measure unseen-task
 performance.
 Fixed-size host usage counters precede artifact metadata in root outputs so

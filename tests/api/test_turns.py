@@ -524,6 +524,38 @@ def test_artifact_capture_validates_hashes_and_retains_sorted_logical_metadata()
     assert capture["files"][0]["sha256"] == hashlib.sha256(payload).hexdigest()
 
 
+@pytest.mark.parametrize("removed", [False, True])
+def test_root_can_supersede_promoted_child_output(removed):
+    path = "artifacts/child/out.txt"
+    current = b"root post-processing"
+    evidence = {
+        "artifacts": {
+            "complete": True,
+            "files": {}
+            if removed
+            else {path: {"sha256": hashlib.sha256(current).hexdigest(), "base64": base64.b64encode(current).decode()}},
+        },
+        "children_complete": True,
+        "children": [
+            {
+                "status": "succeeded",
+                "artifacts": [
+                    {"root_path": path, "agent_id": "child", "sha256": hashlib.sha256(b"original").hexdigest()}
+                ],
+            }
+        ],
+    }
+    capture = turn_module._capture_artifact_view(evidence)
+    assert capture["complete"] is True
+    assert capture["superseded_child_receipts"] == [path]
+    assert capture["paths"] == ([] if removed else [path])
+    if not removed:
+        assert capture["files"][0]["source"] == "workspace"
+        assert "agent_id" not in capture["files"][0]
+    # Keep the original promotion-time receipt intact for downstream scoring.
+    assert evidence["children"][0]["artifacts"][0]["sha256"] == hashlib.sha256(b"original").hexdigest()
+
+
 def test_incomplete_or_invalid_artifact_capture_is_rejected() -> None:
     with pytest.raises(RuntimeError, match="incomplete"):
         turn_module._capture_artifact_view(
