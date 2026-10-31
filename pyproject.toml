@@ -33,7 +33,7 @@ classifiers = [
 dependencies = [
     # Flex uses an internal constructor protocol verified only on DSPy 3.4.1 (GEPA lock: 0.1.4).
     "dspy[typesafe]==3.4.1",
-    "daytona==0.224.0",
+    "daytona==0.226.1",
     "mlflow==3.17.2",
     "databricks-sdk>=0.153.0,<1",
     "psycopg[binary]>=3.3.6,<4",
