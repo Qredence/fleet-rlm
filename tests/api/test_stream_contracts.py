@@ -34,6 +34,19 @@ def wire(event: str, **payload: object) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("event", ["turn_complete", "error", "turn_cancelled"])
+def test_terminal_contract_accepts_integer_deadline_provenance(event: str) -> None:
+    framed = frame_envelope(wire(event, effective_seconds=900))
+    assert framed.data["payload"]["effective_seconds"] == 900
+
+
+def test_progress_mirrors_nan_values() -> None:
+    # Distinct NaN objects exercise the JSON mirror comparison, not identity.
+    event = wire("progress", nested={"value": float("nan")})
+    event["nested"] = {"value": float("nan")}
+    assert FleetEnvelope.model_validate(event).event == "progress"
+
+
 def test_malformed_completion_is_rejected_by_its_terminal_contract() -> None:
     malformed = wire("turn_complete", turn_id="turn-1", answer={"unexpected": "object"})
 

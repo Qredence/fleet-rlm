@@ -132,11 +132,15 @@ def create_app(
             return JSONResponse(
                 status_code=422, content={"detail": "Invalid setup request; check the submitted fields."}
             )
-        if "/workspace/files/" in request.url.path and any(
-            error.get("type") == "workspace_content_xor" for error in exc.errors()
-        ):
-            # Preserve the existing XOR status and response body without echoing the submitted file content.
-            return JSONResponse(status_code=422, content={"detail": "Supply exactly one of content or content_base64"})
+        if "/workspace/files/" in request.url.path:
+            errors = exc.errors()
+            if any(error.get("type") == "workspace_content_xor" for error in errors):
+                # Preserve the existing XOR response without echoing file content.
+                return JSONResponse(
+                    status_code=422, content={"detail": "Supply exactly one of content or content_base64"}
+                )
+            safe = [{key: error[key] for key in ("type", "loc", "msg") if key in error} for error in errors]
+            return JSONResponse(status_code=422, content={"detail": safe})
         return await request_validation_exception_handler(request, exc)
 
     app.state.settings = resolved

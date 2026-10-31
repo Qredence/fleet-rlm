@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from fastapi.sse import ServerSentEvent
@@ -184,7 +185,7 @@ class FleetEnvelope(BaseModel):
                 raise ValueError("SSE envelope fields do not match the nested payload")
             else:
                 flattened[key] = extra[key]
-        if flattened != self.payload:
+        if not _same_json_value(flattened, self.payload):
             raise ValueError("SSE envelope fields do not match the nested payload")
 
         reserved = _TERMINAL_PAYLOADS.get(self.event)
@@ -203,7 +204,7 @@ def _same_json_value(left: Any, right: Any) -> bool:
     if left is right:
         return True
     if isinstance(left, float) and isinstance(right, float):
-        if left != left and right != right:  # NaN is the sole value unequal to itself.
+        if math.isnan(left) and math.isnan(right):
             return True
         return left == right
     if isinstance(left, dict) and isinstance(right, dict):

@@ -232,6 +232,8 @@ experiment status and drain return `accepting`, `busy`, and `experiments`.
 Workspace writes require exactly one non-null `content` or `content_base64` field.
 An empty string writes an empty file. Neither or both returns the existing safe
 422 detail, without echoing file content. OpenAPI expresses this cross-field rule.
+Other workspace-write validation errors return only error type, location, and message;
+rejected input and validation context are excluded from the response.
 
 Sessions run one Turn at a time; a second Turn on a busy Session gets `409` after two seconds. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.

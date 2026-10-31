@@ -10,7 +10,10 @@ def test_openapi_is_version_valid_and_deterministic():
     app = create_app(settings=FleetSettings(_env_file=None), initialize_db=False, configure_observability=False)
     schema = app.openapi()
     validate(schema)
-    assert schema == app.openapi()
+    regenerated = create_app(
+        settings=FleetSettings(_env_file=None), initialize_db=False, configure_observability=False
+    ).openapi()
+    assert schema == regenerated
     assert schema["openapi"] == "3.1.0"
     streams = []
     for path in schema["paths"].values():

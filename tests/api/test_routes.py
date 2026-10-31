@@ -249,6 +249,19 @@ def test_a_missing_workspace_file_is_a_404_and_cleans_its_temp_file():
     assert response.status_code == 404 and not Path(seen[0]).exists()
 
 
+def test_workspace_write_validation_does_not_echo_rejected_file_content():
+    with opened_client(runtime_with(sandbox_mgr=FakeManager())) as (client, _):
+        response = client.put(
+            "/sessions/s1/workspace/files/files/a.txt",
+            json={"content": {"private-file-text": "invalid type"}},
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"] == [
+        {"type": "string_type", "loc": ["body", "content"], "msg": "Input should be a valid string"}
+    ]
+    assert "private-file-text" not in response.text
+
+
 def test_workspace_write_requires_exactly_one_content_field():
     runtime = runtime_with(
         sandbox_mgr=FakeManager(write_workspace_file=lambda rel_path, _content: f"/workspace/{rel_path}")
