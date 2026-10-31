@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from openapi_spec_validator import validate
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -23,7 +24,9 @@ OPENAPI_PATH = ROOT / "openapi.yaml"
 
 def render_openapi() -> str:
     """Return a deterministic YAML representation of the current API schema."""
-    return yaml.safe_dump(app.openapi(), sort_keys=False, allow_unicode=True, width=100)
+    schema = app.openapi()
+    validate(schema)
+    return yaml.safe_dump(schema, sort_keys=False, allow_unicode=True, width=100)
 
 
 def main(argv: list[str] | None = None) -> int:

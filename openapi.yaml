@@ -589,52 +589,42 @@ paths:
           description: Successful Response
           content:
             text/event-stream:
-              itemSchema:
-                type: object
-                properties:
-                  data:
-                    type: string
-                  event:
-                    type: string
-                  id:
-                    type: string
-                  retry:
-                    type: integer
-                    minimum: 0
+              schema:
+                type: string
         '401':
           description: Operator token required
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SetupError'
         '403':
           description: Loopback connection required
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SetupError'
         '404':
           description: Setup or operation unavailable
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SetupError'
         '409':
           description: Operation or configuration conflict
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SetupError'
         '422':
           description: Invalid setup request
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SetupError'
         '503':
           description: Provider unavailable
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SetupError'
   /setup/apply:
@@ -711,9 +701,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Drain Experiments Setup Experiments Drain Post
+                $ref: '#/components/schemas/ExperimentManagerStatus'
         '401':
           description: Operator token required
           content:
@@ -765,9 +753,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Experiment Status Setup Experiments Status Get
+                $ref: '#/components/schemas/ExperimentManagerStatus'
         '401':
           description: Operator token required
           content:
@@ -1662,18 +1648,6 @@ paths:
           description: Server-Sent Events for Turn status, activity, completion, or failure.
           content:
             text/event-stream:
-              itemSchema:
-                type: object
-                properties:
-                  data:
-                    type: string
-                  event:
-                    type: string
-                  id:
-                    type: string
-                  retry:
-                    type: integer
-                    minimum: 0
               schema:
                 type: string
         '409':
@@ -1704,15 +1678,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response List Experiments Sessions  Session Id  Experiments Get
-        '422':
-          description: Validation Error
+                $ref: '#/components/schemas/ExperimentList'
+        '404':
+          description: The requested experiment does not exist.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the run or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or experiment identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Experiment storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     post:
       tags:
       - experiments
@@ -1738,15 +1728,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Start Experiment Sessions  Session Id  Experiments Post
-        '422':
-          description: Validation Error
+                $ref: '#/components/schemas/ExperimentEnvelope'
+        '404':
+          description: The requested experiment does not exist.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the run or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or experiment identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Experiment storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /sessions/{session_id}/experiments/{run_id}:
     get:
       tags:
@@ -1773,15 +1779,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Experiment Detail Sessions  Session Id  Experiments  Run Id  Get
-        '422':
-          description: Validation Error
+                $ref: '#/components/schemas/ExperimentDetail'
+        '404':
+          description: The requested experiment does not exist.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the run or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or experiment identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Experiment storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /sessions/{session_id}/experiments/{run_id}/cancel:
     post:
       tags:
@@ -1808,15 +1830,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Cancel Experiment Sessions  Session Id  Experiments  Run Id  Cancel Post
-        '422':
-          description: Validation Error
+                $ref: '#/components/schemas/ExperimentEnvelope'
+        '404':
+          description: The requested experiment does not exist.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the run or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or experiment identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Experiment storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /sessions/{session_id}/experiments/{run_id}/review:
     post:
       tags:
@@ -1849,15 +1887,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Review Experiment Sessions  Session Id  Experiments  Run Id  Review Post
-        '422':
-          description: Validation Error
+                $ref: '#/components/schemas/ExperimentEnvelope'
+        '404':
+          description: The requested experiment does not exist.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the run or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or experiment identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Experiment storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 components:
   schemas:
     Action:
@@ -1874,6 +1928,21 @@ components:
       - request_id
       title: Action
       description: Client request identity used to avoid replaying a setup operation.
+    ApiError:
+      properties:
+        detail:
+          anyOf:
+          - type: string
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: ApiError
+      description: Sanitized HTTP error detail or FastAPI's standard validation issue list.
     ApplyResult:
       properties:
         restart_required:
@@ -2001,6 +2070,172 @@ components:
       - deleted
       title: Deleted
       description: Acknowledgement of a deleted memory entry or workspace file.
+    ExperimentDetail:
+      properties:
+        experiment:
+          $ref: '#/components/schemas/ExperimentRun'
+        comparison:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Comparison
+      type: object
+      required:
+      - experiment
+      - comparison
+      title: ExperimentDetail
+      description: One public run and its optional saved comparison evidence.
+    ExperimentEnvelope:
+      properties:
+        experiment:
+          $ref: '#/components/schemas/ExperimentRun'
+      type: object
+      required:
+      - experiment
+      title: ExperimentEnvelope
+      description: One public run returned by start, cancel, or review.
+    ExperimentList:
+      properties:
+        experiments:
+          items:
+            $ref: '#/components/schemas/ExperimentRun'
+          type: array
+          title: Experiments
+        active_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Run Id
+        accepting:
+          type: boolean
+          title: Accepting
+      type: object
+      required:
+      - experiments
+      - active_run_id
+      - accepting
+      title: ExperimentList
+      description: History snapshot and admission state for one Session's experiments.
+    ExperimentManagerStatus:
+      properties:
+        accepting:
+          type: boolean
+          title: Accepting
+        busy:
+          type: boolean
+          title: Busy
+        experiments:
+          items:
+            $ref: '#/components/schemas/ExperimentRun'
+          type: array
+          title: Experiments
+      type: object
+      required:
+      - accepting
+      - busy
+      - experiments
+      title: ExperimentManagerStatus
+      description: Admission and active-run state observed by the local launcher.
+    ExperimentRun:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        session_id:
+          type: string
+          title: Session Id
+        status:
+          type: string
+          title: Status
+        stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stage
+        options:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Options
+        started_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Started At
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        finished_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finished At
+        candidate_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Candidate Version
+        gate:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Gate
+        dataset_sizes:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Dataset Sizes
+        mlflow_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mlflow Run Id
+        progress:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Progress
+        failure:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Failure
+        decision:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Decision
+        decision_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Decision At
+        stop_requested:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Stop Requested
+      additionalProperties: true
+      type: object
+      required:
+      - run_id
+      - session_id
+      - status
+      title: ExperimentRun
+      description: Public view of a persisted optimization run, including additive public fields.
     Exported:
       properties:
         exported:
@@ -2622,6 +2857,11 @@ components:
         timeout_seconds:
           anyOf:
           - type: integer
+            maximum: 0.0
+            minimum: 0.0
+          - type: integer
+            maximum: 3600.0
+            minimum: 10.0
           - type: 'null'
           title: Timeout Seconds
           description: Fleet deadline for this Turn in seconds. Omitted or null inherits the configured
@@ -2726,6 +2966,17 @@ components:
       title: VolumeInfo
       description: Safe provider identity of a workspace Volume.
     WorkspaceWriteRequest:
+      oneOf:
+      - properties:
+          content:
+            type: string
+        required:
+        - content
+      - properties:
+          content_base64:
+            type: string
+        required:
+        - content_base64
       properties:
         content:
           anyOf:

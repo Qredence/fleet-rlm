@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from fleet_rlm.api.schemas import ExperimentManagerStatus
 from fleet_rlm.optimization_runs import ACTIVE_STATUSES
 from fleet_rlm.setup import SECTIONS, Operation, SetupConflictError, SetupService
 
@@ -308,7 +309,7 @@ async def apply(request: Request, service: Operator) -> ApplyResult:
     return ApplyResult(restart_required=True)
 
 
-@router.post("/experiments/drain")
+@router.post("/experiments/drain", response_model=ExperimentManagerStatus, response_model_exclude_unset=True)
 async def drain_experiments(request: Request, _service: Operator) -> dict[str, Any]:
     """Fence experiment admission before a local owner waits to stop its services."""
     manager = request.app.state.experiments
@@ -317,7 +318,7 @@ async def drain_experiments(request: Request, _service: Operator) -> dict[str, A
     return await manager.begin_drain()
 
 
-@router.get("/experiments/status")
+@router.get("/experiments/status", response_model=ExperimentManagerStatus, response_model_exclude_unset=True)
 async def experiment_status(request: Request, _service: Operator) -> dict[str, Any]:
     """Observe cleanup through the same private, loopback-only operator capability."""
     manager = request.app.state.experiments

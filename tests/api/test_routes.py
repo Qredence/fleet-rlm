@@ -17,8 +17,10 @@ from fakes import (
     runtime_with,
     store_with,
 )
+from jsonschema import Draft202012Validator
 
 from fleet_rlm.api.deps import get_registry
+from fleet_rlm.api.schemas import WorkspaceWriteRequest
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.workspace import WorkspaceDataset
 
@@ -35,10 +37,16 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
     assert "/sessions/{session_id}/reload" not in schema["paths"]
     assert "post" in schema["paths"]["/skills/push"]
     turn = schema["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]["text/event-stream"]
-    assert turn["schema"] == {"type": "string"} and "itemSchema" in turn
+    assert turn["schema"] == {"type": "string"} and "itemSchema" not in turn
     assert schema["components"]["schemas"]["ModeRequest"]["properties"]["mode"]["pattern"] == "^(rlm|flex|hybrid)$"
     config = schema["paths"]["/sessions/{session_id}/config"]["get"]["responses"]["200"]["content"]
     assert config["application/json"]["schema"] == {"$ref": "#/components/schemas/SessionConfig"}
+    workspace_request = schema["components"]["schemas"]["WorkspaceWriteRequest"]
+    assert len(workspace_request["oneOf"]) == 2
+    timeout = schema["components"]["schemas"]["TurnRequest"]["properties"]["timeout_seconds"]
+    assert {branch.get("minimum") for branch in timeout["anyOf"] if branch.get("type") == "integer"} == {0, 10}
+    assert any(branch.get("maximum") == 0 for branch in timeout["anyOf"])
+    assert any(branch.get("maximum") == 3600 for branch in timeout["anyOf"])
 
 
 def test_health_reports_the_package_version():
@@ -241,11 +249,60 @@ def test_a_missing_workspace_file_is_a_404_and_cleans_its_temp_file():
     assert response.status_code == 404 and not Path(seen[0]).exists()
 
 
+def test_workspace_write_validation_does_not_echo_rejected_file_content():
+    with opened_client(runtime_with(sandbox_mgr=FakeManager())) as (client, _):
+        response = client.put(
+            "/sessions/s1/workspace/files/files/a.txt",
+            json={"content": {"private-file-text": "invalid type"}},
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"] == [
+        {"type": "string_type", "loc": ["body", "content"], "msg": "Input should be a valid string"}
+    ]
+    assert "private-file-text" not in response.text
+
+
 def test_workspace_write_requires_exactly_one_content_field():
-    with opened_client(runtime_with()) as (client, _):
-        both = client.put("/sessions/s1/workspace/files/files/a.txt", json={"content": "x", "content_base64": "eA=="})
-        neither = client.put("/sessions/s1/workspace/files/files/a.txt", json={})
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(write_workspace_file=lambda rel_path, _content: f"/workspace/{rel_path}")
+    )
+    with opened_client(runtime) as (client, _):
+        both = client.put(
+            "/sessions/s1/workspace/files/files/a.txt",
+            json={"content": "secret-file-text", "content_base64": "c2VjcmV0"},
+        )
+        neither = client.put("/sessions/s1/workspace/files/files/a.txt", json={"content": None})
+        empty_text = client.put("/sessions/s1/workspace/files/files/empty.txt", json={"content": ""})
+        empty_base64 = client.put("/sessions/s1/workspace/files/files/empty-base64.txt", json={"content_base64": ""})
     assert both.status_code == neither.status_code == 422
+    assert both.json() == neither.json() == {"detail": "Supply exactly one of content or content_base64"}
+    assert "secret-file-text" not in both.text and "c2VjcmV0" not in both.text
+    assert empty_text.status_code == empty_base64.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("body", "valid"),
+    [
+        ({}, False),
+        ({"content": None}, False),
+        ({"content": ""}, True),
+        ({"content_base64": ""}, True),
+        ({"content": None, "content_base64": ""}, True),
+        ({"content": "", "content_base64": None}, True),
+        ({"content": "text", "content_base64": "dGV4dA=="}, False),
+    ],
+)
+def test_workspace_write_schema_xor_matches_runtime(body, valid):
+    schema = WorkspaceWriteRequest.model_json_schema()
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+
+    assert validator.is_valid(body) is valid
+    if valid:
+        WorkspaceWriteRequest.model_validate(body)
+    else:
+        with pytest.raises(ValueError):
+            WorkspaceWriteRequest.model_validate(body)
 
 
 @pytest.mark.parametrize(

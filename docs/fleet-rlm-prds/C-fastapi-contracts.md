@@ -115,10 +115,71 @@ B supplies terminal semantics. D supplies stable progress ownership; F later sup
 
 ## 10. Codex-ready checklist
 
-- [ ] Freeze existing responses/frames and inventory operations, historical variants and actual errors.
-- [ ] Reuse native Pydantic constraints and existing type owners; preserve the engine/Store boundary.
-- [ ] Validate SSE JSON explicitly and retain native framing and supported flattened fields.
-- [ ] Document real framed examples; keep the existing OpenAPI version and generator by default.
-- [ ] Add no vendor extension or generator normalization without demonstrated need and consumer tests.
-- [ ] Pass C-T1-C-T8 and repository gates, including historical/import-boundary tests.
-- [ ] Record intentional wire/status changes, added models, deleted handler validation and rollback compatibility in the [common acceptance report](README.md#acceptance-report).
+### Implementation evidence (30 October 2026)
+
+Implementation branch: `codex/fastapi-contracts`, starting at `5fd2af6ba`.
+Validation below preceded the implementation commit; the PR identifies the final commit.
+FastAPI 0.162.0 and Pydantic 2.13.5 remain unchanged. The only added dependency
+is the development-only OpenAPI specification validator and its dependencies.
+
+Named experiment/list/detail/acknowledgment and setup manager-status responses
+replace generic response declarations. Native strict deadline constraints replace
+the custom timeout validator; workspace XOR moves from the handler into its
+request model, retaining the existing sanitized 422 response. Unknown historical
+result fields, explicit nulls, and omitted fields remain readable without a SQL
+migration or backfill.
+
+SSE validation lives in `api/stream_contracts.py` to keep transport-specific models
+out of the engine and Store. Native framing and existing flattened fields remain.
+Malformed reserved events cannot enter the dynamic activity branch. Rejected
+envelopes produce a generic exception without embedding submitted payload data;
+stream delivery can terminate, and committed results remain recoverable by the
+existing idempotency path. This does not add a recovery service or a second outcome.
+
+The pinned generator emits OpenAPI 3.2 `itemSchema` under the application's 3.1.0
+declaration. A bounded application schema hook corrects only SSE media declarations,
+including setup errors that occur before streaming and return JSON. There is no
+vendor extension or general normalization pass. The exported and served documents
+share this hook; the existing generation/check command validates the specification.
+
+C-T1–C-T8 coverage includes named response filtering, Python/JSON Schema timeout
+matrices (JSON Schema accepts integer-valued `10.0`; strict Python rejects floats),
+workspace XOR/empty files, current and historical terminal data, malformed terminals,
+native framing/TUI consumption, sanitized errors, and schema validity/determinism.
+Validation uses offline fakes and local fixtures; no live provider, Daytona, or
+production database run was performed. Roll back response models, SSE validation,
+and generated documentation together, retaining historical readers and all stored
+results. No new persistent state or lifecycle fields are introduced.
+
+Final offline validation: `make check` passed (1,756 tests passed, one skipped;
+83% total coverage), including lint, formatting, types, documentation links,
+OpenAPI validation/freshness, and source/wheel builds. `make api-sync` and
+`git diff --check` also passed. The unchanged runtime dependency pins and scoped
+handler-validator deletion above distinguish native reuse from added API models;
+no runtime ownership code was relocated.
+
+Subsequent authorized browser smoke test: `uv run fleet web` initially reused an
+older API; verification instead used a fresh `fleet serve --port 8002` process
+and `fleet web --url http://127.0.0.1:8002 --port 8081`. Messages were entered
+through the browser terminal using agent-browser, not submitted by a test HTTP
+client. Session `sess_web_d6aa9fcb9b7d` completed both Turns:
+
+- Direct reply: Turn `b90ca1abc22c4014ae0fa94303ae564a`, trace
+  `tr-3760052a08a21833be2a0038c728b547`; exact requested response displayed.
+- Python calculation: Turn `70a3ff31c3314fe7846feeba5d929cd2`, trace
+  `tr-828a2fde7d6fc0b77b05c1e699199822`; Flex/child execution returned `338350`.
+  One generated SUBMIT call omitted a required field; the model recovered, and
+  the persisted record correctly reports one sandbox error.
+
+Both durable status reads report `completed` / `turn_complete`, with
+`cleanup: not_required`. Browser page errors were empty; the web access log had
+a missing favicon (404). This verifies these live paths, not every endpoint or
+failure mode. No optimizer experiment or benchmark was started by this check.
+
+- [x] Freeze existing responses/frames and inventory operations, historical variants and actual errors.
+- [x] Reuse native Pydantic constraints and existing type owners; preserve the engine/Store boundary.
+- [x] Validate SSE JSON explicitly and retain native framing and supported flattened fields.
+- [x] Document real framed examples; keep the existing OpenAPI version and generator by default.
+- [x] Add no vendor extension or generator normalization without demonstrated need and consumer tests.
+- [x] Pass C-T1-C-T8 and repository gates, including historical/import-boundary tests.
+- [x] Record intentional wire/status changes, added models, deleted handler validation and rollback compatibility following the [common acceptance report](README.md#acceptance-report) above.

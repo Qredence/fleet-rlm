@@ -126,8 +126,8 @@ override. Omitting it or sending `null` (the default) inherits
 `turn_timeout_seconds`, or `900` when configuration does not set it. `0` disables
 the Fleet wall-clock deadline for this Turn. A positive value must be `10`–`3600`
 and sets this Turn's duration. Booleans, floats, numeric strings, negatives,
-`1`–`9`, and values above `3600` return `422` with an error whose `loc` ends in
-`timeout_seconds` and whose message names the `0 or 10..3600` rule. The resolved
+`1`–`9`, and values above `3600` return `422` with validation errors for
+`timeout_seconds`. OpenAPI describes both permitted integer ranges. The resolved
 source is reported as `request`, `configuration`, or `default`, never `command`.
 A deadline-free Turn reports `effective_seconds: null`; it still reports the
 provider-owned `ttl_minutes` and `auto_stop_interval` bounds, which Fleet does not
@@ -205,6 +205,35 @@ carries the same `session_id`, `turn_id`, `seq`, and SSE `id` as the rest of the
 stream and is delivered after teardown. If the Turn's worker stops without reporting
 an outcome, the server sends a sanitized `error` and closes the stream. The connection
 may emit SSE comment keep-alives.
+
+Fleet validates the complete version-1 JSON envelope before native SSE framing.
+Terminal events (`turn_complete`, `error`, `turn_cancelled`, and `done`) use explicit
+payload models; dynamic activity cannot substitute for a malformed terminal event.
+The envelope retains nested `payload` data and the existing flattened fields.
+Historical replay preserves unknown fields and absent versus explicit null values;
+it does not restore a live interpreter. The OpenAPI stream schema describes the
+framed text, rather than claiming the whole response is one JSON object.
+
+For example, a terminal `done` frame has the following form (the blank line ends
+the frame; sequence and timestamp values vary):
+
+```text
+data: {"version":1,"event":"done","session_id":"session-a","turn_id":"turn-a","agent_id":null,"parent_agent_id":null,"sandbox_id":null,"seq":3,"timestamp":0.0,"payload":{}}
+id: 3
+
+```
+
+Experiment list responses contain `experiments`, nullable `active_run_id`, and
+`accepting`. Start, cancel, and review responses contain `experiment`; detail adds
+nullable `comparison`. Public experiment models retain progress, options, failure,
+gate, and review information while excluding private worker settings. Setup
+experiment status and drain return `accepting`, `busy`, and `experiments`.
+
+Workspace writes require exactly one non-null `content` or `content_base64` field.
+An empty string writes an empty file. Neither or both returns the existing safe
+422 detail, without echoing file content. OpenAPI expresses this cross-field rule.
+Other workspace-write validation errors return only error type, location, and message;
+rejected input and validation context are excluded from the response.
 
 Sessions run one Turn at a time; a second Turn on a busy Session gets `409` after two seconds. Session IDs are
 validated by the runtime; use simple URL-safe identifiers.

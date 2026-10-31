@@ -19,6 +19,7 @@ import dspy
 import pytest
 from dspy import AdapterParseError
 from fakes import FakeManager, api_settings, client_for, completion_for, opened_client, runtime_with, store_with
+from jsonschema import Draft202012Validator
 
 import fleet_rlm.api.app as api_app
 import fleet_rlm.api.deps as api_deps
@@ -26,6 +27,7 @@ import fleet_rlm.api.routes.turns as turns_route
 import fleet_rlm.engine.turn as turn_module
 import fleet_rlm.observability as observability
 from fleet_rlm.api.events import SSERuntimeCallback
+from fleet_rlm.api.schemas import TurnRequest
 from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
@@ -285,6 +287,47 @@ def test_terminal_delivery_failure_does_not_cancel_committed_turn(caplog):
     assert replay[0] == state.rows["delivery"]["result"]
     assert state.cancellations == [] and len(state.executions) == 1
     assert "private client response" not in caplog.text
+
+
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("committed", [False, True])
+def test_invalid_terminal_frame_keeps_existing_commit_and_cancellation_authority(monkeypatch, committed):
+    runtime, state = durable_runtime()
+    cancelled = threading.Event()
+    request_cancellation = runtime.sandbox_mgr.request_cancellation
+
+    def cancel_and_signal():
+        request_cancellation()
+        cancelled.set()
+
+    runtime.sandbox_mgr.request_cancellation = cancel_and_signal
+    frame = turns_route.frame_envelope
+    bad_event = "turn_complete" if committed else "error"
+
+    def reject_terminal(wire):
+        if wire["event"] == bad_event:
+            raise RuntimeError("Turn event contract validation failed")
+        return frame(wire)
+
+    monkeypatch.setattr(turns_route, "frame_envelope", reject_terminal)
+    if not committed:
+
+        def emit_uncommitted_outcome(*_args, emit, **_kwargs):
+            emit({"event": "error", "request_id": "invalid-terminal"})
+            assert cancelled.wait(5), "the uncommitted worker should be fenced and drained"
+
+        monkeypatch.setattr(turns_route, "run_turn", emit_uncommitted_outcome)
+
+    with opened_client(runtime, store=runtime.store) as (client, _app):
+        response = client.post("/sessions/session-a/turn", json={"task": "validate"})
+
+    assert [event["event"] for event in events_of(response)] == ["turn_status"]
+
+    if committed:
+        assert [row["status"] for row in state.rows.values()] == ["completed"]
+        assert state.cancellations == []
+    else:
+        assert state.cancellations == [1]
 
 
 @pytest.mark.usefixtures("traced")
@@ -1970,7 +2013,42 @@ def test_turn_request_timeout_accepts_omission_null_zero_and_bounded_values(valu
     assert response.status_code == 200, response.text
 
 
-@pytest.mark.parametrize("value", [True, -1, 0.5, 9, 3601, "600"])
+@pytest.mark.parametrize(
+    ("value", "include", "schema_valid", "python_valid"),
+    [
+        (None, False, True, True),
+        (None, True, True, True),
+        (0, True, True, True),
+        (10, True, True, True),
+        (10.0, True, True, False),
+        (3600, True, True, True),
+        (True, True, False, False),
+        (-1, True, False, False),
+        (1, True, False, False),
+        (9, True, False, False),
+        (3601, True, False, False),
+        (0.5, True, False, False),
+        ("10", True, False, False),
+    ],
+)
+def test_timeout_json_schema_and_python_strictness(value, include, schema_valid, python_valid):
+    """JSON Schema allows an integer-valued JSON number while Python strict ints reject float objects."""
+    schema = TurnRequest.model_json_schema()
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    body = {"task": "hi"}
+    if include:
+        body["timeout_seconds"] = value
+
+    assert validator.is_valid(body) is schema_valid
+    if python_valid:
+        TurnRequest.model_validate(body)
+    else:
+        with pytest.raises(ValueError):
+            TurnRequest.model_validate(body)
+
+
+@pytest.mark.parametrize("value", [True, -1, 0.5, 1, 9, 10.0, 3601, "600"])
 def test_turn_request_timeout_rejects_values_outside_the_strict_contract(monkeypatch, value):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("a rejected request must not start a Turn")
@@ -1983,8 +2061,7 @@ def test_turn_request_timeout_rejects_values_outside_the_strict_contract(monkeyp
 
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert detail[0]["loc"] == ["body", "timeout_seconds"]
-    assert "0 or between 10 and 3600" in detail[0]["msg"]
+    assert any(item["loc"][:2] == ["body", "timeout_seconds"] for item in detail)
     assert not runtime.turn_lock.locked()
 
 
