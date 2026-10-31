@@ -190,6 +190,19 @@ def workspace_files_metadata_code(
     )
 
 
+def existing_workspace_paths_code(rel_paths: list[str]) -> str:
+    """Build the remote Python script returning which relative paths already exist.
+
+    Uses `lexists` so a symbolic link is reported as present rather than silently absent.
+    """
+    paths = json.dumps(rel_paths)
+    return (
+        "import json,os\n"
+        f"paths={paths}\n"
+        "print(json.dumps([path for path in paths if os.path.lexists('/workspace/' + path)]))"
+    )
+
+
 def verify_python_artifact_code(path: str, *, digest: str, timeout: int) -> str:
     """Build the remote Python script to execute a verified `.py` artifact in an isolated process group."""
     return (

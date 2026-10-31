@@ -105,6 +105,64 @@ the result is specific to that repository, commit, snapshot, and run.
 
 ## Preflight and recorded identity
 
+### Unconfirmed cleanup and writable reuse
+
+Cancellation fences host replies, attempts root interruption before serial child
+deletion, and attempts every required cleanup even if another attempt fails.
+`stopped` means all required cleanup was confirmed; `unconfirmed` preserves the
+unresolved provider handle or allocation labels. Interpreter contexts are invalidated
+in either case. Resetting a Turn budget does not remove the cleanup fence.
+
+While cleanup remains unresolved, Fleet refuses sandbox provisioning and workspace
+access through the manager. A later `shutdown()` retries the retained stop/delete
+action. For an ambiguous create, exactly one label-matching resource can be adopted
+for cleanup; an empty or ambiguous lookup remains unconfirmed. Fleet never reruns
+interrupted generated code as part of cleanup.
+
+Session eviction fails while retaining the fenced runtime and ownership lease if
+shutdown is unconfirmed or raises. Retrying eviction, or admission after lease loss,
+retries that cleanup before reconstruction. Registry shutdown attempts every runtime
+and retains unresolved ones rather than reporting successful release. Confirmed
+resources may be released independently.
+
+This is the F0 same-process guard. It does not survive process exit or establish
+cross-worker restart safety. Do not enable unattended restart on this basis. Keep
+the guard during rollback, or deny writable admission until unresolved resources
+are reconciled. Durable recovery and atomic child publication remain separate
+gates in [PRD F](../fleet-rlm-prds/F-cleanup-publication.md).
+
+### Durable ownership and admission
+
+Each Session row carries a bounded sandbox-ownership record (see
+[database](database.md)). Acquiring the Session lease advances its epoch, and
+every resource mutation is compare-and-set against that epoch, so a late reply
+from a previous owner cannot clear a newer intent. Before a runtime is admitted,
+recorded resources are reconciled against the provider: a confirmed stop or delete
+removes the entry, and a provider not-found answer is also confirmation because a
+resource the provider has forgotten cannot still write. Any other provider
+failure leaves the Session fenced. A Session with no outstanding resources does
+not contact the provider at all.
+
+Turn completion, failure, and claim writes carry the same epoch, so a stale owner
+cannot finalize a Turn. Turns left `running` after a takeover are recorded as
+failed with an explicit no-replay result; interrupted generated code is never
+rerun.
+
+### Child output promotion
+
+A child's changed outputs are promoted as one set. The complete changed set is
+enumerated and validated — count, aggregate bytes, individual size, duplicate and
+colliding destinations — before the first public write, and the quotas are
+enforced while reading so an oversized child is refused without buffering its
+whole output on the host. A destination that already holds identical bytes is a
+completed publication and is skipped, so a retried promotion is idempotent; a
+destination holding different bytes is refused. Quota and collision failures
+produce zero public writes. A provider upload failure can still leave a partial
+set: the batch is not one provider transaction, and this is not an atomic
+publication guarantee.
+
+### Snapshot preflight
+
 Preflight requires an active snapshot meeting all resource floors before creating
 a root sandbox. Successes are cached for 60 seconds by credentials, organization,
 and name. Ordinary concurrent requests share one lookup. Explicit refresh starts

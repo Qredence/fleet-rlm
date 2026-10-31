@@ -17,11 +17,12 @@ from daytona import (
     CreateSnapshotParams,
     Daytona,
     DaytonaConfig,
-    DaytonaNotFoundError,
     Image,
     Resources,
 )
 from daytona.common.image import SupportedPythonSeries
+
+from fleet_rlm.sandbox.repl import provider_not_found
 
 # Repository-owned Turn environment; provider availability is checked by preflight.
 SNAPSHOT_NAME = "fleet-rlm-python313-v14"
@@ -223,7 +224,7 @@ def _resolve_snapshot(service: Any, name: str) -> SnapshotIdentity:
     try:
         snapshot = service.get(name)
     except Exception as exc:
-        if _is_not_found(exc):
+        if provider_not_found(exc):
             snapshot = None
         else:
             raise SnapshotUnavailableError(
@@ -274,17 +275,6 @@ def _resolve_snapshot(service: Any, name: str) -> SnapshotIdentity:
         build_digest=_provider_build_digest(snapshot),
     )
     return identity
-
-
-def _is_not_found(error: Exception) -> bool:
-    """Recognize provider not-found errors without hiding other failures."""
-    if isinstance(error, DaytonaNotFoundError):
-        return True
-    for attr in ("status", "status_code", "http_status"):
-        if getattr(error, attr, None) == 404:
-            return True
-    response = getattr(error, "response", None)
-    return getattr(response, "status_code", None) == 404
 
 
 def _provider_build_digest(snapshot: Any) -> str | None:
@@ -422,7 +412,7 @@ def build_snapshot(
     try:
         existing = client.snapshot.get(name)
     except Exception as exc:
-        if not _is_not_found(exc):
+        if not provider_not_found(exc):
             raise SnapshotUnavailableError(
                 "Snapshot lookup failed; verify access before building.", state="lookup_failed"
             ) from None

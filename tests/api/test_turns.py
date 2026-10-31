@@ -464,32 +464,218 @@ async def test_disconnect_during_postcommit_observation_preserves_success(monkey
     assert len(state.executions) == len(state.commits) == 1
 
 
-@pytest.mark.parametrize("complete", [False, True])
-def test_artifact_changes_distinguish_retained_outputs_and_incomplete_evidence(complete):
+def test_artifact_changes_distinguish_retained_outputs():
     before = {"artifacts/prior.txt": "same", "artifacts/report.txt": "old", "artifacts/gone.txt": "gone"}
-    evidence = {
-        "artifacts": {
-            "complete": complete,
-            "files": {
-                "artifacts/prior.txt": {"sha256": "same"},
-                "artifacts/report.txt": {"sha256": "new"},
-                "artifacts/created.txt": {"sha256": "created"},
-            },
-        }
+    capture = {
+        "complete": True,
+        "paths": ["artifacts/created.txt", "artifacts/prior.txt", "artifacts/report.txt"],
+        "files": [
+            {"path": "artifacts/prior.txt", "sha256": "same", "size_bytes": 1, "source": "workspace"},
+            {"path": "artifacts/report.txt", "sha256": "new", "size_bytes": 1, "source": "workspace"},
+            {"path": "artifacts/created.txt", "sha256": "created", "size_bytes": 1, "source": "workspace"},
+        ],
     }
-    changes = turn_module._artifact_changes(before, evidence)
-    assert changes["complete"] is complete
+    changes = turn_module._artifact_changes(before, capture)
+    assert changes["complete"] is True
     assert {path: item["state"] for path, item in changes["files"].items()} == {
         "artifacts/prior.txt": "retained",
         "artifacts/report.txt": "modified",
         "artifacts/created.txt": "created",
-        "artifacts/gone.txt": "deleted" if complete else "unknown",
+        "artifacts/gone.txt": "deleted",
     }
     assert changes["files"]["artifacts/report.txt"] == {
         "state": "modified",
         "input_sha256": "old",
         "sha256": "new",
     }
+
+
+def test_artifact_capture_validates_hashes_and_retains_sorted_logical_metadata() -> None:
+    payload = b"captured"
+    evidence = {
+        "artifacts": {
+            "complete": True,
+            "files": {
+                "artifacts/z.txt": {
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "base64": base64.b64encode(payload).decode(),
+                }
+            },
+        },
+        "children": [],
+        "children_complete": True,
+    }
+
+    capture = turn_module._capture_artifact_view(evidence)
+
+    assert capture == {
+        "complete": True,
+        "paths": ["artifacts/z.txt"],
+        "files": [
+            {
+                "path": "artifacts/z.txt",
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "source": "workspace",
+            }
+        ],
+    }
+    evidence["artifacts"]["files"]["artifacts/z.txt"]["base64"] = base64.b64encode(b"mutated").decode()
+    assert capture["files"][0]["sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+@pytest.mark.parametrize("removed", [False, True])
+def test_root_can_supersede_promoted_child_output(removed):
+    path = "artifacts/child/out.txt"
+    current = b"root post-processing"
+    evidence = {
+        "artifacts": {
+            "complete": True,
+            "files": {}
+            if removed
+            else {path: {"sha256": hashlib.sha256(current).hexdigest(), "base64": base64.b64encode(current).decode()}},
+        },
+        "children_complete": True,
+        "children": [
+            {
+                "status": "succeeded",
+                "artifacts": [
+                    {"root_path": path, "agent_id": "child", "sha256": hashlib.sha256(b"original").hexdigest()}
+                ],
+            }
+        ],
+    }
+    capture = turn_module._capture_artifact_view(evidence)
+    assert capture["complete"] is True
+    assert capture["superseded_child_receipts"] == [path]
+    assert capture["paths"] == ([] if removed else [path])
+    if not removed:
+        assert capture["files"][0]["source"] == "workspace"
+        assert "agent_id" not in capture["files"][0]
+    # Keep the original promotion-time receipt intact for downstream scoring.
+    assert evidence["children"][0]["artifacts"][0]["sha256"] == hashlib.sha256(b"original").hexdigest()
+
+
+def test_incomplete_or_invalid_artifact_capture_is_rejected() -> None:
+    with pytest.raises(RuntimeError, match="incomplete"):
+        turn_module._capture_artifact_view(
+            {"artifacts": {"complete": False, "files": {}}, "children": [], "children_complete": True}
+        )
+
+
+@pytest.mark.parametrize("bound", ["count", "bytes"])
+@pytest.mark.usefixtures("traced")
+def test_large_session_inventory_keeps_success_and_replay_without_claiming_complete_evidence(bound):
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS, collect_artifacts
+
+    runtime, state = durable_runtime()
+    manager = runtime.sandbox_mgr
+    paths = [f"artifacts/{index:03}.txt" for index in range(MAX_ARTIFACTS + 1)]
+    if bound == "bytes":
+        paths = paths[:2]
+    manager.list_workspace_files = lambda: paths
+    manager.read_workspace_file = lambda _path, **_kwargs: b"x" * (13_000_000 if bound == "bytes" else 1)
+    manager.execution_evidence = lambda: {
+        "artifacts": collect_artifacts(manager),
+        "children": [],
+        "children_complete": True,
+    }
+    with opened_client(runtime) as (client, _app):
+        first = events_of(
+            client.post("/sessions/session-a/turn", json={"task": "continue", "idempotency_key": "large-session"})
+        )
+        replay = events_of(
+            client.post("/sessions/session-a/turn", json={"task": "continue", "idempotency_key": "large-session"})
+        )
+    result = state.rows["large-session"]["result"]
+    assert result["event"] == "turn_complete" and result["artifacts"] == paths
+    assert any(event["event"] == "turn_complete" for event in first)
+    assert next(event["payload"] for event in replay if event["event"] == "turn_complete")["artifacts"] == paths
+    assert len(state.executions) == 1
+    record = json.loads(state.commits[0]["turn_record_json"])
+    assert record["artifact_capture"]["complete"] is False
+    assert record["artifact_changes"]["complete"] is False
+    assert {item["state"] for item in record["artifact_changes"]["files"].values()} == {"unknown"}
+
+
+def test_artifact_capture_accepts_the_full_workspace_artifact_set() -> None:
+    """33 artifacts and a 300 KB file are ordinary Turns, not invalid captures."""
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS
+
+    files = {}
+    for index in range(MAX_ARTIFACTS - 1):
+        raw = f"row {index}".encode()
+        files[f"artifacts/{index:03}.txt"] = {
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "base64": base64.b64encode(raw).decode(),
+        }
+    large = b"z" * 300_000
+    files["artifacts/large.csv"] = {
+        "sha256": hashlib.sha256(large).hexdigest(),
+        "base64": base64.b64encode(large).decode(),
+    }
+
+    capture = turn_module._capture_artifact_view(
+        {"artifacts": {"complete": True, "files": files}, "children": [], "children_complete": True}
+    )
+
+    assert capture["complete"] is True
+    assert len(capture["paths"]) == MAX_ARTIFACTS
+    assert next(entry for entry in capture["files"] if entry["path"] == "artifacts/large.csv")["size_bytes"] == 300_000
+
+
+def test_artifact_heavy_span_keeps_route_usage_and_cleanup_after_sanitization(traced) -> None:
+    """Scalar Turn facts must survive an evidence tree that fills the span node budget.
+
+    MLflow sanitizes a span with a fixed node budget, so anything recorded after a large
+    execution_evidence tree is at risk. The evidence itself must stay whole: scoring compares it
+    against reviewed gold.
+    """
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS
+
+    payload = b"a"
+    files = {
+        f"artifacts/{index:03}.txt": {
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "base64": base64.b64encode(payload).decode(),
+        }
+        for index in range(MAX_ARTIFACTS)
+    }
+    evidence = {"artifacts": {"complete": True, "files": files}, "children": [], "children_complete": True}
+    paths = sorted(files)
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(list_workspace_files=lambda: paths, read_workspace_file=lambda _path: payload),
+        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], paths),
+        engine=lambda **_kwargs: SimpleNamespace(
+            answer="Done",
+            route="rlm",
+            execution_evidence=evidence,
+            lm_calls=4,
+            sandbox_errors=0,
+            submit_rejections=0,
+            budget_breakdown={"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
+        ),
+    )
+
+    with opened_client(runtime) as (client, _app):
+        assert client.post("/sessions/session-a/turn", json={"task": "Produce many files"}).status_code == 200
+
+    outputs = traced["outputs"]
+    order = list(outputs)
+    # The evidence tree is emitted last so sanitization truncates it, never the scalar facts.
+    assert order.index(_turn_cleanup_key()) > order.index("lm_calls")
+    assert order[-1] == "artifact_changes"
+    assert outputs["route"] == "rlm"
+    assert outputs["lm_calls"] == 4
+    assert outputs[_turn_cleanup_key()] == "not_required"
+    # The evidence is never clipped: gold scoring compares against these exact bytes.
+    assert len(outputs["execution_evidence"]["artifacts"]["files"]) == MAX_ARTIFACTS
+
+
+def _turn_cleanup_key() -> str:
+    from fleet_rlm.engine.turn import _CLEANUP_ATTRIBUTE
+
+    return _CLEANUP_ATTRIBUTE
 
 
 @pytest.fixture
@@ -604,6 +790,19 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         sandbox_mgr=FakeManager(
             list_workspace_files=lambda: list(reversed(files)),
             read_workspace_file=files.__getitem__,
+            execution_evidence=lambda: {
+                "artifacts": {
+                    "complete": True,
+                    "files": {
+                        "artifacts/result.csv": {
+                            "sha256": hashlib.sha256(b"generated result").hexdigest(),
+                            "base64": base64.b64encode(b"generated result").decode(),
+                        }
+                    },
+                },
+                "children": [],
+                "children_complete": True,
+            },
             notes=[{"file": "older.md", "summary": "prior hint"}],
             write_learned_note=write_note,
         ),
@@ -667,8 +866,14 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         traced["outputs"]["artifact_changes"]
         == records[0]["artifact_changes"]
         == {
-            "complete": False,
-            "files": {},
+            "complete": True,
+            "files": {
+                "artifacts/result.csv": {
+                    "state": "created",
+                    "input_sha256": None,
+                    "sha256": hashlib.sha256(b"generated result").hexdigest(),
+                }
+            },
         }
     )
     assert traced["compiled_program_digest"] == ""
@@ -690,7 +895,11 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
     digest = hashlib.sha256(raw).hexdigest()
     path = "artifacts/prior.txt"
     records = []
-    evidence = {"artifacts": {"complete": True, "files": {path: {"sha256": digest}}}}
+    evidence = {
+        "artifacts": {"complete": True, "files": {path: {"sha256": digest, "base64": base64.b64encode(raw).decode()}}},
+        "children": [],
+        "children_complete": True,
+    }
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
         commit_turn=lambda **kwargs: (
@@ -730,7 +939,7 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
             {
                 "status": "succeeded",
                 "inputs": {"files/input.csv": "input-digest"},
-                "artifacts": [{"path": final_path, "root_path": final_path, "sha256": digest}],
+                "artifacts": [{"path": final_path, "root_path": final_path, "sha256": digest, "agent_id": "child-a"}],
             }
         ],
         "children_complete": True,

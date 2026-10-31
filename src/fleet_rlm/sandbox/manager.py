@@ -26,12 +26,13 @@ from daytona import (
     ListSandboxesQuery,
     VolumeMount,
 )
+from daytona.common.errors import DaytonaError, DaytonaValidationError
 from mlflow.entities import SpanType
 
 from fleet_rlm.config import validate_shared_notes_subpath
 from fleet_rlm.contracts import STOPPING_RULES
 from fleet_rlm.sandbox import repl
-from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
+from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, provider_not_found, with_retries
 from fleet_rlm.sandbox.runtime.fs_ops import (
     CLEAR_WORKSPACE_CODE,
 )
@@ -71,6 +72,10 @@ _CHILD_TTL_MINUTES = 30
 
 _DAYTONA_CLIENTS: dict[tuple[str, str], Daytona] = {}
 _DAYTONA_CLIENTS_LOCK = threading.Lock()
+
+
+class SandboxOwnershipLostError(RuntimeError):
+    """A newer Session epoch owns reconciliation; stale managers must not mutate it."""
 
 
 def _host_call_bound(remaining: float | None) -> int | None:
@@ -148,6 +153,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     # Durable once-per-Session marker owned by the Store. It must outlive a released or rebuilt
     # runtime, so it is claimed atomically instead of relying on in-process state.
     environment_report_claim: Callable[[str], bool] | None = field(default=None, repr=False)
+    ownership_epoch: int | None = field(default=None, repr=False)
+    ownership_resource_mutate: Callable[[str, dict[str, Any] | None], bool] | None = field(default=None, repr=False)
     # Called the instant preflight resolves the Turn identity, before any later preparation step
     # can fail, so a caller can record provenance without re-deriving it.
     snapshot_resolved_callback: Callable[[SnapshotIdentity], None] | None = field(default=None, repr=False)
@@ -183,6 +190,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     _turn_active: bool = field(default=False, init=False, repr=False)
     _watchdog: threading.Timer | None = field(default=None, init=False, repr=False)
     _sandbox: Any = field(default=None, init=False, repr=False)
+    _ownership_lost: bool = field(default=False, init=False, repr=False)
     _snapshot_identity: SnapshotIdentity | None = field(default=None, init=False, repr=False)
     _client: Daytona | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
@@ -202,6 +210,9 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     # One Daytona interpreter context per Fleet namespace; invalid once the sandbox stops.
     _contexts: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _creation_pending: bool = field(default=False, init=False, repr=False)
+    # Independent of Turn generations: resetting a budget cannot make an unresolved resource safe.
+    # Retain its handle (or pending allocation labels) until shutdown confirms the intended action.
+    _cleanup_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate identity, budgets, and the shared-notes subpath before any sandbox work."""
@@ -475,6 +486,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
         """
         root = self.root
         self.check_turn()
+        self._refuse_unresolved_cleanup()
         selected_paths: list[str] | None = None
         ambient_skills: set[str] = set()
         if input_paths is not None:
@@ -515,6 +527,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 max_llm_calls=root.max_llm_calls,
                 parent=self,
                 linked_children=root.linked_children,
+                ownership_epoch=root.ownership_epoch,
+                ownership_resource_mutate=root.ownership_resource_mutate,
             )
             root._children[child.agent_id] = child
             root._allocations += 1
@@ -659,38 +673,10 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 return
             try:
                 root._notify("cancellation_requested")
-                provider_failed = False
-                for child in tuple(root._children.values()):
-                    try:
-                        confirmed = child.shutdown()
-                    except Exception as exc:
-                        # One failed child must not leave the remaining children or the root running.
-                        provider_failed = True
-                        _LOGGER.warning(
-                            "Child sandbox shutdown failed for Session %s (%s)",
-                            root.session_id,
-                            type(exc).__name__,
-                        )
-                        continue
-                    if confirmed is False:
-                        provider_failed = True
-                try:
-                    # Stopping the root interrupts remote Python, including a running infinite loop.
-                    with root._lock:
-                        if root._sandbox is not None and root._client is not None:
-                            client, sandbox = root._client, root._sandbox
-                            with_retries(lambda: client.stop(sandbox, timeout=60))
-                except Exception:
-                    provider_failed = True
-                finally:
-                    # The root is stopped, or its stop is unconfirmed and therefore lost. Either way
-                    # the cached handle is not reusable: the next Turn must cold-resume into a fresh
-                    # sandbox instead of running against this one, and no later teardown may stop it
-                    # again. Interpreter contexts belong to the discarded handle, so they go too.
-                    with root._lock:
-                        root._sandbox = None
-                        root._contexts.clear()
-                root._cleanup_outcome = CLEANUP_UNCONFIRMED if provider_failed else CLEANUP_STOPPED
+                # Share the shutdown owner, but retain this Turn's deadline until its caller ends it.
+                with root._shutdown_lock:
+                    confirmed = root._shutdown_locked()
+                root._cleanup_outcome = CLEANUP_STOPPED if confirmed else CLEANUP_UNCONFIRMED
             finally:
                 root._teardown_done.set()
 
@@ -758,6 +744,16 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             span.set_attribute("action", "create")
             return self._ensure_sandbox()
 
+    def _refuse_unresolved_cleanup(self) -> None:
+        """Deny writable use while this agent or its root still awaits cleanup confirmation.
+
+        The caller holds this manager's lock, or is single-threaded before provisioning starts.
+        """
+        if self._ownership_lost or self.root._ownership_lost:
+            raise SandboxOwnershipLostError("Session ownership epoch changed; sandbox operation is fenced")
+        if self._cleanup_pending or self.root._cleanup_pending:
+            raise RuntimeError("Session sandbox cleanup is unconfirmed; retry shutdown before writable reuse")
+
     def _ensure_sandbox(self) -> Any:
         """Create or resume this agent's sandbox, returning the live handle.
 
@@ -765,6 +761,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
         """
         self.check_turn()
         with self._lock:
+            self._refuse_unresolved_cleanup()
             if self._client is None:
                 self._client = _shared_daytona_client(self.api_key, self.org_id)
             if self.parent is None and self._sandbox is None:
@@ -813,9 +810,30 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 )
                 self.emit("sandbox_provisioning")
                 self._record_allocation("requested")
+                self._persist_ownership_resource("create", None)
                 self._creation_pending = True
-                self._sandbox = self._client.create(params)
+                try:
+                    self._sandbox = self._client.create(params)
+                except DaytonaError as exc:
+                    # A request rejection allocated no sandbox. Conflict, timeout, rate-limit,
+                    # transport, and server errors still require allocation reconciliation.
+                    if isinstance(exc, DaytonaValidationError) or exc.status_code in {
+                        400,
+                        401,
+                        403,
+                        404,
+                        405,
+                        410,
+                        413,
+                        415,
+                        422,
+                    }:
+                        self._persist_ownership_resource("confirmed", None)
+                        self._creation_pending = False
+                        self._discard_allocation_journal()
+                    raise
                 self._creation_pending = False
+                self._persist_ownership_resource("stop" if not child else "delete", self._sandbox.id)
                 self._record_allocation("ready")
                 self.check_turn()
                 self.emit("sandbox_ready", depth=self.depth)
@@ -827,6 +845,82 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     def _list_sandboxes(self, query: ListSandboxesQuery) -> list[Any]:
         assert self._client is not None
         return list(self._client.list(query))
+
+    def _persist_ownership_resource(self, action: str, provider_id: str | None) -> None:
+        """Persist this agent's cleanup intent before remote work, fenced by the Session epoch."""
+        if self.ownership_resource_mutate is None and self.ownership_epoch is None:
+            # Standalone disposable/test managers have no persisted Session owner.
+            return
+        if self.ownership_resource_mutate is None or self.ownership_epoch is None:
+            raise RuntimeError("Durable sandbox ownership is unavailable")
+        resource = (
+            None
+            if action == "confirmed"
+            else {
+                "allocation_nonce": self.agent_id,
+                "provider_id": provider_id,
+                "parent_agent_id": self.parent.agent_id if self.parent else None,
+                "action": action,
+                "intended_action": "delete" if self.parent is not None or self.disposable else "stop",
+                "confirmed": False,
+            }
+        )
+        if not self.ownership_resource_mutate(self.agent_id, resource):
+            self._ownership_lost = True
+            raise SandboxOwnershipLostError("Session ownership epoch changed; sandbox operation is fenced")
+
+    def reconcile_sandbox_ownership(self, resources: list[dict[str, Any]]) -> None:
+        """Confirm cleanup for bounded persisted Daytona resources before Session admission.
+
+        A resource the provider reports as absent cannot still write, so its not-found answer is
+        treated as confirmation and its record is dropped. Every other provider failure keeps the
+        Session fenced.
+        """
+        if self.ownership_resource_mutate is None or self.ownership_epoch is None:
+            raise RuntimeError("Durable sandbox ownership is unavailable")
+        if not resources:
+            # Nothing outstanding: admission must not depend on a provider round trip.
+            return
+        client = _shared_daytona_client(self.api_key, self.org_id)
+        for entry in resources:
+            agent_id = entry.get("agent_id")
+            provider_id = entry.get("provider_id")
+            action = entry.get("action")
+            intended_action = entry.get("intended_action")
+            nonce = entry.get("allocation_nonce")
+            if (
+                not isinstance(agent_id, str)
+                or not isinstance(nonce, str)
+                or action not in {"create", "stop", "delete"}
+                or intended_action not in {"stop", "delete"}
+            ):
+                raise RuntimeError("Stored sandbox ownership record is invalid")
+            try:
+                if not isinstance(provider_id, str) or not provider_id:
+                    query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": nonce})
+                    matches = with_retries(functools.partial(lambda q: list(client.list(q)), query))
+                    if len(matches) != 1:
+                        raise RuntimeError("Sandbox allocation outcome is uncertain; Session admission remains fenced")
+                    sandbox = matches[0]
+                    provider_id = getattr(sandbox, "id", None)
+                    if not isinstance(provider_id, str) or not provider_id:
+                        raise RuntimeError("Labeled sandbox has no provider identity")
+                else:
+                    sandbox = with_retries(lambda provider_id=provider_id: client.get(provider_id))
+                if intended_action == "delete":
+                    with_retries(lambda sandbox=sandbox: client.delete(sandbox, timeout=60, wait=True))
+                else:
+                    with_retries(lambda sandbox=sandbox: client.stop(sandbox, timeout=60))
+            except Exception as exc:
+                if not provider_not_found(exc):
+                    raise
+                _LOGGER.info(
+                    "Recorded sandbox for Session %s agent %s is gone; treating absence as confirmed cleanup",
+                    self.session_id,
+                    agent_id,
+                )
+            if not self.ownership_resource_mutate(agent_id, None):
+                raise RuntimeError("Session ownership epoch changed during sandbox reconciliation")
 
     def _resume_if_needed(self) -> None:
         """Start a sandbox the provider has stopped, archived, or paused since the handle was cached.
@@ -1196,72 +1290,112 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             self._interpreters.pop(interpreter.ns_id, None)
 
     def shutdown(self) -> bool:
-        """Stop or delete this agent's sandbox after shutting down any children.
+        """Fence work and attempt every required cleanup, retaining unresolved identities.
 
-        A child's workspace is cleared before deletion; a root sandbox is stopped unless disposable.
-
-        Every call for the same manager is serialized on this agent's shutdown lock, so a normal
-        child completion and ``cancel_turn()`` cannot race. A caller that arrives while a provider
-        cleanup is in flight waits for it and then observes the completed result; no caller can
-        report this agent confirmed before its provider call returned.
-
-        Returns whether this agent's own provider cleanup is confirmed. ``True`` means the provider
-        stop or delete returned (or there was nothing to clean up); ``False`` means the provider
-        call failed. Only a child retains its handle for a later retry; a root discards it.
-        Lifecycle notifications are delivered best-effort, so a refused event never changes this
-        result and never skips the provider call. A local allocation-journal unlink failure is bookkeeping:
-        it is logged once and never reverses confirmation or restores an already-deleted handle.
+        Calls serialize on this manager's shutdown lock. The root is interrupted before child
+        deletion, including when a child is already draining. A false result keeps writable
+        admission fenced across Turn resets; a later shutdown may retry the retained action.
+        This is an in-process guarantee, not durable recovery after process restart.
         """
+        if self.parent is None:
+            self._cancelled.set()
+            self._fence_executions()
+            # Never wait for the Turn lock while holding the shutdown lock: the watchdog may
+            # already own the Turn lock and be joining cleanup.
+            self.end_turn()
         with self._shutdown_lock:
             return self._shutdown_locked()
 
     def _shutdown_locked(self) -> bool:
-        """Run the provider cleanup while holding this agent's shutdown lock."""
+        """Interrupt this resource first, then aggregate every required child cleanup."""
         if self.parent is not None:
             with self.root._budget_lock:
                 receipt = self.root._child_receipts.get(self.agent_id)
                 if receipt is not None and receipt["status"] == "running":
                     receipt["status"] = "failed"
-        if self.parent is None:
-            self.end_turn()
-            for child in tuple(self._children.values()):
-                child.shutdown()
         with self._lock:
+            self._cleanup_pending = True
             sandbox, client = self._sandbox, self._client
             interpreters = tuple(self._interpreters.values())
-            self._sandbox = None
             self._contexts.clear()
             self._interpreters.clear()
             for interpreter in interpreters:
                 interpreter._closed = True
-        confirmed = True
-        if sandbox is not None and client is not None:
-            try:
+        confirmed = False
+        try:
+            if self._ownership_lost or self.root._ownership_lost:
+                raise SandboxOwnershipLostError("Sandbox cleanup belongs to the new Session owner")
+            if self._creation_pending:
+                # An ambiguous create may have succeeded without returning its handle. Empty
+                # lookup is not proof of absence; retain the allocation labels for another attempt.
+                self._persist_ownership_resource("create", None)
+                if client is None:
+                    raise RuntimeError("Pending allocation has no provider client")
+                query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
+                matches = with_retries(functools.partial(self._list_sandboxes, query))
+                if len(matches) != 1:
+                    raise RuntimeError("Sandbox allocation outcome is uncertain")
+                with self._lock:
+                    self._sandbox = sandbox = matches[0]
+                    self._creation_pending = False
+            if sandbox is not None:
+                if client is None:
+                    raise RuntimeError("Sandbox cleanup has no provider client")
+                self._persist_ownership_resource(
+                    "delete" if self.parent is not None or self.disposable else "stop",
+                    sandbox.id,
+                )
                 if self.parent is not None or self.disposable:
                     self._notify("sandbox_deleting", sandbox_id=sandbox.id)
                     try:
-                        self._remote_exec(sandbox, CLEAR_WORKSPACE_CODE)
+                        self._remote_exec(sandbox, CLEAR_WORKSPACE_CODE, timeout=60)
                     except Exception:
                         self._notify("workspace_cleanup_failed", sandbox_id=sandbox.id)
-                    # A stopped or failed sandbox cannot run workspace cleanup,
-                    # but must still be deleted and confirmed by the provider.
+                    # A stopped sandbox cannot run workspace cleanup, but must still be deleted.
                     with_retries(lambda: client.delete(sandbox, timeout=60, wait=True))
                     self._discard_allocation_journal()
-                    with self.root._budget_lock:
-                        self.root._children.pop(self.agent_id, None)
                     self._notify("sandbox_deleted", sandbox_id=sandbox.id)
                 else:
                     with_retries(lambda: client.stop(sandbox, timeout=60))
-            except Exception:
-                confirmed = False
-                _LOGGER.warning("Daytona Session sandbox stop failed")
-                if self.parent is not None:
-                    # Retain the handle so a later shutdown can retry deletion.
-                    self._sandbox = sandbox
-                    self._notify("sandbox_cleanup_failed", sandbox_id=sandbox.id)
-        elif self.parent is not None:
+                with self._lock:
+                    self._sandbox = None
+                self._persist_ownership_resource("confirmed", None)
+            confirmed = True
+        except SandboxOwnershipLostError:
+            # The durable record belongs to the new epoch, whose admission reconciles it.
+            # Drop only local handles; a stale provider stop could interrupt the new owner.
+            with self._lock:
+                self._ownership_lost = True
+                self._sandbox = None
+                self._creation_pending = False
+            confirmed = True
+        except Exception as exc:
+            _LOGGER.warning(
+                "Daytona sandbox cleanup unconfirmed for Session %s agent %s (%s)",
+                self.session_id,
+                self.agent_id,
+                type(exc).__name__,
+            )
+            self._notify("sandbox_cleanup_failed", sandbox_id=getattr(sandbox, "id", None))
+        if self.parent is None:
+            with self._budget_lock:
+                children = tuple(self._children.values())
+            for child in children:
+                try:
+                    if child.shutdown() is not True:
+                        confirmed = False
+                except Exception as exc:
+                    confirmed = False
+                    _LOGGER.warning(
+                        "Child sandbox shutdown failed for Session %s (%s)",
+                        self.session_id,
+                        type(exc).__name__,
+                    )
+        elif confirmed:
             with self.root._budget_lock:
                 self.root._children.pop(self.agent_id, None)
+        with self._lock:
+            self._cleanup_pending = not confirmed
         return confirmed
 
     def _discard_allocation_journal(self) -> None:

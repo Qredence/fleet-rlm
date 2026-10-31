@@ -46,3 +46,41 @@ def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> Non
 
     with pytest.raises(ValueError):
         _child_input_path(bad)
+
+
+def test_generated_remote_scripts_compile_and_report_existing_paths(tmp_path):
+    """Remote script builders must emit Python, not a string that merely looks like it.
+
+    The transport base64-encodes and `compile`s these, so a literal backslash-n is a
+    SyntaxError that only shows up against a real sandbox. Compile them here instead.
+    """
+    import json
+    import subprocess
+    import sys
+
+    from fleet_rlm.sandbox.runtime.fs_ops import (
+        existing_workspace_paths_code,
+        list_workspace_files_code,
+        verify_python_artifact_code,
+        workspace_files_metadata_code,
+    )
+
+    destinations = ["artifacts/child/present.txt", "artifacts/child/missing.txt"]
+    scripts = {
+        "existing": existing_workspace_paths_code(destinations),
+        "existing_empty": existing_workspace_paths_code([]),
+        "list": list_workspace_files_code(),
+        "metadata": workspace_files_metadata_code(["files/a.txt"], create_parents=False),
+        "verify": verify_python_artifact_code("artifacts/run.py", digest="0" * 64, timeout=5),
+    }
+    for name, code in scripts.items():
+        compile(code, f"<{name}>", "exec")
+
+    # Execute the destination probe against a real directory tree, mapped to /workspace.
+    workspace = tmp_path / "workspace"
+    (workspace / "artifacts/child").mkdir(parents=True)
+    (workspace / "artifacts/child/present.txt").write_text("x")
+    probe = scripts["existing"].replace("/workspace", str(workspace))
+    completed = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+
+    assert json.loads(completed.stdout) == ["artifacts/child/present.txt"]

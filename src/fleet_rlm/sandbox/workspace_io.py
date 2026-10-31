@@ -16,6 +16,7 @@ from daytona import FileDownloadRequest, FileUpload
 from fleet_rlm.observability import activity_text, phase_span
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
 from fleet_rlm.sandbox.runtime.fs_ops import (
+    existing_workspace_paths_code,
     list_workspace_files_code,
     turn_inputs_code,
     valid_notes,
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 _LOGGER = logging.getLogger(__name__)
+_MAX_PROMOTED_FILES = 100
+_MAX_PROMOTED_BYTES = 25_000_000
 
 
 class WorkspaceIOMixin:
@@ -301,26 +304,67 @@ class WorkspaceIOMixin:
         """Promote this child's new artifacts into the parent's artifacts/<agent-id>/ tree.
 
         Copied-in artifacts are skipped, and promoted paths are recorded relative to the root.
+        Quotas are enforced while reading, so a child that wrote far too much is refused without
+        first buffering all of it on the host.
         """
         if self.parent is None:
             return []
         self.check_turn()
-        results = []
+        selected: list[tuple[str, str, bytes]] = []
         total = 0
         with self.root._budget_lock:
             inputs = dict(self.root._child_receipts.get(self.agent_id, {}).get("inputs", {}))
         for path in self.list_workspace_files():
             if not path.startswith("artifacts/"):
                 continue
+            if len(selected) >= _MAX_PROMOTED_FILES and path not in inputs:
+                raise ValueError("Child output promotion quota exceeded")
             raw = self.read_workspace_file(path)
             if inputs.get(path) == hashlib.sha256(raw).hexdigest():
                 continue  # an unchanged copied-in artifact is the parent's, not this child's output
             total += len(raw)
-            if total > 25_000_000 or len(results) >= 100:
+            if total > _MAX_PROMOTED_BYTES:
                 raise ValueError("Child output promotion quota exceeded")
             target = f"artifacts/{self.agent_id}/{path.removeprefix('artifacts/')}"
-            self.parent.write_workspace_file(target, raw)
-            results.append({"path": target, "sha256": hashlib.sha256(raw).hexdigest(), "agent_id": self.agent_id})
+            selected.append((path, target, raw))
+            if len(selected) > _MAX_PROMOTED_FILES:
+                raise ValueError("Child output promotion quota exceeded")
+
+        # Preflight the complete changed set before the first public write. Upload failures remain
+        # provider failures and may leave partial bytes; deterministic input violations cannot.
+        destinations = [target for _, target, _ in selected]
+        if len(selected) > _MAX_PROMOTED_FILES or total > _MAX_PROMOTED_BYTES:
+            raise ValueError("Child output promotion quota exceeded")
+        if len(destinations) != len(set(destinations)):
+            raise ValueError("Child output promotion contains duplicate destinations")
+        for path, target, raw in selected:
+            _workspace_relative_path(path)
+            _workspace_relative_path(target)
+            if len(raw) > _MAX_PROMOTED_BYTES:
+                raise ValueError("Child output promotion quota exceeded")
+        own_paths = set(self.parent.list_workspace_files())
+        collisions = own_paths.intersection(destinations)
+        occupied = json.loads(self.parent.exec_remote_python(existing_workspace_paths_code(destinations)))
+        if not isinstance(occupied, list) or not all(isinstance(path, str) for path in occupied):
+            raise RuntimeError("Invalid child output destination check")
+        collisions.update(occupied)
+        # A destination already holding identical bytes is a completed publication, so a retried
+        # promotion stays idempotent instead of failing on its own earlier work.
+        by_destination = {target: raw for _, target, raw in selected}
+        for path in sorted(collisions):
+            candidate = by_destination[path]
+            existing = self.parent.stat_workspace_file(path)
+            if not isinstance(existing, dict) or existing.get("sha256") != hashlib.sha256(candidate).hexdigest():
+                raise ValueError("Child output destination already exists")
+        pending = [item for item in selected if item[1] not in collisions]
+
+        # Every selected output is receipted, including one that was already published, so the
+        # root receipt set matches the child's complete output set either way.
+        results = [
+            {"path": target, "sha256": hashlib.sha256(raw).hexdigest(), "agent_id": self.agent_id}
+            for _, target, raw in selected
+        ]
+        self.parent.write_workspace_files({target: raw for _, target, raw in pending})
         self.emit("agent_result", artifacts=results, status="succeeded")
         root_receipts = []
         for row in results:

@@ -79,7 +79,9 @@ See [configuration](docs/reference/configuration.md) and [setup API](docs/refere
 - Stored history cannot restore live Python variables.
 - Daytona Volumes hold Session workspaces.
 - Successful Turns preserve the warm root interpreter.
-- Failed or cancelled Turns discard it. The next Turn cold-resumes durable state.
+- Failed or cancelled Turns stop it. Confirmed cleanup permits the next Turn to
+  cold-resume durable state; unconfirmed cleanup retains resource identity and
+  denies writable reuse in the live process.
 
 Workspace inputs:
 
@@ -116,8 +118,13 @@ Outcomes and cleanup:
 - Each Turn has one terminal outcome and one teardown owner.
 - Failure, cancellation, or expiry triggers teardown; disconnect cancellation is serialized
   with commit and preserves a durably completed outcome even before delivery.
-- Teardown cancels and fences host work, shuts down children, and stops the root before acknowledgment and `done`.
+- Teardown cancels and fences host work, interrupts the root before child deletion,
+  and attempts all required cleanup before acknowledgment and `done`.
 - Cleanup records `stopped` or `unconfirmed`. Success records `not_required` and keeps the warm root.
+- Unconfirmed cleanup retains root/allocation identity and fences provisioning and
+  workspace access across Turn resets. Registry eviction retains the fenced runtime
+  and its lease until a later shutdown confirms cleanup. This in-memory guard does
+  not establish safety after process restart; see the [F0 acceptance report](docs/fleet-rlm-prds/F0-acceptance.md).
 - Reply fences refuse late successful results once, without retry.
 - Error and cancellation replies remain deliverable.
 - Fencing does not interrupt provider calls or replace child shutdown.

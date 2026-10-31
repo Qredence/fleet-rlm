@@ -48,6 +48,7 @@ class SessionRuntime:
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
     context: WorkspaceDataset | None = None
     lease: psycopg.Connection | None = None
+    ownership_epoch: int | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
     restart_requested: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -98,7 +99,8 @@ class SessionRuntime:
     def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
         """Persist intent before side effects; an uncertain running turn is never replayed."""
         digest = hashlib.sha256(task.encode()).hexdigest()
-        prior = self.store.claim_turn(self.session_id, turn_id, key, digest)
+        ownership = {"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}
+        prior = self.store.claim_turn(self.session_id, turn_id, key, digest, **ownership)
         if prior is not None and prior["task_sha256"] != digest:
             raise IdempotencyConflictError("Idempotency key already belongs to another task")
         return prior
@@ -183,6 +185,13 @@ class SessionRuntime:
         if not isinstance(paths, list) or any(not self._valid_vfs_path(path) for path in paths):
             raise ValueError("Workspace listing returned an invalid relative path")
         artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
+        capture = turn_record.get("artifact_capture")
+        if capture is not None and (
+            not isinstance(capture, dict)
+            or not isinstance(capture.get("complete"), bool)
+            or capture.get("paths") != artifacts
+        ):
+            raise ValueError("Canonical artifact inventory does not match its captured view")
         from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
 
         result = {
@@ -233,6 +242,7 @@ class SessionRuntime:
             memory_note=new_memory_note,
             completion=completion,
             replay_snapshot=replay_snapshot,
+            **({"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}),
         )
         return result
 
@@ -302,12 +312,14 @@ class SessionRuntime:
         with self._lease_lock:
             self._lease_monitor_stop.set()
             self.lease_lost.set()
-            lease, self.lease = self.lease, None
+            lease = self.lease
         if self._lease_monitor is not None:
             self._lease_monitor.join(timeout=_LEASE_MONITOR_JOIN_SECONDS)
             self._lease_monitor = None
         if lease is not None:
             lease.close()
+            with self._lease_lock:
+                self.lease = None
 
     def set_mode(self, mode: str) -> None:
         """Set the execution mode on the engine and record its Session-level provenance."""
@@ -458,6 +470,30 @@ class SessionRuntimeRegistry:
         runtime.ensure_session(session_id)
         runtime.lease = store.acquire_session_lease(session_id)
         try:
+            ownership_epoch = store.advance_sandbox_ownership_epoch(session_id)
+            if ownership_epoch is None:
+                raise RuntimeError(
+                    "Session sandbox ownership is unknown; reconcile legacy resources before writable admission"
+                )
+            runtime.ownership_epoch = ownership_epoch
+            ownership = store.sandbox_ownership(session_id)
+            if ownership is None:
+                raise RuntimeError(
+                    "Prior sandbox cleanup is unresolved; reconcile recorded provider resources before admission"
+                )
+            sandbox_mgr.ownership_epoch = runtime.ownership_epoch
+
+            # Resolve the epoch at call time: a manager that outlives a newer owner must fence,
+            # not write under the identity it captured at admission.
+            def mutate_sandbox_resource(agent_id: str, resource: dict[str, Any] | None) -> bool:
+                epoch = runtime.ownership_epoch
+                if epoch is None:
+                    raise RuntimeError("Session ownership epoch is unavailable; sandbox write is fenced")
+                return store.mutate_sandbox_resource(session_id, epoch, agent_id, resource)
+
+            sandbox_mgr.ownership_resource_mutate = mutate_sandbox_resource
+            sandbox_mgr.reconcile_sandbox_ownership(ownership["resources"])
+            store.fail_interrupted_turns(session_id, ownership_epoch)
             saved = store.runtime_settings(session_id)
             if "mode" in saved:
                 runtime.set_mode(settings.for_session(saved).execution_mode)
@@ -487,7 +523,8 @@ class SessionRuntimeRegistry:
     def evict(self, session_id: str) -> bool:
         """Stop one Session's sandbox and release its lease; False when it has no runtime in this process.
 
-        Stored history is untouched, and the next request rebuilds the runtime.
+        Stored history is untouched. Unconfirmed cleanup retains the fenced runtime and lease
+        and raises RuntimeError; retry eviction to reconcile before rebuilding.
         """
         session_id = validate_session_id(session_id)
         with self._rebuild_lock:
@@ -506,27 +543,45 @@ class SessionRuntimeRegistry:
                 if self._sessions.get(session_id) is not runtime:
                     return False
                 runtime.lease_lost.set()
+            if runtime.sandbox_mgr.shutdown() is not True:
+                raise RuntimeError("Session sandbox cleanup is unconfirmed; runtime retained for cleanup retry")
+            runtime.close_lease()
+            with self._lock:
                 self._sessions.pop(session_id, None)
-            try:
-                runtime.sandbox_mgr.shutdown()
-            finally:
-                runtime.close_lease()
         finally:
             runtime.turn_lock.release()
         return True
 
     def close(self) -> None:
-        """Shut down every Session sandbox, then release each lease."""
+        """Attempt all shutdowns, retaining fenced runtimes/leases whose cleanup is unconfirmed."""
         with self._rebuild_lock:
             with self._lock:
                 runtimes = tuple(self._sessions.values())
                 for runtime in runtimes:
                     runtime.lease_lost.set()
-                self._sessions.clear()
-            try:
-                if runtimes:
-                    with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
-                        list(pool.map(lambda runtime: runtime.sandbox_mgr.shutdown(), runtimes))
-            finally:
-                for runtime in runtimes:
-                    runtime.close_lease()
+
+            def shutdown(runtime: SessionRuntime) -> bool:
+                try:
+                    return runtime.sandbox_mgr.shutdown() is True
+                except Exception:
+                    _LOGGER.warning("Session shutdown failed; retaining unresolved runtime")
+                    return False
+
+            unresolved = False
+            if runtimes:
+                with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
+                    confirmations = list(pool.map(shutdown, runtimes))
+                for runtime, confirmed in zip(runtimes, confirmations, strict=True):
+                    if confirmed:
+                        try:
+                            runtime.close_lease()
+                        except Exception:
+                            unresolved = True
+                            _LOGGER.warning("Session lease release failed; retaining fenced runtime")
+                            continue
+                        with self._lock:
+                            self._sessions.pop(runtime.sandbox_mgr.session_id, None)
+                    else:
+                        unresolved = True
+            if unresolved:
+                raise RuntimeError("Session sandbox cleanup is unconfirmed; runtimes retained for cleanup retry")

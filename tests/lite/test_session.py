@@ -49,6 +49,25 @@ def test_commit_does_not_return_a_completion_when_storage_raises() -> None:
         runtime.commit_turn("s1", {"turn_id": "t1"})
 
 
+def test_turn_intent_and_completion_are_fenced_by_the_runtime_ownership_epoch() -> None:
+    claims = []
+    commits = []
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s1", list_workspace_files=lambda: []),
+        store=SimpleNamespace(
+            claim_turn=lambda *args, **kwargs: claims.append((args, kwargs)),
+            commit_turn=lambda *args, **kwargs: commits.append((args, kwargs)),
+        ),
+        ownership_epoch=12,
+    )
+
+    runtime.claim_turn("turn-1", "key-1", "task")
+    runtime.commit_turn("s1", {"turn_id": "turn-1"})
+
+    assert claims[0][1] == {"ownership_epoch": 12}
+    assert commits[0][1]["ownership_epoch"] == 12
+
+
 @pytest.mark.parametrize("paths", [[], ["files/input.txt", "artifacts/out.txt", "artifacts/out.txt"], ["../escape"]])
 def test_captured_artifact_view_uses_existing_path_validation_without_relisting(paths) -> None:
     saved = []
@@ -148,7 +167,7 @@ def _buildable_registry(runtime, *, max_active_sessions: int = 64):
 
 def _stale_runtime(events: list[str]) -> SessionRuntime:
     runtime = _runtime(
-        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown")),
+        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown") or True),
         lease=SimpleNamespace(close=lambda: events.append("lease")),  # type: ignore[arg-type]
     )
     runtime.lease_lost.set()
@@ -174,6 +193,25 @@ def test_get_rebuilds_a_runtime_after_lease_loss(monkeypatch, caplog) -> None:
     assert events == ["shutdown", "lease"]
     assert registry._sessions["s1"] is fresh
     assert "ownership lease was lost" in caplog.text
+
+
+def test_get_releases_epoch_fenced_runtime_without_stopping_new_owner(monkeypatch) -> None:
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+    events = []
+    manager = DaytonaSandboxManager("key", "org", "volume", "s1")
+    manager._sandbox = SimpleNamespace(id="taken-over")
+    manager._client = SimpleNamespace(stop=lambda *_args, **_kwargs: pytest.fail("stale provider stop"))
+    manager.ownership_epoch = 1
+    manager.ownership_resource_mutate = lambda *_args: False
+    stale = _stale_runtime(events)
+    stale.sandbox_mgr = manager
+    registry = _buildable_registry(stale)
+    fresh = _runtime()
+    monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
+    assert registry.get("s1") is fresh
+    assert registry._sessions["s1"] is fresh and events == ["lease"]
+    assert manager._ownership_lost is True and manager._sandbox is None
 
 
 def test_get_keeps_a_stale_runtime_while_its_turn_is_still_draining(monkeypatch) -> None:
@@ -274,7 +312,7 @@ def test_get_rebuilds_a_stale_session_at_capacity(monkeypatch) -> None:
 def test_evicting_a_session_stops_its_sandbox_releases_the_lease_and_forgets_the_runtime() -> None:
     events: list[str] = []
     runtime = _runtime(
-        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown")),
+        sandbox_mgr=SimpleNamespace(shutdown=lambda: events.append("shutdown") or True),
         lease=SimpleNamespace(close=lambda: events.append("lease")),  # type: ignore[arg-type]
     )
     registry = _registry_with(runtime)
@@ -299,14 +337,96 @@ def test_evicting_a_busy_session_is_refused_and_keeps_the_runtime(monkeypatch) -
     assert registry._sessions["s1"] is runtime
 
 
+@pytest.mark.parametrize("raises", [False, True])
+def test_unconfirmed_eviction_retains_runtime_and_lease_until_cleanup_succeeds(monkeypatch, raises) -> None:
+    events: list[str] = []
+
+    def unconfirmed() -> bool:
+        events.append("shutdown")
+        if raises:
+            raise RuntimeError("provider refused cleanup")
+        return False
+
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(shutdown=unconfirmed),
+        lease=SimpleNamespace(close=lambda: events.append("lease")),
+    )
+    registry = _buildable_registry(runtime)
+    fresh = _runtime()
+    monkeypatch.setattr(registry, "_build", lambda _session_id: fresh)
+    with pytest.raises(RuntimeError):
+        registry.evict("s1")
+    assert runtime.lease_lost.is_set()
+    assert registry._sessions["s1"] is runtime
+    assert events == ["shutdown"]
+    with pytest.raises(RuntimeError):
+        registry.get("s1")
+    assert registry._sessions["s1"] is runtime
+    assert events == ["shutdown", "shutdown"]
+    runtime.sandbox_mgr.shutdown = lambda: events.append("confirmed") or True
+    assert registry.get("s1") is fresh
+    assert events == ["shutdown", "shutdown", "confirmed", "lease"]
+
+
+def test_registry_close_attempts_every_runtime_and_retains_unresolved_ones() -> None:
+    events: list[str] = []
+    unresolved = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s1", shutdown=lambda: False),
+        lease=SimpleNamespace(close=lambda: events.append("unresolved-lease")),
+    )
+    healthy = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s2", shutdown=lambda: events.append("shutdown-s2") or True),
+        lease=SimpleNamespace(close=lambda: events.append("healthy-lease")),
+    )
+    registry = _registry_with(unresolved)
+    registry._sessions["s2"] = healthy
+    with pytest.raises(RuntimeError, match="cleanup is unconfirmed"):
+        registry.close()
+    assert registry._sessions == {"s1": unresolved}
+    assert unresolved.lease_lost.is_set()
+    assert events == ["shutdown-s2", "healthy-lease"]
+    unresolved.sandbox_mgr.shutdown = lambda: True
+    registry.close()
+    assert not registry._sessions
+    assert events[-1] == "unresolved-lease"
+
+
+def test_registry_close_retries_failed_lease_release_and_attempts_other_runtimes() -> None:
+    events: list[str] = []
+
+    def failed_close() -> None:
+        events.append("failed-lease")
+        raise RuntimeError("connection close failed")
+
+    lease = SimpleNamespace(close=failed_close)
+    unresolved = _runtime(sandbox_mgr=SimpleNamespace(session_id="s1", shutdown=lambda: True), lease=lease)
+    healthy = _runtime(
+        sandbox_mgr=SimpleNamespace(session_id="s2", shutdown=lambda: True),
+        lease=SimpleNamespace(close=lambda: events.append("healthy-lease")),
+    )
+    registry = _registry_with(unresolved)
+    registry._sessions["s2"] = healthy
+    with pytest.raises(RuntimeError, match="unconfirmed"):
+        registry.close()
+    assert events == ["failed-lease", "healthy-lease"]
+    assert registry._sessions == {"s1": unresolved}
+    assert unresolved.lease is lease
+    lease.close = lambda: events.append("retried-lease")
+    registry.close()
+    assert unresolved.lease is None
+    assert not registry._sessions
+    assert events[-1] == "retried-lease"
+
+
 def test_eviction_fences_a_resolved_runtime_before_releasing_its_turn_lock() -> None:
     shutdown_started = threading.Event()
     finish_shutdown = threading.Event()
     rejected = threading.Event()
 
-    def shutdown() -> None:
+    def shutdown() -> bool:
         shutdown_started.set()
         assert finish_shutdown.wait(timeout=2)
+        return True
 
     runtime = _runtime(sandbox_mgr=SimpleNamespace(shutdown=shutdown))
     registry = _registry_with(runtime)
@@ -388,10 +508,12 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     from fleet_rlm.session import SessionRuntimeRegistry
 
     captured: dict[str, object] = {}
+    calls: list[object] = []
 
     class RecordingManager:
         def __init__(self, *_args: object, **kwargs: object) -> None:
             captured.update(kwargs)
+            self.reconcile_sandbox_ownership = lambda _resources: calls.append("reconcile")
 
     def claim(_session_id: str) -> bool:
         return True
@@ -399,6 +521,9 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     store = SimpleNamespace(
         ensure_session=lambda _session_id: None,
         acquire_session_lease=lambda _session_id: SimpleNamespace(execute=lambda _statement: None, close=lambda: None),
+        advance_sandbox_ownership_epoch=lambda _session_id: 1,
+        sandbox_ownership=lambda _session_id: {"epoch": 1, "resources": []},
+        fail_interrupted_turns=lambda _session_id, epoch: calls.append(("fail-interrupted", epoch)) or ["old-turn"],
         runtime_settings=lambda _session_id: {},
         claim_environment_report=claim,
     )
@@ -410,4 +535,88 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     runtime = registry._build("s1")
 
     assert captured["environment_report_claim"] is claim
+    assert calls == ["reconcile", ("fail-interrupted", 1)]
     runtime.close_lease()
+
+
+def test_build_does_not_terminalize_running_turns_when_resource_reconciliation_fails(monkeypatch) -> None:
+    from fleet_rlm import session as session_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    calls: list[str] = []
+
+    class RecordingManager:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            def fail_reconcile(_resources: object) -> None:
+                calls.append("reconcile")
+                raise RuntimeError("provider cleanup remains uncertain")
+
+            self.reconcile_sandbox_ownership = fail_reconcile
+
+    store = SimpleNamespace(
+        ensure_session=lambda _session_id: None,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(
+            execute=lambda _statement: None,
+            close=lambda: calls.append("lease-close"),
+        ),
+        advance_sandbox_ownership_epoch=lambda _session_id: 2,
+        sandbox_ownership=lambda _session_id: {"epoch": 2, "resources": [{"action": "stop"}]},
+        fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
+        runtime_settings=lambda _session_id: {},
+        claim_environment_report=lambda _session_id: True,
+    )
+    monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
+    monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(session_module, "AdaptiveFleetEngine", lambda **_kwargs: SimpleNamespace())
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="provider cleanup remains uncertain"):
+        registry._build("s1")
+
+    assert calls == ["reconcile", "lease-close"]
+
+
+@pytest.mark.parametrize(
+    ("epoch", "ownership", "message"),
+    [
+        (None, None, "ownership is unknown"),
+        (4, None, "cleanup is unresolved"),
+    ],
+)
+def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
+    monkeypatch, epoch: int | None, ownership: dict | None, message: str
+) -> None:
+    """A Session predating the ownership record is fenced, not treated as having no compute."""
+    from fleet_rlm import session as session_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    calls: list[str] = []
+
+    class RecordingManager:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            # Any provider work here would mean the refusal happened too late.
+            self.reconcile_sandbox_ownership = lambda _resources: calls.append("reconcile")
+
+    store = SimpleNamespace(
+        ensure_session=lambda _session_id: None,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(
+            execute=lambda _statement: None,
+            close=lambda: calls.append("lease-close"),
+        ),
+        advance_sandbox_ownership_epoch=lambda _session_id: epoch,
+        sandbox_ownership=lambda _session_id: ownership,
+        fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
+        runtime_settings=lambda _session_id: {},
+        claim_environment_report=lambda _session_id: True,
+    )
+    monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
+    monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(session_module, "AdaptiveFleetEngine", lambda **_kwargs: SimpleNamespace())
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match=message):
+        registry._build("s1")
+
+    assert calls == ["lease-close"]

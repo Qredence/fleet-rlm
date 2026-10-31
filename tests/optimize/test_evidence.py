@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from types import SimpleNamespace
 
 import dspy
 import pytest
@@ -46,6 +47,44 @@ def test_artifact_checks_preserve_value_associations(kind, raw, expected, keys):
 def test_structured_gold_rejects_unsafe_paths(path):
     with pytest.raises(ValueError):
         validate_structured({"artifacts": [{"path": path, "kind": "text", "expected": "a"}]})
+
+
+def test_collected_artifacts_follow_the_workspace_limits_not_the_gold_limit():
+    """A healthy Turn's output set must not be reported as incomplete evidence."""
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS, MAX_EVIDENCE_BYTES, collect_artifacts
+
+    paths = [f"artifacts/{index:03}.txt" for index in range(MAX_ARTIFACTS - 1)]
+    blobs = {**{path: b"a" for path in paths}, "artifacts/large.bin": b"b" * (MAX_EVIDENCE_BYTES * 2)}
+    observed = SimpleNamespace(
+        list_workspace_files=lambda: list(blobs),
+        read_workspace_file=lambda path, **_kwargs: blobs[path],
+    )
+
+    result = collect_artifacts(observed)
+
+    assert result["complete"] is True
+    assert len(result["files"]) == MAX_ARTIFACTS
+
+
+def test_collected_artifacts_report_incompleteness_past_the_artifact_count():
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS, collect_artifacts
+
+    blobs = {f"artifacts/{index:03}.txt": b"a" for index in range(MAX_ARTIFACTS + 1)}
+    observed = SimpleNamespace(
+        list_workspace_files=lambda: list(blobs),
+        read_workspace_file=lambda path, **_kwargs: blobs[path],
+    )
+
+    assert collect_artifacts(observed)["complete"] is False
+
+
+def test_structured_gold_keeps_its_own_smaller_size_limit():
+    """Raising the observed-artifact bound must not loosen reviewed gold validation."""
+    from fleet_rlm.execution_evidence import MAX_EVIDENCE_BYTES
+
+    gold = {"artifacts": [{"path": "artifacts/a.txt", "kind": "text", "expected": "x" * MAX_EVIDENCE_BYTES}]}
+    with pytest.raises(ValueError, match="size limit"):
+        validate_structured(gold)
 
 
 def test_python_requires_execution_receipt_matching_observed_bytes():

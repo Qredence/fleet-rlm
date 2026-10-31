@@ -532,13 +532,25 @@ Each `fleet_turn` trace records `request_preview` and `response_preview`
 
 Root outputs also carry host-derived `artifact_changes`: `created`, `modified`,
 `retained`, `deleted`, or `unknown` when evidence is incomplete, with before/after
-SHA-256 values. The existing `artifacts` list is the Session inventory, not a list
+SHA-256 values. Host evidence collects up to 100 `artifacts/` files totalling at
+most 25 MB. The persistent Session inventory can grow beyond these byte-evidence
+bounds: exceeding either bound marks the evidence incomplete, with change states
+`unknown`, while the Turn retains the full path inventory and can complete.
+Malformed byte evidence and incomplete child lifecycle receipts still fail the Turn.
+Reviewed gold keeps a separate, much smaller limit because it is review metadata,
+not output. Structured scoring continues to require complete evidence.
+The existing `artifacts` list is the Session inventory, not a list
 of files produced by that Turn. This diagnostic does not change scoring or gold
-approval semantics. Prior answers in history and unreviewed learned notes remain
+approval semantics. A root rewrite or removal of promoted child output records
+`superseded_child_receipts` in the final capture; rewritten files use workspace
+provenance, while the original promotion receipt remains in execution evidence.
+Prior answers in history and unreviewed learned notes remain
 program inputs; a continuation with those inputs does not measure unseen-task
 performance.
 Fixed-size host usage counters precede artifact metadata in root outputs so
-artifact-heavy Turns retain scoring evidence under trace sanitization limits.
+artifact-heavy Turns retain scoring evidence under trace sanitization limits. The
+exported trace preview clips `execution_evidence.artifacts.files` to 100 entries
+and records `previewed` and `total`; the stored Turn capture is never clipped.
 
 Manual TypeSafe routing, Skill-selection, and batched-decision spans record
 reported token counts. A total is derived only when both input and output are
