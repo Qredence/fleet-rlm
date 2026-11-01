@@ -151,7 +151,7 @@ jobs:
             fi
           teardown:
             - store_test_results:
-                path: test-results
+                path: test-results/junit
             - store_artifacts:
                 path: test-results
                 destination: test-results
@@ -237,7 +237,7 @@ jobs:
             circleci testsuite run "ci tests"
           teardown:
             - store_test_results:
-                path: test-results
+                path: test-results/junit
             - store_artifacts:
                 path: test-results
                 destination: test-results

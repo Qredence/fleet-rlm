@@ -33,6 +33,14 @@ def test_smarter_testing_uses_file_atoms_and_per_atom_lcov_analysis():
     assert "coverage run" in suite["analysis"]
     assert "coverage lcov --fail-under=0" in suite["analysis"]
     assert "junit_family=xunit1" in suite["run"]
+    assert "<< outputs.junit-directory >>/junit.xml" in suite["run"]
+    assert suite["outputs"]["junit-directory"] == "test-results/junit"
+    assert "junit" not in suite["outputs"]
+    for job_name in ("test-python", "test-python-312"):
+        test_run = next(
+            step["run"] for step in load_config()["jobs"][job_name]["steps"] if isinstance(step, dict) and "run" in step
+        )
+        assert {"store_test_results": {"path": "test-results/junit"}} in test_run["teardown"]
     assert suite["options"]["impact-key"] == "fleet-ci-files-lcov-v1"
     assert suite["options"]["test-impact-analysis"] is True
     assert suite["options"]["dynamic-test-splitting"] is True

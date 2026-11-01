@@ -11,9 +11,11 @@ run: |
     printf '%s\n' "$@" >> "$shard/test-files.txt"
     export COVERAGE_FILE="$shard/.coverage"
     uv run --locked coverage run --parallel-mode --source=src/fleet_rlm -m pytest \
-      -c pyproject.toml -q --durations=30 -o junit_family=xunit1 --junitxml="<< outputs.junit >>" "$@"
+      -c pyproject.toml -q --durations=30 -o junit_family=xunit1 \
+      --junitxml="<< outputs.junit-directory >>/junit.xml" "$@"
   else
-    uv run --locked pytest -c pyproject.toml -q --durations=30 -o junit_family=xunit1 --junitxml="<< outputs.junit >>" "$@"
+    uv run --locked pytest -c pyproject.toml -q --durations=30 -o junit_family=xunit1 \
+      --junitxml="<< outputs.junit-directory >>/junit.xml" "$@"
   fi
 analysis: |
   set -- << test.atoms >>
@@ -30,7 +32,7 @@ analysis: |
   if [ "$test_status" -ne 0 ]; then exit "$test_status"; fi
   exit "$coverage_status"
 outputs:
-  junit: test-results/junit.xml
+  junit-directory: test-results/junit
   lcov: test-results/coverage.lcov
 options:
   impact-key: fleet-ci-files-lcov-v1

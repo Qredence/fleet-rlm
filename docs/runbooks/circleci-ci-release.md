@@ -118,7 +118,9 @@ Dynamic splitting balances the selected files over one or two workers. Both the
 upstream `list-tests` and downstream `run` commands use default selection flags;
 change both together if adding overrides. One automatic retry is allowed. Review
 pass-on-retry evidence as a defect; do not increase retries to mask failures.
-JUnit includes file attributes; explicit `store_test_results` steps own uploads.
+JUnit includes file attributes. `outputs.junit-directory` assigns a new numbered
+directory to each run attempt, so automatic retries preserve the first attempt's
+results and timings; explicit `store_test_results` steps upload the full directory.
 Teardown retains available reports on cancellation/timeouts. Python 3.11 exports
 XML before enforcing coverage, so threshold failures retain diagnostics; only
 successful report jobs publish the workspace consumed by SonarQube. The Python
