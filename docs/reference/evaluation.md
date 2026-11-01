@@ -216,12 +216,12 @@ automatically registered for production monitoring.
 
 ## Databricks experiment layout and saved-trace scoring
 
-Fleet uses the Databricks `/Shared/fleet-rlm-runtime` experiment for runtime traces and
-trace-level scoring. Keep the curated evaluation dataset and repeatable offline
-evaluation runs in `fleet-rlm-eval`; keep GEPA runs in `fleet-rlm-gepa`. The
-selected workspace profile and all three absolute experiment paths live in
-`config/fleet.toml`. Backend selection remains explicit, so local tracking stays
-the default unless a command selects Databricks.
+Fleet uses the Databricks `/Shared/fleet-rlm-runtime` experiment for runtime
+traces and trace-level scoring. Keep the curated evaluation dataset and repeatable
+offline evaluation runs in `/Shared/fleet-rlm-eval`; keep GEPA runs in
+`/Shared/fleet-rlm-gepa`. The selected workspace profile and all three absolute
+experiment paths live in `config/fleet.toml`. Backend selection remains explicit,
+so local tracking stays the default unless a command selects Databricks.
 
 To validate Fleet scorers on a small historical sample without executing new
 Turns, read completed, nonduplicate traces from the runtime experiment and pass

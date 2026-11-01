@@ -84,10 +84,12 @@ If startup reports a Databricks MLflow trace destination mismatch, compare the
 experiment's existing Unity Catalog binding with the resolved trace catalog,
 schema, and table prefix. `.env` and process environment values override
 `config/fleet.toml`, so changing TOML alone does not replace a stale override.
-For the example `/Shared/fleet-rlm-runtime` experiment, the runtime destination is
+In the public template, the Databricks runtime experiment is
+`/Shared/fleet-rlm-runtime` and its runtime destination is
 `example_catalog.fleet_observability.fleet_rlm_runtime`; set
 `FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX=fleet_rlm_runtime` or remove a stale
-override to use the TOML value. Keep the catalog and schema aligned as well.
+override to use the template's TOML value. Keep the catalog and schema aligned as
+well.
 Fleet fails startup on a conflict rather than changing the existing binding or
 falling back to another tracking destination.
 
