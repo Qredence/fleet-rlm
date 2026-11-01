@@ -450,8 +450,8 @@ def score_evaluation_traces(
             expected value columns are missing, or any scorer reports an error.
     """
     try:
+        active_run = mlflow.active_run()
         if experiment_id is not None:
-            active_run = mlflow.active_run()
             if active_run is not None and active_run.info.experiment_id != experiment_id:
                 raise ValueError("An active MLflow run belongs to a different experiment")
             mlflow.set_experiment(experiment_id=experiment_id)
@@ -460,10 +460,11 @@ def score_evaluation_traces(
             selected_scorers = [*build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm), expected_values_present]
         if not selected_scorers:
             raise ValueError("At least one scorer is required")
-        result = mlflow.genai.evaluate(
-            data=traces,
-            scorers=selected_scorers,
-        )
+        with mlflow.start_run(experiment_id=experiment_id, nested=active_run is not None):
+            result = mlflow.genai.evaluate(
+                data=traces,
+                scorers=selected_scorers,
+            )
     except Exception as exc:
         raise EvaluationError(
             f"Scoring failed ({type(exc).__name__}); score the saved traces without rerunning Turns"
@@ -474,13 +475,16 @@ def score_evaluation_traces(
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
-    has_feedback = any(
-        assessment.get("metadata", {}).get("mlflow.assessment.sourceRunId") == result.run_id
-        and assessment.get("feedback", {}).get("value") is not None
-        and not assessment.get("feedback", {}).get("error")
-        for assessments in frame.get("assessments", [])
-        if isinstance(assessments, list)
-        for assessment in assessments
+    assessments_by_trace = frame["assessments"] if "assessments" in frame else [None] * len(frame)
+    has_feedback = len(frame) == len(traces) and all(
+        isinstance(assessments, list)
+        and any(
+            assessment.get("metadata", {}).get("mlflow.assessment.sourceRunId") == result.run_id
+            and assessment.get("feedback", {}).get("value") is not None
+            and not assessment.get("feedback", {}).get("error")
+            for assessment in assessments
+        )
+        for assessments in assessments_by_trace
     )
     if (
         frame.empty

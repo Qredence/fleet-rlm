@@ -513,6 +513,12 @@ def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
     scorers = [object()]
     monkeypatch.setattr(evaluation.mlflow, "set_experiment", lambda **kwargs: calls.setdefault("experiment", kwargs))
 
+    def start_run(**kwargs):
+        calls["start_run"] = kwargs
+        return nullcontext()
+
+    monkeypatch.setattr(evaluation.mlflow, "start_run", start_run)
+
     def evaluate(**kwargs):
         calls["evaluate"] = kwargs
         return result
@@ -531,6 +537,7 @@ def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
     assert scored is result
     assert scored.run_id == "run-1"
     assert calls["experiment"] == {"experiment_id": "123"}
+    assert calls["start_run"] == {"experiment_id": "123", "nested": False}
     assert calls["evaluate"]["scorers"] == scorers
 
 
@@ -547,6 +554,31 @@ def test_scoring_saved_traces_rejects_active_run_from_another_experiment(monkeyp
         evaluation.score_evaluation_traces(
             [object()], judge_model="m", experiment_id="123", scorers=[object()], report=lambda _message: None
         )
+
+
+def test_scoring_saved_traces_starts_distinct_nested_run_when_a_run_is_active(monkeypatch):
+    result = SimpleNamespace(
+        run_id="run-1",
+        metrics={},
+        result_df=pd.DataFrame(
+            {"assessments": [[{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}]]}
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        evaluation.mlflow,
+        "active_run",
+        lambda: SimpleNamespace(info=SimpleNamespace(experiment_id="123")),
+    )
+    monkeypatch.setattr(evaluation.mlflow, "set_experiment", lambda **_kwargs: None)
+    monkeypatch.setattr(evaluation.mlflow, "start_run", lambda **kwargs: calls.append(kwargs) or nullcontext())
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
+
+    evaluation.score_evaluation_traces(
+        [object()], judge_model="m", experiment_id="123", scorers=[object()], report=lambda _message: None
+    )
+
+    assert calls == [{"experiment_id": "123", "nested": True}]
 
 
 @pytest.mark.parametrize("error", [None, "judge failed"])
@@ -583,6 +615,28 @@ def test_scoring_requires_feedback_readback_even_when_metrics_were_computed(monk
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
     with pytest.raises(evaluation.EvaluationError, match="Scoring incomplete"):
         evaluation.score_evaluation_traces([object()], judge_model="m")
+
+
+def test_scoring_requires_feedback_for_each_trace(monkeypatch):
+    result = SimpleNamespace(
+        run_id="run-1",
+        metrics={},
+        result_df=pd.DataFrame(
+            {
+                "trace_id": ["tr-1", "tr-2"],
+                "assessments": [
+                    [{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}],
+                    [],
+                ],
+            }
+        ),
+    )
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
+
+    with pytest.raises(evaluation.EvaluationError, match="Scoring incomplete"):
+        evaluation.score_evaluation_traces(
+            [object(), object()], judge_model="m", scorers=[object()], report=lambda _message: None
+        )
 
 
 def test_scoring_rejects_empty_scorer_selection(monkeypatch):
