@@ -17,9 +17,9 @@ The checked-in Databricks destinations are:
 
 | Purpose | Catalog | Schema | Prefix |
 |---|---|---|---|
-| Runtime traces | `uscentral` | `fleet_observability` | `fleet_rlm_runtime` |
-| Evaluation traces | `uscentral` | `fleet_observability` | `fleet_rlm_eval` |
-| GEPA traces | `uscentral` | `fleet_gepa` | `fleet_rlm_gepa` |
+| Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_runtime` |
+| Evaluation traces | `example_catalog` | `fleet_observability` | `fleet_rlm_eval` |
+| GEPA traces | `example_catalog` | `fleet_gepa` | `fleet_rlm_gepa` |
 
 These values come from `config/fleet.toml`; if deployment overrides change
 them, use the effective configuration and verify each experiment's trace
@@ -46,7 +46,7 @@ Fleet prefixes. Do not use a schema-wide wildcard.
 
    ```sql
    SELECT count(*) AS eligible_rows
-   FROM uscentral.<verified_schema>.<exact_prefix>_otel_<verified_type>
+   FROM example_catalog.<verified_schema>.<exact_prefix>_otel_<verified_type>
    WHERE time < TIMESTAMP '<recorded UTC cutoff>';
    ```
 
@@ -57,18 +57,18 @@ Fleet prefixes. Do not use a schema-wide wildcard.
    ```sql
    WITH expired_traces AS (
      SELECT trace_id
-     FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans
+     FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
      GROUP BY trace_id
      HAVING max(time) < TIMESTAMP '<recorded UTC cutoff>'
    ), expired_targets AS (
      SELECT trace_id AS target_id FROM expired_traces
      UNION
      SELECT spans.span_id AS target_id
-     FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans AS spans
+     FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans AS spans
      JOIN expired_traces USING (trace_id)
    )
    SELECT count(*) AS eligible_rows
-   FROM uscentral.<verified_schema>.<exact_prefix>_otel_annotations
+   FROM example_catalog.<verified_schema>.<exact_prefix>_otel_annotations
    WHERE target_id IN (SELECT target_id FROM expired_targets);
    ```
 
@@ -89,26 +89,26 @@ substitute values only after the preflight checks above:
 ```sql
 WITH expired_traces AS (
   SELECT trace_id
-  FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans
+  FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
   GROUP BY trace_id
   HAVING max(time) < TIMESTAMP '<recorded UTC cutoff>'
 ), expired_targets AS (
   SELECT trace_id AS target_id FROM expired_traces
   UNION
   SELECT spans.span_id AS target_id
-  FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans AS spans
+  FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans AS spans
   JOIN expired_traces USING (trace_id)
 )
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_annotations
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_annotations
 WHERE target_id IN (SELECT target_id FROM expired_targets);
 
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_logs
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_logs
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_metrics
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_metrics
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 ```
 
@@ -125,7 +125,7 @@ change.
 ## Preflight validation record — 2026-10-17
 
 Under the agreed live-acceptance cap, Genie checked the exact 12 tables named
-above through `uscentral.information_schema.columns`. All 12 tables existed.
+above through `example_catalog.information_schema.columns`. All 12 tables existed.
 The spans, logs, and metrics tables exposed `time TIMESTAMP`; annotation tables
 exposed `target_type` and `target_id` and no `time` column, so linked-target
 counts were used. With the single UTC cutoff `2026-09-17 06:31:35`, the dry-run

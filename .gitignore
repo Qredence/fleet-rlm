@@ -223,3 +223,6 @@ docs/reviews/2026-10-05/PRD-04-domain-contracts-and-persistence.md
 docs/reviews/2026-10-05/PRD-05-api-streaming-and-generated-contracts.md
 docs/reviews/2026-10-05/PRD-06-observability-and-tracing.md
 docs/reviews/2026-10-05/README.md
+
+# Private deployment configuration
+/config/fleet.toml

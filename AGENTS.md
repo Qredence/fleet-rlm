@@ -8,12 +8,10 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries; cons
 
 - Start with `git status --short` and the existing diff; preserve uncommitted work, including deletions.
 - Use Python 3.11–3.13 with `uv`, four-space indentation, and Ruff; prefer `pnpm` for JavaScript.
-- Keep changes scoped. Reuse existing abstractions and native DSPy behavior; avoid speculative abstractions and compatibility aliases.
-- Before removing code, check callers, persisted formats, migrations, replay compatibility, tests, and docs.
+- Keep changes scoped. Reuse existing abstractions and native DSPy package, never rewrite/duplicate DSPy mechanism, use the dependancy directly; avoid speculative abstractions and compatibility aliases.
 - User Skills live in `.fleet/skills/`; never synchronize developer guidance from `.agents/skills/` as user Skills.
-- Update docs for public behavior changes. Keep external benchmarks/verifiers in notebooks/helpers and runtime policy independent of benchmark families.
-- Never commit credentials or `.env` files; treat traces/artifacts as sensitive. Commit, push, publish, and deploy only with explicit authorization; use conventional commit prefixes.
-- Live Daytona, model-provider, database, and evaluation runs require explicit authorization. Preserve run/trace IDs and recover completed work before rerunning; GEPA call budgets do not cap total cost.
+- Never commit credentials or `.env` files; use conventional commit prefixes.
+- Preserve run/trace IDs and recover completed work before rerunning; GEPA call budgets do not cap total cost.
 
 ## Runtime guardrails
 
@@ -21,7 +19,6 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries; cons
 - Execute generated Python in Daytona; keep credentials and host-mediated tools on the server. Preserve shared Turn budgets, isolated children, success-only artifact promotion, and provenance.
 - Preserve one terminal outcome and teardown owner per Turn. On failure, cancellation, expiry, or disconnect before an outcome, fence host work, shut down children, and stop the root before acknowledgment. Success retains the warm root.
 - Preserve execution reply fences and generation-bound watchdogs serialized with Turn end/reset; fencing alone does not interrupt providers or stop children.
-- Progress is advisory; synchronize ingestion/SSE sampling, discard pending progress after an outcome, and keep `done` last.
 - Preserve snapshot resource floors and provider-resolved provenance, historical `pre-provenance` readability, Store migrations, and runtime lease fencing. Stored history cannot restore live interpreter state.
 - Keep ordinary API access loopback by default, explicit non-loopback opt-in, and a secured boundary for external exposure.
 - Use scoped `dspy.context`; preserve native tracing, evaluation, and serialization, and validate pinned integration contracts on upgrades.
@@ -43,6 +40,5 @@ Details: [HTTP API](docs/reference/http-api.md), [configuration](docs/reference/
 Use the [Makefile](Makefile) for supported commands:
 
 - Code: add regression coverage, run `uv run pytest <focused-test>`, then `make check`.
-- Documentation only: run `make check-docs` and `git diff --check`.
 - API changes: update docs and regenerate/check the OpenAPI contract with existing tooling.
 - Ordinary CI must remain independent of live services.

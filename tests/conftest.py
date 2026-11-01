@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import mlflow
 import pytest
 from pydantic import AliasChoices
@@ -34,6 +36,9 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
     # A test that forgets its database fake fails fast instead of reaching a real local Postgres.
     monkeypatch.setenv("FLEET_DATABASE_URL", "postgresql://fleet-test@db.invalid:5432/fleet-test")
+    monkeypatch.setenv("FLEET_CONFIG", str(Path(__file__).resolve().parents[1] / "config/fleet.toml.example"))
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", "example-warehouse")
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", "example_catalog")
     get_settings.cache_clear()
     mlflow.set_tracking_uri(mlflow_test_uri)
     yield

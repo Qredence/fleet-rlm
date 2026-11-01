@@ -1,11 +1,15 @@
 import csv
 import io
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import httpx
 import pandas as pd
 import pytest
+from databricks.sdk.errors import NotFound
+from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import RESOURCE_DOES_NOT_EXIST
 
 from fleet_rlm.optimize import evaluation
 from fleet_rlm.optimize.evaluation import (
@@ -19,6 +23,55 @@ from fleet_rlm.optimize.scorers import expected_values_present
 
 def _rows(content: str) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(content)))
+
+
+def test_build_dataset_uses_databricks_dataset_integration(monkeypatch):
+    import databricks.agents.datasets as agents_datasets
+    import mlflow.genai.datasets as datasets
+
+    calls = []
+    dataset = SimpleNamespace(merge_records=lambda records: calls.append(records))
+    monkeypatch.setattr(datasets, "get_tracking_uri", lambda: "databricks://test-profile")
+    monkeypatch.setattr(datasets, "_databricks_profile_env", nullcontext)
+    monkeypatch.setattr(datasets, "EvaluationDataset", lambda value: value)
+    monkeypatch.setattr(agents_datasets, "get_dataset", lambda _name: dataset)
+    case = EvalCase("c1", "task", ("42",), "direct", "group")
+
+    assert evaluation.build_dataset("catalog.schema.cases", "123", [case]) is dataset
+    assert calls == [[case.record()]]
+
+
+@pytest.mark.parametrize("error", [NotFound("missing"), MlflowException("missing", RESOURCE_DOES_NOT_EXIST)])
+def test_build_dataset_creates_only_when_missing(monkeypatch, error):
+    calls = []
+    dataset = SimpleNamespace(merge_records=lambda records: calls.append(records))
+
+    def missing(**_kwargs):
+        raise error
+
+    monkeypatch.setattr(evaluation.mlflow.genai.datasets, "get_dataset", missing)
+    monkeypatch.setattr(
+        evaluation.mlflow.genai.datasets,
+        "create_dataset",
+        lambda **kwargs: calls.append(kwargs) or dataset,
+    )
+    assert evaluation.build_dataset("catalog.schema.cases", "123", []) is dataset
+    assert calls == [{"name": "catalog.schema.cases", "experiment_id": "123"}, []]
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), MlflowException("denied", "PERMISSION_DENIED")])
+def test_build_dataset_does_not_create_on_lookup_failure(monkeypatch, error):
+    def denied(**_kwargs):
+        raise error
+
+    monkeypatch.setattr(evaluation.mlflow.genai.datasets, "get_dataset", denied)
+    monkeypatch.setattr(
+        evaluation.mlflow.genai.datasets,
+        "create_dataset",
+        lambda **_kwargs: pytest.fail("must not create a dataset after a failed lookup"),
+    )
+    with pytest.raises(type(error), match="denied"):
+        evaluation.build_dataset("catalog.schema.cases", "123", [])
 
 
 def test_synthetic_cases_are_deterministic_and_grouped():
@@ -428,6 +481,33 @@ def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
         [object()], judge_model="m", judge_lm="judge-sentinel", jev_lm=sentinel, report=lambda _message: None
     )
     assert received == [("m", "judge-sentinel", sentinel)]
+
+
+def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
+    result = SimpleNamespace(run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [None]}))
+    calls = {}
+    scorers = [object()]
+    monkeypatch.setattr(evaluation.mlflow, "set_experiment", lambda **kwargs: calls.setdefault("experiment", kwargs))
+
+    def evaluate(**kwargs):
+        calls["evaluate"] = kwargs
+        return result
+
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", evaluate)
+    monkeypatch.setattr(
+        evaluation,
+        "build_mlflow_scorer_suite",
+        lambda *_args: pytest.fail("selected scorers must be used as supplied"),
+    )
+
+    scored = evaluation.score_evaluation_traces(
+        [object()], judge_model="m", experiment_id="123", scorers=scorers, report=lambda _message: None
+    )
+
+    assert scored is result
+    assert scored.run_id == "run-1"
+    assert calls["experiment"] == {"experiment_id": "123"}
+    assert calls["evaluate"]["scorers"] == scorers
 
 
 @pytest.mark.parametrize("error", [None, "judge failed"])

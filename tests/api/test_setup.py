@@ -457,6 +457,7 @@ def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environmen
     settings = FleetSettings(
         _env_file=None,
         mlflow_mode="databricks",
+        mlflow_databricks_tracking_uri="databricks",
         databricks_host="https://candidate.test",
         databricks_token="candidate-token",
         fleet_database_url="postgresql://reader@db.invalid/fleet?sslmode=require",
