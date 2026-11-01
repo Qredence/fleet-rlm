@@ -13,6 +13,7 @@ from fleet_rlm.config import FleetSettings, resolve_turn_deadline
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
+    monkeypatch.delenv("FLEET_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
     # These tests exercise .env precedence from a private tmp_path working directory.
     monkeypatch.setitem(FleetSettings.model_config, "env_file", ".env")
@@ -230,7 +231,7 @@ def test_build_jev_lm_builds_the_configured_typesafe_model(monkeypatch):
 
 
 def test_shipped_defaults_cap_root_output_but_not_sub(monkeypatch):
-    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml.example"
     monkeypatch.setenv("FLEET_CONFIG", str(shipped))
     calls = []
     monkeypatch.setattr("fleet_rlm.config.dspy.LM", lambda model, **kwargs: calls.append((model, kwargs)))
@@ -471,7 +472,7 @@ def test_gateway_discovery_filters_chat_services_and_converts_resource_names(mon
 
 def test_checked_in_toml_loads_without_snapshot_setting(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml.example"
     monkeypatch.setenv("FLEET_CONFIG", str(shipped))
     monkeypatch.delenv("FLEET_DAYTONA_SNAPSHOT", raising=False)
     settings = FleetSettings(_env_file=None)
@@ -523,3 +524,18 @@ def test_gateway_json_declaration_does_not_guess_other_model_capabilities(base_u
     settings = FleetSettings(_env_file=None, fleet_llm_base_url=base_url, databricks_token="test-token")
     lm = settings._build_lm(model)
     assert lm.model == model
+
+
+def test_databricks_requires_explicit_deployment_identifiers(monkeypatch):
+    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", raising=False)
+    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", raising=False)
+    assert FleetSettings(_env_file=None).mlflow_mode == "local"
+    with pytest.raises(ValueError, match="SQL warehouse ID"):
+        FleetSettings(_env_file=None, mlflow_mode="databricks")
+    configured = FleetSettings(
+        _env_file=None,
+        mlflow_mode="databricks",
+        mlflow_databricks_trace_catalog="example_catalog",
+        mlflow_databricks_tracing_sql_warehouse_id="example-warehouse",
+    )
+    assert configured.mlflow_tracking_uri == "databricks"

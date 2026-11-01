@@ -180,31 +180,26 @@ def test_failed_download_span_omits_private_exception_details(monkeypatch, tmp_p
     from mlflow.entities import SpanStatusCode
     from mlflow.entities.trace_location import MlflowExperimentLocation
 
-    previous_uri = mlflow.get_tracking_uri()
-    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'traces.db'}")
-    try:
-        experiment_id = mlflow.create_experiment("private-transfer-failure")
-        destination = MlflowExperimentLocation(experiment_id=experiment_id)
-        sandbox = SimpleNamespace(fs=SimpleNamespace(download_files=lambda *_args: []))
-        monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: sandbox)
-        monkeypatch.setattr(DaytonaSandboxManager, "_workspace_files_metadata", lambda *_args, **_kwargs: [{"size": 1}])
-        manager = DaytonaSandboxManager("key", "org", "volume", "private-transfer")
-        with (
-            mlflow.start_span("parent", trace_destination=destination) as parent,
-            pytest.raises(RuntimeError, match=r"files/private-name\.txt"),
-        ):
-            manager.read_workspace_files(["files/private-name.txt"])
-        mlflow.flush_trace_async_logging()
-        trace = mlflow.get_trace(parent.trace_id)
-        assert trace is not None
-        span = next(span for span in trace.data.spans if span.name == "sandbox.workspace_download")
-        assert span.status.status_code == SpanStatusCode.ERROR
-        assert span.outputs == {"completed": False}
-        assert span.attributes["attempts"] == 1
-        assert span.events == []
-        assert "private-name.txt" not in json.dumps(span.to_dict())
-    finally:
-        mlflow.set_tracking_uri(previous_uri)
+    experiment_id = mlflow.create_experiment(f"private-transfer-failure-{tmp_path.name}")
+    destination = MlflowExperimentLocation(experiment_id=experiment_id)
+    sandbox = SimpleNamespace(fs=SimpleNamespace(download_files=lambda *_args: []))
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: sandbox)
+    monkeypatch.setattr(DaytonaSandboxManager, "_workspace_files_metadata", lambda *_args, **_kwargs: [{"size": 1}])
+    manager = DaytonaSandboxManager("key", "org", "volume", "private-transfer")
+    with (
+        mlflow.start_span("parent", trace_destination=destination) as parent,
+        pytest.raises(RuntimeError, match=r"files/private-name\.txt"),
+    ):
+        manager.read_workspace_files(["files/private-name.txt"])
+    mlflow.flush_trace_async_logging()
+    trace = mlflow.get_trace(parent.trace_id)
+    assert trace is not None
+    span = next(span for span in trace.data.spans if span.name == "sandbox.workspace_download")
+    assert span.status.status_code == SpanStatusCode.ERROR
+    assert span.outputs == {"completed": False}
+    assert span.attributes["attempts"] == 1
+    assert span.events == []
+    assert "private-name.txt" not in json.dumps(span.to_dict())
 
 
 @pytest.mark.parametrize("retry_stage", [None, "metadata", "download", "prepare", "upload"])

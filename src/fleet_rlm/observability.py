@@ -592,6 +592,10 @@ def sanitize_trace_span(span: Any) -> None:
                 setattr_fn(cleaned)
 
 
+class MlflowTraceDestinationMismatchError(ValueError):
+    """The requested Unity Catalog destination conflicts with an existing experiment binding."""
+
+
 def set_mlflow_trace_experiment(
     experiment_name: str,
     *,
@@ -605,8 +609,9 @@ def set_mlflow_trace_experiment(
     if not databricks:
         return mlflow.set_experiment(experiment_name)
     from mlflow.entities.trace_location import UnityCatalog
+    from mlflow.utils.mlflow_tags import MLFLOW_EXPERIMENT_DATABRICKS_TRACE_DESTINATION_PATH
 
-    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = tracing_sql_warehouse_id
+    experiment = mlflow.get_experiment_by_name(experiment_name)
     if trace_table_prefix:
         trace_location = UnityCatalog(
             catalog_name=trace_catalog,
@@ -615,6 +620,17 @@ def set_mlflow_trace_experiment(
         )
     else:
         trace_location = UnityCatalog(catalog_name=trace_catalog, schema_name=trace_schema)
+    if experiment is not None:
+        destination = experiment.tags.get(MLFLOW_EXPERIMENT_DATABRICKS_TRACE_DESTINATION_PATH)
+        # Native MLflow uses the experiment ID when no custom table prefix is supplied.
+        requested_destination = (
+            trace_location.full_table_prefix
+            if trace_table_prefix
+            else f"{trace_catalog}.{trace_schema}.{experiment.experiment_id}"
+        )
+        if destination and destination != requested_destination:
+            raise MlflowTraceDestinationMismatchError("MLflow trace destination mismatch")
+    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = tracing_sql_warehouse_id
     return mlflow.set_experiment(experiment_name, trace_location=trace_location)
 
 

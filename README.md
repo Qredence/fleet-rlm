@@ -53,6 +53,7 @@ Model calls, sandbox execution, and snapshot builds may incur provider charges.
 git clone https://github.com/Qredence/fleet-rlm.git
 cd fleet-rlm
 uv sync --dev
+cp config/fleet.toml.example config/fleet.toml
 cp .env.example .env
 ${EDITOR:-vi} .env
 ```
@@ -61,7 +62,7 @@ Set your database DSN, Gateway token and host, Daytona API key, organization ID,
 and Volume ID, or enter missing values in the startup checklist. Replace example connection values and deployment identifiers;
 keep credentials in `.env` or your deployment's secret configuration.
 
-Non-secret defaults live in [config/fleet.toml](config/fleet.toml). Verify that
+Non-secret defaults live in [config/fleet.toml](config/fleet.toml.example). Verify that
 its root and sub-model IDs are available in your Gateway workspace. Runtime
 model IDs use `openai/<service-id>` and the Gateway base URL must use HTTPS.
 Evaluation and optimization additionally need their configured judge and

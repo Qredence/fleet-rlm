@@ -13,18 +13,20 @@ estimate the preflight query cost with the workspace billing owner. Agree a
 cap before running it. This runbook does not authorize a warehouse query or a
 trace deletion by itself.
 
-The checked-in Databricks destinations are:
+The public template's Databricks destinations are:
 
 | Purpose | Catalog | Schema | Prefix |
 |---|---|---|---|
-| Runtime traces | `uscentral` | `fleet_observability` | `fleet_rlm_runtime` |
-| Evaluation traces | `uscentral` | `fleet_observability` | `fleet_rlm_eval` |
-| GEPA traces | `uscentral` | `fleet_gepa` | `fleet_rlm_gepa` |
+| Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_runtime` |
+| Evaluation traces | `example_catalog` | `fleet_observability` | `fleet_rlm_eval` |
+| GEPA traces | `example_catalog` | `fleet_gepa` | `fleet_rlm_gepa` |
 
-These values come from `config/fleet.toml`; if deployment overrides change
-them, use the effective configuration and verify each experiment's trace
-location before cleanup. Genie metadata discovery also found shared/base and
-legacy Fleet objects in these schemas. They are outside this cleanup scope.
+These values come from `config/fleet.toml.example`; the runtime prefix is also
+`fleet_rlm_runtime` in the code fallback. If deployment overrides change these
+values, use the effective configuration and verify each experiment's trace
+location before cleanup. Genie metadata discovery
+also found shared/base and legacy Fleet objects in these schemas. They are
+outside this cleanup scope.
 Each configured prefix can have `_otel_annotations`, `_otel_logs`,
 `_otel_metrics`, and `_otel_spans` tables. Only operate on these three exact
 Fleet prefixes. Do not use a schema-wide wildcard.
@@ -46,7 +48,7 @@ Fleet prefixes. Do not use a schema-wide wildcard.
 
    ```sql
    SELECT count(*) AS eligible_rows
-   FROM uscentral.<verified_schema>.<exact_prefix>_otel_<verified_type>
+   FROM example_catalog.<verified_schema>.<exact_prefix>_otel_<verified_type>
    WHERE time < TIMESTAMP '<recorded UTC cutoff>';
    ```
 
@@ -57,18 +59,18 @@ Fleet prefixes. Do not use a schema-wide wildcard.
    ```sql
    WITH expired_traces AS (
      SELECT trace_id
-     FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans
+     FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
      GROUP BY trace_id
      HAVING max(time) < TIMESTAMP '<recorded UTC cutoff>'
    ), expired_targets AS (
      SELECT trace_id AS target_id FROM expired_traces
      UNION
      SELECT spans.span_id AS target_id
-     FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans AS spans
+     FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans AS spans
      JOIN expired_traces USING (trace_id)
    )
    SELECT count(*) AS eligible_rows
-   FROM uscentral.<verified_schema>.<exact_prefix>_otel_annotations
+   FROM example_catalog.<verified_schema>.<exact_prefix>_otel_annotations
    WHERE target_id IN (SELECT target_id FROM expired_targets);
    ```
 
@@ -89,26 +91,26 @@ substitute values only after the preflight checks above:
 ```sql
 WITH expired_traces AS (
   SELECT trace_id
-  FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans
+  FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
   GROUP BY trace_id
   HAVING max(time) < TIMESTAMP '<recorded UTC cutoff>'
 ), expired_targets AS (
   SELECT trace_id AS target_id FROM expired_traces
   UNION
   SELECT spans.span_id AS target_id
-  FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans AS spans
+  FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans AS spans
   JOIN expired_traces USING (trace_id)
 )
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_annotations
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_annotations
 WHERE target_id IN (SELECT target_id FROM expired_targets);
 
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_logs
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_logs
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_metrics
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_metrics
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 
-DELETE FROM uscentral.<verified_schema>.<exact_prefix>_otel_spans
+DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 ```
 
@@ -124,8 +126,9 @@ change.
 
 ## Preflight validation record — 2026-10-17
 
-Under the agreed live-acceptance cap, Genie checked the exact 12 tables named
-above through `uscentral.information_schema.columns`. All 12 tables existed.
+This historical record is sanitized: the deployment catalog is redacted.
+Under the agreed live-acceptance cap, Genie checked the corresponding 12 tables
+through the deployment catalog’s `information_schema.columns`. All 12 tables existed.
 The spans, logs, and metrics tables exposed `time TIMESTAMP`; annotation tables
 exposed `target_type` and `target_id` and no `time` column, so linked-target
 counts were used. With the single UTC cutoff `2026-09-17 06:31:35`, the dry-run

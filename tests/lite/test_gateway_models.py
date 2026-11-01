@@ -51,7 +51,7 @@ def test_unity_gateway_models_use_native_dspy_engine_and_credentials(monkeypatch
     monkeypatch.setattr(dspy, "LM", fake_lm)
     settings = FleetSettings(
         _env_file=None,
-        fleet_root_model="openai/uscentral.ai_gateway.deepseek-v4-1-flash-service",
+        fleet_root_model="openai/example_catalog.ai_gateway.deepseek-v4-1-flash-service",
         fleet_sub_model="openai/system.ai.claude-haiku-5-5",
         fleet_reflection_model="openai/system.ai.claude-sonnet-5-5",
         databricks_host="workspace.example.com",
@@ -77,7 +77,7 @@ def test_unity_gateway_models_use_native_dspy_engine_and_credentials(monkeypatch
     assert reflection_lm.model.startswith("fleet-gateway-reflection-")
     assert reflection_lm.model.endswith("/system.ai.claude-sonnet-5-5")
     assert calls == [
-        ("openai/uscentral.ai_gateway.deepseek-v4-1-flash-service", {**gateway_options, "max_tokens": 16384}),
+        ("openai/example_catalog.ai_gateway.deepseek-v4-1-flash-service", {**gateway_options, "max_tokens": 16384}),
         ("openai/system.ai.claude-haiku-5-5", gateway_options),
         (reflection_lm.model, reflection_options),
     ]

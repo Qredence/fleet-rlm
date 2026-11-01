@@ -1,3 +1,4 @@
+# Copy to config/fleet.toml and customize locally. Never add credentials here.
 # Fleet non-secret process defaults. Environment/.env override this file.
 # Values are a provisional baseline, not performance-tuned defaults.
 # Credentials: DATABRICKS_TOKEN, FLEET_DAYTONA_API_KEY,
@@ -72,10 +73,10 @@ experiment_name = "/Shared/fleet-rlm-runtime"
 eval_experiment_name = "/Shared/fleet-rlm-eval"
 eval_trace_table_prefix = "fleet_rlm_eval"
 optimization_experiment_name = "/Shared/fleet-rlm-gepa"
-trace_catalog = "uscentral"
+trace_catalog = "example_catalog"
 trace_schema = "fleet_observability"
 trace_table_prefix = "fleet_rlm_runtime"
-tracing_sql_warehouse_id = "4d07bd43a3ddfff2"
+tracing_sql_warehouse_id = "" # Set your SQL warehouse ID before selecting Databricks.
 optimization_trace_schema = "fleet_gepa"
 optimization_trace_table_prefix = "fleet_rlm_gepa"
 

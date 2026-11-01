@@ -4,6 +4,11 @@ Evaluation scorers live in `src/fleet_rlm/optimize/scorers.py`. This page descri
 the explicit evaluation workflows. `fleet eval` exposes dataset/run/label commands;
 GEPA remains a deliberate isolated optimization workflow.
 
+The default installation includes `databricks-agents`, which MLflow needs to
+open and create Databricks Unity Catalog evaluation datasets. Dataset creation
+falls back to a new dataset only when lookup reports that the dataset does not
+exist; authentication, permission, and other lookup failures are surfaced.
+
 ## Run evaluation against its own server
 
 Use `uv run --env-file .env` for the server, evaluation commands, and trace
@@ -208,6 +213,83 @@ then filter feedback by `mlflow.assessment.sourceRunId` to inspect that scoring
 run alone.
 These custom code-based scorers run in offline evaluation; they are not
 automatically registered for production monitoring.
+
+## Databricks experiment layout and saved-trace scoring
+
+Fleet uses the Databricks `/Shared/fleet-rlm-runtime` experiment for runtime
+traces and trace-level scoring. Keep the curated evaluation dataset and repeatable
+offline evaluation runs in `/Shared/fleet-rlm-eval`; keep GEPA runs in
+`/Shared/fleet-rlm-gepa`. The selected workspace profile and all three absolute
+experiment paths live in `config/fleet.toml`. Backend selection remains explicit,
+so local tracking stays the default unless a command selects Databricks.
+
+To validate Fleet scorers on a small historical sample without executing new
+Turns, read completed, nonduplicate traces from the runtime experiment and pass
+only eligible scorers to `score_evaluation_traces`. Set the named Databricks
+profile and warehouse before trace reads; pass the runtime experiment ID so the
+scoring run is recorded alongside the traces. Do not include retrieval scorers
+when the sample has no retriever spans, or expectation-based scorers when the
+sample lacks matching labels. Preserve prior assessments and inspect only new
+feedback with `mlflow.assessment.sourceRunId` equal to the returned evaluation
+run ID.
+
+```python
+import os
+import mlflow
+from mlflow import MlflowClient
+from databricks.sdk import WorkspaceClient
+
+from fleet_rlm.config import FleetSettings
+from fleet_rlm.optimize.evaluation import score_evaluation_traces
+from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite
+
+settings = FleetSettings(
+    mlflow_mode="databricks",
+    mlflow_databricks_experiment_name="/Shared/fleet-rlm-runtime",
+)
+settings.prepare_mlflow_auth()
+target = settings.mlflow_target()
+mlflow.set_tracking_uri(target.tracking_uri)
+os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
+workspace = WorkspaceClient()
+if workspace.config.auth_type == "pat":
+    os.environ["OPENAI_API_KEY"] = workspace.config.token
+elif workspace.config.auth_type == "databricks-cli" or workspace.config.auth_type.startswith("oauth"):
+    os.environ["OPENAI_API_KEY"] = workspace.config.oauth_token().access_token
+else:
+    raise ValueError(f"Unsupported Databricks auth type: {workspace.config.auth_type}")
+os.environ["OPENAI_API_BASE"] = workspace.config.host.rstrip("/") + "/ai-gateway/mlflow/v1"
+
+experiment = MlflowClient().get_experiment_by_name(target.experiment_name)
+if experiment is None:
+    raise RuntimeError("Runtime experiment was not found")
+trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_runtime/TRACE_ID"]
+traces = [mlflow.get_trace(trace_id, silent=True, flush=True) for trace_id in trace_ids]
+suite = build_mlflow_scorer_suite(settings.fleet_judge_model)
+eligible_names = {"output_instruction_compliance", "rlm_trajectory_efficiency", "jev_routing_efficiency"}
+selected = [scorer for scorer in suite if scorer.name in eligible_names]
+result = score_evaluation_traces(
+    traces,
+    judge_model=settings.fleet_judge_model,
+    experiment_id=experiment.experiment_id,
+    scorers=selected,
+)
+print(result.run_id, result.metrics)
+```
+
+Check task and answer evidence locally before choosing trace IDs; do not print
+payloads into logs. Add `route_correctness` only for traces carrying reviewed route
+expectations. This explicit scoring workflow does not register a production scorer
+or activate sampling. Databricks production scorers are experiment-scoped, and
+custom remote scorer serialization has separate runtime constraints; validate
+those constraints before registering any scorer for ongoing monitoring. The
+Databricks registry also requires a `databricks:/` judge model for production
+scorers; Fleet's `openai:/` Gateway model can be used for an explicit offline
+scoring run but cannot be registered for remote monitoring as-is.
+Production monitoring is Beta. Start registered scorers stopped, inspect the
+definition and sample rate, then use an explicitly authorized canary before
+enabling low-rate sampling.
+
 
 ## Metrics
 

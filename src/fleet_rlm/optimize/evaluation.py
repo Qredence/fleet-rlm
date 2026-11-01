@@ -19,7 +19,9 @@ from typing import Any
 
 import httpx
 import mlflow
+from databricks.sdk.errors import NotFound
 from mlflow.entities import AssessmentSource, AssessmentSourceType
+from mlflow.exceptions import MlflowException
 
 from fleet_rlm.contracts import Route, parse_sse
 from fleet_rlm.optimize.dataset import labels_of
@@ -168,7 +170,9 @@ def build_dataset(name: str, experiment_id: str, cases: list[EvalCase]) -> Any:
     """Create an MLflow evaluation dataset (Unity Catalog table on Databricks) and add the cases."""
     try:
         dataset = mlflow.genai.datasets.get_dataset(name=name)
-    except Exception:
+    except (NotFound, MlflowException) as exc:
+        if isinstance(exc, MlflowException) and exc.error_code != "RESOURCE_DOES_NOT_EXIST":
+            raise
         dataset = mlflow.genai.datasets.create_dataset(name=name, experiment_id=experiment_id)
     dataset.merge_records([case.record() for case in cases])
     return dataset
@@ -415,7 +419,14 @@ def evaluate_cases(
             report(f"Case {case.case_id}: collected and labelled")
     if collect_only:
         return None
-    return score_evaluation_traces(traces, judge_model=judge_model, judge_lm=judge_lm, jev_lm=jev_lm, report=report)
+    return score_evaluation_traces(
+        traces,
+        judge_model=judge_model,
+        judge_lm=judge_lm,
+        jev_lm=jev_lm,
+        experiment_id=experiment_id,
+        report=report,
+    )
 
 
 def score_evaluation_traces(
@@ -424,22 +435,36 @@ def score_evaluation_traces(
     judge_model: str,
     judge_lm: Any = None,
     jev_lm: Any = None,
+    experiment_id: str | None = None,
+    scorers: list[Any] | None = None,
     report: Callable[[str], None] = print,
 ) -> Any:
     """Score already verified, labelled traces without executing their Turns again.
 
     Return the MLflow evaluation result. ``judge_lm`` adds the shared Fleet metric;
     ``jev_lm`` selects TypeSafe route judging, otherwise the generative route judge is used.
+    ``experiment_id`` scopes the evaluation run, and ``scorers`` can select a validated subset.
 
     Raises:
         EvaluationError: Scorer construction or evaluation raises, or result rows are absent,
             expected value columns are missing, or any scorer reports an error.
     """
     try:
-        result = mlflow.genai.evaluate(
-            data=traces,
-            scorers=[*build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm), expected_values_present],
-        )
+        active_run = mlflow.active_run()
+        if experiment_id is not None:
+            if active_run is not None and active_run.info.experiment_id != experiment_id:
+                raise ValueError("An active MLflow run belongs to a different experiment")
+            mlflow.set_experiment(experiment_id=experiment_id)
+        selected_scorers = scorers
+        if selected_scorers is None:
+            selected_scorers = [*build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm), expected_values_present]
+        if not selected_scorers:
+            raise ValueError("At least one scorer is required")
+        with mlflow.start_run(experiment_id=experiment_id, nested=active_run is not None):
+            result = mlflow.genai.evaluate(
+                data=traces,
+                scorers=selected_scorers,
+            )
     except Exception as exc:
         raise EvaluationError(
             f"Scoring failed ({type(exc).__name__}); score the saved traces without rerunning Turns"
@@ -450,8 +475,20 @@ def score_evaluation_traces(
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
+    assessments_by_trace = frame["assessments"] if "assessments" in frame else [None] * len(frame)
+    has_feedback = len(frame) == len(traces) and any(
+        isinstance(assessments, list)
+        and any(
+            assessment.get("metadata", {}).get("mlflow.assessment.sourceRunId") == result.run_id
+            and assessment.get("feedback", {}).get("value") is not None
+            and not assessment.get("feedback", {}).get("error")
+            for assessment in assessments
+        )
+        for assessments in assessments_by_trace
+    )
     if (
         frame.empty
+        or not has_feedback
         or not expected_columns.issubset(frame.columns)
         or any(frame[name].notna().any() for name in error_columns)
     ):

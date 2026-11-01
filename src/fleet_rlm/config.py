@@ -453,9 +453,7 @@ class FleetSettings(BaseSettings):
     mlflow_databricks_optimization_experiment_name: str = Field(
         default="/Shared/fleet-rlm-gepa", validation_alias="FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_EXPERIMENT_NAME"
     )
-    mlflow_databricks_trace_catalog: str = Field(
-        default="uscentral", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG"
-    )
+    mlflow_databricks_trace_catalog: str = Field(default="", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG")
     mlflow_databricks_trace_schema: str = Field(
         default="fleet_observability", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_SCHEMA"
     )
@@ -463,7 +461,7 @@ class FleetSettings(BaseSettings):
         default="fleet_rlm_runtime", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX"
     )
     mlflow_databricks_tracing_sql_warehouse_id: str = Field(
-        default="4d07bd43a3ddfff2",
+        default="",
         validation_alias="FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID",
     )
     mlflow_databricks_optimization_trace_schema: str = Field(
@@ -713,14 +711,21 @@ class FleetSettings(BaseSettings):
     def mlflow_environment(self) -> dict[str, str]:
         """Profile overrides for a subprocess; secrets continue through the existing environment/.env."""
         profile = self.mlflow_mode
-        return {
+        environment = {
             f"FLEET_MLFLOW_{profile.upper()}_{key.upper()}": str(getattr(self, field))
             for key, field in _TOML_FIELDS[f"mlflow.{profile}"].items()
         }
+        if profile == "databricks" and self.mlflow_tracking_uri.startswith("databricks://"):
+            environment["DATABRICKS_CONFIG_PROFILE"] = self.mlflow_tracking_uri.removeprefix("databricks://")
+        return environment
 
     def prepare_mlflow_auth(self) -> None:
         """Make .env credentials available to MLflow's default Databricks SDK authentication."""
-        if self.mlflow_mode == "databricks" and self.mlflow_tracking_uri == "databricks":
+        if self.mlflow_mode != "databricks":
+            return
+        if self.mlflow_tracking_uri.startswith("databricks://"):
+            os.environ["DATABRICKS_CONFIG_PROFILE"] = self.mlflow_tracking_uri.removeprefix("databricks://")
+        elif self.mlflow_tracking_uri == "databricks":
             if self.databricks_host:
                 os.environ["DATABRICKS_HOST"] = self.databricks_host
             if self.databricks_token.get_secret_value():
