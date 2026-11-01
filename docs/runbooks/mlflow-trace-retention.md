@@ -13,18 +13,20 @@ estimate the preflight query cost with the workspace billing owner. Agree a
 cap before running it. This runbook does not authorize a warehouse query or a
 trace deletion by itself.
 
-The checked-in Databricks destinations are:
+The public template's Databricks destinations are:
 
 | Purpose | Catalog | Schema | Prefix |
 |---|---|---|---|
-| Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_runtime` |
+| Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_dev` |
 | Evaluation traces | `example_catalog` | `fleet_observability` | `fleet_rlm_eval` |
 | GEPA traces | `example_catalog` | `fleet_gepa` | `fleet_rlm_gepa` |
 
-These values come from `config/fleet.toml`; if deployment overrides change
-them, use the effective configuration and verify each experiment's trace
-location before cleanup. Genie metadata discovery also found shared/base and
-legacy Fleet objects in these schemas. They are outside this cleanup scope.
+These values come from `config/fleet.toml.example`. Without a TOML override,
+the code fallback for the runtime table prefix is `fleet_rlm_runtime`. If
+deployment overrides change these values, use the effective configuration and
+verify each experiment's trace location before cleanup. Genie metadata discovery
+also found shared/base and legacy Fleet objects in these schemas. They are
+outside this cleanup scope.
 Each configured prefix can have `_otel_annotations`, `_otel_logs`,
 `_otel_metrics`, and `_otel_spans` tables. Only operate on these three exact
 Fleet prefixes. Do not use a schema-wide wildcard.

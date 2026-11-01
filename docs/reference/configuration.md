@@ -48,7 +48,7 @@ source control.
 | `FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME` | `/Shared/fleet-rlm-runtime` | Runtime trace experiment. |
 | `FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG` | empty (example: `example_catalog`) | Unity Catalog catalog for runtime traces. |
 | `FLEET_MLFLOW_DATABRICKS_TRACE_SCHEMA` | `fleet_observability` | Unity Catalog schema for runtime traces. |
-| `FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX` | `fleet_rlm_dev` | Runtime trace table prefix. |
+| `FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX` | `fleet_rlm_runtime` (public example: `fleet_rlm_dev`) | Runtime trace table prefix. |
 | `FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID` | empty; required for Databricks | SQL warehouse ID for Databricks tracing. |
 | `FLEET_MLFLOW_DATABRICKS_EVAL_EXPERIMENT_NAME` | `/Shared/fleet-rlm-eval` | Experiment for `fleet eval` runs; keep it separate from runtime traces. |
 | `FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_EXPERIMENT_NAME` | `/Shared/fleet-rlm-gepa` | Experiment for GEPA runs and candidate artifacts. |
@@ -84,10 +84,13 @@ If startup reports a Databricks MLflow trace destination mismatch, compare the
 experiment's existing Unity Catalog binding with the resolved trace catalog,
 schema, and table prefix. `.env` and process environment values override
 `config/fleet.toml`, so changing TOML alone does not replace a stale override.
-For the configured `fleet-rlm-dev` experiment, the runtime destination is
+In the public template, the Databricks runtime experiment is
+`/Shared/fleet-rlm-runtime` and its runtime destination is
 `example_catalog.fleet_observability.fleet_rlm_dev`; set
 `FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX=fleet_rlm_dev` or remove a stale
-override to use the TOML value. Keep the catalog and schema aligned as well.
+override to use the template's TOML value. Without a TOML override, the code
+fallback prefix is `fleet_rlm_runtime`. Keep the catalog and schema aligned as
+well.
 Fleet fails startup on a conflict rather than changing the existing binding or
 falling back to another tracking destination.
 
