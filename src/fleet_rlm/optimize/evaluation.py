@@ -451,6 +451,9 @@ def score_evaluation_traces(
     """
     try:
         if experiment_id is not None:
+            active_run = mlflow.active_run()
+            if active_run is not None and active_run.info.experiment_id != experiment_id:
+                raise ValueError("An active MLflow run belongs to a different experiment")
             mlflow.set_experiment(experiment_id=experiment_id)
         selected_scorers = scorers
         if selected_scorers is None:

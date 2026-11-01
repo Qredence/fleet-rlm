@@ -534,6 +534,21 @@ def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
     assert calls["evaluate"]["scorers"] == scorers
 
 
+def test_scoring_saved_traces_rejects_active_run_from_another_experiment(monkeypatch):
+    monkeypatch.setattr(
+        evaluation.mlflow,
+        "active_run",
+        lambda: SimpleNamespace(info=SimpleNamespace(experiment_id="other-experiment")),
+    )
+    monkeypatch.setattr(evaluation.mlflow, "set_experiment", lambda **_kwargs: pytest.fail("must reject first"))
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: pytest.fail("must reject first"))
+
+    with pytest.raises(evaluation.EvaluationError, match="Scoring failed"):
+        evaluation.score_evaluation_traces(
+            [object()], judge_model="m", experiment_id="123", scorers=[object()], report=lambda _message: None
+        )
+
+
 @pytest.mark.parametrize("error", [None, "judge failed"])
 def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch, error):
     result = SimpleNamespace(
