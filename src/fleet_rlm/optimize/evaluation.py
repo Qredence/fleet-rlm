@@ -476,7 +476,7 @@ def score_evaluation_traces(
     error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
     assessments_by_trace = frame["assessments"] if "assessments" in frame else [None] * len(frame)
-    has_feedback = len(frame) == len(traces) and all(
+    has_feedback = len(frame) == len(traces) and any(
         isinstance(assessments, list)
         and any(
             assessment.get("metadata", {}).get("mlflow.assessment.sourceRunId") == result.run_id

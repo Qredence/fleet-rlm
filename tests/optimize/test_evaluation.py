@@ -617,7 +617,7 @@ def test_scoring_requires_feedback_readback_even_when_metrics_were_computed(monk
         evaluation.score_evaluation_traces([object()], judge_model="m")
 
 
-def test_scoring_requires_feedback_for_each_trace(monkeypatch):
+def test_scoring_allows_inapplicable_scorer_for_a_trace(monkeypatch):
     result = SimpleNamespace(
         run_id="run-1",
         metrics={},
@@ -633,10 +633,12 @@ def test_scoring_requires_feedback_for_each_trace(monkeypatch):
     )
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
 
-    with pytest.raises(evaluation.EvaluationError, match="Scoring incomplete"):
+    assert (
         evaluation.score_evaluation_traces(
             [object(), object()], judge_model="m", scorers=[object()], report=lambda _message: None
         )
+        is result
+    )
 
 
 def test_scoring_rejects_empty_scorer_selection(monkeypatch):
