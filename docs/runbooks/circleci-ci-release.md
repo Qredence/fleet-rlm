@@ -44,12 +44,17 @@ the server quality gate. Its full Git checkout includes the historical blobs
 needed for SonarQube source blame. The aggregate `quality` job, and therefore release
 preflight, requires this job to pass.
 
-Python 3.11's existing full-suite job produces `coverage/coverage.xml` and
-shares only that report through the workflow workspace. Coverage.py uses
-relative file paths so the scanner can resolve the report in its own checkout.
-The Python 3.12 selective tests and Python 3.13 full suite keep their existing
-behavior; SonarQube does not use partial or merged matrix coverage. Runtime
-and repository scripts are analyzed, while coverage measures the shipped
+Python 3.11 runs the full suite across two executors. Each executor preserves its
+selected test-file manifest and parallel Coverage.py data, including when tests
+fail. A report job waits for both executors to reach a terminal state, verifies
+that their manifests cover every discovered test file, combines the data, writes
+`coverage/coverage.xml`, and then enforces the 80% floor. Its teardown uploads the
+report directory after XML generation, so a floor failure retains the XML
+diagnostic. Successful reports share only the XML through the workflow workspace.
+Coverage.py uses relative file paths so the scanner can resolve the report in its
+own checkout. The Python 3.12 selective suite and Python 3.13 full suite retain
+their separate roles; SonarQube imports the combined Python 3.11 coverage only.
+Runtime and repository scripts are analyzed, while coverage measures the shipped
 `src/fleet_rlm` package. `sonar-project.properties` declares this scope and the
 supported Python versions explicitly, with scanner automatic configuration
 disabled.
@@ -83,8 +88,12 @@ per-atom LCOV analysis. Each analysis run executes one selected file with Covera
 then writes `<< outputs.lcov >>` using `coverage lcov --fail-under=0`. The LCOV
 contract test verifies relative source paths and executable-line records. This
 avoids single-pass-only dependencies while retaining context that each file atom
-covers its source. Python 3.11 and 3.13 still run all tests, and only the full 3.11
-run enforces the 80% coverage floor.
+covers its source. Python 3.11 and 3.13 each run all tests split over two
+executors, with test durations reported for the 30 slowest tests. Python 3.11
+collects parallel coverage across both shards; only their combined report
+enforces the 80% floor. Python 3.13 remains an independent full-suite interpreter
+check. These jobs use fixed parallelism of two; Python 3.12 continues its existing
+one or two-worker impact selection and per-atom LCOV analysis.
 
 Compatibility audit on 2026-11-01 used CircleCI CLI core 1.13.0 with an isolated
 testsuite extension install at 1.0.68450-8be2f5e, pytest 9.1.1, coverage.py 7.16.2,
@@ -109,10 +118,32 @@ Dynamic splitting balances the selected files over one or two workers. Both the
 upstream `list-tests` and downstream `run` commands use default selection flags;
 change both together if adding overrides. One automatic retry is allowed. Review
 pass-on-retry evidence as a defect; do not increase retries to mask failures.
-JUnit includes file attributes; explicit `store_test_results` steps own uploads.
+JUnit includes file attributes. `outputs.junit-directory` assigns a new numbered
+directory to each run attempt, so automatic retries preserve the first attempt's
+results and timings; explicit `store_test_results` steps upload the full directory.
 Teardown retains available reports on cancellation/timeouts. Python 3.11 exports
-XML before enforcing coverage, so failed runs still provide diagnostics; only
-successful runs publish the report workspace consumed by SonarQube.
+XML before enforcing coverage, so threshold failures retain diagnostics; only
+successful report jobs publish the workspace consumed by SonarQube. The Python
+3.11 test job records each executor's exit status and persists coverage data
+before returning that status, allowing the report job to export whatever data
+was collected even when a shard's tests fail. The separate test job remains a
+required success gate.
+
+### Local test latency and MLflow warning investigation
+
+The full local backend suite remains available on demand but no longer blocks
+every push. Run it explicitly with:
+
+```bash
+uv run pre-commit run backend-tests --hook-stage manual --all-files
+```
+
+`make test` remains available for direct invocation. CI's pytest output includes
+the 30 slowest tests. When investigating MLflow lock warnings, compare those
+durations with the warning timestamps and CircleCI test logs across the 3.11 and
+3.13 shards. The autouse fixture continues to point tests at the session-scoped
+temporary SQLite store; do not change tracing or database behavior unless the
+timing and warning evidence identifies a specific contention source.
 
 Offline diagnostics (doctor executes sampled tests and per-file coverage, but must
 not invoke live Fleet services):
@@ -369,12 +400,15 @@ spent 12m38s on Python 3.12 (two workers), versus 6m14s on Python 3.11 and 4m56s
 on Python 3.13. Cache restore was 4–8s and dependency installation 4–5s, so repeated
 test/analysis execution is the first target. This is one observation, not a forecast.
 
-After merge authorization, seed `fleet-ci-files-lcov-v1`, then record at least three
-comparable PR/main runs: workflow and test/analysis duration, executor consumption,
-cold/warm cache state, discovered/selected atoms, and retries. Accept only with
-correct selection, unchanged gates, and improved median Python 3.12 duration without
-increased executor consumption. A temporary source-change probe must show its known
-regression test selected; config/fixture changes must run all atoms.
+Record at least three comparable successful PR runs: total required-workflow and
+per-job duration, executor consumption, cold/warm cache state, selected atoms,
+coverage shard balance, and retries. Target a warm-cache median required-workflow
+duration of five minutes or less while preserving every test and gate. Compare
+executor consumption separately because splitting 3.11 and 3.13 increases their
+parallel executor count. If the target misses, report the measured bottleneck and
+revise the plan before adding more parallelism. A temporary source-change probe
+must still show its known regression test selected; config/fixture changes must
+run all 3.12 atoms.
 
 If the LCOV optimization fails acceptance, restore full test execution while
 retaining the correctness, reporting, interpreter, and release-provenance fixes.

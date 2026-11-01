@@ -128,47 +128,89 @@ jobs:
     docker:
       - image: cimg/python:<< parameters.python-version >>
     resource_class: medium
-    parallelism: 1
+    parallelism: 2
     steps:
       - setup-python:
           python-version: << parameters.python-version >>
       - run:
-          name: Run non-live tests
+          name: Run full non-live suite split across executors
           command: |
             mkdir -p test-results
             if [ "<< parameters.python-version >>" = "3.11" ]; then
-              mkdir -p coverage
-              uv run --locked coverage run -m pytest -o junit_family=xunit1 --junitxml=test-results/junit.xml
+              mkdir -p "coverage-shards/node-${CIRCLE_NODE_INDEX}"
+              : > "coverage-shards/node-${CIRCLE_NODE_INDEX}/test-files.txt"
+              export FLEET_CI_COVERAGE=1
+              set +e
+              circleci testsuite run "ci tests" --run-tests=all --analyze-tests=none
+              test_status=$?
+              printf '%s\n' "$test_status" > "coverage-shards/node-${CIRCLE_NODE_INDEX}/test-status"
+              exit 0
             else
-              uv run --locked pytest -o junit_family=xunit1 --junitxml=test-results/junit.xml
+              mkdir -p "coverage-shards/node-${CIRCLE_NODE_INDEX}"
+              circleci testsuite run "ci tests" --run-tests=all --analyze-tests=none
             fi
           teardown:
             - store_test_results:
-                path: test-results
+                path: test-results/junit
             - store_artifacts:
                 path: test-results
                 destination: test-results
             - store_artifacts:
-                path: .coverage
-                destination: coverage-data
+                path: coverage-shards
+                destination: coverage-shards
+      - when:
+          condition:
+            equal: ["3.11", << parameters.python-version >>]
+          steps:
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - coverage-shards
       - when:
           condition:
             equal: ["3.11", << parameters.python-version >>]
           steps:
             - run:
-                name: Export coverage before enforcing the floor
-                when: always
+                name: Preserve the Python 3.11 test result
                 command: |
-                  uv run --locked coverage xml --fail-under=0 -o coverage/coverage.xml
-                  uv run --locked coverage report
-                teardown:
-                  - store_artifacts:
-                      path: coverage
-                      destination: coverage
-            - persist_to_workspace:
-                root: .
-                paths:
-                  - coverage/coverage.xml
+                  test_status=$(cat "coverage-shards/node-${CIRCLE_NODE_INDEX}/test-status")
+                  exit "$test_status"
+
+  coverage-report:
+    docker:
+      - image: cimg/python:3.11
+    resource_class: medium
+    steps:
+      - setup-python:
+          python-version: "3.11"
+      - attach_workspace:
+          at: .
+      - run:
+          name: Combine Python 3.11 shard coverage, export XML, and enforce the floor
+          command: |
+            mkdir -p coverage
+            for node in 0 1; do
+              shard="coverage-shards/node-${node}"
+              test -s "${shard}/test-status"
+              test -s "${shard}/test-files.txt"
+              find "$shard" -maxdepth 1 -type f -name '.coverage.*' -print -quit | grep -q .
+            done
+            find tests -type f -name 'test_*.py' -print | LC_ALL=C sort > coverage/expected-tests.txt
+            cat coverage-shards/node-0/test-files.txt coverage-shards/node-1/test-files.txt \
+              | LC_ALL=C sort -u > coverage/selected-tests.txt
+            diff -u coverage/expected-tests.txt coverage/selected-tests.txt
+            uv run --locked coverage combine --keep --data-file=coverage/.coverage \
+              coverage-shards/node-0 coverage-shards/node-1
+            uv run --locked coverage xml --data-file=coverage/.coverage --fail-under=0 -o coverage/coverage.xml
+            uv run --locked coverage report --data-file=coverage/.coverage
+          teardown:
+            - store_artifacts:
+                path: coverage
+                destination: coverage
+      - persist_to_workspace:
+          root: .
+          paths:
+            - coverage/coverage.xml
 
   list-smarter-tests:
     docker:
@@ -195,7 +237,7 @@ jobs:
             circleci testsuite run "ci tests"
           teardown:
             - store_test_results:
-                path: test-results
+                path: test-results/junit
             - store_artifacts:
                 path: test-results
                 destination: test-results
@@ -665,6 +707,9 @@ workflows:
           matrix:
             parameters:
               python-version: ["3.11", "3.13"]
+      - coverage-report:
+          requires:
+            - test-python-3.11: terminal
       - list-smarter-tests
       - test-python-312:
           requires:
@@ -674,12 +719,13 @@ workflows:
       - sonarqube:
           context: SonarCloud
           requires:
-            - test-python-3.11
+            - coverage-report
       - quality-gate:
           name: quality
           requires:
             - static-checks
             - test-python-3.11
+            - coverage-report
             - test-python-312
             - test-python-3.13
             - package-check
