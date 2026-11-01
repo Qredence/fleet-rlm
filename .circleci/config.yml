@@ -29,8 +29,7 @@ commands:
       - run:
           name: Install pinned uv
           command: |
-            curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+            bash .circleci/install-uv.sh
   restore-uv-cache:
     parameters:
       python-version:
@@ -85,6 +84,31 @@ commands:
             - save-uv-cache:
                 python-version: << parameters.python-version >>
 
+  capture-release-metadata:
+    parameters:
+      notes-script:
+        type: string
+        default: scripts/release_notes.py
+    steps:
+      - run:
+          name: Capture exact-source notes and locked consumer requirements
+          command: |
+            mkdir -p release-metadata
+            uv export --locked --no-dev --no-emit-project --format requirements.txt --python 3.12 --output-file release-metadata/requirements.txt
+            python << parameters.notes-script >> --version "$FLEET_RELEASE_VERSION" \
+              --source-sha "$FLEET_RELEASE_SHA" --manifest dist/SHA256SUMS --prepare release-metadata
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+            - release-metadata
+      - store_artifacts:
+          path: dist
+          destination: release-distributions
+      - store_artifacts:
+          path: release-metadata
+          destination: release-metadata
+
 jobs:
   static-checks:
     docker:
@@ -114,28 +138,37 @@ jobs:
             mkdir -p test-results
             if [ "<< parameters.python-version >>" = "3.11" ]; then
               mkdir -p coverage
-              uv run --locked coverage run -m pytest --junitxml=test-results/junit.xml
-              uv run --locked coverage report
-              uv run --locked coverage xml -o coverage/coverage.xml
+              uv run --locked coverage run -m pytest -o junit_family=xunit1 --junitxml=test-results/junit.xml
             else
-              uv run --locked pytest --junitxml=test-results/junit.xml
+              uv run --locked pytest -o junit_family=xunit1 --junitxml=test-results/junit.xml
             fi
+          teardown:
+            - store_test_results:
+                path: test-results
+            - store_artifacts:
+                path: test-results
+                destination: test-results
+            - store_artifacts:
+                path: .coverage
+                destination: coverage-data
       - when:
           condition:
             equal: ["3.11", << parameters.python-version >>]
           steps:
+            - run:
+                name: Export coverage before enforcing the floor
+                when: always
+                command: |
+                  uv run --locked coverage xml --fail-under=0 -o coverage/coverage.xml
+                  uv run --locked coverage report
+                teardown:
+                  - store_artifacts:
+                      path: coverage
+                      destination: coverage
             - persist_to_workspace:
                 root: .
                 paths:
                   - coverage/coverage.xml
-            - store_artifacts:
-                path: coverage
-                destination: coverage
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results
-          destination: test-results
 
   list-smarter-tests:
     docker:
@@ -160,11 +193,12 @@ jobs:
           command: |
             mkdir -p test-results
             circleci testsuite run "ci tests"
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results
-          destination: test-results
+          teardown:
+            - store_test_results:
+                path: test-results
+            - store_artifacts:
+                path: test-results
+                destination: test-results
 
   package-check:
     docker:
@@ -237,6 +271,9 @@ jobs:
     docker:
       - image: cimg/python:3.12
     resource_class: small
+    environment:
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
     steps:
       - run:
           name: Validate workflow parameters and release branch
@@ -253,7 +290,7 @@ jobs:
               echo "PyPI recovery cannot run with a new release or the Python 3.14 probe." >&2
               exit 1
             fi
-            if [ "<< pipeline.parameters.run_release >>" = true ] && { [ -z "<< pipeline.parameters.release_version >>" ] || [ -z "<< pipeline.parameters.release_sha >>" ]; }; then
+            if [ "<< pipeline.parameters.run_release >>" = true ] && { [ -z "$FLEET_RELEASE_VERSION" ] || [ -z "$FLEET_RELEASE_SHA" ]; }; then
               echo "Release version and source SHA are required." >&2
               exit 1
             fi
@@ -322,6 +359,7 @@ jobs:
     resource_class: medium
     environment:
       FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
     steps:
       - setup-python:
           python-version: "3.12"
@@ -329,13 +367,7 @@ jobs:
       - run:
           name: Build, verify, and checksum release distributions once
           command: make build-release
-      - persist_to_workspace:
-          root: .
-          paths:
-            - dist
-      - store_artifacts:
-          path: dist
-          destination: release-distributions
+      - capture-release-metadata
 
   validate-pypi-recovery:
     docker:
@@ -371,25 +403,22 @@ jobs:
       - image: cimg/python:3.12
     resource_class: medium
     environment:
+      UV_PYTHON: "3.12"
       FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
       FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
     steps:
       - checkout
       - install-uv
       - run:
-          name: Rebuild the already-published source commit without uploading
+          name: Rebuild the published source with the current notes extractor
           command: |
+            cp scripts/release_notes.py /tmp/fleet-release-notes.py
             git fetch --no-tags origin "$FLEET_RELEASE_SHA"
             git checkout --detach "$FLEET_RELEASE_SHA"
             uv sync --locked --dev --python 3.12
             make build-release
-      - persist_to_workspace:
-          root: .
-          paths:
-            - dist
-      - store_artifacts:
-          path: dist
-          destination: release-distributions
+      - capture-release-metadata:
+          notes-script: /tmp/fleet-release-notes.py
 
   plan-pypi-recovery:
     docker:
@@ -398,17 +427,15 @@ jobs:
     environment:
       FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
     steps:
+      - checkout
       - run:
           name: Track the canary retry as a separate PyPI deployment
           command: |
-            circleci run release plan fleet-rlm-pypi-recovery \
-              --environment-name=pypi \
-              --component-name=fleet-rlm \
-              --target-version="$FLEET_RELEASE_VERSION"
+            python -m scripts.release_checks plan-deployment --version "$FLEET_RELEASE_VERSION" --plan fleet-rlm-pypi-recovery
             circleci run release update fleet-rlm-pypi-recovery --status=running
       - run:
           name: Mark failed PyPI recovery in CircleCI deployment tracking
-          command: circleci run release update fleet-rlm-pypi-recovery --status=FAILED --failure-reason="PyPI recovery canary failed"
+          command: circleci run release update fleet-rlm-pypi-recovery --status=FAILED --failure-reason="PyPI recovery planning failed"
           when: on_fail
 
   publish-testpypi:
@@ -481,6 +508,7 @@ jobs:
     environment:
       FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
     steps:
+      - checkout
       - attach_workspace:
           at: .
       - run:
@@ -492,13 +520,12 @@ jobs:
               echo "PYPI_API_TOKEN is required in the restricted PyPI upload context." >&2
               exit 1
             fi
-            circleci run release plan fleet-rlm-pypi \
-              --environment-name=pypi \
-              --component-name=fleet-rlm \
-              --target-version="$FLEET_RELEASE_VERSION"
             python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
+            cd ..
+            python -m scripts.release_checks plan-deployment --version "$FLEET_RELEASE_VERSION" --plan fleet-rlm-pypi
+            cd dist
             TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" \
-              twine upload --non-interactive fleet_rlm-*
+              timeout --signal=TERM --kill-after=30s 10m twine upload --non-interactive fleet_rlm-*
             circleci run release update fleet-rlm-pypi --status=running
       - run:
           name: Mark failed PyPI publication in CircleCI deployment tracking
@@ -516,37 +543,75 @@ jobs:
     resource_class: medium
     environment:
       FLEET_RELEASE_VERSION: << parameters.release-version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
+      FLEET_RELEASE_PLAN: << parameters.release-plan-name >>
+      PYTHONUNBUFFERED: "1"
     steps:
       - checkout
       - attach_workspace:
           at: .
-      - install-uv
       - run:
-          name: Export locked runtime dependencies for the isolated canary
-          command: uv export --locked --no-dev --no-emit-project --format requirements.txt --python 3.12 --output-file /tmp/fleet-pypi-canary-requirements.txt
-      - run:
-          name: Download, verify, and smoke-test the PyPI candidate
+          name: Prepare and validate the exact PyPI artifact within fifteen minutes
           command: |
-            mkdir -p test-results
-            uv run --locked --python 3.12 python scripts/release_checks.py pypi-canary \
-              --version "$FLEET_RELEASE_VERSION" \
-              --manifest dist/SHA256SUMS \
-              --requirements /tmp/fleet-pypi-canary-requirements.txt \
-              2>&1 | tee test-results/pypi-canary.log
-          environment:
-            PYTHONUNBUFFERED: "1"
-      - store_artifacts:
-          path: test-results
-          destination: pypi-canary
+            mkdir -p canary-results
+            timeout --signal=TERM --kill-after=30s 15m bash -eo pipefail -c '
+              bash .circleci/install-uv.sh
+              export PATH="$HOME/.local/bin:$PATH"
+              export UV_PYTHON=3.12
+              uv run --locked --python 3.12 python -m scripts.release_checks canary-with-receipt \
+                --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA" --plan "$FLEET_RELEASE_PLAN"
+            ' 2>&1 | tee canary-results/pypi-canary.log
+          teardown:
+            - store_artifacts:
+                path: canary-results
+                destination: pypi-canary
       - run:
-          name: Mark failed PyPI canary in CircleCI deployment tracking
-          command: circleci run release update << parameters.release-plan-name >> --status=FAILED --failure-reason="PyPI canary failed"
-          when: on_fail
+          name: Require matching canary evidence before promotion
+          command: |
+            python -m scripts.release_checks verify-canary \
+              --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA" --plan "$FLEET_RELEASE_PLAN"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - canary-results/receipt.json
+
+  fail-pypi-canary:
+    parameters:
+      release-plan-name:
+        type: string
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    environment:
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
+      FLEET_RELEASE_PLAN: << parameters.release-plan-name >>
+    steps:
+      - checkout
+      - run:
+          name: Record failed or timed-out canary independently of its interpreter
+          command: |
+            python -m scripts.release_checks finalize-canary \
+              --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA" --plan "$FLEET_RELEASE_PLAN"
+
+  cancel-pypi-deployment:
+    parameters:
+      release-plan-name:
+        type: string
+    docker:
+      - image: cimg/base:current
+    resource_class: small
+    environment:
+      FLEET_RELEASE_PLAN: << parameters.release-plan-name >>
+    steps:
+      - run:
+          name: Record canceled PyPI deployment
+          command: circleci run release update "$FLEET_RELEASE_PLAN" --status=CANCELED
 
   release-validation:
     type: release
     plan_name: fleet-rlm-pypi
-    validation:
+    validation: &pypi-validation
       enabled: true
       evaluation_time: 20m
       auto_rollback_on_failure: false
@@ -556,6 +621,7 @@ jobs:
           data_points:
             component_name: request.component_name
             version: request.version
+            project_id: request.project_id
             env: request.env
             signal_name: request.signal_name
             criteria: request.alert_transition
@@ -565,21 +631,7 @@ jobs:
   release-validation-recovery:
     type: release
     plan_name: fleet-rlm-pypi-recovery
-    validation:
-      enabled: true
-      evaluation_time: 20m
-      auto_rollback_on_failure: false
-      webhooks:
-        - name: pypi_canary
-          provider: custom
-          data_points:
-            component_name: request.component_name
-            version: request.version
-            env: request.env
-            signal_name: request.signal_name
-            criteria: request.alert_transition
-          fail_when: 'criteria == "triggered"'
-          max_failures: 1
+    validation: *pypi-validation
 
   github-release:
     parameters:
@@ -598,54 +650,10 @@ jobs:
       - attach_workspace:
           at: .
       - run:
-          name: Create versioned GitHub release from CHANGELOG.md and verified artifacts
+          name: Publish captured notes and verified assets or verify an exact retry
           command: |
-            notes_file=$(mktemp)
-            trap 'rm -f "$notes_file"' EXIT
-            python scripts/release_notes.py \
-              --version "$FLEET_RELEASE_VERSION" \
-              --changelog CHANGELOG.md \
-              --output "$notes_file"
-            cd dist
-            sha256sum -c SHA256SUMS
             command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
-            test -n "${GH_TOKEN:-}" || { echo "GH_TOKEN is required from the restricted release context"; exit 1; }
-            if gh release view "v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub release already exists"; exit 1; fi
-            if git ls-remote --exit-code --tags origin "refs/tags/v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub tag already exists"; exit 1; fi
-            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$FLEET_RELEASE_SHA" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --notes-file "$notes_file"
-
-  github-release-recovery:
-    parameters:
-      release-version:
-        type: string
-      release-sha:
-        type: string
-    docker:
-      - image: cimg/python:3.12
-    resource_class: medium
-    environment:
-      FLEET_RELEASE_VERSION: << parameters.release-version >>
-      FLEET_RELEASE_SHA: << parameters.release-sha >>
-    steps:
-      - checkout
-      - attach_workspace:
-          at: .
-      - run:
-          name: Create versioned GitHub release from CHANGELOG.md and verified existing PyPI artifacts
-          command: |
-            notes_file=$(mktemp)
-            trap 'rm -f "$notes_file"' EXIT
-            python scripts/release_notes.py \
-              --version "$FLEET_RELEASE_VERSION" \
-              --changelog CHANGELOG.md \
-              --output "$notes_file"
-            cd dist
-            sha256sum -c SHA256SUMS
-            command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
-            test -n "${GH_TOKEN:-}" || { echo "GH_TOKEN is required from the restricted release context"; exit 1; }
-            if gh release view "v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub release already exists"; exit 1; fi
-            if git ls-remote --exit-code --tags origin "refs/tags/v$FLEET_RELEASE_VERSION" >/dev/null 2>&1; then echo "GitHub tag already exists"; exit 1; fi
-            gh release create "v$FLEET_RELEASE_VERSION" fleet_rlm-* --target "$FLEET_RELEASE_SHA" --title "Fleet RLM Lite v$FLEET_RELEASE_VERSION" --notes-file "$notes_file"
+            python -m scripts.github_release --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA"
 
 workflows:
   required-ci:
@@ -753,7 +761,8 @@ workflows:
           filters: pipeline.parameters.run_pypi_recovery
           requires:
             - plan-pypi-recovery
-      - github-release-recovery:
+      - github-release:
+          name: github-release-recovery
           release-version: << pipeline.parameters.release_version >>
           release-sha: << pipeline.parameters.release_sha >>
           context: fleet-github-release
@@ -761,6 +770,44 @@ workflows:
           requires:
             - release-validation-recovery
             - pypi-canary-recovery
+      - fail-pypi-canary:
+          name: fail-pypi-canary
+          release-plan-name: fleet-rlm-pypi
+          context: fleet-pypi-validation-webhook
+          filters: pipeline.parameters.run_release
+          requires:
+            - pypi-canary: [failed]
+      - fail-pypi-canary:
+          name: fail-pypi-canary-recovery
+          release-plan-name: fleet-rlm-pypi-recovery
+          context: fleet-pypi-validation-webhook
+          filters: pipeline.parameters.run_pypi_recovery
+          requires:
+            - pypi-canary-recovery: [failed]
+      - cancel-pypi-deployment:
+          name: cancel-pypi-publication
+          release-plan-name: fleet-rlm-pypi
+          filters: pipeline.parameters.run_release
+          requires:
+            - publish-pypi: [canceled]
+      - cancel-pypi-deployment:
+          name: cancel-pypi-canary
+          release-plan-name: fleet-rlm-pypi
+          filters: pipeline.parameters.run_release
+          requires:
+            - pypi-canary: [canceled]
+      - cancel-pypi-deployment:
+          name: cancel-pypi-recovery
+          release-plan-name: fleet-rlm-pypi-recovery
+          filters: pipeline.parameters.run_pypi_recovery
+          requires:
+            - plan-pypi-recovery: [canceled]
+      - cancel-pypi-deployment:
+          name: cancel-pypi-canary-recovery
+          release-plan-name: fleet-rlm-pypi-recovery
+          filters: pipeline.parameters.run_pypi_recovery
+          requires:
+            - pypi-canary-recovery: [canceled]
 
   python314-manual:
     when: pipeline.parameters.run_python314 and pipeline.git.branch == "main"

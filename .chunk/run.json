@@ -4,7 +4,7 @@
   "org_type": "circleci",
   "definitions": {
     "dev": {
-      "definition_id": "fe82e142-4105-421e-a525-eb47298d5e7a",
+      "definition_id": "8b3162e2-16da-44ad-9e09-3f44d5777838",
       "description": "Fleet-RLM development tasks",
       "chunk_environment_id": null,
       "default_branch": "main"

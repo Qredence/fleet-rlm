@@ -14,9 +14,11 @@ from unittest.mock import patch
 import pytest
 
 from scripts.release_checks import (
+    CIRCLECI_PROJECT_ID,
     _version,
     create_manifest,
     download_pypi_wheel,
+    finalize_canary,
     preflight,
     pypi_canary,
     recovery_preflight,
@@ -24,6 +26,7 @@ from scripts.release_checks import (
     smoke,
     validate_webhook_context,
     verify_artifacts,
+    verify_canary_receipt,
     verify_manifest,
     verify_pypi_artifacts,
     verify_registry_wheel,
@@ -360,7 +363,7 @@ def test_canary_requires_a_webhook_credential() -> None:
         validate_webhook_context(None)
 
 
-def test_canary_failure_sends_circleci_validation_signal(tmp_path: Path) -> None:
+def test_canary_failure_leaves_signaling_to_workflow_cleanup(tmp_path: Path) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("dependency==1.0\n")
     manifest = tmp_path / "SHA256SUMS"
@@ -375,7 +378,7 @@ def test_canary_failure_sends_circleci_validation_signal(tmp_path: Path) -> None
     ):
         pypi_canary("0.8.0", manifest, requirements, "test-token")
 
-    signal.assert_called_once_with("0.8.0", "test-token")
+    signal.assert_not_called()
 
 
 def test_successful_pypi_canary_does_not_emit_a_failure_signal(tmp_path: Path) -> None:
@@ -395,7 +398,7 @@ def test_successful_pypi_canary_does_not_emit_a_failure_signal(tmp_path: Path) -
     signal.assert_not_called()
 
 
-def test_canary_failure_without_signal_transport_is_fatal(tmp_path: Path) -> None:
+def test_canary_failure_is_fatal_without_inline_signal_transport(tmp_path: Path) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("dependency==1.0\n")
     manifest = tmp_path / "SHA256SUMS"
@@ -403,7 +406,7 @@ def test_canary_failure_without_signal_transport_is_fatal(tmp_path: Path) -> Non
     with (
         patch("scripts.release_checks.download_pypi_wheel", side_effect=RuntimeError("download failed")),
         patch("scripts.release_checks.send_pypi_canary_failure", side_effect=RuntimeError("webhook failed")),
-        pytest.raises(SystemExit, match="could not receive its validation signal"),
+        pytest.raises(SystemExit, match="release blocked"),
     ):
         pypi_canary("0.8.0", manifest, requirements, "test-token")
 
@@ -429,6 +432,94 @@ def test_canary_failure_payload_matches_circleci_named_check() -> None:
         "component_name": "fleet-rlm",
         "env": "pypi",
         "signal_name": "pypi_canary",
+        "project_id": CIRCLECI_PROJECT_ID,
         "version": "0.8.0",
         "alert_transition": "triggered",
     }
+
+
+def test_failed_canary_marks_deployment_even_if_webhook_delivery_fails(tmp_path):
+    with (
+        patch("scripts.release_checks.send_pypi_canary_failure", side_effect=RuntimeError("transport unavailable")),
+        patch("scripts.release_checks.subprocess.run") as marker,
+        pytest.raises(SystemExit, match="no matching success receipt; release blocked; failure signal delivery failed"),
+    ):
+        finalize_canary(
+            "0.9.0", "a" * 40, tmp_path / "SHA256SUMS", tmp_path / "missing.json", "fleet-rlm-pypi", "placeholder"
+        )
+    assert "--status=FAILED" in marker.call_args.args[0]
+    assert marker.call_args.kwargs["check"] is True
+
+
+def test_terminal_deployment_update_error_preserves_failure_without_retry(tmp_path):
+    marker_error = subprocess.CalledProcessError(1, ["circleci", "run", "release", "update"])
+    marker_error.stderr = "Cannot update the status of a release that has already completed"
+    with (
+        patch("scripts.release_checks.send_pypi_canary_failure"),
+        patch("scripts.release_checks.subprocess.run", side_effect=marker_error) as marker,
+        pytest.raises(SystemExit, match="deployment marker update was rejected"),
+    ):
+        finalize_canary(
+            "0.9.0", "a" * 40, tmp_path / "SHA256SUMS", tmp_path / "missing.json", "fleet-rlm-pypi", "placeholder"
+        )
+    marker.assert_called_once()
+
+
+@pytest.mark.parametrize("receipt_text", ["{broken", json.dumps({"outcome": "passed"})])
+def test_canary_receipt_rejects_malformed_or_mismatched_evidence(tmp_path, receipt_text):
+    manifest_dir = tmp_path / "dist"
+    manifest_dir.mkdir()
+    (manifest_dir / "fleet_rlm-0.9.0-py3-none-any.whl").write_bytes(b"wheel")
+    (manifest_dir / "fleet_rlm-0.9.0.tar.gz").write_bytes(b"sdist")
+    create_manifest(manifest_dir)
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(receipt_text)
+
+    with pytest.raises((SystemExit, ValueError)):
+        verify_canary_receipt("0.9.0", "a" * 40, manifest_dir / "SHA256SUMS", receipt)
+
+
+def test_canary_receipt_rejects_source_version_mismatch(tmp_path):
+    manifest_dir = tmp_path / "dist"
+    manifest_dir.mkdir()
+    (manifest_dir / "fleet_rlm-0.9.0-py3-none-any.whl").write_bytes(b"wheel")
+    (manifest_dir / "fleet_rlm-0.9.0.tar.gz").write_bytes(b"sdist")
+    create_manifest(manifest_dir)
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "version": "0.9.0",
+                "source_sha": "b" * 40,
+                "project_id": CIRCLECI_PROJECT_ID,
+                "component_name": "fleet-rlm",
+                "env": "pypi",
+                "plan_name": "fleet-rlm-pypi",
+                "workflow_id": "",
+                "outcome": "passed",
+                "manifest_sha256": hashlib.sha256((manifest_dir / "SHA256SUMS").read_bytes()).hexdigest(),
+                "checks": ["registry_digests", "wheel_digest", "isolated_cli", "isolated_api"],
+            }
+        )
+    )
+
+    with pytest.raises(SystemExit, match="does not match"):
+        verify_canary_receipt("0.9.0", "a" * 40, manifest_dir / "SHA256SUMS", receipt)
+
+
+def test_setup_failure_before_receipt_emits_failure_and_marks_deployment(tmp_path):
+    with (
+        patch("scripts.release_checks.send_pypi_canary_failure") as signal,
+        patch("scripts.release_checks.subprocess.run") as marker,
+        pytest.raises(SystemExit, match="no matching success receipt"),
+    ):
+        finalize_canary(
+            "0.9.0",
+            "a" * 40,
+            tmp_path / "SHA256SUMS",
+            tmp_path / "missing.json",
+            "fleet-rlm-pypi-recovery",
+            "placeholder",
+        )
+    signal.assert_called_once_with("0.9.0", "placeholder")
+    assert marker.call_args.args[0][4] == "fleet-rlm-pypi-recovery"

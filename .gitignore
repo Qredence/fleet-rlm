@@ -226,3 +226,10 @@ docs/reviews/2026-10-05/README.md
 
 # Private deployment configuration
 /config/fleet.toml
+
+# CircleCI local test selection and reports
+.circleci/impact-*.json
+.circleci/state*
+test-results/
+release-metadata/
+canary-results/

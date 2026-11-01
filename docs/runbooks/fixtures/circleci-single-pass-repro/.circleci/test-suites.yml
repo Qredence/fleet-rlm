@@ -1,0 +1,8 @@
+name: parser reproduction
+discover: find tests -type f -name 'test_*.py' -print | sort
+run: uv run --with pytest==9.1.1 pytest -q -o junit_family=xunit1 --junitxml="<< outputs.junit >>" << test.atoms >>
+analysis: uv run --with pytest==9.1.1 --with pytest-cov==7.1.0 --with coverage==7.16.2 --with pytest-circleci-coverage==0.3.883 pytest -q --cov=tests --cov-context=test --cov-report= --cov-fail-under=0 --circleci-coverage="<< outputs.circleci-coverage >>" << test.atoms >>
+outputs:
+  junit: test-results/junit.xml
+options:
+  test-impact-analysis: true

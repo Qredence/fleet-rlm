@@ -16,6 +16,12 @@ import urllib.request
 import venv
 from pathlib import Path
 
+PYPI_COMPONENT = "fleet-rlm"
+PYPI_ENVIRONMENT = "pypi"
+PYPI_SIGNAL = "pypi_canary"
+CIRCLECI_ORG_ID = "d0fc62ae-1f4a-4037-8ccb-d357adfdfda6"
+CIRCLECI_PROJECT_ID = "122b2cc9-5a9c-4b3b-88c6-9276bd5d5d98"
+
 
 def _version() -> str:
     text = Path("pyproject.toml").read_text()
@@ -254,14 +260,15 @@ def send_pypi_canary_failure(version: str, token: str) -> None:
     _validate_version(version)
     payload = {
         "provider": "custom",
-        "component_name": "fleet-rlm",
-        "env": "pypi",
-        "signal_name": "pypi_canary",
+        "component_name": PYPI_COMPONENT,
+        "env": PYPI_ENVIRONMENT,
+        "signal_name": PYPI_SIGNAL,
+        "project_id": CIRCLECI_PROJECT_ID,
         "version": version,
         "alert_transition": "triggered",
     }
     request = urllib.request.Request(
-        "https://circleci.com/api/v3/deploy/hooks/d0fc62ae-1f4a-4037-8ccb-d357adfdfda6/validate",
+        f"https://circleci.com/api/v3/deploy/hooks/{CIRCLECI_ORG_ID}/validate",
         data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         method="POST",
@@ -283,18 +290,98 @@ def pypi_canary(version: str, manifest: Path, requirements: Path, token: str) ->
             verify_registry_wheel(version, wheel, manifest)
             smoke(version, "https://pypi.org/simple", wheel, requirements, deadline=deadline)
     except (Exception, SystemExit) as error:
+        # Workflow failure cleanup owns signaling, including errors before this process starts.
+        raise SystemExit(
+            f"PyPI canary failed for fleet-rlm {version} ({type(error).__name__}); release blocked"
+        ) from None
+
+
+def canary_with_receipt(
+    version: str, source_sha: str, manifest: Path, metadata_dir: Path, receipt: Path, plan_name: str, token: str
+) -> None:
+    """Record host-verified checks; only a complete matching receipt authorizes publication."""
+    from scripts.release_notes import verify_notes
+
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    result = {
+        "version": version,
+        "source_sha": source_sha.lower(),
+        "project_id": CIRCLECI_PROJECT_ID,
+        "component_name": PYPI_COMPONENT,
+        "env": PYPI_ENVIRONMENT,
+        "plan_name": plan_name,
+        "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
+        "outcome": "failed",
+        "checks": [],
+    }
+    # Remove the possibility of a successful receipt surviving a failed rerun.
+    receipt.write_text(json.dumps(result, indent=2) + "\n")
+    metadata = verify_notes(version, source_sha, manifest, metadata_dir)
+    pypi_canary(version, manifest, metadata_dir / "requirements.txt", token)
+    result.update(
+        outcome="passed",
+        manifest_sha256=metadata["manifest_sha256"],
+        checks=["registry_digests", "wheel_digest", "isolated_cli", "isolated_api"],
+    )
+    receipt.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+
+
+def verify_canary_receipt(version: str, source_sha: str, manifest: Path, receipt: Path) -> None:
+    """Reject absent, incomplete, stale, or unrelated canary evidence."""
+    result = json.loads(receipt.read_text())
+    expected = {
+        "version": version,
+        "source_sha": source_sha.lower(),
+        "project_id": CIRCLECI_PROJECT_ID,
+        "component_name": PYPI_COMPONENT,
+        "env": PYPI_ENVIRONMENT,
+        "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
+        "outcome": "passed",
+        "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "checks": ["registry_digests", "wheel_digest", "isolated_cli", "isolated_api"],
+    }
+    if any(result.get(key) != value for key, value in expected.items()):
+        raise SystemExit("canary receipt does not match this release and workflow")
+    if result.get("plan_name") not in {"fleet-rlm-pypi", "fleet-rlm-pypi-recovery"}:
+        raise SystemExit("canary receipt has an unexpected deployment plan")
+
+
+def finalize_canary(version: str, source_sha: str, manifest: Path, receipt: Path, plan_name: str, token: str) -> None:
+    """Record failed health even if setup, timeout, or termination bypassed the canary."""
+    try:
+        verify_canary_receipt(version, source_sha, manifest, receipt)
+    except (OSError, ValueError, SystemExit) as receipt_error:
+        signal_error: BaseException | None = None
+        marker_error: BaseException | None = None
         try:
+            validate_webhook_context(token)
             send_pypi_canary_failure(version, token)
-        except Exception as signal_error:
-            raise SystemExit(
-                "PyPI canary failed and CircleCI could not receive its validation signal; "
-                "the release is blocked. Inspect both errors in the job log."
-            ) from signal_error
-        sys.stdout.write(
-            f"PyPI canary failed for fleet-rlm {version}; sent the pypi_canary validation signal "
-            f"to CircleCI ({type(error).__name__}); blocking the GitHub release.\n"
-        )
-        raise SystemExit(f"PyPI canary failed for fleet-rlm {version}; release blocked") from None
+        except (Exception, SystemExit) as error:
+            signal_error = error
+        try:
+            # CircleCI refuses terminal-state updates. This is a single best-effort
+            # report; never retry it or let the cleanup error obscure canary failure.
+            subprocess.run(
+                [
+                    "circleci",
+                    "run",
+                    "release",
+                    "update",
+                    plan_name,
+                    "--status=FAILED",
+                    "--failure-reason=PyPI canary has no matching success receipt",
+                ],
+                check=True,
+            )
+        except (Exception, SystemExit) as error:
+            marker_error = error
+        details = []
+        if signal_error is not None:
+            details.append(f"failure signal delivery failed ({type(signal_error).__name__})")
+        if marker_error is not None:
+            details.append(f"deployment marker update was rejected ({type(marker_error).__name__})")
+        suffix = f"; {'; '.join(details)}" if details else ""
+        raise SystemExit(f"PyPI canary has no matching success receipt; release blocked{suffix}") from receipt_error
 
 
 def smoke(
@@ -382,6 +469,17 @@ def main() -> None:
     canary.add_argument("--webhook-token", default=os.environ.get("CIRCLECI_VALIDATION_WEBHOOK_TOKEN"))
     webhook = commands.add_parser("validate-webhook-context")
     webhook.add_argument("--webhook-token", default=os.environ.get("CIRCLECI_VALIDATION_WEBHOOK_TOKEN"))
+    for name in ("canary-with-receipt", "finalize-canary", "verify-canary"):
+        receipt_parser = commands.add_parser(name)
+        receipt_parser.add_argument("--version", required=True)
+        receipt_parser.add_argument("--sha", required=True)
+        receipt_parser.add_argument("--manifest", type=Path, default=Path("dist/SHA256SUMS"))
+        receipt_parser.add_argument("--metadata", type=Path, default=Path("release-metadata"))
+        receipt_parser.add_argument("--receipt", type=Path, default=Path("canary-results/receipt.json"))
+        receipt_parser.add_argument("--plan", required=True, choices=["fleet-rlm-pypi", "fleet-rlm-pypi-recovery"])
+    deployment = commands.add_parser("plan-deployment")
+    deployment.add_argument("--version", required=True)
+    deployment.add_argument("--plan", required=True, choices=["fleet-rlm-pypi", "fleet-rlm-pypi-recovery"])
     args = parser.parse_args()
     if args.command == "preflight":
         preflight(args.version, args.sha, args.branch, args.pipeline_sha)
@@ -397,6 +495,42 @@ def main() -> None:
         pypi_canary(args.version, args.manifest, args.requirements, args.webhook_token or "")
     elif args.command == "validate-webhook-context":
         validate_webhook_context(args.webhook_token)
+    elif args.command == "plan-deployment":
+        _validate_version(args.version)
+        subprocess.run(
+            [
+                "circleci",
+                "run",
+                "release",
+                "plan",
+                args.plan,
+                f"--environment-name={PYPI_ENVIRONMENT}",
+                f"--component-name={PYPI_COMPONENT}",
+                f"--target-version={args.version}",
+            ],
+            check=True,
+        )
+    elif args.command == "verify-canary":
+        verify_canary_receipt(args.version, args.sha, args.manifest, args.receipt)
+    elif args.command == "canary-with-receipt":
+        canary_with_receipt(
+            args.version,
+            args.sha,
+            args.manifest,
+            args.metadata,
+            args.receipt,
+            args.plan,
+            os.environ.get("CIRCLECI_VALIDATION_WEBHOOK_TOKEN", ""),
+        )
+    elif args.command == "finalize-canary":
+        finalize_canary(
+            args.version,
+            args.sha,
+            args.manifest,
+            args.receipt,
+            args.plan,
+            os.environ.get("CIRCLECI_VALIDATION_WEBHOOK_TOKEN", ""),
+        )
     else:
         smoke(args.version, args.index_url, args.wheel, args.requirements)
 

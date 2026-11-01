@@ -1,38 +1,30 @@
 ---
 name: ci tests
-discover: find tests -type f -name 'test_*.py' -print | sed -E 's#^tests/#tests.#; s#/#.#g; s#\.py$##' | sort
+discover: find tests -type f -name 'test_*.py' -print | sort
 run: |
-  test_paths=""
-  for atom in << test.atoms >>; do
-    module_path="$(printf '%s' "$atom" | tr . /)"
-    test_paths="$test_paths $module_path.py"
-  done
+  set -- << test.atoms >>
+  if [ "$#" -eq 0 ]; then exit 0; fi
   mkdir -p test-results
-  uv run --locked pytest -q --junitxml="<< outputs.junit >>" $test_paths
-file-mapper: |
-  for atom in << test.atoms >>; do
-    test_path="$(printf '%s' "$atom" | tr . /).py"
-    printf 'TA:%s\n%s\n\n' "$atom" "$test_path"
-  done > "<< outputs.circleci-list >>"
+  uv run --locked pytest -c pyproject.toml -q -o junit_family=xunit1 --junitxml="<< outputs.junit >>" "$@"
 analysis: |
-  set +e
-  test_atom="<< test.atoms >>"
-  test_path="$(printf '%s' "$test_atom" | tr . /).py"
-  coverage_file="$(mktemp)"
-  lcov_file="<< outputs.lcov >>"
-  mkdir -p "$(dirname "$lcov_file")"
-  COVERAGE_FILE="$coverage_file" uv run --locked coverage run --branch \
-    --source=src/fleet_rlm -m pytest -q "$test_path"
+  set -- << test.atoms >>
+  if [ "$#" -eq 0 ]; then exit 0; fi
+  rm -f .coverage
+  uv run --locked coverage run --source=src/fleet_rlm -m pytest -c pyproject.toml -q "$@"
   test_status=$?
-  # Each atom covers only part of the package; the full 3.11 suite enforces 80%.
-  COVERAGE_FILE="$coverage_file" uv run --locked coverage lcov --fail-under=0 -o "$lcov_file"
-  report_status=$?
-  rm -f "$coverage_file"
+  if [ -f .coverage ]; then
+    uv run --locked coverage lcov --fail-under=0 -o "<< outputs.lcov >>"
+    coverage_status=$?
+  else
+    coverage_status=1
+  fi
   if [ "$test_status" -ne 0 ]; then exit "$test_status"; fi
-  exit "$report_status"
+  exit "$coverage_status"
 outputs:
   junit: test-results/junit.xml
+  lcov: test-results/coverage.lcov
 options:
+  impact-key: fleet-ci-files-lcov-v1
   test-impact-analysis: true
   dynamic-test-splitting: true
   max-auto-rerun: 1
@@ -42,3 +34,8 @@ options:
     - Makefile
     - tests/**
     - .circleci/**
+    - config/**
+    - scripts/**
+    - openapi.yaml
+    - src/fleet_rlm/bundled_skills/**
+    - src/fleet_rlm/sandbox/snapshot-requirements.txt
