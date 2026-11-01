@@ -455,6 +455,8 @@ def score_evaluation_traces(
         selected_scorers = scorers
         if selected_scorers is None:
             selected_scorers = [*build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm), expected_values_present]
+        if not selected_scorers:
+            raise ValueError("At least one scorer is required")
         result = mlflow.genai.evaluate(
             data=traces,
             scorers=selected_scorers,
@@ -471,6 +473,7 @@ def score_evaluation_traces(
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
     if (
         frame.empty
+        or not any(frame[name].notna().any() for name in frame.columns if name.endswith("/value"))
         or not expected_columns.issubset(frame.columns)
         or any(frame[name].notna().any() for name in error_columns)
     ):

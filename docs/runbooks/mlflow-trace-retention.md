@@ -17,14 +17,14 @@ The public template's Databricks destinations are:
 
 | Purpose | Catalog | Schema | Prefix |
 |---|---|---|---|
-| Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_dev` |
+| Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_runtime` |
 | Evaluation traces | `example_catalog` | `fleet_observability` | `fleet_rlm_eval` |
 | GEPA traces | `example_catalog` | `fleet_gepa` | `fleet_rlm_gepa` |
 
-These values come from `config/fleet.toml.example`. Without a TOML override,
-the code fallback for the runtime table prefix is `fleet_rlm_runtime`. If
-deployment overrides change these values, use the effective configuration and
-verify each experiment's trace location before cleanup. Genie metadata discovery
+These values come from `config/fleet.toml.example`; the runtime prefix is also
+`fleet_rlm_runtime` in the code fallback. If deployment overrides change these
+values, use the effective configuration and verify each experiment's trace
+location before cleanup. Genie metadata discovery
 also found shared/base and legacy Fleet objects in these schemas. They are
 outside this cleanup scope.
 Each configured prefix can have `_otel_annotations`, `_otel_logs`,
@@ -126,8 +126,9 @@ change.
 
 ## Preflight validation record — 2026-10-17
 
-Under the agreed live-acceptance cap, Genie checked the exact 12 tables named
-above through `example_catalog.information_schema.columns`. All 12 tables existed.
+This historical record is sanitized: the deployment catalog is redacted.
+Under the agreed live-acceptance cap, Genie checked the corresponding 12 tables
+through the deployment catalog’s `information_schema.columns`. All 12 tables existed.
 The spans, logs, and metrics tables exposed `time TIMESTAMP`; annotation tables
 exposed `target_type` and `target_id` and no `time` column, so linked-target
 counts were used. With the single UTC cutoff `2026-09-17 06:31:35`, the dry-run

@@ -251,15 +251,19 @@ settings.prepare_mlflow_auth()
 target = settings.mlflow_target()
 mlflow.set_tracking_uri(target.tracking_uri)
 os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
-workspace = WorkspaceClient(profile="example-profile")
-os.environ["DATABRICKS_CONFIG_PROFILE"] = "example-profile"
-os.environ["OPENAI_API_KEY"] = workspace.config.oauth_token().access_token
+workspace = WorkspaceClient()
+if workspace.config.auth_type == "pat":
+    os.environ["OPENAI_API_KEY"] = workspace.config.token
+elif workspace.config.auth_type.startswith("oauth"):
+    os.environ["OPENAI_API_KEY"] = workspace.config.oauth_token().access_token
+else:
+    raise ValueError(f"Unsupported Databricks auth type: {workspace.config.auth_type}")
 os.environ["OPENAI_API_BASE"] = workspace.config.host.rstrip("/") + "/ai-gateway/mlflow/v1"
 
 experiment = MlflowClient().get_experiment_by_name(target.experiment_name)
 if experiment is None:
     raise RuntimeError("Runtime experiment was not found")
-trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_dev/TRACE_ID"]
+trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_runtime/TRACE_ID"]
 traces = [mlflow.get_trace(trace_id, silent=True, flush=True) for trace_id in trace_ids]
 suite = build_mlflow_scorer_suite(settings.fleet_judge_model)
 eligible_names = {"output_instruction_compliance", "rlm_trajectory_efficiency", "jev_routing_efficiency"}
