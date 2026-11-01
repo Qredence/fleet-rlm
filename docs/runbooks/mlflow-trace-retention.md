@@ -124,8 +124,9 @@ change.
 
 ## Preflight validation record — 2026-10-17
 
-Under the agreed live-acceptance cap, Genie checked the exact 12 tables named
-above through `example_catalog.information_schema.columns`. All 12 tables existed.
+This historical record is sanitized: the deployment catalog is redacted.
+Under the agreed live-acceptance cap, Genie checked the corresponding 12 tables
+through the deployment catalog’s `information_schema.columns`. All 12 tables existed.
 The spans, logs, and metrics tables exposed `time TIMESTAMP`; annotation tables
 exposed `target_type` and `target_id` and no `time` column, so linked-target
 counts were used. With the single UTC cutoff `2026-09-17 06:31:35`, the dry-run

@@ -8,9 +8,10 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries; cons
 
 - Start with `git status --short` and the existing diff; preserve uncommitted work, including deletions.
 - Use Python 3.11–3.13 with `uv`, four-space indentation, and Ruff; prefer `pnpm` for JavaScript.
-- Keep changes scoped. Reuse existing abstractions and native DSPy package, never rewrite/duplicate DSPy mechanism, use the dependancy directly; avoid speculative abstractions and compatibility aliases.
+- Keep changes scoped. Reuse existing abstractions and native DSPy package, never rewrite/duplicate DSPy mechanism, use the dependency directly; avoid speculative abstractions and compatibility aliases.
 - User Skills live in `.fleet/skills/`; never synchronize developer guidance from `.agents/skills/` as user Skills.
-- Never commit credentials or `.env` files; use conventional commit prefixes.
+- Never commit credentials or `.env` files; treat traces/artifacts as sensitive. Commit, push, publish, and deploy only with explicit authorization; use conventional commit prefixes.
+- Live Daytona, model-provider, database, and evaluation runs require explicit authorization.
 - Preserve run/trace IDs and recover completed work before rerunning; GEPA call budgets do not cap total cost.
 
 ## Runtime guardrails
