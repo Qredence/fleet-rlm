@@ -12,6 +12,21 @@ from scripts.release_checks import CIRCLECI_PROJECT_ID, canary_with_receipt, cre
 from scripts.release_notes import prepare_notes, verify_notes
 
 
+@pytest.mark.parametrize(
+    ("version", "sha", "repo"),
+    [
+        ("--help", "a" * 40, "owner/repo"),
+        ("0.9.0", "--help", "owner/repo"),
+        ("0.9.0", "a" * 40, "--help"),
+        ("0.9.0", "a" * 40, "owner/repo/../../other"),
+    ],
+)
+def test_publication_rejects_unsafe_identifiers_before_side_effects(tmp_path, version, sha, repo):
+    with patch("scripts.github_release.subprocess.run") as run, pytest.raises(SystemExit):
+        publish(version, sha, tmp_path / "dist", tmp_path / "metadata", tmp_path / "receipt.json", repo)
+    run.assert_not_called()
+
+
 @pytest.fixture
 def release_files(tmp_path, monkeypatch):
     monkeypatch.setenv("CIRCLE_WORKFLOW_ID", "workflow-test")

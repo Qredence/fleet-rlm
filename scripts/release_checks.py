@@ -76,6 +76,15 @@ def _validate_version(version: str) -> None:
         raise SystemExit(f"unsupported release version: {version}")
 
 
+def _deployment_plan(value: str) -> str:
+    """Resolve only the two supported deployment plans to literal CLI arguments."""
+    if value == "fleet-rlm-pypi":
+        return "fleet-rlm-pypi"
+    if value == "fleet-rlm-pypi-recovery":
+        return "fleet-rlm-pypi-recovery"
+    raise SystemExit("unsupported deployment plan")
+
+
 def verify_artifacts(version: str, directory: Path) -> None:
     """Require exactly one matching wheel and source archive."""
     _validate_version(version)
@@ -348,6 +357,7 @@ def verify_canary_receipt(version: str, source_sha: str, manifest: Path, receipt
 
 def finalize_canary(version: str, source_sha: str, manifest: Path, receipt: Path, plan_name: str, token: str) -> None:
     """Record failed health even if setup, timeout, or termination bypassed the canary."""
+    plan_name = _deployment_plan(plan_name)
     try:
         verify_canary_receipt(version, source_sha, manifest, receipt)
     except (OSError, ValueError, SystemExit) as receipt_error:
@@ -503,7 +513,7 @@ def main() -> None:
                 "run",
                 "release",
                 "plan",
-                args.plan,
+                _deployment_plan(args.plan),
                 f"--environment-name={PYPI_ENVIRONMENT}",
                 f"--component-name={PYPI_COMPONENT}",
                 f"--target-version={args.version}",

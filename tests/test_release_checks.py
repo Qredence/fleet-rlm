@@ -33,6 +33,18 @@ from scripts.release_checks import (
 )
 
 
+@pytest.mark.parametrize("plan", ["--help", "unrelated-deployment"])
+def test_canary_cleanup_rejects_unrelated_plans_before_side_effects(tmp_path: Path, plan: str) -> None:
+    with (
+        patch("scripts.release_checks.subprocess.run") as run,
+        patch("scripts.release_checks.urllib.request.urlopen") as urlopen,
+        pytest.raises(SystemExit, match="unsupported deployment plan"),
+    ):
+        finalize_canary("0.9.0", "a" * 40, tmp_path / "SHA256SUMS", tmp_path / "receipt.json", plan, "placeholder")
+    run.assert_not_called()
+    urlopen.assert_not_called()
+
+
 def test_release_preflight_accepts_current_version_and_commit() -> None:
     sha = "a" * 40
     result = subprocess.CompletedProcess(args=["git", "rev-parse", "HEAD"], returncode=0, stdout=sha, stderr="")

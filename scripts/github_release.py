@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from scripts.release_checks import verify_canary_receipt, verify_manifest
+from scripts.release_checks import _validate_version, verify_canary_receipt, verify_manifest
 from scripts.release_notes import verify_notes
 
 
@@ -25,6 +25,11 @@ def gh_json(path: str, *, missing_ok: bool = False):
 
 
 def publish(version: str, source_sha: str, dist: Path, metadata_dir: Path, receipt: Path, repo: str) -> None:
+    _validate_version(version)
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", source_sha):
+        raise SystemExit("release publication requires a full source SHA")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*", repo):
+        raise SystemExit("release repository must be an owner/name pair")
     verify_manifest(dist)
     verify_notes(version, source_sha, dist / "SHA256SUMS", metadata_dir)
     verify_canary_receipt(version, source_sha, dist / "SHA256SUMS", receipt)
