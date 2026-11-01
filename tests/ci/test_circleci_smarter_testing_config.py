@@ -60,6 +60,7 @@ def test_quality_and_release_gates_remain_required():
     assert set(jobs["quality"]["requires"]) == {
         "static-checks",
         "test-python-3.11",
+        "coverage-report",
         "test-python-312",
         "test-python-3.13",
         "package-check",
@@ -158,27 +159,49 @@ def test_release_request_treats_shell_syntax_as_literal(tmp_path):
 
 def test_coverage_xml_survives_test_or_threshold_failure(tmp_path):
     config = load_config()
-    steps = config["jobs"]["test-python"]["steps"]
-    reporter = next(step["when"] for step in steps if isinstance(step, dict) and "when" in step)["steps"][0]["run"]
-    assert reporter["when"] == "always"
+    steps = config["jobs"]["coverage-report"]["steps"]
+    reporter = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
     binary = tmp_path / "uv"
-    binary.write_text('#!/bin/sh\nif [ "$4" = xml ]; then touch coverage/coverage.xml; else exit 2; fi\n')
+    binary.write_text(
+        "#!/bin/sh\n"
+        'case " $* " in\n'
+        '  *" combine "*) touch coverage/.coverage; printf combine >> "$ORDER" ;;\n'
+        '  *" xml "*) touch coverage/coverage.xml; printf xml >> "$ORDER" ;;\n'
+        '  *" report "*) printf report >> "$ORDER"; exit 2 ;;\n'
+        "  *) exit 3 ;;\n"
+        "esac\n"
+    )
     binary.chmod(0o755)
-    (tmp_path / "coverage").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sample.py").write_text("def test_sample(): pass\n")
+    for node in (0, 1):
+        shard = tmp_path / f"coverage-shards/node-{node}"
+        shard.mkdir(parents=True)
+        (shard / "test-status").write_text("0\n")
+        (shard / "test-files.txt").write_text("tests/test_sample.py\n")
+        (shard / ".coverage.fake").write_text("parallel data\n")
+    order = tmp_path / "coverage-command-order"
     result = subprocess.run(
         ["bash", "-ec", reporter["command"]],
         cwd=tmp_path,
         # CircleCI's shell startup file prepends the real uv installation to PATH.
-        env={**os.environ, "BASH_ENV": "", "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        env={
+            **os.environ,
+            "BASH_ENV": "",
+            "ORDER": str(order),
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        },
         check=False,
     )
     assert result.returncode == 2
     assert (tmp_path / "coverage/coverage.xml").is_file()
-    test_run = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
-    assert any("store_test_results" in step for step in test_run["teardown"])
     coverage_upload = {"store_artifacts": {"path": "coverage", "destination": "coverage"}}
     assert coverage_upload in reporter["teardown"]
-    assert coverage_upload not in test_run["teardown"]
+    assert order.read_text() == "combinexmlreport"
+    assert steps.index(next(step for step in steps if "persist_to_workspace" in step)) > steps.index(
+        next(step for step in steps if isinstance(step, dict) and "run" in step)
+    )
+    assert workflow_jobs()["coverage-report"]["requires"] == [{"test-python-3.11": "terminal"}]
 
 
 def test_python_selection_survives_circleci_step_shells(tmp_path):
