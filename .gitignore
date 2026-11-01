@@ -111,7 +111,8 @@ output/*
 output/**/.DS_Store
 src/output/
 results/
-archive/
+# Root-level scratch output only; `/docs/archive/` is tracked documentation.
+/archive/
 artifacts/
 artifacts/eval/
 
