@@ -1,3 +1,7 @@
+"""Behavioral and graph contracts for offline CI and package publication."""
+
+import os
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -5,22 +9,31 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_smarter_testing_discovers_pytest_files_and_emits_junit_and_lcov() -> None:
-    suite = yaml.safe_load((ROOT / ".circleci/test-suites.yml").read_text())
+def load_config():
+    return yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
 
-    assert suite["name"] == "ci tests"
-    assert "find tests -type f -name 'test_*.py'" in suite["discover"]
-    assert "<< test.atoms >>" in suite["run"]
-    assert "<< outputs.junit >>" in suite["run"]
-    assert "<< outputs.circleci-list >>" in suite["file-mapper"]
+
+def workflow_jobs():
+    result = {}
+    for item in load_config()["workflows"]["required-ci"]["jobs"]:
+        if isinstance(item, str):
+            result[item] = {}
+        else:
+            job, options = next(iter(item.items()))
+            result[options.get("name", job)] = options
+    return result
+
+
+def test_smarter_testing_uses_file_atoms_and_per_atom_lcov_analysis():
+    suite = yaml.safe_load((ROOT / ".circleci/test-suites.yml").read_text())
+    atoms = subprocess.check_output(["bash", "-ec", suite["discover"]], cwd=ROOT, text=True).splitlines()
+    assert atoms == sorted(str(p.relative_to(ROOT)) for p in (ROOT / "tests").rglob("test_*.py"))
+    assert "file-mapper" not in suite
     assert "<< outputs.lcov >>" in suite["analysis"]
+    assert "coverage run" in suite["analysis"]
     assert "coverage lcov --fail-under=0" in suite["analysis"]
-    assert suite["outputs"]["junit"] == "test-results/junit.xml"
-
-
-def test_smarter_testing_uses_paid_features_with_safe_full_suite_fallbacks() -> None:
-    suite = yaml.safe_load((ROOT / ".circleci/test-suites.yml").read_text())
-
+    assert "junit_family=xunit1" in suite["run"]
+    assert suite["options"]["impact-key"] == "fleet-ci-files-lcov-v1"
     assert suite["options"]["test-impact-analysis"] is True
     assert suite["options"]["dynamic-test-splitting"] is True
     assert suite["options"]["max-auto-rerun"] == 1
@@ -30,17 +43,21 @@ def test_smarter_testing_uses_paid_features_with_safe_full_suite_fallbacks() -> 
         "Makefile",
         "tests/**",
         ".circleci/**",
-    }.issubset(suite["options"]["full-test-run-paths"])
+        "config/**",
+        "scripts/**",
+        "openapi.yaml",
+        "src/fleet_rlm/bundled_skills/**",
+        "src/fleet_rlm/sandbox/snapshot-requirements.txt",
+    } <= set(suite["options"]["full-test-run-paths"])
+    for command in (suite["run"], suite["analysis"]):
+        # Empty selection must not accidentally turn into pytest's full-suite discovery.
+        subprocess.run(["bash", "-euc", command.replace("<< test.atoms >>", "")], cwd=ROOT, check=True)
 
 
-def test_quality_aggregates_both_full_matrix_and_smarter_testing_jobs() -> None:
-    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
-    jobs = config["workflows"]["required-ci"]["jobs"]
-    quality = next(job["quality-gate"] for job in jobs if isinstance(job, dict) and "quality-gate" in job)
-
-    assert quality["name"] == "quality"
-    assert config["jobs"]["sonarqube"]["steps"][0] == {"checkout": {"method": "full"}}
-    assert set(quality["requires"]) >= {
+def test_quality_and_release_gates_remain_required():
+    config = load_config()
+    jobs = workflow_jobs()
+    assert set(jobs["quality"]["requires"]) == {
         "static-checks",
         "test-python-3.11",
         "test-python-312",
@@ -49,128 +66,123 @@ def test_quality_aggregates_both_full_matrix_and_smarter_testing_jobs() -> None:
         "security",
         "sonarqube",
     }
+    assert config["jobs"]["sonarqube"]["steps"][0] == {"checkout": {"method": "full"}}
     assert config["experimental"]["dynamic-parallelism"]["test-python-312"] == {
         "key": "ci-tests-parallelism-key",
         "min": 1,
         "max": 2,
     }
-
-
-def test_pypi_release_requires_webhook_preflight_and_canary_validation() -> None:
-    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
-    assert config["parameters"]["skip_testpypi"] == {"type": "boolean", "default": False}
-    assert config["parameters"]["run_pypi_recovery"] == {"type": "boolean", "default": False}
-    workflow_jobs = config["workflows"]["required-ci"]["jobs"]
-    by_name = {
-        name: options
-        for item in workflow_jobs
-        for name, options in (item.items() if isinstance(item, dict) else [(item, {})])
+    assert set(jobs["release-preflight"]["requires"]) == {
+        "quality",
+        "validate-release-request",
+        "validate-pypi-webhook-context",
     }
-    pypi_canary_jobs = [
-        item["pypi-canary"] for item in workflow_jobs if isinstance(item, dict) and "pypi-canary" in item
-    ]
-    normal_canary = next(job for job in pypi_canary_jobs if job["requires"] == ["publish-pypi"])
+    assert set(jobs["github-release"]["requires"]) == {"release-validation", "pypi-canary"}
+    assert set(jobs["github-release-recovery"]["requires"]) == {"release-validation-recovery", "pypi-canary-recovery"}
+    assert jobs["github-release-recovery"]["name"] == "github-release-recovery"
+    assert "github-release-recovery" not in config["jobs"]
+    assert config["parameters"]["skip_testpypi"]["default"] is False
 
-    assert "validate-pypi-webhook-context" in by_name["release-preflight"]["requires"]
-    assert "quality" in by_name["release-preflight"]["requires"]
-    assert normal_canary["context"] == "fleet-pypi-validation-webhook"
-    assert set(by_name["github-release"]["requires"]) == {"release-validation", "pypi-canary"}
-    github_release_command = config["jobs"]["github-release"]["steps"][2]["run"]["command"]
-    assert "python scripts/release_notes.py" in github_release_command
-    assert '--notes-file "$notes_file"' in github_release_command
-    assert "--generate-notes" not in github_release_command
 
-    webhook_guard = config["jobs"]["validate-pypi-webhook-context"]
-    assert webhook_guard["docker"][0]["image"] == "cimg/base:current"
-    guard_command = webhook_guard["steps"][0]["run"]["command"]
-    assert '"${CIRCLECI_VALIDATION_WEBHOOK_TOKEN:-}"' in guard_command
-
-    validation = config["jobs"]["release-validation"]
-    assert validation["type"] == "release"
-    assert validation["plan_name"] == "fleet-rlm-pypi"
-    assert validation["validation"]["auto_rollback_on_failure"] is False
-    assert validation["validation"]["webhooks"][0]["name"] == "pypi_canary"
-    assert validation["validation"]["webhooks"][0]["provider"] == "custom"
-
-    publish_command = config["jobs"]["publish-pypi"]["steps"][1]["run"]["command"]
-    publish_job = next(job["publish-pypi"] for job in workflow_jobs if isinstance(job, dict) and "publish-pypi" in job)
-    assert publish_job["context"] == "fleet-pypi-upload-token"
-    assert '"${PYPI_API_TOKEN:-}"' in publish_command
-    assert 'TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN"' in publish_command
-    assert "twine upload --non-interactive fleet_rlm-*" in publish_command
-    assert "circleci run release plan fleet-rlm-pypi" in publish_command
-    assert "--environment-name=pypi" in publish_command
-    assert "--component-name=fleet-rlm" in publish_command
-    assert '--target-version="$FLEET_RELEASE_VERSION"' in publish_command
-
-    testpypi_publish = config["jobs"]["publish-testpypi"]
-    assert testpypi_publish["environment"]["FLEET_SKIP_TESTPYPI"] == "<< pipeline.parameters.skip_testpypi >>"
-    assert '"$FLEET_SKIP_TESTPYPI" = "true"' in testpypi_publish["steps"][1]["run"]["command"]
-
-    testpypi_command = config["jobs"]["smoke-test-testpypi"]["steps"][4]["run"]["command"]
-    assert '"$FLEET_SKIP_TESTPYPI" = "true"' in testpypi_command
-    assert "https://test.pypi.org/simple" in testpypi_command
-    assert "PIP_CONFIG_FILE=/dev/null" in testpypi_command
-    assert "PIP_EXTRA_INDEX_URL=" in testpypi_command
-    assert "--no-cache-dir" in testpypi_command
-
-    canary_command = "\n".join(
-        step["run"]["command"]
-        for step in config["jobs"]["pypi-canary"]["steps"]
-        if isinstance(step, dict) and "run" in step
+def test_shared_pypi_validation_and_cancellation_contracts():
+    config = load_config()
+    validation = config["jobs"]["release-validation"]["validation"]
+    assert validation == config["jobs"]["release-validation-recovery"]["validation"]
+    assert validation["enabled"] is True
+    assert validation["evaluation_time"] == "20m"
+    assert validation["auto_rollback_on_failure"] is False
+    check = validation["webhooks"][0]
+    assert check["name"] == "pypi_canary"
+    assert check["provider"] == "custom"
+    assert check["data_points"]["project_id"] == "request.project_id"
+    assert check["max_failures"] == 1
+    jobs = workflow_jobs()
+    assert jobs["cancel-pypi-publication"]["requires"] == [{"publish-pypi": ["canceled"]}]
+    assert jobs["cancel-pypi-canary"]["requires"] == [{"pypi-canary": ["canceled"]}]
+    assert jobs["cancel-pypi-canary-recovery"]["requires"] == [{"pypi-canary-recovery": ["canceled"]}]
+    assert "--status=CANCELED" in "\n".join(
+        step.get("run", {}).get("command", "")
+        for step in config["jobs"]["cancel-pypi-deployment"]["steps"]
+        if isinstance(step, dict)
     )
-    assert "pypi-canary" in canary_command
-    assert "uv run --locked --python 3.12 python scripts/release_checks.py pypi-canary" in canary_command
+    steps = config["jobs"]["pypi-canary"]["steps"]
+    run = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
+    assert "timeout --signal=TERM --kill-after=30s 15m" in run["command"]
+    assert "canary-with-receipt" in run["command"]
+    assert any("store_artifacts" in step for step in run["teardown"])
+    assert jobs["fail-pypi-canary"]["requires"] == [{"pypi-canary": ["failed"]}]
+    assert steps[-1]["persist_to_workspace"]["paths"] == ["canary-results/receipt.json"]
+    assert jobs["github-release"]["context"] == "fleet-github-release"
+    assert jobs["pypi-canary"]["context"] == "fleet-pypi-validation-webhook"
+    assert jobs["publish-pypi"]["context"] == "fleet-pypi-upload-token"
 
 
-def test_pypi_recovery_rechecks_existing_artifact_without_uploading() -> None:
-    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
-    workflow_jobs = config["workflows"]["required-ci"]["jobs"]
-    by_name = {
-        name: options
-        for item in workflow_jobs
-        for name, options in (item.items() if isinstance(item, dict) else [(item, {})])
+def test_validation_acceptance_fixture_is_isolated_and_matches_production_policy():
+    production = load_config()["jobs"]["release-validation"]["validation"]
+    fixture = yaml.safe_load((ROOT / ".circleci/validation-acceptance.yml").read_text())
+    validation = fixture["jobs"]["acceptance-validation"]["validation"]
+    for key in ("enabled", "evaluation_time", "auto_rollback_on_failure", "webhooks"):
+        assert validation[key] == production[key]
+    assert fixture["jobs"]["acceptance-validation"]["plan_name"] == "fleet-rlm-validation-acceptance"
+    assert "pypi-validation-acceptance" in "\n".join(str(step) for step in fixture["jobs"]["acceptance-plan"]["steps"])
+    assert not any("publish-pypi" in name or "github-release" in name for name in fixture["jobs"])
+    workflows = fixture["workflows"]
+    assert "downstream-sentinel" in str(workflows["failure-acceptance"])
+    cancel_job = next(
+        item["acceptance-cancel-marker"]
+        for item in workflows["cancellation-acceptance"]["jobs"]
+        if isinstance(item, dict) and "acceptance-cancel-marker" in item
+    )
+    assert cancel_job["requires"] == [{"acceptance-cancellable": ["canceled"]}]
+
+
+def test_release_request_treats_shell_syntax_as_literal(tmp_path):
+    job = load_config()["jobs"]["validate-release-request"]
+    command = job["steps"][0]["run"]["command"]
+    for parameter in ("run_release", "run_python314", "run_pypi_recovery"):
+        command = command.replace(
+            f"<< pipeline.parameters.{parameter} >>", "true" if parameter == "run_release" else "false"
+        )
+    marker = tmp_path / "injected"
+    env = {
+        **os.environ,
+        "CIRCLE_BRANCH": "main",
+        "FLEET_RELEASE_VERSION": f"$(touch {marker})",
+        "FLEET_RELEASE_SHA": "a" * 40,
     }
-
-    assert set(by_name["validate-pypi-recovery"]["requires"]) == {"quality", "validate-release-request"}
-    assert by_name["build-release-recovery"]["requires"] == ["validate-pypi-recovery"]
-    assert by_name["plan-pypi-recovery"]["requires"] == ["build-release-recovery", "validate-pypi-webhook-context"]
-    assert by_name["pypi-canary"]["filters"] == "pipeline.parameters.run_pypi_recovery"
-    assert set(by_name["pypi-canary"]["requires"]) == {"build-release-recovery", "plan-pypi-recovery"}
-    assert by_name["release-validation-recovery"]["requires"] == ["plan-pypi-recovery"]
-    assert by_name["pypi-canary"]["requires"] == ["build-release-recovery", "plan-pypi-recovery"]
-    assert set(by_name["github-release-recovery"]["requires"]) == {
-        "release-validation-recovery",
-        "pypi-canary-recovery",
-    }
-    recovery_preflight = config["jobs"]["validate-pypi-recovery"]["steps"][1]["run"]["command"]
-    assert "recovery-preflight" in recovery_preflight
-    assert 'git fetch --no-tags origin "$FLEET_RELEASE_SHA"' in recovery_preflight
-    build_command = config["jobs"]["build-release-recovery"]["steps"][2]["run"]["command"]
-    assert 'git checkout --detach "$FLEET_RELEASE_SHA"' in build_command
-    assert "make build-release" in build_command
-
-    request_validation = config["jobs"]["validate-release-request"]["steps"][0]["run"]["command"]
-    assert "PyPI recovery cannot run with a new release" in request_validation
-
-    recovery_plan = config["jobs"]["plan-pypi-recovery"]["steps"][0]["run"]["command"]
-    assert "fleet-rlm-pypi-recovery" in recovery_plan
-    assert "twine upload" not in recovery_plan
-    assert config["jobs"]["release-validation-recovery"]["plan_name"] == "fleet-rlm-pypi-recovery"
-
-    recovery_github_command = config["jobs"]["github-release-recovery"]["steps"][2]["run"]["command"]
-    assert '--target "$FLEET_RELEASE_SHA"' in recovery_github_command
-    assert "python scripts/release_notes.py" in recovery_github_command
-    assert '--notes-file "$notes_file"' in recovery_github_command
-    assert "--generate-notes" not in recovery_github_command
-    assert by_name["github-release-recovery"]["context"] == "fleet-github-release"
+    subprocess.run(["bash", "-euc", command], env=env, check=True)
+    assert not marker.exists()
+    assert "<< pipeline.parameters.release_version >>" not in command
+    assert "<< pipeline.parameters.release_sha >>" not in command
 
 
-def test_python_selection_survives_circleci_step_shells(tmp_path) -> None:
-    import os
-    import subprocess
+def test_coverage_xml_survives_test_or_threshold_failure(tmp_path):
+    config = load_config()
+    steps = config["jobs"]["test-python"]["steps"]
+    reporter = next(step["when"] for step in steps if isinstance(step, dict) and "when" in step)["steps"][0]["run"]
+    assert reporter["when"] == "always"
+    binary = tmp_path / "uv"
+    binary.write_text('#!/bin/sh\nif [ "$4" = xml ]; then touch coverage/coverage.xml; else exit 2; fi\n')
+    binary.chmod(0o755)
+    (tmp_path / "coverage").mkdir()
+    result = subprocess.run(
+        ["bash", "-ec", reporter["command"]],
+        cwd=tmp_path,
+        # CircleCI's shell startup file prepends the real uv installation to PATH.
+        env={**os.environ, "BASH_ENV": "", "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        check=False,
+    )
+    assert result.returncode == 2
+    assert (tmp_path / "coverage/coverage.xml").is_file()
+    test_run = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
+    assert any("store_test_results" in step for step in test_run["teardown"])
+    coverage_upload = {"store_artifacts": {"path": "coverage", "destination": "coverage"}}
+    assert coverage_upload in reporter["teardown"]
+    assert coverage_upload not in test_run["teardown"]
 
-    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
+
+def test_python_selection_survives_circleci_step_shells(tmp_path):
+    config = load_config()
     steps = config["commands"]["setup-python"]["steps"]
     commands = [step["run"] for step in steps if isinstance(step, dict) and "run" in step]
     install = next(step["command"] for step in commands if step["name"] == "Install locked project dependencies")
@@ -194,14 +206,12 @@ def test_python_selection_survives_circleci_step_shells(tmp_path) -> None:
                 check=True,
             )
         assert record.read_text().splitlines() == [version, version]
-    assert "sys.version_info[:2] != expected" in verify
-    assert "raise SystemExit" in verify
-    assert "<<" not in verify.replace("<< parameters.python-version >>", "3.12")
+    chunk = yaml.safe_load((ROOT / ".circleci/cci-agent-setup.yml").read_text())
+    assert "export UV_PYTHON=3.12" in chunk["jobs"]["cci-agent-setup"]["steps"][3]["run"]["command"]
 
 
-def test_discovery_does_not_install_project_dependencies() -> None:
-    config = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())
-    steps = config["jobs"]["list-smarter-tests"]["steps"]
+def test_discovery_does_not_install_project_dependencies():
+    steps = load_config()["jobs"]["list-smarter-tests"]["steps"]
     assert steps[0] == "checkout"
     assert len(steps) == 2
     assert steps[1]["run"]["command"] == 'circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key'

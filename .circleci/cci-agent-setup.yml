@@ -18,11 +18,16 @@ jobs:
       - run:
           name: Install pinned uv
           command: |
-            curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+            bash .circleci/install-uv.sh
       - run:
           name: Install locked project dependencies
-          command: uv sync --locked --dev --python 3.12
+          command: |
+            export UV_PYTHON=3.12
+            echo 'export UV_PYTHON=3.12' >> "$BASH_ENV"
+            uv sync --locked --dev --python 3.12
+      - run:
+          name: Verify selected Python interpreter
+          command: uv run --locked python -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
       - save_cache:
           key: v1-uv-{{ arch }}-3.12-0.12.21-{{ checksum "uv.lock" }}
           paths:
