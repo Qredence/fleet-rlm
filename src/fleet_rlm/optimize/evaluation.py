@@ -471,9 +471,17 @@ def score_evaluation_traces(
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
+    has_feedback = any(
+        assessment.get("metadata", {}).get("mlflow.assessment.sourceRunId") == result.run_id
+        and assessment.get("feedback", {}).get("value") is not None
+        and not assessment.get("feedback", {}).get("error")
+        for assessments in frame.get("assessments", [])
+        if isinstance(assessments, list)
+        for assessment in assessments
+    )
     if (
         frame.empty
-        or not any(frame[name].notna().any() for name in frame.columns if name.endswith("/value"))
+        or not has_feedback
         or not expected_columns.issubset(frame.columns)
         or any(frame[name].notna().any() for name in error_columns)
     ):

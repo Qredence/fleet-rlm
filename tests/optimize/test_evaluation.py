@@ -473,7 +473,17 @@ def test_incomplete_evaluation_never_reports_collection_success(monkeypatch, fai
 
 def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
     result = SimpleNamespace(
-        run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [None], "scorer/value": [True]})
+        run_id="run-1",
+        metrics={},
+        result_df=pd.DataFrame(
+            {
+                "scorer/error_message": [None],
+                "scorer/value": [True],
+                "assessments": [
+                    [{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}]
+                ],
+            }
+        ),
     )
     received = []
     monkeypatch.setattr(evaluation, "build_mlflow_scorer_suite", lambda *args: received.append(args) or [])
@@ -487,7 +497,17 @@ def test_scoring_saved_traces_forwards_the_jev_lm(monkeypatch):
 
 def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
     result = SimpleNamespace(
-        run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [None], "scorer/value": [True]})
+        run_id="run-1",
+        metrics={},
+        result_df=pd.DataFrame(
+            {
+                "scorer/error_message": [None],
+                "scorer/value": [True],
+                "assessments": [
+                    [{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}]
+                ],
+            }
+        ),
     )
     calls = {}
     scorers = [object()]
@@ -517,7 +537,17 @@ def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
 @pytest.mark.parametrize("error", [None, "judge failed"])
 def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch, error):
     result = SimpleNamespace(
-        run_id="run-1", metrics={}, result_df=pd.DataFrame({"scorer/error_message": [error], "scorer/value": [True]})
+        run_id="run-1",
+        metrics={},
+        result_df=pd.DataFrame(
+            {
+                "scorer/error_message": [error],
+                "scorer/value": [True],
+                "assessments": [
+                    [{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}]
+                ],
+            }
+        ),
     )
     monkeypatch.setattr(evaluation, "build_mlflow_scorer_suite", lambda *_args: [])
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
@@ -549,6 +579,30 @@ def test_scoring_rejects_empty_scorer_selection(monkeypatch):
 @pytest.mark.parametrize("columns", [{"trace_id": ["tr-1"]}, {"scorer/value": [None]}])
 def test_scoring_rejects_absent_feedback(monkeypatch, columns):
     result = SimpleNamespace(run_id="run-1", metrics={}, result_df=pd.DataFrame(columns))
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
+    with pytest.raises(evaluation.EvaluationError, match="Scoring incomplete"):
+        evaluation.score_evaluation_traces([object()], judge_model="m", scorers=[object()])
+
+
+@pytest.mark.parametrize(
+    "assessment",
+    [
+        {"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "expectation": {"value": True}},
+        {"metadata": {"mlflow.assessment.sourceRunId": "older-run"}, "feedback": {"value": True}},
+        {"metadata": {}, "feedback": {"value": True}},
+    ],
+)
+def test_scoring_requires_feedback_from_current_run(monkeypatch, assessment):
+    result = SimpleNamespace(
+        run_id="run-1",
+        metrics={},
+        result_df=pd.DataFrame(
+            {
+                "gold/value": [True],
+                "assessments": [[assessment]],
+            }
+        ),
+    )
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
     with pytest.raises(evaluation.EvaluationError, match="Scoring incomplete"):
         evaluation.score_evaluation_traces([object()], judge_model="m", scorers=[object()])

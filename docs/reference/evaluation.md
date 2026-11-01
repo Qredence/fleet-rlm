@@ -254,7 +254,7 @@ os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_ware
 workspace = WorkspaceClient()
 if workspace.config.auth_type == "pat":
     os.environ["OPENAI_API_KEY"] = workspace.config.token
-elif workspace.config.auth_type.startswith("oauth"):
+elif workspace.config.auth_type == "databricks-cli" or workspace.config.auth_type.startswith("oauth"):
     os.environ["OPENAI_API_KEY"] = workspace.config.oauth_token().access_token
 else:
     raise ValueError(f"Unsupported Databricks auth type: {workspace.config.auth_type}")
