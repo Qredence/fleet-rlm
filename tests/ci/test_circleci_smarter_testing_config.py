@@ -168,7 +168,8 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path):
     result = subprocess.run(
         ["bash", "-ec", reporter["command"]],
         cwd=tmp_path,
-        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        # CircleCI's shell startup file prepends the real uv installation to PATH.
+        env={**os.environ, "BASH_ENV": "", "PATH": f"{tmp_path}:{os.environ['PATH']}"},
         check=False,
     )
     assert result.returncode == 2

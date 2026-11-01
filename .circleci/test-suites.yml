@@ -1,6 +1,6 @@
 ---
 name: ci tests
-discover: find tests -type f -name 'test_*.py' -print | sort
+discover: find tests -type f -name 'test_*.py' -print | LC_ALL=C sort
 run: |
   set -- << test.atoms >>
   if [ "$#" -eq 0 ]; then exit 0; fi
