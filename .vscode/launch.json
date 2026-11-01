@@ -14,7 +14,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/.venv/bin/fleet-rlm",
-            "args": ["serve-api", "--port", "8000"],
+            "args": ["serve", "--port", "8000"],
             "console": "integratedTerminal",
             "justMyCode": false
         }

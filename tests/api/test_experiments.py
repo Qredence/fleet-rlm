@@ -17,7 +17,12 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.experiments import ExperimentBusyError, ExperimentManager, _require_worker_pipes
+from fleet_rlm.experiments import (
+    _RECOVERY_INTERVAL_SECONDS,
+    ExperimentBusyError,
+    ExperimentManager,
+    _require_worker_pipes,
+)
 from fleet_rlm.optimization_runs import ExperimentOptions
 
 
@@ -527,7 +532,8 @@ def test_initialization_failure_releases_owner_lease_on_cleanup(tmp_path, monkey
         def fail(*_args, **_kwargs):
             raise RuntimeError("history unavailable")
 
-        monkeypatch.setattr(ExperimentManager, "_recover_stale_runs", fail)
+        # initialize() reconciles unthrottled, so the failure is injected on the shared body.
+        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", fail)
         with pytest.raises(RuntimeError, match="history unavailable"):
             await manager.initialize()
         assert store.optimization_owner_alive(manager.owner_id)
@@ -1006,7 +1012,7 @@ def test_rejection_records_decision_and_preserves_candidate_and_comparison(tmp_p
 
 
 def test_database_cancel_remains_authoritative_when_stop_file_signal_fails(tmp_path, monkeypatch):
-    from fleet_rlm.optimize.gepa import OptimizationCancelledError, _check_run_cancelled, _DatabaseStopper
+    from fleet_rlm.optimize.gepa import _check_cancelled, _database_stop_requested, _DatabaseStopper
 
     async def scenario():
         store = MemoryStore()
@@ -1021,9 +1027,10 @@ def test_database_cancel_remains_authoritative_when_stop_file_signal_fails(tmp_p
             await manager.cancel("s1", "s1-run")
         stop_file = tmp_path / "runs" / "s1-run" / "gepa.stop"
         assert not stop_file.exists()
+        # The stop file is absent, so the durable ledger fence must carry the cancellation on its own.
+        _check_cancelled(stop_file)
+        assert _database_stop_requested(store, "s1", "s1-run")
         assert _DatabaseStopper(store, "s1", "s1-run")(None)
-        with pytest.raises(OptimizationCancelledError):
-            _check_run_cancelled(stop_file, store, "s1", "s1-run")
         store.update_optimization_run("s1", "s1-run", {"worker_outcome": {"status": "completed"}})
         await manager._finish("s1", "s1-run", SimpleNamespace(returncode=0), None, approval=False)
         assert store.get_optimization_run("s1", "s1-run")["status"] == "cancelled"
@@ -1043,5 +1050,108 @@ def test_managed_persistence_failure_keeps_sanitized_worker_diagnostic(tmp_path)
         assert record["status"] == "failed"
         assert record["failure"] == failure
         assert record["candidate_version"] is None
+
+    asyncio.run(scenario())
+
+
+def test_polled_recovery_is_throttled_to_one_attempt_per_interval(tmp_path: Path, monkeypatch) -> None:
+    """Repeated polls cost one reconcile, not one per client refresh."""
+
+    async def scenario() -> None:
+        _store, manager = _manager_with_store(tmp_path)
+        attempts: list[float] = []
+        real = ExperimentManager._reconcile_stale_runs
+
+        async def counted(manager_self) -> None:
+            attempts.append(time.monotonic())
+            await real(manager_self)
+
+        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", counted)
+        for _ in range(5):
+            await manager.list("s1")
+        assert len(attempts) == 1
+
+    asyncio.run(scenario())
+
+
+def test_recovery_interval_governs_when_the_next_attempt_is_due(tmp_path: Path, monkeypatch) -> None:
+    """An elapsed interval admits exactly one new attempt; an unexpired one admits none."""
+
+    async def scenario() -> None:
+        _store, manager = _manager_with_store(tmp_path)
+        attempts: list[float] = []
+
+        async def counted(*_args) -> None:
+            attempts.append(time.monotonic())
+
+        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", counted)
+        clock = [1000.0]
+        monkeypatch.setattr("fleet_rlm.experiments.time.monotonic", lambda: clock[0])
+        await manager.list("s1")
+        assert len(attempts) == 1
+        clock[0] += _RECOVERY_INTERVAL_SECONDS - 0.1
+        await manager.list("s1")
+        assert len(attempts) == 1, "an unexpired interval must not reconcile again"
+        clock[0] += 0.2
+        await manager.list("s1")
+        assert len(attempts) == 2, "an expired interval must reconcile exactly once"
+
+    asyncio.run(scenario())
+
+
+def test_failed_recovery_still_counts_toward_the_interval(tmp_path: Path, monkeypatch) -> None:
+    """A broken database is retried on the next interval, not on every poll."""
+
+    async def scenario() -> None:
+        _store, manager = _manager_with_store(tmp_path)
+        calls: list[int] = []
+
+        async def fail(*_args) -> None:
+            calls.append(1)
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", fail)
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await manager.list("s1")
+        await manager.list("s1")
+        assert len(calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_drain_bypasses_the_poll_throttle_so_shutdown_is_not_delayed(tmp_path: Path, monkeypatch) -> None:
+    """A closed admission keeps reconciling on every status call during launcher drain."""
+
+    async def scenario() -> None:
+        _store, manager = _manager_with_store(tmp_path)
+        calls: list[int] = []
+
+        async def counted(*_args) -> None:
+            calls.append(1)
+
+        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", counted)
+        await manager.begin_drain()
+        await manager.status()
+        await manager.status()
+        assert len(calls) == 3
+
+    asyncio.run(scenario())
+
+
+def test_admission_reconciles_without_consuming_the_poll_interval(tmp_path: Path, monkeypatch) -> None:
+    """start() and review() stay fresh: they reconcile even inside an unexpired interval."""
+
+    async def scenario() -> None:
+        _store, manager = _manager_with_store(tmp_path)
+        calls: list[int] = []
+
+        async def counted(*_args) -> None:
+            calls.append(1)
+
+        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", counted)
+        await manager.initialize()
+        assert calls == [1], "startup reconciles once"
+        await manager.start("s1", "request-1", ExperimentOptions())
+        assert len(calls) == 2, "admission must reconcile even during the poll interval"
 
     asyncio.run(scenario())

@@ -27,6 +27,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
+
 _SECRET_FIELDS = {
     "fleet_database_url",
     "fleet_database_migration_url",
@@ -411,9 +413,9 @@ class FleetSettings(BaseSettings):
         validation_alias=AliasChoices("FLEET_MAX_ACTIVE_SESSIONS", "MAX_ACTIVE_SESSIONS"),
     )
     max_upload_bytes: int = Field(
-        default=25_000_000,
+        default=MAX_WORKSPACE_FILE_BYTES,
         ge=1,
-        le=25_000_000,
+        le=MAX_WORKSPACE_FILE_BYTES,
         validation_alias=AliasChoices("FLEET_MAX_UPLOAD_BYTES", "MAX_UPLOAD_BYTES"),
     )
     compiled_program_dir: str = Field(

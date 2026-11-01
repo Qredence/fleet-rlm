@@ -1,7 +1,7 @@
 """Neutral experiment contracts, worker events, and immutable artifact access.
 
-PostgreSQL owns run state. Legacy JSON records are read only for idempotent import;
-GEPA's stop file remains a cooperative signal, never a second lifecycle ledger.
+PostgreSQL owns run state. GEPA's stop file remains a cooperative signal, never a
+second lifecycle ledger.
 """
 
 from __future__ import annotations
@@ -149,16 +149,6 @@ def emit_event(event: Mapping[str, Any], *, stream: TextIO | None = None) -> Non
     output = stream or sys.stdout
     output.write(encode_event(event) + "\n")
     output.flush()
-
-
-def parse_event(line: str) -> dict[str, Any] | None:
-    """Ignore ordinary output; validate lines claiming to be worker events."""
-    if not line.startswith(EVENT_PREFIX):
-        return None
-    value = json.loads(line[len(EVENT_PREFIX) :])
-    if not isinstance(value, dict) or not isinstance(value.get("type"), str):
-        raise ValueError("invalid Fleet optimization event")
-    return value
 
 
 def request_run_stop(root: Path, session_id: str, run_id: str) -> bool:

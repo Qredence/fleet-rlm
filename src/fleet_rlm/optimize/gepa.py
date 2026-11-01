@@ -179,16 +179,6 @@ def _database_stop_requested(store: Store | None, session_id: str | None, run_id
     return record is None or record.get("status") not in {"running", "queued"} or bool(record.get("stop_requested"))
 
 
-def _check_run_cancelled(stop_file: Path, store: Store | None, session_id: str, run_id: str) -> None:
-    """Raise OptimizationCancelledError for a stop file or a stopped, missing, or inactive ledger run.
-
-    Skip the ledger check when no Store is supplied; storage errors propagate.
-    """
-    _check_cancelled(stop_file)
-    if _database_stop_requested(store, session_id, run_id):
-        raise OptimizationCancelledError("Optimization stop requested")
-
-
 def _emit_diagnostic(event: Mapping[str, Any], *, suppress_fifo: bool = True) -> None:
     """Avoid pipe backpressure in callback/control paths; API output is discarded."""
     import os

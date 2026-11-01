@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-01
+
+### Changed
+
+- Bump the package, OpenAPI document, and installed metadata to `0.10.0`.
+- Share one 25 MB workspace-file ceiling across the settings model, HTTP schemas, route
+  handlers, and the sandbox `Workspace` helper instead of restating the literal.
+- Rely on `mlflow[databricks]` for `databricks-agents`; the direct declaration duplicated
+  a range the extra already pins.
+- Archive completed and retired planning documents under `docs/archive/`. The PRD pack,
+  the two retired LongCoT runbooks, and their acceptance reports now state what shipped
+  rather than what was proposed.
+- Correct stale documentation facts: `docs/index.md` named config schema 3 (the loader
+  enforces 4) and claimed a legacy terminal package; `source-layout.md` undercounted
+  implementation modules; `SECURITY.md` named `0.7.x` as current.
+- Throttle stale-run recovery on polled reads to one attempt every five seconds. Each
+  attempt took a database connection, the global advisory lease, and two ledger scans, and
+  the TUI polls two endpoints every second. Startup, admission, review, and shutdown drain
+  still reconcile immediately.
+
+### Removed
+
+- `optimize.gepa._check_run_cancelled`, an unwired wrapper whose two underlying checks
+  remain live, and the tests that exercised only it.
+- `optimization_runs.parse_event`, an unconsumed decoder; the serving process drains worker
+  stdout by design and never parses it. Encoder coverage is unchanged.
+- `.gitignore` negations whose targets no longer exist, plus duplicated patterns.
+
 ## [0.9.0] - 2026-10-28
 
 ### Changed

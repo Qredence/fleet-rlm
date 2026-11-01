@@ -35,7 +35,7 @@ flowchart LR
 - The API owns TUI optimization jobs through one subprocess slot. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
 - The API drains both worker pipes without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and pipe draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
 - A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
-- A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer.
+- A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer. Polled status reads reconcile at most once per interval, while startup, admission, review, and shutdown drain reconcile immediately.
 - `session.py` owns the runtime registry and Session leases.
 - `engine/turn.py` runs each Turn on a worker thread; `sandbox_mgr.turn_scope()` is the one
   place that decides whether a caller owns a Turn, so a program nested inside an API Turn
@@ -124,7 +124,8 @@ Outcomes and cleanup:
 - Unconfirmed cleanup retains root/allocation identity and fences provisioning and
   workspace access across Turn resets. Registry eviction retains the fenced runtime
   and its lease until a later shutdown confirms cleanup. This in-memory guard does
-  not establish safety after process restart; see the [F0 acceptance report](docs/fleet-rlm-prds/F0-acceptance.md).
+  not establish safety after process restart; see the
+  [F0 acceptance report](docs/archive/fleet-rlm-prds/F0-acceptance.md).
 - Reply fences refuse late successful results once, without retry.
 - Error and cancellation replies remain deliverable.
 - Fencing does not interrupt provider calls or replace child shutdown.

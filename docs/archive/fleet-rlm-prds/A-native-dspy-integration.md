@@ -4,7 +4,7 @@
 
 **Revision:** 2 - review amendments applied directly, 29 October 2026. This is a source-based document update, not a new repository audit or implementation. Evidence labels and baseline limitations are defined in [README](README.md#evidence-and-baseline).
 
-Implementation evidence and remaining parser-removal conditions: [acceptance report](../runbooks/native-dspy-integration.md). The requirements below retain their original baseline context.
+Implementation evidence and remaining parser-removal conditions: [acceptance report](../../runbooks/native-dspy-integration.md). The requirements below retain their original baseline context.
 
 ## 1. Problem, users and evidence
 

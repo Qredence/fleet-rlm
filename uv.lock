@@ -1332,10 +1332,9 @@ wheels = [
 
 [[package]]
 name = "fleet-rlm"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
-    { name = "databricks-agents" },
     { name = "databricks-sdk" },
     { name = "daytona" },
     { name = "dspy", extra = ["typesafe"] },
@@ -1378,7 +1377,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "databricks-agents", specifier = ">=1.2,<2" },
     { name = "databricks-sdk", specifier = ">=0.153.0,<1" },
     { name = "daytona", specifier = "==0.224.0" },
     { name = "dspy", extras = ["typesafe"], specifier = "==3.4.1" },

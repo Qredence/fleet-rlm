@@ -13,6 +13,9 @@ from pydantic_core import CoreSchema
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
+# The single byte ceiling for one workspace file: the host API, the remote Workspace, and settings
+# all enforce the same number, so a value raised here cannot silently disagree with the sandbox.
+MAX_WORKSPACE_FILE_BYTES = 25_000_000
 
 
 def validate_session_id(session_id: str) -> str:
@@ -101,7 +104,7 @@ class Workspace:
         return {'path':path, 'size_bytes':p.stat().st_size, 'sha256':h.hexdigest()}
 
     def read(self, path, max_bytes=100000, offset=0):
-        if not 0<=max_bytes<=25000000 or offset<0: raise ValueError('invalid read bounds')
+        if not 0<=max_bytes<=__FLEET_MAX_FILE_BYTES__ or offset<0: raise ValueError('invalid read bounds')
         with self.resolve(path).open('rb') as f:
             f.seek(offset)
             return f.read(max_bytes)
@@ -111,9 +114,9 @@ class Workspace:
 
     def write(self, path, content, append=False):
         raw = content.encode() if isinstance(content,str) else content
-        if not isinstance(raw,bytes) or len(raw)>25000000: raise ValueError('invalid content size')
+        if not isinstance(raw,bytes) or len(raw)>__FLEET_MAX_FILE_BYTES__: raise ValueError('invalid content size')
         p = self.resolve(path)
-        if append and p.exists() and p.stat().st_size+len(raw)>25000000: raise ValueError('file quota')
+        if append and p.exists() and p.stat().st_size+len(raw)>__FLEET_MAX_FILE_BYTES__: raise ValueError('file quota')
         p.parent.mkdir(parents=True,exist_ok=True)
         if append:
             with p.open('ab') as f: f.write(raw)
@@ -168,7 +171,9 @@ class WorkspaceDatasetView:
         return out
 
 workspace = Workspace()
-""".replace("__FLEET_WORKSPACE_ROOTS__", repr(tuple(sorted(_ALLOWED_WORKSPACE_ROOTS))))
+""".replace("__FLEET_WORKSPACE_ROOTS__", repr(tuple(sorted(_ALLOWED_WORKSPACE_ROOTS)))).replace(
+    "__FLEET_MAX_FILE_BYTES__", str(MAX_WORKSPACE_FILE_BYTES)
+)
 
 
 @dataclass(frozen=True)
