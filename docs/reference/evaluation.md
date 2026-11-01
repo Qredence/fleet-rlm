@@ -216,7 +216,7 @@ automatically registered for production monitoring.
 
 ## Databricks experiment layout and saved-trace scoring
 
-Fleet uses the Databricks `fleet-rlm-dev` experiment for runtime traces and
+Fleet uses the Databricks `/Shared/fleet-rlm-runtime` experiment for runtime traces and
 trace-level scoring. Keep the curated evaluation dataset and repeatable offline
 evaluation runs in `fleet-rlm-eval`; keep GEPA runs in `fleet-rlm-gepa`. The
 selected workspace profile and all three absolute experiment paths live in
@@ -259,7 +259,7 @@ os.environ["OPENAI_API_BASE"] = workspace.config.host.rstrip("/") + "/ai-gateway
 experiment = MlflowClient().get_experiment_by_name(target.experiment_name)
 if experiment is None:
     raise RuntimeError("Runtime experiment was not found")
-trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_dev/TRACE_ID"]
+trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_runtime/TRACE_ID"]
 traces = [mlflow.get_trace(trace_id, silent=True, flush=True) for trace_id in trace_ids]
 suite = build_mlflow_scorer_suite(settings.fleet_judge_model)
 eligible_names = {"output_instruction_compliance", "rlm_trajectory_efficiency", "jev_routing_efficiency"}

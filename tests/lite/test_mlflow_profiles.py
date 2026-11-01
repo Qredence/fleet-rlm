@@ -46,7 +46,7 @@ def test_configured_databricks_destinations_keep_the_three_experiments_separate(
     assert (settings.mlflow_trace_catalog, settings.mlflow_trace_schema, settings.mlflow_trace_table_prefix) == (
         "example_catalog",
         "fleet_observability",
-        "fleet_rlm_dev",
+        "fleet_rlm_runtime",
     )
     assert (settings.mlflow_eval_trace_table_prefix, settings.mlflow_optimization_trace_schema) == (
         "fleet_rlm_eval",
