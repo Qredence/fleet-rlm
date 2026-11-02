@@ -5,6 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,10 +39,7 @@ def test_smarter_testing_uses_file_atoms_and_per_atom_lcov_analysis():
     assert suite["outputs"]["junit-directory"] == "test-results/junit"
     assert "junit" not in suite["outputs"]
     for job_name in ("test-python", "test-python-312"):
-        test_run = next(
-            step["run"] for step in load_config()["jobs"][job_name]["steps"] if isinstance(step, dict) and "run" in step
-        )
-        assert {"store_test_results": {"path": "test-results/junit"}} in test_run["teardown"]
+        assert {"store_test_results": {"path": "test-results/junit"}} in load_config()["jobs"][job_name]["steps"]
     assert suite["options"]["impact-key"] == "fleet-ci-files-lcov-v1"
     assert suite["options"]["test-impact-analysis"] is True
     assert suite["options"]["dynamic-test-splitting"] is True
@@ -162,9 +160,13 @@ def test_shared_pypi_validation_and_cancellation_contracts():
     run = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
     assert "timeout --signal=TERM --kill-after=30s 15m" in run["command"]
     assert "canary-with-receipt" in run["command"]
-    assert any("store_artifacts" in step for step in run["teardown"])
+    assert {"store_artifacts": {"path": "canary-results", "destination": "pypi-canary"}} in steps
     assert jobs["fail-pypi-canary"]["requires"] == [{"pypi-canary": ["failed"]}]
     assert steps[-1]["persist_to_workspace"]["paths"] == ["canary-results/receipt.json"]
+    names = [step["run"]["name"] for step in steps if "run" in step]
+    assert names.index("Enforce canary preparation result") < names.index(
+        "Require matching canary evidence before promotion"
+    )
     assert jobs["github-release"]["context"] == "fleet-github-release"
     assert jobs["pypi-canary"]["context"] == "fleet-pypi-validation-webhook"
     assert jobs["publish-pypi"]["context"] == "fleet-pypi-upload-token"
@@ -209,17 +211,19 @@ def test_release_request_treats_shell_syntax_as_literal(tmp_path):
     assert "<< pipeline.parameters.release_sha >>" not in command
 
 
-def test_coverage_xml_survives_test_or_threshold_failure(tmp_path):
+@pytest.mark.parametrize("failed_command", ["none", "combine", "xml", "report"])
+def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_command):
     config = load_config()
     steps = config["jobs"]["coverage-report"]["steps"]
     reporter = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
     binary = tmp_path / "uv"
     binary.write_text(
         "#!/bin/sh\n"
+        f'case " $* " in *" {failed_command} "*) exit 2 ;; esac\n'
         'case " $* " in\n'
         '  *" combine "*) touch coverage/.coverage; printf combine >> "$ORDER" ;;\n'
         '  *" xml "*) touch coverage/coverage.xml; printf xml >> "$ORDER" ;;\n'
-        '  *" report "*) printf report >> "$ORDER"; exit 2 ;;\n'
+        '  *" report "*) printf report >> "$ORDER" ;;\n'
         "  *) exit 3 ;;\n"
         "esac\n"
     )
@@ -245,11 +249,23 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path):
         },
         check=False,
     )
-    assert result.returncode == 2
-    assert (tmp_path / "coverage/coverage.xml").is_file()
+    assert result.returncode == 0
+    enforcement = steps[-1]["run"]["command"]
+    env = {**os.environ, "BASH_ENV": ""}
+    final = subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False)
+    assert final.returncode == (0 if failed_command == "none" else 2)
+    assert (tmp_path / "coverage/coverage.xml").is_file() == (failed_command in ("none", "report"))
     coverage_upload = {"store_artifacts": {"path": "coverage", "destination": "coverage"}}
-    assert coverage_upload in reporter["teardown"]
-    assert order.read_text() == "combinexmlreport"
+    assert coverage_upload in steps
+    assert (order.read_text() if order.exists() else "") == {
+        "none": "combinexmlreport",
+        "combine": "",
+        "xml": "combine",
+        "report": "combinexml",
+    }[failed_command]
+    assert steps.index(coverage_upload) < len(steps) - 1
+    (tmp_path / "coverage/.status").unlink()
+    assert subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False).returncode != 0
     assert steps.index(next(step for step in steps if "persist_to_workspace" in step)) > steps.index(
         next(step for step in steps if isinstance(step, dict) and "run" in step)
     )
@@ -290,3 +306,38 @@ def test_discovery_does_not_install_project_dependencies():
     assert steps[0] == "checkout"
     assert len(steps) == 2
     assert steps[1]["run"]["command"] == 'circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key'
+
+
+@pytest.mark.parametrize(
+    ("job", "name", "status_path"),
+    [
+        ("test-python-312", "Preserve the Python 3.12 test result", "test-results/test-status"),
+        ("pypi-canary", "Enforce canary preparation result", "canary-results/.status"),
+    ],
+)
+@pytest.mark.parametrize("status", [None, 0, 1, 124])
+def test_deferred_status_fails_closed(tmp_path, job, name, status_path, status):
+    steps = load_config()["jobs"][job]["steps"]
+    enforcement = next(step for step in steps if isinstance(step, dict) and step.get("run", {}).get("name") == name)
+    upload = next(step for step in steps if "store_artifacts" in step)
+    assert steps.index(upload) < steps.index(enforcement)
+    if job == "pypi-canary":
+        verify = next(
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and step.get("run", {}).get("name") == "Require matching canary evidence before promotion"
+        )
+        persist = next(step for step in steps if "persist_to_workspace" in step)
+        assert steps.index(enforcement) < steps.index(verify) < steps.index(persist)
+    path = tmp_path / status_path
+    if status is not None:
+        path.parent.mkdir(parents=True)
+        path.write_text(f"{status}\n")
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", enforcement["run"]["command"]],
+        cwd=tmp_path,
+        env={**os.environ, "BASH_ENV": ""},
+        check=False,
+    )
+    assert result.returncode == (1 if status is None else status)

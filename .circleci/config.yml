@@ -151,15 +151,12 @@ jobs:
             fi
       - store_test_results:
           path: test-results/junit
-          when: always
       - store_artifacts:
           path: test-results
           destination: test-results
-          when: always
       - store_artifacts:
           path: coverage-shards
           destination: coverage-shards
-          when: always
       - when:
           condition:
             equal: ["3.11", << parameters.python-version >>]
@@ -191,6 +188,7 @@ jobs:
           name: Combine Python 3.11 shard coverage, export XML, and enforce the floor
           command: |
             set +e
+            bash -eo pipefail <<'COVERAGE'
             mkdir -p coverage
             for node in 0 1; do
               shard="coverage-shards/node-${node}"
@@ -206,6 +204,7 @@ jobs:
               coverage-shards/node-0 coverage-shards/node-1
             uv run --locked coverage xml --data-file=coverage/.coverage --fail-under=0 -o coverage/coverage.xml
             uv run --locked coverage report --data-file=coverage/.coverage
+            COVERAGE
             status=$?
             printf '%s\n' "$status" > coverage/.status
             exit 0
@@ -219,7 +218,7 @@ jobs:
       - run:
           name: Enforce coverage-report result
           command: |
-            status=$(cat coverage/.status 2>/dev/null || echo 0)
+            status=$(cat coverage/.status 2>/dev/null || exit 1)
             exit "$status"
 
   list-smarter-tests:
@@ -257,7 +256,7 @@ jobs:
       - run:
           name: Preserve the Python 3.12 test result
           command: |
-            status=$(cat test-results/test-status 2>/dev/null || echo 0)
+            status=$(cat test-results/test-status 2>/dev/null || exit 1)
             exit "$status"
 
   package-check:
@@ -652,6 +651,11 @@ jobs:
           path: canary-results
           destination: pypi-canary
       - run:
+          name: Enforce canary preparation result
+          command: |
+            status=$(cat canary-results/.status 2>/dev/null || exit 1)
+            exit "$status"
+      - run:
           name: Require matching canary evidence before promotion
           command: |
             python -m scripts.release_checks verify-canary \
@@ -660,11 +664,6 @@ jobs:
           root: .
           paths:
             - canary-results/receipt.json
-      - run:
-          name: Enforce canary preparation result
-          command: |
-            status=$(cat canary-results/.status 2>/dev/null || echo 0)
-            exit "$status"
 
   fail-pypi-canary:
     parameters:
