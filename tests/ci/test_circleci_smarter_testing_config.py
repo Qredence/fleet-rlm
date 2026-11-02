@@ -128,6 +128,7 @@ fi
         executable.chmod(0o755)
     log = tmp_path / "upload.log"
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "UPLOAD_LOG": str(log)}
+    env.pop("BASH_ENV", None)
     env.update(PYPI_API_TOKEN="offline-fixture", FLEET_RELEASE_VERSION="0.10.0")
     subprocess.run(["bash", "-euc", command], cwd=tmp_path, env=env, check=True)
     calls = log.read_text()
