@@ -551,6 +551,7 @@ jobs:
       FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
     steps:
       - checkout
+      - install-uv
       - attach_workspace:
           at: .
       - run:
@@ -562,12 +563,15 @@ jobs:
               echo "PYPI_API_TOKEN is required in the restricted PyPI upload context." >&2
               exit 1
             fi
-            python -m pip install --disable-pip-version-check 'twine>=7.0.0,<8'
+            upload_env=$(mktemp -d)
+            trap 'rm -rf "$upload_env"' EXIT
+            uv venv --python 3.12 "$upload_env"
+            uv pip install --python "$upload_env/bin/python" 'twine>=7.0.0,<8'
             cd ..
-            python -m scripts.release_checks plan-deployment --version "$FLEET_RELEASE_VERSION" --plan fleet-rlm-pypi
+            "$upload_env/bin/python" -m scripts.release_checks plan-deployment --version "$FLEET_RELEASE_VERSION" --plan fleet-rlm-pypi
             cd dist
             TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" \
-              timeout --signal=TERM --kill-after=30s 10m twine upload --non-interactive fleet_rlm-*
+              timeout --signal=TERM --kill-after=30s 10m "$upload_env/bin/python" -m twine upload --non-interactive fleet_rlm-*
             circleci run release update fleet-rlm-pypi --status=running
       - run:
           name: Mark failed PyPI publication in CircleCI deployment tracking
