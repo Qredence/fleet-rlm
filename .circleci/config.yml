@@ -758,7 +758,21 @@ jobs:
 
 workflows:
   required-ci:
-    when: (pipeline.event.name == "push" and pipeline.git.branch == "main") or pipeline.event.name == "pull_request" or (pipeline.parameters.run_ci and pipeline.git.branch == "main") or (pipeline.parameters.run_release and pipeline.git.branch == "main") or (pipeline.parameters.run_pypi_recovery and pipeline.git.branch == "main")
+    when:
+      or:
+        - and:
+            - equal: ["push", << pipeline.event.name >>]
+            - equal: ["main", << pipeline.git.branch >>]
+        - equal: ["pull_request", << pipeline.event.name >>]
+        - and:
+            - << pipeline.parameters.run_ci >>
+            - equal: ["main", << pipeline.git.branch >>]
+        - and:
+            - << pipeline.parameters.run_release >>
+            - equal: ["main", << pipeline.git.branch >>]
+        - and:
+            - << pipeline.parameters.run_pypi_recovery >>
+            - equal: ["main", << pipeline.git.branch >>]
     jobs:
       - static-checks
       - test-python:
@@ -915,7 +929,10 @@ workflows:
             - pypi-canary-recovery: [canceled]
 
   python314-manual:
-    when: pipeline.parameters.run_python314 and pipeline.git.branch == "main"
+    when:
+      and:
+        - << pipeline.parameters.run_python314 >>
+        - equal: ["main", << pipeline.git.branch >>]
     jobs:
       - validate-release-request
       - python314-probe:
