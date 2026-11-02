@@ -149,15 +149,17 @@ jobs:
               mkdir -p "coverage-shards/node-${CIRCLE_NODE_INDEX}"
               circleci testsuite run "ci tests" --run-tests=all --analyze-tests=none
             fi
-          teardown:
-            - store_test_results:
-                path: test-results/junit
-            - store_artifacts:
-                path: test-results
-                destination: test-results
-            - store_artifacts:
-                path: coverage-shards
-                destination: coverage-shards
+      - store_test_results:
+          path: test-results/junit
+          when: always
+      - store_artifacts:
+          path: test-results
+          destination: test-results
+          when: always
+      - store_artifacts:
+          path: coverage-shards
+          destination: coverage-shards
+          when: always
       - when:
           condition:
             equal: ["3.11", << parameters.python-version >>]
@@ -188,6 +190,7 @@ jobs:
       - run:
           name: Combine Python 3.11 shard coverage, export XML, and enforce the floor
           command: |
+            set +e
             mkdir -p coverage
             for node in 0 1; do
               shard="coverage-shards/node-${node}"
@@ -203,14 +206,21 @@ jobs:
               coverage-shards/node-0 coverage-shards/node-1
             uv run --locked coverage xml --data-file=coverage/.coverage --fail-under=0 -o coverage/coverage.xml
             uv run --locked coverage report --data-file=coverage/.coverage
-          teardown:
-            - store_artifacts:
-                path: coverage
-                destination: coverage
+            status=$?
+            printf '%s\n' "$status" > coverage/.status
+            exit 0
+      - store_artifacts:
+          path: coverage
+          destination: coverage
       - persist_to_workspace:
           root: .
           paths:
             - coverage/coverage.xml
+      - run:
+          name: Enforce coverage-report result
+          command: |
+            status=$(cat coverage/.status 2>/dev/null || echo 0)
+            exit "$status"
 
   list-smarter-tests:
     docker:
@@ -234,13 +244,21 @@ jobs:
           name: Run impacted Python 3.12 tests or the full main-branch suite
           command: |
             mkdir -p test-results
+            set +e
             circleci testsuite run "ci tests"
-          teardown:
-            - store_test_results:
-                path: test-results/junit
-            - store_artifacts:
-                path: test-results
-                destination: test-results
+            status=$?
+            printf '%s\n' "$status" > test-results/test-status
+            exit 0
+      - store_test_results:
+          path: test-results/junit
+      - store_artifacts:
+          path: test-results
+          destination: test-results
+      - run:
+          name: Preserve the Python 3.12 test result
+          command: |
+            status=$(cat test-results/test-status 2>/dev/null || echo 0)
+            exit "$status"
 
   package-check:
     docker:
@@ -282,6 +300,29 @@ jobs:
           method: full
       - attach_workspace:
           at: .
+      - restore_cache:
+          keys:
+            - v1-sonar-scanner-{{ arch }}-8.1.0.6389
+      - run:
+          name: Install or reuse cached SonarScanner CLI
+          command: |
+            set -euo pipefail
+            mkdir -p "$HOME/.cache/sonar"
+            SCANNER_DIR="$HOME/.cache/sonar/sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64"
+            if [ ! -x "$SCANNER_DIR/bin/sonar-scanner" ]; then
+              echo "Downloading SonarScanner $SONAR_SCANNER_VERSION..."
+              tmpdir=$(mktemp -d)
+              trap 'rm -rf "$tmpdir"' EXIT
+              archive="sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
+              curl --fail --silent --show-error --location \
+                "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$archive" \
+                --output "$tmpdir/$archive"
+              printf '%s  %s\n' "$SONAR_SCANNER_SHA256" "$tmpdir/$archive" | sha256sum --check -
+              unzip -q "$tmpdir/$archive" -d "$HOME/.cache/sonar"
+            else
+              echo "Using cached SonarScanner at $SCANNER_DIR"
+            fi
+            echo "export SCANNER_DIR=\"$SCANNER_DIR\"" >> "$BASH_ENV"
       - run:
           name: Analyze with SonarQube Cloud and require its quality gate
           command: |
@@ -290,15 +331,11 @@ jobs:
             if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
               git fetch --unshallow
             fi
-            scanner_archive="sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
-            scanner_dir=$(mktemp -d)
-            trap 'rm -rf "$scanner_dir"' EXIT
-            curl --fail --silent --show-error --location \
-              "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$scanner_archive" \
-              --output "$scanner_dir/$scanner_archive"
-            printf '%s  %s\n' "$SONAR_SCANNER_SHA256" "$scanner_dir/$scanner_archive" | sha256sum --check -
-            unzip -q "$scanner_dir/$scanner_archive" -d "$scanner_dir"
-            "$scanner_dir/sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64/bin/sonar-scanner"
+            "${SCANNER_DIR}/bin/sonar-scanner"
+      - save_cache:
+          key: v1-sonar-scanner-{{ arch }}-8.1.0.6389
+          paths:
+            - ~/.cache/sonar
 
   quality-gate:
     docker:
@@ -599,6 +636,7 @@ jobs:
       - run:
           name: Prepare and validate the exact PyPI artifact within fifteen minutes
           command: |
+            set +e
             mkdir -p canary-results
             timeout --signal=TERM --kill-after=30s 15m bash -eo pipefail -c '
               bash .circleci/install-uv.sh
@@ -607,10 +645,12 @@ jobs:
               uv run --locked --python 3.12 python -m scripts.release_checks canary-with-receipt \
                 --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA" --plan "$FLEET_RELEASE_PLAN"
             ' 2>&1 | tee canary-results/pypi-canary.log
-          teardown:
-            - store_artifacts:
-                path: canary-results
-                destination: pypi-canary
+            status=${PIPESTATUS[0]}
+            printf '%s\n' "$status" > canary-results/.status
+            exit 0
+      - store_artifacts:
+          path: canary-results
+          destination: pypi-canary
       - run:
           name: Require matching canary evidence before promotion
           command: |
@@ -620,6 +660,11 @@ jobs:
           root: .
           paths:
             - canary-results/receipt.json
+      - run:
+          name: Enforce canary preparation result
+          command: |
+            status=$(cat canary-results/.status 2>/dev/null || echo 0)
+            exit "$status"
 
   fail-pypi-canary:
     parameters:
