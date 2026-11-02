@@ -1,5 +1,6 @@
 """Behavioral and graph contracts for offline CI and package publication."""
 
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -91,6 +92,48 @@ def test_quality_and_release_gates_remain_required():
     assert jobs["github-release-recovery"]["name"] == "github-release-recovery"
     assert "github-release-recovery" not in config["jobs"]
     assert config["parameters"]["skip_testpypi"]["default"] is False
+
+
+def test_pypi_upload_does_not_require_system_python_pip(tmp_path):
+    config = load_config()
+    steps = config["jobs"]["publish-pypi"]["steps"]
+    assert "install-uv" in steps
+    command = next(step["run"]["command"] for step in steps if isinstance(step, dict) and "run" in step)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    archive = dist / "fleet_rlm-0.10.0.tar.gz"
+    archive.write_bytes(b"offline upload fixture")
+    (dist / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    scripts = {
+        "python": "#!/bin/sh\nexit 91\n",
+        "uv": """#!/bin/sh
+set -eu
+echo "uv $*" >> "$UPLOAD_LOG"
+if [ "$1" = venv ]; then
+    mkdir -p "$4/bin"
+    cat > "$4/bin/python" <<'SH'
+#!/bin/sh
+echo "isolated-python $*" >> "$UPLOAD_LOG"
+SH
+    chmod +x "$4/bin/python"
+fi
+""",
+        "circleci": '#!/bin/sh\necho "circleci $*" >> "$UPLOAD_LOG"\n',
+    }
+    for name, script in scripts.items():
+        executable = bin_dir / name
+        executable.write_text(script)
+        executable.chmod(0o755)
+    log = tmp_path / "upload.log"
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "UPLOAD_LOG": str(log)}
+    env.update(PYPI_API_TOKEN="offline-fixture", FLEET_RELEASE_VERSION="0.10.0")
+    subprocess.run(["bash", "-euc", command], cwd=tmp_path, env=env, check=True)
+    calls = log.read_text()
+    assert "isolated-python -m scripts.release_checks plan-deployment" in calls
+    assert "isolated-python -m twine upload --non-interactive" in calls
+    assert calls.index("-m twine upload") < calls.index("circleci run release update")
 
 
 def test_shared_pypi_validation_and_cancellation_contracts():
