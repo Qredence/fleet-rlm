@@ -1139,7 +1139,7 @@ def test_drain_bypasses_the_poll_throttle_so_shutdown_is_not_delayed(tmp_path: P
 
 
 def test_admission_reconciles_without_consuming_the_poll_interval(tmp_path: Path, monkeypatch) -> None:
-    """start() and review() stay fresh: they reconcile even inside an unexpired interval."""
+    """start() bypasses the poll throttle. Admission is refused so no worker is spawned."""
 
     async def scenario() -> None:
         _store, manager = _manager_with_store(tmp_path)
@@ -1148,10 +1148,24 @@ def test_admission_reconciles_without_consuming_the_poll_interval(tmp_path: Path
         async def counted(*_args) -> None:
             calls.append(1)
 
+        async def refuse() -> None:
+            raise ExperimentBusyError("admission refused for the test")
+
         monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", counted)
+        monkeypatch.setattr(ExperimentManager, "_available", staticmethod(lambda: refuse()))
+        clock = [1000.0]
+        monkeypatch.setattr("fleet_rlm.experiments.time.monotonic", lambda: clock[0])
         await manager.initialize()
         assert calls == [1], "startup reconciles once"
-        await manager.start("s1", "request-1", ExperimentOptions())
-        assert len(calls) == 2, "admission must reconcile even during the poll interval"
+        # The first poll reconciles and opens the window; a later one inside it does not.
+        await manager.list("s1")
+        assert len(calls) == 2
+        clock[0] += 0.1
+        await manager.list("s1")
+        assert len(calls) == 2, "a poll inside the interval is throttled"
+        with pytest.raises(ExperimentBusyError, match="admission refused"):
+            await manager.start("s1", "request-1", ExperimentOptions())
+        assert len(calls) == 3, "admission must reconcile even during the poll interval"
+        assert not manager.busy, "no worker may be spawned by this test"
 
     asyncio.run(scenario())
