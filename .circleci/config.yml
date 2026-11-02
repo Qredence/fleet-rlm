@@ -698,7 +698,17 @@ jobs:
       - run:
           name: Publish captured notes and verified assets or verify an exact retry
           command: |
-            command -v gh >/dev/null || (sudo apt-get update && sudo apt-get install -y gh)
+            if ! command -v gh >/dev/null; then
+              # Try system install first; if the package is unavailable, add the official GitHub CLI repo and retry
+              if ! (sudo apt-get update && sudo apt-get install -y gh); then
+                echo "Installing GitHub CLI from official repository..."
+                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null
+                sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+                sudo apt-get update
+                sudo apt-get install -y gh
+              fi
+            fi
             python -m scripts.github_release --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA"
 
 workflows:
