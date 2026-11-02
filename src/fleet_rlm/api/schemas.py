@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from fleet_rlm.optimization_runs import ExperimentOptions
+from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
 MAX_TASK_CHARS = 100_000
 
@@ -63,7 +64,7 @@ class WorkspaceWriteRequest(_Request):
         },
     )
 
-    content: str | None = Field(default=None, max_length=25_000_000)
+    content: str | None = Field(default=None, max_length=MAX_WORKSPACE_FILE_BYTES)
     content_base64: str | None = Field(default=None, max_length=34_000_000)
 
     @model_validator(mode="after")

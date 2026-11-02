@@ -24,7 +24,6 @@ venv/
 .env
 .env.*
 !.env.example
-!.env.sample
 .fleet/
 # Jupyter
 .ipynb_checkpoints/
@@ -77,10 +76,6 @@ outputs/
 .agents/*
 !.agents/skills/
 .agents/skills/*
-!.agents/skills/analyzing-rlm-performance/
-.agents/skills/analyzing-rlm-performance/*
-!.agents/skills/analyzing-rlm-performance/SKILL.md
-!.agents/skills/analyzing-rlm-performance/references/
 !.agents/skills/running-the-fleet-tui/
 .agents/skills/running-the-fleet-tui/*
 !.agents/skills/running-the-fleet-tui/SKILL.md
@@ -104,31 +99,22 @@ outputs/
 .codex/*
 !.codex/environments/
 !.codex/environments/environment.toml
-!.codex/cloud-preflight.zsh
-!.codex/workspace-bootstrap.zsh
-!.codex/config.toml
-!.codex/agents/
-!.codex/agents/*.toml
 .letta/
 .opencode/
 .junie/
 .pi/
 .hermes/
-blogs/
 .cursor/
 
 # Output artifacts
 output/*
-!output/longcot-eval/
-!output/longcot-eval/**
 output/**/.DS_Store
 src/output/
 results/
-archive/
+# Root-level scratch output only; `/docs/archive/` is tracked documentation.
+/archive/
 artifacts/
 artifacts/eval/
-!src/fleet_rlm/artifacts/
-!src/fleet_rlm/artifacts/*.py
 
 # Local runtime artifacts
 .data/
@@ -141,7 +127,6 @@ fleet_rlm.db
 server.log
 .remember/
 .air/
-.air
 .posthog-events.json
 .neon
 .output.txt
@@ -190,7 +175,6 @@ mlflow_verification_report.md
 plan-code-change/
 skill-optimization/
 /traces/
-plan/
 transcript-vvqo_92l.jsonl
 
 # chunk active sidecar tracking
@@ -211,7 +195,6 @@ notebooks/*
 !notebooks/oolong_benchmark.ipynb
 !notebooks/longcot_benchmark.ipynb
 docs/benchmarks/
-.databricks
 
 # chunk review context artifacts
 .chunk/context/

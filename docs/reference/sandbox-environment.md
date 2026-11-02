@@ -129,7 +129,7 @@ This is the F0 same-process guard. It does not survive process exit or establish
 cross-worker restart safety. Do not enable unattended restart on this basis. Keep
 the guard during rollback, or deny writable admission until unresolved resources
 are reconciled. Durable recovery and atomic child publication remain separate
-gates in [PRD F](../fleet-rlm-prds/F-cleanup-publication.md).
+gates in [PRD F](../archive/fleet-rlm-prds/F-cleanup-publication.md).
 
 ### Durable ownership and admission
 

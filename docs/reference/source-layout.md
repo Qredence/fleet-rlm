@@ -66,10 +66,10 @@ TUI experiment routes delegate optimization to a CLI subprocess managed by
 PostgreSQL stores API-owned and standalone CLI run lifecycle. `fleet optimize`
 remains an independently callable synchronous CLI workflow. `optimization_runs.py`
 is neutral to the serving boundary and holds shared options, worker events, and
-legacy history import without rewriting the source files.
+artifact reads without rewriting the source files.
 
-The package contains 61 Python files: 53 implementation modules and eight package
-initializers. Resources bring the tracked source/resource target to 68 files. This
+The package contains 62 Python files: 54 implementation modules and eight package
+initializers. Resources bring the tracked source/resource target to 69 files. This
 reduces navigation boundaries, not the number of application capabilities. Release
 checks live in repository tooling at `scripts/release_checks.py`, outside the wheel.
 

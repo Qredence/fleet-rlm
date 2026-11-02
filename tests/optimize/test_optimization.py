@@ -27,6 +27,13 @@ from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
 from fleet_rlm.optimize.validation import IsolatedFleetProgram, score_split
 from fleet_rlm.replay import encode_snapshot
 
+EVENT_PREFIX = "FLEET_EVENT "
+
+
+def worker_events(output: str) -> list[dict]:
+    """Decode the worker's structured event lines, ignoring ordinary CLI prose."""
+    return [json.loads(line[len(EVENT_PREFIX) :]) for line in output.splitlines() if line.startswith(EVENT_PREFIX)]
+
 
 class Example:
     def __init__(self, task: str, source: str, critical: bool = False) -> None:
@@ -1004,7 +1011,6 @@ def test_changed_components_detects_flex_source_and_predictor_instruction_change
 def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatch, capsys, interrupted) -> None:
     """The loop closes: an approved candidate is the file the Session engine reloads and runs next Turn."""
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
-    from fleet_rlm.optimization_runs import parse_event
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     lm = dspy.LM("openai/test", engine="lm15", cache=False)
@@ -1058,8 +1064,8 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
     )
     assert store.initialized is True
     assert store.migration_pool_closed is True
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    assert [event["status"] for event in events if event and event["type"] == "terminal"] == ["approved"]
+    events = worker_events(capsys.readouterr().out)
+    assert [event["status"] for event in events if event["type"] == "terminal"] == ["approved"]
     record = store.get_optimization_run("sess_loop", version)
     assert record["status"] == "approved"
     with pytest.raises(ValueError, match="only a completed"):
@@ -1077,7 +1083,6 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
 def test_managed_approval_leaves_terminal_transition_to_api_parent(
     tmp_path, monkeypatch, capsys, stale_evidence
 ) -> None:
-    from fleet_rlm.optimization_runs import parse_event
 
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     version = "sess-managed-approval"
@@ -1153,13 +1158,12 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     assert next(i for i, (event, _) in enumerate(store.events) if event == "store.close") < next(
         i for i, (event, _) in enumerate(store.events) if event == "lease.close"
     )
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    terminal = next(event for event in events if event and event["type"] == "terminal")
+    events = worker_events(capsys.readouterr().out)
+    terminal = next(event for event in events if event["type"] == "terminal")
     assert terminal["status"] == expected
 
 
 def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_path, capsys) -> None:
-    from fleet_rlm.optimization_runs import parse_event
 
     captured = {}
     store = MemoryOptimizationStore()
@@ -1194,8 +1198,8 @@ def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_pat
     assert store.initialized is True
     assert store.migration_pool_closed is True
     assert captured["closed"] is True
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    assert [event["type"] for event in events if event] == ["started", "terminal"]
+    events = worker_events(capsys.readouterr().out)
+    assert [event["type"] for event in events] == ["started", "terminal"]
 
 
 @pytest.mark.parametrize("phase", ["search", "validation"])
@@ -1700,12 +1704,14 @@ def test_database_stop_fence_is_checked_at_safe_boundaries(tmp_path) -> None:
         [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
     )
     stop_file = tmp_path / "runs" / "s1-run" / "gepa.stop"
+    stopper = workflow._DatabaseStopper(store, "s1", "s1-run")
 
+    workflow._check_cancelled(stop_file)
     assert not workflow._database_stop_requested(store, "s1", "s1-run")
+    assert not stopper(None)
     store.records[("s1", "s1-run")]["stop_requested"] = True
     assert workflow._database_stop_requested(store, "s1", "s1-run")
-    with pytest.raises(workflow.OptimizationCancelledError, match="stop requested"):
-        workflow._check_run_cancelled(stop_file, store, "s1", "s1-run")
+    assert stopper(None)
 
 
 def test_run_persists_cancellation_without_candidate(tmp_path, monkeypatch) -> None:
@@ -1801,7 +1807,6 @@ def test_standalone_preserves_live_api_pending_launch(tmp_path, monkeypatch):
 
 
 def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outcome(tmp_path, monkeypatch, capsys):
-    from fleet_rlm.optimization_runs import parse_event
 
     run_id = "s1-managed"
     store = MemoryOptimizationStore(
@@ -1834,11 +1839,7 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
         workflow.run(args, parser, settings)
     outcome = store.get_optimization_run("s1", run_id)["worker_outcome"]
     assert outcome["status"] == "cancelled" and outcome["candidate_version"] is None
-    terminals = [
-        event
-        for line in capsys.readouterr().out.splitlines()
-        if (event := parse_event(line)) and event["type"] == "terminal"
-    ]
+    terminals = [event for event in worker_events(capsys.readouterr().out) if event["type"] == "terminal"]
     assert len(terminals) == 1
     assert terminals[0]["status"] == "cancelled"
     assert terminals[0]["worker_outcome"] == outcome
@@ -1846,7 +1847,6 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
 
 
 def test_managed_run_records_worker_outcome_without_publishing_terminal_status(tmp_path, monkeypatch, capsys) -> None:
-    from fleet_rlm.optimization_runs import parse_event
 
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     run_id = "sess-managed-run"
@@ -1886,8 +1886,8 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
     assert record["status"] == "running"
     assert record["worker_outcome"]["status"] == "completed"
     assert store.initialized is False
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    terminal = next(event for event in events if event and event["type"] == "terminal")
+    events = worker_events(capsys.readouterr().out)
+    terminal = next(event for event in events if event["type"] == "terminal")
     assert terminal["status"] == "completed"
     assert terminal["worker_outcome"]["status"] == "completed"
 

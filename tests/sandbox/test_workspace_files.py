@@ -436,3 +436,20 @@ def test_delete_checks_the_path_remotely_before_using_the_file_api(monkeypatch) 
     with pytest.raises(ValueError):
         manager.delete_workspace_file("../escape")
     assert calls == [("check", "files/a.txt"), ("delete", "/workspace/files/a.txt"), ("check", "files/link.txt")]
+
+
+@pytest.mark.parametrize("value", [-1, 25_000_001, True, 1.5, "1000"])
+def test_byte_bounds_are_rejected_before_any_provider_transfer(value):
+    """The shared 25 MB ceiling rejects a malformed bound without touching Daytona."""
+    from fleet_rlm.sandbox.workspace_io import _checked_max_bytes
+    from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
+
+    with pytest.raises(ValueError, match=f"between 0 and {MAX_WORKSPACE_FILE_BYTES}"):
+        _checked_max_bytes(value)
+
+
+@pytest.mark.parametrize("value", [0, 1, 1024, 25_000_000])
+def test_byte_bounds_accept_every_integer_in_range(value):
+    from fleet_rlm.sandbox.workspace_io import _checked_max_bytes
+
+    assert _checked_max_bytes(value) == value

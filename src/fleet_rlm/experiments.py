@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -38,6 +39,12 @@ class ExperimentBusyError(ValueError):
     """Admission or review conflicts with another owned operation."""
 
 
+# Stale-run recovery opens a connection, takes the global advisory lease, and scans the whole
+# ledger. Polled callers ask for it far more often than orphans can appear, so the observed
+# paths are throttled while startup and shutdown drain stay immediate.
+_RECOVERY_INTERVAL_SECONDS = 5.0
+
+
 def _require_worker_pipes(process: asyncio.subprocess.Process) -> tuple[Any, Any, Any]:
     """Return the configured worker pipes, failing explicitly if subprocess setup is broken."""
     if process.stdin is None or process.stdout is None or process.stderr is None:
@@ -57,6 +64,7 @@ class ExperimentManager:
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
         self._owner_lease: Connection | None = None
+        self._recovered_at: float | None = None
 
     @property
     def busy(self) -> bool:
@@ -67,7 +75,9 @@ class ExperimentManager:
         """Fence abandoned API workers without rerunning them."""
         async with self._lock:
             await self._ensure_owner_lease()
-        await self._recover_stale_runs()
+        # Unthrottled, and deliberately not counting as the polled attempt: a worker that still
+        # held the global lease here must be re-checked on the next poll, not five seconds later.
+        await self._reconcile_stale_runs()
 
     async def _ensure_owner_lease(self) -> None:
         """Register liveness before any admission; caller holds the manager lock."""
@@ -75,6 +85,24 @@ class ExperimentManager:
             self._owner_lease = await asyncio.to_thread(self.store.acquire_optimization_owner_lease, self.owner_id)
 
     async def _recover_stale_runs(self) -> None:
+        """Reconcile orphaned ledger rows at most once per interval.
+
+        This is the polled-read entry point: `list`, `detail`, and an accepting `status` each
+        reach it on every client refresh. Unthrottled, one TUI session cost a connection, the
+        global advisory lease, and two ledger scans per second. A failed attempt still counts,
+        because the marker is stamped before the body runs: an unreachable database is retried
+        on the next interval instead of on every poll.
+
+        Admission and review do not use this throttle. They depend on fresh reconciliation for
+        correctness and are driven by explicit user actions, not by a timer.
+        """
+        now = time.monotonic()
+        if self._recovered_at is not None and now - self._recovered_at < _RECOVERY_INTERVAL_SECONDS:
+            return
+        self._recovered_at = now
+        await self._reconcile_stale_runs()
+
+    async def _reconcile_stale_runs(self) -> None:
         """Reconcile orphaned ledger rows only while holding the worker's global lease."""
         async with self._lock:
             await self._ensure_owner_lease()
@@ -164,7 +192,7 @@ class ExperimentManager:
     async def start(self, session_id: str, request_id: str, options: ExperimentOptions) -> dict[str, Any]:
         """Persist an idempotent intent before spawning any paid work."""
         session_id = validate_session_id(session_id)
-        await self._recover_stale_runs()
+        await self._reconcile_stale_runs()
         async with self._lock:
             for prior in await asyncio.to_thread(self.store.list_optimization_runs, session_id):
                 if prior["request_id"] == request_id:
@@ -206,7 +234,7 @@ class ExperimentManager:
 
     async def review(self, session_id: str, run_id: str, decision: str, request_id: str) -> dict[str, Any]:
         """Serialize explicit review while the existing optimizer performs evidence checks."""
-        await self._recover_stale_runs()
+        await self._reconcile_stale_runs()
         async with self._lock:
             record = await self.get(session_id, run_id)
             if record.get("review_request_id") == request_id:
@@ -458,7 +486,12 @@ class ExperimentManager:
         """Report admission and live/unfinished worker ownership to the local launcher."""
         # Setup apply already holds this lock while it asks for status.
         if not self._lock.locked():
-            await self._recover_stale_runs()
+            # The launcher polls this every second while draining services and must observe
+            # recovery promptly, so a closed admission bypasses the poll throttle.
+            if self.accepting:
+                await self._recover_stale_runs()
+            else:
+                await self._reconcile_stale_runs()
         records = await asyncio.to_thread(self.store.list_optimization_runs)
         active = [public_run(record) for record in records if record["status"] in ACTIVE_STATUSES]
         return {"accepting": self.accepting, "busy": self.busy or bool(active), "experiments": active}

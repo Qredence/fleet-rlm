@@ -9,7 +9,7 @@
   "ty.importStrategy": "fromEnvironment",
   "cursorpyright.analysis.typeCheckingMode": "off",
   "cursorpyright.disableLanguageServices": true,
-  "fastapi.entryPoint": "fleet_rlm.main:app",
+  "fastapi.entryPoint": "fleet_rlm.api.app:create_app",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,

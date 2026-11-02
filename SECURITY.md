@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.7.x   | Current maintenance line |
-| < 0.7   | Upgrade to the current line |
+| 0.10.x  | Current maintenance line |
+| < 0.10  | Upgrade to the current line |
 
 The source version is defined in `pyproject.toml`. This table identifies the
 maintenance line, not a claim that a particular checkout has passed a security

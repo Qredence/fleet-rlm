@@ -12,7 +12,6 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import uvicorn
 from pydantic import ValidationError
@@ -25,7 +24,7 @@ from fleet_rlm.observability import trace_object as _trace_object
 from fleet_rlm.optimization_runs import add_optimization_arguments, read_worker_settings
 from fleet_rlm.replay import REVIEW_STATUSES
 from fleet_rlm.tui.app import run_interactive_cli
-from fleet_rlm.tui.web import serve_web_client, validate_api_url, web_auth_token
+from fleet_rlm.tui.web import serve_web_client, validate_api_url, validate_http_origin, web_auth_token
 from fleet_rlm.workspace import validate_session_id
 
 _CONSOLE = Console()
@@ -51,21 +50,9 @@ def _web_api_url(value: str) -> str:
 def _web_public_url(value: str) -> str:
     """Validate and normalize the browser-facing URL used behind a proxy or wildcard bind."""
     try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError:
-        raise argparse.ArgumentTypeError("public URL must be a valid HTTP(S) URL") from None
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-        or (port is not None and not 1 <= port <= 65535)
-    ):
-        raise argparse.ArgumentTypeError("public URL must be an HTTP(S) URL without credentials, query, or fragment")
-    return value.rstrip("/")
+        return validate_http_origin(value, label="public URL")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _configuration_error(exc: ValueError) -> str:

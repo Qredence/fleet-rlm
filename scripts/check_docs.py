@@ -15,8 +15,13 @@ MARKDOWN_PATHS = (ROOT / "README.md", ROOT / "ARCHITECTURE.md", ROOT / "CONTRIBU
 
 
 def markdown_files() -> list[Path]:
-    """Return the maintained Markdown files covered by the documentation gate."""
-    docs = (path for path in (ROOT / "docs").rglob("*.md") if "plans" not in path.relative_to(ROOT / "docs").parts)
+    """Return the maintained Markdown files covered by the documentation gate.
+
+    `plans` and `archive` are local working notes and frozen history: their links describe
+    the layout at the time of writing and are not maintained.
+    """
+    skipped = {"plans", "archive"}
+    docs = (path for path in (ROOT / "docs").rglob("*.md") if skipped.isdisjoint(path.relative_to(ROOT / "docs").parts))
     return sorted(set(MARKDOWN_PATHS).union(docs))
 
 

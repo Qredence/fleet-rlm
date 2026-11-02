@@ -23,14 +23,21 @@ from fleet_rlm.sandbox.runtime.fs_ops import (
     verify_python_artifact_code,
     workspace_files_metadata_code,
 )
-from fleet_rlm.workspace import _workspace_relative_path
+from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES, _workspace_relative_path
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_PROMOTED_FILES = 100
-_MAX_PROMOTED_BYTES = 25_000_000
+_MAX_PROMOTED_BYTES = MAX_WORKSPACE_FILE_BYTES
+
+
+def _checked_max_bytes(max_bytes: Any) -> int:
+    """Reject a non-integer or out-of-range byte bound before a provider transfer."""
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= MAX_WORKSPACE_FILE_BYTES:
+        raise ValueError(f"max_bytes must be an integer between 0 and {MAX_WORKSPACE_FILE_BYTES}")
+    return max_bytes
 
 
 class WorkspaceIOMixin:
@@ -117,7 +124,7 @@ class WorkspaceIOMixin:
         clean_path = _workspace_relative_path(rel_path)
         if not isinstance(content, bytes):
             raise TypeError("workspace content must be bytes")
-        if len(content) > 25_000_000:
+        if len(content) > MAX_WORKSPACE_FILE_BYTES:
             raise ValueError("Workspace file exceeds the 25 MB limit")
         sandbox = self.ensure_sandbox()
         self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
@@ -129,20 +136,21 @@ class WorkspaceIOMixin:
         clean_path = _workspace_relative_path(rel_path)
         source = Path(local_path)
         size = source.stat().st_size
-        if size > 25_000_000:
+        if size > MAX_WORKSPACE_FILE_BYTES:
             raise ValueError("Workspace file exceeds the 25 MB limit")
         sandbox = self.ensure_sandbox()
         self._workspace_file_metadata(sandbox, clean_path, create_parents=True)
         with_retries(lambda: sandbox.fs.upload_file(str(source), f"/workspace/{clean_path}", timeout=1800))
         return f"/workspace/{clean_path}"
 
-    def read_workspace_file(self: DaytonaSandboxManager, rel_path: str, *, max_bytes: int = 25_000_000) -> bytes:
+    def read_workspace_file(
+        self: DaytonaSandboxManager, rel_path: str, *, max_bytes: int = MAX_WORKSPACE_FILE_BYTES
+    ) -> bytes:
         """Read one workspace file, refusing anything over max_bytes.
 
         Metadata is checked remotely first, and a size change during download raises.
         """
-        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 25_000_000:
-            raise ValueError("max_bytes must be an integer between 0 and 25000000")
+        _checked_max_bytes(max_bytes)
         clean_path = _workspace_relative_path(rel_path)
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
@@ -157,16 +165,15 @@ class WorkspaceIOMixin:
         clean_path = _workspace_relative_path(rel_path)
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_files_metadata(
-            sandbox, [clean_path], create_parents=False, max_bytes=25_000_000, include_digest=True
+            sandbox, [clean_path], create_parents=False, max_bytes=MAX_WORKSPACE_FILE_BYTES, include_digest=True
         )[0]
         return {"path": clean_path, "size_bytes": metadata["size"], "sha256": metadata["sha256"]}
 
     def read_workspace_file_to_path(
-        self: DaytonaSandboxManager, rel_path: str, local_path: str | Path, *, max_bytes: int = 25_000_000
+        self: DaytonaSandboxManager, rel_path: str, local_path: str | Path, *, max_bytes: int = MAX_WORKSPACE_FILE_BYTES
     ) -> int:
         """Download a workspace file to disk through Daytona's path overload."""
-        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 25_000_000:
-            raise ValueError("max_bytes must be an integer between 0 and 25000000")
+        _checked_max_bytes(max_bytes)
         clean_path = _workspace_relative_path(rel_path)
         sandbox = self.ensure_sandbox()
         metadata = self._workspace_file_metadata(sandbox, clean_path, create_parents=False, max_bytes=max_bytes)
@@ -243,7 +250,9 @@ class WorkspaceIOMixin:
         if not clean_paths:
             return {}
         sandbox = self.ensure_sandbox()
-        metadata = self._workspace_files_metadata(sandbox, clean_paths, create_parents=False, max_bytes=25_000_000)
+        metadata = self._workspace_files_metadata(
+            sandbox, clean_paths, create_parents=False, max_bytes=MAX_WORKSPACE_FILE_BYTES
+        )
         if sum(item["size"] for item in metadata) > max_total_bytes:
             raise ValueError("Workspace batch exceeds the transfer quota")
         trace = (
@@ -277,7 +286,7 @@ class WorkspaceIOMixin:
         clean = {_workspace_relative_path(path): content for path, content in files.items()}
         if not clean:
             return
-        if any(not isinstance(content, bytes) or len(content) > 25_000_000 for content in clean.values()):
+        if any(not isinstance(content, bytes) or len(content) > MAX_WORKSPACE_FILE_BYTES for content in clean.values()):
             raise ValueError("Workspace files must be bytes of at most 25 MB")
         sandbox = self.ensure_sandbox()
         self._workspace_files_metadata(sandbox, list(clean), create_parents=True)
