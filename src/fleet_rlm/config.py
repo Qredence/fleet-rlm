@@ -66,6 +66,7 @@ _TOML_FIELDS = {
         key: f"mlflow_local_{key}"
         for key in ("port", "data_dir", "experiment_name", "eval_experiment_name", "optimization_experiment_name")
     },
+    "mlflow": {"mode": "mlflow_mode"},
     "mlflow.databricks": {
         key: f"mlflow_databricks_{key}"
         for key in (
@@ -194,6 +195,8 @@ def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
         children = tables.pop(parent)
         if not isinstance(children, dict):
             raise ValueError(f"Fleet TOML {parent} must be a table")
+        if parent == "mlflow" and "mode" in children:
+            tables["mlflow"] = {"mode": children.pop("mode")}
         tables.update({f"{parent}.{name}": values for name, values in children.items()})
     result = {}
     for table, values in tables.items():
@@ -900,6 +903,6 @@ class FleetSettings(BaseSettings):
 
 
 @lru_cache(maxsize=1)
-def get_settings(mlflow_mode: Literal["local", "databricks"] = "local") -> FleetSettings:
+def get_settings(mlflow_mode: Literal["local", "databricks"] | None = None) -> FleetSettings:
     """Load and cache process settings."""
-    return FleetSettings(mlflow_mode=mlflow_mode)
+    return FleetSettings(**({"mlflow_mode": mlflow_mode} if mlflow_mode is not None else {}))

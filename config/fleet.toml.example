@@ -59,6 +59,9 @@ lakebase_endpoint = ""
 database_schema = "fleet_rlm_lite"
 
 # Local MLflow is managed by `fleet cli`. Standalone commands connect to it.
+[mlflow]
+mode = "local"
+
 [mlflow.local]
 port = 5001
 data_dir = ".fleet/mlflow"
