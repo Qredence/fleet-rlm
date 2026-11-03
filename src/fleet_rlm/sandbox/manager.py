@@ -145,7 +145,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     max_depth: int = 3
     max_children: int = 8
     max_active_children: int = 4
-    turn_timeout_seconds: int = 900
+    turn_timeout_seconds: int = 0
     linked_children: bool = True
     disposable: bool = False
     shared_notes_subpath: str = ""

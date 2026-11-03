@@ -172,7 +172,7 @@ def test_toml_turn_timeout_stays_a_bounded_integer(value):
 @pytest.mark.parametrize(
     ("configured", "configured_source", "requested", "expected"),
     [
-        (900, "default", None, ("default", 900)),
+        (900, "default", None, ("default", 0)),
         (1200, "toml", None, ("configuration", 1200)),
         (1200, "environment", 600, ("request", 600)),
         (1200, "toml", 0, ("request", None)),

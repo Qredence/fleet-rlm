@@ -123,7 +123,7 @@ the engine runs. The TUI exposes the same opt-in with `/replay on` and `/replay 
 
 `timeout_seconds` is an optional strict integer and the only per-Turn deadline
 override. Omitting it or sending `null` (the default) inherits
-`turn_timeout_seconds`, or `900` when configuration does not set it. `0` disables
+`turn_timeout_seconds`, or `0` (no Fleet deadline) when configuration does not set it. `0` disables
 the Fleet wall-clock deadline for this Turn. A positive value must be `10`–`3600`
 and sets this Turn's duration. Booleans, floats, numeric strings, negatives,
 `1`–`9`, and values above `3600` return `422` with validation errors for

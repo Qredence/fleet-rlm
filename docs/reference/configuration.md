@@ -33,7 +33,7 @@ source control.
 | `FLEET_MAX_AGENT_DEPTH` | `3` | Maximum recursive child depth (root is zero). |
 | `FLEET_MAX_CHILD_SANDBOXES` | `8` | Total child allocations per turn. |
 | `FLEET_MAX_ACTIVE_CHILDREN` | `4` | Active child capacity; exhaustion fails immediately, avoiding a spawn/join wait cycle. |
-| `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. `0` is opt-in and is not the default. |
+| `FLEET_TURN_TIMEOUT_SECONDS` | `0` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. The shipped value is `0`; provider TTL and idle bounds still apply. |
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
@@ -163,7 +163,8 @@ the fallback if local state is lost. This is not a distributed global reaper.
 
 `FLEET_TURN_TIMEOUT_SECONDS` (TOML `[runtime] turn_timeout_seconds`) accepts exactly
 `0` or `10`–`3600` as an integer. `0` means the Turn has no Fleet wall-clock
-deadline. It is opt-in, not the default: the shipped value stays `900`. Booleans,
+deadline. The shipped value is `0`, so a Session runs without a Fleet deadline
+unless it configures one. Booleans,
 floats, negatives, `1`–`9`, values above `3600`, and numeric text outside the
 environment transport are rejected before a Session runs.
 
@@ -174,7 +175,7 @@ precedence:
 | --- | --- |
 | `request` | `POST /sessions/{session_id}/turn` supplies `timeout_seconds`. The terminal client's `/timeout` override is also sent this way. |
 | `configuration` | `turn_timeout_seconds` was set by TOML, `.env`, or the environment. |
-| `default` | Neither override is present, so the shipped `900` applies. |
+| `default` | Neither override is present, so the shipped `0` applies. |
 
 Omitting the request field or sending `null` inherits the configured value.
 Request `0` disables the Fleet deadline for that Turn. The server reports only

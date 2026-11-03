@@ -44,7 +44,8 @@ Use a unique Session name. Run this in a real terminal/PTY. The terminal
 launcher owns the temporary API server and stops it on `/exit`. For the bounded
 P5.5 canary, apply the previously agreed process-only limits: 20 Turn model
 calls, zero automatic model retries, 2048-token root/sub outputs, and a
-1024-token reflection output. Keep the 900-second Turn deadline. Verify `/config`
+1024-token reflection output. Set the Turn deadline explicitly (for example
+`FLEET_TURN_TIMEOUT_SECONDS=900`) because the shipped default is `0`, no deadline. Verify `/config`
 before entering the task; do not print secret values.
 
 Use `/mode hybrid`, then enter exactly:

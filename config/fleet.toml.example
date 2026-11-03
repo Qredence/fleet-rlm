@@ -9,7 +9,8 @@ schema_version = 4
 
 [runtime]
 execution_mode = "hybrid"
-turn_timeout_seconds = 900
+# 0 = no Fleet Turn deadline; provider TTL and idle bounds still apply.
+turn_timeout_seconds = 0
 max_llm_calls_per_turn = 150
 max_agent_depth = 3
 max_child_sandboxes = 8

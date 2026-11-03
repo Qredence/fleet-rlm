@@ -838,7 +838,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         "submit_rejections": 2,
         "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
         "deadline_source": "configuration",
-        "effective_seconds": 900,
+        "effective_seconds": None,
         # A completed Turn keeps its warm root sandbox for the next Turn.
         "cleanup": "not_required",
     }
@@ -2277,11 +2277,11 @@ def test_turn_request_timeout_rejects_values_outside_the_strict_contract(monkeyp
 @pytest.mark.parametrize(
     ("configured", "configured_source", "body_timeout", "expected"),
     [
-        (900, "default", "omit", ("default", 900)),
+        (900, "default", "omit", ("default", 0)),
         (1200, "toml", "omit", ("configuration", 1200)),
         (1200, "toml", 300, ("request", 300)),
         (1200, "toml", 0, ("request", None)),
-        (900, "default", None, ("default", 900)),
+        (900, "default", None, ("default", 0)),
     ],
 )
 def test_deadline_provenance_matches_across_span_turn_record_and_replay(

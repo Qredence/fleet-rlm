@@ -96,8 +96,9 @@ RETIRED_MLFLOW_ENV = {
     "MLFLOW_EXPERIMENT_NAME",
     *(f"FLEET_MLFLOW_{key.upper()}" for key in _TOML_FIELDS["mlflow.databricks"]),
 }
-# The shipped Fleet deadline. It stays finite; deadline-free execution is opt-in per Turn.
-DEFAULT_TURN_TIMEOUT_SECONDS = 900
+# The shipped Fleet deadline: none. A Turn runs to its model-call budget unless a Session
+# configures a finite deadline, so a legitimate long Turn is never cut off by a default.
+DEFAULT_TURN_TIMEOUT_SECONDS = 0
 _TURN_TIMEOUT_RULE = "0 or between 10 and 3600 seconds"
 
 
