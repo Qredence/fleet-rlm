@@ -11,7 +11,7 @@ source control.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/fleet` | PostgreSQL DSN for Session, Turn and memory storage. |
-| `FLEET_DATABASE_SCHEMA` | `fleet_rlm_lite` in the public example (`public` code fallback) | Lowercase schema name for Fleet Lite tables. The fresh Lakebase database is configured to use a dedicated schema; provision a separate migration role and grant the runtime role access to its objects. |
+| `FLEET_DATABASE_SCHEMA` | `fleet_rlm_lite` in the public example (`public` code fallback) | Lowercase schema name for Fleet Lite tables. Choose a schema for Fleet tables; optionally provision a separate migration role and grant the runtime role access to its objects. |
 | `FLEET_DATABASE_MIGRATION_URL` | empty | Optional secret-only DSN for schema migrations. When omitted, migrations use `FLEET_DATABASE_URL`; when separate, it must target the same database. |
 | `FLEET_LAKEBASE_ENDPOINT` | empty | Optional Lakebase endpoint resource path. When set, Fleet generates a fresh Databricks OAuth database credential for each new physical connection; the DSN must contain host/user/database, omit password, and require TLS. |
 | `FLEET_DAYTONA_API_KEY` | empty | Daytona API credential. |
@@ -64,9 +64,9 @@ Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
 validation; it does not authenticate callers. The API has no authentication.
 
-Local MLflow is the default for all commands. Select Databricks with
-`fleet cli databricks` or `--mlflow databricks` on standalone commands.
-The selected backend is an explicit command choice, never an environment default.
+The MLflow backend comes from `[mlflow].mode` in TOML (default `local`).
+Select Databricks explicitly with `fleet cli databricks` or `--mlflow databricks`;
+an explicit command selection overrides TOML.
 `[mlflow.local]` and `[mlflow.databricks]` keep their values independent.
 `fleet cli` manages the local server; standalone commands require it to be
 running. Tracking initialization failure prevents API readiness. `/health`
@@ -117,12 +117,9 @@ Set `FLEET_DATABASE_MIGRATION_URL` to a separate DDL role when runtime privilege
 must not create or alter schema objects. Fleet creates the configured schema and
 applies versioned migrations through that role; provision USAGE and required
 table privileges for the runtime role. The migration role must be able to create
-the schema and objects. The current Lakebase setup uses native-password
-`fleet_migrator` for migrations and `fleet_app` for runtime queries and session
-leases; both DSNs are secret-only and must remain in ignored local or deployment
-configuration. No new service principal or shared authentication flow is
-required. MLflow uses Databricks SDK authentication and Gateway uses the
-configured `DATABRICKS_TOKEN`. Lakebase OAuth remains an optional alternative;
+the schema and objects. Keep DSNs in ignored local or deployment configuration.
+MLflow uses Databricks SDK authentication and Gateway uses the configured
+`DATABRICKS_TOKEN`. Lakebase OAuth is optional;
 when used, Fleet validates TLS and that both DSNs target the same host and
 database, then obtains credentials separately for each role from the configured
 Databricks identity.
