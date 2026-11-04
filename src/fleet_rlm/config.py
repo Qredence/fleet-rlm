@@ -402,7 +402,9 @@ class FleetSettings(BaseSettings):
         le=10_000,
         validation_alias=AliasChoices("FLEET_MAX_LLM_CALLS_PER_TURN", "MAX_LLM_CALLS_PER_TURN"),
     )
-    execution_mode: Literal["rlm", "flex", "hybrid"] = Field(default="hybrid", validation_alias="FLEET_EXECUTION_MODE")
+    execution_mode: Literal["direct", "rlm", "flex", "hybrid"] = Field(
+        default="hybrid", validation_alias="FLEET_EXECUTION_MODE"
+    )
     max_agent_depth: int = Field(default=3, ge=0, le=8, validation_alias="FLEET_MAX_AGENT_DEPTH")
     max_child_sandboxes: int = Field(default=8, ge=0, le=64, validation_alias="FLEET_MAX_CHILD_SANDBOXES")
     max_active_children: int = Field(default=4, ge=1, le=16, validation_alias="FLEET_MAX_ACTIVE_CHILDREN")

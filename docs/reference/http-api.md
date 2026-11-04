@@ -19,7 +19,7 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/experiments/{run_id}` | Read one experiment snapshot and its bounded saved comparison. |
 | `POST` | `/sessions/{session_id}/experiments/{run_id}/cancel` | Request cooperative cancellation of a running experiment. |
 | `POST` | `/sessions/{session_id}/experiments/{run_id}/review` | Explicitly approve or reject a candidate. |
-| `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `rlm`, `flex`, or `hybrid` mode. |
+| `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `direct`, `flex`, `rlm`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
 | `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
 | `GET` | `/sessions/{session_id}/turns/{turn_id}` | Recover a durable running/terminal turn outcome directly from Postgres without replaying it; available while another worker owns the Session. |

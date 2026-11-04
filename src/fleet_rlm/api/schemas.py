@@ -46,9 +46,9 @@ class TurnRequest(_Request):
 
 
 class ModeRequest(_Request):
-    """Request to switch a Session's execution mode to rlm, flex, or hybrid."""
+    """Request to switch a Session's execution mode to direct, flex, rlm, or hybrid."""
 
-    mode: str = Field(pattern="^(rlm|flex|hybrid)$")
+    mode: str = Field(pattern="^(direct|flex|rlm|hybrid)$")
 
 
 class WorkspaceWriteRequest(_Request):

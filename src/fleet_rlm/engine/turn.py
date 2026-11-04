@@ -298,6 +298,13 @@ def run_turn(
                     name: getattr(prediction, name, None)
                     for name in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
                 }
+                # Direct mode inlines the workspace into its prompt; keep that measurable per Turn
+                # rather than inferring it from the route.
+                direct_context = {
+                    name: getattr(prediction, name, None)
+                    for name in ("direct_context_chars", "direct_context_truncated")
+                    if getattr(prediction, name, None) is not None
+                }
                 learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
                 route = str(getattr(prediction, "route", Route.RLM.value))
                 evidence = deepcopy(getattr(prediction, "execution_evidence", {}))
@@ -331,6 +338,7 @@ def run_turn(
                     "execution_mode": runtime.engine.execution_mode,
                     "trace_id": trace_id,
                     **usage,
+                    **direct_context,
                     **environment,
                     "context_files": inputs["context_files"],
                     "artifact_capture": artifact_capture,

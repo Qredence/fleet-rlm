@@ -29,7 +29,7 @@ source control.
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
-| `FLEET_EXECUTION_MODE` | `hybrid` | Strict `rlm`, strict `flex`, or routed `hybrid`; sessions can override and persist the selection. |
+| `FLEET_EXECUTION_MODE` | `hybrid` | Strict `direct`, strict `flex`, strict `rlm`, or routed `hybrid`; sessions can override and persist the selection. Strict `direct` folds the Session's `files/` into one prompt, because that route has no workspace access; the inlined size is recorded as `direct_context_chars` and a clipped prompt as `direct_context_truncated`. |
 | `FLEET_MAX_AGENT_DEPTH` | `3` | Maximum recursive child depth (root is zero). |
 | `FLEET_MAX_CHILD_SANDBOXES` | `8` | Total child allocations per turn. |
 | `FLEET_MAX_ACTIVE_CHILDREN` | `4` | Active child capacity; exhaustion fails immediately, avoiding a spawn/join wait cycle. |

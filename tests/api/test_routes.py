@@ -38,7 +38,9 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
     assert "post" in schema["paths"]["/skills/push"]
     turn = schema["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]["text/event-stream"]
     assert turn["schema"] == {"type": "string"} and "itemSchema" not in turn
-    assert schema["components"]["schemas"]["ModeRequest"]["properties"]["mode"]["pattern"] == "^(rlm|flex|hybrid)$"
+    assert (
+        schema["components"]["schemas"]["ModeRequest"]["properties"]["mode"]["pattern"] == "^(direct|flex|rlm|hybrid)$"
+    )
     config = schema["paths"]["/sessions/{session_id}/config"]["get"]["responses"]["200"]["content"]
     assert config["application/json"]["schema"] == {"$ref": "#/components/schemas/SessionConfig"}
     workspace_request = schema["components"]["schemas"]["WorkspaceWriteRequest"]

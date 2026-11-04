@@ -2511,14 +2511,14 @@ components:
       properties:
         mode:
           type: string
-          pattern: ^(rlm|flex|hybrid)$
+          pattern: ^(direct|flex|rlm|hybrid)$
           title: Mode
       additionalProperties: false
       type: object
       required:
       - mode
       title: ModeRequest
-      description: Request to switch a Session's execution mode to rlm, flex, or hybrid.
+      description: Request to switch a Session's execution mode to direct, flex, rlm, or hybrid.
     ModelRequest:
       properties:
         role:

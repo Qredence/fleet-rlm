@@ -203,7 +203,15 @@ class SessionRuntime:
             "artifacts": artifacts,
             **{
                 key: turn_record[key]
-                for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
+                for key in (
+                    "lm_calls",
+                    "sandbox_errors",
+                    "submit_rejections",
+                    "budget_breakdown",
+                    # Direct mode inlines the workspace; the caller needs that measurement too.
+                    "direct_context_chars",
+                    "direct_context_truncated",
+                )
                 if key in turn_record
             },
             # The status payload carries the same provider-resolved identity as the record.

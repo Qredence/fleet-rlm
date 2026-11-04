@@ -248,11 +248,18 @@ def test_batch_decisions_keep_alignment_and_evidence(monkeypatch):
         (None, "hybrid", "direct", None),
         ("selected", "hybrid", "rlm", "selected_context"),
         (None, "rlm", "rlm", "session_mode"),
+        # An operator-selected direct mode keeps the direct route even with a context selected;
+        # the direct branch inlines the workspace instead of overriding the route.
+        ("selected", "direct", "direct", "session_mode"),
+        (None, "direct", "direct", "session_mode"),
+        (None, "flex", "flex", "session_mode"),
     ],
 )
-def test_routing_evidence_distinguishes_backend_and_override(backend, context, mode, expected, reason):
+def test_routing_evidence_distinguishes_backend_and_override(monkeypatch, backend, context, mode, expected, reason):
     events = []
     m = DaytonaSandboxManager("key", "org", "volume", "test")
+    # The direct lane inlines the workspace, so it inspects files; keep this test off the provider.
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
     m.event_callback = lambda payload: events.append((payload["event"], payload))
     root = dspy.LM("openai/test-root", engine="lm15", cache=False)
     lm = type("TypeSafe", (), {"model": "test-jev"})() if backend == "typesafe" else None
@@ -266,6 +273,7 @@ def test_routing_evidence_distinguishes_backend_and_override(backend, context, m
     )
     engine.direct_cot = lambda **_kwargs: SimpleNamespace(answer="ok")
     engine.primary_rlm = lambda **_kwargs: SimpleNamespace(answer="ok")
+    engine.flex_agent = lambda **_kwargs: SimpleNamespace(answer="ok")
     try:
         result = engine(workspace_manifest="", memory_summary="", task="greeting", context=context, execution_mode=mode)
         evidence = next(p["evidence"] for name, p in events if name == "triage_decision")

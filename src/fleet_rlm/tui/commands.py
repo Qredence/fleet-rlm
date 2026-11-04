@@ -25,7 +25,7 @@ from fleet_rlm.contracts import catalog_entries
 from fleet_rlm.optimization_runs import ExperimentOptions, add_search_arguments
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
-MODES = ("rlm", "flex", "hybrid")
+MODES = ("direct", "flex", "rlm", "hybrid")
 
 
 @dataclass(slots=True)
@@ -659,7 +659,11 @@ COMMANDS: dict[str, Command] = {
         category="Workspace & Context",
     ),
     "/mode": Command(
-        "/mode [rlm|flex|hybrid]", "inspect or change execution mode", _mode, _MODE_OPTIONS, category="Session & Models"
+        "/mode [direct|flex|rlm|hybrid]",
+        "inspect or change execution mode",
+        _mode,
+        _MODE_OPTIONS,
+        category="Session & Models",
     ),
     "/timeout": Command(
         "/timeout <seconds|off|default>",
