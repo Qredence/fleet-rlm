@@ -6,6 +6,7 @@ This module is a leaf. The runtime (`engine`, `sandbox`) and the offline tooling
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import xml.etree.ElementTree as ElementTree
@@ -186,8 +187,9 @@ def decision_evidence(decision: Any, lm: Any) -> dict[str, Any]:
     }
 
 
-def item_decision(choices: list[str]) -> type[dspy.Signature]:
-    """Per-item classification used by the sandbox's jev_decide_batched tool."""
+@functools.lru_cache(maxsize=64)
+def _item_decision_cached(choices: tuple[str, ...]) -> type[dspy.Signature]:
+    """Build the classification signature for one choice vocabulary."""
     return dspy.make_signature(
         {
             "item": (str, dspy.InputField()),
@@ -199,3 +201,12 @@ def item_decision(choices: list[str]) -> type[dspy.Signature]:
         },
         signature_name="ItemDecision",
     )
+
+
+def item_decision(choices: list[str]) -> type[dspy.Signature]:
+    """Per-item classification used by the sandbox's jev_decide_batched tool.
+
+    The returned class is shared across callers with the same vocabulary, so treat
+    it as immutable: build a new signature instead of editing this one.
+    """
+    return _item_decision_cached(tuple(choices))
