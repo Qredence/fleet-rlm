@@ -26,6 +26,8 @@ source control.
 | `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |
 | `DATABRICKS_TOKEN` | empty | Databricks credential for Unity Gateway `openai/` models. |
 | `FLEET_LLM_BASE_URL` | derived from `DATABRICKS_HOST` | Optional Unity Gateway base URL override, normally `https://<workspace-host>/ai-gateway/mlflow/v1`. |
+| `COMMAND_CODE_BASE_URL` | empty | Inference endpoint that takes precedence over `FLEET_LLM_BASE_URL` when set; must be HTTPS. |
+| `COMMAND_CODE_API_KEY` | empty | Inference credential that takes precedence over `DATABRICKS_TOKEN` when set, so a non-Databricks provider never requires overwriting the Databricks credential. |
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
