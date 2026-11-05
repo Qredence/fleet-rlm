@@ -276,7 +276,9 @@ class AdaptiveFleetEngine(dspy.Module):
                 raise ValueError("Dataset source changed; select the new revision")
         route = self._route(mode, task, workspace_manifest, skills_catalog, context)
         skills_catalog = self._select_skills(task, skills_catalog, route)
-        return self._execute(route, workspace_manifest, memory_summary, task, skills_catalog, session_history, context)
+        return self._execute(
+            route, workspace_manifest, memory_summary, task, skills_catalog, session_history, context, mode
+        )
 
     def _inline_context(self, task: str, workspace_manifest: str) -> tuple[str, int, bool]:
         """Fold this Session's workspace files into the task for the context-free direct prompt.
@@ -435,12 +437,14 @@ class AdaptiveFleetEngine(dspy.Module):
         skills_catalog: str,
         session_history: str,
         context: Any,
+        mode: str,
     ) -> dspy.Prediction:
         if route is Route.DIRECT:
-            # The direct prompt has no workspace access, so the context is inlined exactly as a
-            # single-shot benchmark request would carry it. The inlining is measured, never silent.
-            inlined, chars, truncated = self._inline_context(task, workspace_manifest)
-            self.sandbox_mgr.emit("direct_context", chars=chars, truncated=truncated)
+            inlined, chars, truncated = task, 0, False
+            if mode == "direct":
+                # Explicit direct mode carries workspace context in its single prompt.
+                inlined, chars, truncated = self._inline_context(task, workspace_manifest)
+                self.sandbox_mgr.emit("direct_context", chars=chars, truncated=truncated)
             with dspy.context(lm=self._metered_root, adapter=self.root_adapter):
                 answer = self.direct_cot(
                     memory_summary=memory_summary,

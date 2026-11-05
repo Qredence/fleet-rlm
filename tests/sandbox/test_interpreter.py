@@ -91,7 +91,9 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
         engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=3)
     with dspy.context(disable_history=True):
         for _ in range(2):
-            prediction = engine._execute(Route(route), "files/selected.csv", "", "Sum the values", "", "", dataset)
+            prediction = engine._execute(
+                Route(route), "files/selected.csv", "", "Sum the values", "", "", dataset, route
+            )
             assert prediction.answer == "28" and prediction.route == route
             assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
     assert serialized == [dataset, dataset]
@@ -130,7 +132,7 @@ def test_dataset_initialization_failure_closes_native_interpreters(sandbox, rout
     else:
         engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory)
     with pytest.raises(dspy.CodeInterpreterError, match=r"source changed|FileNotFoundError"):
-        engine._execute(Route(route), "", "", "Read the selected file", "", "", dataset)
+        engine._execute(Route(route), "", "", "Read the selected file", "", "", dataset, route)
     assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
     assert lm.history == []
 
@@ -1031,7 +1033,7 @@ def test_native_agent_parse_failure_survives_nested_bridge(sandbox, route, monke
     engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
     engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=1)
     with pytest.raises((dspy.AdapterParseError, dspy.CodeExecutionError)) as raised:
-        engine._execute(Route(route), "", "", "Compute a number", "", "", None)
+        engine._execute(Route(route), "", "", "Compute a number", "", "", None, route)
     assert "invalid structured response" in _failure_message(raised.value, "parse-test")
 
 

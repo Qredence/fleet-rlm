@@ -103,7 +103,7 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
                     decision = engine.triage(task="solve fixture", workspace_manifest="", skills_catalog="").route
                 assert isinstance(decision, engine.triage.signature.fields["route"].annotation)
                 assert decision.value == route.value
-                result = engine._execute(route, "", "", "solve fixture", "", "", None)
+                result = engine._execute(route, "", "", "solve fixture", "", "", None, mode)
                 assert result.answer == "right" and result.route == route.value
 
     assert native.execution_mode == mode

@@ -362,7 +362,8 @@ def run_tasks(
                     response.raise_for_status()
                     config = response.json()
                     if arm is not None:
-                        assert expected_configuration is not None
+                        if expected_configuration is None:
+                            raise ValueError("A comparison arm requires expected_configuration")
                         _comparison_config(config, direct_lm, expected_configuration)
                         if arm in {"hybrid", "rlm"} and config.get("mode") != arm:
                             raise ValueError("Fleet did not apply the selected comparison mode")

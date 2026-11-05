@@ -369,7 +369,7 @@ def test_execution_adapter_policy_is_scoped_and_injectable(monkeypatch, route, a
 
     setattr(engine, {"direct": "direct_cot", "rlm": "primary_rlm", "flex": "flex_agent"}[route], execute)
     with dspy.context(adapter=ambient):
-        assert engine._execute(Route(route), "", "", "test", "", "", None).answer == "ok"
+        assert engine._execute(Route(route), "", "", "test", "", "", None, "direct").answer == "ok"
         assert dspy.settings.adapter is ambient
 
 
@@ -587,6 +587,7 @@ def test_direct_route_inlines_only_dataset_files_into_one_prompt(monkeypatch):
     engine.direct_cot = lambda **kwargs: prompts.append(kwargs["task"]) or SimpleNamespace(answer="ok")
 
     prediction = engine._execute(
+        mode="direct",
         route=engine._route("direct", "Q?", "/workspace/files/context.txt", "<available_skills/>", context=None),
         workspace_manifest="/workspace/files/context.txt",
         memory_summary="",
@@ -616,6 +617,7 @@ def test_direct_route_records_truncation_instead_of_clipping_silently(monkeypatc
     engine.direct_cot = lambda **_kwargs: SimpleNamespace(answer="ok")
 
     prediction = engine._execute(
+        mode="direct",
         route=engine._route("direct", "Q?", "/workspace/files/context.txt", "<available_skills/>", context=None),
         workspace_manifest="/workspace/files/context.txt",
         memory_summary="",
@@ -627,3 +629,26 @@ def test_direct_route_records_truncation_instead_of_clipping_silently(monkeypatc
 
     # A clipped arm must be visible to the caller rather than quietly scored.
     assert prediction.direct_context_chars == 10 and prediction.direct_context_truncated is True
+
+
+def test_hybrid_direct_does_not_inline_workspace_files(monkeypatch):
+    from fleet_rlm.contracts import Route
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session")
+    engine = _engine(manager, execution_mode="hybrid")
+    monkeypatch.setattr(AdaptiveFleetEngine, "_route", lambda *_args: Route.DIRECT)
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "list_workspace_files", lambda *_args: pytest.fail("no workspace listing")
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda *_args: pytest.fail("no workspace reads"))
+    events = []
+    monkeypatch.setattr(DaytonaSandboxManager, "emit", lambda _self, kind, **_kwargs: events.append(kind))
+    prompts = []
+    engine.direct_cot = lambda **kwargs: prompts.append(kwargs["task"]) or SimpleNamespace(answer="ok")
+
+    prediction = engine._run_turn("/workspace/files/context.txt", "", "Q?", "", "", None, None)
+
+    assert prompts == ["Q?"]
+    assert prediction.direct_context_chars == 0
+    assert prediction.direct_context_truncated is False
+    assert "direct_context" not in events

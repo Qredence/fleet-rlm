@@ -1040,3 +1040,19 @@ def test_partial_stream_keeps_evidence_and_requests_disconnect_cleanup(tmp_path,
     assert "turn-interrupted" in (run / "evidence/task/response.sse").read_text()
     assert any(request.method == "DELETE" for request in requests)
     assert turns == []  # No replacement of the interrupted request.
+
+
+def test_comparison_requires_expected_configuration_before_any_request(tmp_path, monkeypatch):
+    _, lm = comparison_settings()
+    monkeypatch.setattr(bench, "load_tasks", lambda *_args: pytest.fail("must reject before loading tasks"))
+    with pytest.raises(ValueError, match="comparison arm requires"):
+        bench.run_tasks(
+            tmp_path / "bundle",
+            tmp_path / "run",
+            base_url="http://fleet",
+            expected_destination=DESTINATION,
+            allow_live=True,
+            arm="hybrid",
+            direct_lm=lm,
+            expected_configuration=None,
+        )

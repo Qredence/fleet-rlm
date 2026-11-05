@@ -2292,3 +2292,44 @@ def test_optional_tracking_close_receives_body_failure_and_preserves_it(monkeypa
         failing_body()
     assert exits[0][0] is ValueError and exits[0][1] is error and exits[0][2] is not None
     assert "private telemetry teardown credential" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("overrides", "warns"),
+    [
+        ({}, True),
+        ({"fleet_reflection_model": "openai/shared"}, True),
+        ({"fleet_root_model": "openai/shared"}, True),
+        ({"fleet_reflection_model": "openai/other"}, False),
+    ],
+)
+def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, tmp_path, capsys, overrides, warns):
+    settings = FleetSettings(
+        _env_file=None, fleet_llm_model="openai/shared", compiled_program_dir=str(tmp_path), **overrides
+    )
+    store = MemoryOptimizationStore([{"session_id": "s1", "run_id": "run", "status": "running", "owner_id": "owner"}])
+    lm = SimpleNamespace()
+    monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
+    monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
+    monkeypatch.setattr(workflow, "build_lm", lambda *_args: lm)
+    splits = tuple([Example(name, name, critical=name == "holdout")] for name in ("train", "dev", "holdout"))
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kwargs: splits)
+
+    class ReachedTemplateError(Exception):
+        pass
+
+    def stop_before_runtime(*_args, **_kwargs):
+        raise ReachedTemplateError
+
+    monkeypatch.setattr(workflow, "DaytonaSandboxManager", stop_before_runtime)
+    with pytest.raises(ReachedTemplateError):
+        workflow._compile(
+            SimpleNamespace(validation_ratio=0.2),
+            settings,
+            store,
+            "s1",
+            settings.mlflow_target(),
+            "run",
+            owner_id="owner",
+        )
+    assert ("equals the serving model" in capsys.readouterr().out) is warns

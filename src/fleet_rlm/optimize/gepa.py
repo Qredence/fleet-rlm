@@ -836,7 +836,7 @@ def _compile(
     reflection_lm = build_lm(settings, settings.fleet_reflection_model, "reflection")
     reflection_adapter = settings.resolved_model("reflection").build_adapter()
     jev_lm = settings.build_jev_lm()
-    if settings.fleet_reflection_model == settings.fleet_root_model:
+    if settings.resolved_model("reflection").model == settings.resolved_model("root").model:
         with suppress(Exception):
             print("[gepa] FLEET_REFLECTION_MODEL equals the serving model; GEPA proposes better with a stronger one.")
     # This manager is a serialization template only; no sandbox is provisioned.
