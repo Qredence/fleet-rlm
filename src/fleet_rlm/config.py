@@ -34,7 +34,7 @@ _SECRET_FIELDS = {
     "fleet_database_migration_url",
     "fleet_daytona_api_key",
     "databricks_token",
-    "command_code_api_key",
+    "llm_api_key",
     "typesafe_api_key",
 }
 _TOML_FIELDS = {
@@ -365,11 +365,11 @@ class FleetSettings(BaseSettings):
     databricks_host: str = Field(default="", validation_alias="DATABRICKS_HOST")
     databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
     fleet_llm_base_url: str = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
-    # Inference credential when the model endpoint is not a Databricks workspace. It is separate
-    # from DATABRICKS_TOKEN, which MLflow/workspace calls still need, so pointing inference at
-    # another provider never means overwriting the Databricks credential.
-    command_code_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="COMMAND_CODE_API_KEY")
-    command_code_base_url: str = Field(default="", validation_alias="COMMAND_CODE_BASE_URL")
+    # Inference endpoint and credential. Provider-agnostic: any OpenAI-compatible base URL works,
+    # and this key takes precedence over DATABRICKS_TOKEN so pointing inference elsewhere never
+    # means overwriting the Databricks credential that MLflow/workspace calls still need.
+    llm_base_url: str = Field(default="", validation_alias="LLM_BASE_URL")
+    llm_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="LLM_API_KEY")
     daytona_auto_stop_minutes: int = Field(
         default=30,
         ge=1,
@@ -532,7 +532,7 @@ class FleetSettings(BaseSettings):
             raise ValueError("Runtime models require an OpenAI-compatible 'openai/<service-id>' route")
         return value
 
-    @field_validator("fleet_llm_base_url", "command_code_base_url")
+    @field_validator("fleet_llm_base_url", "llm_base_url")
     @classmethod
     def gateway_override_uses_https(cls, value: str) -> str:
         """Accept an empty inference endpoint, or an HTTPS one."""
@@ -550,7 +550,7 @@ class FleetSettings(BaseSettings):
             raise ValueError("TypeSafe route model must not be empty")
         return normalized
 
-    @field_validator("databricks_host", "fleet_llm_base_url", "command_code_base_url", "mlflow_databricks_tracking_uri")
+    @field_validator("databricks_host", "fleet_llm_base_url", "llm_base_url", "mlflow_databricks_tracking_uri")
     @classmethod
     def public_urls_do_not_contain_credentials(cls, value: str) -> str:
         """Reject URLs that embed credentials or carry HTTP query strings and fragments."""
@@ -892,9 +892,8 @@ class FleetSettings(BaseSettings):
         )
 
     def _gateway_base_url(self) -> str:
-        """Resolve the inference endpoint: the COMMAND_CODE provider when configured, else Databricks."""
-        command_base = self.command_code_base_url.strip()
-        base_url = (command_base or self.fleet_llm_base_url).strip()
+        """Resolve the inference endpoint: LLM_BASE_URL first, then the Databricks gateway."""
+        base_url = (self.llm_base_url.strip() or self.fleet_llm_base_url).strip()
         if not base_url and self.databricks_host.strip():
             host = self.databricks_host.strip().rstrip("/")
             if "://" not in host:
@@ -910,17 +909,15 @@ class FleetSettings(BaseSettings):
         return base_url
 
     def _gateway_api_key(self) -> SecretStr:
-        """Prefer the non-Databricks inference credential when one is configured.
+        """Prefer LLM_API_KEY when configured.
 
         A missing credential is reported here with the endpoint that needs it, rather than
         surfacing later as an opaque provider 401.
         """
-        if self.command_code_api_key.get_secret_value():
-            return self.command_code_api_key
+        if self.llm_api_key.get_secret_value():
+            return self.llm_api_key
         if not self.databricks_token.get_secret_value():
-            raise ValueError(
-                "Model endpoints require COMMAND_CODE_API_KEY, or DATABRICKS_TOKEN for a Databricks gateway"
-            )
+            raise ValueError("Model endpoints require LLM_API_KEY, or DATABRICKS_TOKEN for a Databricks gateway")
         return self.databricks_token
 
 
