@@ -730,6 +730,7 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
 
     from fleet_rlm.config import FleetSettings
 
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-only")
     requests = []
 
     @asynccontextmanager
@@ -768,14 +769,17 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
     mlflow.dspy.autolog(log_traces=True)
     monkeypatch.setattr(StdlibAsyncTransport, "stream", transport)
     settings = FleetSettings(
-        fleet_llm_base_url="https://gateway.invalid/ai-gateway/mlflow/v1",
+        fleet_root_api_base="https://gateway.invalid/ai-gateway/mlflow/v1",
+        fleet_root_api_key_env="DATABRICKS_TOKEN",
         databricks_token="test-only",
         fleet_root_model="openai/system.ai.deepseek-v4-1-flash-1017",
         fleet_root_max_tokens=16384,
         fleet_root_temperature=0.2,
         fleet_root_cache=False,
     )
-    lm = settings.build_lms()[0]
+    from fleet_rlm.models import build_lm
+
+    lm = build_lm(settings, settings.fleet_root_model, "root")
     case = {"task": "published prompt", "expected_answer": "secret-gold", "question": {"answer": "secret-payload"}}
     receipt = bench._direct_turn(lm, case, timeout_seconds=deadline, evidence_dir=tmp_path / "evidence")
     assert len(requests) == 1
@@ -846,15 +850,17 @@ def test_pilot_is_gated_rotates_arms_and_never_exceeds_ten_slots(tmp_path, monke
     bench.freeze_tasks(bundle, cases, {"dataset": "x", "dataset_revision": "a" * 40, "hf_pin_verified": True})
     values, lm = comparison_settings()
     settings = SimpleNamespace(
+        fleet_root_model="root-model",
+        fleet_sub_model="sub-model",
         mlflow_target=lambda: SimpleNamespace(mode="local", experiment_name="runtime", tracking_uri="http://tracking"),
         mlflow_descriptor=lambda: DESTINATION,
-        build_lms=lambda: (lm, lm, None, None),
         configuration=lambda: {"digest": "settings", "values": values},
         mlflow_trace_catalog="",
         mlflow_trace_schema="",
         mlflow_trace_table_prefix="",
         mlflow_tracing_sql_warehouse_id="",
     )
+    monkeypatch.setattr(bench, "build_lm", lambda _settings, _model_id, _role: lm, raising=False)
     slots = []
     direct_calls = []
     requests, turns = api(

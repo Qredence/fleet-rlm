@@ -504,9 +504,9 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     store = SimpleNamespace(replay_snapshot=lambda _session, _turn: (snapshot_digest, compressed))
     built_models = []
     monkeypatch.setattr(
-        FleetSettings,
-        "build_lms",
-        lambda config: built_models.append(config.fleet_root_model) or (None, None, None, None),
+        validation,
+        "build_lm",
+        lambda _config, model_id, role: built_models.append((model_id, role)) or None,
     )
 
     class Manager:
@@ -556,7 +556,10 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     else:
         engine = factory(example, program)
         assert {path: (tmp_path / path).read_bytes() for path in files} == files
-        assert built_models == ["openai/current-deployment"]
+        assert built_models == [
+            (current.fleet_root_model, "root"),
+            (current.fleet_sub_model, "sub"),
+        ]
         assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
         assert engine.compiled_path is None
 
@@ -729,6 +732,26 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
         approve_candidate(candidate, manifest, active, evidence=new_evidence)
 
 
+def test_approval_rejects_changed_effective_generation_with_identical_raw_settings(tmp_path, monkeypatch):
+    config = tmp_path / "fleet.toml"
+    config.write_text("[config]\nschema_version=5\n")
+    monkeypatch.setenv("FLEET_CONFIG", str(config))
+    inherited = FleetSettings(_env_file=None, fleet_llm_max_tokens=100)
+    explicit = inherited.with_explicit_overrides(fleet_root_max_tokens=16384)
+    assert inherited.model_dump() == explicit.model_dump()
+    monkeypatch.setattr(artifacts, "optimization_code_digest", lambda: "fixed-code")
+    monkeypatch.setattr(artifacts, "installed_dependency_fingerprint", lambda: "fixed-dependencies")
+    previous = artifacts.approval_evidence(inherited, "", scorer_version=SCORER_VERSION)
+    current = artifacts.approval_evidence(explicit, "", scorer_version=SCORER_VERSION)
+    candidate, active = tmp_path / "candidate.json", tmp_path / "active.json"
+    candidate.write_text('{"candidate":1}')
+    manifest = replace(_manifest(candidate, "s1-1", _evaluation()), dependencies=previous)
+
+    with pytest.raises(ValueError, match="stale"):
+        approve_candidate(candidate, manifest, active, evidence=current)
+    assert not active.exists()
+
+
 def test_approval_evidence_uses_sorted_installed_distribution_identity(monkeypatch) -> None:
     monkeypatch.setattr(
         artifacts,
@@ -806,6 +829,7 @@ def test_final_validation_traces_link_each_case_to_optimization_run(monkeypatch)
         def forward(self, task):
             return dspy.Prediction(answer=task)
 
+    monkeypatch.setattr(validation.mlflow, "get_current_active_span", lambda: None)
     monkeypatch.setattr(validation.mlflow, "start_span", start_span)
     result = validation.score_stage(
         Program(),
@@ -1276,7 +1300,7 @@ def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypa
     def forbidden(*_args, **_kwargs):
         pytest.fail("Unusable splits must not start search or build serving models")
 
-    monkeypatch.setattr(FleetSettings, "build_lms", forbidden)
+    monkeypatch.setattr(workflow, "build_lm", forbidden)
     monkeypatch.setattr(dspy, "GEPA", forbidden)
     with pytest.raises(ValueError, match=r"critical holdout.*'holdout'.*'examples': 1"):
         workflow._compile(
@@ -1320,6 +1344,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         _env_file=None,
         compiled_program_dir=str(tmp_path),
         fleet_root_cache=True,
+        fleet_reflection_adapter="json",
         fleet_daytona_api_key="k",
         fleet_daytona_org_id="o",
         fleet_daytona_volume_id="v",
@@ -1334,7 +1359,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
     )
     store.settings["s1"] = {"mode": "flex", "models": {"root": "openai/deployed-root", "sub": "openai/deployed-sub"}}
-    monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (lm, lm, lm, None))
+    monkeypatch.setattr(workflow, "build_lm", lambda _settings, _model_id, _role: lm)
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
     train, dev, holdout = [
         [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
@@ -1349,12 +1374,25 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     searched = []
     optimizer_kwargs = {}
 
+    def judge_metric(*_args, **kwargs):
+        assert kwargs["judge_lm"] is lm
+        assert type(dspy.settings.adapter) is dspy.ChatAdapter
+        return dspy.Prediction(score=1.0)
+
+    monkeypatch.setattr(workflow, "fleet_metric", judge_metric)
+
     class Optimizer:
         def __init__(self, **kwargs):
             assert "code_proposer" not in kwargs
+            assert isinstance(dspy.settings.adapter, dspy.JSONAdapter)
+            assert kwargs["instruction_proposer"].adapter is dspy.settings.adapter
             optimizer_kwargs.update(kwargs)
 
         def compile(self, baseline, *, trainset, valset):
+            reflection_adapter = dspy.settings.adapter
+            assert isinstance(reflection_adapter, dspy.JSONAdapter)
+            optimizer_kwargs["metric"](dspy.Example(task="fixture"), dspy.Prediction(answer="answer"))
+            assert dspy.settings.adapter is reflection_adapter
             if cancel_after_validation == "interrupt_search":
                 raise KeyboardInterrupt
             reporter = optimizer_kwargs["gepa_kwargs"]["callbacks"][0]
@@ -1391,6 +1429,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     measured = []
 
     def score(program, actual_dev, actual_holdout, _metric, _threads, **_kwargs):
+        assert not isinstance(dspy.settings.adapter, dspy.JSONAdapter)
         if cancel_after_validation == "interrupt_validation":
             raise KeyboardInterrupt
         assert searched and actual_dev is dev and actual_holdout is holdout
@@ -1544,7 +1583,7 @@ def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
     digest = optimization_code_digest()
     assert len(digest) == 64 and digest == optimization_code_digest()
     assert {
-        "adapters.py",
+        "models.py",
         "contracts.py",
         "execution_evidence.py",
         "optimization_runs.py",

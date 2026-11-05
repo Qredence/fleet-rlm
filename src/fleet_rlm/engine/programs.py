@@ -15,7 +15,6 @@ import mlflow
 from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.contracts import (
     ROUTE_SUMMARIES,
     TRIAGE_CRITERIA,
@@ -152,6 +151,8 @@ class AdaptiveFleetEngine(dspy.Module):
         jev_lm: Any | None = None,
         compiled_path: str | None = None,
         execution_mode: str = "hybrid",
+        root_adapter: dspy.Adapter | None = None,
+        sub_adapter: dspy.Adapter | None = None,
     ) -> None:
         """Build the triage, direct, Flex, and RLM programs, then load any compiled artifact."""
         super().__init__()
@@ -163,6 +164,9 @@ class AdaptiveFleetEngine(dspy.Module):
         if execution_mode not in {"direct", "flex", "rlm", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
+        self.root_adapter = root_adapter if root_adapter is not None else dspy.ChatAdapter()
+        self.sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
+        sandbox_mgr.sub_adapter = self.sub_adapter
         self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
@@ -170,7 +174,7 @@ class AdaptiveFleetEngine(dspy.Module):
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
         self.skill_selector = dspy.Predict(SkillRelevance)
 
-        self.children = ChildAgents(sandbox_mgr, self._metered_sub)
+        self.children = ChildAgents(sandbox_mgr, self._metered_sub, self.sub_adapter)
         tools = self.children.tools()
         toolset = {tool.__name__: tool for tool in tools}
         self.flex_agent = dspy.Flex(
@@ -388,7 +392,9 @@ class AdaptiveFleetEngine(dspy.Module):
                     span_type=SpanType.LLM if self.jev_lm is not None else SpanType.CHAIN,
                     inputs={name: activity_text(value) for name, value in triage_inputs.items()},
                 ) as span:
-                    with typed_decision_scope(lm=route_lm, span=span, typesafe=self.jev_lm is not None):
+                    with typed_decision_scope(
+                        lm=route_lm, span=span, typesafe=self.jev_lm is not None, adapter=self.sub_adapter
+                    ):
                         decision = self.triage(**triage_inputs).route
                     evidence = decision_evidence(decision, route_lm)
                     # An unknown or missing label takes the bounded RLM path.
@@ -435,7 +441,7 @@ class AdaptiveFleetEngine(dspy.Module):
             # single-shot benchmark request would carry it. The inlining is measured, never silent.
             inlined, chars, truncated = self._inline_context(task, workspace_manifest)
             self.sandbox_mgr.emit("direct_context", chars=chars, truncated=truncated)
-            with dspy.context(lm=self._metered_root):
+            with dspy.context(lm=self._metered_root, adapter=self.root_adapter):
                 answer = self.direct_cot(
                     memory_summary=memory_summary,
                     session_history=session_history,
@@ -452,8 +458,7 @@ class AdaptiveFleetEngine(dspy.Module):
         agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
         if route is Route.FLEX and isinstance(context, WorkspaceDataset):
             context = context.flex_input()
-        # Native ChatAdapter recovery, with only recorded gateway parse compatibility.
-        with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
+        with dspy.context(lm=self._metered_root, adapter=self.root_adapter):
             prediction = agent(
                 workspace_manifest=workspace_manifest,
                 skills_catalog=skills_catalog,

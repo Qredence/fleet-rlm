@@ -340,11 +340,8 @@ def _spawn_agent_with_fake_child(monkeypatch, child_call):
 
 
 def test_spawn_agent_promotes_artifacts_only_after_clean_completion_and_always_shuts_down(monkeypatch) -> None:
-    from fleet_rlm.adapters import FleetRLMChatAdapter
-
     def child_call(**_kwargs):
-        assert isinstance(dspy.settings.adapter, FleetRLMChatAdapter)
-        assert dspy.settings.adapter.use_json_adapter_fallback
+        assert isinstance(dspy.settings.adapter, dspy.ChatAdapter)
         return SimpleNamespace(findings="done")
 
     spawn_agent, interpreter, calls = _spawn_agent_with_fake_child(monkeypatch, child_call)
@@ -355,21 +352,19 @@ def test_spawn_agent_promotes_artifacts_only_after_clean_completion_and_always_s
 
 
 @pytest.mark.parametrize("route", ["direct", "rlm", "flex"])
-def test_execution_adapter_policy_is_scoped_and_direct_keeps_ambient_policy(monkeypatch, route):
-    from fleet_rlm.adapters import FleetRLMChatAdapter
+@pytest.mark.parametrize("adapter_kind", ["chat", "json"])
+def test_execution_adapter_policy_is_scoped_and_injectable(monkeypatch, route, adapter_kind):
     from fleet_rlm.contracts import Route
 
     manager = DaytonaSandboxManager("key", "org", "volume", "adapter-policy")
-    engine = _engine(manager)
+    root_adapter = dspy.JSONAdapter() if adapter_kind == "json" else dspy.ChatAdapter(use_json_adapter_fallback=False)
+    engine = _engine(manager, root_adapter=root_adapter)
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
     ambient = dspy.ChatAdapter(use_json_adapter_fallback=False)
 
     def execute(**_kwargs):
         selected = dspy.settings.adapter
-        if route == "direct":
-            assert selected is ambient
-        else:
-            assert isinstance(selected, FleetRLMChatAdapter) and selected.use_json_adapter_fallback
+        assert selected is root_adapter
         return dspy.Prediction(answer="ok", learned_skill_note="")
 
     setattr(engine, {"direct": "direct_cot", "rlm": "primary_rlm", "flex": "flex_agent"}[route], execute)

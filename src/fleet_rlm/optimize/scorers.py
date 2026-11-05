@@ -641,6 +641,7 @@ def build_mlflow_scorer_suite(
     judge_model: str = "openai:/system.ai.deepseek-v4-1-flash",
     judge_lm: dspy.LM | None = None,
     jev_lm: Any = None,
+    judge_adapter: dspy.Adapter | None = None,
 ) -> list[Any]:
     """Construct Fleet's versioned MLflow diagnostic suite and optional shared Fleet metric.
 
@@ -648,6 +649,7 @@ def build_mlflow_scorer_suite(
         judge_model: MLflow provider/model identifier for generative diagnostics.
         judge_lm: DSPy judge for the shared Fleet metric; None omits that metric.
         jev_lm: TypeSafe client for route suitability; None selects the generative route judge.
+        judge_adapter: Explicit native adapter used by correctness scoring workers.
 
     Model and evidence-validation errors from the returned scorers propagate to their caller.
     """
@@ -817,7 +819,7 @@ def build_mlflow_scorer_suite(
         jev_routing_efficiency,
         route_correctness,
     ]
-    return [*suite, fleet_scorer(judge_lm)] if judge_lm is not None else suite
+    return [*suite, fleet_scorer(judge_lm, judge_adapter)] if judge_lm is not None else suite
 
 
 class FleetJudge(dspy.Module):
@@ -855,9 +857,10 @@ def _judge_for(judge_lm: dspy.LM) -> FleetJudge:
 
 def answer_correctness(gold: Any, answer: str, judge_lm: dspy.LM) -> Metric:
     """The judge's verdict; uses the gold answer when one is labelled."""
-    verdict = _judge_for(judge_lm)(
-        task=str(getattr(gold, "task", "")), answer=answer, expected_answer=str(getattr(gold, "answer", "") or "")
-    )
+    with dspy.context(adapter=dspy.settings.adapter or dspy.ChatAdapter()):
+        verdict = _judge_for(judge_lm)(
+            task=str(getattr(gold, "task", "")), answer=answer, expected_answer=str(getattr(gold, "answer", "") or "")
+        )
     return verdict.score, verdict.feedback
 
 
@@ -882,6 +885,7 @@ def fleet_metric(
     program_trace: Any = None,
     *,
     judge_lm: dspy.LM,
+    judge_adapter: dspy.Adapter | None = None,
 ) -> dspy.Prediction:
     """Incorrect answers score zero; correct answers compete on measured execution efficiency.
 
@@ -897,8 +901,10 @@ def fleet_metric(
             feedback="FAIL answer: the Turn produced no answer.",
             objective_scores={"answer_correctness": 0.0, "quality": 0.0, "usage_available": 0.0},
         )
+    with dspy.context(adapter=judge_adapter or dspy.settings.adapter or dspy.ChatAdapter()):
+        correctness = answer_correctness(gold, answer, judge_lm)
     metrics: dict[str, Metric] = {
-        "answer_correctness": answer_correctness(gold, answer, judge_lm),
+        "answer_correctness": correctness,
         "expected_values": expected_values_metric(gold, answer),
         "route": route_metric(gold, pred),
         "efficiency": efficiency_metric(pred),
@@ -971,12 +977,12 @@ def expected_values_present(outputs: Any, expectations: dict[str, Any]) -> Feedb
     return Feedback(value=value == 1.0, rationale=f"Expected values: {detail}.")
 
 
-def fleet_scorer(judge_lm: dspy.LM) -> Any:
+def fleet_scorer(judge_lm: dspy.LM, judge_adapter: dspy.Adapter | None = None) -> Any:
     """``fleet_metric`` and each of its objectives as an MLflow scorer over a ``fleet_turn`` trace."""
 
     @scorer(name="fleet_metric")
     def fleet_score(inputs: Any, outputs: Any, expectations: dict[str, Any]) -> list[Feedback]:
         gold, pred = gold_and_prediction(inputs, outputs, expectations)
-        return metric_feedbacks(fleet_metric(gold, pred, judge_lm=judge_lm))
+        return metric_feedbacks(fleet_metric(gold, pred, judge_lm=judge_lm, judge_adapter=judge_adapter))
 
     return fleet_score

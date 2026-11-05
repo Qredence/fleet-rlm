@@ -161,6 +161,46 @@ reconciled when the owning session next provisions a root. Provider TTL remains
 the fallback if local state is lost. This is not a distributed global reaper.
 
 
+## Native model response format
+
+Shared `[llm]` and role tables `[llm.root]`, `[llm.sub]`, `[llm.reflection]`, and
+`[llm.judge]` accept `adapter = "chat" | "json"` and
+`response_format = "auto" | "json_object"`. Response format defaults to `auto`;
+roles inherit the shared setting unless explicitly overridden, including an
+explicit role `auto`. The environment equivalents are `FLEET_LLM_RESPONSE_FORMAT`
+and `FLEET_ROOT_RESPONSE_FORMAT`, with SUB/REFLECTION/JUDGE counterparts.
+
+`json_object` requires the effective `json` adapter. Fleet passes
+`response_format={"type": "json_object"}` directly to native DSPy's LM and uses
+native `JSONAdapter` to validate required output fields. This is useful for
+OpenAI-compatible deployment names whose capabilities DSPy cannot discover:
+selecting the JSON adapter alone may only add prompt instructions. JSON mode
+constrains JSON syntax; it does not guarantee the required fields or correctness.
+For catalog-known schema-capable models, native DSPy may select a stricter JSON
+schema instead of this LM default. Endpoint support must be verified.
+No malformed Python response is accepted as
+structured output, and Fleet adds no format repair retry.
+
+```toml
+[llm.root]
+adapter = "json"
+response_format = "json_object"
+
+[llm.sub]
+adapter = "json"
+response_format = "json_object"
+```
+
+These settings are available in local setup, safe configuration reporting, and
+configuration digests. Changes require an API restart. Keep credentials in the
+existing secret environment variables. A terminal structured-response failure
+shows a safe explanation with its request/trace IDs; raw model replies and
+exception details must be inspected in MLflow.
+
+GEPA uses the effective reflection adapter for both native instruction proposals
+and native Flex code proposals. Serving and correctness judging retain their
+own role adapters; reflection does not change their response format.
+
 ## Turn deadlines
 
 `FLEET_TURN_TIMEOUT_SECONDS` (TOML `[runtime] turn_timeout_seconds`) accepts exactly
@@ -218,6 +258,12 @@ search, environment interpolation or hot reload. Every file must declare
    Leave credentials and unrelated MLflow settings intact.
 
 The configuration digest includes the selected backend and both profiles.
+It also hashes non-secret resolved model settings for every role, including
+inherited generation settings and session root/sub model choices. Credentials
+and source labels are excluded from the digest material. This intentionally
+changes prior digests without changing the public configuration response or its
+schema version. Optimization evidence created with the previous digest requires
+reevaluation before installation.
 Existing GEPA approval evidence with a different identity requires reevaluation.
 Removing the former snapshot setting (`[daytona] snapshot` and its environment
 override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots.py`

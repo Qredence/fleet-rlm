@@ -230,17 +230,23 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
             cases[: args.limit] if args.limit else cases,
             base_url=args.url,
             judge_model=settings.fleet_judge_model,
-            judge_lm=settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
-            jev_lm=settings.build_jev_lm(),
+            judge_lm=None if args.collect_only else settings.build_judge_lm(),
+            judge_adapter=None if args.collect_only else settings.resolved_model("judge").build_adapter(),
+            jev_lm=None if args.collect_only else settings.build_jev_lm(),
             collect_only=args.collect_only,
             experiment_id=experiment.experiment_id,
             uc_location=(
-                (settings.mlflow_trace_catalog, settings.mlflow_trace_schema, settings.mlflow_eval_trace_table_prefix)
+                (
+                    settings.mlflow_trace_catalog,
+                    settings.mlflow_trace_schema,
+                    settings.mlflow_eval_trace_table_prefix,
+                )
                 if target.mode == "databricks"
                 else None
             ),
             report=lambda message: _CONSOLE.print(message, markup=False, soft_wrap=True),
         )
+
     except evaluation.EvaluationError as exc:
         raise SystemExit(str(exc)) from None
     if result is not None:

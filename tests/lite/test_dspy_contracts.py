@@ -96,6 +96,7 @@ def manager():
         check_turn=lambda: None,
         emit=lambda *_args, **_kwargs: None,
         sub_lm=lambda prompt: [prompt.upper()],
+        sub_adapter=None,
         replies=replies,
         counts=counts,
     )

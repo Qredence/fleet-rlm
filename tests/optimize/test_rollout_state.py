@@ -184,8 +184,8 @@ def rollout(monkeypatch):
     monkeypatch.setattr(validation, "DaytonaSandboxManager", manager)
     monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", write)
     monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
-    models = candidate.root_lm, candidate.sub_lm, None, candidate.jev_lm
-    monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: models)
+    models = {"root": candidate.root_lm, "sub": candidate.sub_lm}
+    monkeypatch.setattr(validation, "build_lm", lambda _settings, _model_id, role: models[role])
     factory = validation.build_isolated_engine_factory(
         FleetSettings(
             _env_file=None,

@@ -25,6 +25,7 @@ import httpx
 from anyio.from_thread import start_blocking_portal
 
 from fleet_rlm.contracts import parse_route, parse_sse
+from fleet_rlm.models import build_lm
 from fleet_rlm.optimize.artifacts import atomic_write
 from fleet_rlm.workspace import validate_session_id
 
@@ -500,7 +501,8 @@ def run_comparison_pilot(
         if experiment is None or experiment.name != target.experiment_name:
             raise ValueError("Preconfigured MLflow experiment differs; refusing to override it")
     destination = settings.mlflow_descriptor()
-    lm, sub_lm, _, _ = settings.build_lms()
+    lm = build_lm(settings, settings.fleet_root_model, "root")
+    sub_lm = build_lm(settings, settings.fleet_sub_model, "sub")
     if lm.model != sub_lm.model:
         raise ValueError("Resolve root/sub generation model mismatch before the pilot")
     domains = ("cs", "chemistry", "chess", "math", "logic")

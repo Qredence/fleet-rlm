@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -47,15 +47,12 @@ def list_sessions(store: StoreDep) -> Sessions:
 @router.get("/models")
 def list_models(
     settings: Settings,
-    scope: Annotated[str, Query(description="Runtime scope tag for model discovery")] = "system.ai",
+    scope: Annotated[str, Query(deprecated=True, description="Ignored compatibility parameter")] = "",
+    role: Literal["root", "sub", "reflection", "judge"] = "root",
 ) -> Models:
-    """List the chat models in a discovery scope.
-
-    An invalid scope or missing Gateway credentials returns 422.
-    """
-    invalid = "Invalid discovery scope or missing Gateway credentials"
-    with translate("Gateway model discovery is unavailable", invalid=invalid):
-        return Models(scope=scope, models=settings.list_models(scope))
+    """Browse an explicit compatible endpoint; manual model selection is always available."""
+    with translate("Model discovery is unavailable", invalid="Invalid model discovery response"):
+        return Models(scope=scope, models=settings.list_models(scope, role=role))
 
 
 @router.delete("/sessions/{session_id}", responses=LOCKED)
@@ -82,7 +79,10 @@ def session_config(runtime: Runtime, settings: Settings) -> SessionConfig:
     manager = runtime.sandbox_mgr
     return SessionConfig(
         mode=runtime.engine.execution_mode,
-        models={"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model},
+        models={
+            "root": runtime.engine.root_lm.model,
+            "sub": runtime.engine.sub_lm.model,
+        },
         context=runtime.context.to_descriptor() if runtime.context else None,
         configuration=runtime_configuration(settings, runtime),
         limits=Limits(
@@ -96,23 +96,21 @@ def session_config(runtime: Runtime, settings: Settings) -> SessionConfig:
 
 
 @router.put("/sessions/{session_id}/model", responses=LOCKED)
-def select_model(
-    session_id: str, body: ModelRequest, runtime: Runtime, registry: Registry, settings: Settings
-) -> ModelSelection:
+def select_model(session_id: str, body: ModelRequest, runtime: Runtime, registry: Registry) -> ModelSelection:
     """Bind a model to a role, persist it, and swap in a new engine.
 
     Returns 409 while a Turn holds the Session lock.
     """
     unavailable = "Model selection is unavailable; configuration unchanged"
-    with translate(unavailable, invalid="Invalid session or model configuration"):
-        scope = ".".join(body.model.removeprefix("openai/").split(".")[:2])
-        if body.model not in settings.list_models(scope):
-            raise HTTPException(status_code=422, detail="Model is not an accessible chat service")
-        with session_lock(runtime):
-            models = {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model, body.role: body.model}
-            engine = registry.engine_for_models(runtime, models)
-            runtime.store.save_runtime_settings(session_id, {"models": models})
-            runtime.set_engine(engine)
+    with translate(unavailable, invalid="Invalid session or model configuration"), session_lock(runtime):
+        models = {
+            "root": runtime.engine.root_lm.model,
+            "sub": runtime.engine.sub_lm.model,
+            body.role: body.model,
+        }
+        engine = registry.engine_for_models(runtime, models)
+        runtime.store.save_runtime_settings(session_id, {"models": models})
+        runtime.set_engine(engine)
     return ModelSelection(role=body.role, model=body.model)
 
 

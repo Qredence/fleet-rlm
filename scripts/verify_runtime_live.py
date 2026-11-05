@@ -22,10 +22,10 @@ from dspy.primitives.facade import FacadeInvocation
 from fastapi.testclient import TestClient
 from psycopg import sql
 
-from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import parse_sse
+from fleet_rlm.models import build_lm
 from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME
 
 # Reported by the Turn itself, so the harness measures without instrumenting the runtime.
@@ -231,8 +231,8 @@ def main() -> None:
             recursive_events: list[dict] = []
             manager.event_callback = recursive_events.append
             manager.reset_turn_budget()
-            lm = settings._build_lm(args.model)
-            with dspy.context(lm=lm, adapter=FleetRLMChatAdapter()):
+            lm = build_lm(settings, args.model, "root")
+            with dspy.context(lm=lm, adapter=settings.resolved_model("root").build_adapter()):
                 interpreter = manager.interpreter_factory(
                     tools={"spawn_agent": runtime.engine.primary_rlm._user_tools["spawn_agent"]}
                 )()

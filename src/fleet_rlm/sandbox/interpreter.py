@@ -54,6 +54,10 @@ def _grounded(literal: str, value: float, observed: set[float]) -> bool:
     return any(round(seen, places) == round(value, places) for seen in observed)
 
 
+class StructuredResponseError(dspy.CodeExecutionError):
+    """A host-verified structured response failure that escaped remote execution."""
+
+
 class DaytonaInterpreter:
     """DSPy CodeInterpreter backed by a namespace in a Session-isolated sandbox."""
 
@@ -99,6 +103,7 @@ class DaytonaInterpreter:
         self._closed = False
         self._host_calls = 0
         self._host_call_lock = threading.Lock()
+        self._format_failures: dict[str, dict[str, tuple[str, Exception]]] = {}
         # Figures this namespace's inputs and executions have shown the model, for the SUBMIT check.
         self._observed: set[float] = set()
         self._ungrounded_rejections = 0
@@ -164,11 +169,11 @@ class DaytonaInterpreter:
             for child in children:
                 child.shutdown()
 
-    def answer_host_call(self, call: dict[str, Any]) -> dict[str, Any]:
+    def answer_host_call(self, call: dict[str, Any], *, execution_id: str | None = None) -> dict[str, Any]:
         """Run one bridged call in this interpreter's DSPy context; the reply the sandbox is waiting for."""
-        return self._context.copy().run(self._handle_host_call, call)
+        return self._context.copy().run(self._handle_host_call, call, execution_id)
 
-    def _handle_host_call(self, call: dict[str, Any]) -> dict[str, Any]:
+    def _handle_host_call(self, call: dict[str, Any], execution_id: str | None = None) -> dict[str, Any]:
         """Return a bridged tool value or convert validation, cancellation, and tool errors to an error reply.
 
         Records the host call and emits activity events. Event-delivery failures can propagate.
@@ -220,6 +225,17 @@ class DaytonaInterpreter:
                 error_type=type(exc).__name__,
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
+            if isinstance(exc, (dspy.utils.exceptions.AdapterParseError, StructuredResponseError)):
+                receipt = uuid.uuid4().hex
+                with self._host_call_lock:
+                    failures = self._format_failures.get(execution_id) if execution_id is not None else None
+                    if failures is not None and isinstance(call_id, str):
+                        failures[receipt] = (call_id, exc)
+                        return {
+                            "error": "The model returned an invalid structured response.",
+                            "host_error_id": receipt,
+                        }
+                return {"error": "The model returned an invalid structured response."}
             return {"error": str(exc)[:2000]}
         finally:
             _ACTIVE_MANAGER.reset(active_token)
@@ -314,7 +330,7 @@ class DaytonaInterpreter:
             "jev_batch_decisions",
             inputs={"item_count": len(items), "question": activity_text(question), "choices": choices},
         ) as span:
-            with typed_decision_scope(lm=active_lm, span=span, typesafe=typesafe):
+            with typed_decision_scope(lm=active_lm, span=span, typesafe=typesafe, adapter=self.manager.sub_adapter):
                 # Decisions are prepaid; disable DSPy's speculative straggler resubmission.
                 predictions = predictor.batch(examples, num_threads=min(8, len(items)), timeout=0)
             results: list[dict[str, Any]] = []
@@ -440,6 +456,8 @@ class DaytonaInterpreter:
                 }
                 if self.output_fields:
                     payload["outputs"] = [field["name"] for field in self.output_fields]
+                with self._host_call_lock:
+                    self._format_failures[execution_id] = {}
                 response = self.manager.run_namespace(self, payload)
                 span.set_outputs(
                     {
@@ -460,6 +478,17 @@ class DaytonaInterpreter:
                     self.manager.record_sandbox_error()
                     span.set_attribute("remote_error_type", response.get("error_type", "PythonError"))
                     output = str(response.get("stdout", "")) + str(response.get("stderr", ""))
+                    receipt = response.get("host_error_id")
+                    with self._host_call_lock:
+                        failure = (
+                            self._format_failures.get(execution_id, {}).get(receipt)
+                            if isinstance(receipt, str)
+                            else None
+                        )
+                    if failure is not None and failure[0] == response.get("host_call_id"):
+                        raise StructuredResponseError(
+                            "The model returned an invalid structured response."
+                        ) from failure[1]
                     raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")
                 span.set_attribute("outcome", "completed")
                 response["outcome"] = "completed"
@@ -491,6 +520,8 @@ class DaytonaInterpreter:
                     response["outcome"] = outcome
                 raise
             finally:
+                with self._host_call_lock:
+                    self._format_failures.pop(execution_id, None)
                 if phase == "task":
                     self._observe(f"{response.get('stdout', '')}\n{response.get('value', '')}")
                 span.set_attribute("host_calls", self._host_calls - host_calls_before)

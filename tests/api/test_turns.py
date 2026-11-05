@@ -1323,7 +1323,8 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
         assert traced["inputs"]["turn_id"] == failure["payload"]["request_id"]
     else:
         assert failure["payload"]["trace_id"] == "trace-failed-id"
-    assert "The Turn failed" in failure["payload"]["error"]
+    expected = "The Turn failed" if fail_preparation else "invalid structured response"
+    assert expected in failure["payload"]["error"]
     assert finished[0][1] == "failed"
     assert not runtime.turn_lock.locked()
 
@@ -1481,7 +1482,8 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
     assert traced["attributes"]["root_sandbox_id"] == "sandbox-warm-root"
 
 
-def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced) -> None:
+@pytest.mark.parametrize("error_kind", ["ordinary", "parse", "bridged_parse"])
+def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced, error_kind) -> None:
     order: list[str] = []
     stored: list[tuple[str, str, dict[str, Any]]] = []
     manager = FakeManager(live_sandbox_id="sandbox-failed-root")
@@ -1492,6 +1494,14 @@ def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced)
         manager.live_sandbox_id = None
 
     def engine(**_kwargs: Any) -> SimpleNamespace:
+        if error_kind == "parse":
+            raise AdapterParseError(
+                adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="secret-reply"
+            )
+        if error_kind == "bridged_parse":
+            from fleet_rlm.sandbox.interpreter import StructuredResponseError
+
+            raise StructuredResponseError("secret-reply")
         raise RuntimeError("engine failed")
 
     manager.cancel_turn = cancel_turn
@@ -1510,6 +1520,9 @@ def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced)
     assert traced["root_sandbox_id"] == "sandbox-failed-root"
     assert traced["cleanup"] == "stopped"
     assert manager.live_sandbox_id is None
+
+    assert ("invalid structured response" in emitted[0]["error"]) == (error_kind != "ordinary")
+    assert "secret-reply" not in json.dumps(emitted)
 
 
 @pytest.mark.usefixtures("traced")

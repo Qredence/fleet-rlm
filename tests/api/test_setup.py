@@ -107,34 +107,75 @@ def test_experiment_status_without_manager_has_same_named_contract(tmp_path):
 
 @pytest.mark.parametrize("sub_scope", ["team.models", "other.serving"])
 @pytest.mark.parametrize("missing", [False, True])
-def test_model_readiness_discovers_configured_scopes(tmp_path, monkeypatch, sub_scope, missing):
-    settings = FleetSettings(
-        _env_file=None,
-        databricks_host="https://example.test",
-        databricks_token="test-token",
-        fleet_root_model="openai/team.models.root",
-        fleet_sub_model=f"openai/{sub_scope}.sub",
-    )
-    calls = []
+def test_model_readiness_checks_configured_allowlist_without_discovery(tmp_path, monkeypatch, sub_scope, missing):
+    settings = FleetSettings(_env_file=None, fleet_llm_model=f"openai/{sub_scope}.model")
 
-    def discover(_settings, scope="system.ai"):
-        calls.append(scope)
-        return [
-            model
-            for model in (settings.fleet_root_model, settings.fleet_sub_model)
-            if model.removeprefix("openai/").rsplit(".", 1)[0] == scope
-            and not (missing and model == settings.fleet_sub_model)
-        ]
+    def discover(*_args, **_kwargs):
+        if missing:
+            raise RuntimeError("private provider error")
+        return ["openai/discovered"]
 
     monkeypatch.setattr(FleetSettings, "list_models", discover)
     service = SetupService(tmp_path)
     try:
         result = service.check_models(settings)
-        assert result["status"] == ("blocked" if missing else "ready")
-        assert calls == sorted({"team.models", sub_scope})
-        assert result["models"] == sorted(
-            {settings.fleet_root_model} | (set() if missing else {settings.fleet_sub_model})
-        )
+        assert result["status"] == "ready"
+        assert result["models"] == ([] if missing else ["openai/discovered"])
+        assert "private provider error" not in result["message"]
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_model_probe_uses_normalized_request_and_response(tmp_path, monkeypatch, json_mode):
+    import dspy
+    from dspy.lm15 import Request
+
+    calls = []
+
+    class FakeLM:
+        def __init__(self, model):
+            self.model = model
+
+        def copy(self, **kwargs):
+            calls.append(("copy", kwargs))
+            return self
+
+        def __call__(self, request):
+            assert isinstance(request, Request)
+            calls.append(("request", request))
+            return SimpleNamespace(text='{"status":"OK"}' if json_mode else "OK")
+
+        def close(self):
+            calls.append(("close", None))
+
+    def fake_lm(model, **kwargs):
+        lm = FakeLM(model)
+        lm.kwargs = {
+            key: value for key, value in kwargs.items() if key in {"response_format", "max_tokens", "temperature"}
+        }
+        return lm
+
+    monkeypatch.setattr(dspy, "LM", fake_lm)
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_model="openai/test-root",
+        fleet_root_adapter="json" if json_mode else "chat",
+        fleet_root_response_format="json_object" if json_mode else "auto",
+    )
+    service = SetupService(tmp_path)
+    monkeypatch.setattr(service, "settings", lambda: settings)
+    try:
+        result = service.test_model(object())
+        request = next(value for kind, value in calls if kind == "request")
+        assert request.model == "openai/test-root"
+        expected = 'Return exactly this JSON object: {"status":"OK"}' if json_mode else "Reply with exactly OK"
+        assert request.messages[0].text == expected
+        assert request.config.response_format == ({"type": "json_object"} if json_mode else None)
+        assert request.config.max_tokens == 16
+        assert calls[0] == ("copy", {"num_retries": 0, "max_tokens": 16, "cache": False, "callbacks": []})
+        assert calls[-1] == ("close", None)
+        assert "response was received" in result["message"]
     finally:
         service.close()
 
@@ -172,7 +213,7 @@ def test_completed_worker_cannot_clear_next_operations_busy_state(tmp_path, monk
 
 
 def test_setup_boots_with_invalid_configuration_without_runtime_services(tmp_path, monkeypatch):
-    monkeypatch.setenv("FLEET_ROOT_MODEL", "invalid")
+    monkeypatch.setenv("FLEET_LLM_MODEL", "")
     monkeypatch.setattr("fleet_rlm.api.app.Store.open", lambda *_a, **_kw: pytest.fail("setup must not open Store"))
     monkeypatch.setattr(
         "fleet_rlm.api.app._configure_tracing", lambda *_a: pytest.fail("setup must not configure tracing")
@@ -224,7 +265,7 @@ def test_secret_edits_are_masked_saved_atomically_and_preserve_unrelated_entries
 
 @pytest.mark.parametrize(
     "name,value",
-    [("FLEET_ROOT_MODEL", "bad"), ("FLEET_LLM_BASE_URL", "http://bad.test"), ("FLEET_DATABASE_SCHEMA", "bad;schema")],
+    [("FLEET_LLM_MODEL", ""), ("FLEET_LLM_BASE_URL", "http://bad.test"), ("FLEET_DATABASE_SCHEMA", "bad;schema")],
 )
 def test_save_runs_fleet_validators_and_never_replaces_valid_file(tmp_path, monkeypatch, name, value):
     monkeypatch.chdir(tmp_path)
@@ -470,5 +511,22 @@ def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environmen
         assert observed[0].host == "https://candidate.test"
         assert observed[0].token == "candidate-token"
         assert "DATABRICKS_TOKEN" not in os.environ
+    finally:
+        service.close()
+
+
+def test_setup_validates_and_persists_json_mode(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    service = SetupService(tmp_path)
+    try:
+        service.stage({"FLEET_ROOT_RESPONSE_FORMAT": "json_object"})
+        with pytest.raises(ValueError, match="JSON adapter"):
+            service.settings()
+        service.stage({"FLEET_ROOT_ADAPTER": "json"})
+        settings = service.settings()
+        assert settings.resolved_model("root").response_format == "json_object"
+        assert "FLEET_ROOT_RESPONSE_FORMAT" in {field["name"] for field in service.status()["fields"]}
+        service.save()
+        assert "FLEET_ROOT_RESPONSE_FORMAT='json_object'" in (tmp_path / ".env").read_text()
     finally:
         service.close()

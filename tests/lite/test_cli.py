@@ -81,6 +81,8 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
         judge_environment=lambda: {"OPENAI_API_BASE": "https://gateway.example/v1", "OPENAI_API_KEY": "gateway-key"},
         fleet_judge_model="databricks:/judge",
         build_jev_lm=lambda: None,
+        build_judge_lm=lambda: None,
+        resolved_model=lambda _role: SimpleNamespace(build_adapter=lambda: None),
         mlflow_descriptor=lambda **_kwargs: {},
     )
     monkeypatch.setenv("OPENAI_API_BASE", "https://stale-provider.example/v1")

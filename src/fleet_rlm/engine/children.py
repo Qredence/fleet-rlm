@@ -12,7 +12,6 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.engine.signatures import ChildTask
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -31,10 +30,13 @@ def child_failure(exc: Exception) -> str:
 class ChildAgents:
     """The delegation tools given to the Flex and RLM programs."""
 
-    def __init__(self, sandbox_mgr: DaytonaSandboxManager, metered_sub: Any) -> None:
+    def __init__(
+        self, sandbox_mgr: DaytonaSandboxManager, metered_sub: Any, sub_adapter: dspy.Adapter | None = None
+    ) -> None:
         """Bind the delegation tools to the sandbox manager and the metered sub LM."""
         self.sandbox_mgr = sandbox_mgr
         self._metered_sub = metered_sub
+        self._sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
 
     def tools(self) -> list[Any]:
         """Return the delegation tools, spawn_agent and spawn_agents, for the Flex and RLM programs."""
@@ -90,8 +92,7 @@ class ChildAgents:
             max_llm_calls=max_llm_calls,
         )
         try:
-            # Match the parent's native-first, fixture-bounded parsing policy.
-            with dspy.context(lm=self._metered_sub, disable_history=True, adapter=FleetRLMChatAdapter()):
+            with dspy.context(lm=self._metered_sub, disable_history=True, adapter=self._sub_adapter):
                 result = child(subtask=subtask)
         except Exception as exc:
             if turn_is_over(exc):

@@ -365,14 +365,22 @@ def typesafe_callbacks() -> list[Any]:
 
 
 @contextmanager
-def typed_decision_scope(*, lm: Any, span: Any, typesafe: bool) -> Generator[None, None, None]:
+def typed_decision_scope(
+    *, lm: Any, span: Any, typesafe: bool, adapter: dspy.Adapter | None = None
+) -> Generator[None, None, None]:
     """One typed decision's scope: no LM history, the right callbacks, and usage on its own span.
 
     TypeSafe clients emit their own usage, so only they are metered here; a generative backend
     already reports usage through the LM callback and must keep the MLflow hook off.
     """
+    adapter_options = {} if typesafe else {"adapter": adapter or dspy.ChatAdapter()}
     with (
-        dspy.context(lm=lm, disable_history=True, callbacks=typesafe_callbacks() if typesafe else ambient_callbacks()),
+        dspy.context(
+            lm=lm,
+            disable_history=True,
+            callbacks=typesafe_callbacks() if typesafe else ambient_callbacks(),
+            **adapter_options,
+        ),
         decision_usage(span) if typesafe else nullcontext(),
     ):
         yield
