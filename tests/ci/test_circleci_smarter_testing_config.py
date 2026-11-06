@@ -17,7 +17,7 @@ def load_config():
 
 def workflow_jobs():
     result = {}
-    for item in load_config()["workflows"]["required-ci"]["jobs"]:
+    for item in load_config()["workflows"]["required-ci"]["jobs"] + load_config()["job-groups"]["publication"]["jobs"]:
         if isinstance(item, str):
             result[item] = {}
         else:
@@ -64,7 +64,8 @@ def test_smarter_testing_uses_file_atoms_and_per_atom_lcov_analysis():
 def test_quality_and_release_gates_remain_required():
     config = load_config()
     jobs = workflow_jobs()
-    assert set(jobs["quality"]["requires"]) == {
+    assert {item if isinstance(item, str) else next(iter(item)) for item in jobs["quality"]["requires"]} == {
+        "release-metadata",
         "static-checks",
         "test-python-3.11",
         "coverage-report",
@@ -81,7 +82,6 @@ def test_quality_and_release_gates_remain_required():
         "max": 2,
     }
     assert set(jobs["release-preflight"]["requires"]) == {
-        "quality",
         "validate-release-request",
         "validate-pypi-webhook-context",
     }
@@ -89,7 +89,7 @@ def test_quality_and_release_gates_remain_required():
     assert set(jobs["github-release-recovery"]["requires"]) == {"release-validation-recovery", "pypi-canary-recovery"}
     assert jobs["github-release-recovery"]["name"] == "github-release-recovery"
     assert "github-release-recovery" not in config["jobs"]
-    assert config["parameters"]["skip_testpypi"]["default"] is False
+    assert config["parameters"]["skip_testpypi"]["default"] is True
 
 
 def test_pypi_upload_does_not_require_system_python_pip(tmp_path):
@@ -341,3 +341,34 @@ def test_deferred_status_fails_closed(tmp_path, job, name, status_path, status):
         check=False,
     )
     assert result.returncode == (1 if status is None else status)
+
+
+def test_publication_is_serialized_with_recovery_and_github_health_gates():
+    config = load_config()
+    invocations = config["workflows"]["required-ci"]["jobs"]
+    publication = next(item["publication"] for item in invocations if isinstance(item, dict) and "publication" in item)
+    assert publication["requires"] == ["quality"]
+    assert publication["serial-group"] == "<< pipeline.project.slug >>/pypi-publication"
+    jobs = workflow_jobs()
+    assert jobs["publish-pypi"]["requires"] == ["github-deployment"]
+    assert jobs["github-deployment"]["requires"] == ["smoke-test-testpypi"]
+    assert "github-deployment-recovery" in jobs["plan-pypi-recovery"]["requires"]
+    for phase in ("publish-pypi", "pypi-canary", "release-validation", "github-release"):
+        assert jobs[f"report-{phase}-failure"]["requires"] == [{phase: ["failed", "canceled"]}]
+    command = config["jobs"]["github-release"]["steps"][-1]["run"]["command"]
+    assert command.index("scripts.github_release") < command.index("deployment-status")
+    assert "--state success" in command
+
+
+def test_dynamic_setup_is_staged_and_preserves_explicit_release_parameters():
+    setup = yaml.safe_load((ROOT / ".circleci/setup.yml").read_text())
+    assert setup["setup"] is True
+    assert setup["parameters"] == load_config()["parameters"]
+    assert setup["parameters"]["activate_auto_release"]["default"] is False
+    assert setup["parameters"]["run_draft"]["default"] is False
+    job = setup["jobs"]["resolve-release"]
+    assert job["steps"][0] == {"checkout": {"method": "full"}}
+    commands = "\n".join(step["run"]["command"] for step in job["steps"] if "run" in step)
+    assert '"$CIRCLE_SHA1"' in commands
+    assert "CIRCLE_CONTINUATION_KEY" in commands
+    assert 'Path(".circleci/config.yml").read_text()' in commands

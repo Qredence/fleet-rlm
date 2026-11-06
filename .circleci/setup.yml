@@ -1,0 +1,88 @@
+version: 2.1
+setup: true
+parameters:
+  run_ci:
+    type: boolean
+    default: false
+  run_python314:
+    type: boolean
+    default: false
+  run_release:
+    type: boolean
+    default: false
+  run_pypi_recovery:
+    type: boolean
+    default: false
+  skip_testpypi:
+    type: boolean
+    default: true
+  run_draft:
+    type: boolean
+    default: false
+  activate_auto_release:
+    type: boolean
+    default: false
+  release_version:
+    type: string
+    default: ''
+  release_sha:
+    type: string
+    default: ''
+jobs:
+  resolve-release:
+    docker:
+    - image: cimg/python:3.12
+    resource_class: small
+    environment:
+      FLEET_EVENT: << pipeline.event.name >>
+      FLEET_BRANCH: << pipeline.git.branch >>
+      FLEET_AUTO_RELEASE: << pipeline.parameters.activate_auto_release >>
+      INPUT_RUN_CI: << pipeline.parameters.run_ci >>
+      INPUT_RUN_PYTHON314: << pipeline.parameters.run_python314 >>
+      INPUT_RUN_RELEASE: << pipeline.parameters.run_release >>
+      INPUT_RUN_PYPI_RECOVERY: << pipeline.parameters.run_pypi_recovery >>
+      INPUT_SKIP_TESTPYPI: << pipeline.parameters.skip_testpypi >>
+      INPUT_RUN_DRAFT: << pipeline.parameters.run_draft >>
+      INPUT_ACTIVATE_AUTO_RELEASE: << pipeline.parameters.activate_auto_release >>
+      INPUT_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      INPUT_RELEASE_SHA: << pipeline.parameters.release_sha >>
+    steps:
+    - checkout:
+        method: full
+    - run:
+        name: Select trusted setup implementation for pull requests
+        command: |-
+          if [ "$FLEET_EVENT" = pull_request ]; then
+            git fetch --no-tags https://github.com/Qredence/fleet-rlm.git main
+            mkdir -p /tmp/fleet-trusted-setup
+            git archive FETCH_HEAD | tar -x -C /tmp/fleet-trusted-setup
+            printf '%s\n' 'cd /tmp/fleet-trusted-setup' >> "$BASH_ENV"
+          fi
+    - run:
+        name: Resolve immutable release intent
+        command: |-
+          python - \<<'PYCODE'
+          import json, os
+          from pathlib import Path
+          boolean = {"run_ci", "run_python314", "run_release", "run_pypi_recovery", "skip_testpypi", "run_draft", "activate_auto_release"}
+          values = {key[6:].lower(): (value.lower() == "true" if key[6:].lower() in boolean else value) for key, value in os.environ.items() if key.startswith("INPUT_")}
+          Path("/tmp/input-parameters.json").write_text(json.dumps(values))
+          PYCODE
+          args=()
+          if [ "$FLEET_AUTO_RELEASE" = true ]; then args+=(--enabled); fi
+          python -m scripts.release_automation intent --event "$FLEET_EVENT" --branch "$FLEET_BRANCH" --sha "$CIRCLE_SHA1" "${args[@]}" --parameters /tmp/input-parameters.json --output /tmp/continuation-parameters.json
+    - run:
+        name: Continue validated pipeline configuration
+        command: |-
+          python - \<<'PYCODE'
+          import json, os, urllib.request
+          from pathlib import Path
+          body = {"continuation-key": os.environ["CIRCLE_CONTINUATION_KEY"], "configuration": Path(".circleci/config.yml").read_text(), "parameters": json.loads(Path("/tmp/continuation-parameters.json").read_text())}
+          request = urllib.request.Request("https://circleci.com/api/v2/pipeline/continue", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+          with urllib.request.urlopen(request, timeout=60) as response:
+              print("Continuation accepted:", response.status)
+          PYCODE
+workflows:
+  setup:
+    jobs:
+    - resolve-release

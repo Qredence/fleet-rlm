@@ -416,3 +416,81 @@ Keep the two-worker cap. Cache
 restructuring, larger executors, and further paid-feature expansion require evidence.
 To undo trigger deduplication, re-enable the saved trigger ID with
 `circleci project trigger update <trigger-id> --enable`.
+
+## Automatic release rollout
+
+Automatic releases are staged separately from the existing explicit release route.
+Do not change the project pipeline definition to the setup configuration until
+local checks and an authorized configuration-provenance acceptance run pass.
+Do not relax the restricted contexts' configuration-source, main-branch, project,
+or non-SSH restrictions to enable dynamic continuation.
+
+Contributor PRs use the repository template and exactly one `release:feature`,
+`release:fix`, `release:breaking`, `release:maintenance`, or `release:none` label.
+Breaking changes require migration instructions. The bot collects reviewed PR
+metadata, never executes it, and maintains `automation/release-draft`. Review the
+rendered notes; category labels do not establish correctness of their claims.
+
+The `release-ready` label freezes bot updates. Before merge, select a stable
+version, prepare matching package/lock/API metadata and changelog, and refresh
+against current main. Remove the label before refreshing and review again after
+updates. Configure required checks and strict up-to-date branch protection during
+activation; the automation has no branch-protection bypass or merge permission.
+
+Provision a repository-scoped GitHub App for draft automation, with Contents and
+Pull Requests permissions. Keep its installation credentials in a separate
+restricted context from the publisher's Contents/Deployments credentials. Mint
+short-lived installation tokens only in trusted jobs. Fork jobs must never receive
+write credentials. Provision category labels and `release-ready` during rollout.
+
+Direct PyPI publication is the automatic default. TestPyPI remains an explicit
+manual rehearsal and requires its own project-scoped token: CircleCI OIDC must
+not be assumed to be supported by PyPI. Preserve the required package checks,
+public-PyPI canary receipt and 20-minute validation window. A successful validation
+window alone does not establish package health.
+
+Activate draft generation first, review output, then run the isolated validation
+acceptance fixture with operator authorization. Only subsequently enable automatic
+publication. Record exact run/deployment IDs and digests. The first real release
+must produce one wheel/sdist upload, matching registry digests, successful canary
+and validation, matching GitHub release assets/notes, and a successful GitHub
+Deployment record. Full workflow cancellation can prevent finalizers; reconcile
+CircleCI and GitHub deployment states manually before another release.
+
+Disable automatic publication and draft updates to roll back automation; retain
+manual publication and no-upload recovery. Never overwrite registry files. A bad
+published package needs a corrective version and possibly a manual yank. Measure
+draft runtime, release runtime, retries and credits before tuning parallelism or
+considering self-hosted runners. Credential provisioning, protection changes,
+cloud acceptance and package publication require separate explicit authorization.
+
+Prepare the reviewed rolling draft locally with
+`uv run --locked python -m scripts.release_automation prepare --version X.Y.Z`.
+Use a canonical stable version and inspect the resulting diff before applying
+`release-ready`. Preparation is distinct from publication.
+
+The staged entry point is `.circleci/setup.yml`; `.circleci/config.yml` remains
+its continuation and the existing manual entry. `activate_auto_release` defaults
+false; `run_draft` independently defaults false. Activate through reviewed pipeline
+configuration only after acceptance. Validate both configurations locally.
+
+PR metadata validation requires a separate **read-only GitHub App installation**
+in `fleet-release-metadata`, not a draft-writer private key with a downscoped token.
+A label/body-only edit may not trigger CircleCI: rerun its required metadata check
+after edits, and verify PR event subscriptions during activation. Freeze checks
+must be combined with strict up-to-date branch protection, since advancing main
+does not itself invalidate an old PR check result.
+
+At activation, verify GitHub App PR events provide `CIRCLE_PULL_REQUEST` as a
+`https://github.com/Qredence/fleet-rlm/pull/<number>` URL. The metadata job fails
+closed if absent; configure and validate supported event mapping before making
+this check required. Do not substitute unvalidated shell parameters. The App token
+helper expects `FLEET_GITHUB_APP_ID`, `FLEET_GITHUB_APP_INSTALLATION_ID`, and
+`FLEET_GITHUB_APP_PRIVATE_KEY` in each purpose-specific context.
+
+Configure the setup pipeline's **configuration source** to protected main while
+retaining the event checkout revision for tests. Fetching trusted scripts inside
+a job does not make a PR-authored YAML configuration trusted. Do not expose any
+App private key context to PR-controlled YAML; validate the effective configuration
+source and fork behavior during acceptance. The read-only metadata installation
+must have no writer permissions even if a job requests a different token purpose.

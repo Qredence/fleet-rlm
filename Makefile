@@ -61,6 +61,7 @@ test:
 	uv run pytest
 
 check-ci-config:
+	circleci config validate .circleci/setup.yml
 	circleci config validate .circleci/config.yml
 	circleci config validate .circleci/cci-agent-setup.yml
 	circleci config validate .circleci/validation-acceptance.yml

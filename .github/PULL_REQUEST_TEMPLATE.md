@@ -26,5 +26,15 @@ Please delete options that are not relevant.
 List the commands run and outcomes. For documentation-only changes, use
 `make check-docs` when available and `git diff --check`. For broader changes,
 follow AGENTS.md. Distinguish deterministic checks from live provider,
-database, and security evidence; name any remaining validation gap. Releases
-and publishing are operator-controlled, not automated by this workflow.
+database, and security evidence; name any remaining validation gap. Merging a reviewed stable version bump authorizes publication only after
+automatic release rollout has been activated.
+
+## Release notes
+
+Write the user-facing changelog entry here. Apply exactly one label:
+`release:feature`, `release:fix`, `release:breaking`, `release:maintenance`, or
+`release:none`. The last category needs no release-note entry.
+
+## Migration
+
+For `release:breaking`, explain the action existing users must take.
