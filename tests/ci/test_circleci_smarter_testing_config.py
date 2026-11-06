@@ -366,7 +366,7 @@ def test_dynamic_setup_is_staged_and_preserves_explicit_release_parameters():
     assert {k: v["type"] for k, v in setup["parameters"].items()} == {
         k: v["type"] for k, v in load_config()["parameters"].items()
     }
-    assert setup["parameters"]["activate_auto_release"]["default"] is True
+    assert setup["parameters"]["activate_auto_release"]["default"] is False
     assert setup["parameters"]["run_draft"]["default"] is True
     job = setup["jobs"]["resolve-release"]
     assert job["steps"][0] == {"checkout": {"method": "full"}}
