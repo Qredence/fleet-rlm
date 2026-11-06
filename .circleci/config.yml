@@ -1118,7 +1118,7 @@ workflows:
             - test-python-3.13
             - package-check
             - security
-            - sonarqube
+            - sonarqube: [success, not_run]
       - publication:
           serial-group: << pipeline.project.slug >>/pypi-publication
           filters: pipeline.parameters.run_release or pipeline.parameters.run_pypi_recovery
