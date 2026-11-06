@@ -70,7 +70,7 @@ jobs:
           PYCODE
           args=()
           if [ "$FLEET_AUTO_RELEASE" = true ]; then args+=(--enabled); fi
-          python -m scripts.release_automation intent --event "$FLEET_EVENT" --branch "$FLEET_BRANCH" --sha "$CIRCLE_SHA1" "${args[@]}" --parameters /tmp/input-parameters.json --output /tmp/continuation-parameters.json
+          python3.12 -m scripts.release_automation intent --event "$FLEET_EVENT" --branch "$FLEET_BRANCH" --sha "$CIRCLE_SHA1" "${args[@]}" --parameters /tmp/input-parameters.json --output /tmp/continuation-parameters.json
     - run:
         name: Continue validated pipeline configuration
         command: |-
