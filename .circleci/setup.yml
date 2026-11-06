@@ -34,6 +34,7 @@ jobs:
     - image: cimg/python:3.12
     resource_class: small
     environment:
+      PYENV_VERSION: "3.12"
       FLEET_EVENT: << pipeline.event.name >>
       FLEET_BRANCH: << pipeline.git.branch >>
       FLEET_AUTO_RELEASE: << pipeline.parameters.activate_auto_release >>
