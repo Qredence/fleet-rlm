@@ -238,6 +238,24 @@ also stop cleanup jobs: inspect the Deploys record and reconcile it manually.
 A rejected terminal marker update must be inspected; do not force a completed
 release into a new state. Rerun the full recovery workflow instead.
 
+### Release-script security finding review
+
+SonarCloud findings `AaGvUEZt-J3Gs6PfOIuR`, `AaGvUEZt-J3Gs6PfOIuV`,
+`AaGvUEZt-J3Gs6PfOIuT`, `AaGvUEZt-J3Gs6PfOIuS`, `AaGvUEZt-J3Gs6PfOIuP`,
+and `AaGvUEZt-J3Gs6PfOIuU` trace paths to command-line arguments. These scripts
+are CLI tools, not HTTP endpoints. In CircleCI their path arguments are literals
+in the checked-in configuration; `prepare` writes a fixed set of repository files
+and rejects noncanonical versions. A local operator can select paths using the
+CLI, which is intentional and does not add privileges beyond that operator.
+
+For `AaGvUEZt-J3Gs6PfOIuQ`, the deployment ID used in the `gh api` argument is
+checked as an integer before use. For `AaGvUEcS-J3Gs6PfOIuW`, the repository
+argument is constrained to owner/name characters and the PR number is parsed as
+an integer. Both invoke `gh` with an argument list, not a shell. PR text is data
+and is never interpolated into an executable command. These observations support
+false-positive review of the reported flows; they are not a substitute for
+restricting credential-bearing jobs to trusted configuration and code.
+
 ### Integration acceptance, without uploading a package
 
 Use the prepared [.circleci/validation-acceptance.yml](../../.circleci/validation-acceptance.yml)
