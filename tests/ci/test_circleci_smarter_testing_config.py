@@ -78,6 +78,26 @@ def test_quality_and_release_gates_remain_required():
         "security",
         "sonarqube",
     }
+    # Every executed quality dependency must succeed. Metadata alone is absent on non-PR runs.
+    assert {
+        item if isinstance(item, str) else next(iter(item)): "success"
+        if isinstance(item, str)
+        else next(iter(item.values()))
+        for item in jobs["quality"]["requires"]
+    } == {
+        name: ["success", "not_run"] if name == "release-metadata" else "success"
+        for name in (
+            "release-metadata",
+            "static-checks",
+            "test-python-3.11",
+            "coverage-report",
+            "test-python-312",
+            "test-python-3.13",
+            "package-check",
+            "security",
+            "sonarqube",
+        )
+    }
     assert config["jobs"]["sonarqube"]["steps"][0] == {"checkout": {"method": "full"}}
     assert config["experimental"]["dynamic-parallelism"]["test-python-312"] == {
         "key": "ci-tests-parallelism-key",
