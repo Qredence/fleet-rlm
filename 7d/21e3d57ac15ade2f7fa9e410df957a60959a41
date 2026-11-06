@@ -1,0 +1,25 @@
+CHANGELOG.md
+  s_0c2b7da8f924e5::t_cacb30c989c0bb 7-40
+openapi.yaml
+  s_0c2b7da8f924e5::t_addcdbeeff2757 4
+pyproject.toml
+  s_0c2b7da8f924e5::t_99828d4044b8cc 3
+uv.lock
+  s_0c2b7da8f924e5::t_4ac9e7ecf2cb35 1335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7d21e3d57ac15ade2f7fa9e410df957a60959a41",
+  "prompts": {},
+  "sessions": {
+    "s_0c2b7da8f924e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af33-e2ad-76b3-96f9-94a4af5bcfcf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
