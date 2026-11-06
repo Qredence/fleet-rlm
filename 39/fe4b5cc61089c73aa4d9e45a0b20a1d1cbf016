@@ -1,0 +1,21 @@
+.circleci/setup.yml
+  s_0c2b7da8f924e5::t_c375ae2b9f0898 73
+.circleci/config.yml
+  s_0c2b7da8f924e5::t_c375ae2b9f0898 150,158,175,177,184,186,206,209,224,864,878
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "39fe4b5cc61089c73aa4d9e45a0b20a1d1cbf016",
+  "prompts": {},
+  "sessions": {
+    "s_0c2b7da8f924e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af33-e2ad-76b3-96f9-94a4af5bcfcf",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
