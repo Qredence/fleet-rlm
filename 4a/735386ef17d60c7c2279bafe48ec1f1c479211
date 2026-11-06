@@ -1,0 +1,64 @@
+.github/PULL_REQUEST_TEMPLATE.md
+  s_0c2b7da8f924e5::t_556b9a164d1d9f 29-31,34
+  s_0c2b7da8f924e5::t_f67c8519058a31 32,35-40
+  s_0c2b7da8f924e5::t_9bcad21ed7c99a 33
+Makefile
+  s_0c2b7da8f924e5::t_aad4f2fead8596 64
+.circleci/setup.yml
+  s_0c2b7da8f924e5::t_d9df4a175b6d02 52-61
+  s_0c2b7da8f924e5::t_615cd597f773d8 63-84
+  s_0c2b7da8f924e5::t_cad6dfb4b9ad8f 1-51,62,85-88
+tests/ci/test_circleci_smarter_testing_config.py
+  s_0c2b7da8f924e5::t_ba2945486fe3c5 344-374
+  s_0c2b7da8f924e5::t_7c00ef099fb6e4 20,67-68
+  s_0c2b7da8f924e5::t_9a9c95a2c1c4bf 92
+scripts/github_app_token.py
+  s_0c2b7da8f924e5::t_4aaaee32cd7f58 1-69
+tests/test_release_draft.py
+  s_0c2b7da8f924e5::t_4edfa7a9b08f42 73,93
+  s_0c2b7da8f924e5::t_ab4d32d8e65ad4 15,96-127
+  s_0c2b7da8f924e5::t_d993d1bb91110f 58-72,74-92,94-95
+  s_0c2b7da8f924e5::t_7b5c3a45d81a3c 1-14,16-57
+docs/runbooks/circleci-ci-release.md
+  s_0c2b7da8f924e5::t_a260e0ea9aef5b 488
+  s_0c2b7da8f924e5::t_497dd2279d6181 471-482
+  s_0c2b7da8f924e5::t_40479b48f2553e 466-470
+  s_0c2b7da8f924e5::t_9b441cff374081 483-487,489
+  s_0c2b7da8f924e5::t_580054045dee30 419-465
+  s_0c2b7da8f924e5::t_86bbc74a9b874c 490-496
+scripts/release_automation.py
+  s_0c2b7da8f924e5::t_3c254413a543ae 92-93
+  s_0c2b7da8f924e5::t_793dbad2043858 1-20,24-32,38-77,89-91,94-103,107-109,118-138,143-151,164-172,183-202,206-218
+  s_0c2b7da8f924e5::t_25bb29f97c9b12 78-88
+  s_0c2b7da8f924e5::t_f50d9eebcde89f 21-23,33-37,104-106,110-117,139-142,152-163,173-182,203-205
+scripts/release_draft.py
+  s_0c2b7da8f924e5::t_648a0a3b238c62 1-34,36-48,50-66,68-106,108-123,127-149,155-196,199,202-218,223-247
+  s_0c2b7da8f924e5::t_0832091cde8fe3 35,49,67,219-222
+  s_0c2b7da8f924e5::t_8b946acd0cca66 107,124-126,197-198,200-201
+  s_0c2b7da8f924e5::t_db8e9197793037 150-154
+.circleci/config.yml
+  s_0c2b7da8f924e5::t_f80aaf22836b2e 136-140,142-160,173-177,182,205-206,222-226,863-864,1082-1084,1107
+  s_0c2b7da8f924e5::t_ca9c05d59bb302 17-22,161-168,170-172,181,183,187-197,199-204,208-216,218-221,227,535-537,656,878,880-881,898,907-911,916,944-946,950-953,1015,1017-1020,1026,1032,1038-1039,1041-1044,1050,1056,1062-1081,1085-1106,1108-1122,1124-1125
+  s_0c2b7da8f924e5::t_3c254413a543ae 1016,1021-1025,1027-1031,1033-1037,1040,1045-1049,1051-1055,1057-1061
+  s_0c2b7da8f924e5::t_8fb0941d8da1d4 1123
+  s_0c2b7da8f924e5::t_16db1cc6bcef4e 33-49,141,169,198,217
+  s_0c2b7da8f924e5::t_3f0126ba66e3d0 178-180,184-186,207,865
+tests/test_release_automation.py
+  s_0c2b7da8f924e5::t_79de6e830ef6d5 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4a735386ef17d60c7c2279bafe48ec1f1c479211",
+  "prompts": {},
+  "sessions": {
+    "s_0c2b7da8f924e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af33-e2ad-76b3-96f9-94a4af5bcfcf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
