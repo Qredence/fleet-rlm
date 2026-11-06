@@ -29,6 +29,9 @@ def workflow_jobs():
 def test_smarter_testing_uses_file_atoms_and_per_atom_lcov_analysis():
     suite = yaml.safe_load((ROOT / ".circleci/test-suites.yml").read_text())
     atoms = subprocess.check_output(["bash", "-ec", suite["discover"]], cwd=ROOT, text=True).splitlines()
+    # Some environments print a startup banner to stdout (e.g., Node version).
+    # Filter to the expected test file paths to keep this test robust.
+    atoms = [line for line in atoms if line.startswith("tests/")]
     assert atoms == sorted(str(p.relative_to(ROOT)) for p in (ROOT / "tests").rglob("test_*.py"))
     assert "file-mapper" not in suite
     assert "<< outputs.lcov >>" in suite["analysis"]
