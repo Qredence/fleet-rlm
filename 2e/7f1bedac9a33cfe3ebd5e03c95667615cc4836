@@ -1,0 +1,24 @@
+tests/ci/test_circleci_smarter_testing_config.py
+  s_0c2b7da8f924e5::t_a32d7bc2846502 366-368
+  s_0c2b7da8f924e5::t_f0446cb01ce533 369-370
+.circleci/setup.yml
+  s_0c2b7da8f924e5::t_f0446cb01ce533 21,24,83
+docs/runbooks/circleci-ci-release.md
+  s_0c2b7da8f924e5::t_69e8713ec30f51 473-475
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e7f1bedac9a33cfe3ebd5e03c95667615cc4836",
+  "prompts": {},
+  "sessions": {
+    "s_0c2b7da8f924e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af33-e2ad-76b3-96f9-94a4af5bcfcf",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
