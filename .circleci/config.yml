@@ -1096,7 +1096,7 @@ workflows:
               python-version: ["3.11", "3.13"]
       - coverage-report:
           requires:
-            - test-python-3.11
+            - test-python-3.11: terminal
       - list-smarter-tests
       - test-python-312:
           requires:
