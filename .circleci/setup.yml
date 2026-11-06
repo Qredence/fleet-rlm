@@ -78,7 +78,12 @@ jobs:
           python - \<<'PYCODE'
           import json, os, urllib.request
           from pathlib import Path
-          body = {"continuation-key": os.environ["CIRCLE_CONTINUATION_KEY"], "configuration": Path(".circleci/config.yml").read_text(), "parameters": json.loads(Path("/tmp/continuation-parameters.json").read_text())}
+          incoming = json.loads(Path("/tmp/input-parameters.json").read_text())
+          resolved = json.loads(Path("/tmp/continuation-parameters.json").read_text())
+          defaults = {"run_ci": False, "run_python314": False, "run_release": False, "run_pypi_recovery": False, "skip_testpypi": True, "run_draft": False, "activate_auto_release": False, "release_version": "", "release_sha": ""}
+          # Explicit non-default API parameters already propagate; passing them again is a CircleCI 409 conflict.
+          parameters = {key: value for key, value in resolved.items() if incoming[key] == defaults[key]}
+          body = {"continuation-key": os.environ["CIRCLE_CONTINUATION_KEY"], "configuration": Path(".circleci/config.yml").read_text(), "parameters": parameters}
           request = urllib.request.Request("https://circleci.com/api/v2/pipeline/continue", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
           with urllib.request.urlopen(request, timeout=60) as response:
               print("Continuation accepted:", response.status)
