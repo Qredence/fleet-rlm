@@ -18,10 +18,10 @@ parameters:
     default: true
   run_draft:
     type: boolean
-    default: false
+    default: true
   activate_auto_release:
     type: boolean
-    default: false
+    default: true
   release_version:
     type: string
     default: ''
@@ -80,7 +80,7 @@ jobs:
           from pathlib import Path
           incoming = json.loads(Path("/tmp/input-parameters.json").read_text())
           resolved = json.loads(Path("/tmp/continuation-parameters.json").read_text())
-          defaults = {"run_ci": False, "run_python314": False, "run_release": False, "run_pypi_recovery": False, "skip_testpypi": True, "run_draft": False, "activate_auto_release": False, "release_version": "", "release_sha": ""}
+          defaults = {"run_ci": False, "run_python314": False, "run_release": False, "run_pypi_recovery": False, "skip_testpypi": True, "run_draft": True, "activate_auto_release": True, "release_version": "", "release_sha": ""}
           # Explicit non-default API parameters already propagate; passing them again is a CircleCI 409 conflict.
           parameters = {key: value for key, value in resolved.items() if incoming[key] == defaults[key]}
           body = {"continuation-key": os.environ["CIRCLE_CONTINUATION_KEY"], "configuration": Path(".circleci/config.yml").read_text(), "parameters": parameters}

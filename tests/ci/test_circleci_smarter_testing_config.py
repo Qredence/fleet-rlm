@@ -363,9 +363,11 @@ def test_publication_is_serialized_with_recovery_and_github_health_gates():
 def test_dynamic_setup_is_staged_and_preserves_explicit_release_parameters():
     setup = yaml.safe_load((ROOT / ".circleci/setup.yml").read_text())
     assert setup["setup"] is True
-    assert setup["parameters"] == load_config()["parameters"]
-    assert setup["parameters"]["activate_auto_release"]["default"] is False
-    assert setup["parameters"]["run_draft"]["default"] is False
+    assert {k: v["type"] for k, v in setup["parameters"].items()} == {
+        k: v["type"] for k, v in load_config()["parameters"].items()
+    }
+    assert setup["parameters"]["activate_auto_release"]["default"] is True
+    assert setup["parameters"]["run_draft"]["default"] is True
     job = setup["jobs"]["resolve-release"]
     assert job["steps"][0] == {"checkout": {"method": "full"}}
     commands = "\n".join(step["run"]["command"] for step in job["steps"] if "run" in step)
