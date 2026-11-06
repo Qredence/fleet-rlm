@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-06
+
+### Features
+
+- Add role-scoped OpenAI-compatible endpoint, credential, and adapter settings,
+  including provider-agnostic `LLM_BASE_URL` and `LLM_API_KEY` configuration.
+  See [PR #672](https://github.com/Qredence/fleet-rlm/pull/672).
+- Support bounded workspace-context inlining for explicitly selected direct
+  execution, with character and truncation accounting; retain context-bearing
+  triage routing constraints. See [PR #672](https://github.com/Qredence/fleet-rlm/pull/672).
+
+### Changed
+
+- Use native DSPy configuration and role adapters; expand benchmark evidence
+  handling and correct setup discovery, MLflow port validation, and Store
+  compatibility. See [PR #672](https://github.com/Qredence/fleet-rlm/pull/672).
+- Add staged automatic release detection, PR-based changelog drafts, serialized
+  PyPI publication, and GitHub Deployment reporting. Activation requires the
+  credential and integration acceptance steps in the CircleCI release runbook.
+
+### Fixed
+
+- Preserve CircleCI test, coverage, and canary diagnostics when checks fail;
+  cache the verified SonarScanner distribution and improve GitHub CLI bootstrap.
+  See [PR #667](https://github.com/Qredence/fleet-rlm/pull/667) and
+  [PR #668](https://github.com/Qredence/fleet-rlm/pull/668).
+
+### Migration
+
+- Migrate model configuration to schema version 5 and role-scoped settings;
+  remove the abandoned `[models]` and `[connections]` tables. Follow
+  [the DSPy migration guide](DSPY_MIGRATION.md) before upgrading an existing
+  configuration. No live-provider or performance gains are claimed by this release.
+
 ## [0.10.0] - 2026-11-01
 
 ### Changed
