@@ -21,7 +21,7 @@ parameters:
     default: true
   activate_auto_release:
     type: boolean
-    default: true
+    default: false
   release_version:
     type: string
     default: ''

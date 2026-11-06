@@ -470,9 +470,12 @@ Use a canonical stable version and inspect the resulting diff before applying
 `release-ready`. Preparation is distinct from publication.
 
 The staged entry point is `.circleci/setup.yml`; `.circleci/config.yml` remains
-its continuation and the existing manual entry. `activate_auto_release` and `run_draft` default true in the setup entry point.
+its continuation and the existing manual entry. `run_draft` defaults true and `activate_auto_release` defaults false in the setup entry point.
 They take effect only when the production pipeline definition selects that entry point.
 Validate both configurations and complete acceptance before switching the definition.
+Enable `activate_auto_release` only in a separate reviewed change after the draft has been
+reviewed and the acceptance fixture has passed; never enable publication in the same change
+that first activates draft generation.
 
 PR metadata validation requires a separate **read-only GitHub App installation**
 in `fleet-release-metadata`, not a draft-writer private key with a downscoped token.
