@@ -1,0 +1,21 @@
+.circleci/config.yml
+  s_09e6d8a3b450d1::t_000251dd78342a 1121
+tests/ci/test_circleci_smarter_testing_config.py
+  s_09e6d8a3b450d1::t_a6502286f5901d 81-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bc86dfb9e6435d0944d7109b3eddadca02c2f885",
+  "prompts": {},
+  "sessions": {
+    "s_09e6d8a3b450d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b32a-24c3-7230-9757-ab69a73bb82d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
