@@ -35,6 +35,7 @@ jobs:
     resource_class: small
     environment:
       PYENV_VERSION: "3.12"
+      FLEET_EVENT: << pipeline.event.name >>
       FLEET_BRANCH: << pipeline.git.branch >>
       FLEET_AUTO_RELEASE: << pipeline.parameters.activate_auto_release >>
       INPUT_RUN_CI: << pipeline.parameters.run_ci >>
@@ -47,11 +48,12 @@ jobs:
       INPUT_RELEASE_VERSION: << pipeline.parameters.release_version >>
       INPUT_RELEASE_SHA: << pipeline.parameters.release_sha >>
     steps:
-    - checkout
+    - checkout:
+        method: full
     - run:
         name: Select trusted setup implementation for pull requests
         command: |-
-          if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+          if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
             git fetch --no-tags https://github.com/Qredence/fleet-rlm.git main
             mkdir -p /tmp/fleet-trusted-setup
             git archive FETCH_HEAD | tar -x -C /tmp/fleet-trusted-setup
@@ -60,11 +62,9 @@ jobs:
     - run:
         name: Resolve immutable release intent
         command: |-
-          # Derive a GitHub-like event name for downstream tooling
-          if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+          # Normalize PRs without treating API or scheduled pipelines as pushes.
+          if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
             export FLEET_EVENT=pull_request
-          else
-            export FLEET_EVENT=push
           fi
           python - \<<'PYCODE'
           import json, os

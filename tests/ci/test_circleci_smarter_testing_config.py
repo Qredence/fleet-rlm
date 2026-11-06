@@ -377,3 +377,45 @@ def test_dynamic_setup_is_staged_and_preserves_explicit_release_parameters():
     assert '"$CIRCLE_SHA1"' in commands
     assert "CIRCLE_CONTINUATION_KEY" in commands
     assert 'Path(".circleci/config.yml").read_text()' in commands
+
+
+@pytest.mark.parametrize(
+    ("event", "pull_request", "expected"),
+    [
+        ("push", "https://github.com/Qredence/fleet-rlm/pull/679", "pull_request"),
+        ("push", "", "push"),
+        ("api", "", "api"),
+        ("scheduled_pipeline", "", "scheduled_pipeline"),
+    ],
+)
+def test_dynamic_setup_preserves_pipeline_event_except_pull_requests(tmp_path, event, pull_request, expected):
+    setup = yaml.safe_load((ROOT / ".circleci/setup.yml").read_text())
+    job = setup["jobs"]["resolve-release"]
+    assert job["environment"]["FLEET_EVENT"] == "<< pipeline.event.name >>"
+    selection = job["steps"][1]["run"]["command"]
+    assert "${CIRCLE_PULL_REQUEST:-}" in selection
+    command = job["steps"][2]["run"]["command"].replace(r"\<<", "<<")
+    for name, script in {
+        "python": "#!/bin/sh\ncat >/dev/null\n",
+        "python3.12": '#!/bin/sh\nprintf "%s\\n" "$FLEET_EVENT" > "$EVENT_RECORD"\n',
+    }.items():
+        binary = tmp_path / name
+        binary.write_text(script)
+        binary.chmod(0o755)
+    record = tmp_path / "event"
+    env = {
+        **os.environ,
+        "BASH_ENV": "",
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "EVENT_RECORD": str(record),
+        "FLEET_EVENT": event,
+        "FLEET_AUTO_RELEASE": "true",
+        "FLEET_BRANCH": "main",
+        "CIRCLE_SHA1": "a" * 40,
+    }
+    if pull_request:
+        env["CIRCLE_PULL_REQUEST"] = pull_request
+    else:
+        env.pop("CIRCLE_PULL_REQUEST", None)
+    subprocess.run(["bash", "-euc", command], cwd=tmp_path, env=env, check=True)
+    assert record.read_text().strip() == expected
