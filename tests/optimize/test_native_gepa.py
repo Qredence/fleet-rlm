@@ -97,14 +97,18 @@ def _factory(example: dspy.Example, candidate: dspy.Module, loaded: list[dspy.Fl
 
 
 @pytest.mark.parametrize("bounded_canary", [False, True])
-def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_trips(tmp_path, bounded_canary) -> None:
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_trips(
+    tmp_path, bounded_canary, adapter_type
+) -> None:
     from gepa.utils.stop_condition import MaxCandidateProposalsStopper
 
     baseline = _flex()
     assert "dspy.RLM" in baseline._baseline_src()
     assert set(tunable_components(baseline)) == {"self"}
 
-    reflection_lm = DummyLM([{"revised_source": REVISED_SOURCE}] * 8)
+    reflection_adapter = adapter_type()
+    reflection_lm = DummyLM([{"revised_source": REVISED_SOURCE}] * 8, adapter=reflection_adapter)
 
     def metric(
         example: dspy.Example,
@@ -132,8 +136,11 @@ def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_tr
         gepa_kwargs={"stop_callbacks": [MaxCandidateProposalsStopper(1)]} if bounded_canary else None,
     )
     example = dspy.Example(task="solve fixture", answer="right").with_inputs("task")
-    with dspy.context(adapter=ChatAdapter(use_json_adapter_fallback=False), trace=[]):
-        candidate = gepa.compile(baseline, trainset=[example], valset=[example] * (3 if bounded_canary else 1))
+    ambient = ChatAdapter(use_json_adapter_fallback=False)
+    with dspy.context(adapter=ambient, trace=[]):
+        with dspy.context(adapter=reflection_adapter):
+            candidate = gepa.compile(baseline, trainset=[example], valset=[example] * (3 if bounded_canary else 1))
+        assert dspy.settings.adapter is ambient
 
     if bounded_canary:
         assert candidate.detailed_results.total_metric_calls == 8
@@ -158,20 +165,22 @@ def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_tr
     assert loaded_flex[-1].module_src.strip() == REVISED_SOURCE.strip()
 
 
-def test_native_gepa_instruction_component_contract() -> None:
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_native_gepa_instruction_component_contract(adapter_type) -> None:
     from fleet_rlm.optimize.gepa import INSTRUCTION_MAX_CHARS, build_instruction_proposer
 
-    proposer = build_instruction_proposer()
-    assert isinstance(proposer.adapter, JSONAdapter)
+    reflection_adapter = adapter_type()
+    proposer = build_instruction_proposer(adapter=reflection_adapter)
+    assert proposer.adapter is reflection_adapter
     assert proposer.max_chars == INSTRUCTION_MAX_CHARS
     assert proposer.truncate_history_outputs is True
 
     student = dspy.Predict("task -> answer")
     student.signature = student.signature.with_instructions("Return a concise answer.")
-    # The native proposer uses JSONAdapter and returns its typed instruction field.
+    # The native proposer uses the reflection role's adapter for its typed field.
     reflection_lm = DummyLM(
         [{"new_instruction": "Return the reviewed answer exactly."}] * 8,
-        adapter=JSONAdapter(),
+        adapter=reflection_adapter,
     )
 
     def metric(
@@ -197,10 +206,47 @@ def test_native_gepa_instruction_component_contract() -> None:
     )
     example = dspy.Example(task="fixture", answer="right").with_inputs("task")
     serving_lm = DummyLM([{"answer": "wrong"}, {"answer": "wrong"}, {"answer": "right"}, {"answer": "right"}])
-    with dspy.context(lm=serving_lm, adapter=ChatAdapter(use_json_adapter_fallback=False), trace=[]):
+    serving_adapter = ChatAdapter(use_json_adapter_fallback=False)
+    with dspy.context(lm=serving_lm, adapter=serving_adapter, trace=[]):
         candidate = gepa.compile(student, trainset=[example], valset=[example])
+        assert dspy.settings.adapter is serving_adapter
     assert candidate.signature.instructions == "Return the reviewed answer exactly."
     assert student.signature.instructions == "Return a concise answer."
+
+
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_instruction_proposal_failure_restores_ambient_adapter(adapter_type):
+    from fleet_rlm.optimize.gepa import build_instruction_proposer
+
+    reflection_adapter = adapter_type()
+    proposer = build_instruction_proposer(adapter=reflection_adapter)
+    ambient = JSONAdapter() if adapter_type is ChatAdapter else ChatAdapter()
+    lm = DummyLM([{"unrelated_field": "missing instruction"}] * 4, adapter=reflection_adapter)
+    with dspy.context(lm=lm, adapter=ambient), pytest.raises(dspy.AdapterParseError):
+        try:
+            proposer(
+                candidate={"predict": "Answer incorrectly."},
+                reflective_dataset={"predict": [{"Inputs": {"task": "fixture"}, "Feedback": "Fix it."}]},
+                components_to_update=["predict"],
+            )
+        finally:
+            assert dspy.settings.adapter is ambient
+
+
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_flex_proposal_parse_failure_keeps_source_and_restores_ambient_adapter(adapter_type):
+    from dspy.teleprompt.gepa.gepa_flex_utils import propose_code
+
+    reflection_adapter = adapter_type()
+    ambient = JSONAdapter() if adapter_type is ChatAdapter else ChatAdapter()
+    lm = DummyLM([{"unrelated_field": "missing revised source"}] * 4, adapter=reflection_adapter)
+    candidate = {"self": BASELINE_SOURCE}
+    with dspy.context(adapter=ambient):
+        with dspy.context(adapter=reflection_adapter):
+            result = propose_code(["self"], candidate, {"self": []}, {"self": "task -> answer"}, {}, lm)
+        assert dspy.settings.adapter is ambient
+    assert result == candidate
+    assert lm.history
 
 
 def test_public_parameter_traversal_finds_predictor_and_flex_together() -> None:

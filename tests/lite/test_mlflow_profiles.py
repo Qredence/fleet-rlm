@@ -20,7 +20,7 @@ def test_profiles_have_independent_precedence_and_provenance(tmp_path, monkeypat
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config").mkdir()
     (tmp_path / "config/fleet.toml").write_text(
-        '[config]\nschema_version=4\n[mlflow.local]\nexperiment_name="local-toml"\n'
+        '[config]\nschema_version=5\n[mlflow.local]\nexperiment_name="local-toml"\n'
         '[mlflow.databricks]\nexperiment_name="/Shared/db-toml"\n'
     )
     (tmp_path / ".env").write_text("FLEET_MLFLOW_LOCAL_EXPERIMENT_NAME=local-dotenv\n")
@@ -60,7 +60,7 @@ def test_databricks_trace_prefix_dotenv_overrides_toml_and_can_be_corrected(tmp_
     monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX", raising=False)
     (tmp_path / "config").mkdir()
     (tmp_path / "config/fleet.toml").write_text(
-        '[config]\nschema_version=4\n[mlflow.databricks]\ntrace_table_prefix="fleet_rlm_dev"\n'
+        '[config]\nschema_version=5\n[mlflow.databricks]\ntrace_table_prefix="fleet_rlm_dev"\n'
     )
     env = tmp_path / ".env"
     env.write_text("FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX=fleet_rlm_runtime\n")
@@ -92,16 +92,15 @@ def test_retired_process_mode_cannot_redirect_the_cli(monkeypatch, capsys):
     assert "migrate" in capsys.readouterr().err
 
 
-def test_old_schema_and_flat_mlflow_settings_require_migration(tmp_path, monkeypatch):
+def test_old_schema_requires_migration_and_toml_selects_mlflow_mode(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "fleet.toml.example"
     monkeypatch.setenv("FLEET_CONFIG", str(path))
     path.write_text("[config]\nschema_version=3\n")
-    with pytest.raises(ValueError, match="migrate"):
+    with pytest.raises(ValueError, match="schema_version = 5"):
         FleetSettings(_env_file=None)
-    path.write_text('[config]\nschema_version=4\n[mlflow]\nmode="databricks"\n')
-    with pytest.raises(ValueError, match=r"mlflow\.mode"):
-        FleetSettings(_env_file=None)
+    path.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
+    assert FleetSettings(_env_file=None).mlflow_mode == "databricks"
 
 
 @pytest.mark.parametrize("arguments", [["databricks"], ["--mlflow", "databricks"], ["--session", "s1", "databricks"]])
@@ -459,3 +458,30 @@ def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination
     assert "MLFLOW_TRACKING_URI" not in requests[0].headers
     assert os.environ["MLFLOW_EXPERIMENT_ID"] == "stale"
     assert "session's MLflow backend" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["cli", "web"])
+def test_invalid_configured_backend_still_opens_interactive_setup(tmp_path, monkeypatch, command):
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "fleet.toml"
+    config.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
+    monkeypatch.setenv("FLEET_CONFIG", str(config))
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", "")
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    seen = []
+    monkeypatch.setattr(cli, "_onboard", lambda args, backend, _token: seen.append((args.command, backend)) or False)
+    cli.main([command])
+    assert seen == [(command, "local")]
+
+
+def test_toml_backend_is_used_by_standalone_commands_and_explicit_flag_wins(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "fleet.toml"
+    config.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
+    monkeypatch.setenv("FLEET_CONFIG", str(config))
+    monkeypatch.setattr(launcher, "mlflow_is_healthy", lambda _url: True)
+    seen = []
+    monkeypatch.setattr(cli, "_trace_verify_command", lambda _args, settings: seen.append(settings.mlflow_mode))
+    cli.main(["trace", "verify", "trace-1"])
+    cli.main(["trace", "verify", "trace-1", "--mlflow", "local"])
+    assert seen == ["databricks", "local"]

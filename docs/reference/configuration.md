@@ -11,7 +11,7 @@ source control.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/fleet` | PostgreSQL DSN for Session, Turn and memory storage. |
-| `FLEET_DATABASE_SCHEMA` | `fleet_rlm_lite` in the public example (`public` code fallback) | Lowercase schema name for Fleet Lite tables. The fresh Lakebase database is configured to use a dedicated schema; provision a separate migration role and grant the runtime role access to its objects. |
+| `FLEET_DATABASE_SCHEMA` | `fleet_rlm_lite` in the public example (`public` code fallback) | Lowercase schema name for Fleet Lite tables. Choose a schema for Fleet tables; optionally provision a separate migration role and grant the runtime role access to its objects. |
 | `FLEET_DATABASE_MIGRATION_URL` | empty | Optional secret-only DSN for schema migrations. When omitted, migrations use `FLEET_DATABASE_URL`; when separate, it must target the same database. |
 | `FLEET_LAKEBASE_ENDPOINT` | empty | Optional Lakebase endpoint resource path. When set, Fleet generates a fresh Databricks OAuth database credential for each new physical connection; the DSN must contain host/user/database, omit password, and require TLS. |
 | `FLEET_DAYTONA_API_KEY` | empty | Daytona API credential. |
@@ -26,14 +26,16 @@ source control.
 | `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |
 | `DATABRICKS_TOKEN` | empty | Databricks credential for Unity Gateway `openai/` models. |
 | `FLEET_LLM_BASE_URL` | derived from `DATABRICKS_HOST` | Optional Unity Gateway base URL override, normally `https://<workspace-host>/ai-gateway/mlflow/v1`. |
+| `LLM_BASE_URL` | empty | OpenAI-compatible inference endpoint; takes precedence over `FLEET_LLM_BASE_URL` when set and must be HTTPS. |
+| `LLM_API_KEY` | empty | Inference credential; takes precedence over `DATABRICKS_TOKEN` when set, so a non-Databricks provider never requires overwriting the Databricks credential. |
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
-| `FLEET_EXECUTION_MODE` | `hybrid` | Strict `rlm`, strict `flex`, or routed `hybrid`; sessions can override and persist the selection. |
+| `FLEET_EXECUTION_MODE` | `hybrid` | Strict `direct`, strict `flex`, strict `rlm`, or routed `hybrid`; sessions can override and persist the selection. Strict `direct` folds the Session's `files/` into one prompt, because that route has no workspace access; the inlined size is recorded as `direct_context_chars` and a clipped prompt as `direct_context_truncated`. |
 | `FLEET_MAX_AGENT_DEPTH` | `3` | Maximum recursive child depth (root is zero). |
 | `FLEET_MAX_CHILD_SANDBOXES` | `8` | Total child allocations per turn. |
 | `FLEET_MAX_ACTIVE_CHILDREN` | `4` | Active child capacity; exhaustion fails immediately, avoiding a spawn/join wait cycle. |
-| `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. `0` is opt-in and is not the default. |
+| `FLEET_TURN_TIMEOUT_SECONDS` | `0` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. The shipped value is `0`; provider TTL and idle bounds still apply. |
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
@@ -64,9 +66,9 @@ Set environment names to the uppercase field names shown. In particular the
 bind override is `FLEET_ALLOW_NON_LOOPBACK_BIND=true`. This only changes bind
 validation; it does not authenticate callers. The API has no authentication.
 
-Local MLflow is the default for all commands. Select Databricks with
-`fleet cli databricks` or `--mlflow databricks` on standalone commands.
-The selected backend is an explicit command choice, never an environment default.
+The MLflow backend comes from `[mlflow].mode` in TOML (default `local`).
+Select Databricks explicitly with `fleet cli databricks` or `--mlflow databricks`;
+an explicit command selection overrides TOML.
 `[mlflow.local]` and `[mlflow.databricks]` keep their values independent.
 `fleet cli` manages the local server; standalone commands require it to be
 running. Tracking initialization failure prevents API readiness. `/health`
@@ -117,12 +119,9 @@ Set `FLEET_DATABASE_MIGRATION_URL` to a separate DDL role when runtime privilege
 must not create or alter schema objects. Fleet creates the configured schema and
 applies versioned migrations through that role; provision USAGE and required
 table privileges for the runtime role. The migration role must be able to create
-the schema and objects. The current Lakebase setup uses native-password
-`fleet_migrator` for migrations and `fleet_app` for runtime queries and session
-leases; both DSNs are secret-only and must remain in ignored local or deployment
-configuration. No new service principal or shared authentication flow is
-required. MLflow uses Databricks SDK authentication and Gateway uses the
-configured `DATABRICKS_TOKEN`. Lakebase OAuth remains an optional alternative;
+the schema and objects. Keep DSNs in ignored local or deployment configuration.
+MLflow uses Databricks SDK authentication and Gateway uses the configured
+`DATABRICKS_TOKEN`. Lakebase OAuth is optional;
 when used, Fleet validates TLS and that both DSNs target the same host and
 database, then obtains credentials separately for each role from the configured
 Databricks identity.
@@ -162,11 +161,52 @@ reconciled when the owning session next provisions a root. Provider TTL remains
 the fallback if local state is lost. This is not a distributed global reaper.
 
 
+## Native model response format
+
+Shared `[llm]` and role tables `[llm.root]`, `[llm.sub]`, `[llm.reflection]`, and
+`[llm.judge]` accept `adapter = "chat" | "json"` and
+`response_format = "auto" | "json_object"`. Response format defaults to `auto`;
+roles inherit the shared setting unless explicitly overridden, including an
+explicit role `auto`. The environment equivalents are `FLEET_LLM_RESPONSE_FORMAT`
+and `FLEET_ROOT_RESPONSE_FORMAT`, with SUB/REFLECTION/JUDGE counterparts.
+
+`json_object` requires the effective `json` adapter. Fleet passes
+`response_format={"type": "json_object"}` directly to native DSPy's LM and uses
+native `JSONAdapter` to validate required output fields. This is useful for
+OpenAI-compatible deployment names whose capabilities DSPy cannot discover:
+selecting the JSON adapter alone may only add prompt instructions. JSON mode
+constrains JSON syntax; it does not guarantee the required fields or correctness.
+For catalog-known schema-capable models, native DSPy may select a stricter JSON
+schema instead of this LM default. Endpoint support must be verified.
+No malformed Python response is accepted as
+structured output, and Fleet adds no format repair retry.
+
+```toml
+[llm.root]
+adapter = "json"
+response_format = "json_object"
+
+[llm.sub]
+adapter = "json"
+response_format = "json_object"
+```
+
+These settings are available in local setup, safe configuration reporting, and
+configuration digests. Changes require an API restart. Keep credentials in the
+existing secret environment variables. A terminal structured-response failure
+shows a safe explanation with its request/trace IDs; raw model replies and
+exception details must be inspected in MLflow.
+
+GEPA uses the effective reflection adapter for both native instruction proposals
+and native Flex code proposals. Serving and correctness judging retain their
+own role adapters; reflection does not change their response format.
+
 ## Turn deadlines
 
 `FLEET_TURN_TIMEOUT_SECONDS` (TOML `[runtime] turn_timeout_seconds`) accepts exactly
 `0` or `10`–`3600` as an integer. `0` means the Turn has no Fleet wall-clock
-deadline. It is opt-in, not the default: the shipped value stays `900`. Booleans,
+deadline. The shipped value is `0`, so a Session runs without a Fleet deadline
+unless it configures one. Booleans,
 floats, negatives, `1`–`9`, values above `3600`, and numeric text outside the
 environment transport are rejected before a Session runs.
 
@@ -177,7 +217,7 @@ precedence:
 | --- | --- |
 | `request` | `POST /sessions/{session_id}/turn` supplies `timeout_seconds`. The terminal client's `/timeout` override is also sent this way. |
 | `configuration` | `turn_timeout_seconds` was set by TOML, `.env`, or the environment. |
-| `default` | Neither override is present, so the shipped `900` applies. |
+| `default` | Neither override is present, so the shipped `0` applies. |
 
 Omitting the request field or sending `null` inherits the configured value.
 Request `0` disables the Fleet deadline for that Turn. The server reports only
@@ -218,6 +258,12 @@ search, environment interpolation or hot reload. Every file must declare
    Leave credentials and unrelated MLflow settings intact.
 
 The configuration digest includes the selected backend and both profiles.
+It also hashes non-secret resolved model settings for every role, including
+inherited generation settings and session root/sub model choices. Credentials
+and source labels are excluded from the digest material. This intentionally
+changes prior digests without changing the public configuration response or its
+schema version. Optimization evidence created with the previous digest requires
+reevaluation before installation.
 Existing GEPA approval evidence with a different identity requires reevaluation.
 Removing the former snapshot setting (`[daytona] snapshot` and its environment
 override; the Turn snapshot is now defined in `src/fleet_rlm/sandbox/snapshots.py`

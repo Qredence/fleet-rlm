@@ -31,7 +31,7 @@ VALIDATION_PASSES = 3
 
 # Execution, review selection, and scoring affect approval; presentation-only code does not.
 DIGEST_SOURCES = (
-    "adapters.py",
+    "models.py",
     "config.py",
     "contracts.py",
     "execution_evidence.py",

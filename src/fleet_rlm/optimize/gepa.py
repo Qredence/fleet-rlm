@@ -20,6 +20,7 @@ import mlflow
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.models import build_lm
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimization_runs import (
     ExperimentOptions,
@@ -258,18 +259,19 @@ _PROPOSER_GUIDANCE = (
 )
 
 
-def build_instruction_proposer() -> Any:
-    """GEPA's native JSON instruction proposer with Fleet-specific bounds and guidance.
+def build_instruction_proposer(*, adapter: dspy.Adapter) -> Any:
+    """GEPA's native instruction proposer with Fleet-specific bounds and guidance.
 
     The proposer writes every new instruction from the metric's per-component feedback, so its
     prompt and output size are controlled here: ``max_chars`` bounds a proposed instruction and
     ``truncate_history_outputs`` keeps ``dspy.History``/REPL payloads from filling the reflection
-    prompt. DSPy supplies its documented JSON adapter by default. Flex code proposals remain in
-    GEPA's native proposer path.
+    prompt. The reflection role supplies the native adapter. Flex code proposals remain in
+    GEPA's native proposer path and inherit the compilation scope's adapter.
     """
     from dspy.teleprompt.gepa import InstructionProposer
 
     return InstructionProposer(
+        adapter=adapter,
         max_chars=INSTRUCTION_MAX_CHARS,
         truncate_history_outputs=True,
         additional_instructions=_PROPOSER_GUIDANCE,
@@ -829,8 +831,12 @@ def _compile(
     if any(not items for items in splits.values()) or not any(getattr(item, "critical", False) for item in holdout):
         raise ValueError(f"GEPA requires nonempty train/dev/holdout and critical holdout; found {counts}")
     examples = [*trainset, *devset, *holdout]
-    root_lm, sub_lm, reflection_lm, jev_lm = settings.build_lms()
-    if settings.fleet_reflection_model == settings.fleet_root_model:
+    root_lm = build_lm(settings, settings.fleet_root_model, "root")
+    sub_lm = build_lm(settings, settings.fleet_sub_model, "sub")
+    reflection_lm = build_lm(settings, settings.fleet_reflection_model, "reflection")
+    reflection_adapter = settings.resolved_model("reflection").build_adapter()
+    jev_lm = settings.build_jev_lm()
+    if settings.resolved_model("reflection").model == settings.resolved_model("root").model:
         with suppress(Exception):
             print("[gepa] FLEET_REFLECTION_MODEL equals the serving model; GEPA proposes better with a stronger one.")
     # This manager is a serialization template only; no sandbox is provisioned.
@@ -844,7 +850,14 @@ def _compile(
     )
     active = Path(settings.compiled_program_dir) / f"{session_id}.json"
     template = AdaptiveFleetEngine(
-        template_manager, root_lm, sub_lm, jev_lm, compiled_path=str(active), execution_mode=settings.execution_mode
+        template_manager,
+        root_lm,
+        sub_lm,
+        jev_lm,
+        compiled_path=str(active),
+        execution_mode=settings.execution_mode,
+        root_adapter=settings.resolved_model("root").build_adapter(),
+        sub_adapter=settings.resolved_model("sub").build_adapter(),
     )
     incumbent_digest = template.compiled.digest
     # Snapshot all identities before native search starts. Completion checks the same
@@ -864,7 +877,8 @@ def _compile(
     ) -> Any:
         # GEPA passes program_trace by keyword only because this signature declares it.
         """Score a rollout with the explicit judge and forward GEPA's component and program traces."""
-        return fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge_lm)
+        with dspy.context(adapter=settings.resolved_model("judge").build_adapter()):
+            return fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge_lm)
 
     version = run_id
     budget = {"max_metric_calls": args.max_metric_calls} if args.max_metric_calls else {"auto": args.gepa_budget}
@@ -894,20 +908,21 @@ def _compile(
                 "fleet.trace_search": str(bool(getattr(args, "trace_search", False))).lower(),
             },
         )
-        optimized = dspy.GEPA(
-            metric=metric,
-            reflection_lm=reflection_lm,
-            instruction_proposer=build_instruction_proposer(),
-            num_threads=args.threads,
-            reflection_minibatch_size=getattr(args, "reflection_minibatch_size", 3),
-            track_stats=True,
-            seed=0,
-            log_dir=str(directory / "runs" / version),
-            # Stream GEPA's per-iteration scores into this run instead of opening a second one.
-            use_mlflow=bool(mlflow_run_id),
-            gepa_kwargs=gepa_kwargs,
-            **budget,
-        ).compile(baseline, trainset=trainset, valset=devset)
+        with dspy.context(adapter=reflection_adapter):
+            optimized = dspy.GEPA(
+                metric=metric,
+                reflection_lm=reflection_lm,
+                instruction_proposer=build_instruction_proposer(adapter=reflection_adapter),
+                num_threads=args.threads,
+                reflection_minibatch_size=getattr(args, "reflection_minibatch_size", 3),
+                track_stats=True,
+                seed=0,
+                log_dir=str(directory / "runs" / version),
+                # Stream GEPA's per-iteration scores into this run instead of opening a second one.
+                use_mlflow=bool(mlflow_run_id),
+                gepa_kwargs=gepa_kwargs,
+                **budget,
+            ).compile(baseline, trainset=trainset, valset=devset)
         check_boundary()
         set_stage("validation")
         # GEPA compile/evaluation autologging suppresses DSPy Evaluate traces by default.

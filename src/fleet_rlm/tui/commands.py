@@ -25,7 +25,7 @@ from fleet_rlm.contracts import catalog_entries
 from fleet_rlm.optimization_runs import ExperimentOptions, add_search_arguments
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
-MODES = ("rlm", "flex", "hybrid")
+MODES = ("direct", "flex", "rlm", "hybrid")
 
 
 @dataclass(slots=True)
@@ -186,9 +186,15 @@ def _config(ctx: Context, arg: str) -> None:
 
 
 def _models(ctx: Context, arg: str) -> None:
-    scope = arg or "system.ai"
-    models = ctx.get("/models", params={"scope": scope}).json()["models"]
-    _out(ctx).print(Panel("\n".join(models) or "(no accessible chat services)", title=f"Models · {scope}"))
+    role = arg or "root"
+    try:
+        models = ctx.get("/models", params={"role": role}).json()["models"]
+    except httpx.HTTPError:
+        _out(ctx).print("[yellow]Model discovery is unavailable. Enter /model root provider/model manually.[/yellow]")
+        return
+    _out(ctx).print(
+        Panel("\n".join(models) or "(no models listed; enter a model route manually)", title=f"Models · {role}")
+    )
 
 
 def apply_model_choice(ctx: Context, role: str, models: list[str], choice: str) -> None:
@@ -213,13 +219,19 @@ def _model(ctx: Context, arg: str) -> None:
     args = arg.split()
     role = args[0] if args else "root"
     if role not in {"root", "sub"} or len(args) > 2:
-        _out(ctx).print("[red]Usage: /model [root|sub] [model-id|catalog.schema][/red]")
+        _out(ctx).print("[red]Usage: /model [root|sub] [provider/model][/red]")
         return
     selected = args[1] if len(args) > 1 else ""
-    if not selected.startswith("openai/"):
-        models = list(ctx.get("/models", params={"scope": selected or "system.ai"}).json()["models"])
+    if not selected:
+        try:
+            models = list(ctx.get("/models", params={"role": role}).json()["models"])
+        except httpx.HTTPError:
+            _out(ctx).print(
+                f"[yellow]Model discovery is unavailable. Enter /model {role} provider/model manually.[/yellow]"
+            )
+            return
         if not models:
-            _out(ctx).print("[yellow]No accessible chat services. Model unchanged.[/yellow]")
+            _out(ctx).print("[yellow]No models listed. Enter /model root provider/model manually.[/yellow]")
             return
         for index, name in enumerate(models, 1):
             _out(ctx).print(f"{index}. {name}")
@@ -659,7 +671,11 @@ COMMANDS: dict[str, Command] = {
         category="Workspace & Context",
     ),
     "/mode": Command(
-        "/mode [rlm|flex|hybrid]", "inspect or change execution mode", _mode, _MODE_OPTIONS, category="Session & Models"
+        "/mode [direct|flex|rlm|hybrid]",
+        "inspect or change execution mode",
+        _mode,
+        _MODE_OPTIONS,
+        category="Session & Models",
     ),
     "/timeout": Command(
         "/timeout <seconds|off|default>",
@@ -683,10 +699,13 @@ COMMANDS: dict[str, Command] = {
         category="Session & Models",
     ),
     "/models": Command(
-        "/models [catalog.schema]", "discover accessible Gateway chat services", _models, category="Session & Models"
+        "/models [root|sub]",
+        "discover accessible compatible endpoint chat services",
+        _models,
+        category="Session & Models",
     ),
     "/model": Command(
-        "/model [root|sub] [model-id|catalog.schema]",
+        "/model [root|sub] [provider/model]",
         "choose interactively or set a model",
         _model,
         {"root": None, "sub": None},

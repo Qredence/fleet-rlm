@@ -9,7 +9,6 @@ import os
 import re
 import tomllib
 from functools import lru_cache
-from itertools import islice
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 from urllib.parse import urlsplit
@@ -27,6 +26,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fleet_rlm.models import Endpoint, EnvReference, ModelRoute, ResolvedModel, Role
 from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
 _SECRET_FIELDS = {
@@ -34,6 +34,7 @@ _SECRET_FIELDS = {
     "fleet_database_migration_url",
     "fleet_daytona_api_key",
     "databricks_token",
+    "fleet_llm_api_key",
     "typesafe_api_key",
 }
 _TOML_FIELDS = {
@@ -47,7 +48,14 @@ _TOML_FIELDS = {
         "max_active_sessions": "max_active_sessions",
         "linked_children": "linked_children",
     },
-    "gateway": {"host": "databricks_host", "base_url": "fleet_llm_base_url"},
+    "gateway": {"host": "databricks_host"},
+    "llm": {
+        "model": "fleet_llm_model",
+        "api_base": "fleet_llm_api_base",
+        "api_key_env": "fleet_llm_api_key_env",
+        "adapter": "fleet_llm_adapter",
+        "response_format": "fleet_llm_response_format",
+    },
     "decision": {"model": "typesafe_model"},
     "daytona": {
         "org_id": "fleet_daytona_org_id",
@@ -66,6 +74,7 @@ _TOML_FIELDS = {
         key: f"mlflow_local_{key}"
         for key in ("port", "data_dir", "experiment_name", "eval_experiment_name", "optimization_experiment_name")
     },
+    "mlflow": {"mode": "mlflow_mode"},
     "mlflow.databricks": {
         key: f"mlflow_databricks_{key}"
         for key in (
@@ -89,14 +98,26 @@ for _role in ("root", "sub", "reflection"):
     _TOML_FIELDS[f"llm.{_role}"] = {
         name: f"fleet_{_role}_{name}" for name in ("model", "max_tokens", "temperature", "num_retries", "cache")
     }
+_TOML_FIELDS["llm.judge"] = {
+    "model": "fleet_correctness_model",
+    **{name: f"fleet_judge_{name}" for name in ("max_tokens", "temperature", "num_retries", "cache")},
+}
+for _role in ("root", "sub", "reflection", "judge"):
+    _TOML_FIELDS[f"llm.{_role}"].update(
+        {name: f"fleet_{_role}_{name}" for name in ("api_base", "api_key_env", "adapter", "response_format")}
+    )
+_TOML_FIELDS["llm"].update(
+    {name: f"fleet_llm_{name}" for name in ("max_tokens", "temperature", "num_retries", "cache")}
+)
 RETIRED_MLFLOW_ENV = {
     "FLEET_MLFLOW_MODE",
     "MLFLOW_TRACKING_URI",
     "MLFLOW_EXPERIMENT_NAME",
     *(f"FLEET_MLFLOW_{key.upper()}" for key in _TOML_FIELDS["mlflow.databricks"]),
 }
-# The shipped Fleet deadline. It stays finite; deadline-free execution is opt-in per Turn.
-DEFAULT_TURN_TIMEOUT_SECONDS = 900
+# The shipped Fleet deadline: none. A Turn runs to its model-call budget unless a Session
+# configures a finite deadline, so a legitimate long Turn is never cut off by a default.
+DEFAULT_TURN_TIMEOUT_SECONDS = 0
 _TURN_TIMEOUT_RULE = "0 or between 10 and 3600 seconds"
 
 
@@ -182,11 +203,12 @@ def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         raise ValueError("Fleet configuration could not be read as valid TOML") from None
     schema = data.pop("config", None)
-    if schema != {"schema_version": 4} or type(schema.get("schema_version")) is not int:
+    if schema != {"schema_version": 5} or type(schema.get("schema_version")) is not int:
         raise ValueError(
-            "Fleet TOML requires [config] schema_version = 4; "
-            "migrate [mlflow] to [mlflow.local] and [mlflow.databricks]"
+            "Fleet TOML requires [config] schema_version = 5; see DSPY_MIGRATION.md for direct model configuration"
         )
+    if "models" in data or "connections" in data:
+        raise ValueError("[models] and [connections] were removed; configure [llm] directly")
     tables = dict(data)
     for parent in ("llm", "mlflow"):
         if parent not in tables:
@@ -194,6 +216,12 @@ def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
         children = tables.pop(parent)
         if not isinstance(children, dict):
             raise ValueError(f"Fleet TOML {parent} must be a table")
+        if parent == "mlflow" and "mode" in children:
+            tables["mlflow"] = {"mode": children.pop("mode")}
+        if parent == "llm":
+            defaults = {name: children.pop(name) for name in list(children) if not isinstance(children[name], dict)}
+            if defaults:
+                tables["llm"] = defaults
         tables.update({f"{parent}.{name}": values for name, values in children.items()})
     result = {}
     for table, values in tables.items():
@@ -224,22 +252,111 @@ class FleetSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore",
+        extra="forbid",
         validate_by_name=True,
         hide_input_in_errors=True,
     )
 
+    fleet_llm_model: ModelRoute = Field(default="openai/gpt-4o-mini", validation_alias="FLEET_LLM_MODEL")
+    fleet_llm_api_base: Endpoint = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
+    fleet_llm_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="FLEET_LLM_API_KEY")
+    fleet_llm_adapter: Literal["chat", "json"] = "chat"
+    fleet_llm_response_format: Literal["auto", "json_object"] = "auto"
+    fleet_llm_api_key_env: EnvReference = ""
+    fleet_correctness_model: ModelRoute | Literal[""] = ""
+    fleet_judge_api_base: Endpoint | None = None
+    fleet_judge_api_key_env: EnvReference | None = None
+    fleet_judge_adapter: Literal["chat", "json"] | None = None
+    fleet_judge_response_format: Literal["auto", "json_object"] | None = None
+
+    fleet_judge_max_tokens: int | None = Field(default=None, gt=0)
+    fleet_judge_temperature: float = 0.0
+    fleet_judge_num_retries: int = Field(default=3, ge=0)
+    fleet_judge_cache: bool = True
+
+    fleet_llm_max_tokens: int | None = Field(default=None, gt=0)
+    fleet_llm_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    fleet_llm_num_retries: int | None = Field(default=None, ge=0, le=10)
+    fleet_llm_cache: bool | None = None
+    _resolved_credentials: dict[str, SecretStr] = PrivateAttr(default_factory=dict)
+    _resolved_lms: dict[str, ResolvedModel] = PrivateAttr(default_factory=dict)
+    _credential_env_file: str | Path | None = PrivateAttr(default=None)
     _configuration_sources: dict[str, str] = PrivateAttr(default_factory=dict)
 
     def __init__(self, **values: Any) -> None:
         """Load settings while recording which source supplied each explicit value."""
+        credential_snapshot = values.pop("_credential_snapshot", {})
+        source_snapshot = values.pop("_source_snapshot", None)
+        accepted = set(type(self).model_fields)
+        for field in type(self).model_fields.values():
+            if isinstance(field.validation_alias, str):
+                accepted.add(field.validation_alias)
+            elif isinstance(field.validation_alias, AliasChoices):
+                accepted.update(field.validation_alias.choices)
+        unknown = {key for key in values if key not in accepted and not key.startswith("_")}
+        if unknown:
+            raise ValueError("Unknown Fleet settings: " + ", ".join(sorted(unknown)))
         sources: dict[str, str] = {}
         token = _SETTINGS_SOURCES.set(sources)
         try:
             super().__init__(**values)
-            self._configuration_sources = sources
+            self._configuration_sources = source_snapshot if source_snapshot is not None else sources
+            self._resolved_credentials = dict(credential_snapshot)
+            self._credential_env_file = values.get("_env_file", self.model_config.get("env_file"))
+            self._resolve_models()
         finally:
             _SETTINGS_SOURCES.reset(token)
+
+    def _resolve_models(self) -> None:
+        from dotenv import dotenv_values
+
+        def credential(reference: str, default: SecretStr) -> SecretStr:
+            if not reference:
+                return default
+            if reference in self._resolved_credentials:
+                return self._resolved_credentials[reference]
+            value = os.environ.get(reference)
+            if value is None and self._credential_env_file:
+                value = dotenv_values(self._credential_env_file).get(reference)
+            if not value:
+                raise ValueError(f"Missing credential environment variable: {reference}")
+            self._resolved_credentials[reference] = SecretStr(value)
+            return self._resolved_credentials[reference]
+
+        default_key = credential(self.fleet_llm_api_key_env, self.fleet_llm_api_key)
+        self._resolved_lms["shared"] = ResolvedModel(
+            model=self.fleet_llm_model,
+            api_base=self.fleet_llm_api_base,
+            api_key=default_key,
+            adapter=self.fleet_llm_adapter,
+            response_format=self.fleet_llm_response_format,
+        )
+        for role in ("root", "sub", "reflection", "judge"):
+            selected = self.fleet_correctness_model if role == "judge" else getattr(self, f"fleet_{role}_model")
+            independent = bool(selected)
+            base = getattr(self, f"fleet_{role}_api_base")
+            reference = getattr(self, f"fleet_{role}_api_key_env")
+            adapter = getattr(self, f"fleet_{role}_adapter")
+            options = {}
+            for name in ("max_tokens", "temperature", "num_retries", "cache"):
+                field = f"fleet_{role}_{name}"
+                value = getattr(self, field)
+                shared = getattr(self, f"fleet_llm_{name}")
+                if self.configuration_source(field) == "default" and shared is not None:
+                    value = shared
+                options[name] = value
+            self._resolved_lms[role] = ResolvedModel(
+                model=selected or self.fleet_llm_model,
+                api_base=base if base is not None else ("" if independent else self.fleet_llm_api_base),
+                api_key=credential(reference or "", SecretStr("") if independent else default_key),
+                adapter=adapter or self.fleet_llm_adapter,
+                response_format=getattr(self, f"fleet_{role}_response_format") or self.fleet_llm_response_format,
+                **options,
+            )
+
+    def resolved_model(self, role: Role | Literal["shared"]) -> ResolvedModel:
+        """Return a role's validated connection and credential snapshot."""
+        return self._resolved_lms[role]
 
     @classmethod
     def settings_customise_sources(
@@ -266,6 +383,9 @@ class FleetSettings(BaseSettings):
         def capture(source: Any, label: str) -> Any:
             def read() -> dict[str, Any]:
                 if label in {"environment", "dotenv"}:
+                    obsolete = {"llm_base_url", "llm_api_key"} & set(source.env_vars)
+                    if obsolete:
+                        raise ValueError("Use FLEET_LLM_MODEL, FLEET_LLM_BASE_URL, and FLEET_LLM_API_KEY")
                     retired = sorted(
                         name
                         for name in RETIRED_MLFLOW_ENV
@@ -279,6 +399,8 @@ class FleetSettings(BaseSettings):
                             "select the backend with --mlflow local|databricks"
                         )
                 values = {aliases.get(key, key): value for key, value in source().items()}
+                if label == "dotenv":
+                    values = {key: value for key, value in values.items() if key in cls.model_fields}
                 sources = _SETTINGS_SOURCES.get()
                 if sources is not None:
                     for key in values:
@@ -296,15 +418,26 @@ class FleetSettings(BaseSettings):
 
     def configuration(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         """Non-secret resolved settings and provenance, safe for CLI/API/trace inspection."""
+        overrides = overrides or {}
         values = self.model_dump(mode="json", exclude=_SECRET_FIELDS)
         sources = {name: self._configuration_sources.get(name, "default") for name in values}
-        for name, value in (overrides or {}).items():
+        for name, value in overrides.items():
             if name in values:
                 values[name] = value
                 sources[name] = "session"
-        digest = hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        resolved_models = {}
+        for role in ("root", "sub", "reflection", "judge"):
+            resolved = self.resolved_model(role).model_dump(mode="json", exclude={"api_key"})
+            field = f"fleet_{role}_model"
+            if role in {"root", "sub"} and field in overrides:
+                resolved["model"] = overrides[field]
+            resolved_models[role] = resolved
+        # Inheritance depends on explicitness, so raw values alone cannot identify
+        # effective generation settings. Hash snapshots without reloading credentials.
+        material = {"values": values, "resolved_models": resolved_models}
+        digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return {
-            "schema_version": 4,
+            "schema_version": 5,
             "digest": digest,
             "values": values,
             "sources": sources,
@@ -323,14 +456,29 @@ class FleetSettings(BaseSettings):
             overrides["execution_mode"] = saved["mode"]
         if saved.get("models"):
             overrides.update({f"fleet_{role}_model": saved["models"][role] for role in ("root", "sub")})
-        return self.with_explicit_overrides(**overrides)
+        updated = self.model_copy(update=overrides)
+        updated._resolved_lms = dict(self._resolved_lms)
+        updated._configuration_sources = dict(self._configuration_sources)
+        if "execution_mode" in overrides:
+            TypeAdapter(Literal["direct", "flex", "rlm", "hybrid"]).validate_python(overrides["execution_mode"])
+        for role in ("root", "sub"):
+            field = f"fleet_{role}_model"
+            if field in overrides:
+                route = TypeAdapter(ModelRoute).validate_python(overrides[field])
+                updated._resolved_lms[role] = self._resolved_lms[role].model_copy(update={"model": route})
+        return updated
 
     def with_explicit_overrides(self, **values: Any) -> FleetSettings:
         """Validate CLI overrides while retaining the provenance of unchanged settings."""
         unknown = values.keys() - type(self).model_fields.keys()
         if unknown:
             raise ValueError("Unsupported Fleet overrides: " + ", ".join(sorted(unknown)))
-        updated = type(self)(**{**self.model_dump(), **values})
+        updated = type(self)(
+            _env_file=self._credential_env_file,
+            _credential_snapshot=self._resolved_credentials,
+            _source_snapshot={**self._configuration_sources, **dict.fromkeys(values, "explicit")},
+            **{**self.model_dump(), **values},
+        )
         updated._configuration_sources = {**self._configuration_sources, **dict.fromkeys(values, "explicit")}
         return updated
 
@@ -359,7 +507,6 @@ class FleetSettings(BaseSettings):
     )
     databricks_host: str = Field(default="", validation_alias="DATABRICKS_HOST")
     databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
-    fleet_llm_base_url: str = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
     daytona_auto_stop_minutes: int = Field(
         default=30,
         ge=1,
@@ -367,15 +514,30 @@ class FleetSettings(BaseSettings):
         validation_alias=AliasChoices("FLEET_DAYTONA_AUTO_STOP_MINUTES", "DAYTONA_AUTO_STOP_MINUTES"),
     )
 
-    fleet_root_model: str = "openai/system.ai.deepseek-v4-1-flash"
-    fleet_sub_model: str = "openai/system.ai.claude-sonnet-5-5"
-    fleet_reflection_model: str = "openai/system.ai.claude-haiku-5-5"
-    fleet_root_max_tokens: int | None = Field(default=None, ge=1)
+    fleet_root_model: ModelRoute | Literal[""] = ""
+    fleet_root_api_base: Endpoint | None = None
+    fleet_root_api_key_env: EnvReference | None = None
+    fleet_root_adapter: Literal["chat", "json"] | None = None
+    fleet_root_response_format: Literal["auto", "json_object"] | None = None
+
+    fleet_sub_model: ModelRoute | Literal[""] = ""
+    fleet_sub_api_base: Endpoint | None = None
+    fleet_sub_api_key_env: EnvReference | None = None
+    fleet_sub_adapter: Literal["chat", "json"] | None = None
+    fleet_sub_response_format: Literal["auto", "json_object"] | None = None
+
+    fleet_reflection_model: ModelRoute | Literal[""] = ""
+    fleet_reflection_api_base: Endpoint | None = None
+    fleet_reflection_api_key_env: EnvReference | None = None
+    fleet_reflection_adapter: Literal["chat", "json"] | None = None
+    fleet_reflection_response_format: Literal["auto", "json_object"] | None = None
+
+    fleet_root_max_tokens: int | None = Field(default=16384, ge=1)
     fleet_sub_max_tokens: int | None = Field(default=None, ge=1)
-    fleet_reflection_max_tokens: int | None = Field(default=None, ge=1)
+    fleet_reflection_max_tokens: int | None = Field(default=32000, ge=1)
     fleet_root_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
     fleet_sub_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
-    fleet_reflection_temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    fleet_reflection_temperature: float | None = Field(default=1.0, ge=0, le=2, allow_inf_nan=False)
     fleet_root_num_retries: int = Field(default=3, ge=0, le=10)
     fleet_sub_num_retries: int = Field(default=3, ge=0, le=10)
     fleet_reflection_num_retries: int = Field(default=3, ge=0, le=10)
@@ -398,7 +560,9 @@ class FleetSettings(BaseSettings):
         le=10_000,
         validation_alias=AliasChoices("FLEET_MAX_LLM_CALLS_PER_TURN", "MAX_LLM_CALLS_PER_TURN"),
     )
-    execution_mode: Literal["rlm", "flex", "hybrid"] = Field(default="hybrid", validation_alias="FLEET_EXECUTION_MODE")
+    execution_mode: Literal["direct", "rlm", "flex", "hybrid"] = Field(
+        default="hybrid", validation_alias="FLEET_EXECUTION_MODE"
+    )
     max_agent_depth: int = Field(default=3, ge=0, le=8, validation_alias="FLEET_MAX_AGENT_DEPTH")
     max_child_sandboxes: int = Field(default=8, ge=0, le=64, validation_alias="FLEET_MAX_CHILD_SANDBOXES")
     max_active_children: int = Field(default=4, ge=1, le=16, validation_alias="FLEET_MAX_ACTIVE_CHILDREN")
@@ -490,9 +654,6 @@ class FleetSettings(BaseSettings):
 
     @field_validator(
         "fleet_database_url",
-        "fleet_root_model",
-        "fleet_sub_model",
-        "fleet_reflection_model",
     )
     @classmethod
     def required_values_are_nonempty(cls, value: str) -> str:
@@ -512,23 +673,6 @@ class FleetSettings(BaseSettings):
             allow_numeric_text=labels.get("turn_timeout_seconds") in {"environment", "dotenv"},
         )
 
-    @field_validator("fleet_root_model", "fleet_sub_model", "fleet_reflection_model")
-    @classmethod
-    def model_routes_use_native_gateway(cls, value: str) -> str:
-        """Require runtime models to use the native 'openai/<service-id>' route."""
-        if not value.startswith("openai/") or not value.removeprefix("openai/").strip():
-            raise ValueError("Runtime models require an OpenAI-compatible 'openai/<service-id>' route")
-        return value
-
-    @field_validator("fleet_llm_base_url")
-    @classmethod
-    def gateway_override_uses_https(cls, value: str) -> str:
-        """Accept an empty gateway override, or an HTTPS workspace URL."""
-        parsed = urlsplit(value)
-        if value and (parsed.scheme != "https" or not parsed.netloc):
-            raise ValueError("Gateway base URL must be an HTTPS workspace URL")
-        return value
-
     @field_validator("typesafe_model")
     @classmethod
     def typesafe_model_is_nonempty(cls, value: str) -> str:
@@ -538,7 +682,7 @@ class FleetSettings(BaseSettings):
             raise ValueError("TypeSafe route model must not be empty")
         return normalized
 
-    @field_validator("databricks_host", "fleet_llm_base_url", "mlflow_databricks_tracking_uri")
+    @field_validator("databricks_host", "mlflow_databricks_tracking_uri")
     @classmethod
     def public_urls_do_not_contain_credentials(cls, value: str) -> str:
         """Reject URLs that embed credentials or carry HTTP query strings and fragments."""
@@ -761,17 +905,8 @@ class FleetSettings(BaseSettings):
         return target
 
     def judge_environment(self) -> dict[str, str]:
-        """Credentials MLflow's OpenAI judge provider reads from the environment for gateway judges."""
-        if not self.fleet_judge_model.startswith("openai:/"):
-            return {}
-        return {"OPENAI_API_KEY": self._gateway_api_key(), "OPENAI_API_BASE": self._gateway_base_url()}
-
-    def build_lms(self) -> tuple[dspy.LM, dspy.LM, dspy.LM, Any | None]:
-        """Create role-specific LMs without mutating process-global DSPy settings."""
-        root_lm = self._build_lm(self.fleet_root_model, "root")
-        sub_lm = self._build_lm(self.fleet_sub_model, "sub")
-        reflection_lm = self._build_lm(self.fleet_reflection_model, "reflection")
-        return root_lm, sub_lm, reflection_lm, self.build_jev_lm()
+        """MLflow diagnostic providers use their own native environment configuration."""
+        return {}
 
     def build_jev_lm(self) -> Any | None:
         """The TypeSafe System One client, or None when no credential is configured.
@@ -790,116 +925,19 @@ class FleetSettings(BaseSettings):
         return TypeSafe(self.typesafe_model, api_key=self.typesafe_api_key)
 
     def build_judge_lm(self) -> dspy.LM:
-        """The DSPy twin of FLEET_JUDGE_MODEL: temperature zero and cached for consistent repeated judging."""
-        if not self.fleet_judge_model.startswith("openai:/"):
-            raise ValueError("The DSPy judge needs FLEET_JUDGE_MODEL as an 'openai:/<service-id>' gateway route")
-        return dspy.LM(
-            self.fleet_judge_model.replace("openai:/", "openai/", 1),
-            api_base=self._gateway_base_url(),
-            api_key=self._gateway_api_key(),
-            engine="lm15",
-            temperature=0.0,
-            cache=True,
-            num_retries=self.fleet_reflection_num_retries,
-        )
+        """Build the independently configured DSPy correctness judge."""
+        from fleet_rlm.models import build_lm
 
-    def list_models(self, scope: str = "system.ai") -> list[str]:
-        """Discover authorized chat-capable Unity Gateway services, not inference /models."""
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.core import Config
+        return build_lm(self, self.fleet_correctness_model, "judge")
 
-        if not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", scope):
-            raise ValueError("Model scope must be catalog.schema")
-        host = self.databricks_host.strip().rstrip("/")
-        if not host:
-            parsed = urlsplit(self.fleet_llm_base_url)
-            host = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
-        if not host or not self.databricks_token.get_secret_value():
-            raise ValueError("Model discovery requires a workspace host and token")
-        client = WorkspaceClient(
-            config=Config(
-                host=host,
-                token=self.databricks_token.get_secret_value(),
-                auth_type="pat",
-                http_timeout_seconds=20,
-                retry_timeout_seconds=20,
-            )
-        )
-        return sorted(
-            {
-                "openai/" + service.name.removeprefix("model-services/")
-                for service in islice(client.ai_gateway.list_model_services(parent=f"schemas/{scope}"), 1000)
-                if service.name and "mlflow/v1/chat/completions" in (service.supported_api_types or [])
-            }
-        )
+    def list_models(self, scope: str = "", role: Role | Literal["shared"] = "root") -> list[str]:
+        """Browse the selected role's explicit compatible endpoint."""
+        from fleet_rlm.models import list_models
 
-    def _build_lm(self, model: str, role: str = "root") -> dspy.LM:
-        """Use native DSPy routing only; never fall back to LiteLLM."""
-        if not model.startswith("openai/") or not model.removeprefix("openai/").strip():
-            raise ValueError(
-                f"Fleet model {model!r} must use an OpenAI-compatible 'openai/<service-id>' route; "
-                "refusing to fall back to another inference backend"
-            )
-
-        options = {
-            name: getattr(self, f"fleet_{role}_{name}")
-            for name in ("max_tokens", "temperature", "num_retries", "cache")
-        }
-        base_url = self._gateway_base_url()
-        service = model.removeprefix("openai/")
-        model_name = service.rsplit(".", 1)[-1]
-        chat_only_reflection = role == "reflection" and model_name.startswith("claude-")
-        deepseek_json_mode = service in {"system.ai.deepseek-v4-1-flash", "system.ai.deepseek-v4-1-flash-1017"}
-        if urlsplit(base_url).path == "/ai-gateway/mlflow/v1" and (chat_only_reflection or deepseek_json_mode):
-            from dspy.lm15 import AccessPolicy, ModelSupport, OpenAIChatCompat, ProviderDefinition, register_provider
-
-            if chat_only_reflection:
-                # Gateway translates schema output into forced Anthropic tools,
-                # which these reflection deployments reject. Keep prompt-only JSON.
-                provider = "fleet-gateway-reflection-" + hashlib.sha256(base_url.encode()).hexdigest()[:12]
-            else:
-                # Unity service IDs are unknown to DSPy's model catalog. Declare
-                # documented DeepSeek Flash tool support so native JSON recovery
-                # sends response_format=json_object. Schema output stays disabled.
-                identity = base_url + "/" + service
-                provider = "fleet-gateway-json-" + hashlib.sha256(identity.encode()).hexdigest()[:12]
-            register_provider(
-                ProviderDefinition.chat(AccessPolicy(provider=provider, base_url=base_url), compat=OpenAIChatCompat()),
-                supports=ModelSupport(function_calling=deepseek_json_mode, response_schema=False),
-            )
-            model = provider + "/" + service
-        return dspy.LM(
-            model,
-            api_base=base_url,
-            api_key=self._gateway_api_key(),
-            engine="lm15",
-            **{key: value for key, value in options.items() if value is not None},
-        )
-
-    def _gateway_base_url(self) -> str:
-        base_url = self.fleet_llm_base_url.strip()
-        if not base_url and self.databricks_host.strip():
-            host = self.databricks_host.strip().rstrip("/")
-            if "://" not in host:
-                host = f"https://{host}"
-            base_url = f"{host}/ai-gateway/mlflow/v1"
-        base_url = base_url.rstrip("/")
-        parsed_base_url = urlsplit(base_url)
-        if parsed_base_url.scheme != "https" or not parsed_base_url.netloc:
-            raise ValueError(
-                "Databricks Unity Gateway models require FLEET_LLM_BASE_URL or DATABRICKS_HOST "
-                "with an HTTPS workspace URL"
-            )
-        return base_url
-
-    def _gateway_api_key(self) -> str:
-        api_key = self.databricks_token.get_secret_value()
-        if not api_key:
-            raise ValueError("Databricks Unity Gateway models require DATABRICKS_TOKEN")
-        return api_key
+        return list_models(self, scope=scope, role=role)
 
 
 @lru_cache(maxsize=1)
-def get_settings(mlflow_mode: Literal["local", "databricks"] = "local") -> FleetSettings:
+def get_settings(mlflow_mode: Literal["local", "databricks"] | None = None) -> FleetSettings:
     """Load and cache process settings."""
-    return FleetSettings(mlflow_mode=mlflow_mode)
+    return FleetSettings(**({"mlflow_mode": mlflow_mode} if mlflow_mode is not None else {}))

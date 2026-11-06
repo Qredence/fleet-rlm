@@ -148,6 +148,57 @@ _OPTIMIZATION_RUNS_ACTIVE_INDEX = """
     WHERE status IN ('running', 'approving')
 """
 
+# Retained for databases already upgraded by the retired managed-memory experiment.
+_MANAGED_SESSION_BINDINGS = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_managed_session_bindings (
+        session_id TEXT PRIMARY KEY REFERENCES fleet_lite_sessions(session_id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        session_store TEXT NOT NULL,
+        memory_store TEXT NOT NULL,
+        remote_session_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+_MANAGED_SESSION_OUTBOX = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_managed_session_outbox (
+        delivery_id BIGSERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','inflight','delivered','uncertain','failed')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        item_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        error_kind TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        FOREIGN KEY (session_id, turn_id)
+            REFERENCES fleet_lite_turns(session_id, turn_id) ON DELETE CASCADE,
+        UNIQUE (session_id, turn_id)
+    )
+"""
+_MANAGED_SESSION_OUTBOX_INDEX = """
+    CREATE INDEX IF NOT EXISTS fleet_lite_managed_session_outbox_ready
+    ON fleet_lite_managed_session_outbox (status, session_id, delivery_id)
+"""
+_MANAGED_PIPELINE_RUNS = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_managed_pipeline_runs (
+        request_id TEXT PRIMARY KEY,
+        run_name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('submitting','uncertain','running','succeeded','failed','cancelled')),
+        model TEXT NOT NULL,
+        scope JSONB NOT NULL DEFAULT '{}'::jsonb,
+        result JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+_MANAGED_SESSION_OUTBOX_PURPOSE = """
+    ALTER TABLE fleet_lite_managed_session_outbox
+    ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'serving'
+"""
+
 _APPEND_TURN = """
     UPDATE fleet_lite_sessions
     SET turns = (
@@ -205,6 +256,8 @@ _SCHEMA_MIGRATIONS = (
         8,
         ("ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB",),
     ),
+    (9, (_MANAGED_SESSION_BINDINGS, _MANAGED_SESSION_OUTBOX, _MANAGED_SESSION_OUTBOX_INDEX, _MANAGED_PIPELINE_RUNS)),
+    (10, (_MANAGED_SESSION_OUTBOX_PURPOSE,)),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30

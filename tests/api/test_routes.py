@@ -21,7 +21,6 @@ from jsonschema import Draft202012Validator
 
 from fleet_rlm.api.deps import get_registry
 from fleet_rlm.api.schemas import WorkspaceWriteRequest
-from fleet_rlm.config import FleetSettings
 from fleet_rlm.workspace import WorkspaceDataset
 
 
@@ -38,7 +37,9 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
     assert "post" in schema["paths"]["/skills/push"]
     turn = schema["paths"]["/sessions/{session_id}/turn"]["post"]["responses"]["200"]["content"]["text/event-stream"]
     assert turn["schema"] == {"type": "string"} and "itemSchema" not in turn
-    assert schema["components"]["schemas"]["ModeRequest"]["properties"]["mode"]["pattern"] == "^(rlm|flex|hybrid)$"
+    assert (
+        schema["components"]["schemas"]["ModeRequest"]["properties"]["mode"]["pattern"] == "^(direct|flex|rlm|hybrid)$"
+    )
     config = schema["paths"]["/sessions/{session_id}/config"]["get"]["responses"]["200"]["content"]
     assert config["application/json"]["schema"] == {"$ref": "#/components/schemas/SessionConfig"}
     workspace_request = schema["components"]["schemas"]["WorkspaceWriteRequest"]
@@ -151,8 +152,8 @@ def test_session_settings_only_change_after_successful_persistence(operation, fa
             assert after["context"] == before["context"]
 
 
-@pytest.mark.parametrize("failure", [None, "unavailable", "unlisted", "busy", "persistence"])
-def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failure):
+@pytest.mark.parametrize("failure", [None, "busy", "persistence"])
+def test_model_selection_is_validated_atomic_and_secret_free(failure):
     saved: dict = {}
     old_engine = engine_with("openai/system.ai.old", "openai/system.ai.child")
 
@@ -160,11 +161,6 @@ def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failur
         if failure == "persistence":
             raise RuntimeError("private database detail")
         saved.update(data)
-
-    def discover(_self, _scope):
-        if failure == "unavailable":
-            raise RuntimeError("private upstream detail")
-        return [] if failure == "unlisted" else ["openai/system.ai.new"]
 
     runtime = runtime_with(
         engine=old_engine,
@@ -174,18 +170,19 @@ def test_model_selection_is_validated_atomic_and_secret_free(monkeypatch, failur
             sub_lm=old_engine.sub_lm, max_llm_calls=7, max_depth=2, max_children=3, max_active_children=1
         ),
     )
-    monkeypatch.setattr(FleetSettings, "list_models", discover)
     if failure == "busy":
         runtime.turn_lock.acquire()
     client, _ = client_for(
-        runtime, engine_for_models=lambda _runtime, models: engine_with(models["root"], models["sub"])
+        runtime,
+        settings=api_settings(),
+        engine_for_models=lambda _runtime, models: engine_with(models["root"], models["sub"]),
     )
     with client:
         before = client.get("/sessions/s1/config").json()
         assert before["models"]["sub"] == "openai/system.ai.child"
         response = client.put("/sessions/s1/model", json={"role": "root", "model": "openai/system.ai.new"})
         after = client.get("/sessions/s1/config").json()
-    expected = {None: 200, "unavailable": 503, "unlisted": 422, "busy": 409, "persistence": 503}[failure]
+    expected = {None: 200, "unlisted": 422, "busy": 409, "persistence": 503}[failure]
     assert response.status_code == expected
     assert after["models"] == (saved["models"] if failure is None else before["models"])
     assert after["limits"]["lm_calls"] == 7
@@ -560,3 +557,35 @@ def test_attach_distinguishes_no_selection_from_a_named_zero_byte_file(filename,
         assert response.json()["detail"][0]["loc"] == ["body", "file"]
         assert response.json()["detail"][0]["type"] == "missing"
         assert uploaded == []
+
+
+@pytest.mark.parametrize("failure", ["timeout", "malformed"])
+def test_models_discovery_errors_are_sanitized_and_manual_selection_still_works(monkeypatch, failure):
+    from contextlib import contextmanager
+
+    import httpx
+
+    from fleet_rlm.config import FleetSettings
+
+    @contextmanager
+    def stream(*_args, **_kwargs):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("private credential body")
+        yield httpx.Response(
+            200,
+            json={"private credential body": "bad"},
+            request=httpx.Request("GET", "https://models.example/v1/models"),
+        )
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    runtime = runtime_with()
+    client, _ = client_for(
+        runtime,
+        settings=FleetSettings(_env_file=None, fleet_llm_api_base="https://models.example/v1"),
+        engine_for_models=lambda _runtime, models: engine_with(models["root"], models["sub"]),
+    )
+    with client:
+        discovered = client.get("/models", params={"scope": "ignored", "role": "root"})
+        assert discovered.status_code == (503 if failure == "timeout" else 422)
+        assert "private credential body" not in discovered.text
+        assert client.put("/sessions/s1/model", json={"role": "root", "model": "anthropic/manual"}).status_code == 200

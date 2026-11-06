@@ -36,7 +36,7 @@
     "request_id": "fixture-turn",
     "error": "The Turn failed (request fixture-turn).",
     "cleanup": "stopped",
-    "deadline_source": "configuration",
+    "deadline_source": "request",
     "effective_seconds": 900
   },
   "legacy_rows": [

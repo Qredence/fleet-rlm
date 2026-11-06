@@ -195,6 +195,7 @@ notebooks/*
 !notebooks/oolong_benchmark.ipynb
 !notebooks/longcot_benchmark.ipynb
 docs/benchmarks/
+docs/specs/
 
 # chunk review context artifacts
 .chunk/context/

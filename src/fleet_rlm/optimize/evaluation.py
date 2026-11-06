@@ -333,6 +333,7 @@ def evaluate_cases(
     base_url: str,
     judge_model: str,
     judge_lm: Any = None,
+    judge_adapter: Any = None,
     jev_lm: Any = None,
     experiment_id: str,
     uc_location: tuple[str, str, str] | None = None,
@@ -423,6 +424,7 @@ def evaluate_cases(
         traces,
         judge_model=judge_model,
         judge_lm=judge_lm,
+        judge_adapter=judge_adapter,
         jev_lm=jev_lm,
         experiment_id=experiment_id,
         report=report,
@@ -434,6 +436,7 @@ def score_evaluation_traces(
     *,
     judge_model: str,
     judge_lm: Any = None,
+    judge_adapter: Any = None,
     jev_lm: Any = None,
     experiment_id: str | None = None,
     scorers: list[Any] | None = None,
@@ -457,7 +460,12 @@ def score_evaluation_traces(
             mlflow.set_experiment(experiment_id=experiment_id)
         selected_scorers = scorers
         if selected_scorers is None:
-            selected_scorers = [*build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm), expected_values_present]
+            suite = (
+                build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm, judge_adapter)
+                if judge_adapter is not None
+                else build_mlflow_scorer_suite(judge_model, judge_lm, jev_lm)
+            )
+            selected_scorers = [*suite, expected_values_present]
         if not selected_scorers:
             raise ValueError("At least one scorer is required")
         with mlflow.start_run(experiment_id=experiment_id, nested=active_run is not None):

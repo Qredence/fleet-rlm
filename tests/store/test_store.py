@@ -99,7 +99,7 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 8
+    assert SCHEMA_VERSION == 10
     assert _SCHEMA_MIGRATIONS[7][0] == 8
     assert "ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB" in _SCHEMA_MIGRATIONS[7][1][0]
     version, statements = _SCHEMA_MIGRATIONS[4]
@@ -755,3 +755,17 @@ def test_runtime_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
     with pytest.raises(ValueError, match="turn_id"):
         _runtime(store, []).commit_turn("s1", {"answer": "42"})
     assert calls == []
+
+
+def test_retired_managed_memory_migrations_remain_readable_without_runtime_wiring():
+    migrations = dict(_SCHEMA_MIGRATIONS)
+    assert len(migrations[9]) == 4
+    assert "fleet_lite_managed_session_bindings" in migrations[9][0]
+    assert "fleet_lite_managed_session_outbox" in migrations[9][1]
+    assert "fleet_lite_managed_pipeline_runs" in migrations[9][3]
+    assert "ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'serving'" in migrations[10][0]
+    store, pool = make_store([], [], [(10,)])
+    store.initialize()
+    statements = [sql for sql, _params in pool.conn.statements]
+    assert not any("INSERT INTO fleet_lite_schema_migrations(version)" in sql for sql in statements)
+    assert not any("fleet_lite_managed_" in sql for sql in statements)

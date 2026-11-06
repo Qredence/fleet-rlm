@@ -2221,7 +2221,7 @@ def _ready_manager(*, deadline: float | None, turn_timeout_seconds: int = 900) -
 
 
 def _ready_interpreter() -> Any:
-    return SimpleNamespace(ns_id="ns", answer_host_call=lambda _call: {"value": 1})
+    return SimpleNamespace(ns_id="ns", answer_host_call=lambda _call, **_kwargs: {"value": 1})
 
 
 def _record_host_call_bound(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:

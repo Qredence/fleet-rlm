@@ -830,10 +830,7 @@ paths:
       tags:
       - sessions
       summary: List Models
-      description: 'List the chat models in a discovery scope.
-
-
-        An invalid scope or missing Gateway credentials returns 422.'
+      description: Browse an explicit compatible endpoint; manual model selection is always available.
       operationId: list_models_models_get
       parameters:
       - name: scope
@@ -841,10 +838,24 @@ paths:
         required: false
         schema:
           type: string
-          description: Runtime scope tag for model discovery
-          default: system.ai
+          description: Ignored compatibility parameter
+          deprecated: true
+          default: ''
           title: Scope
-        description: Runtime scope tag for model discovery
+        description: Ignored compatibility parameter
+        deprecated: true
+      - name: role
+        in: query
+        required: false
+        schema:
+          enum:
+          - root
+          - sub
+          - reflection
+          - judge
+          type: string
+          default: root
+          title: Role
       responses:
         '200':
           description: Successful Response
@@ -2511,26 +2522,28 @@ components:
       properties:
         mode:
           type: string
-          pattern: ^(rlm|flex|hybrid)$
+          pattern: ^(direct|flex|rlm|hybrid)$
           title: Mode
       additionalProperties: false
       type: object
       required:
       - mode
       title: ModeRequest
-      description: Request to switch a Session's execution mode to rlm, flex, or hybrid.
+      description: Request to switch a Session's execution mode to direct, flex, rlm, or hybrid.
     ModelRequest:
       properties:
         role:
           type: string
-          pattern: ^(root|sub)$
+          enum:
+          - root
+          - sub
           title: Role
           default: root
         model:
           type: string
           maxLength: 300
           minLength: 1
-          pattern: ^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$
+          pattern: ^\S(?:.*\S)?$
           title: Model
       additionalProperties: false
       type: object
@@ -2567,7 +2580,7 @@ components:
       - scope
       - models
       title: Models
-      description: Chat models available in one discovery scope.
+      description: Model routes from optional compatible-endpoint discovery; scope is deprecated.
     OperationStarted:
       properties:
         operation_id:

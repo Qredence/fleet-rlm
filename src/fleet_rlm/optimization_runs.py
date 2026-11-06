@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TextIO
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, model_validator
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.workspace import validate_session_id
@@ -226,7 +226,8 @@ def worker_settings_payload(settings: FleetSettings) -> bytes:
     # Shared dotenv files may contain unrelated applications' keys. Their source
     # bookkeeping is not part of the validated Fleet configuration snapshot.
     sources = {name: source for name, source in settings._configuration_sources.items() if name in values}
-    return json.dumps({"settings": values, "sources": sources}).encode()
+    credentials = {name: value.get_secret_value() for name, value in settings._resolved_credentials.items()}
+    return json.dumps({"settings": values, "sources": sources, "credentials": credentials}).encode()
 
 
 def read_worker_settings(stream: TextIO) -> FleetSettings:
@@ -235,7 +236,7 @@ def read_worker_settings(stream: TextIO) -> FleetSettings:
     if len(raw) > 1_000_000:
         raise ValueError("worker configuration is too large")
     data = json.loads(raw)
-    if not isinstance(data, dict) or set(data) != {"settings", "sources"}:
+    if not isinstance(data, dict) or set(data) != {"settings", "sources", "credentials"}:
         raise ValueError("invalid worker configuration")
 
     class WorkerSettings(FleetSettings):
@@ -249,11 +250,13 @@ def read_worker_settings(stream: TextIO) -> FleetSettings:
             del settings_cls, env_settings, dotenv_settings, file_secret_settings
             return (init_settings,)
 
-    settings = WorkerSettings(_env_file=None, **data["settings"])
     sources = data["sources"]
     if not isinstance(sources, dict) or any(
         name not in FleetSettings.model_fields or not isinstance(source, str) for name, source in sources.items()
     ):
         raise ValueError("invalid worker configuration provenance")
-    settings._configuration_sources = dict(sources)
+    credentials = TypeAdapter(dict[str, SecretStr]).validate_python(data["credentials"], strict=True)
+    settings = WorkerSettings(
+        _env_file=None, _credential_snapshot=credentials, _source_snapshot=dict(sources), **data["settings"]
+    )
     return settings

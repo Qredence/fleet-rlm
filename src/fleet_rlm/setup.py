@@ -22,15 +22,16 @@ from dotenv import dotenv_values, set_key
 from pydantic import ValidationError
 
 from fleet_rlm.config import FleetSettings, _toml_settings
+from fleet_rlm.models import build_lm, complete_text
 from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError, activate_snapshot, build_snapshot
 
 # A deliberately bounded editor. Values retain FleetSettings' existing validation and precedence.
 FIELDS: dict[str, tuple[str, str, bool]] = {
     "DATABRICKS_HOST": ("databricks_host", "models", False),
     "DATABRICKS_TOKEN": ("databricks_token", "models", True),
-    "FLEET_LLM_BASE_URL": ("fleet_llm_base_url", "models", False),
-    "FLEET_ROOT_MODEL": ("fleet_root_model", "models", False),
-    "FLEET_SUB_MODEL": ("fleet_sub_model", "models", False),
+    "FLEET_LLM_BASE_URL": ("fleet_llm_api_base", "models", False),
+    "FLEET_LLM_MODEL": ("fleet_llm_model", "models", False),
+    "FLEET_LLM_API_KEY": ("fleet_llm_api_key", "models", True),
     "FLEET_DATABASE_URL": ("fleet_database_url", "database", True),
     "FLEET_DATABASE_MIGRATION_URL": ("fleet_database_migration_url", "database", True),
     "FLEET_LAKEBASE_ENDPOINT": ("fleet_lakebase_endpoint", "database", False),
@@ -39,6 +40,9 @@ FIELDS: dict[str, tuple[str, str, bool]] = {
     "FLEET_DAYTONA_ORG_ID": ("fleet_daytona_org_id", "daytona", False),
     "FLEET_DAYTONA_VOLUME_ID": ("fleet_daytona_volume_id", "daytona", False),
 }
+for _role in ("llm", "root", "sub", "reflection", "judge"):
+    for _key in ("adapter", "response_format"):
+        FIELDS[f"FLEET_{_role.upper()}_{_key.upper()}"] = (f"fleet_{_role}_{_key}", "models", False)
 for _key in ("port", "data_dir", "experiment_name"):
     FIELDS[f"FLEET_MLFLOW_LOCAL_{_key.upper()}"] = (f"mlflow_local_{_key}", "mlflow", False)
 for _key in (
@@ -149,6 +153,10 @@ class SetupService:
         values = settings.model_dump(mode="json")
         # SecretStr serializes as masked text; include its actual value only in this private digest.
         values["databricks_token"] = settings.databricks_token.get_secret_value()
+        values["model_credentials"] = {
+            role: settings.resolved_model(role).api_key.get_secret_value()
+            for role in ("root", "sub", "reflection", "judge")
+        }
         return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
 
     def status(self) -> dict[str, Any]:
@@ -363,28 +371,16 @@ class SetupService:
         inference = (
             "Root model inference test succeeded." if tested else "Inference is untested; the model test is optional."
         )
-        if not settings.databricks_token.get_secret_value() or not (
-            settings.databricks_host or settings.fleet_llm_base_url
-        ):
-            return {"status": "blocked", "message": "Configure the Gateway host/base URL and Databricks token."}
-        configured = {settings.fleet_root_model, settings.fleet_sub_model}
-        scopes = {model.removeprefix("openai/").rsplit(".", 1)[0] for model in configured}
+        settings.resolved_model("root")
         try:
-            models = sorted({model for scope in sorted(scopes) for model in settings.list_models(scope)})
+            models = settings.list_models(role="shared")
+            discovery = "" if models else " Enter a model route manually if no models are listed."
         except Exception:
-            return {
-                "status": "warning",
-                "message": "Models are configured; discovery is unavailable. " + inference,
-                "inference_tested": tested,
-            }
-        available = set(models)
+            models = []
+            discovery = " Discovery is unavailable; manual model entry remains available."
         return {
-            "status": "ready" if configured <= available else "blocked",
-            "message": (
-                "Model discovery complete. " + inference
-                if configured <= available
-                else "A configured serving model was not found. Select available root/sub model IDs."
-            ),
+            "status": "ready",
+            "message": "Models are configured. " + inference + discovery,
             "models": models,
             "inference_tested": tested,
         }
@@ -577,10 +573,17 @@ class SetupService:
         import dspy
 
         settings = self.settings()
-        lm = settings._build_lm(settings.fleet_root_model).copy(num_retries=0, max_tokens=16, cache=False, callbacks=[])
+        lm = build_lm(settings, settings.fleet_root_model, "root").copy(
+            num_retries=0, max_tokens=16, cache=False, callbacks=[]
+        )
         try:
             with dspy.context(callbacks=[]):
-                result = lm("Reply with exactly OK")
+                prompt = (
+                    'Return exactly this JSON object: {"status":"OK"}'
+                    if settings.resolved_model("root").response_format == "json_object"
+                    else "Reply with exactly OK"
+                )
+                result = complete_text(lm, prompt, max_tokens=16)
             if not result:
                 raise ValueError("Model returned no response")
         finally:

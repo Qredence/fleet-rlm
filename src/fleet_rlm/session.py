@@ -17,6 +17,7 @@ import psycopg
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.models import build_lm
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.skills import SkillManager
 from fleet_rlm.store import IdempotencyConflictError, Store
@@ -203,7 +204,15 @@ class SessionRuntime:
             "artifacts": artifacts,
             **{
                 key: turn_record[key]
-                for key in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
+                for key in (
+                    "lm_calls",
+                    "sandbox_errors",
+                    "submit_rejections",
+                    "budget_breakdown",
+                    # Direct mode inlines the workspace; the caller needs that measurement too.
+                    "direct_context_chars",
+                    "direct_context_truncated",
+                )
                 if key in turn_record
             },
             # The status payload carries the same provider-resolved identity as the record.
@@ -331,7 +340,10 @@ class SessionRuntime:
         self.engine = engine
         self.sandbox_mgr.sub_lm = engine.sub_lm
         self.configuration_overrides.update(
-            {"fleet_root_model": engine.root_lm.model, "fleet_sub_model": engine.sub_lm.model}
+            {
+                "fleet_root_model": engine.root_lm.model,
+                "fleet_sub_model": engine.sub_lm.model,
+            }
         )
 
 
@@ -340,7 +352,7 @@ def runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, An
     overrides = dict(getattr(runtime, "configuration_overrides", {}))
     for role in ("root", "sub"):
         model = getattr(getattr(runtime.engine, f"{role}_lm", None), "model", None)
-        if model is not None and model != getattr(settings, f"fleet_{role}_model"):
+        if model is not None and model != settings.resolved_model(role).model:
             overrides[f"fleet_{role}_model"] = model
     mode = getattr(getattr(runtime, "engine", None), "execution_mode", settings.execution_mode)
     if mode != settings.execution_mode:
@@ -414,7 +426,9 @@ class SessionRuntimeRegistry:
                 if self.store is None:
                     raise RuntimeError("Session storage is not configured")
                 if self.root_lm is None:
-                    self.root_lm, self.sub_lm, _, self.jev_lm = self.settings.build_lms()
+                    self.root_lm = build_lm(self.settings, self.settings.fleet_root_model, "root")
+                    self.sub_lm = build_lm(self.settings, self.settings.fleet_sub_model, "sub")
+                    self.jev_lm = self.settings.build_jev_lm()
             runtime = self._build(session_id)
             with self._lock:
                 self._sessions[session_id] = runtime
@@ -465,6 +479,8 @@ class SessionRuntimeRegistry:
                 jev_lm=self.jev_lm,
                 compiled_path=str(Path(settings.compiled_program_dir) / f"{session_id}.json"),
                 execution_mode=settings.execution_mode,
+                root_adapter=settings.resolved_model("root").build_adapter(),
+                sub_adapter=settings.resolved_model("sub").build_adapter(),
             ),
         )
         runtime.ensure_session(session_id)
@@ -510,7 +526,8 @@ class SessionRuntimeRegistry:
     def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> AdaptiveFleetEngine:
         """Build an engine for this Session that uses the given root and sub model names."""
         settings = self.settings.for_session({"models": models})
-        root, sub, _, _ = settings.build_lms()
+        root = build_lm(settings, settings.fleet_root_model, "root")
+        sub = build_lm(settings, settings.fleet_sub_model, "sub")
         return AdaptiveFleetEngine(
             sandbox_mgr=runtime.sandbox_mgr,
             root_lm=root,
@@ -518,6 +535,8 @@ class SessionRuntimeRegistry:
             jev_lm=self.jev_lm,
             compiled_path=runtime.engine.compiled_path,
             execution_mode=runtime.engine.execution_mode,
+            root_adapter=settings.resolved_model("root").build_adapter(),
+            sub_adapter=settings.resolved_model("sub").build_adapter(),
         )
 
     def evict(self, session_id: str) -> bool:

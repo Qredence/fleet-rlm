@@ -230,17 +230,23 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
             cases[: args.limit] if args.limit else cases,
             base_url=args.url,
             judge_model=settings.fleet_judge_model,
-            judge_lm=settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
-            jev_lm=settings.build_jev_lm(),
+            judge_lm=None if args.collect_only else settings.build_judge_lm(),
+            judge_adapter=None if args.collect_only else settings.resolved_model("judge").build_adapter(),
+            jev_lm=None if args.collect_only else settings.build_jev_lm(),
             collect_only=args.collect_only,
             experiment_id=experiment.experiment_id,
             uc_location=(
-                (settings.mlflow_trace_catalog, settings.mlflow_trace_schema, settings.mlflow_eval_trace_table_prefix)
+                (
+                    settings.mlflow_trace_catalog,
+                    settings.mlflow_trace_schema,
+                    settings.mlflow_eval_trace_table_prefix,
+                )
                 if target.mode == "databricks"
                 else None
             ),
             report=lambda message: _CONSOLE.print(message, markup=False, soft_wrap=True),
         )
+
     except evaluation.EvaluationError as exc:
         raise SystemExit(str(exc)) from None
     if result is not None:
@@ -409,23 +415,25 @@ def main(argv: list[str] | None = None) -> None:
             "--mlflow",
             choices=("local", "databricks"),
             default=None,
-            help="MLflow backend (default: local); replaces the retired --mlflow env option",
+            help="MLflow backend (default: configured setting); replaces the retired --mlflow env option",
         )
 
     args = parser.parse_args(argv)
     if getattr(args, "backend", None) and args.mlflow == "local":
         parser.error("cli databricks conflicts with --mlflow local")
-    backend = getattr(args, "backend", None) or getattr(args, "mlflow", None) or "local"
+    backend = getattr(args, "backend", None) or getattr(args, "mlflow", None)
     managed_settings = None
     if args.command == "optimize" and getattr(args, "managed_run_id", None):
         try:
             managed_settings = read_worker_settings(sys.stdin)
         except (ValueError, TypeError):
             parser.error("invalid private worker configuration")
+        if backend is None:
+            backend = managed_settings.mlflow_mode
         if managed_settings.mlflow_mode != backend:
             parser.error("worker MLflow backend does not match its server configuration")
     if getattr(args, "mlflow_port", None) is not None:
-        if backend != "local":
+        if backend == "databricks":
             parser.error("--mlflow-port is only supported with local MLflow")
         if not 1 <= args.mlflow_port <= 65535:
             parser.error("--mlflow-port must be between 1 and 65535")
@@ -441,7 +449,7 @@ def main(argv: list[str] | None = None) -> None:
                 setup_mode=True,
                 setup_token=setup_token,
                 project_dir=Path(os.environ.get("FLEET_SETUP_PROJECT_DIR", ".")),
-                setup_backend=backend,
+                setup_backend=backend or "local",
             ),
             host=args.host or "127.0.0.1",
             port=args.port or 8000,
@@ -458,15 +466,21 @@ def main(argv: list[str] | None = None) -> None:
             _is_loopback(existing_settings.host)
             and not launcher.api_is_healthy(f"http://{existing_settings.host}:{existing_settings.port}")
         )
+        setup_backend = backend or (existing_settings.mlflow_mode if existing_settings else "local")
+        if getattr(args, "mlflow_port", None) is not None and setup_backend != "local":
+            parser.error("--mlflow-port is only supported with local MLflow")
         if owned_local:
             setup_token = secrets.token_urlsafe(32)
-            if not _onboard(args, backend, setup_token):
+            if not _onboard(args, setup_backend, setup_token):
                 if not sys.stdin.isatty():
                     raise SystemExit(1)
                 return
             get_settings.cache_clear()
     try:
         settings = managed_settings or get_settings(backend)
+        backend = settings.mlflow_mode
+        if getattr(args, "mlflow_port", None) is not None and backend != "local":
+            parser.error("--mlflow-port is only supported with local MLflow")
         overrides = {}
         if getattr(args, "mlflow_port", None) is not None:
             overrides["mlflow_local_port"] = args.mlflow_port

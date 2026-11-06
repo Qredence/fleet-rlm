@@ -139,13 +139,14 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     session_id: str
     snapshot: str = SNAPSHOT_NAME
     auto_stop_minutes: int = 30
+    sub_adapter: dspy.Adapter | None = None
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
     max_llm_calls: int = 150
     max_depth: int = 3
     max_children: int = 8
     max_active_children: int = 4
-    turn_timeout_seconds: int = 900
+    turn_timeout_seconds: int = 0
     linked_children: bool = True
     disposable: bool = False
     shared_notes_subpath: str = ""
@@ -523,6 +524,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 snapshot=self.snapshot,
                 auto_stop_minutes=self.auto_stop_minutes,
                 sub_lm=self.sub_lm,
+                sub_adapter=self.sub_adapter,
                 jev_lm=self.jev_lm,
                 max_llm_calls=root.max_llm_calls,
                 parent=self,
@@ -1016,7 +1018,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
                 sandbox,
                 context,
                 payload,
-                on_call=interpreter.answer_host_call,
+                on_call=lambda call: interpreter.answer_host_call(call, execution_id=execution_id),
                 timeout=timeout,
                 fence=fence,
                 on_fence=lambda: self._report_fence(fence, interpreter.ns_id),
