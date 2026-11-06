@@ -59,9 +59,10 @@ def test_baseline_live_success_and_failure_fields_are_preserved(turn_results):
 
     runtime = _failed_turn_runtime(FakeManager(), stored, fail)
     failure = []
-    _run_turn_direct(runtime, emitted=failure, turn_id="fixture-turn")
+    _run_turn_direct(runtime, emitted=failure, turn_id="fixture-turn", timeout_seconds=900)
     assert {**failure[0], "duration_seconds": 0.0} == turn_results["live_failure"]
     assert stored[0][2] == failure[0]
+    assert failure[0]["effective_seconds"] == stored[0][2]["effective_seconds"] == 900
 
 
 @pytest.mark.usefixtures("traced")

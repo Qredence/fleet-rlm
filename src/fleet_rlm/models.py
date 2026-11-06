@@ -112,7 +112,7 @@ def complete_text(
     return response.text
 
 
-def list_models(settings: FleetSettings, *, scope: str = "", role: Role = "root") -> list[str]:
+def list_models(settings: FleetSettings, *, scope: str = "", role: Role | Literal["shared"] = "root") -> list[str]:
     """Browse only the selected role's explicit OpenAI-compatible endpoint."""
     del scope
     resolved = settings.resolved_model(role)

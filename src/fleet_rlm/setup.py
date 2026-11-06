@@ -373,7 +373,7 @@ class SetupService:
         )
         settings.resolved_model("root")
         try:
-            models = settings.list_models()
+            models = settings.list_models(role="shared")
             discovery = "" if models else " Enter a model route manually if no models are listed."
         except Exception:
             models = []

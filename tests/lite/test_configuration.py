@@ -496,3 +496,27 @@ def test_databricks_requires_explicit_deployment_identifiers(monkeypatch):
         mlflow_databricks_tracing_sql_warehouse_id="example-warehouse",
     )
     assert configured.mlflow_tracking_uri == "databricks"
+
+
+def test_shared_discovery_uses_default_connection_when_root_has_an_override(monkeypatch):
+    from contextlib import nullcontext
+
+    import httpx
+
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_model="openai/shared",
+        fleet_llm_api_base="https://shared.example/v1",
+        fleet_llm_api_key="shared-test-key",
+        fleet_root_model="openai/root",
+        fleet_root_api_base="https://root.example/v1",
+    )
+
+    def stream(method, url, *, headers, timeout):
+        assert method == "GET" and url == "https://shared.example/v1/models"
+        assert headers == {"Authorization": "Bearer shared-test-key"}
+        assert timeout == 10
+        return nullcontext(httpx.Response(200, json={"data": [{"id": "shared"}]}, request=httpx.Request(method, url)))
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    assert settings.list_models(role="shared") == ["openai/shared"]

@@ -21,11 +21,11 @@ bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
 
 
-def freeze(tmp_path, count=2):
+def freeze(tmp_path, count=2, task=None):
     cases = [
         {
             "case_id": f"task-{index}",
-            "task": f"Compute {index}",
+            "task": task if task is not None else f"Compute {index}",
             "expected_answer": "secret-gold",
             "question": {"answer": "secret-payload"},
             "files": {"context.txt": "unlabelled input"},
@@ -454,7 +454,6 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
     configured, reads, labels, inputs, logged = [], [], [], [], []
 
     def build_judge_lm():
-        assert judge_model.startswith("openai:/")
         return "native-dspy-judge"
 
     settings = SimpleNamespace(
@@ -465,6 +464,7 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
         prepare_mlflow_auth=lambda: None,
         judge_environment=lambda: {},
         build_judge_lm=build_judge_lm,
+        resolved_model=lambda role: SimpleNamespace(build_adapter=lambda: "judge-adapter") if role == "judge" else None,
         build_jev_lm=lambda: "native-jev-lm",
         fleet_judge_model=judge_model,
         mlflow_trace_catalog="catalog",
@@ -481,7 +481,9 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
     )
     monkeypatch.setattr(evaluation, "label_trace", lambda identity, **kwargs: labels.append((identity, kwargs)))
     monkeypatch.setattr(
-        scorers, "build_mlflow_scorer_suite", lambda model, lm, jev=None: [f"native-suite:{model}:{lm}:{jev}"]
+        scorers,
+        "build_mlflow_scorer_suite",
+        lambda model, lm, jev=None, judge_adapter=None: [f"native-suite:{model}:{lm}:{jev}:{judge_adapter}"],
     )
     monkeypatch.setattr(mlflow, "start_run", lambda **_kwargs: nullcontext())
     monkeypatch.setattr(mlflow, "set_tags", lambda tags: logged.append(tags))
@@ -491,8 +493,8 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
 
     def evaluate(*, data, scorers):
         assert data == [{"trace": trace, "expectations": {"benchmark_official_score": 1}}]
-        expected_lm = "native-dspy-judge" if judge_model.startswith("openai:/") else None
-        assert scorers[0] == f"native-suite:{judge_model}:{expected_lm}:native-jev-lm"
+        expected_lm = "native-dspy-judge"
+        assert scorers[0] == f"native-suite:{judge_model}:{expected_lm}:native-jev-lm:judge-adapter"
         assert scorers[-1](expectations=data[0]["expectations"]).value == 1
         frame = pd.DataFrame({"benchmark_correctness/value": [1]})
         if scoring_error:
@@ -532,7 +534,7 @@ def test_official_scores_survive_real_mlflow_cross_experiment_cloning(
 
     from fleet_rlm.optimize import scorers
 
-    bundle, run_dir = freeze(tmp_path)
+    bundle, run_dir = freeze(tmp_path, task="identical prompt")
     with monkeypatch.context() as api_patch:
         api(api_patch)
         bench.run_tasks(bundle, run_dir, base_url="http://fleet", expected_destination=DESTINATION, allow_live=True)
@@ -564,6 +566,7 @@ def test_official_scores_survive_real_mlflow_cross_experiment_cloning(
             pytest.fail("Official-only scoring must not prepare judge credentials") if official_only else {}
         ),
         build_judge_lm=lambda: None,
+        resolved_model=lambda _role: SimpleNamespace(build_adapter=lambda: None),
         build_jev_lm=lambda: None,
         fleet_judge_model="unused",
         mlflow_trace_catalog="",
@@ -573,7 +576,7 @@ def test_official_scores_survive_real_mlflow_cross_experiment_cloning(
     )
 
     # Exercise native trace readback, labeling, cloning and scoring without model judges.
-    def suite(*_args):
+    def suite(*_args, **_kwargs):
         if official_only:
             pytest.fail("Official-only scoring must not build model judges")
         return []
@@ -776,6 +779,8 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
         fleet_root_max_tokens=16384,
         fleet_root_temperature=0.2,
         fleet_root_cache=False,
+        fleet_root_adapter="json",
+        fleet_root_response_format="json_object",
     )
     from fleet_rlm.models import build_lm
 
@@ -785,6 +790,7 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
     assert len(requests) == 1
     wire = json.loads(requests[0].body)
     assert wire["messages"] == [{"role": "user", "content": "published prompt"}]
+    assert wire["response_format"] == {"type": "json_object"}
     assert not wire.get("tools")
     assert wire["model"] == "system.ai.deepseek-v4-1-flash-1017"
     assert wire["max_completion_tokens"] == 16384 and wire["temperature"] == 0.2

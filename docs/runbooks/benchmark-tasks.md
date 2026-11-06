@@ -21,7 +21,7 @@ LongCoT comparison pilot below explicitly selects modes and isolates notes/cache
 ## Prepare tasks
 
 Preparation uses pinned Hugging Face dataset revisions and deterministic selection.
-LongCoT defaults to a five-task, three-arm pilot; its single-Fleet mode selects ten
+LongCoT defaults to a five-task, two-arm pilot; its single-Fleet mode selects ten
 easy tasks across five domains. OOLONG defaults to twelve
 validation tasks spanning task groups and context sizes. These are diagnostic samples.
 OOLONG projects small metadata columns first, then loads selected unlabelled contexts.

@@ -189,7 +189,11 @@ def _direct_turn(lm: Any, case: dict, *, timeout_seconds: int, evidence_dir: Pat
     request = Request(
         model=lm.model,
         messages=(Message.user(case["task"]),),
-        config=Config(max_tokens=lm.kwargs.get("max_tokens"), temperature=lm.kwargs.get("temperature")),
+        config=Config(
+            max_tokens=lm.kwargs.get("max_tokens"),
+            temperature=lm.kwargs.get("temperature"),
+            response_format=lm.kwargs.get("response_format"),
+        ),
     )
     save_json(
         evidence_dir / "request.json",
@@ -838,7 +842,10 @@ def evaluate_saved_tasks(
         if len(found) > 1:
             raise ValueError("Ambiguous frozen evaluation dataset")
         records = [
-            {"inputs": {"task": case["task"]}, "expectations": {"benchmark_case_id": case["case_id"]}}
+            {
+                "inputs": {"case_id": case["case_id"], "task": case["task"]},
+                "expectations": {"benchmark_case_id": case["case_id"]},
+            }
             for case in bundle["cases"]
         ]
         expected_records = sorted(map(_digest, records))  # Native merge_records may annotate its input dictionaries.
@@ -853,15 +860,15 @@ def evaluate_saved_tasks(
         actual = frame[["inputs", "expectations"]].to_dict("records")
         if sorted(map(_digest, actual)) != expected_records:
             raise ValueError("Native evaluation dataset differs from the frozen tasks")
-        by_task = {
-            cases[row["case_id"]]["task"]: evaluation
+        by_case = {
+            row["case_id"]: evaluation
             for row, evaluation in zip(
                 [row for row in scored["cases"] if "official_score" in row], evaluation_rows, strict=True
             )
         }
-        frame = frame[frame["inputs"].map(lambda inputs: inputs["task"] in by_task)].copy()
-        frame["trace"] = [by_task[inputs["task"]]["trace"] for inputs in frame["inputs"]]
-        frame["expectations"] = [by_task[inputs["task"]]["expectations"] for inputs in frame["inputs"]]
+        frame = frame[frame["inputs"].map(lambda inputs: inputs["case_id"] in by_case)].copy()
+        frame["trace"] = [by_case[inputs["case_id"]]["trace"] for inputs in frame["inputs"]]
+        frame["expectations"] = [by_case[inputs["case_id"]]["expectations"] for inputs in frame["inputs"]]
         evaluation_data = frame
     coverage = {key: scored[key] for key in ("expected", "completed", "scored")}
     with mlflow.start_run(run_name=f"benchmark-{run['run_id']}"):
@@ -891,8 +898,9 @@ def evaluate_saved_tasks(
                     if official_only
                     else build_mlflow_scorer_suite(
                         settings.fleet_judge_model,
-                        settings.build_judge_lm() if settings.fleet_judge_model.startswith("openai:/") else None,
+                        settings.build_judge_lm(),
                         settings.build_jev_lm(),
+                        judge_adapter=settings.resolved_model("judge").build_adapter(),
                     )
                 ),
                 benchmark_correctness,

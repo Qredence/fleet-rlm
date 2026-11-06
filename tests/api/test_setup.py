@@ -110,7 +110,8 @@ def test_experiment_status_without_manager_has_same_named_contract(tmp_path):
 def test_model_readiness_checks_configured_allowlist_without_discovery(tmp_path, monkeypatch, sub_scope, missing):
     settings = FleetSettings(_env_file=None, fleet_llm_model=f"openai/{sub_scope}.model")
 
-    def discover(*_args, **_kwargs):
+    def discover(_settings, *, role):
+        assert role == "shared"
         if missing:
             raise RuntimeError("private provider error")
         return ["openai/discovered"]

@@ -324,6 +324,13 @@ class FleetSettings(BaseSettings):
             return self._resolved_credentials[reference]
 
         default_key = credential(self.fleet_llm_api_key_env, self.fleet_llm_api_key)
+        self._resolved_lms["shared"] = ResolvedModel(
+            model=self.fleet_llm_model,
+            api_base=self.fleet_llm_api_base,
+            api_key=default_key,
+            adapter=self.fleet_llm_adapter,
+            response_format=self.fleet_llm_response_format,
+        )
         for role in ("root", "sub", "reflection", "judge"):
             selected = self.fleet_correctness_model if role == "judge" else getattr(self, f"fleet_{role}_model")
             independent = bool(selected)
@@ -347,7 +354,7 @@ class FleetSettings(BaseSettings):
                 **options,
             )
 
-    def resolved_model(self, role: Role) -> ResolvedModel:
+    def resolved_model(self, role: Role | Literal["shared"]) -> ResolvedModel:
         """Return a role's validated connection and credential snapshot."""
         return self._resolved_lms[role]
 
@@ -923,7 +930,7 @@ class FleetSettings(BaseSettings):
 
         return build_lm(self, self.fleet_correctness_model, "judge")
 
-    def list_models(self, scope: str = "", role: Role = "root") -> list[str]:
+    def list_models(self, scope: str = "", role: Role | Literal["shared"] = "root") -> list[str]:
         """Browse the selected role's explicit compatible endpoint."""
         from fleet_rlm.models import list_models
 

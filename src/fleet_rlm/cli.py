@@ -466,9 +466,11 @@ def main(argv: list[str] | None = None) -> None:
             _is_loopback(existing_settings.host)
             and not launcher.api_is_healthy(f"http://{existing_settings.host}:{existing_settings.port}")
         )
+        setup_backend = backend or (existing_settings.mlflow_mode if existing_settings else "local")
+        if getattr(args, "mlflow_port", None) is not None and setup_backend != "local":
+            parser.error("--mlflow-port is only supported with local MLflow")
         if owned_local:
             setup_token = secrets.token_urlsafe(32)
-            setup_backend = backend or (existing_settings.mlflow_mode if existing_settings else "local")
             if not _onboard(args, setup_backend, setup_token):
                 if not sys.stdin.isatty():
                     raise SystemExit(1)
