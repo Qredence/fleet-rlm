@@ -1,0 +1,26 @@
+.circleci/config.yml
+  s_3028dc0623023d::t_4a40115f3bb567 159-161,195-197,228-230,250-252,901-903
+  s_3028dc0623023d::t_ede6f16ea3f264 32-34
+tests/ci/test_circleci_smarter_testing_config.py
+  s_3028dc0623023d::t_198a5c5f8162a0 317,352
+  s_3028dc0623023d::t_ede6f16ea3f264 316,318,350-351,353
+  s_3028dc0623023d::t_03fe545e475b87 355-362
+  s_3028dc0623023d::t_4a40115f3bb567 354,363
+  s_3028dc0623023d::t_afebbbebc65fd3 364-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7b4af1547056dfab4e2732c3af303d40ead0d4c6",
+  "prompts": {},
+  "sessions": {
+    "s_3028dc0623023d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b43f-c5ae-7a31-9b7c-6612d8a399b4",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
