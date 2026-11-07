@@ -177,6 +177,11 @@ jobs:
           command: |
             set +x
             export PYENV_VERSION=3.12
+            # Skip gracefully when GitHub App credentials are unavailable (e.g., forked PRs).
+            if [ -z "${FLEET_GITHUB_APP_ID:-}" ] || [ -z "${FLEET_GITHUB_APP_PRIVATE_KEY:-}" ] || [ -z "${FLEET_GITHUB_APP_INSTALLATION_ID:-}" ]; then
+              echo "Skipping release-metadata: GitHub App credentials not present in this context."
+              exit 0
+            fi
             git fetch --no-tags https://github.com/Qredence/fleet-rlm.git main
             git checkout --detach FETCH_HEAD
             GH_TOKEN=$(python3.12 -m scripts.github_app_token --purpose read)
