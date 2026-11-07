@@ -234,8 +234,13 @@ def test_release_request_treats_shell_syntax_as_literal(tmp_path):
     assert "<< pipeline.parameters.release_sha >>" not in command
 
 
-@pytest.mark.parametrize("failed_command", ["none", "combine", "xml", "report"])
-def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_command):
+@pytest.mark.parametrize(
+    ("failed_command", "shard_status", "missing_evidence"),
+    [(command, 0, None) for command in ("none", "combine", "xml", "report")]
+    + [("none", 2, None)]
+    + [("none", 0, evidence) for evidence in ("test-status", "test-files.txt", ".coverage.fake")],
+)
+def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_command, shard_status, missing_evidence):
     config = load_config()
     steps = config["jobs"]["coverage-report"]["steps"]
     reporter = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
@@ -256,9 +261,11 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
     for node in (0, 1):
         shard = tmp_path / f"coverage-shards/node-{node}"
         shard.mkdir(parents=True)
-        (shard / "test-status").write_text("0\n")
+        (shard / "test-status").write_text(f"{shard_status}\n")
         (shard / "test-files.txt").write_text("tests/test_sample.py\n")
         (shard / ".coverage.fake").write_text("parallel data\n")
+    if missing_evidence:
+        (shard / missing_evidence).unlink()
     order = tmp_path / "coverage-command-order"
     result = subprocess.run(
         ["bash", "-ec", reporter["command"]],
@@ -276,16 +283,22 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
     enforcement = steps[-1]["run"]["command"]
     env = {**os.environ, "BASH_ENV": ""}
     final = subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False)
-    assert final.returncode == (0 if failed_command == "none" else 2)
-    assert (tmp_path / "coverage/coverage.xml").is_file() == (failed_command in ("none", "report"))
+    assert final.returncode == (1 if missing_evidence else 0 if failed_command == "none" else 2)
+    assert (tmp_path / "coverage/coverage.xml").is_file() == (
+        not missing_evidence and failed_command in ("none", "report")
+    )
     coverage_upload = {"store_artifacts": {"path": "coverage", "destination": "coverage"}}
     assert coverage_upload in steps
-    assert (order.read_text() if order.exists() else "") == {
-        "none": "combinexmlreport",
-        "combine": "",
-        "xml": "combine",
-        "report": "combinexml",
-    }[failed_command]
+    assert (order.read_text() if order.exists() else "") == (
+        ""
+        if missing_evidence
+        else {
+            "none": "combinexmlreport",
+            "combine": "",
+            "xml": "combine",
+            "report": "combinexml",
+        }[failed_command]
+    )
     assert steps.index(coverage_upload) < len(steps) - 1
     (tmp_path / "coverage/.status").unlink()
     assert subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False).returncode != 0
@@ -293,6 +306,7 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
         next(step for step in steps if isinstance(step, dict) and "run" in step)
     )
     assert workflow_jobs()["coverage-report"]["requires"] == [{"test-python-3.11": "terminal"}]
+    assert "test-python-3.11" in workflow_jobs()["quality"]["requires"]
 
 
 def test_python_selection_survives_circleci_step_shells(tmp_path):
