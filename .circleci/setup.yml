@@ -53,7 +53,7 @@ jobs:
     - run:
         name: Select trusted setup implementation for pull requests
         command: |-
-          if [ "$FLEET_EVENT" = pull_request ]; then
+          if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
             git fetch --no-tags https://github.com/Qredence/fleet-rlm.git main
             mkdir -p /tmp/fleet-trusted-setup
             git archive FETCH_HEAD | tar -x -C /tmp/fleet-trusted-setup
@@ -62,6 +62,10 @@ jobs:
     - run:
         name: Resolve immutable release intent
         command: |-
+          # Normalize PRs without treating API or scheduled pipelines as pushes.
+          if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
+            export FLEET_EVENT=pull_request
+          fi
           python - \<<'PYCODE'
           import json, os
           from pathlib import Path
