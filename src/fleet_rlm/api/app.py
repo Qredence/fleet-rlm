@@ -20,7 +20,7 @@ from fleet_rlm.api.schemas import Health
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.experiments import ExperimentManager
 from fleet_rlm.launcher import mlflow_is_healthy
-from fleet_rlm.observability import configure_mlflow_observability
+from fleet_rlm.observability import MlflowTraceDestinationMismatchError, configure_mlflow_observability
 from fleet_rlm.session import SessionRuntimeRegistry
 from fleet_rlm.store import Store
 
@@ -212,6 +212,13 @@ def _configure_tracing(settings: FleetSettings) -> str:
             trace_table_prefix=settings.mlflow_trace_table_prefix,
             tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
         )
+    except MlflowTraceDestinationMismatchError:
+        raise RuntimeError(
+            "Databricks MLflow trace destination mismatch: the experiment is already linked to a "
+            "different Unity Catalog destination. Check FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG, "
+            "FLEET_MLFLOW_DATABRICKS_TRACE_SCHEMA, and FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX, "
+            "including .env overrides, and align them with the experiment's existing binding."
+        ) from None
     except Exception as exc:
         raise RuntimeError(
             f"Could not initialize {target.mode} MLflow experiment {target.experiment_name!r} "

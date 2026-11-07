@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import dspy
 import mlflow
+from dspy.utils.exceptions import AdapterParseError
 from mlflow.entities import SpanType
 from mlflow.entities.trace_location import MlflowExperimentLocation
 
@@ -29,6 +30,7 @@ from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import Route
 from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
+from fleet_rlm.sandbox.interpreter import StructuredResponseError
 from fleet_rlm.sandbox.manager import (
     CLEANUP_NOT_REQUIRED,
     CLEANUP_STOPPED,
@@ -298,6 +300,13 @@ def run_turn(
                     name: getattr(prediction, name, None)
                     for name in ("lm_calls", "sandbox_errors", "submit_rejections", "budget_breakdown")
                 }
+                # Direct mode inlines the workspace into its prompt; keep that measurable per Turn
+                # rather than inferring it from the route.
+                direct_context = {
+                    name: getattr(prediction, name, None)
+                    for name in ("direct_context_chars", "direct_context_truncated")
+                    if getattr(prediction, name, None) is not None
+                }
                 learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
                 route = str(getattr(prediction, "route", Route.RLM.value))
                 evidence = deepcopy(getattr(prediction, "execution_evidence", {}))
@@ -331,6 +340,7 @@ def run_turn(
                     "execution_mode": runtime.engine.execution_mode,
                     "trace_id": trace_id,
                     **usage,
+                    **direct_context,
                     **environment,
                     "context_files": inputs["context_files"],
                     "artifact_capture": artifact_capture,
@@ -540,6 +550,7 @@ def _failure_message(exc: BaseException, turn_id: str) -> str:
     from the snapshot name, observed provider state/resources, the required floors,
     and the build command, so those bounded details are explicitly safe to surface.
     Idempotency conflicts also retain their caller-safe message.
+    Native and host-verified bridged format errors receive a fixed safe explanation.
     All remaining exceptions stay sanitized: their text can carry file paths,
     credentials, or provider payloads.
     """
@@ -547,6 +558,12 @@ def _failure_message(exc: BaseException, turn_id: str) -> str:
         return str(exc)
     if isinstance(exc, SnapshotUnavailableError):
         return str(exc)[:MAX_REFUSAL_CHARS]
+    if isinstance(exc, (AdapterParseError, StructuredResponseError)):
+        return (
+            "The model returned an invalid structured response. "
+            "Check the configured adapter and JSON mode. "
+            f"See the trace for details (request {turn_id})."
+        )
     return f"The Turn failed (request {turn_id})."
 
 

@@ -15,7 +15,6 @@ import mlflow
 from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.contracts import (
     ROUTE_SUMMARIES,
     TRIAGE_CRITERIA,
@@ -39,6 +38,15 @@ _MAX_PRELOADED_SKILL_CHARS = 20_000
 # A Flex baseline is dspy.RLM with DSPy's defaults (20 iterations, 50 sub-LLM calls). The rlm route
 # uses the Turn's own budgets, so the flex route gets the same ones.
 _FLEX_MAX_ITERS = 16
+# Ceiling on the workspace bytes a direct-mode Turn folds into its single prompt. Hitting it is
+# recorded as `direct_context_truncated`, so a benchmark can refuse a clipped arm instead of
+# silently scoring an answer produced from half the context.
+_MAX_DIRECT_CONTEXT_CHARS = 1_000_000
+# Workspace content is data, not instructions: delimit it so an inlined file cannot pose as the task.
+# The block precedes the task because the questions Fleet is asked about workspace data refer to it
+# as already supplied ("in the above data"), and a question must follow the material it asks about.
+_DIRECT_CONTEXT_HEADER = "<workspace_files>\n"
+_DIRECT_CONTEXT_FOOTER = "\n</workspace_files>\n\n"
 
 
 def _lm_api_key(lm: Any) -> str | None:
@@ -143,6 +151,8 @@ class AdaptiveFleetEngine(dspy.Module):
         jev_lm: Any | None = None,
         compiled_path: str | None = None,
         execution_mode: str = "hybrid",
+        root_adapter: dspy.Adapter | None = None,
+        sub_adapter: dspy.Adapter | None = None,
     ) -> None:
         """Build the triage, direct, Flex, and RLM programs, then load any compiled artifact."""
         super().__init__()
@@ -151,9 +161,12 @@ class AdaptiveFleetEngine(dspy.Module):
         self.sub_lm = sub_lm
         self.jev_lm = jev_lm
         self.compiled_path = compiled_path
-        if execution_mode not in {"rlm", "flex", "hybrid"}:
+        if execution_mode not in {"direct", "flex", "rlm", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.execution_mode = execution_mode
+        self.root_adapter = root_adapter if root_adapter is not None else dspy.ChatAdapter()
+        self.sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
+        sandbox_mgr.sub_adapter = self.sub_adapter
         self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
         self.triage = dspy.Predict(TurnTriage)
@@ -161,7 +174,7 @@ class AdaptiveFleetEngine(dspy.Module):
         self.direct_cot = dspy.ChainOfThought(DirectAnswer)
         self.skill_selector = dspy.Predict(SkillRelevance)
 
-        self.children = ChildAgents(sandbox_mgr, self._metered_sub)
+        self.children = ChildAgents(sandbox_mgr, self._metered_sub, self.sub_adapter)
         tools = self.children.tools()
         toolset = {tool.__name__: tool for tool in tools}
         self.flex_agent = dspy.Flex(
@@ -255,7 +268,7 @@ class AdaptiveFleetEngine(dspy.Module):
         self.compiled.reload_if_changed(self)
         self.sandbox_mgr.check_turn()
         mode = execution_mode or self.execution_mode
-        if mode not in {"rlm", "flex", "hybrid"}:
+        if mode not in {"direct", "flex", "rlm", "hybrid"}:
             raise ValueError("Invalid execution mode")
         if isinstance(context, WorkspaceDataset):
             metadata = self.sandbox_mgr.stat_workspace_file(context.workspace_path)
@@ -263,7 +276,52 @@ class AdaptiveFleetEngine(dspy.Module):
                 raise ValueError("Dataset source changed; select the new revision")
         route = self._route(mode, task, workspace_manifest, skills_catalog, context)
         skills_catalog = self._select_skills(task, skills_catalog, route)
-        return self._execute(route, workspace_manifest, memory_summary, task, skills_catalog, session_history, context)
+        return self._execute(
+            route, workspace_manifest, memory_summary, task, skills_catalog, session_history, context, mode
+        )
+
+    def _inline_context(self, task: str, workspace_manifest: str) -> tuple[str, int, bool]:
+        """Fold this Session's workspace files into the task for the context-free direct prompt.
+
+        Return the prompt, the inlined character count, and whether the ceiling clipped it.
+        Only ``files/`` is treated as dataset context: Skills and artifacts are Fleet bookkeeping,
+        not task input. An empty manifest means no remote listing is issued at all, so a direct
+        Turn with no workspace stays as cheap as it was before inlining existed. Unreadable files
+        are skipped rather than failing the Turn.
+        """
+        # Only a manifest that actually names a files/ path can carry inlinable context. This keeps
+        # a direct Turn with no workspace entirely local: no sandbox access, exactly as before.
+        if "/workspace/files/" not in workspace_manifest:
+            return task, 0, False
+        paths = [
+            path for path in self.sandbox_mgr.list_workspace_files() if path.startswith("files/") and path != "files"
+        ]
+        if not paths:
+            return task, 0, False
+        budget = _MAX_DIRECT_CONTEXT_CHARS
+        blocks: list[str] = []
+        inlined = 0
+        truncated = False
+        for path in paths:
+            if truncated:
+                break
+            try:
+                text = self.sandbox_mgr.read_workspace_file(path).decode("utf-8")
+            except (OSError, ValueError, RuntimeError, UnicodeError):
+                continue
+            room = budget - inlined
+            if room <= 0:
+                truncated = True
+                break
+            if len(text) > room:
+                text = text[:room]
+                truncated = True
+            blocks.append(f'<file path="/workspace/{path}">\n{text}\n</file>')
+            inlined += len(text)
+        if not blocks:
+            return task, 0, truncated
+        prompt = _DIRECT_CONTEXT_HEADER + "\n".join(blocks) + _DIRECT_CONTEXT_FOOTER + task
+        return prompt, inlined, truncated
 
     def _select_skills(self, task: str, skills_catalog: str, route: Route) -> str:
         """Preload the instructions of Skills the TypeSafe Jev marks relevant; other Skills stay in the catalog."""
@@ -325,7 +383,7 @@ class AdaptiveFleetEngine(dspy.Module):
         try:
             if mode != "hybrid":
                 reason = "session_mode"
-                route = Route.RLM if mode == "rlm" else Route.FLEX
+                route = {"direct": Route.DIRECT, "rlm": Route.RLM}.get(mode, Route.FLEX)
                 summary = f"Session mode {mode} selects this route without hybrid triage."
             else:
                 if self.jev_lm is not None:
@@ -336,7 +394,9 @@ class AdaptiveFleetEngine(dspy.Module):
                     span_type=SpanType.LLM if self.jev_lm is not None else SpanType.CHAIN,
                     inputs={name: activity_text(value) for name, value in triage_inputs.items()},
                 ) as span:
-                    with typed_decision_scope(lm=route_lm, span=span, typesafe=self.jev_lm is not None):
+                    with typed_decision_scope(
+                        lm=route_lm, span=span, typesafe=self.jev_lm is not None, adapter=self.sub_adapter
+                    ):
                         decision = self.triage(**triage_inputs).route
                     evidence = decision_evidence(decision, route_lm)
                     # An unknown or missing label takes the bounded RLM path.
@@ -354,7 +414,9 @@ class AdaptiveFleetEngine(dspy.Module):
             reason = "routing_error"
             summary = f"Route selection failed ({type(exc).__name__}); falling back to bounded RLM execution."
 
-        if context is not None and route is Route.DIRECT:
+        # Triage never routes a context-bearing task to the context-free direct prompt. An operator
+        # who selects direct mode explicitly keeps it: the direct branch inlines the context.
+        if context is not None and route is Route.DIRECT and mode != "direct":
             reason = "selected_context"
             route = Route.RLM
             summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
@@ -375,21 +437,32 @@ class AdaptiveFleetEngine(dspy.Module):
         skills_catalog: str,
         session_history: str,
         context: Any,
+        mode: str,
     ) -> dspy.Prediction:
         if route is Route.DIRECT:
-            with dspy.context(lm=self._metered_root):
+            inlined, chars, truncated = task, 0, False
+            if mode == "direct":
+                # Explicit direct mode carries workspace context in its single prompt.
+                inlined, chars, truncated = self._inline_context(task, workspace_manifest)
+                self.sandbox_mgr.emit("direct_context", chars=chars, truncated=truncated)
+            with dspy.context(lm=self._metered_root, adapter=self.root_adapter):
                 answer = self.direct_cot(
                     memory_summary=memory_summary,
                     session_history=session_history,
-                    task=task,
+                    task=inlined,
                 ).answer
-            return dspy.Prediction(answer=answer, learned_skill_note="", route=route.value)
+            return dspy.Prediction(
+                answer=answer,
+                learned_skill_note="",
+                route=route.value,
+                direct_context_chars=chars,
+                direct_context_truncated=truncated,
+            )
 
         agent = self.flex_agent if route is Route.FLEX else self.primary_rlm
         if route is Route.FLEX and isinstance(context, WorkspaceDataset):
             context = context.flex_input()
-        # Native ChatAdapter recovery, with only recorded gateway parse compatibility.
-        with dspy.context(lm=self._metered_root, adapter=FleetRLMChatAdapter()):
+        with dspy.context(lm=self._metered_root, adapter=self.root_adapter):
             prediction = agent(
                 workspace_manifest=workspace_manifest,
                 skills_catalog=skills_catalog,

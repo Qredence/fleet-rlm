@@ -22,7 +22,7 @@ completion after confirmation, with separate nested-data ownership for caller
 records, Store, telemetry and delivery. The coordinator's second construction was
 deleted, rather than relocated. New result JSON includes `turn_id`; completed
 historical reads obtain it from the enclosing row and preserve unknown fields.
-The [single field/legacy inventory](../reference/turn-results.md) records every
+The [single field/legacy inventory](../../reference/turn-results.md) records every
 result, record-only and envelope field and its absence/null policy.
 
 The coordinator uses two local helpers for exception resolution and one-time

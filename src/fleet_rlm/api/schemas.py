@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from fleet_rlm.optimization_runs import ExperimentOptions
+from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
 MAX_TASK_CHARS = 100_000
 
@@ -45,9 +46,9 @@ class TurnRequest(_Request):
 
 
 class ModeRequest(_Request):
-    """Request to switch a Session's execution mode to rlm, flex, or hybrid."""
+    """Request to switch a Session's execution mode to direct, flex, rlm, or hybrid."""
 
-    mode: str = Field(pattern="^(rlm|flex|hybrid)$")
+    mode: str = Field(pattern="^(direct|flex|rlm|hybrid)$")
 
 
 class WorkspaceWriteRequest(_Request):
@@ -63,7 +64,7 @@ class WorkspaceWriteRequest(_Request):
         },
     )
 
-    content: str | None = Field(default=None, max_length=25_000_000)
+    content: str | None = Field(default=None, max_length=MAX_WORKSPACE_FILE_BYTES)
     content_base64: str | None = Field(default=None, max_length=34_000_000)
 
     @model_validator(mode="after")
@@ -93,10 +94,8 @@ class MemoryRequest(_Request):
 class ModelRequest(_Request):
     """Model to bind to the root or sub role of a Session's engine."""
 
-    role: str = Field(default="root", pattern="^(root|sub)$")
-    model: str = Field(
-        min_length=1, max_length=300, pattern=r"^openai/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$"
-    )
+    role: Literal["root", "sub"] = "root"
+    model: str = Field(min_length=1, max_length=300, pattern=r"^\S(?:.*\S)?$")
 
 
 class StartExperiment(ExperimentOptions):
@@ -178,7 +177,7 @@ class Pushed(BaseModel):
 
 
 class Models(BaseModel):
-    """Chat models available in one discovery scope."""
+    """Model routes from optional compatible-endpoint discovery; scope is deprecated."""
 
     scope: str
     models: list[str]

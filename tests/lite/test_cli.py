@@ -81,6 +81,8 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
         judge_environment=lambda: {"OPENAI_API_BASE": "https://gateway.example/v1", "OPENAI_API_KEY": "gateway-key"},
         fleet_judge_model="databricks:/judge",
         build_jev_lm=lambda: None,
+        build_judge_lm=lambda: None,
+        resolved_model=lambda _role: SimpleNamespace(build_adapter=lambda: None),
         mlflow_descriptor=lambda **_kwargs: {},
     )
     monkeypatch.setenv("OPENAI_API_BASE", "https://stale-provider.example/v1")
@@ -498,3 +500,15 @@ def test_web_cli_requires_authentication_before_starting_services(monkeypatch, c
         cli.main(["web", "--url", "http://fleet.test", "--host", "0.0.0.0", "--public-url", "https://fleet.test"])
     assert error.value.code == 2
     assert "FLEET_WEB_AUTH_TOKEN" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command", ["cli", "web"])
+def test_inherited_databricks_port_is_rejected_before_onboarding(monkeypatch, capsys, command):
+    settings = FleetSettings(_env_file=None, mlflow_mode="databricks")
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
+    monkeypatch.setattr(cli, "_onboard", lambda *_args: pytest.fail("invalid port must not apply onboarding"))
+    with pytest.raises(SystemExit) as error:
+        cli.main([command, "--mlflow-port", "5001"])
+    assert error.value.code == 2
+    assert "--mlflow-port is only supported with local MLflow" in capsys.readouterr().err

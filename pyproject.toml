@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.9.0"
+version = "0.11.0"
 description = "Lightweight session-isolated DSPy RLM runtime on Daytona with Postgres persistence, Skills, and MLflow evaluation"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -34,7 +34,7 @@ dependencies = [
     # Flex uses an internal constructor protocol verified only on DSPy 3.4.1 (GEPA lock: 0.1.4).
     "dspy[typesafe]==3.4.1",
     "daytona==0.224.0",
-    "mlflow==3.17.2",
+    "mlflow[databricks]==3.18.0",
     "databricks-sdk>=0.153.0,<1",
     "psycopg[binary]>=3.3.6,<4",
     "fastapi[standard]==0.162.0",

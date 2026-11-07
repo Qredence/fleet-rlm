@@ -59,9 +59,10 @@ def test_baseline_live_success_and_failure_fields_are_preserved(turn_results):
 
     runtime = _failed_turn_runtime(FakeManager(), stored, fail)
     failure = []
-    _run_turn_direct(runtime, emitted=failure, turn_id="fixture-turn")
+    _run_turn_direct(runtime, emitted=failure, turn_id="fixture-turn", timeout_seconds=900)
     assert {**failure[0], "duration_seconds": 0.0} == turn_results["live_failure"]
     assert stored[0][2] == failure[0]
+    assert failure[0]["effective_seconds"] == stored[0][2]["effective_seconds"] == 900
 
 
 @pytest.mark.usefixtures("traced")
@@ -838,7 +839,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
         "submit_rejections": 2,
         "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
         "deadline_source": "configuration",
-        "effective_seconds": 900,
+        "effective_seconds": None,
         # A completed Turn keeps its warm root sandbox for the next Turn.
         "cleanup": "not_required",
     }
@@ -1323,7 +1324,8 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
         assert traced["inputs"]["turn_id"] == failure["payload"]["request_id"]
     else:
         assert failure["payload"]["trace_id"] == "trace-failed-id"
-    assert "The Turn failed" in failure["payload"]["error"]
+    expected = "The Turn failed" if fail_preparation else "invalid structured response"
+    assert expected in failure["payload"]["error"]
     assert finished[0][1] == "failed"
     assert not runtime.turn_lock.locked()
 
@@ -1481,7 +1483,8 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
     assert traced["attributes"]["root_sandbox_id"] == "sandbox-warm-root"
 
 
-def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced) -> None:
+@pytest.mark.parametrize("error_kind", ["ordinary", "parse", "bridged_parse"])
+def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced, error_kind) -> None:
     order: list[str] = []
     stored: list[tuple[str, str, dict[str, Any]]] = []
     manager = FakeManager(live_sandbox_id="sandbox-failed-root")
@@ -1492,6 +1495,14 @@ def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced)
         manager.live_sandbox_id = None
 
     def engine(**_kwargs: Any) -> SimpleNamespace:
+        if error_kind == "parse":
+            raise AdapterParseError(
+                adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="secret-reply"
+            )
+        if error_kind == "bridged_parse":
+            from fleet_rlm.sandbox.interpreter import StructuredResponseError
+
+            raise StructuredResponseError("secret-reply")
         raise RuntimeError("engine failed")
 
     manager.cancel_turn = cancel_turn
@@ -1510,6 +1521,9 @@ def test_a_failed_turn_stops_the_root_before_its_terminal_event_and_done(traced)
     assert traced["root_sandbox_id"] == "sandbox-failed-root"
     assert traced["cleanup"] == "stopped"
     assert manager.live_sandbox_id is None
+
+    assert ("invalid structured response" in emitted[0]["error"]) == (error_kind != "ordinary")
+    assert "secret-reply" not in json.dumps(emitted)
 
 
 @pytest.mark.usefixtures("traced")
@@ -2277,11 +2291,11 @@ def test_turn_request_timeout_rejects_values_outside_the_strict_contract(monkeyp
 @pytest.mark.parametrize(
     ("configured", "configured_source", "body_timeout", "expected"),
     [
-        (900, "default", "omit", ("default", 900)),
+        (900, "default", "omit", ("default", 0)),
         (1200, "toml", "omit", ("configuration", 1200)),
         (1200, "toml", 300, ("request", 300)),
         (1200, "toml", 0, ("request", None)),
-        (900, "default", None, ("default", 900)),
+        (900, "default", None, ("default", 0)),
     ],
 )
 def test_deadline_provenance_matches_across_span_turn_record_and_replay(

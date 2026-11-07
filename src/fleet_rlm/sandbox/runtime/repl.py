@@ -267,6 +267,15 @@ def _host_call_limit(value: Any) -> float | None:
     return float(value)
 
 
+class _HostCallError(RuntimeError):
+    """A failed bridge reply, with an opaque receipt issued by the host."""
+
+    def __init__(self, message: str, call_id: str, receipt: Any) -> None:
+        super().__init__(message)
+        self.call_id = call_id
+        self.receipt = receipt
+
+
 def _bridge_call(tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
     """Call a host tool and return its reply value, waiting under the execution's deadline policy.
 
@@ -302,7 +311,7 @@ def _bridge_call(tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any
             continue
         os.unlink(path)
         if reply.get("error"):
-            raise RuntimeError(str(reply["error"])[:2000])
+            raise _HostCallError(str(reply["error"])[:2000], request["id"], reply.get("host_error_id"))
         return reply.get("value")
 
 
@@ -491,6 +500,9 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
             "error": True,
             "error_type": type(exc).__name__,
         }
+        if isinstance(exc, _HostCallError):
+            result["host_call_id"] = exc.call_id
+            result["host_error_id"] = exc.receipt
     if output.truncated or errors.truncated:
         result["truncated"] = True
     result["skill_activity"] = _STATE["skill_activity"]

@@ -14,7 +14,8 @@ uv run fleet optimize --session SESSION_ID ... [--mlflow local|databricks]
 uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
 ```
 
-Every command defaults to local MLflow. `uv run fleet cli databricks` is the
+The configured `[mlflow].mode` selects the default backend (`local` when omitted).
+An explicit `--mlflow` option overrides that setting. `uv run fleet cli databricks` is the
 shorthand for `uv run fleet cli --mlflow databricks`. The command selects the
 backend; environment variables override values only inside that backend.
 Conflicting selectors are errors, and `--mlflow env` has been retired.

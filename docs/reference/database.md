@@ -9,7 +9,7 @@ connection with `FLEET_DATABASE_URL`; the default DSN is local PostgreSQL at
 owns memory validation, bounded history, idempotency, and Turn-record policies,
 using one shared `runtime.store` reference rather than a separate harness. Session
 rows are created before lease acquisition; releasing a runtime closes its lease,
-not the registry's Store. The consolidation changes no SQL or schema version.
+not the registry's Store.
 
 At startup, Fleet takes a transaction-scoped advisory lock, reads the
 `fleet_lite_schema_migrations` ledger, and applies each pending migration once.
@@ -58,6 +58,12 @@ rate limits, transport errors, and server failures retain it for reconciliation.
 After an epoch takeover, the stale process fences local handles and releases its
 runtime without provider mutations. The new owner reconciles the durable resources
 before admitting writable work; the stale manager cannot be reused.
+Migrations 9 and 10 are retained for compatibility with databases upgraded by
+an experimental managed-memory implementation. They create managed-session
+bindings, an outbox, a pipeline-run ledger, and an outbox purpose column. Fleet
+no longer reads or writes these tables. Existing rows remain untouched, and
+initialization still records these versions so upgraded databases can start.
+These tables do not enable remote recall, conversation export, or pipeline jobs.
 At Store initialization, replay snapshots older than 30 days are deleted; their
 curation rows cascade with them. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy
@@ -67,7 +73,7 @@ eligible for GEPA.
 The Lite names keep its tables separate from legacy Fleet tables in an existing
 database. `FLEET_DATABASE_SCHEMA` selects the schema; the code fallback is the
 compatibility schema `public`, while the checked-in config selects
-`fleet_rlm_lite` for the fresh application database. The configured database
+`fleet_rlm_lite` in the public example. The configured database
 must already exist with appropriate permissions.
 
 `fleet_lite_sessions` stores each session's timestamp, memory summary, bounded
@@ -124,10 +130,10 @@ reconnect path against these service limits. The process probes each lease
 connection periodically; a failed probe cancels that session's sandbox work and fences the runtime so it
 cannot accept another Turn. A server-side idle timeout or network partition may
 delay failure detection, so verify behavior with an authorized Lakebase
-fault-injection canary before relying on a specific detection time. If Lakebase
-OAuth is adopted, mint fresh credentials for new physical pool connections and
-dedicated leases; the current password-based `fleet_app` role does not implement
-credential refresh. OAuth is not compatible with Lakebase's built-in PgBouncer
+fault-injection canary before relying on a specific detection time. When
+`FLEET_LAKEBASE_ENDPOINT` enables OAuth, Fleet mints fresh credentials for new
+physical pool connections and dedicated leases using Databricks SDK
+authentication. OAuth is not compatible with Lakebase's built-in PgBouncer
 transaction pooler. See the [Lakebase authentication guidance](https://docs.databricks.com/gcp/en/oltp/projects/authentication)
 and [pooling constraints](https://docs.databricks.com/gcp/en/oltp/projects/connection-pooling)
 before changing the role's authentication method.
@@ -143,14 +149,11 @@ to create the schema and apply migrations. Keep the old database intact until
 the new database has been bootstrapped, restored, and accepted, and document the
 selected database and rollback DSN outside committed configuration.
 
-The fresh Lakebase database uses native-password `fleet_migrator` for DDL and
-`fleet_app` for runtime queries. `fleet_migrator` owns the `fleet_rlm_lite`
-schema and Fleet tables. `fleet_app` has database `CONNECT`, schema `USAGE`, and
-table `SELECT`, `INSERT`, `UPDATE`, and `DELETE`; it has no schema `CREATE` grant
-or membership in `fleet_migrator`. Default table privileges give it the same
-DML rights on tables created by future migrations. Both DSNs stay in ignored
-local/deployment secret configuration. The shared Lakebase endpoint's scaling
-and suspend settings are unchanged.
+Deployments may use one role for migrations and runtime queries or separate
+roles. For separate roles, grant the runtime role database `CONNECT`, schema
+`USAGE`, and table `SELECT`, `INSERT`, `UPDATE`, and `DELETE`. Configure default
+table privileges for future migrations. Role names and authentication methods
+are deployment choices; keep both DSNs in ignored secret configuration.
 
 Daytona Volume bytes are not part of a database transaction. Restarting
 recovers Turns and settings from PostgreSQL and files from the Volume; it does

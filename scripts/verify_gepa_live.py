@@ -20,8 +20,8 @@ import dspy
 from daytona import ListSandboxesQuery
 from dspy.primitives.facade import SandboxLM
 
-from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.models import build_lm
 from fleet_rlm.optimize.artifacts import digest_bytes
 from fleet_rlm.optimize.gepa import build_instruction_proposer, build_proposal_stop_callback
 from fleet_rlm.optimize.scorers import fleet_metric
@@ -35,10 +35,11 @@ _SEED = """class Addition(dspy.Module):
 
 
 class AdditionProgram(dspy.Module):
-    def __init__(self, manager: DaytonaSandboxManager, lm: dspy.LM):
+    def __init__(self, manager: DaytonaSandboxManager, lm: dspy.LM, adapter: dspy.Adapter | None = None):
         super().__init__()
         self.sandbox_mgr = manager
         self.lm = lm
+        self.adapter = adapter or dspy.ChatAdapter()
         self.optimization = None
         self.flex_agent = dspy.Flex(
             "task: str -> answer: str", interpreter_factory=manager.interpreter_factory(), max_predictor_calls=1
@@ -47,7 +48,10 @@ class AdditionProgram(dspy.Module):
     def forward(self, task: str) -> dspy.Prediction:
         self.sandbox_mgr.reset_turn_budget()
         try:
-            with dspy.context(lm=SandboxLM(self.lm, self.sandbox_mgr.consume_budget), adapter=FleetRLMChatAdapter()):
+            with dspy.context(
+                lm=SandboxLM(self.lm, self.sandbox_mgr.consume_budget),
+                adapter=self.adapter,
+            ):
                 result = self.flex_agent(task=task)
             return dspy.Prediction(answer=result.answer, **self.sandbox_mgr.turn_usage())
         finally:
@@ -80,7 +84,9 @@ def main() -> None:
         fleet_sub_cache=False,
         fleet_reflection_cache=False,
     )
-    root, _, reflection, _ = settings.build_lms()
+    root = build_lm(settings, settings.fleet_root_model, "root")
+    reflection = build_lm(settings, settings.fleet_reflection_model, "reflection")
+    reflection_adapter = settings.resolved_model("reflection").build_adapter()
     judge = settings.build_judge_lm().copy(max_tokens=512, num_retries=0)
     managers: list[DaytonaSandboxManager] = []
     run_id = "gepa-canary-" + uuid.uuid4().hex[:12]
@@ -112,11 +118,11 @@ def main() -> None:
         return runtime
 
     def factory(_example: dspy.Example, candidate: dspy.Module) -> AdditionProgram:
-        runtime = AdditionProgram(manager(), root)
+        runtime = AdditionProgram(manager(), root, settings.resolved_model("root").build_adapter())
         runtime.load_state(candidate.dump_state())
         return runtime
 
-    seed = AdditionProgram(manager(), root)
+    seed = AdditionProgram(manager(), root, settings.resolved_model("root").build_adapter())
     seed.flex_agent.load_state({"module_src": _SEED})
     program = IsolatedFleetProgram(seed, factory)
     train = [
@@ -126,7 +132,8 @@ def main() -> None:
     dev = [dspy.Example(task="Add 37 and 19; return the decimal integer only.", answer="56").with_inputs("task")]
 
     def metric(gold, pred, trace=None, pred_name=None, pred_trace=None, program_trace=None):
-        result = fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge)
+        with dspy.context(adapter=settings.resolved_model("judge").build_adapter()):
+            result = fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge)
         if result.objective_scores["quality"] != 1.0:
             result.feedback += (
                 " For addition, parse the two integers and sum them in Python. Generalize to other pairs."
@@ -136,13 +143,13 @@ def main() -> None:
     started = time.monotonic()
     try:
         # The serving probe verifies the configured model/adapter independently of deterministic candidates.
-        with dspy.context(lm=root, adapter=FleetRLMChatAdapter()):
+        with dspy.context(lm=root, adapter=settings.resolved_model("root").build_adapter()):
             probe = dspy.Predict("task -> answer")(task="What is 2+2? Return only the integer.")
         report["serving_probe"] = str(probe.answer).strip() == "4"
-        # Probe the native InstructionProposer's JSONAdapter separately from the serving
-        # Fleet adapter. Its reflection usage is additional to GEPA search metric calls.
-        proposer = build_instruction_proposer()
-        with dspy.context(lm=reflection, adapter=dspy.JSONAdapter()):
+        # Probe the configured native reflection adapter separately from serving.
+        # Its reflection usage is additional to GEPA search metric calls.
+        proposer = build_instruction_proposer(adapter=reflection_adapter)
+        with dspy.context(lm=reflection, adapter=reflection_adapter):
             probe_draft = proposer(
                 candidate={"probe": "Return the wrong value."},
                 reflective_dataset={
@@ -157,18 +164,19 @@ def main() -> None:
                 components_to_update=["probe"],
             )
         report["native_instruction_json_probe"] = bool(probe_draft.get("probe", "").strip())
-        candidate = dspy.GEPA(
-            metric=metric,
-            reflection_lm=reflection,
-            instruction_proposer=proposer,
-            max_metric_calls=10,
-            reflection_minibatch_size=1,
-            num_threads=1,
-            use_merge=False,
-            track_stats=True,
-            seed=0,
-            gepa_kwargs={"stop_callbacks": [build_proposal_stop_callback(1)]},
-        ).compile(program, trainset=train, valset=dev)
+        with dspy.context(adapter=reflection_adapter):
+            candidate = dspy.GEPA(
+                metric=metric,
+                reflection_lm=reflection,
+                instruction_proposer=proposer,
+                max_metric_calls=10,
+                reflection_minibatch_size=1,
+                num_threads=1,
+                use_merge=False,
+                track_stats=True,
+                seed=0,
+                gepa_kwargs={"stop_callbacks": [build_proposal_stop_callback(1)]},
+            ).compile(program, trainset=train, valset=dev)
         search_metric_calls = candidate.detailed_results.total_metric_calls
         report["search_metric_calls"] = search_metric_calls
         if search_metric_calls > report["search_metric_call_limit"]:
@@ -178,7 +186,7 @@ def main() -> None:
         artifact = args.output.parent / f"{run_id}.json"
         artifact.parent.mkdir(parents=True, exist_ok=True)
         candidate.program.save(str(artifact))
-        restored = AdditionProgram(manager(), root)
+        restored = AdditionProgram(manager(), root, settings.resolved_model("root").build_adapter())
         restored.load(str(artifact))
         isolated = IsolatedFleetProgram(restored, factory)
         # This held-out pair is never given to the optimizer or the reflection model.

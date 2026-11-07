@@ -6,6 +6,79 @@ from typing import Any
 import pytest
 
 
+@pytest.mark.parametrize("destination", [None, "", "catalog.schema.prefix"])
+def test_databricks_trace_experiment_preserves_native_activation(monkeypatch, destination):
+    from fleet_rlm import observability
+
+    experiment = (
+        None
+        if destination is None
+        else SimpleNamespace(tags={"mlflow.experiment.databricksTraceDestinationPath": destination})
+    )
+    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
+    calls = []
+    monkeypatch.setattr(
+        observability.mlflow, "set_experiment", lambda name, **kwargs: calls.append((name, kwargs)) or experiment
+    )
+    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
+
+    assert (
+        observability.set_mlflow_trace_experiment(
+            "/Shared/runtime",
+            databricks=True,
+            trace_catalog="catalog",
+            trace_schema="schema",
+            trace_table_prefix="prefix",
+            tracing_sql_warehouse_id="warehouse",
+        )
+        is experiment
+    )
+    assert len(calls) == 1
+    assert calls[0][0] == "/Shared/runtime"
+    assert calls[0][1]["trace_location"].full_table_prefix == "catalog.schema.prefix"
+
+
+@pytest.mark.parametrize("prefix", ["requested", ""])
+def test_databricks_trace_destination_mismatch_prevents_activation(monkeypatch, prefix):
+    from fleet_rlm import observability
+
+    experiment = SimpleNamespace(
+        experiment_id="17", tags={"mlflow.experiment.databricksTraceDestinationPath": "catalog.schema.existing"}
+    )
+    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
+    monkeypatch.setattr(
+        observability.mlflow, "set_experiment", lambda *_args, **_kwargs: pytest.fail("must not activate")
+    )
+    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
+
+    with pytest.raises(observability.MlflowTraceDestinationMismatchError, match="trace destination mismatch"):
+        observability.set_mlflow_trace_experiment(
+            "/Shared/runtime",
+            databricks=True,
+            trace_catalog="catalog",
+            trace_schema="schema",
+            trace_table_prefix=prefix,
+        )
+
+
+def test_databricks_trace_experiment_omitted_prefix_uses_native_experiment_id(monkeypatch):
+    from fleet_rlm import observability
+
+    experiment = SimpleNamespace(
+        experiment_id="17", tags={"mlflow.experiment.databricksTraceDestinationPath": "catalog.schema.17"}
+    )
+    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
+    monkeypatch.setattr(observability.mlflow, "set_experiment", lambda *_args, **_kwargs: experiment)
+    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
+
+    assert (
+        observability.set_mlflow_trace_experiment(
+            "/Shared/runtime", databricks=True, trace_catalog="catalog", trace_schema="schema"
+        )
+        is experiment
+    )
+
+
 def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.MonkeyPatch) -> None:
     import fleet_rlm.observability as memory_and_eval
 

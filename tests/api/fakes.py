@@ -209,7 +209,6 @@ class FakeRegistry:
 def api_settings(**values: Any) -> FleetSettings:
     return FleetSettings(
         _env_file=None,
-        fleet_llm_base_url="https://gateway.example.com/ai-gateway/mlflow/v1",
         databricks_token="test-token",
         **values,
     )

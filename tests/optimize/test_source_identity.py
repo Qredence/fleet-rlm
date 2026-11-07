@@ -22,7 +22,7 @@ from fleet_rlm.optimize import artifacts
         "sandbox/snapshot-requirements.txt",
         "bundled_skills/example/SKILL.md",
         "bundled_skills/example/references/policy.txt",
-        "adapters.py",
+        "models.py",
         "config.py",
         "contracts.py",
         "observability.py",

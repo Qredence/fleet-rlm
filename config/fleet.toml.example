@@ -1,14 +1,16 @@
+# Copy to config/fleet.toml and customize locally. Never add credentials here.
 # Fleet non-secret process defaults. Environment/.env override this file.
 # Values are a provisional baseline, not performance-tuned defaults.
 # Credentials: DATABRICKS_TOKEN, FLEET_DAYTONA_API_KEY,
 # FLEET_TYPESAFE_API_KEY and FLEET_DATABASE_URL belong in .env/environment.
 # FLEET_DATABASE_MIGRATION_URL is an optional secret-only DDL-role DSN.
 [config]
-schema_version = 4
+schema_version = 5
 
 [runtime]
 execution_mode = "hybrid"
-turn_timeout_seconds = 900
+# 0 = no Fleet Turn deadline; provider TTL and idle bounds still apply.
+turn_timeout_seconds = 0
 max_llm_calls_per_turn = 150
 max_agent_depth = 3
 max_child_sandboxes = 8
@@ -16,30 +18,24 @@ max_active_children = 4
 max_active_sessions = 64
 linked_children = true
 
-# Native lm15 is fixed. Omitted max_tokens/temperature remain provider-controlled, except the
-# root cap, which bounds runaway reasoning; a capped response fails the format check and is re-asked once.
+# One model supplies all roles. Provider credentials may be exported in the environment.
+[llm]
+model = "openai/gpt-4o-mini"
+# api_base = "https://your-compatible-endpoint.example/v1"
+# api_key_env = "MY_PROVIDER_KEY"
+adapter = "chat"
+# Set adapter = "json" together with response_format = "json_object" to request JSON mode.
+response_format = "auto"
+
 [llm.root]
-model = "openai/system.ai.deepseek-v4-1-flash-1017"
 max_tokens = 16384
-num_retries = 3
-cache = false
 
-[llm.sub]
-model = "openai/system.ai.deepseek-v4-1-flash-1017"
-num_retries = 3
-cache = false
-
-# GEPA's reflection model should be stronger than the serving model (DSPy GEPA guide); it also
-# rewrites whole Flex modules, hence the large output budget.
 [llm.reflection]
-model = "openai/system.ai.claude-haiku-5-5"
 temperature = 1.0
 max_tokens = 32000
-num_retries = 3
-cache = false
-
-[gateway]
-# host/base_url may be set here or via DATABRICKS_HOST/FLEET_LLM_BASE_URL.
+# An explicit model starts an independent connection:
+# model = "anthropic/claude-sonnet-4-5"
+# api_key_env = "ANTHROPIC_API_KEY"
 
 [decision]
 model = "jev-1.14.0"
@@ -58,6 +54,9 @@ lakebase_endpoint = ""
 database_schema = "fleet_rlm_lite"
 
 # Local MLflow is managed by `fleet cli`. Standalone commands connect to it.
+[mlflow]
+mode = "local"
+
 [mlflow.local]
 port = 5001
 data_dir = ".fleet/mlflow"
@@ -72,16 +71,20 @@ experiment_name = "/Shared/fleet-rlm-runtime"
 eval_experiment_name = "/Shared/fleet-rlm-eval"
 eval_trace_table_prefix = "fleet_rlm_eval"
 optimization_experiment_name = "/Shared/fleet-rlm-gepa"
-trace_catalog = "uscentral"
+trace_catalog = "example_catalog"
 trace_schema = "fleet_observability"
 trace_table_prefix = "fleet_rlm_runtime"
-tracing_sql_warehouse_id = "4d07bd43a3ddfff2"
+tracing_sql_warehouse_id = "" # Set your SQL warehouse ID before selecting Databricks.
 optimization_trace_schema = "fleet_gepa"
 optimization_trace_table_prefix = "fleet_rlm_gepa"
 
+[llm.judge]
+temperature = 0.0
+cache = true
+
 [evaluation]
 # openai:/<service-id> judges route through the AI Gateway with DATABRICKS_TOKEN.
-judge_model = "openai:/system.ai.deepseek-v4-1-flash-1017"
+judge_model = "openai:/gpt-4o-mini"
 
 [server]
 host = "127.0.0.1"

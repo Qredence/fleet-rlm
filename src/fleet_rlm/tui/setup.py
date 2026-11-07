@@ -131,8 +131,7 @@ class SetupApp(App[bool]):
                             id=field["name"],
                         )
                     if section == "models":
-                        yield Select([], prompt="Choose an available root model", id="root-model-choice")
-                        yield Select([], prompt="Choose an available sub model", id="sub-model-choice")
+                        yield Select([], prompt="Browse available models (optional)", id="default-model-choice")
                         yield Button("Test root model (may incur cost)", id="model-test")
                     if section == "daytona":
                         yield Button("Find Volumes", id="list-volumes")
@@ -185,10 +184,10 @@ class SetupApp(App[bool]):
         self.query_one("#heading", Static).update(f"Fleet setup · {ready}/4 sections ready")
         self._update_controls()
         available = status["checks"].get("models", {}).get("models", [])
-        for role in ("root", "sub"):
+        for role in ("default",):
             choice = self.query_one(f"#{role}-model-choice", Select)
             choice.set_options([(model, model) for model in available])
-            field = next((field for field in status["fields"] if field["name"] == f"FLEET_{role.upper()}_MODEL"), None)
+            field = next((field for field in status["fields"] if field["name"] == "FLEET_LLM_MODEL"), None)
             choice.disabled = self._working or not available or field is None or not field["editable"]
 
     def _update_controls(self) -> None:
@@ -315,9 +314,8 @@ class SetupApp(App[bool]):
         if event.select.id == "volumes" and event.value is not Select.BLANK:
             self.query_one("#FLEET_DAYTONA_VOLUME_ID", Input).value = str(event.value)
             self.query_one("#apply", Button).disabled = True
-        elif event.select.id in {"root-model-choice", "sub-model-choice"} and event.value is not Select.BLANK:
-            role = "ROOT" if event.select.id == "root-model-choice" else "SUB"
-            self.query_one(f"#FLEET_{role}_MODEL", Input).value = str(event.value)
+        elif event.select.id == "default-model-choice" and event.value is not Select.BLANK:
+            self.query_one("#FLEET_LLM_MODEL", Input).value = str(event.value)
 
     def on_input_changed(self, _event: Input.Changed) -> None:
         """Require saving and rechecking after edits."""

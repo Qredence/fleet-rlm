@@ -21,6 +21,7 @@ import mlflow
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.models import build_lm
 from fleet_rlm.replay import selected_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
 from fleet_rlm.store import Store
@@ -70,7 +71,9 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
         """Build the serving LMs once per factory; rollouts share them instead of rebuilding per example."""
         with shared_lock:
             if not shared:
-                root, sub, _reflection, jev = settings.build_lms()
+                root = build_lm(settings, settings.fleet_root_model, "root")
+                sub = build_lm(settings, settings.fleet_sub_model, "sub")
+                jev = settings.build_jev_lm()
                 shared.extend((root, sub, jev))
             return shared[0], shared[1], shared[2]
 
@@ -120,6 +123,8 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
                 jev_lm=jev_lm,
                 compiled_path=None,
                 execution_mode=settings.execution_mode,
+                root_adapter=settings.resolved_model("root").build_adapter(),
+                sub_adapter=settings.resolved_model("sub").build_adapter(),
             )
             engine.load_state(deepcopy(program.dump_state()))
             engine.optimization = OptimizationInputs(

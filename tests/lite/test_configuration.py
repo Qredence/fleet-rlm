@@ -13,6 +13,7 @@ from fleet_rlm.config import FleetSettings, resolve_turn_deadline
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
+    monkeypatch.delenv("FLEET_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
     # These tests exercise .env precedence from a private tmp_path working directory.
     monkeypatch.setitem(FleetSettings.model_config, "env_file", ".env")
@@ -20,69 +21,7 @@ def isolated_settings(tmp_path, monkeypatch):
 
 def toml(text):
     Path("config").mkdir(exist_ok=True)
-    Path("config/fleet.toml").write_text("[config]\nschema_version = 4\n" + text)
-
-
-def test_gateway_claude_reflection_uses_native_json_prompt_without_forced_tools(monkeypatch):
-    import dspy
-
-    settings = FleetSettings(
-        _env_file=None,
-        databricks_host="https://workspace.example",
-        databricks_token="private-test-token",
-        fleet_reflection_model="openai/system.ai.claude-haiku-5-5",
-        fleet_root_model="openai/test-root",
-    )
-    root, _sub, reflection, _jev = settings.build_lms()
-    calls = []
-
-    def complete(_self, **kwargs):
-        calls.append(kwargs)
-        return ['{"answer":"valid-json"}']
-
-    monkeypatch.setattr(dspy.LM, "__call__", complete)
-    with dspy.context(lm=reflection, adapter=dspy.JSONAdapter()):
-        assert dspy.Predict("task -> answer")(task="fixture").answer == "valid-json"
-    assert "response_format" not in calls[0]
-    assert root.model == settings.fleet_root_model
-    assert type(reflection) is dspy.LM
-    assert reflection.copy().model == reflection.model
-    assert reflection.kwargs["api_key"] == "private-test-token"
-    assert "private-test-token" not in str(reflection.dump_state())
-
-
-@pytest.mark.parametrize(
-    ("databricks_host", "base_url", "model", "gateway_claude"),
-    [
-        ("https://first.example", None, "openai/system.ai.claude-haiku-5-5", True),
-        ("https://second.example", None, "openai/system.ai.claude-haiku-5-5", True),
-        (
-            "https://workspace.example",
-            None,
-            "openai/system.ai.deepseek-v4-pro-0813",
-            False,
-        ),
-        ("", "https://compatible.example/v1", "openai/claude-haiku-5-5", False),
-    ],
-)
-def test_reflection_declarations_preserve_provider_routing_and_repeatability(
-    databricks_host, base_url, model, gateway_claude
-):
-    settings = FleetSettings(
-        _env_file=None,
-        databricks_host=databricks_host,
-        fleet_llm_base_url=base_url or "",
-        databricks_token="test",
-        fleet_reflection_model=model,
-    )
-    first = settings.build_lms()[2]
-    second = settings.build_lms()[2]
-    assert first.model == second.model
-    if gateway_claude:
-        assert first.model.startswith("fleet-gateway-reflection-")
-        assert "response_format" not in first.supported_params
-    else:
-        assert first.model == model
+    Path("config/fleet.toml").write_text("[config]\nschema_version = 5\n" + text)
 
 
 def test_sources_and_aliases_have_one_precedence(monkeypatch):
@@ -107,7 +46,7 @@ def test_optional_default_file_and_explicit_path(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="existing TOML"):
         FleetSettings(_env_file=None)
     p = tmp_path / "selected.toml"
-    p.write_text('[config]\nschema_version=4\n[runtime]\nexecution_mode="rlm"')
+    p.write_text('[config]\nschema_version=5\n[runtime]\nexecution_mode="rlm"')
     monkeypatch.setenv("FLEET_CONFIG", str(p))
     assert FleetSettings(_env_file=None).execution_mode == "rlm"
 
@@ -171,7 +110,7 @@ def test_toml_turn_timeout_stays_a_bounded_integer(value):
 @pytest.mark.parametrize(
     ("configured", "configured_source", "requested", "expected"),
     [
-        (900, "default", None, ("default", 900)),
+        (900, "default", None, ("default", 0)),
         (1200, "toml", None, ("configuration", 1200)),
         (1200, "environment", 600, ("request", 600)),
         (1200, "toml", 0, ("request", None)),
@@ -188,25 +127,34 @@ def test_deadline_resolution_follows_request_then_configuration_then_default(
 
 def test_schema_and_parse_errors(monkeypatch):
     monkeypatch.setenv("FLEET_CONFIG", "file.toml")
-    for text in ("x=[", "[config]\nschema_version=2", "[config]\nschema_version=4\nextra=1"):
+    for text in ("x=[", "[config]\nschema_version=2", "[config]\nschema_version=5\nextra=1"):
         Path("file.toml").write_text(text)
         with pytest.raises(ValueError):
             FleetSettings(_env_file=None)
 
 
-def test_role_settings_are_passed_without_provider_controlled_options(monkeypatch):
+def test_role_settings_are_applied_by_native_model_builder(monkeypatch):
+    from fleet_rlm.models import build_lm
+
     toml("[llm.root]\nmax_tokens=16384\ntemperature=0.0\nnum_retries=1\ncache=true\n[llm.sub]\nmax_tokens=8192\n")
     calls = []
-    monkeypatch.setattr("fleet_rlm.config.dspy.LM", lambda model, **kwargs: calls.append((model, kwargs)))
-    FleetSettings(
-        _env_file=None, databricks_host="https://example.invalid", databricks_token="credential-marker"
-    ).build_lms()
+    monkeypatch.setattr(
+        "fleet_rlm.models.dspy.LM",
+        lambda model, **kwargs: calls.append((model, kwargs)) or SimpleNamespace(model=model, kwargs=kwargs),
+    )
+    settings = FleetSettings(
+        _env_file=None,
+    )
+    settings.fleet_root_model, settings.fleet_sub_model, settings.fleet_reflection_model = "root", "sub", "reflection"
+    build_lm(settings, "root", "root")
+    build_lm(settings, "sub", "sub")
+    build_lm(settings, "reflection", "reflection")
     assert calls[0][1]["max_tokens"] == 16384
     assert calls[0][1]["temperature"] == 0
     assert calls[0][1]["cache"] is True and calls[0][1]["num_retries"] == 1
     assert calls[1][1]["max_tokens"] == 8192
     assert "temperature" not in calls[1][1]
-    assert "max_tokens" not in calls[2][1]
+    assert calls[2][1]["max_tokens"] == 32000
     assert all(kwargs["engine"] == "lm15" for _, kwargs in calls)
 
 
@@ -230,15 +178,11 @@ def test_build_jev_lm_builds_the_configured_typesafe_model(monkeypatch):
 
 
 def test_shipped_defaults_cap_root_output_but_not_sub(monkeypatch):
-    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml.example"
     monkeypatch.setenv("FLEET_CONFIG", str(shipped))
-    calls = []
-    monkeypatch.setattr("fleet_rlm.config.dspy.LM", lambda model, **kwargs: calls.append((model, kwargs)))
-    FleetSettings(
-        _env_file=None, databricks_host="https://example.invalid", databricks_token="credential-marker"
-    ).build_lms()
-    assert calls[0][1]["max_tokens"] == 16384
-    assert "max_tokens" not in calls[1][1]
+    settings = FleetSettings(_env_file=None)
+    assert settings.fleet_root_max_tokens == 16384
+    assert settings.fleet_sub_max_tokens is None
 
 
 def test_public_configuration_omits_credentials_and_tracks_session_override():
@@ -257,6 +201,66 @@ def test_public_configuration_omits_credentials_and_tracks_session_override():
     assert settings.configuration()["digest"] == public["digest"]
     assert changed["file_changes_require_restart"] is True
     assert settings.configuration({"execution_mode": settings.execution_mode})["sources"]["execution_mode"] == "session"
+
+
+@pytest.mark.parametrize("role", ["root", "sub", "reflection", "judge"])
+@pytest.mark.parametrize(
+    ("option", "shared"), [("max_tokens", 100), ("temperature", 0.4), ("num_retries", 1), ("cache", False)]
+)
+def test_digest_distinguishes_inherited_generation_from_explicit_role_defaults(role, option, shared):
+    # Use the opposite cache value where the role default is already false.
+    field = f"fleet_{role}_{option}"
+    default = FleetSettings.model_fields[field].get_default()
+    if option == "cache":
+        shared = not default
+    inherited = FleetSettings(_env_file=None, **{f"fleet_llm_{option}": shared})
+    explicit = FleetSettings(_env_file=None, **{f"fleet_llm_{option}": shared, field: default})
+
+    assert inherited.model_dump() == explicit.model_dump()
+    assert getattr(inherited.resolved_model(role), option) == shared
+    assert getattr(explicit.resolved_model(role), option) == default
+    assert inherited.configuration()["digest"] != explicit.configuration()["digest"]
+
+
+def test_digest_ignores_source_only_changes_and_model_credentials():
+    inherited = FleetSettings(_env_file=None, fleet_llm_api_key="first-secret")
+    explicit = FleetSettings(_env_file=None, fleet_llm_api_key="second-secret", fleet_root_max_tokens=16384)
+    first, second = inherited.configuration(), explicit.configuration()
+
+    assert first["sources"]["fleet_root_max_tokens"] != second["sources"]["fleet_root_max_tokens"]
+    assert first["values"] == second["values"]
+    assert first["digest"] == second["digest"]
+    assert "first-secret" not in str(first) and "second-secret" not in str(second)
+    assert set(first) == {
+        "schema_version",
+        "digest",
+        "values",
+        "sources",
+        "mlflow_target",
+        "file_changes_require_restart",
+    }
+    assert first["schema_version"] == 5
+
+
+def test_session_digest_uses_route_overrides_without_resolving_connections_again(monkeypatch):
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_api_base="https://models.example/v1",
+        fleet_llm_api_key="session-secret",
+        fleet_llm_max_tokens=100,
+    )
+    saved = {"mode": "rlm", "models": {"root": "openai/new-root", "sub": "openai/new-sub"}}
+    session = settings.for_session(saved)
+    overrides = {"execution_mode": "rlm", "fleet_root_model": "openai/new-root", "fleet_sub_model": "openai/new-sub"}
+    monkeypatch.setattr(FleetSettings, "_resolve_models", lambda _self: pytest.fail("must retain snapshots"))
+
+    assert settings.configuration(overrides)["digest"] == session.configuration()["digest"]
+    assert settings.configuration(overrides)["digest"] != settings.configuration()["digest"]
+    for role in ("root", "sub"):
+        assert session.resolved_model(role).api_base == "https://models.example/v1"
+        assert session.resolved_model(role).api_key.get_secret_value() == "session-secret"
+        assert session.resolved_model(role).max_tokens == 100
+        assert settings.resolved_model(role).model == "openai/gpt-4o-mini"
 
 
 def test_lakebase_oauth_requires_endpoint_and_password_free_tls_dsn():
@@ -326,7 +330,7 @@ def test_validation_errors_hide_input_values():
     assert "credential-marker" not in str(error.value)
 
 
-@pytest.mark.parametrize("field", ["databricks_host", "fleet_llm_base_url", "mlflow_databricks_tracking_uri"])
+@pytest.mark.parametrize("field", ["databricks_host", "fleet_llm_api_base", "mlflow_databricks_tracking_uri"])
 def test_public_urls_cannot_expose_credentials(field):
     with pytest.raises(ValidationError) as error:
         FleetSettings(_env_file=None, **{field: "https://user:credential-marker@example.invalid"})
@@ -354,7 +358,7 @@ def test_configuration_is_frozen_until_new_settings_are_loaded():
 
 def test_schema_version_must_be_integer():
     Path("config").mkdir()
-    Path("config/fleet.toml").write_text("[config]\nschema_version=3.0\n")
+    Path("config/fleet.toml").write_text("[config]\nschema_version=5.0\n")
     with pytest.raises(ValueError, match="schema_version"):
         FleetSettings(_env_file=None)
 
@@ -362,9 +366,7 @@ def test_schema_version_must_be_integer():
 @pytest.mark.parametrize(
     "values",
     [
-        {"fleet_root_model": "unsupported/model"},
-        {"fleet_sub_model": "openai/"},
-        {"fleet_llm_base_url": "http://example.invalid"},
+        {"fleet_llm_api_base": "http://example.invalid"},
     ],
 )
 def test_invalid_routes_fail_during_settings_loading(values):
@@ -375,8 +377,7 @@ def test_invalid_routes_fail_during_settings_loading(values):
 @pytest.mark.parametrize(
     ("name", "value", "field"),
     [
-        ("FLEET_ROOT_MODEL", "system.ai.deepseek-v4-1-flash", "fleet_root_model"),
-        ("FLEET_LLM_BASE_URL", "http://example.invalid", "fleet_llm_base_url"),
+        ("FLEET_LLM_BASE_URL", "http://example.invalid", "fleet_llm_api_base"),
     ],
 )
 def test_cli_reports_invalid_configuration_without_traceback(monkeypatch, capsys, name, value, field):
@@ -428,50 +429,26 @@ def test_configuration_defaults_to_local_and_keeps_databricks_available():
     assert target.optimization_experiment_name.startswith("/")
 
 
-def test_gateway_judge_environment_uses_gateway_credentials():
+def test_native_judge_configuration_does_not_export_gateway_environment():
     settings = FleetSettings(
         _env_file=None,
-        fleet_llm_base_url="https://workspace.example/ai-gateway/mlflow/v1",
+        fleet_llm_api_base="https://workspace.example/ai-gateway/mlflow/v1",
         databricks_token="token",
     )
-    assert settings.fleet_judge_model == "openai:/system.ai.deepseek-v4-1-flash"
-    assert settings.judge_environment() == {
-        "OPENAI_API_KEY": "token",
-        "OPENAI_API_BASE": "https://workspace.example/ai-gateway/mlflow/v1",
-    }
+    assert settings.judge_environment() == {}
     assert FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint").judge_environment() == {}
     with pytest.raises(ValidationError, match="provider"):
         FleetSettings(_env_file=None, fleet_judge_model="deepseek")
 
 
-def test_gateway_discovery_filters_chat_services_and_converts_resource_names(monkeypatch) -> None:
-    from databricks import sdk
-    from databricks.sdk import core
-
-    monkeypatch.setattr(core, "Config", lambda **kwargs: SimpleNamespace(**kwargs))
-
-    def list_services(**kwargs):
-        assert kwargs == {"parent": "schemas/team.chat"}
-        return [
-            SimpleNamespace(name="model-services/team.chat.second", supported_api_types=["mlflow/v1/chat/completions"]),
-            SimpleNamespace(name="model-services/team.chat.embedding", supported_api_types=["mlflow/v1/embeddings"]),
-            SimpleNamespace(name="model-services/team.chat.first", supported_api_types=["mlflow/v1/chat/completions"]),
-        ]
-
-    monkeypatch.setattr(
-        sdk,
-        "WorkspaceClient",
-        lambda **_kwargs: SimpleNamespace(ai_gateway=SimpleNamespace(list_model_services=list_services)),
-    )
-    settings = FleetSettings(databricks_host="https://example.databricks.com", databricks_token="test-only")
-    assert settings.list_models("team.chat") == ["openai/team.chat.first", "openai/team.chat.second"]
-    with pytest.raises(ValueError, match=r"catalog\.schema"):
-        settings.list_models("../other")
+def test_list_models_without_endpoint_does_not_perform_discovery(monkeypatch):
+    monkeypatch.setattr("httpx.stream", lambda *_args, **_kwargs: pytest.fail("unexpected network"))
+    assert FleetSettings(_env_file=None).list_models() == []
 
 
 def test_checked_in_toml_loads_without_snapshot_setting(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+    shipped = Path(__file__).resolve().parents[2] / "config" / "fleet.toml.example"
     monkeypatch.setenv("FLEET_CONFIG", str(shipped))
     monkeypatch.delenv("FLEET_DAYTONA_SNAPSHOT", raising=False)
     settings = FleetSettings(_env_file=None)
@@ -496,30 +473,50 @@ def test_snapshot_environment_variable_creates_no_field_or_digest_change(monkeyp
     assert overridden.configuration()["digest"] == baseline.configuration()["digest"]
 
 
-@pytest.mark.parametrize("role", ["root", "sub", "reflection"])
-@pytest.mark.parametrize("service", ["system.ai.deepseek-v4-1-flash", "system.ai.deepseek-v4-1-flash-1017"])
-def test_gateway_deepseek_flash_advertises_native_json_mode_without_schema(role, service):
-    settings = FleetSettings(_env_file=None, databricks_host="https://workspace.example", databricks_token="test-token")
-    lm = settings._build_lm("openai/" + service, role=role)
-    assert "response_format" in lm.supported_params
-    assert lm.supports_function_calling
-    assert not lm.supports_response_schema
-    assert lm.model.endswith("/" + service)
-    assert lm.copy().supported_params == lm.supported_params
-    assert settings._build_lm("openai/" + service, role=role).model == lm.model
+def test_native_chat_policy_does_not_force_provider_capabilities():
+    import dspy
+
+    from fleet_rlm.models import build_lm
+
+    settings = FleetSettings(_env_file=None, fleet_llm_model="openai/demo.model")
+    assert isinstance(build_lm(settings, "", "root"), dspy.LM)
+    assert isinstance(settings.resolved_model("root").build_adapter(), dspy.ChatAdapter)
 
 
-@pytest.mark.parametrize(
-    "base_url,model",
-    [
-        ("https://compatible.example/v1", "openai/system.ai.deepseek-v4-1-flash-1017"),
-        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/system.ai.unknown-model"),
-        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/system.ai.deepseek-v4-pro-0813"),
-        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/production.ai.deepseek-v4-1-flash"),
-        ("https://workspace.example/ai-gateway/mlflow/v1", "openai/production.ai.deepseek-v4-1-flash-1017"),
-    ],
-)
-def test_gateway_json_declaration_does_not_guess_other_model_capabilities(base_url, model):
-    settings = FleetSettings(_env_file=None, fleet_llm_base_url=base_url, databricks_token="test-token")
-    lm = settings._build_lm(model)
-    assert lm.model == model
+def test_databricks_requires_explicit_deployment_identifiers(monkeypatch):
+    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", raising=False)
+    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", raising=False)
+    assert FleetSettings(_env_file=None).mlflow_mode == "local"
+    with pytest.raises(ValueError, match="SQL warehouse ID"):
+        FleetSettings(_env_file=None, mlflow_mode="databricks")
+    configured = FleetSettings(
+        _env_file=None,
+        mlflow_mode="databricks",
+        mlflow_databricks_trace_catalog="example_catalog",
+        mlflow_databricks_tracing_sql_warehouse_id="example-warehouse",
+    )
+    assert configured.mlflow_tracking_uri == "databricks"
+
+
+def test_shared_discovery_uses_default_connection_when_root_has_an_override(monkeypatch):
+    from contextlib import nullcontext
+
+    import httpx
+
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_model="openai/shared",
+        fleet_llm_api_base="https://shared.example/v1",
+        fleet_llm_api_key="shared-test-key",
+        fleet_root_model="openai/root",
+        fleet_root_api_base="https://root.example/v1",
+    )
+
+    def stream(method, url, *, headers, timeout):
+        assert method == "GET" and url == "https://shared.example/v1/models"
+        assert headers == {"Authorization": "Bearer shared-test-key"}
+        assert timeout == 10
+        return nullcontext(httpx.Response(200, json={"data": [{"id": "shared"}]}, request=httpx.Request(method, url)))
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    assert settings.list_models(role="shared") == ["openai/shared"]

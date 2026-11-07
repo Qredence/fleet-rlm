@@ -19,7 +19,7 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/experiments/{run_id}` | Read one experiment snapshot and its bounded saved comparison. |
 | `POST` | `/sessions/{session_id}/experiments/{run_id}/cancel` | Request cooperative cancellation of a running experiment. |
 | `POST` | `/sessions/{session_id}/experiments/{run_id}/review` | Explicitly approve or reject a candidate. |
-| `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `rlm`, `flex`, or `hybrid` mode. |
+| `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `direct`, `flex`, `rlm`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
 | `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
 | `GET` | `/sessions/{session_id}/turns/{turn_id}` | Recover a durable running/terminal turn outcome directly from Postgres without replaying it; available while another worker owns the Session. |
@@ -123,7 +123,7 @@ the engine runs. The TUI exposes the same opt-in with `/replay on` and `/replay 
 
 `timeout_seconds` is an optional strict integer and the only per-Turn deadline
 override. Omitting it or sending `null` (the default) inherits
-`turn_timeout_seconds`, or `900` when configuration does not set it. `0` disables
+`turn_timeout_seconds`, or `0` (no Fleet deadline) when configuration does not set it. `0` disables
 the Fleet wall-clock deadline for this Turn. A positive value must be `10`–`3600`
 and sets this Turn's duration. Booleans, floats, numeric strings, negatives,
 `1`–`9`, and values above `3600` return `422` with validation errors for

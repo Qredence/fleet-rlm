@@ -100,13 +100,18 @@ class FleetWebServer(Server):
         return await super().handle_websocket(request)
 
 
-def validate_api_url(value: str) -> str:
-    """Require a credential-free absolute API URL safe to embed in a subprocess command."""
+def validate_http_origin(value: str, *, label: str) -> str:
+    """Require a credential-free absolute HTTP(S) URL, returning it without a trailing slash.
+
+    Shared by the API URL and the browser-facing public URL so both entry points reject the
+    same shapes: non-HTTP schemes, embedded credentials, query strings, fragments, and ports
+    outside 1-65535. `label` names the URL in the error message for the calling boundary.
+    """
     try:
         parsed = urlsplit(value)
         port = parsed.port
     except ValueError:
-        raise ValueError("Fleet API URL must be a valid HTTP(S) URL") from None
+        raise ValueError(f"{label} must be a valid HTTP(S) URL") from None
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.hostname
@@ -116,8 +121,13 @@ def validate_api_url(value: str) -> str:
         or parsed.fragment
         or (port is not None and not 1 <= port <= 65535)
     ):
-        raise ValueError("Fleet API URL must be HTTP(S), without credentials, query, or fragment")
+        raise ValueError(f"{label} must be an HTTP(S) URL without credentials, query, or fragment")
     return value.rstrip("/")
+
+
+def validate_api_url(value: str) -> str:
+    """Require a credential-free absolute API URL safe to embed in a subprocess command."""
+    return validate_http_origin(value, label="Fleet API URL")
 
 
 def build_web_app_command(

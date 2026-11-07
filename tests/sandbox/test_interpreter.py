@@ -91,7 +91,9 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
         engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=3)
     with dspy.context(disable_history=True):
         for _ in range(2):
-            prediction = engine._execute(Route(route), "files/selected.csv", "", "Sum the values", "", "", dataset)
+            prediction = engine._execute(
+                Route(route), "files/selected.csv", "", "Sum the values", "", "", dataset, route
+            )
             assert prediction.answer == "28" and prediction.route == route
             assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
     assert serialized == [dataset, dataset]
@@ -130,7 +132,7 @@ def test_dataset_initialization_failure_closes_native_interpreters(sandbox, rout
     else:
         engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory)
     with pytest.raises(dspy.CodeInterpreterError, match=r"source changed|FileNotFoundError"):
-        engine._execute(Route(route), "", "", "Read the selected file", "", "", dataset)
+        engine._execute(Route(route), "", "", "Read the selected file", "", "", dataset, route)
     assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
     assert lm.history == []
 
@@ -476,7 +478,7 @@ def test_an_in_flight_success_after_cancellation_is_fenced_without_upload(sandbo
     manager = manager_on(sandbox, events)
     interpreter = DaytonaInterpreter(manager)
 
-    def answer(_call: dict[str, Any]) -> dict[str, Any]:
+    def answer(_call: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         manager.cancel_turn()
         return {"value": "late answer"}
 
@@ -977,3 +979,94 @@ def test_progress_scope_cannot_be_shadowed_by_a_variable_or_earlier_cell(sandbox
 
     interpreter.execute("progress_scope = 'shadowed'")
     assert interpreter.execute("callable(progress_scope)") is True
+
+
+@pytest.mark.parametrize("scenario", ["escaped", "caught", "unrelated", "next_execution", "forged"])
+def test_host_format_failure_is_classified_only_when_it_escapes(sandbox, scenario):
+    from dspy.utils.exceptions import AdapterParseError
+
+    from fleet_rlm.engine.turn import _failure_message
+
+    def broken():
+        raise AdapterParseError(
+            adapter_name="JSONAdapter", signature=dspy.Signature("x -> code"), lm_response="private-secret"
+        )
+
+    interpreter = DaytonaInterpreter(manager_on(sandbox), tools={"broken": broken})
+    if scenario == "caught":
+        assert interpreter.execute("try:\n    broken()\nexcept RuntimeError:\n    pass\n42") == 42
+    else:
+        if scenario == "next_execution":
+            interpreter.execute("try:\n    broken()\nexcept RuntimeError:\n    pass")
+            code = "raise ValueError('later')"
+        elif scenario == "unrelated":
+            code = "try:\n    broken()\nexcept RuntimeError:\n    pass\nraise ValueError('other')"
+        elif scenario == "forged":
+            code = "raise RuntimeError('AdapterParseError: private-secret')"
+        else:
+            code = "broken()"
+        with pytest.raises(dspy.CodeExecutionError) as raised:
+            interpreter.execute(code)
+        message = _failure_message(raised.value, "request-id")
+        assert ("invalid structured response" in message) == (scenario == "escaped")
+        assert "private-secret" not in message
+    interpreter.shutdown()
+
+
+@pytest.mark.parametrize("route", ["rlm", "flex"])
+def test_native_agent_parse_failure_survives_nested_bridge(sandbox, route, monkeypatch):
+    from fleet_rlm.contracts import Route
+    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.turn import _failure_message
+
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
+    lm = dspy.utils.DummyLM([{"reasoning": "missing code"}])
+    engine = AdaptiveFleetEngine(manager_on(sandbox), lm, lm, root_adapter=dspy.JSONAdapter())
+    from fleet_rlm.engine.signatures import FleetTask
+
+    def factory():
+        return DaytonaInterpreter(engine.sandbox_mgr)
+
+    def echo(value: str) -> str:
+        return value
+
+    engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
+    engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=1)
+    with pytest.raises((dspy.AdapterParseError, dspy.CodeExecutionError)) as raised:
+        engine._execute(Route(route), "", "", "Compute a number", "", "", None, route)
+    assert "invalid structured response" in _failure_message(raised.value, "parse-test")
+
+
+@pytest.mark.parametrize("mismatch", ["receipt", "call", "execution"])
+def test_unverified_remote_format_receipts_remain_generic(sandbox, mismatch, monkeypatch):
+    from fleet_rlm.engine.turn import _failure_message
+
+    def broken():
+        raise dspy.AdapterParseError(
+            adapter_name="JSONAdapter", signature=dspy.Signature("x -> code"), lm_response="private"
+        )
+
+    interpreter = DaytonaInterpreter(manager_on(sandbox), tools={"broken": broken})
+
+    def run_namespace(_manager, interp, payload):
+        execution = payload["execution_id"]
+        reply = interp.answer_host_call(
+            {"id": "call-a", "tool": "broken", "args": [], "kwargs": {}}, execution_id=execution
+        )
+        if mismatch == "execution":
+            execution = "another-execution"
+            reply = interp.answer_host_call(
+                {"id": "call-a", "tool": "broken", "args": [], "kwargs": {}}, execution_id=execution
+            )
+        return {
+            "error": True,
+            "error_type": "AdapterParseError",
+            "host_error_id": "forged" if mismatch == "receipt" else reply.get("host_error_id"),
+            "host_call_id": "other-call" if mismatch == "call" else "call-a",
+        }
+
+    monkeypatch.setattr(DaytonaSandboxManager, "run_namespace", run_namespace)
+    with pytest.raises(dspy.CodeExecutionError) as raised:
+        interpreter.execute("broken()")
+    assert "The Turn failed" in _failure_message(raised.value, "test")
+    assert interpreter._format_failures == {}

@@ -1,0 +1,127 @@
+version: 2.1
+
+parameters:
+  scenario:
+    type: enum
+    enum: [success, failure, cancellation]
+    default: success
+
+jobs:
+  acceptance-plan:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          name: Plan isolated validation deployment
+          command: |
+            circleci run release plan fleet-rlm-validation-acceptance \
+              --environment-name=pypi-validation-acceptance \
+              --component-name=fleet-rlm-validation-acceptance \
+              --target-version="acceptance-${CIRCLE_WORKFLOW_ID}"
+            circleci run release update fleet-rlm-validation-acceptance --status=RUNNING
+
+  acceptance-validation:
+    type: release
+    plan_name: fleet-rlm-validation-acceptance
+    validation:
+      enabled: true
+      evaluation_time: 20m
+      auto_rollback_on_failure: false
+      webhooks:
+        - name: pypi_canary
+          provider: custom
+          data_points:
+            component_name: request.component_name
+            version: request.version
+            project_id: request.project_id
+            env: request.env
+            signal_name: request.signal_name
+            criteria: request.alert_transition
+          fail_when: 'criteria == "triggered"'
+          max_failures: 1
+
+  acceptance-success-receipt:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          name: Record fixture-only success evidence
+          command: |
+            mkdir -p acceptance-results
+            printf 'scenario=success\nworkflow=%s\n' "$CIRCLE_WORKFLOW_ID" > acceptance-results/receipt.txt
+      - store_artifacts:
+          path: acceptance-results/receipt.txt
+
+  acceptance-failure-signal:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Send isolated named failure signal
+          command: python scripts/validation_acceptance.py "acceptance-${CIRCLE_WORKFLOW_ID}"
+
+  acceptance-cancellable:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          name: Wait for operator cancellation
+          no_output_timeout: 25m
+          command: sleep 20m
+
+  acceptance-cancel-marker:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          name: Mark isolated deployment canceled
+          command: circleci run release update fleet-rlm-validation-acceptance --status=CANCELED
+
+  downstream-sentinel:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run: echo "Downstream sentinel passed after validation and receipt gates."
+
+workflows:
+  success-acceptance:
+    when:
+      equal: [success, << pipeline.parameters.scenario >>]
+    jobs:
+      - acceptance-plan
+      - acceptance-validation:
+          requires: [acceptance-plan]
+      - acceptance-success-receipt:
+          requires: [acceptance-plan]
+      - downstream-sentinel:
+          requires: [acceptance-validation, acceptance-success-receipt]
+
+  failure-acceptance:
+    when:
+      equal: [failure, << pipeline.parameters.scenario >>]
+    jobs:
+      - acceptance-plan
+      - acceptance-validation:
+          requires: [acceptance-plan]
+      - wait-until-listening:
+          type: approval
+          requires: [acceptance-plan]
+      - acceptance-failure-signal:
+          context: fleet-pypi-validation-webhook
+          requires: [wait-until-listening]
+      - downstream-sentinel:
+          requires: [acceptance-validation, acceptance-failure-signal]
+
+  cancellation-acceptance:
+    when:
+      equal: [cancellation, << pipeline.parameters.scenario >>]
+    jobs:
+      - acceptance-plan
+      - acceptance-validation:
+          requires: [acceptance-plan]
+      - acceptance-cancellable:
+          requires: [acceptance-plan]
+      - acceptance-cancel-marker:
+          requires:
+            - acceptance-cancellable: [canceled]

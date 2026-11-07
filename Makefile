@@ -1,6 +1,6 @@
 PYTHON_SOURCES := src/fleet_rlm tests scripts notebooks
 
-.PHONY: help install install-dev dev serve web cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run coverage
+.PHONY: help install install-dev dev serve web cli eval-dataset eval optimize format format-check lint typecheck test api-check api-sync check-docs check build clean check-security check-release build-release verify-release-artifacts release-smoke release-manifest-check precommit-run coverage check-ci-config
 
 help:
 	@echo "Fleet-RLM Lite development targets:"
@@ -59,6 +59,12 @@ optimize:
 
 test:
 	uv run pytest
+
+check-ci-config:
+	circleci config validate .circleci/setup.yml
+	circleci config validate .circleci/config.yml
+	circleci config validate .circleci/cci-agent-setup.yml
+	circleci config validate .circleci/validation-acceptance.yml
 
 api-check:
 	uv run python scripts/openapi_contract.py check

@@ -44,7 +44,7 @@ def test_worker_snapshot_ignores_unrelated_dotenv_keys(tmp_path):
     dotenv = tmp_path / ".env"
     dotenv.write_text("OTHER_APP_SECRET=unrelated-secret\nFLEET_TURN_TIMEOUT_SECONDS=123\n")
     settings = FleetSettings(_env_file=dotenv)
-    assert "other_app_secret" in settings._configuration_sources
+    assert "other_app_secret" not in settings._configuration_sources
     snapshot = worker_settings_payload(settings)
     received = read_worker_settings(io.StringIO(snapshot.decode()))
     assert b"other_app_secret" not in snapshot and b"unrelated-secret" not in snapshot
@@ -96,3 +96,23 @@ def test_cli_and_http_search_controls_have_one_validated_contract():
         ExperimentOptions(threads=True)
     with pytest.raises(ValidationError):
         ExperimentOptions.model_validate({"executable": "untrusted"})
+
+
+def test_worker_preserves_referenced_credentials_and_role_defaults(tmp_path, monkeypatch):
+    config = tmp_path / "fleet.toml"
+    config.write_text("[config]\nschema_version=5\n")
+    monkeypatch.setenv("FLEET_CONFIG", str(config))
+    path = tmp_path / ".env"
+    path.write_text("CUSTOM_PROVIDER_KEY=original-key\n")
+    settings = FleetSettings(_env_file=path, fleet_llm_api_key_env="CUSTOM_PROVIDER_KEY", fleet_llm_temperature=0.4)
+    payload = worker_settings_payload(settings)
+    path.write_text("CUSTOM_PROVIDER_KEY=replaced-key\n")
+    monkeypatch.setenv("CUSTOM_PROVIDER_KEY", "environment-replacement")
+    received = read_worker_settings(io.StringIO(payload.decode()))
+    assert received.resolved_model("root").api_key.get_secret_value() == "original-key"
+    assert received.resolved_model("reflection").temperature == 0.4
+    assert received.configuration()["digest"] == settings.configuration()["digest"]
+    updated = received.with_explicit_overrides(fleet_root_cache=False)
+    assert updated.resolved_model("root").api_key.get_secret_value() == "original-key"
+    assert updated.resolved_model("reflection").temperature == 0.4
+    assert "original-key" not in str(received.configuration())

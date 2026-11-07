@@ -13,14 +13,24 @@ repository checkout. Manual CI and compatibility probes are restricted to
 `main`:
 
 ```bash
-circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
-  --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
-  --param run_ci=true
-
-circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
-  --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
-  --param run_python314=true
+circleci api runs --method POST --data @- <<'JSON'
+{
+  "data": {
+    "attributes": {
+      "config": {"branch": "main"},
+      "checkout": {"branch": "main"},
+      "parameters": {"run_ci": true}
+    },
+    "references": {"pipeline": {"id": "fe82e142-4105-421e-a525-eb47298d5e7a"}}
+  }
+}
+JSON
 ```
+
+Use the same request with `parameters: {"run_python314": true}` for the probe.
+The explicit pipeline ID avoids dispatching an agent/deploy definition accidentally.
+This is the current [V3 run API](https://circleci.com/docs/api/v3/#runs);
+older CLI examples using `circleci pipeline run` / `--param` are obsolete.
 
 The Python 3.14 probe is informational and does not change the supported
 Python range (`>=3.11,<3.14`).
@@ -34,12 +44,17 @@ the server quality gate. Its full Git checkout includes the historical blobs
 needed for SonarQube source blame. The aggregate `quality` job, and therefore release
 preflight, requires this job to pass.
 
-Python 3.11's existing full-suite job produces `coverage/coverage.xml` and
-shares only that report through the workflow workspace. Coverage.py uses
-relative file paths so the scanner can resolve the report in its own checkout.
-The Python 3.12 selective tests and Python 3.13 full suite keep their existing
-behavior; SonarQube does not use partial or merged matrix coverage. Runtime
-and repository scripts are analyzed, while coverage measures the shipped
+Python 3.11 runs the full suite across two executors. Each executor preserves its
+selected test-file manifest and parallel Coverage.py data, including when tests
+fail. A report job waits for both executors to reach a terminal state, verifies
+that their manifests cover every discovered test file, combines the data, writes
+`coverage/coverage.xml`, and then enforces the 80% floor. Its teardown uploads the
+report directory after XML generation, so a floor failure retains the XML
+diagnostic. Successful reports share only the XML through the workflow workspace.
+Coverage.py uses relative file paths so the scanner can resolve the report in its
+own checkout. The Python 3.12 selective suite and Python 3.13 full suite retain
+their separate roles; SonarQube imports the combined Python 3.11 coverage only.
+Runtime and repository scripts are analyzed, while coverage measures the shipped
 `src/fleet_rlm` package. `sonar-project.properties` declares this scope and the
 supported Python versions explicitly, with scanner automatic configuration
 disabled.
@@ -66,254 +81,436 @@ describes scanner setup, and the
 [Python coverage guide](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/test-coverage/python-test-coverage)
 describes coverage import.
 
-## Chunk tasks
-
-The Chunk CLI project configuration provides local validations through
-`chunk validate`. Run all configured checks together, or select an individual
-check:
-
-```bash
-chunk validate
-chunk validate static
-chunk validate tests
-chunk validate build
-```
-
-The `dev` task definition uses the existing `build-and-test` CircleCI pipeline.
-Cloud tasks use committed repository code on the selected branch; local
-uncommitted changes are not included. To start a task, provide an explicit
-prompt and branch:
-
-```bash
-chunk task run --definition dev --branch main \
-  --prompt "<describe the requested change and acceptance criteria>"
-```
-
-The default Chunk environment is configured in
-`.circleci/cci-agent-setup.yml`. It installs the locked development
-dependencies for Python 3.12 and does not run tests; use Chunk validation for
-that. Chunk is currently in beta and task runs consume CircleCI credits and
-model-provider tokens.
-
-## Smart Deployments
-
-CircleCI Project Settings for `rlm` currently reports Smart Deployments as
-**Configured** (checked 2026-10-20). Treat this as project-level setup status;
-the project has existing `fleet-rlm` / `pypi` deployment history, and the
-release workflow now adds package-specific validation. A running Fleet service
-is not the target: the canary verifies that the published Python package can be
-downloaded and used by a consumer.
-
-The `publish-pypi` job plans a deployment named `fleet-rlm-pypi` for component
-`fleet-rlm`, environment `pypi`, and the requested release version. After the
-PyPI upload succeeds, it marks that deployment `running`. The typed
-`release-validation` job opens a 20-minute validation window while
-`pypi-canary` downloads the exact version exclusively from `https://pypi.org/simple`,
-checks its wheel digest against `dist/SHA256SUMS`, installs the locked runtime
-dependencies, and runs the package CLI/API smoke checks in isolation. The
-canary retries PyPI visibility for a bounded number of attempts and its total
-work is capped at 15 minutes so a failed check can report during the
-validation window. GitHub release creation requires both the canary job and
-successful CircleCI release validation.
-
-The canary emits a `pypi_canary` custom-provider failure signal only when the
-download, digest verification, or smoke check fails. The signal includes the
-matching component, environment, and version, and the canary job also fails so
-the direct GitHub release dependency blocks even if validation delivery is
-misconfigured. A successful canary emits no failure signal and the job passes.
-If CircleCI cannot accept a failure signal, the canary job fails and blocks the
-GitHub release.
-CircleCI's [release validation guide](https://circleci.com/docs/guides/deploy/set-up-release-validation-manually/)
-requires the signal name to match the configured webhook and the component,
-environment, and version to match the planned deployment.
-
-Before running a release, create the CircleCI Deploys validation webhook and
-add its token as `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` in the
-`fleet-pypi-validation-webhook` context. The context is restricted to the
-`rlm` project, `main`, pipelines that are not API-triggered, and jobs that are
-not SSH reruns. CircleCI combines these restrictions, so all must pass. The
-`validate-pypi-webhook-context` job checks for the credential before any
-package publication. Never put the webhook token in the repository, a
-project-wide environment variable, or a job log.
-
-Automatic rollback is explicitly disabled for this release job. PyPI package
-uploads cannot be undone by the configured CircleCI `rollback-pipeline`; if
-the canary fails after upload, do not rerun or overwrite the version. Inspect
-the deploy record and PyPI files, manually yank the defective release, then
-publish a corrected follow-up version. CircleCI validation and deployment
-markers are described in its [Smart Deployments overview](https://circleci.com/docs/guides/deploy/smart-deployments-overview/)
-and [configuration reference](https://circleci.com/docs/guides/deploy/release-validation-reference/).
-
 ## Smarter Testing
 
-The required Python 3.12 job uses `.circleci/test-suites.yml` and
-`circleci testsuite run "ci tests"`. It generates test impact data by running
-the complete test suite on `main` and selects impacted tests on pull requests.
-Changes to `pyproject.toml`, `uv.lock`, `Makefile`, `tests/**`, or
-`.circleci/**` select all test atoms. Python 3.11 and 3.13 remain full-suite
-runs so the supported-version matrix still tests every change.
+Python 3.12 uses sorted relative test-file atoms and CircleCI's documented
+per-atom LCOV analysis. Each analysis run executes one selected file with Coverage.py,
+then writes `<< outputs.lcov >>` using `coverage lcov --fail-under=0`. The LCOV
+contract test verifies relative source paths and executable-line records. This
+avoids single-pass-only dependencies while retaining context that each file atom
+covers its source. Python 3.11 and 3.13 each run all tests split over two
+executors, with test durations reported for the 30 slowest tests. Python 3.11
+collects parallel coverage across both shards; only their combined report
+enforces the 80% floor. Python 3.13 remains an independent full-suite interpreter
+check. These jobs use fixed parallelism of two; Python 3.12 continues its existing
+one or two-worker impact selection and per-atom LCOV analysis.
 
-After changing test discovery, JUnit output, coverage analysis, or selection
-rules, run:
+Compatibility audit on 2026-11-01 used CircleCI CLI core 1.13.0 with an isolated
+testsuite extension install at 1.0.68450-8be2f5e, pytest 9.1.1, coverage.py 7.16.2,
+and `pytest-circleci-coverage` 0.3.883. The minimal one-file format/parser
+reproduction passed, including the file-to-test mapping. Fleet doctor then failed
+its sampled run because the sandbox fixture was not loaded in that invocation.
+That did not meet the required doctor acceptance, so the one-attempt rule selects
+the LCOV fallback. The explicit `-c pyproject.toml` run option fixes fixture loading
+for Fleet's doctor. Both single-pass packages have been removed; the user's
+installed CLI was not replaced.
+
+Final Fleet doctor with the isolated extension discovered 66 atoms, passed all 12
+sampled run atoms, and parsed all 12 sampled LCOV mappings with no action items.
+
+Impact key `fleet-ci-files-lcov-v1` isolates the LCOV/file-atom map. The first
+authorized `main` run seeds it. Missing impact data must select all tests.
+Changes to dependencies, tests/fixtures, CI/build configuration, repository scripts,
+OpenAPI, bundled Skills, and sandbox requirements force a full run. When adding
+non-Python runtime inputs, add them to `full-test-run-paths` too.
+
+Dynamic splitting balances the selected files over one or two workers. Both the
+upstream `list-tests` and downstream `run` commands use default selection flags;
+change both together if adding overrides. One automatic retry is allowed. Review
+pass-on-retry evidence as a defect; do not increase retries to mask failures.
+JUnit includes file attributes. `outputs.junit-directory` assigns a new numbered
+directory to each run attempt, so automatic retries preserve the first attempt's
+results and timings; explicit `store_test_results` steps upload the full directory.
+Teardown retains available reports on cancellation/timeouts. Python 3.11 exports
+XML before enforcing coverage, so threshold failures retain diagnostics; only
+successful report jobs publish the workspace consumed by SonarQube. The Python
+3.11 test job records each executor's exit status and persists coverage data
+before returning that status, allowing the report job to export whatever data
+was collected even when a shard's tests fail. The separate test job remains a
+required success gate.
+
+### Local test latency and MLflow warning investigation
+
+The full local backend suite remains available on demand but no longer blocks
+every push. Run it explicitly with:
 
 ```bash
+uv run pre-commit run backend-tests --hook-stage manual --all-files
+```
+
+`make test` remains available for direct invocation. CI's pytest output includes
+the 30 slowest tests. When investigating MLflow lock warnings, compare those
+durations with the warning timestamps and CircleCI test logs across the 3.11 and
+3.13 shards. The autouse fixture continues to point tests at the session-scoped
+temporary SQLite store; do not change tracing or database behavior unless the
+timing and warning evidence identifies a specific contention source.
+
+Offline diagnostics (doctor executes sampled tests and per-file coverage, but must
+not invoke live Fleet services):
+
+```bash
+uv sync --locked --dev
+make check-ci-config
 circleci testsuite doctor "ci tests"
+circleci testsuite run "ci tests" --local --run-tests=all --analyze-tests=none
 ```
 
-If impact data is unavailable or the selection is suspect, run the full
-Python 3.12 suite with:
+Doctor and local impact/state files and test reports are ignored. To rebuild a
+local map, use `--local --run-tests=none --analyze-tests=all`. To reset incompatible
+cloud data, bump `impact-key` in a reviewed change and seed it on `main`; do not
+reuse data from another atom naming scheme.
+
+Paid Smarter Testing charges count discovered atoms, even when selection runs only
+a subset. Recount with the discovery command and check current plan usage before
+forecasting; the historical 10,000-atom allowance is not an enforced spending cap.
+Keep the worker maximum at two. Do not increase workers or spending without an
+explicit decision. See [Smarter Testing](https://circleci.com/docs/guides/test/smarter-testing-overview/).
+
+## Release notes and package publication
+
+The release sequence is:
+
+`quality → preflight → build once → TestPyPI → PyPI → canary + validation → GitHub`
+
+Before running it, verify the requested version is unpublished and choose its exact
+full `main` source SHA. The build captures that SHA's unique nonempty changelog
+section, locked consumer requirements, and their SHA-256 identities in
+`release-metadata/`, bound to `dist/SHA256SUMS`. These are CircleCI artifacts and
+workflow inputs, not files to commit. Missing/empty/duplicate notes fail before
+any publication. Uploads reuse the same verified distribution bytes.
+
+In the explicit V3 run request above, set `parameters` to:
+
+```json
+{"run_release": true, "release_version": "<version>", "release_sha": "<full-sha>"}
+```
+
+TestPyPI rehearsal is enabled by default. If its OIDC exchange reports an unsupported
+issuer, first confirm no candidate was uploaded, then obtain explicit approval for
+`"skip_testpypi": true` in the parameters. This retains the PyPI checksum, isolated canary,
+validation window, and GitHub gates. The PyPI upload uses the restricted
+`fleet-pypi-upload-token` context; TestPyPI uses `fleet-testpypi-trusted-publishing`.
+Never put publishing credentials in project-wide variables or task prompts.
+
+GitHub publication uses captured notes, not notes regenerated from the current
+checkout or an agent at publication time. It verifies the source, metadata, manifest,
+and successful canary receipt from the same workflow, then publishes distributions
+and `SHA256SUMS`. Normal and recovery runs share the same publishing job. A repeat
+is a no-op only for an identical existing tag target, notes, and downloaded asset
+checksums. A conflicting or partial release fails for manual inspection; assets are
+never overwritten. GitHub publication uses only `fleet-github-release`.
+
+## PyPI Smart Deployments
+
+Verified read-only on 2026-11-01: component `fleet-rlm` and environment `pypi` exist.
+Version 0.9.0's canary and release-validation jobs passed; GitHub publication waited
+for both. This proves the historical success path, not failure-webhook delivery.
+
+The normal plan is `fleet-rlm-pypi`; recovery uses `fleet-rlm-pypi-recovery`.
+Marker/webhook identities live in `scripts/release_checks.py`. Both typed release
+jobs share one validation policy: enabled, 20-minute window, custom `pypi_canary`
+check, `criteria == "triggered"`, one failure, and automatic rollback disabled.
+The payload explicitly includes component, environment, signal, version, and project
+UUID; mappings must match those fields. The webhook secret is in the restricted
+`fleet-pypi-validation-webhook` context. Its metadata and project/main/non-SSH/non-API
+restrictions were inspected without reading the credential. TestPyPI, PyPI upload,
+and GitHub release context restrictions were likewise checked.
+
+Uploader tools are prepared before the pending plan starts. Upload is bounded to ten
+minutes, below CircleCI's pending-marker timeout, and `RUNNING` is recorded only
+after upload succeeds. The canary has a fifteen-minute outer deadline that includes
+uv bootstrap and environment installation. uv's installer is pinned and verified
+against its GitHub release asset SHA-256 in `.circleci/install-uv.sh`.
+
+The canary checks public PyPI wheel and sdist metadata against the manifest,
+downloads only from public PyPI without alternate indexes/cache, verifies the wheel's
+bytes, installs captured source-version runtime requirements, and smoke-tests the
+CLI and API in an isolated environment. It records source/artifact identity, checks,
+workflow/project/plan identifiers, and outcome in `canary-results/receipt.json`.
+A failed rerun clears previous success evidence before validation. GitHub requires
+both the successful canary job/receipt and the typed release-validation job.
+
+Failure jobs send the named failure signal and explicitly mark deployment health
+failed, including setup failures and timeouts. Separate canceled-job dependencies
+record `CANCELED`; cancellation must not run a second failure finalizer in teardown.
+Teardown preserves available diagnostic artifacts. Full workflow cancellation may
+also stop cleanup jobs: inspect the Deploys record and reconcile it manually.
+A rejected terminal marker update must be inspected; do not force a completed
+release into a new state. Rerun the full recovery workflow instead.
+
+### Release-script security finding review
+
+SonarCloud findings `AaGvUEZt-J3Gs6PfOIuR`, `AaGvUEZt-J3Gs6PfOIuV`,
+`AaGvUEZt-J3Gs6PfOIuT`, `AaGvUEZt-J3Gs6PfOIuS`, `AaGvUEZt-J3Gs6PfOIuP`,
+and `AaGvUEZt-J3Gs6PfOIuU` trace paths to command-line arguments. These scripts
+are CLI tools, not HTTP endpoints. In CircleCI their path arguments are literals
+in the checked-in configuration; `prepare` writes a fixed set of repository files
+and rejects noncanonical versions. A local operator can select paths using the
+CLI, which is intentional and does not add privileges beyond that operator.
+
+For `AaGvUEZt-J3Gs6PfOIuQ`, the deployment ID used in the `gh api` argument is
+checked as an integer before use. For `AaGvUEcS-J3Gs6PfOIuW`, the repository
+argument is constrained to owner/name characters and the PR number is parsed as
+an integer. Both invoke `gh` with an argument list, not a shell. PR text is data
+and is never interpolated into an executable command. These observations support
+false-positive review of the reported flows; they are not a substitute for
+restricting credential-bearing jobs to trusted configuration and code.
+
+### Integration acceptance, without uploading a package
+
+Use the prepared [.circleci/validation-acceptance.yml](../../.circleci/validation-acceptance.yml)
+and `scripts/validation_acceptance.py` fixture only after an operator authorizes an
+isolated integration run. It plans component `fleet-rlm-validation-acceptance` in
+environment `pypi-validation-acceptance`, copies the production 20-minute named-check
+policy with rollback disabled, and contains no package upload or GitHub publication
+job. A temporary CircleCI pipeline definition must point at this config and retain
+the project/main restrictions. The `fleet-pypi-validation-webhook` context must be
+available to the failure scenario under that definition's approved restriction.
+
+Run one scenario parameter at a time: `success` proves a fixture-only receipt and
+lets the validation window finish; `failure` starts validation, then pauses at
+`wait-until-listening`. Approve that job only after the UI shows **Listening**. The
+next job sends the matching isolated failure payload; verify that the event attaches
+to `pypi_canary`, validation fails, and `downstream-sentinel` is skipped. For
+`cancellation`, cancel only `acceptance-cancellable`; verify the dependent cleanup
+job records `CANCELED`. The fixture receipt is not package-health evidence; the real
+workflow's public-PyPI canary remains authoritative. Preserve workflow/deployment
+IDs, panel evidence, payload metadata without headers, and terminal outcomes. Do not
+create the temporary pipeline definition or run any scenario as part of local checks.
+
+HTTP 2xx only means webhook acceptance, not attachment to a listening check.
+CircleCI documents no supported API to await Listening. Validation can pass when its
+window expires without any signal, so a green validation job alone is not proof of
+package health. The direct canary/receipt gate remains mandatory even if a failure
+event races window startup. No sleeps or undocumented readiness API are used.
+See [manual validation](https://circleci.com/docs/guides/deploy/set-up-release-validation-manually/)
+and the [routing reference](https://circleci.com/docs/guides/deploy/release-validation-reference/).
+
+On the next authorized real release, confirm the exact version/digests, receipt,
+Listening window, attached failure events when applicable, and GitHub gate ordering.
+No controlled cloud verification or new package upload is implied by offline tests.
+
+### Failure and recovery
+
+PyPI files cannot be overwritten and this pipeline has no automatic registry rollback.
+After a defective publication, inspect/yank it manually and publish a corrected
+version. Do not re-upload the same version or silently promote validation. If the
+package is correct and only CI infrastructure failed, use no-upload recovery:
+
+In the explicit V3 run request above, set `parameters` to:
+
+```json
+{"run_pypi_recovery": true, "release_version": "<published-version>", "release_sha": "<published-source-sha>"}
+```
+
+Recovery requires the published source to be an ancestor of current `main`, rebuilds
+that exact source, captures its historical notes and requirements with the current
+extractor, verifies published digests, and opens a separate validation record. It
+never uploads to a registry. A checksum mismatch blocks recovery; inspect rather
+than rerunning or replacing evidence. Preserve completed artifacts and run IDs.
+
+## Chunk tasks and AI delivery feedback
+
+[CircleCI's AI SDLC guidance](https://circleci.com/blog/ai-sdlc/) informs a bounded
+loop: named intent/failure → evidence → small fix/draft → offline checks → reviewed
+PR → validated release → receipt/outcome fed back to a future repair. Agents propose
+and validate; humans retain architecture, merge, and release decisions.
+
+`.chunk/run.json` dispatches `dev` to `chunk-task-pipeline`
+(`8b3162e2-16da-44ad-9e09-3f44d5777838`), not the ordinary build pipeline. The
+existing `build-and-test` pipeline remains the task validation target. The agent
+setup has exactly one `cci-agent-setup` job/workflow, installs locked Python 3.12
+dependencies, exports/verifies the interpreter, and attaches no publishing contexts.
+`chunk validate` uses Make targets for static checks, coverage, build, and both CI
+configuration validations. Remote sidecar/cloud tasks consume credits and model
+tokens and require an operator request. Keep the existing provider/spending controls.
+
+### Credential migration and Chunk activation gate
+
+The 2026-11-01 metadata-only audit returned these project-wide variable names:
+`GH_TOKEN`, `GITHUB_TOKEN`, `DAYTONA_API_KEY`, `DAYTONA_ORG_ID`, and
+`DAYTONA_TARGET`. No value was requested or printed. The CircleCI CLI reports
+project-variable values only as masked placeholders; they cannot be exported
+after creation. The existing `fleet-github-release` context contains `GH_TOKEN`
+and is restricted to this project, main, and non-SSH/non-API configuration. The
+current release jobs already use that context. Older `github-release` and
+`release-automation` contexts contain `GITHUB_TOKEN`; audit their consumers before
+removing them.
+
+| Project variable | Known consumer and required access | Prepared destination | Verification before removal | Rollback |
+| --- | --- | --- | --- | --- |
+| `GH_TOKEN` | Current normal/recovery GitHub release jobs need repository release/tag/asset write access. | Keep the existing `fleet-github-release` context; no project-level copy is needed after cutover. | Run a controlled publication check in a sandbox repository with the same restricted context, then verify the `build-and-test` release job receives context access only. | Reissue from the GitHub credential source of truth and recreate the project variable only if the restricted context fails. |
+| `GITHUB_TOKEN` | No use is present in the checked-in primary config or `.chunk` files. It may be consumed by older remote pipeline definitions or Chunk setup. | Chunk PR creation should use its managed GitHub App installation. Any confirmed legacy job gets a separately named least-privilege context; routine CI gets no token. | Create a draft PR in a sandbox repository with the managed App and each confirmed legacy consumer; verify non-PR jobs cannot see a token. | Restore a replacement from the GitHub source of truth or reauthorize the App; never recover a value from logs or a running job. |
+| `DAYTONA_API_KEY` | No reference exists in checked-in CircleCI or Chunk config. Likely consumers are live Daytona-backed agent/runtime tasks; exact job/task ownership is unverified. Requires only the Daytona project/org permissions those consumers use. | Prepare a `fleet-daytona-live` restricted context only after the remote consumers and minimum scope are confirmed. Add it to named live-service jobs, never normal tests or release jobs. | Use a dedicated non-production Daytona target for an authorized auth/connectivity smoke check, then audit which jobs accessed the context. | Reissue/rotate in Daytona's source of truth, verify the replacement, then restore the old project value only as a temporary emergency rollback. |
+| `DAYTONA_ORG_ID` | Same unresolved consumer set as `DAYTONA_API_KEY`; organization routing metadata is not itself sufficient authorization. | Same `fleet-daytona-live` context, only where required with the API key. | Confirm the selected organization and target are the approved non-production pair without logging the key. | Restore from the Daytona source of truth; do not recover from CI output. |
+| `DAYTONA_TARGET` | Same unresolved consumer set; selects the Daytona execution target. | Same `fleet-daytona-live` context, limited to live-service jobs. | Verify that the designated job uses the intended isolated target and that ordinary CI has no Daytona context. | Restore the previously approved target identifier from its source of truth. |
+
+The pipeline-definition inventory is also incomplete. The API lists `build-and-test`
+(`fe82e142-4105-421e-a525-eb47298d5e7a`, checked-in `.circleci/config.yml`),
+`chunk-task-pipeline` (`8b3162e2-16da-44ad-9e09-3f44d5777838`, configured from
+`circleci-agents/configs/chunk/config.yml`, not present in this checkout),
+`deploy-pipeline` (`3078fcb4-7056-4c90-8ecc-7f2831046a53`, `.circleci/deploy.yml`),
+`rollback-pipeline` (`330a2c33-9a78-4f30-8dad-ecd897ab3465`,
+`.circleci/rollback.yml`), and four historical `deploy-markers-setup` definitions
+(`47909734-57e6-4f6b-8b02-fb867c1c6fea`, `cdd26158-a2e2-49f0-ac8f-442c8184c726`,
+`0f2376c8-8b4c-4bd8-a583-c7cca7ba257c`, and
+`3ce81903-5623-47a1-8a2e-3b4bfbe53ce4`; all point at `.circleci/config.yml`).
+The deploy/rollback and Chunk source files are not in this workspace, so their
+variable consumers cannot be cleared from this audit. Obtain and review the exact
+config revisions and recent job context-access records before cutover. Retain each
+definition until its trigger/run owner confirms it is obsolete.
+
+**Cutover is a separate approved operation.** Before requesting it, the operator
+must map every variable to the exact job/task and source-of-truth owner, prepare
+replacement values where needed, create restricted contexts, verify replacement
+access for all required consumers, and record rollback owners. Only then remove the
+project-wide copies through CircleCI project settings. Verify the variable names
+are absent, release-context jobs retain their restricted access, ordinary CI has
+none of these credentials, and Chunk uses managed App access for draft PRs. If a
+value is unavailable from its source of truth, issue a replacement; do not extract
+it from logs, artifacts, or live jobs. Do not activate a cloud agent task until
+this cutover is complete. Keep provider selection and spending controls unchanged.
+
+Versioned prompts and the shared checklist are maintained in:
+
+- [CI repair](../../.circleci/tasks/ci-repair.md): requires the original failed run ID.
+- [Release preparation](../../.circleci/tasks/release-preparation.md): requires target
+  version and previous tag; produces reviewed notes/version changes, never a release.
+- [Review checklist](../../.circleci/tasks/review-checklist.md): architecture, regression
+  evidence, permissions, release provenance, and honest uncertainty.
+
+After the activation prerequisite and explicit task authorization:
 
 ```bash
-circleci testsuite run "ci tests" --run-tests=all --analyze-tests=none
+chunk task run --definition dev --branch main --new-branch \
+  --prompt "$(cat .circleci/tasks/ci-repair.md) Target run UUID: <run-id>"
+
+chunk task run --definition dev --branch main --new-branch \
+  --prompt "$(cat .circleci/tasks/release-preparation.md) Target version: <version>; previous tag: <tag>"
 ```
 
-The `test-python-312` job uses dynamic test splitting, dynamic parallelism
-with a maximum of two workers, and one automatic retry for a failed test atom.
-Per-atom LCOV exports use `--fail-under=0` because each file measures partial
-package coverage. The full Python 3.11 suite enforces the 80% coverage floor.
-Review test reruns in CircleCI Test Insights because a retry that passes makes
-the job succeed and suppresses the original test error.
+The task must use a new branch and draft PR, preserve failing-test evidence, run
+focused regression checks then `make check-ci-config` and `make check`, and report
+run links and uncertainty. No automatic merge, publishing, validation promotion,
+weakened gates, or live Fleet evaluation. A green retry feeds a future flaky-test
+investigation rather than being treated as a harmless race. Read the shared checklist
+as part of both tasks; do not synchronize developer prompts into Fleet user Skills.
 
-The Qredence Performance plan currently includes 10,000 paid Smarter Testing
-test atoms each month. The current discovery command finds 67 file-level
-atoms; a normal Python 3.12 test-suite run therefore counts 67 atoms even when
-TIA selects only a subset. At 149 complete runs, 9,983 atoms are used. Recount discovery and check current billing data before forecasting usage. Check
-the monthly atom total and forecast before increasing test volume. Disable
-paid Smart Testing features when the forecast
-would exceed 10,000 atoms. CircleCI config does not enforce a cumulative
-monthly atom ceiling, so review usage before the threshold is reached; any
-overage needs a separate decision.
+Native weekly flaky-test configuration is prepared as: one test, one candidate,
+five validation runs, maximum one open PR. Do not activate on this organization:
+current [native-task documentation](https://circleci.com/docs/guides/test/fix-flaky-tests/)
+requires a GitHub OAuth organization, while this project uses `circleci/<ID>`.
+Recheck support before activation; until then use on-demand repair. No custom
+scheduler or organization migration is included.
 
-## Package release
+## Triggers, measurements, and rollback
 
-Before starting, confirm the version in `pyproject.toml` has not been published
-and that the intended commit is on `main`. Set the requested version and the
-full 40-character commit SHA to that exact `main` commit:
+On 2026-11-01, redundant-workflow auto-cancel was already enabled. Keep it enabled.
+The combined `only-build-prs` trigger (`a2d5b248-ba99-4737-af62-74e9fe6c726d`) stays
+active. The overlapping ready-for-review trigger (`99951c33-d6b9-4b9d-912e-3dda83ddf809`)
+was disabled reversibly. After an authorized push, verify a draft PR open/update and
+main push each produce the intended pipeline once. Branch protection must continue
+requiring the observed aggregate `quality` status. Leave obsolete pipeline definitions
+alone until their consumers have been audited.
 
-Release artifact verification, registry downloads, and smoke checks accept one
-version such as `0.8.0` or `0.8.1rc1`. They reject wildcards, requirement markers,
-paths, and command options before running pip or contacting the registry.
+The successful 2026-10-31 workflow `a96f94c8-ffea-4b6d-b093-8085c4a3a97d`
+spent 12m38s on Python 3.12 (two workers), versus 6m14s on Python 3.11 and 4m56s
+on Python 3.13. Cache restore was 4–8s and dependency installation 4–5s, so repeated
+test/analysis execution is the first target. This is one observation, not a forecast.
 
-```bash
-circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
-  --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
-  --param run_release=true \
-  --param release_version=0.8.0 \
-  --param release_sha=<full-main-commit-sha>
-```
+Record at least three comparable successful PR runs: total required-workflow and
+per-job duration, executor consumption, cold/warm cache state, selected atoms,
+coverage shard balance, and retries. Target a warm-cache median required-workflow
+duration of five minutes or less while preserving every test and gate. Compare
+executor consumption separately because splitting 3.11 and 3.13 increases their
+parallel executor count. If the target misses, report the measured bottleneck and
+revise the plan before adding more parallelism. A temporary source-change probe
+must still show its known regression test selected; config/fixture changes must
+run all 3.12 atoms.
 
-The TestPyPI rehearsal is enabled by default. When the TestPyPI service cannot
-accept CircleCI OIDC tokens, a maintainer may explicitly request a direct
-PyPI-only publication by adding `--param skip_testpypi=true`. This skips only
-the TestPyPI upload and smoke test; it retains the quality gate, SHA preflight,
-single manifest-verified build, PyPI-only canary, validation, and gated GitHub
-release. Use this path only after reviewing the extra risk of publishing
-without the TestPyPI rehearsal.
+If the LCOV optimization fails acceptance, restore full test execution while
+retaining the correctness, reporting, interpreter, and release-provenance fixes.
+Keep the two-worker cap. Cache
+restructuring, larger executors, and further paid-feature expansion require evidence.
+To undo trigger deduplication, re-enable the saved trigger ID with
+`circleci project trigger update <trigger-id> --enable`.
 
-The required quality jobs complete first. The release then validates checkout
-SHA and branch, builds the wheel and source archive once, writes a SHA-256
-manifest, publishes to TestPyPI, downloads the candidate wheel from TestPyPI,
-checks its digest against the build, and installs it in isolation. It then
-plans and publishes the same manifest-verified files to PyPI, marks the package
-release as running in CircleCI, and runs the PyPI-only canary during release
-validation. CircleCI creates the GitHub release only after validation and the
-canary both pass.
+## Automatic release rollout
 
-The `publish-pypi` job uses the `fleet-pypi-upload-token` CircleCI context. Add
-`PYPI_API_TOKEN` there using a PyPI API token scoped only to the `fleet-rlm`
-project. Restrict this context to the `rlm` project, `main`, non-API pipeline
-triggers, and jobs without SSH reruns; the workflow attaches it only to
-`publish-pypi`. The token is passed to Twine through its standard
-`TWINE_USERNAME=__token__` and `TWINE_PASSWORD` variables and is never written
-to the repository or printed. Revoke and replace it in PyPI and CircleCI if it
-is exposed. This long-lived token is the fallback for CircleCI's currently
-unsupported PyPI trusted-publishing issuer; remove it only after a verified
-OIDC release path is available.
+Automatic releases are staged separately from the existing explicit release route.
+Do not change the project pipeline definition to the setup configuration until
+local checks and an authorized configuration-provenance acceptance run pass.
+Do not relax the restricted contexts' configuration-source, main-branch, project,
+or non-SSH restrictions to enable dynamic continuation.
 
-The `fleet-testpypi-trusted-publishing` context remains reserved for TestPyPI
-OIDC. The `fleet-github-release` context must hold a narrowly scoped `GH_TOKEN`
-for this repository. The `fleet-pypi-validation-webhook` context must contain
-the CircleCI-generated `CIRCLECI_VALIDATION_WEBHOOK_TOKEN` and be restricted to
-the `rlm` project, `main`, non-API pipeline triggers, and jobs without SSH
-reruns.
+Contributor PRs use the repository template and exactly one `release:feature`,
+`release:fix`, `release:breaking`, `release:maintenance`, or `release:none` label.
+Breaking changes require migration instructions. The bot collects reviewed PR
+metadata, never executes it, and maintains `automation/release-draft`. Review the
+rendered notes; category labels do not establish correctness of their claims.
 
-If TestPyPI rejects token exchange with `unknown trusted publishing issuer`,
-the registry does not recognize CircleCI's OIDC provider. That happens before
-any upload. Confirm the requested version is absent from TestPyPI and run the
-release with `--param skip_testpypi=true` only after reviewing the added risk of
-omitting that rehearsal. This flag skips only TestPyPI upload and smoke; it does
-not skip the PyPI artifact checksum, isolated PyPI canary, release validation,
-or GitHub release gate. A PyPI upload failure before acceptance leaves the
-version unpublished. If a canary fails because the published package is
-defective, inspect the deploy record and PyPI files, manually yank the release,
-then publish a corrected follow-up version. Do not rerun the normal release
-pipeline for a version already on PyPI.
+The `release-ready` label freezes bot updates. Before merge, select a stable
+version, prepare matching package/lock/API metadata and changelog, and refresh
+against current main. Remove the label before refreshing and review again after
+updates. Configure required checks and strict up-to-date branch protection during
+activation; the automation has no branch-protection bypass or merge permission.
 
-If publication succeeded but the canary job failed before inspecting the
-artifact (for example, an interpreter or CI setup error), use the no-upload
-recovery workflow. It is restricted to `main`, requires the published source
-SHA to be an ancestor of the current commit, rebuilds from that exact source
-SHA, and verifies both PyPI file digests against the rebuilt manifest. The
-canary retries transient PyPI metadata errors and file-visibility delays within
-its deadline; an actual checksum mismatch fails immediately. The recovery has
-no registry upload job; it opens the validation window alongside the fresh
-canary before creating the GitHub release. For the 0.8.0 recovery, use the SHA
-that produced the published files:
+Provision a repository-scoped GitHub App for draft automation, with Contents and
+Pull Requests permissions. Keep its installation credentials in a separate
+restricted context from the publisher's Contents/Deployments credentials. Mint
+short-lived installation tokens only in trusted jobs. Fork jobs must never receive
+write credentials. Provision category labels and `release-ready` during rollout.
 
-```bash
-circleci pipeline run --project circleci/SomxVLJYMpo86z6XUrZBUq/3F8H681druYB2ErY5Af6Cf \
-  --definition-id fe82e142-4105-421e-a525-eb47298d5e7a --branch main \
-  --param run_pypi_recovery=true \
-  --param release_version=0.8.0 \
-  --param release_sha=a8163c3564b4561b9258af97f16e2a7e0f76c8ae
-```
+Direct PyPI publication is the automatic default. TestPyPI remains an explicit
+manual rehearsal and requires its own project-scoped token: CircleCI OIDC must
+not be assumed to be supported by PyPI. Preserve the required package checks,
+public-PyPI canary receipt and 20-minute validation window. A successful validation
+window alone does not establish package health.
 
-The recovery creates a separate deployment record, so its validation result is
-visible independently from the first attempt. If the rebuild does not match all
-published PyPI hashes, it stops before creating a GitHub release.
+Activate draft generation first, review output, then run the isolated validation
+acceptance fixture with operator authorization. Only subsequently enable automatic
+publication. Record exact run/deployment IDs and digests. The first real release
+must produce one wheel/sdist upload, matching registry digests, successful canary
+and validation, matching GitHub release assets/notes, and a successful GitHub
+Deployment record. Full workflow cancellation can prevent finalizers; reconcile
+CircleCI and GitHub deployment states manually before another release.
 
-## Migration and recovery
+Disable automatic publication and draft updates to roll back automation; retain
+manual publication and no-upload recovery. Never overwrite registry files. A bad
+published package needs a corrective version and possibly a manual yank. Measure
+draft runtime, release runtime, retries and credits before tuning parallelism or
+considering self-hosted runners. Credential provisioning, protection changes,
+cloud acceptance and package publication require separate explicit authorization.
 
-Keep `.github/workflows/quality.yml` active until CircleCI has a successful
-pull-request run and `main` run. Confirm the CircleCI aggregate `quality` check
-is visible, then require that observed status in branch protection. Only then
-remove the GitHub Actions quality workflow. Verify PR synchronization and main
-push triggers in the CircleCI GitHub App settings; a configuration file cannot
-enable a missing project trigger. Preserve the separate Chunk pipeline and
-disable obsolete deploy and setup pipeline definitions after checking their
-consumers.
+Prepare the reviewed rolling draft locally with
+`uv run --locked python -m scripts.release_automation prepare --version X.Y.Z`.
+Use a canonical stable version and inspect the resulting diff before applying
+`release-ready`. Preparation is distinct from publication.
 
-If a release stops after publishing to a registry, do not blindly rerun the
-pipeline or overwrite a release. Inspect the registry's files and compare
-SHA-256 digests with the CircleCI `release-distributions` artifact. Resume only
-after confirming the uploaded files match. If an incorrect version was
-published, yank it and publish a follow-up version; there is no automatic
-rollback.
+The staged entry point is `.circleci/setup.yml`; `.circleci/config.yml` remains
+its continuation and the existing manual entry. `run_draft` defaults true and
+`activate_auto_release` defaults false in the setup entry point. They take effect
+only when the production pipeline definition selects that entry point. Validate
+both configurations and complete acceptance before switching the definition;
+enable automatic publication separately after reviewing the generated draft.
 
-During initial adoption, record job queue and execution time, cache hit rate,
-and CircleCI credit use. The Python 3.12 Smart Testing job is capped at two
-workers; increase that cap only after measuring runtime and credit use.
+PR metadata validation requires a separate **read-only GitHub App installation**
+in `fleet-release-metadata`, not a draft-writer private key with a downscoped token.
+A label/body-only edit may not trigger CircleCI: rerun its required metadata check
+after edits, and verify PR event subscriptions during activation. Freeze checks
+must be combined with strict up-to-date branch protection, since advancing main
+does not itself invalidate an old PR check result.
 
-## CI setup performance baseline
+At activation, verify GitHub App PR events provide `CIRCLE_PULL_REQUEST` as a
+`https://github.com/Qredence/fleet-rlm/pull/<number>` URL. The metadata job fails
+closed if absent; configure and validate supported event mapping before making
+this check required. Do not substitute unvalidated shell parameters. The App token
+helper expects `FLEET_GITHUB_APP_ID`, `FLEET_GITHUB_APP_INSTALLATION_ID`, and
+`FLEET_GITHUB_APP_PRIVATE_KEY` in each purpose-specific context.
 
-Shared Python setup exports `UV_PYTHON` for the setup shell and subsequent
-CircleCI steps through `BASH_ENV`. A separate check prints the interpreter and
-executable and fails if its major/minor differs from the requested version.
-This keeps Make targets and Smart Testing subprocesses on the prepared Python
-environment despite the developer pin in `.python-version`. Discovery uses
-checkout and shell tools without installing project dependencies.
-
-The successful main workflow `e60962b9-f266-4e29-8e0b-b3d72ff96ea6` at
-`deb0879` took 6m12s. Discovery spent about 13 seconds on unused setup before
-a 1.4-second selection step. The jobs labelled 3.11 and 3.12 rebuilt their
-environments under 3.13; this baseline therefore does not establish correct
-version coverage. Warm cache restoration took about 4–6 seconds.
-
-After publication is authorized, compare at least three comparable successful
-PR/main runs for job and workflow duration, credits, and reruns; separate cold
-cache runs. Confirm each interpreter check matches its job, no later step
-recreates the environment under another version, discovery returns the same
-atoms, and all existing quality gates pass. Savings remain unmeasured until
-these runs complete. Discovery can be reverted independently; if interpreter
-propagation needs repair, use explicit matching `--python` arguments and retain
-the interpreter checks.
+Configure the setup pipeline's **configuration source** to protected main while
+retaining the event checkout revision for tests. Fetching trusted scripts inside
+a job does not make a PR-authored YAML configuration trusted. Do not expose any
+App private key context to PR-controlled YAML; validate the effective configuration
+source and fork behavior during acceptance. The read-only metadata installation
+must have no writer permissions even if a job requests a different token purpose.

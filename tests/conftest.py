@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import mlflow
 import pytest
 from pydantic import AliasChoices
@@ -27,13 +29,16 @@ def mlflow_test_uri(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
-    for name in _setting_env_names() | RETIRED_MLFLOW_ENV | {"MLFLOW_EXPERIMENT_ID"}:
+    for name in _setting_env_names() | RETIRED_MLFLOW_ENV | {"MLFLOW_EXPERIMENT_ID", "DATABRICKS_CONFIG_PROFILE"}:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setitem(FleetSettings.model_config, "env_file", None)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_test_uri)
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
     # A test that forgets its database fake fails fast instead of reaching a real local Postgres.
     monkeypatch.setenv("FLEET_DATABASE_URL", "postgresql://fleet-test@db.invalid:5432/fleet-test")
+    monkeypatch.setenv("FLEET_CONFIG", str(Path(__file__).resolve().parents[1] / "config/fleet.toml.example"))
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", "example-warehouse")
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", "example_catalog")
     get_settings.cache_clear()
     mlflow.set_tracking_uri(mlflow_test_uri)
     yield

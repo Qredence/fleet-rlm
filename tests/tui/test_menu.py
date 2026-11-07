@@ -129,15 +129,15 @@ async def test_escape_keeps_the_input_and_explicit_tab_reopens_completion(menu_a
 @pytest.mark.parametrize(
     ("prefix", "choices"),
     [
-        ("/mode ", ["rlm", "flex", "hybrid"]),
+        ("/mode ", ["direct", "flex", "rlm", "hybrid"]),
         ("/timeout ", ["off", "default"]),
         ("/skills ", ["push", "pull"]),
         ("/replay ", ["on", "off"]),
         ("/model ", ["root", "sub"]),
         ("/config ", ["mode ", "json"]),
-        ("/config mode ", ["rlm", "flex", "hybrid"]),
+        ("/config mode ", ["direct", "flex", "rlm", "hybrid"]),
         ("/settings ", ["mode ", "json"]),
-        ("/settings mode ", ["rlm", "flex", "hybrid"]),
+        ("/settings mode ", ["direct", "flex", "rlm", "hybrid"]),
         ("/context ", ["clear"]),
         ("/optimize ", ["--max-metric-calls", "--approve"]),
     ],

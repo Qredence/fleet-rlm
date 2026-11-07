@@ -27,6 +27,13 @@ from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
 from fleet_rlm.optimize.validation import IsolatedFleetProgram, score_split
 from fleet_rlm.replay import encode_snapshot
 
+EVENT_PREFIX = "FLEET_EVENT "
+
+
+def worker_events(output: str) -> list[dict]:
+    """Decode the worker's structured event lines, ignoring ordinary CLI prose."""
+    return [json.loads(line[len(EVENT_PREFIX) :]) for line in output.splitlines() if line.startswith(EVENT_PREFIX)]
+
 
 class Example:
     def __init__(self, task: str, source: str, critical: bool = False) -> None:
@@ -497,9 +504,9 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     store = SimpleNamespace(replay_snapshot=lambda _session, _turn: (snapshot_digest, compressed))
     built_models = []
     monkeypatch.setattr(
-        FleetSettings,
-        "build_lms",
-        lambda config: built_models.append(config.fleet_root_model) or (None, None, None, None),
+        validation,
+        "build_lm",
+        lambda _config, model_id, role: built_models.append((model_id, role)) or None,
     )
 
     class Manager:
@@ -549,7 +556,10 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     else:
         engine = factory(example, program)
         assert {path: (tmp_path / path).read_bytes() for path in files} == files
-        assert built_models == ["openai/current-deployment"]
+        assert built_models == [
+            (current.fleet_root_model, "root"),
+            (current.fleet_sub_model, "sub"),
+        ]
         assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
         assert engine.compiled_path is None
 
@@ -722,6 +732,26 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
         approve_candidate(candidate, manifest, active, evidence=new_evidence)
 
 
+def test_approval_rejects_changed_effective_generation_with_identical_raw_settings(tmp_path, monkeypatch):
+    config = tmp_path / "fleet.toml"
+    config.write_text("[config]\nschema_version=5\n")
+    monkeypatch.setenv("FLEET_CONFIG", str(config))
+    inherited = FleetSettings(_env_file=None, fleet_llm_max_tokens=100)
+    explicit = inherited.with_explicit_overrides(fleet_root_max_tokens=16384)
+    assert inherited.model_dump() == explicit.model_dump()
+    monkeypatch.setattr(artifacts, "optimization_code_digest", lambda: "fixed-code")
+    monkeypatch.setattr(artifacts, "installed_dependency_fingerprint", lambda: "fixed-dependencies")
+    previous = artifacts.approval_evidence(inherited, "", scorer_version=SCORER_VERSION)
+    current = artifacts.approval_evidence(explicit, "", scorer_version=SCORER_VERSION)
+    candidate, active = tmp_path / "candidate.json", tmp_path / "active.json"
+    candidate.write_text('{"candidate":1}')
+    manifest = replace(_manifest(candidate, "s1-1", _evaluation()), dependencies=previous)
+
+    with pytest.raises(ValueError, match="stale"):
+        approve_candidate(candidate, manifest, active, evidence=current)
+    assert not active.exists()
+
+
 def test_approval_evidence_uses_sorted_installed_distribution_identity(monkeypatch) -> None:
     monkeypatch.setattr(
         artifacts,
@@ -799,6 +829,7 @@ def test_final_validation_traces_link_each_case_to_optimization_run(monkeypatch)
         def forward(self, task):
             return dspy.Prediction(answer=task)
 
+    monkeypatch.setattr(validation.mlflow, "get_current_active_span", lambda: None)
     monkeypatch.setattr(validation.mlflow, "start_span", start_span)
     result = validation.score_stage(
         Program(),
@@ -1004,7 +1035,6 @@ def test_changed_components_detects_flex_source_and_predictor_instruction_change
 def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatch, capsys, interrupted) -> None:
     """The loop closes: an approved candidate is the file the Session engine reloads and runs next Turn."""
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
-    from fleet_rlm.optimization_runs import parse_event
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     lm = dspy.LM("openai/test", engine="lm15", cache=False)
@@ -1058,8 +1088,8 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
     )
     assert store.initialized is True
     assert store.migration_pool_closed is True
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    assert [event["status"] for event in events if event and event["type"] == "terminal"] == ["approved"]
+    events = worker_events(capsys.readouterr().out)
+    assert [event["status"] for event in events if event["type"] == "terminal"] == ["approved"]
     record = store.get_optimization_run("sess_loop", version)
     assert record["status"] == "approved"
     with pytest.raises(ValueError, match="only a completed"):
@@ -1077,7 +1107,6 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
 def test_managed_approval_leaves_terminal_transition_to_api_parent(
     tmp_path, monkeypatch, capsys, stale_evidence
 ) -> None:
-    from fleet_rlm.optimization_runs import parse_event
 
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     version = "sess-managed-approval"
@@ -1153,13 +1182,12 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     assert next(i for i, (event, _) in enumerate(store.events) if event == "store.close") < next(
         i for i, (event, _) in enumerate(store.events) if event == "lease.close"
     )
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    terminal = next(event for event in events if event and event["type"] == "terminal")
+    events = worker_events(capsys.readouterr().out)
+    terminal = next(event for event in events if event["type"] == "terminal")
     assert terminal["status"] == expected
 
 
 def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_path, capsys) -> None:
-    from fleet_rlm.optimization_runs import parse_event
 
     captured = {}
     store = MemoryOptimizationStore()
@@ -1194,8 +1222,8 @@ def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_pat
     assert store.initialized is True
     assert store.migration_pool_closed is True
     assert captured["closed"] is True
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    assert [event["type"] for event in events if event] == ["started", "terminal"]
+    events = worker_events(capsys.readouterr().out)
+    assert [event["type"] for event in events] == ["started", "terminal"]
 
 
 @pytest.mark.parametrize("phase", ["search", "validation"])
@@ -1272,7 +1300,7 @@ def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypa
     def forbidden(*_args, **_kwargs):
         pytest.fail("Unusable splits must not start search or build serving models")
 
-    monkeypatch.setattr(FleetSettings, "build_lms", forbidden)
+    monkeypatch.setattr(workflow, "build_lm", forbidden)
     monkeypatch.setattr(dspy, "GEPA", forbidden)
     with pytest.raises(ValueError, match=r"critical holdout.*'holdout'.*'examples': 1"):
         workflow._compile(
@@ -1316,6 +1344,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         _env_file=None,
         compiled_program_dir=str(tmp_path),
         fleet_root_cache=True,
+        fleet_reflection_adapter="json",
         fleet_daytona_api_key="k",
         fleet_daytona_org_id="o",
         fleet_daytona_volume_id="v",
@@ -1330,7 +1359,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
     )
     store.settings["s1"] = {"mode": "flex", "models": {"root": "openai/deployed-root", "sub": "openai/deployed-sub"}}
-    monkeypatch.setattr(FleetSettings, "build_lms", lambda _self: (lm, lm, lm, None))
+    monkeypatch.setattr(workflow, "build_lm", lambda _settings, _model_id, _role: lm)
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
     train, dev, holdout = [
         [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
@@ -1345,12 +1374,25 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     searched = []
     optimizer_kwargs = {}
 
+    def judge_metric(*_args, **kwargs):
+        assert kwargs["judge_lm"] is lm
+        assert type(dspy.settings.adapter) is dspy.ChatAdapter
+        return dspy.Prediction(score=1.0)
+
+    monkeypatch.setattr(workflow, "fleet_metric", judge_metric)
+
     class Optimizer:
         def __init__(self, **kwargs):
             assert "code_proposer" not in kwargs
+            assert isinstance(dspy.settings.adapter, dspy.JSONAdapter)
+            assert kwargs["instruction_proposer"].adapter is dspy.settings.adapter
             optimizer_kwargs.update(kwargs)
 
         def compile(self, baseline, *, trainset, valset):
+            reflection_adapter = dspy.settings.adapter
+            assert isinstance(reflection_adapter, dspy.JSONAdapter)
+            optimizer_kwargs["metric"](dspy.Example(task="fixture"), dspy.Prediction(answer="answer"))
+            assert dspy.settings.adapter is reflection_adapter
             if cancel_after_validation == "interrupt_search":
                 raise KeyboardInterrupt
             reporter = optimizer_kwargs["gepa_kwargs"]["callbacks"][0]
@@ -1387,6 +1429,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     measured = []
 
     def score(program, actual_dev, actual_holdout, _metric, _threads, **_kwargs):
+        assert not isinstance(dspy.settings.adapter, dspy.JSONAdapter)
         if cancel_after_validation == "interrupt_validation":
             raise KeyboardInterrupt
         assert searched and actual_dev is dev and actual_holdout is holdout
@@ -1540,7 +1583,7 @@ def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
     digest = optimization_code_digest()
     assert len(digest) == 64 and digest == optimization_code_digest()
     assert {
-        "adapters.py",
+        "models.py",
         "contracts.py",
         "execution_evidence.py",
         "optimization_runs.py",
@@ -1700,12 +1743,14 @@ def test_database_stop_fence_is_checked_at_safe_boundaries(tmp_path) -> None:
         [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
     )
     stop_file = tmp_path / "runs" / "s1-run" / "gepa.stop"
+    stopper = workflow._DatabaseStopper(store, "s1", "s1-run")
 
+    workflow._check_cancelled(stop_file)
     assert not workflow._database_stop_requested(store, "s1", "s1-run")
+    assert not stopper(None)
     store.records[("s1", "s1-run")]["stop_requested"] = True
     assert workflow._database_stop_requested(store, "s1", "s1-run")
-    with pytest.raises(workflow.OptimizationCancelledError, match="stop requested"):
-        workflow._check_run_cancelled(stop_file, store, "s1", "s1-run")
+    assert stopper(None)
 
 
 def test_run_persists_cancellation_without_candidate(tmp_path, monkeypatch) -> None:
@@ -1801,7 +1846,6 @@ def test_standalone_preserves_live_api_pending_launch(tmp_path, monkeypatch):
 
 
 def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outcome(tmp_path, monkeypatch, capsys):
-    from fleet_rlm.optimization_runs import parse_event
 
     run_id = "s1-managed"
     store = MemoryOptimizationStore(
@@ -1834,11 +1878,7 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
         workflow.run(args, parser, settings)
     outcome = store.get_optimization_run("s1", run_id)["worker_outcome"]
     assert outcome["status"] == "cancelled" and outcome["candidate_version"] is None
-    terminals = [
-        event
-        for line in capsys.readouterr().out.splitlines()
-        if (event := parse_event(line)) and event["type"] == "terminal"
-    ]
+    terminals = [event for event in worker_events(capsys.readouterr().out) if event["type"] == "terminal"]
     assert len(terminals) == 1
     assert terminals[0]["status"] == "cancelled"
     assert terminals[0]["worker_outcome"] == outcome
@@ -1846,7 +1886,6 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
 
 
 def test_managed_run_records_worker_outcome_without_publishing_terminal_status(tmp_path, monkeypatch, capsys) -> None:
-    from fleet_rlm.optimization_runs import parse_event
 
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     run_id = "sess-managed-run"
@@ -1886,8 +1925,8 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
     assert record["status"] == "running"
     assert record["worker_outcome"]["status"] == "completed"
     assert store.initialized is False
-    events = [parse_event(line) for line in capsys.readouterr().out.splitlines()]
-    terminal = next(event for event in events if event and event["type"] == "terminal")
+    events = worker_events(capsys.readouterr().out)
+    terminal = next(event for event in events if event["type"] == "terminal")
     assert terminal["status"] == "completed"
     assert terminal["worker_outcome"]["status"] == "completed"
 
@@ -2253,3 +2292,44 @@ def test_optional_tracking_close_receives_body_failure_and_preserves_it(monkeypa
         failing_body()
     assert exits[0][0] is ValueError and exits[0][1] is error and exits[0][2] is not None
     assert "private telemetry teardown credential" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("overrides", "warns"),
+    [
+        ({}, True),
+        ({"fleet_reflection_model": "openai/shared"}, True),
+        ({"fleet_root_model": "openai/shared"}, True),
+        ({"fleet_reflection_model": "openai/other"}, False),
+    ],
+)
+def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, tmp_path, capsys, overrides, warns):
+    settings = FleetSettings(
+        _env_file=None, fleet_llm_model="openai/shared", compiled_program_dir=str(tmp_path), **overrides
+    )
+    store = MemoryOptimizationStore([{"session_id": "s1", "run_id": "run", "status": "running", "owner_id": "owner"}])
+    lm = SimpleNamespace()
+    monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
+    monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
+    monkeypatch.setattr(workflow, "build_lm", lambda *_args: lm)
+    splits = tuple([Example(name, name, critical=name == "holdout")] for name in ("train", "dev", "holdout"))
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kwargs: splits)
+
+    class ReachedTemplateError(Exception):
+        pass
+
+    def stop_before_runtime(*_args, **_kwargs):
+        raise ReachedTemplateError
+
+    monkeypatch.setattr(workflow, "DaytonaSandboxManager", stop_before_runtime)
+    with pytest.raises(ReachedTemplateError):
+        workflow._compile(
+            SimpleNamespace(validation_ratio=0.2),
+            settings,
+            store,
+            "s1",
+            settings.mlflow_target(),
+            "run",
+            owner_id="owner",
+        )
+    assert ("equals the serving model" in capsys.readouterr().out) is warns

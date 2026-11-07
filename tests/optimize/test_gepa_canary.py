@@ -38,23 +38,32 @@ def test_canary_rollout_satisfies_isolated_program_runtime_contract():
     assert cleanup == ["shutdown"]
 
 
-def test_canary_instruction_probe_uses_reflection_lm(monkeypatch, tmp_path):
+@pytest.mark.parametrize("adapter_type", [dspy.ChatAdapter, dspy.JSONAdapter])
+def test_canary_instruction_probe_uses_reflection_lm(monkeypatch, tmp_path, adapter_type):
     import json
     import sys
 
     namespace = _canary_namespace()
     main = namespace["main"]
     serving = DummyLM([{"answer": "4"}])
-    reflection = DummyLM([{"new_instruction": "Add the integers correctly."}], adapter=dspy.JSONAdapter())
+    reflection_adapter = adapter_type()
+    reflection = DummyLM([{"new_instruction": "Add the integers correctly."}], adapter=reflection_adapter)
     ambient = DummyLM([{"answer": "unexpected ambient call"}])
     settings = SimpleNamespace(
+        fleet_root_model="serving-model",
+        fleet_reflection_model="reflection-model",
         fleet_daytona_api_key="offline",
         fleet_daytona_org_id="offline",
         fleet_daytona_volume_id="offline",
-        build_lms=lambda: (serving, serving, reflection, None),
         build_judge_lm=lambda: serving,
+        resolved_model=lambda role: SimpleNamespace(
+            build_adapter=lambda: reflection_adapter if role == "reflection" else dspy.ChatAdapter()
+        ),
     )
     settings.with_explicit_overrides = lambda **_kwargs: settings
+    monkeypatch.setitem(
+        main.__globals__, "build_lm", lambda _settings, _model_id, role: reflection if role == "reflection" else serving
+    )
     monkeypatch.setitem(main.__globals__, "FleetSettings", lambda **_kwargs: settings)
     monkeypatch.setitem(
         main.__globals__,
@@ -68,14 +77,19 @@ def test_canary_instruction_probe_uses_reflection_lm(monkeypatch, tmp_path):
     )
     monkeypatch.setitem(main.__globals__, "IsolatedFleetProgram", lambda seed, _factory: seed)
 
-    def stop_before_search(**_kwargs):
+    def stop_before_search(**kwargs):
+        assert dspy.settings.adapter is reflection_adapter
+        assert kwargs["instruction_proposer"].adapter is reflection_adapter
         raise RuntimeError("Offline test stops after the two native probes")
 
     monkeypatch.setattr(dspy, "GEPA", stop_before_search)
     report_path = tmp_path / "report.json"
     monkeypatch.setattr(sys, "argv", ["verify_gepa_live.py", "--live", "--output", str(report_path)])
-    with dspy.context(lm=ambient), pytest.raises(SystemExit, match="1"):
-        main()
+    ambient_adapter = dspy.ChatAdapter()
+    with dspy.context(lm=ambient, adapter=ambient_adapter):
+        with pytest.raises(SystemExit, match="1"):
+            main()
+        assert dspy.settings.adapter is ambient_adapter
 
     report = json.loads(report_path.read_text())
     assert report["serving_probe"] is True

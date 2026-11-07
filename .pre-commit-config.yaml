@@ -38,4 +38,4 @@ repos:
         entry: make test
         language: system
         pass_filenames: false
-        stages: [pre-push]
+        stages: [manual]

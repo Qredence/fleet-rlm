@@ -222,7 +222,6 @@ from dspy.lm15 import Message, Response, Usage
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.contracts import Route
-from fleet_rlm.adapters import FleetRLMChatAdapter
 from fleet_rlm.observability import decision_usage, usage_callbacks
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
@@ -266,7 +265,7 @@ with mlflow.start_span(name="fleet_turn") as root:
         result = engine(workspace_manifest="", memory_summary="", task="return five")
     assert result.answer == "5" and result.lm_calls == 1
     with dspy.context(lm=lm, callbacks=usage_callbacks(list(dspy.settings.callbacks)),
-                      adapter=FleetRLMChatAdapter(), disable_history=True, track_usage=True):
+                      adapter=dspy.ChatAdapter(), disable_history=True, track_usage=True):
         repaired = dspy.Predict("task -> answer")(task="return five")
     assert repaired.answer == "5"
     trace_id = root.trace_id

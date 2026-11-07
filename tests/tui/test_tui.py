@@ -328,7 +328,7 @@ def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selecte
             writes.append(json.loads(request.content))
             return httpx.Response(200, json=writes[-1])
         if request.url.path == "/models":
-            assert request.url.params["scope"] == "system.ai"
+            assert request.url.params["role"] == "sub"
             return httpx.Response(200, json={"models": ["openai/system.ai.alpha", "openai/system.ai.beta"]})
         return httpx.Response(200, json={"mode": "rlm", "models": {"root": "openai/system.ai.alpha"}})
 
@@ -1560,3 +1560,22 @@ def test_review_request_retries_keep_id_until_known_outcome_then_rotate() -> Non
             assert screen._review_request_id(record["run_id"], "approved") == retry
 
     asyncio.run(scenario())
+
+
+def test_discovery_error_keeps_manual_native_provider_selection_available(monkeypatch):
+    output, _console = _capture_console(monkeypatch, width=100)
+    writes = []
+
+    def handle(request):
+        if request.method == "PUT":
+            payload = json.loads(request.content)
+            writes.append(payload)
+            return httpx.Response(200, json=payload)
+        return httpx.Response(503, json={"detail": "private provider credential"})
+
+    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
+        commands.handle_command(client, "/model root", "s1")
+        commands.handle_command(client, "/model root anthropic/manual-route", "s1")
+    assert writes == [{"role": "root", "model": "anthropic/manual-route"}]
+    assert "discovery is unavailable" in output.getvalue()
+    assert "private provider credential" not in output.getvalue()

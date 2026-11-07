@@ -17,9 +17,10 @@ from starlette.background import BackgroundTask
 
 from fleet_rlm.api.deps import LOCKED, LockedRuntime, Runtime, Settings, session_lock, translate
 from fleet_rlm.api.schemas import Attached, Deleted, Files, FileStat, FileWritten, WorkspaceWriteRequest
+from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
 router = APIRouter(tags=["workspace"])
-_MAX_FILE_BYTES = 25_000_000
+_MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES
 
 
 def _list_files(session_id: str, runtime: Runtime) -> Files:
