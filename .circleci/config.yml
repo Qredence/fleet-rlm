@@ -29,23 +29,10 @@ parameters:
     type: string
     default: ""
 
+functions:
+  setup-github-cli: github.com/circleci-functions/setup-github-cli@v0.3.0
+
 commands:
-  install-gh:
-    steps:
-      - run:
-          name: Install GitHub CLI
-          command: |
-            if ! command -v gh >/dev/null; then
-              # Try system install first; if the package is unavailable, add the official GitHub CLI repo and retry
-              if ! (sudo apt-get update && sudo apt-get install -y gh); then
-                echo "Installing GitHub CLI from official repository..."
-                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null
-                sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-                sudo apt-get update
-                sudo apt-get install -y gh
-              fi
-            fi
 
   install-uv:
     steps:
@@ -169,7 +156,9 @@ jobs:
       - image: cimg/python:3.12
     resource_class: small
     steps:
-      - install-gh
+      - setup-github-cli:
+          with:
+            version: "2.103.3"
       - checkout:
           method: full
       - run:
@@ -203,7 +192,9 @@ jobs:
       FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
       FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
     steps:
-      - install-gh
+      - setup-github-cli:
+          with:
+            version: "2.103.3"
       - checkout
       - run:
           name: Create exact-source GitHub deployment
@@ -234,7 +225,9 @@ jobs:
       - image: cimg/python:3.12
     resource_class: small
     steps:
-      - install-gh
+      - setup-github-cli:
+          with:
+            version: "2.103.3"
       - checkout
       - attach_workspace:
           at: .
@@ -254,7 +247,9 @@ jobs:
       - image: cimg/python:3.12
     resource_class: small
     steps:
-      - install-gh
+      - setup-github-cli:
+          with:
+            version: "2.103.3"
       - setup-python:
           python-version: "3.12"
           use-workspace-venv: true
@@ -903,7 +898,9 @@ jobs:
       - checkout
       - attach_workspace:
           at: .
-      - install-gh
+      - setup-github-cli:
+          with:
+            version: "2.103.3"
       - run:
           name: Publish captured notes and verified assets or verify an exact retry
           command: |
