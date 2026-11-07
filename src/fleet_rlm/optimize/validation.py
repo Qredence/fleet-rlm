@@ -9,7 +9,8 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from statistics import median
@@ -28,32 +29,143 @@ from fleet_rlm.store import Store
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 
+class RolloutCleanupError(RuntimeError):
+    """An isolated runtime did not confirm cleanup; its run cannot certify evidence."""
+
+
+class RolloutCleanup:
+    """Keep cleanup failure and admitted attempts outside native DSPy scoring semantics."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._active = 0
+        self._closed = False
+        self._unconfirmed: list[DaytonaSandboxManager] = []
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> RolloutCleanup:
+        # Native candidate copies share the run's owner, never copies of its locks or latch.
+        memo[id(self)] = self
+        return self
+
+    def should_stop(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Ask native GEPA to stop cooperatively after cleanup uncertainty."""
+        with self._condition:
+            return bool(self._unconfirmed)
+
+    def raise_if_failed(self) -> None:
+        """Reject evidence even when DSPy converted an exception to a failure score."""
+        if self.should_stop():
+            raise RolloutCleanupError("Isolated sandbox cleanup is unconfirmed; run evidence is invalid")
+
+    @contextmanager
+    def attempt(self) -> Generator[None]:
+        """Admit one attempt through setup, execution and cleanup, without serializing work."""
+        with self._condition:
+            self.raise_if_failed()
+            if self._closed:
+                raise RolloutCleanupError("Isolated rollout admission is closed")
+            self._active += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._condition.notify_all()
+
+    def shutdown(self, manager: DaytonaSandboxManager, error: BaseException | None = None) -> None:
+        """Confirm cleanup once, retaining uncertain identities without masking a primary error."""
+        interruption = None
+        try:
+            confirmed = manager.shutdown() is True
+        except BaseException as cleanup_error:
+            confirmed = False
+            if not isinstance(cleanup_error, Exception):
+                interruption = cleanup_error
+        if confirmed:
+            return
+        with self._condition:
+            self._unconfirmed.append(manager)
+        # Keep the existing allocation journals; these identities locate them for recovery.
+        logging.getLogger(__name__).warning(
+            "Isolated cleanup unconfirmed for Session %s agent %s; allocation journal retained",
+            manager.session_id,
+            manager.agent_id,
+        )
+        if error is not None:
+            error.add_note("Isolated sandbox cleanup is unconfirmed; allocation journal retained")
+            return
+        if interruption is not None:
+            raise interruption
+        self.raise_if_failed()
+
+    def close(self) -> None:
+        """Close admission and drain admitted attempts before propagating an interrupt."""
+        interruption = None
+        while True:
+            try:
+                with self._condition:
+                    self._closed = True
+                    self._condition.wait_for(lambda: self._active == 0)
+                break
+            except KeyboardInterrupt as error:
+                if interruption is None:
+                    interruption = error
+        if interruption is not None:
+            raise interruption
+
+    @contextmanager
+    def run(self) -> Generator[None]:
+        """Drain before worker finalization, preserving the original failure or cancellation."""
+        try:
+            yield
+        except BaseException as error:
+            try:
+                self.close()
+            except KeyboardInterrupt:
+                error.add_note("SIGINT received during drain; admitted rollouts finished before propagation")
+            if self.should_stop():
+                error.add_note("Isolated sandbox cleanup is unconfirmed; run evidence is invalid")
+            raise
+        else:
+            self.close()
+            self.raise_if_failed()
+
+
 class IsolatedFleetProgram(dspy.Module):
     """Expose candidate predictors while giving every rollout a private runtime."""
 
-    def __init__(self, program: dspy.Module, engine_factory: Any):
+    def __init__(self, program: dspy.Module, engine_factory: Any, cleanup: RolloutCleanup | None = None):
         """Wrap the program so each forward call builds its own engine."""
         super().__init__()
         self.program = program
         self.engine_factory = engine_factory
+        self.cleanup = cleanup if cleanup is not None else RolloutCleanup()
 
     def forward(self, **inputs: Any) -> dspy.Prediction:
         """Run one rollout in a fresh engine and always shut that engine's sandbox down."""
-        engine = self.engine_factory(dspy.Example(**inputs), self.program)
-        try:
-            arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
-            if engine.optimization is not None:
-                arguments["context"] = engine.optimization.context
-            return engine(**arguments)
-        finally:
-            engine.sandbox_mgr.shutdown()
+        with self.cleanup.attempt():
+            engine = self.engine_factory(dspy.Example(**inputs), self.program)
+            error = None
+            try:
+                arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
+                if engine.optimization is not None:
+                    arguments["context"] = engine.optimization.context
+                return engine(**arguments)
+            except BaseException as exc:
+                error = exc
+                raise
+            finally:
+                self.cleanup.shutdown(engine.sandbox_mgr, error)
 
 
-def build_isolated_engine_factory(settings: FleetSettings, store: Store, examples: Any = ()) -> Any:
+def build_isolated_engine_factory(
+    settings: FleetSettings, store: Store, examples: Any = (), *, cleanup: RolloutCleanup | None = None
+) -> Any:
     """Return a factory that builds disposable replay engines with verified immutable inputs.
 
     Each fresh engine receives an independent copy of the candidate's native state.
     Serving LMs are shared within this factory; callers own cleanup of returned engines.
+    Supply the same cleanup owner to this factory and its rollout wrappers for a run.
     """
     from fleet_rlm.execution_evidence import verification_entries
 
@@ -64,6 +176,7 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
         for item in examples
     }
 
+    cleanup = cleanup if cleanup is not None else RolloutCleanup()
     shared: list[Any] = []
     shared_lock = threading.Lock()
 
@@ -136,8 +249,8 @@ def build_isolated_engine_factory(settings: FleetSettings, store: Store, example
                 ),
             )
             return engine
-        except BaseException:
-            manager.shutdown()
+        except BaseException as error:
+            cleanup.shutdown(manager, error)
             raise
 
     return create

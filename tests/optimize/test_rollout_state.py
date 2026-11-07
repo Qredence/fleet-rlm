@@ -1,6 +1,8 @@
 """Offline parity and ownership contracts for native rollout state transport."""
 
 import json
+import os
+import signal
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +17,7 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, Route
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.optimize import validation
-from fleet_rlm.optimize.validation import IsolatedFleetProgram
+from fleet_rlm.optimize.validation import IsolatedFleetProgram, RolloutCleanup, RolloutCleanupError
 from fleet_rlm.replay import encode_snapshot
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from tests.optimize.test_native_gepa import REVISED_SOURCE, ScriptedCodeInterpreter, lookup
@@ -180,12 +182,14 @@ def rollout(monkeypatch):
 
     def shutdown(self):
         self.shutdown_calls += 1
+        return True
 
     monkeypatch.setattr(validation, "DaytonaSandboxManager", manager)
     monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", write)
     monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
     models = {"root": candidate.root_lm, "sub": candidate.sub_lm}
     monkeypatch.setattr(validation, "build_lm", lambda _settings, _model_id, role: models[role])
+    cleanup = RolloutCleanup()
     factory = validation.build_isolated_engine_factory(
         FleetSettings(
             _env_file=None,
@@ -195,12 +199,13 @@ def rollout(monkeypatch):
             fleet_daytona_volume_id="volume",
         ),
         SimpleNamespace(replay_snapshot=lambda *_args: (digest, compressed)),
+        cleanup=cleanup,
     )
-    return candidate, example, factory, managers
+    return candidate, example, factory, managers, cleanup
 
 
 def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_files(rollout, monkeypatch):
-    candidate, example, factory, managers = rollout
+    candidate, example, factory, managers, _cleanup = rollout
     before = deepcopy(candidate.dump_state())
 
     def refuse(*_args, **_kwargs):
@@ -241,13 +246,15 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
 
 
 @pytest.mark.parametrize("failure", ["copy", "load", "restore", "execute"])
-@pytest.mark.parametrize("cleanup_fails", [False, True])
-def test_rollout_failure_has_one_cleanup_owner(rollout, monkeypatch, failure, cleanup_fails):
-    candidate, example, factory, managers = rollout
+@pytest.mark.parametrize("cleanup_result", [True, False, "raises"])
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_rollout_failure_has_one_cleanup_owner(rollout, monkeypatch, failure, cleanup_result, error_type):
+    candidate, example, factory, managers, cleanup = rollout
     before = deepcopy(candidate.dump_state())
+    original = error_type(failure)
 
     def fail(*_args, **_kwargs):
-        raise RuntimeError(failure)
+        raise original
 
     if failure == "copy":
         monkeypatch.setattr(validation, "deepcopy", fail)
@@ -258,32 +265,37 @@ def test_rollout_failure_has_one_cleanup_owner(rollout, monkeypatch, failure, cl
     else:
         monkeypatch.setattr(AdaptiveFleetEngine, "forward", fail)
 
-    if cleanup_fails:
-
-        def uncertain(self):
-            self.shutdown_calls += 1
+    def shutdown(self):
+        self.shutdown_calls += 1
+        if cleanup_result == "raises":
             raise OSError("cleanup unconfirmed")
+        return cleanup_result
 
-        monkeypatch.setattr(DaytonaSandboxManager, "shutdown", uncertain)
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
 
-    isolated = IsolatedFleetProgram(candidate, factory)
-    with pytest.raises(
-        OSError if cleanup_fails else RuntimeError, match="cleanup unconfirmed" if cleanup_fails else failure
-    ):
+    isolated = IsolatedFleetProgram(candidate, factory, cleanup)
+    with pytest.raises(error_type, match=failure) as raised:
         isolated(**example.inputs())
+    assert raised.value is original
     assert len(managers) == 1 and managers[0].shutdown_calls == 1
     assert candidate.dump_state() == before
+    if cleanup_result is True:
+        cleanup.raise_if_failed()
+    else:
+        assert any("cleanup is unconfirmed" in note for note in original.__notes__)
+        with pytest.raises(RolloutCleanupError):
+            cleanup.raise_if_failed()
 
 
 def test_factory_rejects_wrapper_state_before_allocating_runtime(rollout):
-    candidate, example, factory, managers = rollout
+    candidate, example, factory, managers, _cleanup = rollout
     with pytest.raises(TypeError, match="Fleet engine candidate"):
         factory(example, IsolatedFleetProgram(candidate, factory))
     assert managers == []
 
 
 def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypatch, tmp_path):
-    candidate, example, factory, managers = rollout
+    candidate, example, factory, managers, cleanup = rollout
     seen = []
 
     def tracked_factory(item, program):
@@ -292,7 +304,7 @@ def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypa
         return factory(item, program)
 
     monkeypatch.setattr(AdaptiveFleetEngine, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
-    baseline = IsolatedFleetProgram(candidate, tracked_factory)
+    baseline = IsolatedFleetProgram(candidate, tracked_factory, cleanup)
     optimizer = dspy.GEPA(
         metric=lambda *_args: dspy.Prediction(score=1.0, feedback="Reviewed answer"),
         reflection_lm=dspy.utils.DummyLM([]),
@@ -311,3 +323,160 @@ def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypa
     optimized.save(str(artifact))
     assert set(json.loads(artifact.read_text())) == {*optimized.dump_state(), "metadata"}
     assert all(manager.shutdown_calls == 1 for manager in managers)
+
+
+@pytest.mark.parametrize("cleanup_result", [False, None, "raises"])
+@pytest.mark.parametrize("native", ["evaluate", "gepa"])
+def test_native_scoring_cannot_clear_cleanup_failure(rollout, monkeypatch, cleanup_result, native):
+    candidate, example, factory, managers, cleanup = rollout
+    monkeypatch.setattr(AdaptiveFleetEngine, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        if cleanup_result == "raises":
+            raise OSError("private cleanup details")
+        return cleanup_result
+
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
+    baseline = IsolatedFleetProgram(candidate, factory, cleanup)
+
+    def metric(*_args):
+        return pytest.fail("An unconfirmed rollout must not reach the metric")
+
+    if native == "evaluate":
+        result = validation.score_split(baseline, [example], metric, 1)
+        assert result.errors == 1 and result.scores == [0.0]
+        assert result.failures[0]["type"] == "RolloutCleanupError"
+    else:
+        optimized = dspy.GEPA(
+            metric=metric,
+            reflection_lm=dspy.utils.DummyLM([]),
+            max_metric_calls=1,
+            num_threads=1,
+            use_merge=False,
+            reflection_minibatch_size=1,
+            gepa_kwargs={"stop_callbacks": [cleanup.should_stop]},
+        ).compile(baseline, trainset=[example], valset=[example])
+        with pytest.raises(RolloutCleanupError, match="unconfirmed"):
+            optimized(**example.inputs())
+    assert len(managers) == 1 and managers[0].shutdown_calls == 1
+    with pytest.raises(RolloutCleanupError, match="evidence is invalid"):
+        cleanup.raise_if_failed()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_run_drains_late_cleanup_and_closes_admission_without_masking_cancellation(rollout, monkeypatch, cancel):
+    candidate, example, factory, managers, cleanup = rollout
+    entered = threading.Barrier(3)
+    release = threading.Event()
+    closing = threading.Event()
+    original = KeyboardInterrupt("stop")
+
+    def forward(_self, **_kwargs):
+        entered.wait(timeout=10)
+        assert release.wait(timeout=10)
+        return dspy.Prediction(answer="right")
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        return False
+
+    monkeypatch.setattr(AdaptiveFleetEngine, "forward", forward)
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
+    baseline = IsolatedFleetProgram(candidate, factory, cleanup)
+
+    def finish():
+        with cleanup.run():
+            closing.set()
+            if cancel:
+                raise original
+            cleanup.close()
+            cleanup.raise_if_failed()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        attempts = [pool.submit(baseline, **example.inputs()) for _ in range(2)]
+        entered.wait(timeout=10)
+        finalized = pool.submit(finish)
+        assert closing.wait(timeout=10)
+        try:
+            with pytest.raises(TimeoutError):
+                finalized.result(timeout=0.05)
+            with pytest.raises(RolloutCleanupError, match="admission is closed"):
+                baseline(**example.inputs())
+        finally:
+            release.set()
+        for attempt in attempts:
+            with pytest.raises(RolloutCleanupError):
+                attempt.result(timeout=10)
+        with pytest.raises(KeyboardInterrupt if cancel else RolloutCleanupError) as raised:
+            finalized.result(timeout=10)
+    if cancel:
+        assert raised.value is original
+        assert any("cleanup is unconfirmed" in note for note in original.__notes__)
+    assert len(managers) == 2
+    assert len({manager.session_id for manager in managers}) == 2
+    assert all(manager.shutdown_calls == 1 for manager in managers)
+
+
+@pytest.mark.parametrize("primary", [None, ValueError, KeyboardInterrupt])
+def test_sigint_during_drain_waits_for_attempt_and_preserves_primary(monkeypatch, primary):
+    cleanup = RolloutCleanup()
+    original = primary("primary failure") if primary is not None else None
+    interruption = KeyboardInterrupt("SIGINT during drain")
+    admitted = threading.Event()
+    waiting = threading.Event()
+    delivered = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    exited = threading.Event()
+    wait = cleanup._condition.wait
+
+    def observe_wait(timeout=None):
+        waiting.set()
+        return wait(timeout)
+
+    # Observe the wait only to deliver the signal at the failing boundary, not to
+    # assert an implementation detail. Assertions below concern completion/error identity.
+    monkeypatch.setattr(cleanup._condition, "wait", observe_wait)
+
+    def interrupt(_signum, _frame):
+        delivered.set()
+        raise interruption
+
+    previous_handler = signal.signal(signal.SIGINT, interrupt)
+
+    def attempt():
+        with cleanup.attempt():
+            admitted.set()
+            assert release.wait(timeout=10)
+            completed.set()
+
+    def send_signal():
+        try:
+            assert waiting.wait(timeout=10)
+            os.kill(os.getpid(), signal.SIGINT)
+            assert delivered.wait(timeout=10)
+            return exited.wait(timeout=0.05)
+        finally:
+            release.set()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            active = pool.submit(attempt)
+            assert admitted.wait(timeout=10)
+            sender = pool.submit(send_signal)
+            try:
+                with pytest.raises(BaseException) as raised, cleanup.run():
+                    if original is not None:
+                        raise original
+                assert completed.is_set(), "Run must not exit while an admitted attempt is active"
+                assert raised.value is (original if original is not None else interruption)
+            finally:
+                exited.set()
+            assert sender.result(timeout=10) is False, "SIGINT must not bypass the drain"
+            active.result(timeout=10)
+        with pytest.raises(RolloutCleanupError, match="admission is closed"), cleanup.attempt():
+            pytest.fail("Closed run must not admit another attempt")
+    finally:
+        release.set()
+        signal.signal(signal.SIGINT, previous_handler)

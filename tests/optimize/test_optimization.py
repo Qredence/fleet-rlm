@@ -943,6 +943,7 @@ def test_isolated_rollouts_retain_candidate_instructions_without_sharing_runtime
 
         def close(self):
             self.closed = True
+            return True
 
         def forward(self, task):
             self.turns += 1
@@ -1327,6 +1328,11 @@ def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypa
         "validation_write_failure",
         "owner_loss",
         "db_cancel",
+        "cleanup_search",
+        "cleanup_incumbent",
+        "cleanup_candidate",
+        "cleanup_late",
+        "cleanup_cancel",
         "optional_tracking",
         "optional_stdout",
         "optional_tracking_setup",
@@ -1335,6 +1341,8 @@ def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypa
 def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     monkeypatch, tmp_path, cancel_after_validation
 ):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
     from contextlib import nullcontext
 
     from fleet_rlm.engine.programs import AdaptiveFleetEngine
@@ -1366,11 +1374,29 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     ]
     monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
     factories = []
-    monkeypatch.setattr(
-        workflow,
-        "build_isolated_engine_factory",
-        lambda config, _store, _examples=(): factories.append(config) or (lambda *_args: None),
-    )
+    late_entered = threading.Event()
+    release_late = threading.Event()
+    late_attempts = []
+
+    class Runtime:
+        optimization = None
+
+        def __init__(self):
+            self.sandbox_mgr = SimpleNamespace(
+                session_id="opt-fixture", agent_id="fixture-agent", shutdown=lambda: False
+            )
+
+        def __call__(self, **_kwargs):
+            if cancel_after_validation == "cleanup_late":
+                late_entered.set()
+                assert release_late.wait(timeout=10)
+            return dspy.Prediction(answer="right")
+
+    def factory(config, _store, _examples=(), **_kwargs):
+        factories.append(config)
+        return lambda *_args: Runtime()
+
+    monkeypatch.setattr(workflow, "build_isolated_engine_factory", factory)
     searched = []
     optimizer_kwargs = {}
 
@@ -1395,6 +1421,12 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             assert dspy.settings.adapter is reflection_adapter
             if cancel_after_validation == "interrupt_search":
                 raise KeyboardInterrupt
+            if cancel_after_validation in {"cleanup_search", "cleanup_cancel"}:
+                result = score_split(baseline, [train[0].with_inputs("task")], lambda *_args: 1.0, 1)
+                assert result.errors == 1
+                assert any(stop(None) for stop in optimizer_kwargs["gepa_kwargs"]["stop_callbacks"])
+                if cancel_after_validation == "cleanup_cancel":
+                    store.records[("s1", "s1-run")]["stop_requested"] = True
             reporter = optimizer_kwargs["gepa_kwargs"]["callbacks"][0]
             if cancel_after_validation == "callback_failure":
                 from gepa.core.callbacks import notify_callbacks
@@ -1435,8 +1467,16 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         assert searched and actual_dev is dev and actual_holdout is holdout
         changed = "optimized source" in program.program.flex_agent.module_src
         measured.append(changed)
+        if (cancel_after_validation == "cleanup_incumbent" and not changed) or (
+            cancel_after_validation == "cleanup_candidate" and changed
+        ):
+            result = score_split(program, [dev[0].with_inputs("task")], lambda *_args: 1.0, 1)
+            assert result.errors == 1
         if cancel_after_validation is True and len(measured) == 6:
             (Path(optimizer_kwargs["log_dir"]) / "gepa.stop").touch()
+        if cancel_after_validation == "cleanup_late" and len(measured) == 6:
+            late_attempts.append(pool.submit(program, task="straggler"))
+            assert late_entered.wait(timeout=10)
         return _evaluation()["candidate" if changed else "baseline"]["passes"][0]
 
     monkeypatch.setattr(workflow, "score_stage", score)
@@ -1486,6 +1526,39 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     args = SimpleNamespace(
         validation_ratio=0.35, max_metric_calls=4, gepa_budget="light", threads=1, structured_events=True
     )
+    if cancel_after_validation == "cleanup_late":
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            result = pool.submit(
+                workflow._compile, args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner"
+            )
+            try:
+                assert late_entered.wait(timeout=10)
+                with pytest.raises(TimeoutError):
+                    result.result(timeout=0.05)
+                assert not list((tmp_path / "candidates").glob("*.json"))
+            finally:
+                release_late.set()
+            with pytest.raises(validation.RolloutCleanupError):
+                result.result(timeout=10)
+            with pytest.raises(validation.RolloutCleanupError):
+                late_attempts[0].result(timeout=10)
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        assert digest_bytes(active.read_bytes()) == digest
+        return
+    if cancel_after_validation in {"cleanup_search", "cleanup_incumbent", "cleanup_candidate"}:
+        with pytest.raises(validation.RolloutCleanupError, match="evidence is invalid"):
+            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        assert digest_bytes(active.read_bytes()) == digest
+        assert "candidate_path" not in store.records[("s1", "s1-run")]
+        return
+    if cancel_after_validation == "cleanup_cancel":
+        with pytest.raises(workflow.OptimizationCancelledError) as raised:
+            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert any("cleanup is unconfirmed" in note for note in raised.value.__notes__)
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        assert not measured
+        return
     if cancel_after_validation in {"interrupt_search", "interrupt_validation"}:
         store.records.clear()
         monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
@@ -1542,7 +1615,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     assert any(
         isinstance(callback, workflow.GEPAProgressReporter) for callback in optimizer_kwargs["gepa_kwargs"]["callbacks"]
     )
-    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 3
+    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 4
     assert measured == [False, True, True, False, False, True]
     assert all(config.fleet_root_model == "openai/deployed-root" for config in factories)
     assert factories[0].fleet_root_cache and not factories[1].fleet_root_cache

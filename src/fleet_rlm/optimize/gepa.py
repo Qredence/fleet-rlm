@@ -43,6 +43,7 @@ from fleet_rlm.optimize.dataset import curate_dataset, dataset_digest
 from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
 from fleet_rlm.optimize.validation import (
     IsolatedFleetProgram,
+    RolloutCleanup,
     build_isolated_engine_factory,
     score_stage,
     summarize_passes,
@@ -797,6 +798,7 @@ def _compile(
         owner_id=owner_id,
         emit_events=False,
     )
+    cleanup = RolloutCleanup()
 
     def check_boundary() -> None:
         reporter.raise_if_failed()
@@ -808,6 +810,7 @@ def _compile(
             raise OptimizationCancelledError("Optimization stop requested")
         if record.get("status") != "running":
             raise OptimizationPersistenceError("Optimization status changed")
+        cleanup.raise_if_failed()
 
     def set_stage(name: str) -> None:
         check_boundary()
@@ -864,8 +867,8 @@ def _compile(
     # values again, so the manifest cannot certify code or dependencies changed mid-run.
     search_evidence = approval_evidence(settings, incumbent_digest, scorer_version=SCORER_VERSION)
     reporter.update(incumbent_digest=incumbent_digest, evidence=search_evidence)
-    factory = build_isolated_engine_factory(settings, store, [*trainset, *devset])
-    baseline = IsolatedFleetProgram(template, factory)
+    factory = build_isolated_engine_factory(settings, store, [*trainset, *devset], cleanup=cleanup)
+    baseline = IsolatedFleetProgram(template, factory, cleanup)
 
     def metric(
         gold: Any,
@@ -887,6 +890,7 @@ def _compile(
         build_stop_file_callback(stop_file),
         _DatabaseStopper(store, session_id, run_id),
         reporter.should_stop,
+        cleanup.should_stop,
     ]
     if (proposals := getattr(args, "max_candidate_proposals", None)) is not None:
         stop_callbacks.append(build_proposal_stop_callback(proposals))
@@ -894,7 +898,7 @@ def _compile(
     gepa_kwargs["callbacks"] = [reporter]
     set_stage("search")
     check_boundary()
-    with _tracking_run(f"fleet-gepa-{session_id}") as active_run:
+    with _tracking_run(f"fleet-gepa-{session_id}") as active_run, cleanup.run():
         mlflow_run_id = getattr(getattr(active_run, "info", None), "run_id", None)
         if mlflow_run_id:
             reporter.update(mlflow_run_id=mlflow_run_id)
@@ -930,9 +934,9 @@ def _compile(
         _optional_mlflow(_enable_validation_tracing, trace_search=bool(getattr(args, "trace_search", False)))
         # The selected candidate is final before either program sees the holdout.
         validation_settings = settings.with_explicit_overrides(fleet_root_cache=False, fleet_sub_cache=False)
-        validation_factory = build_isolated_engine_factory(validation_settings, store, examples)
-        incumbent_validation = IsolatedFleetProgram(template, validation_factory)
-        candidate_validation = IsolatedFleetProgram(optimized.program, validation_factory)
+        validation_factory = build_isolated_engine_factory(validation_settings, store, examples, cleanup=cleanup)
+        incumbent_validation = IsolatedFleetProgram(template, validation_factory, cleanup)
+        candidate_validation = IsolatedFleetProgram(optimized.program, validation_factory, cleanup)
         paired = {"baseline": [], "candidate": []}
         for pass_index in range(VALIDATION_PASSES):
             # Alternate order to reduce systematic warmup/order effects.
@@ -953,6 +957,9 @@ def _compile(
                     )
                 )
                 check_boundary()
+        # Native DSPy may discard straggler results before their attempts finish. Seal
+        # admission and observe every admitted cleanup before certifying any evidence.
+        cleanup.close()
         check_boundary()
         set_stage("finalization")
         evaluation: dict[str, Any] = {

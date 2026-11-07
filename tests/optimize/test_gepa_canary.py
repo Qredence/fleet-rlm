@@ -24,7 +24,7 @@ def test_canary_rollout_satisfies_isolated_program_runtime_contract():
         consume_budget=lambda *_args: None,
         turn_usage=lambda: {"lm_calls": 0, "sandbox_errors": 0},
         end_turn=lambda: None,
-        shutdown=lambda: cleanup.append("shutdown"),
+        shutdown=lambda: cleanup.append("shutdown") or True,
     )
     program = namespace["AdditionProgram"](manager, DummyLM([]))
 
