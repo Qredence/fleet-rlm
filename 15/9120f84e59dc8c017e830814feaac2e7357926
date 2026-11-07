@@ -1,0 +1,25 @@
+docs/runbooks/circleci-ci-release.md
+  s_9420c3afcac827::t_655308c0306b48 505-512,516-520
+  s_9420c3afcac827::t_2c487d7f6d2b38 9-13
+  s_9420c3afcac827::t_26dede7b6a3703 451-456
+.circleci/config.yml
+  s_9420c3afcac827::t_4bc9dbfdecaf4a 1128
+tests/ci/test_circleci_smarter_testing_config.py
+  s_9420c3afcac827::t_a2c40d7a5f8d61 81-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "159120f84e59dc8c017e830814feaac2e7357926",
+  "prompts": {},
+  "sessions": {
+    "s_9420c3afcac827": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a2140d8a-0c23-41b6-8b17-91a9108cb7e6",
+        "model": "grok-4.7"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
