@@ -313,7 +313,9 @@ def test_python_selection_survives_circleci_step_shells(tmp_path):
     config = load_config()
     steps = config["commands"]["setup-python"]["steps"]
     commands = [step["run"] for step in steps if isinstance(step, dict) and "run" in step]
-    install = next(step["command"] for step in commands if step["name"] == "Install locked project dependencies")
+    install = next(
+        step["command"] for step in commands if step["name"] == "Prepare environment and reuse venv when available"
+    )
     verify = next(step["command"] for step in commands if step["name"] == "Verify selected Python interpreter")
     binary = tmp_path / "uv"
     binary.write_text('#!/bin/sh\nprintf "%s\\n" "$UV_PYTHON" >> "$RECORD"\n')
@@ -331,6 +333,7 @@ def test_python_selection_survives_circleci_step_shells(tmp_path):
             subprocess.run(
                 ["bash", "-eo", "pipefail", "-c", command.replace("<< parameters.python-version >>", version)],
                 env=env,
+                cwd=tmp_path,
                 check=True,
             )
         assert record.read_text().splitlines() == [version, version]
@@ -343,6 +346,22 @@ def test_discovery_does_not_install_project_dependencies():
     assert steps[0] == "checkout"
     assert len(steps) == 2
     assert steps[1]["run"]["command"] == 'circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key'
+
+
+def test_github_cli_uses_pinned_circleci_function():
+    config = load_config()
+    assert config["functions"]["setup-github-cli"] == ("github.com/circleci-functions/setup-github-cli@v0.3.0")
+    assert "install-gh" not in config["commands"]
+    step = {"setup-github-cli": {"with": {"version": "2.103.3"}}}
+    github_jobs = (
+        "release-metadata",
+        "github-deployment",
+        "github-deployment-failure",
+        "release-draft",
+        "github-release",
+    )
+    for job in github_jobs:
+        assert step in config["jobs"][job]["steps"]
 
 
 @pytest.mark.parametrize(
