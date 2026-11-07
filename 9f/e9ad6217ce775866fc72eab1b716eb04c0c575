@@ -1,0 +1,19 @@
+tests/ci/test_circleci_smarter_testing_config.py
+  s_3028dc0623023d::t_5b3b65082a9c45 336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9fe9ad6217ce775866fc72eab1b716eb04c0c575",
+  "prompts": {},
+  "sessions": {
+    "s_3028dc0623023d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b43f-c5ae-7a31-9b7c-6612d8a399b4",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
