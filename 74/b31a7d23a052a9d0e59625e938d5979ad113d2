@@ -1,0 +1,19 @@
+docs/runbooks/circleci-ci-release.md
+  s_bf9d72924f1609::t_5e6344e3bbe2f0 188-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "74b31a7d23a052a9d0e59625e938d5979ad113d2",
+  "prompts": {},
+  "sessions": {
+    "s_bf9d72924f1609": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b3d9-2348-7a91-9dfa-ff8f5ff25a1a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
