@@ -333,6 +333,7 @@ def test_python_selection_survives_circleci_step_shells(tmp_path):
             subprocess.run(
                 ["bash", "-eo", "pipefail", "-c", command.replace("<< parameters.python-version >>", version)],
                 env=env,
+                cwd=tmp_path,
                 check=True,
             )
         assert record.read_text().splitlines() == [version, version]
