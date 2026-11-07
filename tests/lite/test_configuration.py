@@ -183,6 +183,38 @@ def test_shipped_defaults_cap_root_output_but_not_sub(monkeypatch):
     settings = FleetSettings(_env_file=None)
     assert settings.fleet_root_max_tokens == 16384
     assert settings.fleet_sub_max_tokens is None
+    for role in ("root", "sub"):
+        assert settings.resolved_model(role).model == "openai/system.ai.deepseek-v4-1-flash-1017"
+
+
+def test_root_and_sub_default_to_deepseek_without_changing_other_roles():
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_api_base="https://gateway.example/v1",
+        fleet_llm_api_key="default-secret",
+    )
+    for role in ("root", "sub"):
+        resolved = settings.resolved_model(role)
+        assert resolved.model == "openai/system.ai.deepseek-v4-1-flash-1017"
+        assert resolved.api_base == "https://gateway.example/v1"
+        assert resolved.api_key.get_secret_value() == "default-secret"
+    for role in ("shared", "reflection", "judge"):
+        assert settings.resolved_model(role).model == "openai/gpt-4o-mini"
+
+
+@pytest.mark.parametrize("source", ["toml", "dotenv", "environment", "explicit"])
+def test_explicit_shared_model_still_overrides_root_and_sub_defaults(source, monkeypatch):
+    if source == "toml":
+        toml('[llm]\nmodel = "openai/gpt-4o-mini"\n')
+    elif source == "dotenv":
+        Path(".env").write_text("FLEET_LLM_MODEL=openai/gpt-4o-mini\n")
+    elif source == "environment":
+        monkeypatch.setenv("FLEET_LLM_MODEL", "openai/gpt-4o-mini")
+    settings = FleetSettings(**({"fleet_llm_model": "openai/gpt-4o-mini"} if source == "explicit" else {}))
+    for role in ("root", "sub"):
+        assert settings.resolved_model(role).model == "openai/gpt-4o-mini"
+    overridden = FleetSettings(fleet_sub_model="anthropic/claude-sonnet-4-5")
+    assert overridden.resolved_model("sub").model == "anthropic/claude-sonnet-4-5"
 
 
 def test_public_configuration_omits_credentials_and_tracks_session_override():
@@ -260,7 +292,7 @@ def test_session_digest_uses_route_overrides_without_resolving_connections_again
         assert session.resolved_model(role).api_base == "https://models.example/v1"
         assert session.resolved_model(role).api_key.get_secret_value() == "session-secret"
         assert session.resolved_model(role).max_tokens == 100
-        assert settings.resolved_model(role).model == "openai/gpt-4o-mini"
+        assert settings.resolved_model(role).model == "openai/system.ai.deepseek-v4-1-flash-1017"
 
 
 def test_lakebase_oauth_requires_endpoint_and_password_free_tls_dsn():

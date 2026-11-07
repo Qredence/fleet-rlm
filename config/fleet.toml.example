@@ -18,9 +18,11 @@ max_active_children = 4
 max_active_sessions = 64
 linked_children = true
 
-# One model supplies all roles. Provider credentials may be exported in the environment.
+# Root/sub default to openai/system.ai.deepseek-v4-1-flash-1017.
+# An explicit shared model overrides all roles without their own model.
+# Provider credentials may be exported in the environment.
 [llm]
-model = "openai/gpt-4o-mini"
+# model = "openai/gpt-4o-mini"
 # api_base = "https://your-compatible-endpoint.example/v1"
 # api_key_env = "MY_PROVIDER_KEY"
 adapter = "chat"

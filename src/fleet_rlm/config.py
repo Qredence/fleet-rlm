@@ -346,7 +346,12 @@ class FleetSettings(BaseSettings):
                     value = shared
                 options[name] = value
             self._resolved_lms[role] = ResolvedModel(
-                model=selected or self.fleet_llm_model,
+                model=selected
+                or (
+                    "openai/system.ai.deepseek-v4-1-flash-1017"
+                    if role in {"root", "sub"} and self.configuration_source("fleet_llm_model") == "default"
+                    else self.fleet_llm_model
+                ),
                 api_base=base if base is not None else ("" if independent else self.fleet_llm_api_base),
                 api_key=credential(reference or "", SecretStr("") if independent else default_key),
                 adapter=adapter or self.fleet_llm_adapter,
