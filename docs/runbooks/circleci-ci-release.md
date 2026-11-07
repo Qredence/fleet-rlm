@@ -6,6 +6,11 @@ pipeline from `.circleci/config.yml`. Its CircleCI project slug is
 pipeline definition is `build-and-test`
 (`fe82e142-4105-421e-a525-eb47298d5e7a`).
 
+Agents use the official CircleCI plugin and that project slug. The GitHub-style
+locator `gh/Qredence/fleet-rlm` is not a project the plugin can read. Keep the
+CircleCI CLI for the manual commands below; do not add a second agent connection
+through `circleci mcp start`.
+
 ## Manual runs
 
 Install and authenticate the CircleCI CLI, then run commands from the
@@ -443,9 +448,12 @@ local checks and an authorized configuration-provenance acceptance run pass.
 Do not relax the restricted contexts' configuration-source, main-branch, project,
 or non-SSH restrictions to enable dynamic continuation.
 
-Contributor PRs use the repository template and exactly one `release:feature`,
-`release:fix`, `release:breaking`, `release:maintenance`, or `release:none` label.
-Breaking changes require migration instructions. The bot collects reviewed PR
+Contributor PRs use the repository template. A `release:feature`, `release:fix`,
+`release:breaking`, `release:maintenance`, or `release:none` label classifies the
+changelog entry. Breaking changes require migration instructions. An unlabeled
+merged PR is drafted as Other. The pre-merge `release-metadata` job runs only
+for pull requests from `automation/release-draft`; other pull requests leave it
+not run, and `quality` accepts that outcome. The bot collects reviewed PR
 metadata, never executes it, and maintains `automation/release-draft`. Review the
 rendered notes; category labels do not establish correctness of their claims.
 
@@ -494,19 +502,22 @@ only when the production pipeline definition selects that entry point. Validate
 both configurations and complete acceptance before switching the definition;
 enable automatic publication separately after reviewing the generated draft.
 
-PR metadata validation requires a separate **read-only GitHub App installation**
-in `fleet-release-metadata`, not a draft-writer private key with a downscoped token.
-A label/body-only edit may not trigger CircleCI: rerun its required metadata check
-after edits, and verify PR event subscriptions during activation. Freeze checks
-must be combined with strict up-to-date branch protection, since advancing main
-does not itself invalidate an old PR check result.
+PR metadata validation for `automation/release-draft` requires a separate
+**read-only GitHub App installation** in `fleet-release-metadata`, not a
+draft-writer private key with a downscoped token. A label or body edit on that
+draft may not trigger CircleCI: rerun the draft pull request so
+`release-metadata` runs again, and verify PR event subscriptions during
+activation. Freeze checks must be combined with strict up-to-date branch
+protection, since advancing main does not itself invalidate an old PR check
+result.
 
 At activation, verify GitHub App PR events provide `CIRCLE_PULL_REQUEST` as a
 `https://github.com/Qredence/fleet-rlm/pull/<number>` URL. The metadata job fails
-closed if absent; configure and validate supported event mapping before making
-this check required. Do not substitute unvalidated shell parameters. The App token
-helper expects `FLEET_GITHUB_APP_ID`, `FLEET_GITHUB_APP_INSTALLATION_ID`, and
-`FLEET_GITHUB_APP_PRIVATE_KEY` in each purpose-specific context.
+closed if that URL is absent. Do not substitute unvalidated shell parameters.
+The App token helper expects `FLEET_GITHUB_APP_ID`,
+`FLEET_GITHUB_APP_INSTALLATION_ID`, and `FLEET_GITHUB_APP_PRIVATE_KEY` in each
+purpose-specific context. Branch protection requires the `required-ci` workflow,
+not the individual metadata job.
 
 Configure the setup pipeline's **configuration source** to protected main while
 retaining the event checkout revision for tests. Fetching trusted scripts inside
