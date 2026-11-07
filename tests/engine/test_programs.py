@@ -12,7 +12,8 @@ import dspy
 import pytest
 from dspy import AdapterParseError
 
-from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs, Route
+from fleet_rlm.engine.decisions import preload_skills, select_route
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
@@ -80,7 +81,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
         learned_skill_note="",
     )
 
-    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.programs"):
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.decisions"):
         prediction = engine(
             workspace_manifest="",
             memory_summary="",
@@ -433,7 +434,14 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
 def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) -> None:
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
 
-    catalog = engine._select_skills("Total revenue per region in files/sales.csv", CATALOG, seen["route"].FLEX)
+    catalog = preload_skills(
+        skill_selector=engine.skill_selector,
+        sandbox_mgr=engine.sandbox_mgr,
+        jev_lm=engine.jev_lm,
+        task="Total revenue per region in files/sales.csv",
+        skills_catalog=CATALOG,
+        route=seen["route"].FLEX,
+    )
 
     assert seen["batched"] == ["tabular-analysis", "delegation"] and seen["budget"] == 2
     assert catalog.startswith(CATALOG)
@@ -444,10 +452,37 @@ def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) ->
 
 def test_skill_selection_is_skipped_without_jev_or_for_direct_answers(monkeypatch) -> None:
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"}, jev=False)
-    assert engine._select_skills("task", CATALOG, seen["route"].FLEX) == CATALOG
+    assert (
+        preload_skills(
+            skill_selector=engine.skill_selector,
+            sandbox_mgr=engine.sandbox_mgr,
+            jev_lm=engine.jev_lm,
+            task="task",
+            skills_catalog=CATALOG,
+            route=seen["route"].FLEX,
+        )
+        == CATALOG
+    )
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
-    assert engine._select_skills("hello", CATALOG, seen["route"].DIRECT) == CATALOG
-    assert engine._select_skills("task", "<available_skills>No Skills installed.</available_skills>", seen["route"].RLM)
+    assert (
+        preload_skills(
+            skill_selector=engine.skill_selector,
+            sandbox_mgr=engine.sandbox_mgr,
+            jev_lm=engine.jev_lm,
+            task="hello",
+            skills_catalog=CATALOG,
+            route=seen["route"].DIRECT,
+        )
+        == CATALOG
+    )
+    assert preload_skills(
+        skill_selector=engine.skill_selector,
+        sandbox_mgr=engine.sandbox_mgr,
+        jev_lm=engine.jev_lm,
+        task="task",
+        skills_catalog="<available_skills>No Skills installed.</available_skills>",
+        route=seen["route"].RLM,
+    )
     assert seen["batched"] == [] and seen["budget"] == 0
 
 
@@ -458,14 +493,31 @@ def test_skill_selection_failure_keeps_the_catalog_but_budget_exhaustion_ends_th
         raise ConnectionError("jev unavailable")
 
     monkeypatch.setattr(engine.skill_selector, "batch", broken)
-    assert engine._select_skills("task", CATALOG, seen["route"].RLM) == CATALOG
+    assert (
+        preload_skills(
+            skill_selector=engine.skill_selector,
+            sandbox_mgr=engine.sandbox_mgr,
+            jev_lm=engine.jev_lm,
+            task="task",
+            skills_catalog=CATALOG,
+            route=seen["route"].RLM,
+        )
+        == CATALOG
+    )
 
     def exhausted(_self, _count=1, **_kwargs):
         raise RuntimeError("Shared RLM budget exhausted (3 calls)")
 
     monkeypatch.setattr(DaytonaSandboxManager, "consume_budget", exhausted)
     with pytest.raises(RuntimeError, match="budget exhausted"):
-        engine._select_skills("task", CATALOG, seen["route"].RLM)
+        preload_skills(
+            skill_selector=engine.skill_selector,
+            sandbox_mgr=engine.sandbox_mgr,
+            jev_lm=engine.jev_lm,
+            task="task",
+            skills_catalog=CATALOG,
+            route=seen["route"].RLM,
+        )
 
 
 def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch) -> None:
@@ -478,7 +530,21 @@ def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch
     )
     engine.triage = lambda **_kwargs: SimpleNamespace(route="flex")
 
-    assert engine._route("hybrid", "task", "", CATALOG, None) is seen["route"].FLEX
+    assert (
+        select_route(
+            triage=engine.triage,
+            sandbox_mgr=engine.sandbox_mgr,
+            jev_lm=engine.jev_lm,
+            sub_lm=engine.sub_lm,
+            sub_adapter=engine.sub_adapter,
+            mode="hybrid",
+            task="task",
+            workspace_manifest="",
+            skills_catalog=CATALOG,
+            context=None,
+        )
+        is seen["route"].FLEX
+    )
     assert charged == [(1, "routing")]
 
 
@@ -563,7 +629,7 @@ def test_route_errors_redact_the_serving_lm_credential(caplog: pytest.LogCapture
         learned_skill_note="",
     )
 
-    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.programs"):
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.decisions"):
         prediction = engine(workspace_manifest="", memory_summary="", task="test fallback")
 
     # Production dspy.LM keeps the key in kwargs, not as an attribute; it must still be redacted.
@@ -588,7 +654,7 @@ def test_direct_route_inlines_only_dataset_files_into_one_prompt(monkeypatch):
 
     prediction = engine._execute(
         mode="direct",
-        route=engine._route("direct", "Q?", "/workspace/files/context.txt", "<available_skills/>", context=None),
+        route=Route.DIRECT,
         workspace_manifest="/workspace/files/context.txt",
         memory_summary="",
         task="Q?",
@@ -618,7 +684,7 @@ def test_direct_route_records_truncation_instead_of_clipping_silently(monkeypatc
 
     prediction = engine._execute(
         mode="direct",
-        route=engine._route("direct", "Q?", "/workspace/files/context.txt", "<available_skills/>", context=None),
+        route=Route.DIRECT,
         workspace_manifest="/workspace/files/context.txt",
         memory_summary="",
         task="Q?",
@@ -636,7 +702,7 @@ def test_hybrid_direct_does_not_inline_workspace_files(monkeypatch):
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session")
     engine = _engine(manager, execution_mode="hybrid")
-    monkeypatch.setattr(AdaptiveFleetEngine, "_route", lambda *_args: Route.DIRECT)
+    monkeypatch.setattr(engine, "triage", lambda **_kwargs: SimpleNamespace(route=Route.DIRECT.value))
     monkeypatch.setattr(
         DaytonaSandboxManager, "list_workspace_files", lambda *_args: pytest.fail("no workspace listing")
     )

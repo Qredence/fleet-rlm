@@ -220,10 +220,15 @@ import dspy
 import mlflow
 from dspy.lm15 import Message, Response, Usage
 from fleet_rlm.observability import configure_mlflow_observability
+import fleet_rlm.engine.programs as programs
 from fleet_rlm.engine.programs import AdaptiveFleetEngine
 from fleet_rlm.contracts import Route
 from fleet_rlm.observability import decision_usage, usage_callbacks
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+def refuse_sandbox(*_args, **_kwargs):
+    raise AssertionError("Offline tracing test must not provision a sandbox")
+DaytonaSandboxManager._ensure_sandbox = refuse_sandbox
 
 class Engine:
     def __init__(self):
@@ -254,12 +259,12 @@ if __import__('os').environ['MISSING_TOTALS'] == '1':
     UsageTracker.add_usage = without_total
 manager = DaytonaSandboxManager("key", "org", "volume", "offline")
 engine = AdaptiveFleetEngine(manager, lm, lm)
-def choose(*_args):
+def choose(**_kwargs):
     with mlflow.start_span(name="typesafe_route_selection", span_type="LLM") as span:
         with decision_usage(span):
             dspy.settings.usage_tracker.add_usage("jev", {"prompt_tokens":883,"completion_tokens":39})
     return Route.DIRECT
-engine._route = choose
+programs.select_route = choose
 with mlflow.start_span(name="fleet_turn") as root:
     with dspy.context(disable_history=True, track_usage=True):
         result = engine(workspace_manifest="", memory_summary="", task="return five")
