@@ -74,6 +74,12 @@ commands:
     parameters:
       python-version:
         type: string
+      use-workspace-venv:
+        type: boolean
+        default: false
+      persist-venv:
+        type: boolean
+        default: false
       use-cache:
         type: boolean
         default: true
@@ -81,16 +87,34 @@ commands:
       - checkout
       - install-uv
       - when:
+          condition: << parameters.use-workspace-venv >>
+          steps:
+            - attach_workspace:
+                at: .
+      - when:
           condition: << parameters.use-cache >>
           steps:
             - restore-uv-cache:
                 python-version: << parameters.python-version >>
       - run:
-          name: Install locked project dependencies
+          name: Prepare environment and reuse venv when available
           command: |
             export UV_PYTHON="<< parameters.python-version >>"
             echo 'export UV_PYTHON="<< parameters.python-version >>"' >> "$BASH_ENV"
-            uv sync --locked --dev --python << parameters.python-version >>
+            # If a workspace-provided .venv exists but with the wrong interpreter, discard it
+            if [ -x .venv/bin/python ]; then
+              ver=$(.venv/bin/python -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
+              if [ "$ver" != "<< parameters.python-version >>" ]; then
+                echo "Existing .venv uses $ver; removing to rebuild for << parameters.python-version >>"
+                rm -rf .venv
+              else
+                echo "Reusing workspace .venv for Python << parameters.python-version >>"
+              fi
+            fi
+            # Create/sync venv only when needed
+            if [ ! -x .venv/bin/python ]; then
+              uv sync --locked --dev --python << parameters.python-version >>
+            fi
       - run:
           name: Verify selected Python interpreter
           command: |
@@ -106,6 +130,13 @@ commands:
           steps:
             - save-uv-cache:
                 python-version: << parameters.python-version >>
+      - when:
+          condition: << parameters.persist-venv >>
+          steps:
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - .venv
 
   capture-release-metadata:
     parameters:
@@ -221,6 +252,7 @@ jobs:
       - install-gh
       - setup-python:
           python-version: "3.12"
+          use-workspace-venv: true
       - run:
           name: Update the trusted main changelog draft
           command: |
@@ -237,6 +269,7 @@ jobs:
     steps:
       - setup-python:
           python-version: "3.12"
+          use-workspace-venv: true
       - run:
           name: Lint, formatting, typing, docs, and API contract
           command: make lint format-check typecheck check-docs api-check
@@ -360,6 +393,7 @@ jobs:
     steps:
       - setup-python:
           python-version: "3.12"
+          use-workspace-venv: true
       - run:
           name: Run impacted Python 3.12 tests or the full main-branch suite
           command: |
@@ -387,6 +421,7 @@ jobs:
     steps:
       - setup-python:
           python-version: "3.12"
+          use-workspace-venv: true
       - run:
           name: Build and verify distributions, then smoke-test the wheel
           command: |
@@ -404,6 +439,7 @@ jobs:
     steps:
       - setup-python:
           python-version: "3.12"
+          use-workspace-venv: true
       - run:
           name: Audit locked runtime and development dependencies
           command: make check-security
@@ -862,6 +898,7 @@ jobs:
       - checkout
       - attach_workspace:
           at: .
+      - install-gh
       - run:
           name: Publish captured notes and verified assets or verify an exact retry
           command: |
@@ -869,19 +906,17 @@ jobs:
             export PYENV_VERSION=3.12
             GH_TOKEN=$(python3.12 -m scripts.github_app_token --purpose publish)
             export GH_TOKEN
-            if ! command -v gh >/dev/null; then
-              # Try system install first; if the package is unavailable, add the official GitHub CLI repo and retry
-              if ! (sudo apt-get update && sudo apt-get install -y gh); then
-                echo "Installing GitHub CLI from official repository..."
-                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null
-                sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-                sudo apt-get update
-                sudo apt-get install -y gh
-              fi
-            fi
             python -m scripts.github_release --version "$FLEET_RELEASE_VERSION" --sha "$FLEET_RELEASE_SHA"
             python3.12 -m scripts.release_automation deployment-status --deployment github-deployment.json --state success --phase "PyPI canary, Smart Deployment validation, and GitHub release completed"
+
+  prep-venv-312:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    steps:
+      - setup-python:
+          python-version: "3.12"
+          persist-venv: true
 
 job-groups:
   publication:
@@ -1085,10 +1120,13 @@ workflows:
             - << pipeline.parameters.run_pypi_recovery >>
             - equal: ["main", << pipeline.git.branch >>]
     jobs:
+      - prep-venv-312
       - release-metadata:
           context: fleet-release-metadata
           filters: pipeline.event.name == "pull_request"
-      - static-checks
+      - static-checks:
+          requires:
+            - prep-venv-312
       - test-python:
           name: test-python-<< matrix.python-version >>
           matrix:
@@ -1101,8 +1139,13 @@ workflows:
       - test-python-312:
           requires:
             - list-smarter-tests
-      - package-check
-      - security
+            - prep-venv-312
+      - package-check:
+          requires:
+            - prep-venv-312
+      - security:
+          requires:
+            - prep-venv-312
       - sonarqube:
           context: SonarCloud
           requires:
@@ -1129,6 +1172,7 @@ workflows:
           filters: pipeline.parameters.run_draft and not pipeline.parameters.run_release and not pipeline.parameters.run_pypi_recovery and pipeline.git.branch == "main" and pipeline.event.name == "push"
           requires:
             - quality
+            - prep-venv-312
 
   python314-manual:
     when:
