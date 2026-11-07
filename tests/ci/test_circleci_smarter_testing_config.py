@@ -29,6 +29,9 @@ def workflow_jobs():
 def test_smarter_testing_uses_file_atoms_and_per_atom_lcov_analysis():
     suite = yaml.safe_load((ROOT / ".circleci/test-suites.yml").read_text())
     atoms = subprocess.check_output(["bash", "-ec", suite["discover"]], cwd=ROOT, text=True).splitlines()
+    # Some environments print a startup banner to stdout (e.g., Node version).
+    # Filter to the expected test file paths to keep this test robust.
+    atoms = [line for line in atoms if line.startswith("tests/")]
     assert atoms == sorted(str(p.relative_to(ROOT)) for p in (ROOT / "tests").rglob("test_*.py"))
     assert "file-mapper" not in suite
     assert "<< outputs.lcov >>" in suite["analysis"]
@@ -74,6 +77,26 @@ def test_quality_and_release_gates_remain_required():
         "package-check",
         "security",
         "sonarqube",
+    }
+    # Every executed quality dependency must succeed. Metadata alone is absent on non-PR runs.
+    assert {
+        item if isinstance(item, str) else next(iter(item)): "success"
+        if isinstance(item, str)
+        else next(iter(item.values()))
+        for item in jobs["quality"]["requires"]
+    } == {
+        name: ["success", "not_run"] if name == "release-metadata" else "success"
+        for name in (
+            "release-metadata",
+            "static-checks",
+            "test-python-3.11",
+            "coverage-report",
+            "test-python-312",
+            "test-python-3.13",
+            "package-check",
+            "security",
+            "sonarqube",
+        )
     }
     assert config["jobs"]["sonarqube"]["steps"][0] == {"checkout": {"method": "full"}}
     assert config["experimental"]["dynamic-parallelism"]["test-python-312"] == {
@@ -211,8 +234,13 @@ def test_release_request_treats_shell_syntax_as_literal(tmp_path):
     assert "<< pipeline.parameters.release_sha >>" not in command
 
 
-@pytest.mark.parametrize("failed_command", ["none", "combine", "xml", "report"])
-def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_command):
+@pytest.mark.parametrize(
+    ("failed_command", "shard_status", "missing_evidence"),
+    [(command, 0, None) for command in ("none", "combine", "xml", "report")]
+    + [("none", 2, None)]
+    + [("none", 0, evidence) for evidence in ("test-status", "test-files.txt", ".coverage.fake")],
+)
+def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_command, shard_status, missing_evidence):
     config = load_config()
     steps = config["jobs"]["coverage-report"]["steps"]
     reporter = next(step["run"] for step in steps if isinstance(step, dict) and "run" in step)
@@ -233,9 +261,11 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
     for node in (0, 1):
         shard = tmp_path / f"coverage-shards/node-{node}"
         shard.mkdir(parents=True)
-        (shard / "test-status").write_text("0\n")
+        (shard / "test-status").write_text(f"{shard_status}\n")
         (shard / "test-files.txt").write_text("tests/test_sample.py\n")
         (shard / ".coverage.fake").write_text("parallel data\n")
+    if missing_evidence:
+        (shard / missing_evidence).unlink()
     order = tmp_path / "coverage-command-order"
     result = subprocess.run(
         ["bash", "-ec", reporter["command"]],
@@ -253,16 +283,22 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
     enforcement = steps[-1]["run"]["command"]
     env = {**os.environ, "BASH_ENV": ""}
     final = subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False)
-    assert final.returncode == (0 if failed_command == "none" else 2)
-    assert (tmp_path / "coverage/coverage.xml").is_file() == (failed_command in ("none", "report"))
+    assert final.returncode == (1 if missing_evidence else 0 if failed_command == "none" else 2)
+    assert (tmp_path / "coverage/coverage.xml").is_file() == (
+        not missing_evidence and failed_command in ("none", "report")
+    )
     coverage_upload = {"store_artifacts": {"path": "coverage", "destination": "coverage"}}
     assert coverage_upload in steps
-    assert (order.read_text() if order.exists() else "") == {
-        "none": "combinexmlreport",
-        "combine": "",
-        "xml": "combine",
-        "report": "combinexml",
-    }[failed_command]
+    assert (order.read_text() if order.exists() else "") == (
+        ""
+        if missing_evidence
+        else {
+            "none": "combinexmlreport",
+            "combine": "",
+            "xml": "combine",
+            "report": "combinexml",
+        }[failed_command]
+    )
     assert steps.index(coverage_upload) < len(steps) - 1
     (tmp_path / "coverage/.status").unlink()
     assert subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False).returncode != 0
@@ -270,13 +306,16 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
         next(step for step in steps if isinstance(step, dict) and "run" in step)
     )
     assert workflow_jobs()["coverage-report"]["requires"] == [{"test-python-3.11": "terminal"}]
+    assert "test-python-3.11" in workflow_jobs()["quality"]["requires"]
 
 
 def test_python_selection_survives_circleci_step_shells(tmp_path):
     config = load_config()
     steps = config["commands"]["setup-python"]["steps"]
     commands = [step["run"] for step in steps if isinstance(step, dict) and "run" in step]
-    install = next(step["command"] for step in commands if step["name"] == "Install locked project dependencies")
+    install = next(
+        step["command"] for step in commands if step["name"] == "Prepare environment and reuse venv when available"
+    )
     verify = next(step["command"] for step in commands if step["name"] == "Verify selected Python interpreter")
     binary = tmp_path / "uv"
     binary.write_text('#!/bin/sh\nprintf "%s\\n" "$UV_PYTHON" >> "$RECORD"\n')
@@ -294,6 +333,7 @@ def test_python_selection_survives_circleci_step_shells(tmp_path):
             subprocess.run(
                 ["bash", "-eo", "pipefail", "-c", command.replace("<< parameters.python-version >>", version)],
                 env=env,
+                cwd=tmp_path,
                 check=True,
             )
         assert record.read_text().splitlines() == [version, version]
@@ -306,6 +346,22 @@ def test_discovery_does_not_install_project_dependencies():
     assert steps[0] == "checkout"
     assert len(steps) == 2
     assert steps[1]["run"]["command"] == 'circleci testsuite list-tests "ci tests" --key=ci-tests-parallelism-key'
+
+
+def test_github_cli_uses_pinned_circleci_function():
+    config = load_config()
+    assert config["functions"]["setup-github-cli"] == ("github.com/circleci-functions/setup-github-cli@v0.3.0")
+    assert "install-gh" not in config["commands"]
+    step = {"setup-github-cli": {"with": {"version": "2.103.3"}}}
+    github_jobs = (
+        "release-metadata",
+        "github-deployment",
+        "github-deployment-failure",
+        "release-draft",
+        "github-release",
+    )
+    for job in github_jobs:
+        assert step in config["jobs"][job]["steps"]
 
 
 @pytest.mark.parametrize(
@@ -363,12 +419,56 @@ def test_publication_is_serialized_with_recovery_and_github_health_gates():
 def test_dynamic_setup_is_staged_and_preserves_explicit_release_parameters():
     setup = yaml.safe_load((ROOT / ".circleci/setup.yml").read_text())
     assert setup["setup"] is True
-    assert setup["parameters"] == load_config()["parameters"]
+    assert {k: v["type"] for k, v in setup["parameters"].items()} == {
+        k: v["type"] for k, v in load_config()["parameters"].items()
+    }
     assert setup["parameters"]["activate_auto_release"]["default"] is False
-    assert setup["parameters"]["run_draft"]["default"] is False
+    assert setup["parameters"]["run_draft"]["default"] is True
     job = setup["jobs"]["resolve-release"]
     assert job["steps"][0] == {"checkout": {"method": "full"}}
     commands = "\n".join(step["run"]["command"] for step in job["steps"] if "run" in step)
     assert '"$CIRCLE_SHA1"' in commands
     assert "CIRCLE_CONTINUATION_KEY" in commands
     assert 'Path(".circleci/config.yml").read_text()' in commands
+
+
+@pytest.mark.parametrize(
+    ("event", "pull_request", "expected"),
+    [
+        ("push", "https://github.com/Qredence/fleet-rlm/pull/679", "pull_request"),
+        ("push", "", "push"),
+        ("api", "", "api"),
+        ("scheduled_pipeline", "", "scheduled_pipeline"),
+    ],
+)
+def test_dynamic_setup_preserves_pipeline_event_except_pull_requests(tmp_path, event, pull_request, expected):
+    setup = yaml.safe_load((ROOT / ".circleci/setup.yml").read_text())
+    job = setup["jobs"]["resolve-release"]
+    assert job["environment"]["FLEET_EVENT"] == "<< pipeline.event.name >>"
+    selection = job["steps"][1]["run"]["command"]
+    assert "${CIRCLE_PULL_REQUEST:-}" in selection
+    command = job["steps"][2]["run"]["command"].replace(r"\<<", "<<")
+    for name, script in {
+        "python": "#!/bin/sh\ncat >/dev/null\n",
+        "python3.12": '#!/bin/sh\nprintf "%s\\n" "$FLEET_EVENT" > "$EVENT_RECORD"\n',
+    }.items():
+        binary = tmp_path / name
+        binary.write_text(script)
+        binary.chmod(0o755)
+    record = tmp_path / "event"
+    env = {
+        **os.environ,
+        "BASH_ENV": "",
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "EVENT_RECORD": str(record),
+        "FLEET_EVENT": event,
+        "FLEET_AUTO_RELEASE": "true",
+        "FLEET_BRANCH": "main",
+        "CIRCLE_SHA1": "a" * 40,
+    }
+    if pull_request:
+        env["CIRCLE_PULL_REQUEST"] = pull_request
+    else:
+        env.pop("CIRCLE_PULL_REQUEST", None)
+    subprocess.run(["bash", "-euc", command], cwd=tmp_path, env=env, check=True)
+    assert record.read_text().strip() == expected
