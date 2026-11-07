@@ -78,7 +78,10 @@ def test_quality_and_release_gates_remain_required():
         "security",
         "sonarqube",
     }
-    # Every executed quality dependency must succeed. Metadata alone is absent on non-PR runs.
+    # Every executed quality dependency must succeed. Metadata runs only on the release draft.
+    assert jobs["release-metadata"]["filters"] == (
+        'pipeline.event.name == "pull_request" and pipeline.git.branch == "automation/release-draft"'
+    )
     assert {
         item if isinstance(item, str) else next(iter(item)): "success"
         if isinstance(item, str)

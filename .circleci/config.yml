@@ -1125,7 +1125,7 @@ workflows:
       - prep-venv-312
       - release-metadata:
           context: fleet-release-metadata
-          filters: pipeline.event.name == "pull_request"
+          filters: pipeline.event.name == "pull_request" and pipeline.git.branch == "automation/release-draft"
       - static-checks:
           requires:
             - prep-venv-312
