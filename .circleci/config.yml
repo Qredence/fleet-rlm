@@ -1106,21 +1106,6 @@ job-groups:
 
 workflows:
   required-ci:
-    when:
-      or:
-        - and:
-            - equal: ["push", << pipeline.event.name >>]
-            - equal: ["main", << pipeline.git.branch >>]
-        - equal: ["pull_request", << pipeline.event.name >>]
-        - and:
-            - << pipeline.parameters.run_ci >>
-            - equal: ["main", << pipeline.git.branch >>]
-        - and:
-            - << pipeline.parameters.run_release >>
-            - equal: ["main", << pipeline.git.branch >>]
-        - and:
-            - << pipeline.parameters.run_pypi_recovery >>
-            - equal: ["main", << pipeline.git.branch >>]
     jobs:
       - prep-venv-312
       - release-metadata:
