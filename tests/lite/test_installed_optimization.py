@@ -76,7 +76,12 @@ engine = AdaptiveFleetEngine(
     DaytonaSandboxManager("key", "org", "volume", "wheel-state"),
     lm, lm, compiled_path=str(fixture),
 )
-assert engine.dump_state() == saved
+loaded = engine.dump_state()
+assert {key: loaded[key] for key in saved} == saved
+assert set(loaded) - set(saved) == {"children.leaf_action", "children.delegating_action", "fleet_child_policy_version"}
+assert loaded["fleet_child_policy_version"] == 1
+for name, default in engine.children.default_actions.items():
+    assert loaded[f"children.{name}"] == default
 assert engine.flex_agent.module_src == saved["flex_agent"]["module_src"]
 print(json.dumps({"module": str(module_path), "fingerprint": evidence["dependency_fingerprint"]}))
 """

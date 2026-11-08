@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextvars
 from concurrent.futures import Future, ThreadPoolExecutor
+from copy import deepcopy
 from typing import Any
 
 import dspy
@@ -27,16 +28,42 @@ def child_failure(exc: Exception) -> str:
     return f"child agent failed ({type(exc).__name__}): {str(exc)[:500]}"
 
 
-class ChildAgents:
-    """The delegation tools given to the Flex and RLM programs."""
+class ChildAgents(dspy.Module):
+    """Own learned child action policies, while every tool call owns a fresh native RLM."""
 
     def __init__(
         self, sandbox_mgr: DaytonaSandboxManager, metered_sub: Any, sub_adapter: dspy.Adapter | None = None
     ) -> None:
-        """Bind the delegation tools to the sandbox manager and the metered sub LM."""
+        """Build native action policies without allocating interpreters or calling models."""
+        super().__init__()
         self.sandbox_mgr = sandbox_mgr
         self._metered_sub = metered_sub
         self._sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
+        self.default_actions: dict[str, Any] = {}
+        for name, tools in (("leaf_action", []), ("delegating_action", [self.spawn_agent])):
+            action = dspy.RLM(
+                ChildTask,
+                tools=tools,
+                interpreter_factory=sandbox_mgr.interpreter_factory(),
+                max_iters=8,
+                max_llm_calls=25,
+            ).generate_action
+            # GEPA matches traces by signature, not predictor identity. Role metadata
+            # remains distinct even when the two learned instruction strings converge.
+            action.signature = action.signature.with_updated_fields(
+                "code", desc=f"{action.signature.fields['code'].json_schema_extra['desc']} Fleet child role: {name}."
+            )
+            setattr(self, name, action)
+            self.default_actions[name] = deepcopy(action.dump_state())
+
+    def validate_state(self, state: dict[str, Any]) -> None:
+        """Keep role attribution and metered model ownership outside learned state."""
+        for name, default in self.default_actions.items():
+            action = state[f"children.{name}"]
+            if action.get("lm") is not None:
+                raise ValueError("Child action models are bound by the runtime, not candidate state")
+            if action["signature"]["fields"] != default["signature"]["fields"]:
+                raise ValueError("Child action signature fields must preserve their native role contract")
 
     def tools(self) -> list[Any]:
         """Return the delegation tools, spawn_agent and spawn_agents, for the Flex and RLM programs."""
@@ -91,6 +118,17 @@ class ChildAgents:
             max_iters=max_iters,
             max_llm_calls=max_llm_calls,
         )
+        policy = self.delegating_action if tools else self.leaf_action
+        # Copy native learned state, never the runtime/tool closures or a live RLM.
+        child.generate_action = dspy.Predict(policy.signature)
+        state = deepcopy(policy.dump_state())
+        state["lm"] = None
+        child.generate_action.load_state(state)
+        if max_iters != 8 or max_llm_calls != 25:
+            subtask = (
+                f"Host resource limits: max_iters={max_iters}, max_llm_calls={max_llm_calls}; "
+                f"optional Fleet tools={list(tools)}. These limits override nominal policy ceilings.\n\n{subtask}"
+            )
         try:
             with dspy.context(lm=self._metered_sub, disable_history=True, adapter=self._sub_adapter):
                 result = child(subtask=subtask)

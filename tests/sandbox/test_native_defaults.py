@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+import uuid
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +15,141 @@ from test_interpreter import manager_on
 
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, DaytonaSandboxManager
+
+
+@pytest.mark.parametrize("route", ["rlm", "flex"])
+def test_child_policies_reconstruct_and_reach_native_gepa_through_parallel_host_calls(tmp_path, monkeypatch, route):
+    """Use real DSPy/Fleet/guest Python; fake only the model and Daytona provider."""
+    from dspy.teleprompt.gepa.gepa_utils import DspyAdapter
+    from emulator import emulated_sandbox
+
+    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.optimize.artifacts import tunable_components
+    from fleet_rlm.optimize.validation import IsolatedFleetProgram
+
+    root_code = """leaf = spawn_agent(subtask='solo', allowed_tools=[], max_iters=1, max_llm_calls=1)
+if 'error' in leaf:
+    SUBMIT(answer=leaf['error'], learned_skill_note='')
+batch = spawn_agents(subtasks=['alpha', 'beta'], max_iters=2, max_llm_calls=2)
+assert all('error' not in item for item in [leaf, *batch]), [leaf, *batch]
+SUBMIT(answer='|'.join(item['findings'] for item in [leaf, *batch]), learned_skill_note='')"""
+    rendezvous = threading.Barrier(2, timeout=10)
+    calls, managers, sandboxes = [], [], []
+    malformed_leaf = False
+
+    class PolicyLM(dspy.utils.DummyLM):
+        def __call__(self, *, messages, **_kwargs):
+            system = messages[0]["content"]
+            if "Fleet child role: leaf_action." in system:
+                if malformed_leaf:
+                    return ["malformed child action"]
+                role = "leaf"
+                code = "assert 'spawn_agent' not in globals()\nassert 'max_iters=1' in subtask\n"
+            elif "Fleet child role: delegating_action." in system:
+                role = "delegating"
+                rendezvous.wait()
+                code = "assert callable(spawn_agent)\nassert 'max_llm_calls=2' in subtask\n"
+            else:
+                role, code = "root", root_code
+                assert "2/16" not in messages[-1]["content"], messages[-1]["content"]
+            if role != "root":
+                version = "new" if "CHILD_POLICY_NEW" in system else "old"
+                code += "assert 'private_child_value' not in globals()\nprivate_child_value = subtask\n"
+                code += f"SUBMIT(findings={role + '-' + version!r} + ':' + subtask.split('\\n\\n')[-1])"
+            calls.append(role)
+            return [self._format_answer_fields({"reasoning": "offline policy-conditioned response", "code": code})]
+
+    lm = PolicyLM([])
+
+    def manager(name, parent=None):
+        sandbox = emulated_sandbox(tmp_path / name)
+        sandbox.id = name
+        sandboxes.append(sandbox)
+        result = manager_on(sandbox, name=name)
+        result.parent = parent
+        result._client = SimpleNamespace(
+            stop=lambda *_args, **_kwargs: sandbox.code_interpreter.close(),
+            delete=lambda *_args, **_kwargs: sandbox.code_interpreter.close(),
+        )
+        managers.append(result)
+        return result
+
+    def allocate(parent, **_kwargs):
+        return manager(f"child-{uuid.uuid4().hex}", parent)
+
+    monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate)
+    monkeypatch.setattr(DaytonaSandboxManager, "collect_child_artifacts", lambda _self: [])
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
+
+    def engine():
+        return AdaptiveFleetEngine(manager(f"root-{len(managers)}"), lm, lm, execution_mode=route)
+
+    candidate = engine()
+    for policy in (candidate.children.leaf_action, candidate.children.delegating_action):
+        # Equal instructions must not cause cross-role attribution.
+        policy.signature = policy.signature.with_instructions("CHILD_POLICY_OLD")
+    artifact = tmp_path / "candidate.json"
+    candidate.save(str(artifact))
+    restored = engine()
+    restored.compiled.path = str(artifact)
+    restored.compiled.load_initial(restored)
+    assert restored.dump_state() == candidate.dump_state()
+    loaded = []
+
+    def reconstruct(_example, program):
+        instance = engine()
+        instance.load_state(deepcopy(program.dump_state()))
+        loaded.append(instance)
+        return instance
+
+    isolated = IsolatedFleetProgram(restored, reconstruct)
+    names = ["program.children.leaf_action", "program.children.delegating_action"]
+    expected = "leaf-old:solo|delegating-old:alpha|delegating-old:beta"
+
+    def metric(_gold, prediction, _trace=None, _pred_name=None, _pred_trace=None):
+        return dspy.Prediction(score=float(prediction.answer == expected), feedback="Inspect the child action policy.")
+
+    def feedback(**kwargs):
+        return dspy.Prediction(score=1.0, feedback=kwargs["predictor_output"].code)
+
+    adapter = DspyAdapter(isolated, metric, dict.fromkeys(names, feedback), num_threads=1)
+    example = dspy.Example(task="delegate", workspace_manifest="", memory_summary="").with_inputs(
+        "task", "workspace_manifest", "memory_summary"
+    )
+    try:
+        texts = tunable_components(isolated)
+        evaluation = adapter.evaluate([example], texts, capture_traces=True)
+        assert evaluation.outputs[0].answer == expected
+        assert calls.count("root") == 1 and calls.count("leaf") == 1 and calls.count("delegating") == 2
+        reflected = adapter.make_reflective_dataset(texts, evaluation, names)
+        assert set(reflected) == set(names)
+        assert "leaf-old" in reflected[names[0]][0]["Feedback"]
+        assert "delegating-old" in reflected[names[1]][0]["Feedback"]
+        assert "delegating-old" not in reflected[names[0]][0]["Feedback"]
+        assert "leaf-old" not in reflected[names[1]][0]["Feedback"]
+        # A native GEPA candidate mutation must reach only its named reconstructed child.
+        texts[names[0]] = "CHILD_POLICY_NEW"
+        changed = adapter.evaluate([example], texts, capture_traces=True)
+        assert changed.outputs[0].answer == "leaf-new:solo|delegating-old:alpha|delegating-old:beta"
+        assert calls.count("root") == 2 and calls.count("leaf") == 2 and calls.count("delegating") == 4
+        assert restored.children.leaf_action.signature.instructions == "CHILD_POLICY_OLD"
+        assert len(loaded) == 2
+        assert len({id(instance.children.leaf_action) for instance in loaded}) == 2
+        # Ordinary child parse failures remain tool results. Native GEPA cannot
+        # reflect on a failed child step swallowed by that existing boundary.
+        malformed_leaf = True
+        failed = adapter.evaluate([example], texts, capture_traces=True)
+        assert "AdapterParseError" in failed.outputs[0].answer
+        with pytest.raises(Exception, match="No valid predictions found for any module"):
+            adapter.make_reflective_dataset(texts, failed, names)
+        assert len({id(instance) for instance in sandboxes}) == len(sandboxes)
+        assert all(not sandbox.code_interpreter.contexts for sandbox in sandboxes)
+        assert all(not instance._contexts and not instance._interpreters for instance in managers)
+    finally:
+        for instance in managers:
+            instance.shutdown()
+        for sandbox in sandboxes:
+            sandbox.code_interpreter.close()
 
 
 @pytest.mark.parametrize(

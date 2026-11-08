@@ -163,6 +163,11 @@ Child execution:
 - Explicit children execute fresh native `dspy.RLM(ChildTask, ...)` instances on the metered sub LM.
   Fleet retains selected inputs, allowlisted tools, bounded slices, concurrent context propagation,
   failure classification, success-only promotion, and cleanup.
+- The root owns `children.leaf_action` and `children.delegating_action` as native DSPy predictors.
+  Each invocation copies its role's learned instructions/demos into a fresh child action predictor;
+  tools, resource limits, interpreter, and metered LM remain runtime-owned. Distinct signature
+  field descriptions preserve native GEPA attribution even with identical learned instructions.
+  Child extraction and arbitrary RLMs constructed by Flex are not separately tuned policies.
 - Explicit children receive Skills plus selected inputs.
 - Native nested RLMs copy their parent's `files/` and `skills/`.
 - Children use isolated Volume paths and promote only successful changed outputs.

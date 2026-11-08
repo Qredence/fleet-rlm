@@ -480,6 +480,25 @@ search metric call limits remain advisory between native batches. See the [versi
 contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
 API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
 
+Explicit Fleet child calls expose `children.leaf_action` and
+`children.delegating_action` as ordinary native instruction components outside
+Flex source ownership (`program.`-prefixed in the isolated wrapper). Fresh native
+child RLMs receive independent copies of the selected policy's instructions and
+demos, not its LM or live runtime. DSPy 3.4.1's GEPA adapter attributes predictor traces by
+signature equality; immutable role-specific `code` field descriptions distinguish
+the policies even when their instruction strings match. Child extraction and
+arbitrary RLMs authored inside Flex remain outside this separate policy inventory.
+The offline integration test executes both RLM and Flex through the emulated
+Daytona transport and native GEPA trace/reflection APIs, including simultaneous
+children and a leaf-only candidate mutation. This proves attribution and state
+transfer, not improved model quality or live-provider behavior.
+
+Ordinary child adapter parse failures still return as tool errors without ending
+the Turn. Native DSPy does not record those swallowed exceptions as failed child
+predictor steps, so native GEPA cannot produce child-specific format-failure
+reflection for them. The offline test checks this limitation explicitly; no
+synthetic trace injection or change in child error severity is introduced.
+
 LM and serving-adapter overrides use scoped `dspy.context` calls. DSPy's evaluator
 owns worker context propagation. Fleet uses native predictor/parameter traversal
 and native state loading. Missing RLM limits are supplied only by the outer Flex
@@ -582,6 +601,17 @@ safe-loading policy. Published candidates still use native JSON save, manifest a
 digest approval, and the bounded serving loader, including historical `program.`
 wrapper keys. This evaluation code change invalidates prior code-identity evidence;
 collect fresh evidence before approving a candidate.
+
+Native engine state includes `fleet_child_policy_version: 1` (not a tunable
+parameter). Legacy artifacts with neither the marker nor child keys retain their
+original predictor paths and initialize both child policies from native defaults.
+New artifacts must include both policies and the supported marker; incomplete
+state, modified role field contracts, or saved child LM overrides are rejected
+before changing the incumbent. The serving loader still accepts historically
+omitted root predictors, but cannot silently default missing new-format child
+policies. Isolated reconstruction uses the same validation in memory. Runtime
+limits and tool allowlists remain authoritative, including nondefault slices
+announced in child inputs; no saved policy restores a live interpreter.
 
 The `compiled_program_digest`
 attribute names the approved program that served the Turn (empty when none is

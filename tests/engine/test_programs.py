@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import time
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -583,8 +584,52 @@ def test_pre_consolidation_native_state_loads_unchanged():
     fixture = Path(__file__).parents[1] / "fixtures/pre_consolidation_program.json"
     state = json.loads(fixture.read_text())
     engine.load_state(state)
-    assert engine.dump_state() == state
+    migrated = engine.dump_state()
+    assert {name: migrated[name] for name in state} == state
+    assert set(migrated) - set(state) == {
+        "children.leaf_action",
+        "children.delegating_action",
+        "fleet_child_policy_version",
+    }
+    assert migrated["fleet_child_policy_version"] == 1
+    for name, default in engine.children.default_actions.items():
+        assert migrated[f"children.{name}"] == default
     assert "max_iters=16" in engine.flex_agent.module_src
+
+
+@pytest.mark.parametrize("entrypoint", ["native", "compiled", "isolated"])
+@pytest.mark.parametrize("invalid", ["missing_one", "missing_both", "version", "role", "model"])
+def test_child_policy_artifacts_reject_incomplete_or_unsafe_state_atomically(tmp_path, entrypoint, invalid):
+    from fleet_rlm.optimize.validation import IsolatedFleetProgram
+
+    engine = _engine(DaytonaSandboxManager("key", "org", "volume", "policy-artifact"))
+    engine.children.leaf_action.signature = engine.children.leaf_action.signature.with_instructions("Incumbent leaf")
+    before = deepcopy(engine.dump_state())
+    state = deepcopy(before)
+    if invalid in {"missing_one", "missing_both"}:
+        del state["children.leaf_action"]
+        if invalid == "missing_both":
+            del state["children.delegating_action"]
+    elif invalid == "version":
+        state["fleet_child_policy_version"] = 99
+    elif invalid == "role":
+        state["children.leaf_action"]["signature"]["fields"] = state["children.delegating_action"]["signature"][
+            "fields"
+        ]
+    else:
+        state["children.leaf_action"]["lm"] = dspy.LM("openai/unmetered").dump_state()
+
+    with pytest.raises(ValueError):
+        if entrypoint == "native":
+            engine.load_state(state)
+        elif entrypoint == "isolated":
+            IsolatedFleetProgram(engine, None).load_state({f"program.{key}": value for key, value in state.items()})
+        else:
+            path = tmp_path / "wrapped.json"
+            path.write_text(json.dumps({f"program.{key}": value for key, value in state.items()}))
+            engine.compiled.path = str(path)
+            engine.compiled.load_initial(engine)
+    assert engine.dump_state() == before
 
 
 def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypatch) -> None:

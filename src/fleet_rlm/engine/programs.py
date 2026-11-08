@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -97,9 +98,10 @@ class CompiledProgramFile:
             raise ValueError("Compiled program must be a JSON object")
         if state and all(key.startswith("program.") or key == "metadata" for key in state):
             state = {key.removeprefix("program."): value for key, value in state.items()}
-        # A program saved before a predictor existed keeps that predictor's current state.
-        state = {**program.dump_state(), **state}
-        program.load_state(state)  # DSPy trial-loads a copy first, so a bad artifact leaves `program` unchanged.
+        if isinstance(program, AdaptiveFleetEngine):
+            program.load_state(state, partial=True)
+        else:
+            program.load_state({**program.dump_state(), **state})
         if self.path and os.path.lexists(self.path):
             stat = self._regular_stat(self.path)
             self._stat = (stat.st_mtime_ns, stat.st_size)
@@ -163,6 +165,28 @@ class AdaptiveFleetEngine(dspy.Module):
         # Set by the optimizer's per-example factory on disposable rollout engines.
         self.optimization: OptimizationInputs | None = None
         self.compiled.load_initial(self)
+
+    def dump_state(self, json_mode: bool = True) -> dict[str, Any]:
+        """Save native parameters with a marker distinguishing complete child-policy artifacts."""
+        return {**super().dump_state(json_mode=json_mode), "fleet_child_policy_version": 1}
+
+    def load_state(self, state: dict[str, Any], *, allow_unsafe_lm_state: bool = False, partial: bool = False) -> None:
+        """Migrate legacy child defaults, but reject incomplete or incompatible new policies atomically.
+
+        Only the compiled-file loader permits omitted historical root predictors.
+        New-format child policies are mandatory even for partial compiled files.
+        """
+        state = dict(state)
+        version = state.pop("fleet_child_policy_version", None)
+        child_keys = {f"children.{name}" for name in self.children.default_actions}
+        if version is None and not child_keys.intersection(state):
+            state.update({f"children.{name}": deepcopy(value) for name, value in self.children.default_actions.items()})
+        elif version != 1 or not child_keys.issubset(state):
+            raise ValueError("Incomplete or unsupported child action policy state")
+        self.children.validate_state(state)
+        if partial:
+            state = {**self.dump_state(), **state}
+        super().load_state(state, allow_unsafe_lm_state=allow_unsafe_lm_state)
 
     def forward(
         self,

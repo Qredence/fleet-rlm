@@ -69,6 +69,10 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
     candidate = _engine(jev=jev)
     candidate.direct_cot.predict.signature = candidate.direct_cot.predict.signature.with_instructions("Reviewed answer")
     candidate.direct_cot.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
+    candidate.children.leaf_action.signature = candidate.children.leaf_action.signature.with_instructions("Leaf policy")
+    candidate.children.delegating_action.signature = candidate.children.delegating_action.signature.with_instructions(
+        "Delegating policy"
+    )
     candidate.flex_agent.load_state({"module_src": REVISED_SOURCE})
     before = deepcopy(candidate.dump_state())
 
@@ -78,7 +82,9 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
     assert [name for name, _ in native.named_parameters()] == [name for name, _ in candidate.named_parameters()]
     wrapped = IsolatedFleetProgram(candidate, None)
     assert wrapped.dump_state() == {f"program.{key}": value for key, value in before.items()}
-    assert [name for name, _ in wrapped.named_parameters()] == [f"program.{key}" for key in before]
+    assert [name for name, _ in wrapped.named_parameters()] == [
+        f"program.{key}" for key in before if key != "fleet_child_policy_version"
+    ]
 
     for program in (candidate, wrapped):
         path = tmp_path / "published.json"
@@ -152,6 +158,10 @@ def test_native_load_failure_does_not_mutate_candidate_or_target():
 def rollout(monkeypatch):
     candidate = _engine()
     candidate.direct_cot.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
+    candidate.children.leaf_action.demos = [{"reasoning": "leaf demo", "code": "print('leaf')", "nested": [11]}]
+    candidate.children.delegating_action.signature = candidate.children.delegating_action.signature.with_instructions(
+        "Use reviewed delegated reasoning"
+    )
     replay, _, _ = _selected_snapshot("s1", "t1", "fixture", {"files/input.csv": b"fixture"})
     replay["dataset_context"] = {
         "workspace_path": "files/input.csv",
@@ -223,6 +233,7 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
             barrier.wait(timeout=10)
             engine.direct_cot.predict.demos[0]["nested"].append(index)
             engine.direct_cot.predict.signature = engine.direct_cot.predict.signature.with_instructions(str(index))
+            engine.children.leaf_action.demos[0]["nested"].append(index)
             engine.flex_agent.load_state({"module_src": REVISED_SOURCE + f"\n# rollout {index}\n"})
             engine.sandbox_mgr.write_workspace_file("files/input.csv", str(index).encode())
             return engine
@@ -236,6 +247,8 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
     assert engines[0].optimization.context is not engines[1].optimization.context
     for index, engine in zip((2, 3), engines, strict=True):
         assert engine.direct_cot.predict.demos[0]["nested"] == [1, index]
+        assert engine.children.leaf_action.demos[0]["nested"] == [11, index]
+        assert engine.children.delegating_action.signature.instructions == "Use reviewed delegated reasoning"
         assert engine.direct_cot.predict.signature.instructions == str(index)
         assert engine.flex_agent.module_src.endswith(f"# rollout {index}\n")
         assert engine.sandbox_mgr.test_files["files/input.csv"] == str(index).encode()

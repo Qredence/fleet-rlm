@@ -141,6 +141,17 @@ class IsolatedFleetProgram(dspy.Module):
         self.engine_factory = engine_factory
         self.cleanup = cleanup if cleanup is not None else RolloutCleanup()
 
+    def dump_state(self, json_mode: bool = True) -> dict[str, Any]:
+        """Preserve the candidate's native state and schema marker under the existing prefix."""
+        return {f"program.{key}": value for key, value in self.program.dump_state(json_mode=json_mode).items()}
+
+    def load_state(self, state: dict[str, Any], *, allow_unsafe_lm_state: bool = False) -> None:
+        """Let the candidate validate and atomically migrate its own state."""
+        self.program.load_state(
+            {key.removeprefix("program."): value for key, value in state.items() if key.startswith("program.")},
+            allow_unsafe_lm_state=allow_unsafe_lm_state,
+        )
+
     def forward(self, **inputs: Any) -> dspy.Prediction:
         """Run one rollout in a fresh engine and always shut that engine's sandbox down."""
         with self.cleanup.attempt():
