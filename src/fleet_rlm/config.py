@@ -292,7 +292,7 @@ class FleetSettings(BaseSettings):
             if isinstance(field.validation_alias, str):
                 accepted.add(field.validation_alias)
             elif isinstance(field.validation_alias, AliasChoices):
-                accepted.update(field.validation_alias.choices)
+                accepted.update(choice for choice in field.validation_alias.choices if isinstance(choice, str))
         unknown = {key for key in values if key not in accepted and not key.startswith("_")}
         if unknown:
             raise ValueError("Unknown Fleet settings: " + ", ".join(sorted(unknown)))
