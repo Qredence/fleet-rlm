@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import dspy
@@ -252,3 +255,125 @@ def test_response_format_sources_and_session_snapshot(tmp_path, monkeypatch):
     updated = settings.for_session({"models": {"root": "openai/other", "sub": "openai/child"}})
     assert updated.resolved_model("root").response_format == "auto"
     assert updated.resolved_model("reflection").response_format == "json_object"
+
+
+@pytest.mark.parametrize("role", ["root", "sub", "reflection", "judge"])
+def test_unity_gateway_native_wire_and_reconstruction_leave_openai_unchanged(role, monkeypatch):
+    requests = []
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-key")
+    monkeypatch.setenv("ORDINARY_KEY", "ordinary-key")
+    model_field = "fleet_correctness_model" if role == "judge" else f"fleet_{role}_model"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append((self.path, self.headers["Authorization"], body))
+            payload = json.dumps(
+                {
+                    "id": "offline-gateway-response",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": body["model"],
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "46"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        settings = FleetSettings(
+            _env_file=None,
+            fleet_llm_model="openai/catalog.ai_gateway.qwen",
+            fleet_llm_api_base=base + "/ai-gateway/mlflow/v1",
+            fleet_llm_api_key="gateway-key",
+            fleet_llm_max_tokens=37,
+            fleet_llm_cache=False,
+            **{
+                model_field: "openai/catalog.ai_gateway.qwen",
+                f"fleet_{role}_api_base": base + "/ai-gateway/mlflow/v1",
+                f"fleet_{role}_api_key_env": "GATEWAY_KEY",
+                f"fleet_{role}_max_tokens": 37,
+                f"fleet_{role}_cache": False,
+            },
+        )
+        gateway = build_lm(settings, "", role)
+        assert complete_text(gateway, "17 + 29") == "46"
+        # A second endpoint/credential must not replace the first LM's connection or dialect.
+        ordinary = build_lm(
+            FleetSettings(
+                _env_file=None,
+                fleet_llm_model="openai/ordinary-model",
+                fleet_llm_api_base=base + "/v1",
+                fleet_llm_api_key="ordinary-key",
+                fleet_llm_max_tokens=53,
+                fleet_llm_cache=False,
+                **{
+                    model_field: "openai/ordinary-model",
+                    f"fleet_{role}_api_base": base + "/v1",
+                    f"fleet_{role}_api_key_env": "ORDINARY_KEY",
+                    f"fleet_{role}_max_tokens": 53,
+                    f"fleet_{role}_cache": False,
+                },
+            ),
+            "",
+            role,
+        )
+        assert complete_text(ordinary, "17 + 29") == "46"
+        other_gateway = build_lm(
+            FleetSettings(
+                _env_file=None,
+                **{
+                    model_field: "openai/second-service",
+                    f"fleet_{role}_api_base": base.replace("127.0.0.1", "localhost") + "/ai-gateway/mlflow/v1/",
+                    f"fleet_{role}_api_key_env": "ORDINARY_KEY",
+                    f"fleet_{role}_max_tokens": 71,
+                    f"fleet_{role}_cache": False,
+                },
+            ),
+            "",
+            role,
+        )
+        assert complete_text(other_gateway, "17 + 29") == "46"
+        # Native saved LMs omit credentials; reconstruction rebinds one without a custom engine.
+        state = json.loads(json.dumps(gateway.dump_state()))
+        assert "gateway-key" not in json.dumps(state)
+        restored = dspy.LM.load_state(state).copy(api_key="restored-key")
+        assert complete_text(restored, "17 + 29") == "46"
+        assert [path for path, _, _ in requests] == [
+            "/ai-gateway/mlflow/v1/chat/completions",
+            "/v1/chat/completions",
+            "/ai-gateway/mlflow/v1/chat/completions",
+            "/ai-gateway/mlflow/v1/chat/completions",
+        ]
+        assert [auth for _, auth, _ in requests] == [
+            "Bearer gateway-key",
+            "Bearer ordinary-key",
+            "Bearer ordinary-key",
+            "Bearer restored-key",
+        ]
+        for _, _, body in (requests[0], requests[3]):
+            assert body["model"] == "catalog.ai_gateway.qwen"
+            assert body["max_tokens"] == 37
+            assert "max_completion_tokens" not in body
+        assert requests[1][2]["max_completion_tokens"] == 53
+        assert "max_tokens" not in requests[1][2]
+        assert requests[2][2]["model"] == "second-service"
+        assert requests[2][2]["max_tokens"] == 71
+        assert "max_completion_tokens" not in requests[2][2]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

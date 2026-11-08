@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import ipaddress
 import json
 from dataclasses import fields
@@ -11,6 +12,7 @@ from urllib.parse import urlsplit
 
 import dspy
 import httpx
+from dspy.lm15 import AccessPolicy, OpenAIChatCompat, ProviderDefinition, register_provider
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 if TYPE_CHECKING:
@@ -78,6 +80,20 @@ def build_lm(settings: FleetSettings, model_id: str, role: Role) -> dspy.LM:
     """Build a native client, retaining the role connection on route replacement."""
     resolved = settings.resolved_model(role)
     route = model_id or resolved.model
+    if (
+        route.startswith(("openai/", "fleet-unity-"))
+        and urlsplit(resolved.api_base).path.rstrip("/") == "/ai-gateway/mlflow/v1"
+    ):
+        # Native declarations require an address. Stable per-endpoint IDs avoid
+        # replacing another workspace's binding; credentials remain LM-owned.
+        provider = "fleet-unity-" + hashlib.sha256(resolved.api_base.encode()).hexdigest()
+        register_provider(
+            ProviderDefinition.chat(
+                AccessPolicy(provider=provider, base_url=resolved.api_base),
+                compat=OpenAIChatCompat(max_tokens_field="max_tokens"),
+            )
+        )
+        route = provider + "/" + route.split("/", 1)[1]
     options = resolved.model_dump(exclude={"model", "adapter", "api_base", "response_format"}, exclude_none=True)
     if resolved.api_base:
         options["api_base"] = resolved.api_base

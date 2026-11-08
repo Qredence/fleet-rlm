@@ -793,7 +793,8 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
     assert wire["response_format"] == {"type": "json_object"}
     assert not wire.get("tools")
     assert wire["model"] == "system.ai.deepseek-v4-1-flash-1017"
-    assert wire["max_completion_tokens"] == 16384 and wire["temperature"] == 0.2
+    assert wire["max_tokens"] == 16384 and wire["temperature"] == 0.2
+    assert "max_completion_tokens" not in wire
     assert (
         lm.kwargs.get("timeout") is None and Timeouts().read == 600
     )  # Native SDK idle limit, not a benchmark deadline.

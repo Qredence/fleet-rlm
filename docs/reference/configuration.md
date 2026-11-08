@@ -23,11 +23,11 @@ source control.
 | `FLEET_SUB_MODEL` | empty; resolves to `openai/system.ai.deepseek-v4-1-flash-1017` | Sub-model override, with the same shared-model precedence as root. Reflection and judge defaults are unchanged. Configure the gateway endpoint and credentials separately; the model name alone does not select them. |
 | `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-haiku-5-5` | Code fallback for GEPA reflection. The public `config/fleet.toml.example` selects the same route, with temperature 1.0 and max tokens 32000. Relative model strength is an evaluation hypothesis, not established by configuration. |
 | `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. The public `config/fleet.toml.example` selects `openai:/system.ai.deepseek-v4-1-flash-1017`. |
-| `DATABRICKS_HOST` | empty | Workspace host used to derive the Unity Gateway base URL for `openai/` models. |
-| `DATABRICKS_TOKEN` | empty | Databricks credential for Unity Gateway `openai/` models. |
-| `FLEET_LLM_BASE_URL` | derived from `DATABRICKS_HOST` | Optional Unity Gateway base URL override, normally `https://<workspace-host>/ai-gateway/mlflow/v1`. |
-| `LLM_BASE_URL` | empty | OpenAI-compatible inference endpoint; takes precedence over `FLEET_LLM_BASE_URL` when set and must be HTTPS. |
-| `LLM_API_KEY` | empty | Inference credential; takes precedence over `DATABRICKS_TOKEN` when set, so a non-Databricks provider never requires overwriting the Databricks credential. |
+| `DATABRICKS_HOST` | empty | Databricks workspace host for MLflow; does not select Fleet's inference endpoint. |
+| `DATABRICKS_TOKEN` | empty | Databricks credential for MLflow; Fleet inference can explicitly reference it with `api_key_env`. |
+| `FLEET_LLM_BASE_URL` | empty | Shared inference endpoint, equivalent to `[llm].api_base`. Unity Gateway uses `https://<workspace-host>/ai-gateway/mlflow/v1`. |
+| `FLEET_LLM_API_KEY` | empty | Shared inference credential. Keep it in `.env` or a secret manager. |
+| `FLEET_LLM_API_KEY_ENV` | empty | Name of the environment variable containing the shared inference credential, equivalent to `[llm].api_key_env`. Role-specific `FLEET_ROOT_API_KEY_ENV`, SUB, REFLECTION and JUDGE references override it. |
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
@@ -144,10 +144,42 @@ live-integration verification report.
 
 For Databricks Unity Gateway, prefix each model service name with `openai/`,
 for example `openai/example_catalog.ai_gateway.deepseek-v4-1-flash-service` or
-`openai/system.ai.claude-haiku-5-5`. Fleet passes those models to the
-OpenAI-compatible API at `FLEET_LLM_BASE_URL`; when it is empty, the URL is
-derived from `DATABRICKS_HOST`. `DATABRICKS_TOKEN` is required, and the URL
-must use HTTPS.
+`openai/system.ai.claude-haiku-5-5`. Configure the endpoint and credential
+reference explicitly; `DATABRICKS_HOST` does not fill in the inference URL:
+
+```toml
+[llm]
+api_base = "https://<workspace-host>/ai-gateway/mlflow/v1"
+api_key_env = "DATABRICKS_TOKEN"
+```
+
+Independently selected role models need their own connection settings in
+`[llm.root]`, `[llm.sub]`, `[llm.reflection]` or `[llm.judge]` when they do not
+inherit the shared connection. Each role's resolved endpoint and credential
+are retained on model replacement and Session reconstruction.
+
+For `openai/` models whose resolved endpoint path is exactly
+`/ai-gateway/mlflow/v1` (an optional trailing slash is accepted), Fleet declares
+DSPy's native `ProviderDefinition.chat` with
+`OpenAIChatCompat(max_tokens_field="max_tokens")`. Unity Gateway rejects
+OpenAI's `max_completion_tokens` spelling. The declaration is automatic in
+normal CLI, API and optimizer model construction; no bootstrap script,
+custom engine, dependency patch or LiteLLM fallback is required. Other
+OpenAI-compatible endpoint paths keep DSPy's ordinary OpenAI behavior.
+
+The upstream service ID and configured `openai/` settings stay unchanged.
+Native LM state records an internal `fleet-unity-<endpoint-sha256>/` route.
+Each endpoint has a stable independent registration; credentials are never
+stored in that registration or native JSON LM state. Fleet registers the
+resolved endpoint before constructing its LMs, including before loading
+compiled programs. A standalone consumer loading native LM JSON outside
+Fleet must first construct a Fleet LM for that endpoint to register its
+native declaration, then provide its credential separately. Old `openai/`
+instruction-only compiled state remains readable; rebuilding the runtime LMs
+through Fleet selects the gateway declaration without rewriting predictor
+paths. Explicit LM bindings embedded by external callers in old predictor
+state are not rewritten; rebind those through Fleet's model construction.
+
 Fleet uses DSPy's native `lm15` engine for all runtime model roles and disables
 DSPy's response cache for those calls. Unsupported model prefixes are rejected
 instead of falling back to LiteLLM.
