@@ -19,7 +19,8 @@ import dspy
 import mlflow
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.compiled import load_program_envelope, program_envelope
+from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.models import build_lm
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimization_runs import (
@@ -33,6 +34,7 @@ from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
     approval_evidence,
     approve_candidate,
+    atomic_write,
     component_diffs,
     digest_bytes,
     format_report,
@@ -565,19 +567,37 @@ def _run_approval(
                 if restored is None:
                     raise ValueError("Interrupted approval changed; review the current experiment status")
                 record = restored
-            if not recovered:
+            current = settings.for_session(store.runtime_settings(session_id))
+            # Construction validates the same native graph as serving without allocating Daytona.
+            template = FleetRuntime(
+                DaytonaSandboxManager(
+                    current.fleet_daytona_api_key,
+                    current.fleet_daytona_org_id,
+                    current.fleet_daytona_volume_id,
+                    "approval-template",
+                    max_llm_calls=current.max_llm_calls_per_turn,
+                ),
+                build_lm(current, current.fleet_root_model, "root"),
+                build_lm(current, current.fleet_sub_model, "sub"),
+                current.build_jev_lm(),
+                root_adapter=current.resolved_model("root").build_adapter(),
+                sub_adapter=current.resolved_model("sub").build_adapter(),
+            ).program
+            if recovered:
+                load_program_envelope(template, active.read_bytes())
+            else:
                 if record.get("status") != "completed" and not preclaimed:
                     raise ValueError("Only a completed, unreviewed experiment can be approved")
                 review_owner_id = managed_owner_id or uuid.uuid4().hex
                 if not preclaimed:
                     record = store.claim_optimization_review(session_id, version, review_owner_id)
-                current = settings.for_session(store.runtime_settings(session_id))
                 try:
                     approve_candidate(
                         candidate_path,
                         manifest,
                         active,
                         evidence=approval_evidence(current, incumbent, scorer_version=SCORER_VERSION),
+                        program=template,
                     )
                 except Exception:
                     observed = digest_bytes(active.read_bytes()) if active.exists() else ""
@@ -592,6 +612,7 @@ def _run_approval(
                             worker_outcome=None,
                         )
                     raise
+            store.save_runtime_settings(session_id, {"program_selection": "artifact"})
             decision_at = datetime.now(UTC).isoformat(timespec="seconds")
             if record.get("status") == "approved":
                 saved = record
@@ -785,7 +806,8 @@ def _compile(
 
     Dataset, provider, storage, and artifact write errors also propagate.
     """
-    settings = settings.for_session(store.runtime_settings(session_id))
+    saved_settings = store.runtime_settings(session_id)
+    settings = settings.for_session(saved_settings)
     run_id = run_id or f"{session_id}-{uuid.uuid4().hex}"
     directory = Path(settings.compiled_program_dir)
     stop_file = directory / "runs" / run_id / "gepa.stop"
@@ -852,17 +874,19 @@ def _compile(
         max_llm_calls=settings.max_llm_calls_per_turn,
     )
     active = Path(settings.compiled_program_dir) / f"{session_id}.json"
-    template = AdaptiveFleetEngine(
+    template_runtime = FleetRuntime(
         template_manager,
         root_lm,
         sub_lm,
         jev_lm,
         compiled_path=str(active),
+        baseline=saved_settings.get("program_selection") != "artifact" and not (active.exists() or active.is_symlink()),
         execution_mode=settings.execution_mode,
         root_adapter=settings.resolved_model("root").build_adapter(),
         sub_adapter=settings.resolved_model("sub").build_adapter(),
     )
-    incumbent_digest = template.compiled.digest
+    template = template_runtime.program
+    incumbent_digest = template_runtime.compiled.digest
     # Snapshot all identities before native search starts. Completion checks the same
     # values again, so the manifest cannot certify code or dependencies changed mid-run.
     search_evidence = approval_evidence(settings, incumbent_digest, scorer_version=SCORER_VERSION)
@@ -977,7 +1001,7 @@ def _compile(
             raise RuntimeError("Optimization evidence changed during the run; candidate requires reevaluation")
         destination = directory / "candidates" / f"{version}.json"
         destination.parent.mkdir(parents=True, exist_ok=True)
-        optimized.program.save(str(destination))
+        atomic_write(destination, program_envelope(optimized.program, metadata=search_evidence))
         manifest = ArtifactManifest(
             version=version,
             digest=digest_bytes(destination.read_bytes()),

@@ -23,7 +23,8 @@ def test_child_policies_reconstruct_and_reach_native_gepa_through_parallel_host_
     from dspy.teleprompt.gepa.gepa_utils import DspyAdapter
     from emulator import emulated_sandbox
 
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.compiled import CompiledProgramFile, program_envelope
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.optimize.artifacts import tunable_components
     from fleet_rlm.optimize.validation import IsolatedFleetProgram
 
@@ -82,28 +83,28 @@ SUBMIT(answer='|'.join(item['findings'] for item in [leaf, *batch]), learned_ski
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
 
     def engine():
-        return AdaptiveFleetEngine(manager(f"root-{len(managers)}"), lm, lm, execution_mode=route)
+        return FleetRuntime(manager(f"root-{len(managers)}"), lm, lm, execution_mode=route)
 
-    candidate = engine()
-    for policy in (candidate.children.leaf_action, candidate.children.delegating_action):
+    candidate = engine().program
+    for policy in (candidate.child_policies.leaf_action, candidate.child_policies.delegating_action):
         # Equal instructions must not cause cross-role attribution.
         policy.signature = policy.signature.with_instructions("CHILD_POLICY_OLD")
     artifact = tmp_path / "candidate.json"
-    candidate.save(str(artifact))
+    artifact.write_bytes(program_envelope(candidate))
     restored = engine()
-    restored.compiled.path = str(artifact)
-    restored.compiled.load_initial(restored)
-    assert restored.dump_state() == candidate.dump_state()
+    restored.compiled = CompiledProgramFile(str(artifact))
+    restored.compiled.load_initial(restored.program)
+    assert restored.program.dump_state() == candidate.dump_state()
     loaded = []
 
     def reconstruct(_example, program):
         instance = engine()
-        instance.load_state(deepcopy(program.dump_state()))
+        instance.program.load_state(deepcopy(program.dump_state()))
         loaded.append(instance)
         return instance
 
-    isolated = IsolatedFleetProgram(restored, reconstruct)
-    names = ["program.children.leaf_action", "program.children.delegating_action"]
+    isolated = IsolatedFleetProgram(restored.program, reconstruct)
+    names = ["program.child_policies.leaf_action", "program.child_policies.delegating_action"]
     expected = "leaf-old:solo|delegating-old:alpha|delegating-old:beta"
 
     def metric(_gold, prediction, _trace=None, _pred_name=None, _pred_trace=None):
@@ -132,9 +133,9 @@ SUBMIT(answer='|'.join(item['findings'] for item in [leaf, *batch]), learned_ski
         changed = adapter.evaluate([example], texts, capture_traces=True)
         assert changed.outputs[0].answer == "leaf-new:solo|delegating-old:alpha|delegating-old:beta"
         assert calls.count("root") == 2 and calls.count("leaf") == 2 and calls.count("delegating") == 4
-        assert restored.children.leaf_action.signature.instructions == "CHILD_POLICY_OLD"
+        assert restored.program.child_policies.leaf_action.signature.instructions == "CHILD_POLICY_OLD"
         assert len(loaded) == 2
-        assert len({id(instance.children.leaf_action) for instance in loaded}) == 2
+        assert len({id(instance.program.child_policies.leaf_action) for instance in loaded}) == 2
         # Ordinary child parse failures remain tool results. Native GEPA cannot
         # reflect on a failed child step swallowed by that existing boundary.
         malformed_leaf = True

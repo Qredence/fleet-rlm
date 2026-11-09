@@ -21,7 +21,8 @@ import mlflow
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.invocation import FleetRuntime
+from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.models import build_lm
 from fleet_rlm.replay import selected_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
@@ -141,14 +142,16 @@ class IsolatedFleetProgram(dspy.Module):
         self.engine_factory = engine_factory
         self.cleanup = cleanup if cleanup is not None else RolloutCleanup()
 
-    def dump_state(self, json_mode: bool = True) -> dict[str, Any]:
-        """Preserve the candidate's native state and schema marker under the existing prefix."""
-        return {f"program.{key}": value for key, value in self.program.dump_state(json_mode=json_mode).items()}
-
     def load_state(self, state: dict[str, Any], *, allow_unsafe_lm_state: bool = False) -> None:
-        """Let the candidate validate and atomically migrate its own state."""
+        """Validate the complete underlying graph, rather than bypassing it parameter by parameter."""
+        if not isinstance(self.program, FleetProgram):
+            # Native Parameter students (such as Flex) serialize under `program`, not dotted fields.
+            super().load_state(state, allow_unsafe_lm_state=allow_unsafe_lm_state)
+            return
+        if set(state) != {f"program.{key}" for key in self.program.dump_state()}:
+            raise ValueError("Isolated candidate requires complete native program-prefixed state")
         self.program.load_state(
-            {key.removeprefix("program."): value for key, value in state.items() if key.startswith("program.")},
+            {key.removeprefix("program."): value for key, value in state.items()},
             allow_unsafe_lm_state=allow_unsafe_lm_state,
         )
 
@@ -201,7 +204,7 @@ def build_isolated_engine_factory(
                 shared.extend((root, sub, jev))
             return shared[0], shared[1], shared[2]
 
-    def create(example: dspy.Example, program: AdaptiveFleetEngine) -> AdaptiveFleetEngine:
+    def create(example: dspy.Example, program: FleetProgram) -> FleetRuntime:
         """Restore one reviewed replay into a disposable engine using the candidate program.
 
         Reject inconsistent replay metadata with ValueError. Setup failures trigger
@@ -214,8 +217,8 @@ def build_isolated_engine_factory(
             raise ValueError("Curated replay snapshot does not match the reviewed example")
         if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
             raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")
-        if not isinstance(program, AdaptiveFleetEngine):
-            raise TypeError("Isolated rollout requires a Fleet engine candidate")
+        if not isinstance(program, FleetProgram):
+            raise TypeError("Isolated rollout requires an unwrapped FleetProgram candidate")
         root_lm, sub_lm, jev_lm = language_models()
         replay_context = snapshot.get("dataset_context")
         replay_files = snapshot["replay_files"]
@@ -240,7 +243,7 @@ def build_isolated_engine_factory(
             for path, encoded in replay_files.items():
                 content = base64.b64decode(encoded, validate=True)
                 manager.write_workspace_file(path, content)
-            engine = AdaptiveFleetEngine(
+            engine = FleetRuntime(
                 sandbox_mgr=manager,
                 root_lm=root_lm,
                 sub_lm=sub_lm,
@@ -250,7 +253,7 @@ def build_isolated_engine_factory(
                 root_adapter=settings.resolved_model("root").build_adapter(),
                 sub_adapter=settings.resolved_model("sub").build_adapter(),
             )
-            engine.load_state(deepcopy(program.dump_state()))
+            engine.program.load_state(deepcopy(program.dump_state()))
             engine.optimization = OptimizationInputs(
                 context=WorkspaceDataset(**replay_context) if replay_context else None,
                 verifications=tuple(

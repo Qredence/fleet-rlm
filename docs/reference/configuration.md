@@ -174,11 +174,12 @@ stored in that registration or native JSON LM state. Fleet registers the
 resolved endpoint before constructing its LMs, including before loading
 compiled programs. A standalone consumer loading native LM JSON outside
 Fleet must first construct a Fleet LM for that endpoint to register its
-native declaration, then provide its credential separately. Old `openai/`
-instruction-only compiled state remains readable; rebuilding the runtime LMs
-through Fleet selects the gateway declaration without rewriting predictor
-paths. Explicit LM bindings embedded by external callers in old predictor
-state are not rewritten; rebind those through Fleet's model construction.
+native declaration, then provide its credential separately. Historical native LM
+JSON remains inspectable, but Fleet installation requires the complete
+`fleet-program-a1` envelope described in [evaluation](evaluation.md). Learned state
+must not contain non-null LM bindings: current role models, credentials, adapters
+and budget accounting are supplied by the runtime. Legacy compiled predictor paths
+are not translated or partially loaded.
 
 Fleet uses DSPy's native `lm15` engine for all runtime model roles and disables
 DSPy's response cache for those calls. Unsupported model prefixes are rejected

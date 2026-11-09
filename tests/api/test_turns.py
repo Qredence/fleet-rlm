@@ -1375,6 +1375,7 @@ def test_turn_associates_actual_engine_before_root_closes(monkeypatch, failure):
             raise RuntimeError("generate failed")
         return SimpleNamespace(answer="verified", route="flex", learned_skill_note="")
 
+    engine.program = object()
     runtime = runtime_with(load_context=load, engine=engine)
 
     def associate(actual, config_digest, experiment, span):
@@ -1384,7 +1385,7 @@ def test_turn_associates_actual_engine_before_root_closes(monkeypatch, failure):
     emitted = []
     _run_turn_direct(runtime, emitted=emitted)
     assert len(observed) == 1
-    assert observed[0][0] is runtime.engine and len(observed[0][1]) == 64
+    assert observed[0][0] is runtime.engine.program and len(observed[0][1]) == 64
     assert emitted[-1] == {"event": "done"}
     assert emitted[-2]["event"] == ("error" if failure else "turn_complete")
 

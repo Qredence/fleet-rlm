@@ -1,5 +1,6 @@
 """Offline parity and ownership contracts for native rollout state transport."""
 
+import hashlib
 import json
 import os
 import signal
@@ -15,7 +16,9 @@ import pytest
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, Route
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.compiled import program_envelope
+from fleet_rlm.engine.invocation import FleetRuntime
+from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.optimize import validation
 from fleet_rlm.optimize.validation import IsolatedFleetProgram, RolloutCleanup, RolloutCleanupError
 from fleet_rlm.replay import encode_snapshot
@@ -42,7 +45,7 @@ def _no_provider(monkeypatch):
 
 def _engine(mode="hybrid", jev=None):
     manager = DaytonaSandboxManager("key", "org", "volume", "state-parity", max_llm_calls=7)
-    return AdaptiveFleetEngine(
+    return FleetRuntime(
         manager,
         dspy.utils.DummyLM([{"reasoning": "Fixed offline response", "answer": "right"}] * 20),
         dspy.LM("openai/sub"),
@@ -66,34 +69,50 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
 
     monkeypatch.setattr(dspy.RLM, "forward", rlm_forward)
     jev = SimpleNamespace(model="typed-fixture") if typed else None
-    candidate = _engine(jev=jev)
-    candidate.direct_cot.predict.signature = candidate.direct_cot.predict.signature.with_instructions("Reviewed answer")
-    candidate.direct_cot.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
-    candidate.children.leaf_action.signature = candidate.children.leaf_action.signature.with_instructions("Leaf policy")
-    candidate.children.delegating_action.signature = candidate.children.delegating_action.signature.with_instructions(
-        "Delegating policy"
+    candidate_runtime = _engine(jev=jev)
+    candidate = candidate_runtime.program
+    candidate.reasoning.direct.predict.signature = candidate.reasoning.direct.predict.signature.with_instructions(
+        "Reviewed answer"
     )
-    candidate.flex_agent.load_state({"module_src": REVISED_SOURCE})
+    candidate.reasoning.direct.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
+    candidate.child_policies.leaf_action.signature = candidate.child_policies.leaf_action.signature.with_instructions(
+        "Leaf policy"
+    )
+    candidate.child_policies.delegating_action.signature = (
+        candidate.child_policies.delegating_action.signature.with_instructions("Delegating policy")
+    )
+    from fleet_rlm.contracts import TRIAGE_CRITERIA
+
+    criteria = deepcopy(TRIAGE_CRITERIA)
+    criteria["direct"]["definition"] = "Non-default reviewed criterion"
+    candidate.routing.predict.set_criteria("route", criteria)
+    candidate.reasoning.flex.load_state({"module_src": REVISED_SOURCE})
     before = deepcopy(candidate.dump_state())
 
-    native = _engine(mode, jev)
+    native_runtime = _engine(mode, jev)
+    native = native_runtime.program
     native.load_state(deepcopy(before))
     assert native.dump_state() == before
     assert [name for name, _ in native.named_parameters()] == [name for name, _ in candidate.named_parameters()]
     wrapped = IsolatedFleetProgram(candidate, None)
     assert wrapped.dump_state() == {f"program.{key}": value for key, value in before.items()}
-    assert [name for name, _ in wrapped.named_parameters()] == [
-        f"program.{key}" for key in before if key != "fleet_child_policy_version"
-    ]
+    assert [name for name, _ in wrapped.named_parameters()] == [f"program.{key}" for key in before]
 
     for program in (candidate, wrapped):
         path = tmp_path / "published.json"
-        program.save(str(path))
-        durable = AdaptiveFleetEngine(
-            native.sandbox_mgr, native.root_lm, native.sub_lm, jev_lm=jev, compiled_path=str(path), execution_mode=mode
+        root = program.program if isinstance(program, IsolatedFleetProgram) else program
+        path.write_bytes(program_envelope(root))
+        durable_runtime = FleetRuntime(
+            native_runtime.sandbox_mgr,
+            native_runtime.root_lm,
+            native_runtime.sub_lm,
+            jev_lm=jev,
+            compiled_path=str(path),
+            execution_mode=mode,
         )
-        assert durable.dump_state() == native.dump_state()
-        for engine in (native, durable):
+        assert durable_runtime.program.dump_state() == native.dump_state()
+        for runtime in (native_runtime, durable_runtime):
+            engine = runtime.program
             for route in Route:
                 decision_lm = dspy.utils.DummyLM(
                     [
@@ -108,46 +127,48 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
                     ]
                 )
                 with dspy.context(lm=decision_lm, adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)):
-                    decision = engine.triage(task="solve fixture", workspace_manifest="", skills_catalog="").route
-                assert isinstance(decision, engine.triage.signature.fields["route"].annotation)
+                    decision = engine.routing.predict(
+                        task="solve fixture", workspace_manifest="", skills_catalog=""
+                    ).route
+                assert isinstance(decision, engine.routing.predict.signature.fields["route"].annotation)
                 assert decision.value == route.value
-                result = engine._execute(route, "", "", "solve fixture", "", "", None, mode)
+                result = runtime("", "", "solve fixture", "", "", None, route.value)
                 assert result.answer == "right" and result.route == route.value
 
-    assert native.execution_mode == mode
-    assert native.jev_lm is jev
-    assert native._metered_root._lm is native.root_lm
-    assert native._metered_sub._lm is native.sub_lm
-    assert native.primary_rlm.max_llm_calls == 7
-    assert native.flex_agent._interpreter_factory is not candidate.flex_agent._interpreter_factory
-    for name in ("triage", "skill_selector"):
-        original, restored = getattr(candidate, name), getattr(native, name)
+    assert native_runtime.execution_mode == mode
+    assert native_runtime.jev_lm is jev
+    assert native_runtime._metered_root._lm is native_runtime.root_lm
+    assert native_runtime._metered_sub._lm is native_runtime.sub_lm
+    assert native.reasoning.rlm.max_llm_calls == 7
+    assert native.reasoning.flex._interpreter_factory is not candidate.reasoning.flex._interpreter_factory
+    for name in ("routing", "skill_selection"):
+        original, restored = getattr(candidate, name).predict, getattr(native, name).predict
         assert restored.signature.dump_state() == original.signature.dump_state()
         assert {key: field.annotation for key, field in restored.signature.fields.items()} == {
             key: field.annotation for key, field in original.signature.fields.items()
         }
-    assert native.triage.fields == candidate.triage.fields
-    native.direct_cot.predict.demos[0]["nested"].append(2)
+    assert native.routing.predict.fields == candidate.routing.predict.fields
+    native.reasoning.direct.predict.demos[0]["nested"].append(2)
     assert candidate.dump_state() == before
 
 
 def test_native_load_keeps_unsafe_lm_state_disabled():
-    candidate = _engine()
-    candidate.direct_cot.predict.lm = dspy.LM("openai/serialized", api_base="https://untrusted.invalid")
+    candidate = _engine().program
+    candidate.reasoning.direct.predict.lm = dspy.LM("openai/serialized", api_base="https://untrusted.invalid")
     state = deepcopy(candidate.dump_state())
     restored = _engine()
     root, sub = restored.root_lm, restored.sub_lm
-    restored.load_state(state)
+    with pytest.raises(ValueError, match="runtime"):
+        restored.program.load_state(state)
     assert restored.root_lm is root and restored.sub_lm is sub
-    assert restored.direct_cot.predict.lm.model == "openai/serialized"
-    assert "api_base" not in restored.direct_cot.predict.lm.kwargs
+    assert restored.program.reasoning.direct.predict.lm is None
 
 
 def test_native_load_failure_does_not_mutate_candidate_or_target():
-    candidate, target = _engine(), _engine()
+    candidate, target = _engine().program, _engine().program
     before = deepcopy(candidate.dump_state())
     invalid = deepcopy(before)
-    invalid["flex_agent"]["module_src"] = "class Invalid(:\n"
+    invalid["reasoning.flex"]["module_src"] = "class Invalid(:\n"
     with pytest.raises((SyntaxError, ValueError)):
         target.load_state(invalid)
     assert target.dump_state() == before
@@ -156,11 +177,12 @@ def test_native_load_failure_does_not_mutate_candidate_or_target():
 
 @pytest.fixture
 def rollout(monkeypatch):
-    candidate = _engine()
-    candidate.direct_cot.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
-    candidate.children.leaf_action.demos = [{"reasoning": "leaf demo", "code": "print('leaf')", "nested": [11]}]
-    candidate.children.delegating_action.signature = candidate.children.delegating_action.signature.with_instructions(
-        "Use reviewed delegated reasoning"
+    template = _engine()
+    candidate = template.program
+    candidate.reasoning.direct.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
+    candidate.child_policies.leaf_action.demos = [{"reasoning": "leaf demo", "code": "print('leaf')", "nested": [11]}]
+    candidate.child_policies.delegating_action.signature = (
+        candidate.child_policies.delegating_action.signature.with_instructions("Use reviewed delegated reasoning")
     )
     replay, _, _ = _selected_snapshot("s1", "t1", "fixture", {"files/input.csv": b"fixture"})
     replay["dataset_context"] = {
@@ -197,7 +219,15 @@ def rollout(monkeypatch):
     monkeypatch.setattr(validation, "DaytonaSandboxManager", manager)
     monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", write)
     monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
-    models = {"root": candidate.root_lm, "sub": candidate.sub_lm}
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "stat_workspace_file",
+        lambda self, path: {
+            "size_bytes": len(self.test_files[path]),
+            "sha256": hashlib.sha256(self.test_files[path]).hexdigest(),
+        },
+    )
+    models = {"root": template.root_lm, "sub": template.sub_lm}
     monkeypatch.setattr(validation, "build_lm", lambda _settings, _model_id, role: models[role])
     cleanup = RolloutCleanup()
     factory = validation.build_isolated_engine_factory(
@@ -221,7 +251,7 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
     def refuse(*_args, **_kwargs):
         pytest.fail("Rollout must not save, create or unlink candidate transport files")
 
-    monkeypatch.setattr(AdaptiveFleetEngine, "save", refuse)
+    monkeypatch.setattr(FleetProgram, "save", refuse)
     monkeypatch.setattr(tempfile, "mkstemp", refuse)
     monkeypatch.setattr(Path, "unlink", refuse)
     barrier = threading.Barrier(2)
@@ -229,12 +259,15 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
     def run(index):
         engine = factory(example, candidate)
         try:
-            assert engine.dump_state() == before
+            assert engine.program.dump_state() == before
             barrier.wait(timeout=10)
-            engine.direct_cot.predict.demos[0]["nested"].append(index)
-            engine.direct_cot.predict.signature = engine.direct_cot.predict.signature.with_instructions(str(index))
-            engine.children.leaf_action.demos[0]["nested"].append(index)
-            engine.flex_agent.load_state({"module_src": REVISED_SOURCE + f"\n# rollout {index}\n"})
+            program = engine.program
+            program.reasoning.direct.predict.demos[0]["nested"].append(index)
+            program.reasoning.direct.predict.signature = program.reasoning.direct.predict.signature.with_instructions(
+                str(index)
+            )
+            program.child_policies.leaf_action.demos[0]["nested"].append(index)
+            program.reasoning.flex.load_state({"module_src": REVISED_SOURCE + f"\n# rollout {index}\n"})
             engine.sandbox_mgr.write_workspace_file("files/input.csv", str(index).encode())
             return engine
         finally:
@@ -246,16 +279,19 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
     assert len({manager.session_id for manager in managers}) == 2
     assert engines[0].optimization.context is not engines[1].optimization.context
     for index, engine in zip((2, 3), engines, strict=True):
-        assert engine.direct_cot.predict.demos[0]["nested"] == [1, index]
-        assert engine.children.leaf_action.demos[0]["nested"] == [11, index]
-        assert engine.children.delegating_action.signature.instructions == "Use reviewed delegated reasoning"
-        assert engine.direct_cot.predict.signature.instructions == str(index)
-        assert engine.flex_agent.module_src.endswith(f"# rollout {index}\n")
+        program = engine.program
+        assert program.reasoning.direct.predict.demos[0]["nested"] == [1, index]
+        assert program.child_policies.leaf_action.demos[0]["nested"] == [11, index]
+        assert program.child_policies.delegating_action.signature.instructions == "Use reviewed delegated reasoning"
+        assert program.reasoning.direct.predict.signature.instructions == str(index)
+        assert program.reasoning.flex.module_src.endswith(f"# rollout {index}\n")
         assert engine.sandbox_mgr.test_files["files/input.csv"] == str(index).encode()
         assert engine.sandbox_mgr.shutdown_calls == 1
         assert engine.compiled_path is None
-        assert engine.primary_rlm.max_llm_calls == 7
-        assert engine.flex_agent._interpreter_factory().rlm_defaults == {"max_iters": 16, "max_llm_calls": 7}
+        assert program.reasoning.rlm.max_llm_calls == 7
+        assert program.reasoning.flex._interpreter_factory().rlm_defaults == {"max_iters": 16, "max_llm_calls": 7}
+        assert program.reasoning.rlm._user_tools["spawn_agent"].func.__self__ is engine.delegation
+    assert engines[0].delegation is not engines[1].delegation
 
 
 @pytest.mark.parametrize("failure", ["copy", "load", "restore", "execute"])
@@ -272,11 +308,11 @@ def test_rollout_failure_has_one_cleanup_owner(rollout, monkeypatch, failure, cl
     if failure == "copy":
         monkeypatch.setattr(validation, "deepcopy", fail)
     elif failure == "load":
-        monkeypatch.setattr(AdaptiveFleetEngine, "load_state", fail)
+        monkeypatch.setattr(FleetProgram, "load_state", fail)
     elif failure == "restore":
         monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", fail)
     else:
-        monkeypatch.setattr(AdaptiveFleetEngine, "forward", fail)
+        monkeypatch.setattr(FleetProgram, "forward", fail)
 
     def shutdown(self):
         self.shutdown_calls += 1
@@ -302,7 +338,7 @@ def test_rollout_failure_has_one_cleanup_owner(rollout, monkeypatch, failure, cl
 
 def test_factory_rejects_wrapper_state_before_allocating_runtime(rollout):
     candidate, example, factory, managers, _cleanup = rollout
-    with pytest.raises(TypeError, match="Fleet engine candidate"):
+    with pytest.raises(TypeError, match="unwrapped FleetProgram candidate"):
         factory(example, IsolatedFleetProgram(candidate, factory))
     assert managers == []
 
@@ -312,11 +348,11 @@ def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypa
     seen = []
 
     def tracked_factory(item, program):
-        assert isinstance(program, AdaptiveFleetEngine)
+        assert isinstance(program, FleetProgram)
         seen.append(program)
         return factory(item, program)
 
-    monkeypatch.setattr(AdaptiveFleetEngine, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
+    monkeypatch.setattr(FleetProgram, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
     baseline = IsolatedFleetProgram(candidate, tracked_factory, cleanup)
     optimizer = dspy.GEPA(
         metric=lambda *_args: dspy.Prediction(score=1.0, feedback="Reviewed answer"),
@@ -328,13 +364,13 @@ def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypa
     )
     optimized = optimizer.compile(baseline, trainset=[example], valset=[example])
     assert isinstance(optimized, IsolatedFleetProgram)
-    assert isinstance(optimized.program, AdaptiveFleetEngine)
+    assert isinstance(optimized.program, FleetProgram)
     assert optimized.dump_state() == {f"program.{key}": value for key, value in optimized.program.dump_state().items()}
     assert IsolatedFleetProgram(optimized.program, tracked_factory)(**example.inputs()).answer == "right"
     assert seen[-1] is optimized.program
     artifact = tmp_path / "published-candidate.json"
-    optimized.save(str(artifact))
-    assert set(json.loads(artifact.read_text())) == {*optimized.dump_state(), "metadata"}
+    artifact.write_bytes(program_envelope(optimized.program))
+    assert json.loads(artifact.read_text())["state"] == optimized.program.dump_state()
     assert all(manager.shutdown_calls == 1 for manager in managers)
 
 
@@ -342,7 +378,7 @@ def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypa
 @pytest.mark.parametrize("native", ["evaluate", "gepa"])
 def test_native_scoring_cannot_clear_cleanup_failure(rollout, monkeypatch, cleanup_result, native):
     candidate, example, factory, managers, cleanup = rollout
-    monkeypatch.setattr(AdaptiveFleetEngine, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
+    monkeypatch.setattr(FleetProgram, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
 
     def shutdown(self):
         self.shutdown_calls += 1
@@ -394,7 +430,7 @@ def test_run_drains_late_cleanup_and_closes_admission_without_masking_cancellati
         self.shutdown_calls += 1
         return False
 
-    monkeypatch.setattr(AdaptiveFleetEngine, "forward", forward)
+    monkeypatch.setattr(FleetProgram, "forward", forward)
     monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
     baseline = IsolatedFleetProgram(candidate, factory, cleanup)
 

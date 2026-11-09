@@ -51,6 +51,11 @@ class OptimizationInputs:
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
+def turn_is_over(exc: BaseException) -> bool:
+    """Deadline, cancellation and shared budget exhaustion end the entire Turn."""
+    return isinstance(exc, TimeoutError) or str(exc).startswith(("Turn cancelled", "Shared RLM budget exhausted"))
+
+
 def parse_sse(text: str) -> list[dict[str, Any]]:
     """Decode the JSON data lines from a Fleet SSE response, ignoring malformed lines."""
     events = []

@@ -14,7 +14,7 @@ from dspy.primitives.facade import SandboxLM
 from pydantic import BaseModel
 
 from fleet_rlm.contracts import TRIAGE_ROUTE, decision_evidence, item_decision, make_choice_type
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.engine.signatures import FleetTask
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -264,17 +264,17 @@ def test_routing_evidence_distinguishes_backend_and_override(monkeypatch, backen
     m.event_callback = lambda payload: events.append((payload["event"], payload))
     root = dspy.LM("openai/test-root", engine="lm15", cache=False)
     lm = type("TypeSafe", (), {"model": "test-jev"})() if backend == "typesafe" else None
-    engine = AdaptiveFleetEngine(m, root, root, jev_lm=lm)
-    engine.triage = lambda **_kwargs: SimpleNamespace(
+    engine = FleetRuntime(m, root, root, jev_lm=lm)
+    engine.program.routing.predict = lambda **_kwargs: SimpleNamespace(
         route=TRIAGE_ROUTE(
             value="direct",
             confidence=0.8,
             probabilities={"direct": 0.8, "flex": 0.1, "rlm": 0.1},
         )
     )
-    engine.direct_cot = lambda **_kwargs: SimpleNamespace(answer="ok")
-    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(answer="ok")
-    engine.flex_agent = lambda **_kwargs: SimpleNamespace(answer="ok")
+    engine.program.reasoning.direct = lambda **_kwargs: SimpleNamespace(answer="ok")
+    engine.program.reasoning.rlm = lambda **_kwargs: SimpleNamespace(answer="ok")
+    engine.program.reasoning.flex = lambda **_kwargs: SimpleNamespace(answer="ok")
     try:
         result = engine(workspace_manifest="", memory_summary="", task="greeting", context=context, execution_mode=mode)
         evidence = next(p["evidence"] for name, p in events if name == "triage_decision")

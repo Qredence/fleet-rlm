@@ -234,7 +234,7 @@ def main() -> None:
             lm = build_lm(settings, args.model, "root")
             with dspy.context(lm=lm, adapter=settings.resolved_model("root").build_adapter()):
                 interpreter = manager.interpreter_factory(
-                    tools={"spawn_agent": runtime.engine.primary_rlm._user_tools["spawn_agent"]}
+                    tools={"spawn_agent": runtime.engine.program.reasoning.rlm._user_tools["spawn_agent"]}
                 )()
                 facade = FacadeInvocation({}, manager.interpreter_factory(), 20, lm=lm, reserve=manager.consume_budget)
                 facade.install(interpreter)

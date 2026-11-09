@@ -36,7 +36,7 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
     from pydantic_core import to_jsonable_python
 
     from fleet_rlm.contracts import Route
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.engine.signatures import FleetTask
 
     raw = b"__FILE_BODY_ONLY__,value\none,11\ntwo,17\n"
@@ -84,15 +84,22 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
         ]
         * 2
     )
-    engine = AdaptiveFleetEngine(manager, lm, lm)
+    engine = FleetRuntime(manager, lm, lm)
     if route == "flex":
-        engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
+        engine.program.reasoning.flex = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
     else:
-        engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=3)
+        engine.program.reasoning.rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=3)
     with dspy.context(disable_history=True):
         for _ in range(2):
-            prediction = engine._execute(
-                Route(route), "files/selected.csv", "", "Sum the values", "", "", dataset, route
+            prediction = engine.program.reasoning(
+                route=Route(route),
+                workspace_manifest="files/selected.csv",
+                memory_summary="",
+                task="Sum the values",
+                skills_catalog="",
+                session_history="",
+                context=dataset,
+                mode=route,
             )
             assert prediction.answer == "28" and prediction.route == route
             assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
@@ -108,7 +115,7 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
 @pytest.mark.parametrize("failure", ["missing", "changed"])
 def test_dataset_initialization_failure_closes_native_interpreters(sandbox, route, failure, monkeypatch):
     from fleet_rlm.contracts import Route
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.engine.signatures import FleetTask
 
     if failure == "changed":
@@ -121,18 +128,27 @@ def test_dataset_initialization_failure_closes_native_interpreters(sandbox, rout
         lambda _self: ["files/selected.txt"] if failure == "changed" else [],
     )
     lm = dspy.utils.DummyLM([])
-    engine = AdaptiveFleetEngine(manager, lm, lm)
+    engine = FleetRuntime(manager, lm, lm)
 
     def echo(value: str) -> str:
         return value
 
     factory = lambda: DaytonaInterpreter(manager)  # noqa: E731
     if route == "flex":
-        engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
+        engine.program.reasoning.flex = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
     else:
-        engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory)
+        engine.program.reasoning.rlm = dspy.RLM(FleetTask, interpreter_factory=factory)
     with pytest.raises(dspy.CodeInterpreterError, match=r"source changed|FileNotFoundError"):
-        engine._execute(Route(route), "", "", "Read the selected file", "", "", dataset, route)
+        engine.program.reasoning(
+            route=Route(route),
+            workspace_manifest="",
+            memory_summary="",
+            task="Read the selected file",
+            skills_catalog="",
+            session_history="",
+            context=dataset,
+            mode=route,
+        )
     assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
     assert lm.history == []
 
@@ -1016,12 +1032,12 @@ def test_host_format_failure_is_classified_only_when_it_escapes(sandbox, scenari
 @pytest.mark.parametrize("route", ["rlm", "flex"])
 def test_native_agent_parse_failure_survives_nested_bridge(sandbox, route, monkeypatch):
     from fleet_rlm.contracts import Route
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.engine.turn import _failure_message
 
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
     lm = dspy.utils.DummyLM([{"reasoning": "missing code"}])
-    engine = AdaptiveFleetEngine(manager_on(sandbox), lm, lm, root_adapter=dspy.JSONAdapter())
+    engine = FleetRuntime(manager_on(sandbox), lm, lm, root_adapter=dspy.JSONAdapter())
     from fleet_rlm.engine.signatures import FleetTask
 
     def factory():
@@ -1030,10 +1046,19 @@ def test_native_agent_parse_failure_survives_nested_bridge(sandbox, route, monke
     def echo(value: str) -> str:
         return value
 
-    engine.flex_agent = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
-    engine.primary_rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=1)
+    engine.program.reasoning.flex = dspy.Flex(FleetTask, tools=[echo], interpreter_factory=factory)
+    engine.program.reasoning.rlm = dspy.RLM(FleetTask, interpreter_factory=factory, max_iters=1)
     with pytest.raises((dspy.AdapterParseError, dspy.CodeExecutionError)) as raised:
-        engine._execute(Route(route), "", "", "Compute a number", "", "", None, route)
+        engine.program.reasoning(
+            route=Route(route),
+            workspace_manifest="",
+            memory_summary="",
+            task="Compute a number",
+            skills_catalog="",
+            session_history="",
+            context=None,
+            mode=route,
+        )
     assert "invalid structured response" in _failure_message(raised.value, "parse-test")
 
 

@@ -300,7 +300,7 @@ no tolerance): `12` rejects `-12` and `12.5`, and `1` rejects `1.25`; `+12`,
 matching and comma removal. Presence is not proof of answer correctness; semantic
 judging remains separate. This correction advances the shared scorer to v10.
 
-Native DSPy GEPA tunes the Turn program (`AdaptiveFleetEngine`) end to end,
+Native DSPy GEPA tunes the Turn program (`FleetProgram`) end to end,
 including predictor instructions and generated Flex code through DSPy's built-in
 code proposer. It uses the current deployment settings, including persisted
 Session overrides. The manifest records effective model configuration for
@@ -308,10 +308,18 @@ provenance; replay uses the current deployment configuration and credentials.
 
 Its components are:
 
-- `triage` (`TurnTriage`): route choice
-- `direct_cot` (`DirectAnswer`): the no-code answer
-- `primary_rlm.generate_action` and `primary_rlm.extract` (`FleetTask`): the RLM loop
-- DSPy predictor instructions and generated Flex source.
+- `routing.predict` (`TurnTriage`): three-way route choice
+- `skill_selection.predict` (`SkillRelevance`): optional Skill relevance
+- `reasoning.direct.predict` (`DirectAnswer`): the no-code answer
+- `reasoning.rlm.generate_action` and `reasoning.rlm.extract` (`FleetTask`): the native RLM loop
+- `reasoning.flex`: native Flex code parameter (not an ordinary persistent predictor)
+- `child_policies.leaf_action` and `child_policies.delegating_action`: native child action policies.
+
+The ordinary `FleetRuntime` constructs and binds the learned graph. Serving and
+fresh isolated rollout runtimes use the same host invocation for dataset integrity,
+Turn scope, callbacks and usage/artifact receipts. Learned output cannot certify its
+own execution evidence. Outer owners still persist/finalize serving Turns or confirm
+disposable rollout cleanup; neither lifecycle moves into the learned root.
 
 Every metric scores the Turn's final prediction (`answer`, `route`, `lm_calls`,
 `sandbox_errors`, `submit_rejections`) against the example. Each one applies only when its input exists:
@@ -480,8 +488,8 @@ search metric call limits remain advisory between native batches. See the [versi
 contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
 API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
 
-Explicit Fleet child calls expose `children.leaf_action` and
-`children.delegating_action` as ordinary native instruction components outside
+Explicit Fleet child calls expose `child_policies.leaf_action` and
+`child_policies.delegating_action` as ordinary native instruction components outside
 Flex source ownership (`program.`-prefixed in the isolated wrapper). Fresh native
 child RLMs receive independent copies of the selected policy's instructions and
 demos, not its LM or live runtime. DSPy 3.4.1's GEPA adapter attributes predictor traces by
@@ -505,7 +513,30 @@ and native state loading. Missing RLM limits are supplied only by the outer Flex
 interpreter's constructor adapter, not by source rewriting or a second state load.
 DSPy support is pinned to the tested 3.4.1 release because this facade protocol is internal. JSON state preserves optimized instructions
 and Flex source; the host reconstructs the Daytona interpreter and current
-credentials. Runtime and configuration digests, a digest of optimization source,
+credentials. Installation now requires a complete host envelope with
+`format="fleet-program"`, `format_version=1`, `program_schema="fleet-program-a1"`,
+`child_policy_contract=1`, canonical unwrapped native `state`, and string-valued
+`metadata`. The exporter deliberately reads the isolated wrapper's `.program`;
+native `.save()` output is not an installation artifact. Missing/extra parameters,
+incompatible field contracts, malformed Flex source and any non-null learned LM
+binding are rejected before any state changes. Native field criteria/configuration
+are preserved and validated by DSPy, not translated by Fleet.
+
+Old bare/wrapped JSON and older child-policy markers are readable as historical
+artifacts only. They cannot be approved or installed into this schema. Do not rename
+keys to simulate migration: reconstruct/re-evaluate a new candidate under the running
+schema, or explicitly select its baseline. For an operator-approved baseline reset,
+retire the active compiled file and set the existing Session runtime setting
+`program_selection` to `baseline` while the runtime is stopped; do not delete an
+artifact alone. No new selection endpoint or automatic rollback is added by Gate A.
+An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
+Absent Session selection means baseline; successful installation and serving
+selection record `artifact`. Startup and each invocation reconcile that durable
+selection without writing baseline over a concurrent approval. A missing selected artifact fails across
+restart rather than silently reverting. Invalid replacement bytes retain the valid
+in-memory program/digest but refuse the Turn. No live interpreter state is restored.
+
+Runtime and configuration digests, a digest of optimization source,
 and a versioned fingerprint of installed distribution names and versions are
 captured before search and rechecked before the candidate manifest is written and
 again at approval. Evidence format 2 does not depend on finding a source-tree
@@ -596,22 +627,19 @@ setup, the isolated program owns shutdown on success or execution failure. Clean
 errors remain visible to the caller.
 
 Root, sub and Jev model roles, execution mode and Turn budgets come from the
-current deployment constructors. Native predictor/Flex LM state uses DSPy's default
-safe-loading policy. Published candidates still use native JSON save, manifest and
-digest approval, and the bounded serving loader, including historical `program.`
-wrapper keys. This evaluation code change invalidates prior code-identity evidence;
-collect fresh evidence before approving a candidate.
+current deployment constructors. All non-null learned predictor/Flex LM bindings
+are rejected. Published candidates use the complete `fleet-program-a1` envelope,
+manifest/digest approval and the bounded serving loader described above. Historical
+bare state, `program.` wrapper keys and `fleet_child_policy_version` markers are
+not accepted for installation. This code/schema change invalidates prior approval
+evidence; collect fresh evidence before approving a candidate.
 
-Native engine state includes `fleet_child_policy_version: 1` (not a tunable
-parameter). Legacy artifacts with neither the marker nor child keys retain their
-original predictor paths and initialize both child policies from native defaults.
-New artifacts must include both policies and the supported marker; incomplete
-state, modified role field contracts, or saved child LM overrides are rejected
-before changing the incumbent. The serving loader still accepts historically
-omitted root predictors, but cannot silently default missing new-format child
-policies. Isolated reconstruction uses the same validation in memory. Runtime
-limits and tool allowlists remain authoritative, including nondefault slices
-announced in child inputs; no saved policy restores a live interpreter.
+The envelope's `child_policy_contract: 1` identifies the two required native action
+policies; it is not a tunable parameter. Incomplete state, modified role field
+contracts or saved LM overrides are rejected before changing the incumbent.
+Isolated reconstruction uses the same complete native-state validation in memory.
+Runtime limits and tool allowlists remain authoritative, including nondefault
+slices announced in child inputs; no saved policy restores a live interpreter.
 
 The `compiled_program_digest`
 attribute names the approved program that served the Turn (empty when none is

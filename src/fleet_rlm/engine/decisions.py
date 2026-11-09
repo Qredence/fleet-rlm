@@ -3,23 +3,28 @@
 from __future__ import annotations
 
 import logging
-from functools import partial
+from collections.abc import Callable
 from typing import Any
 
 import dspy
 import mlflow
-from dspy.primitives.facade import SandboxLM
 from mlflow.entities import SpanType
 
-from fleet_rlm.contracts import ROUTE_SUMMARIES, Route, catalog_entries, decision_evidence, parse_route
-from fleet_rlm.engine.children import turn_is_over
+from fleet_rlm.contracts import (
+    ROUTE_SUMMARIES,
+    TRIAGE_CRITERIA,
+    Route,
+    catalog_entries,
+    decision_evidence,
+    parse_route,
+    turn_is_over,
+)
+from fleet_rlm.engine.signatures import SkillRelevance, TurnTriage
 from fleet_rlm.observability import activity_text, evidence_span, typed_decision_scope
-from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_SELECTABLE_SKILLS = 20
 _MAX_PRELOADED_SKILLS = 3
-_MAX_PRELOADED_SKILL_CHARS = 20_000
 
 
 def _lm_api_key(lm: Any) -> str | None:
@@ -47,21 +52,22 @@ def _safe_route_error(exc: Exception, route_lm: Any) -> str:
     return detail[:500] or "no exception message"
 
 
-def preload_skills(
+def select_skills(
     *,
     skill_selector: dspy.Predict,
-    sandbox_mgr: DaytonaSandboxManager,
+    consume_budget: Callable[..., Any],
+    emit: Callable[..., Any],
     jev_lm: Any | None,
     task: str,
     skills_catalog: str,
     route: Route,
-) -> str:
-    """Preload the instructions of Skills the TypeSafe Jev marks relevant; other Skills stay in the catalog."""
+) -> list[str]:
+    """Select bounded catalog identities; resolving their bytes remains a host capability."""
     skills = (catalog_entries(skills_catalog) or [])[:_MAX_SELECTABLE_SKILLS]
     if jev_lm is None or route is Route.DIRECT or not skills:
-        return skills_catalog
+        return []
     try:
-        sandbox_mgr.consume_budget(len(skills), category="skill_selection")
+        consume_budget(len(skills), category="skill_selection")
         examples = [
             dspy.Example(task=task, skill_name=name, skill_description=description).with_inputs(
                 "task", "skill_name", "skill_description"
@@ -80,42 +86,34 @@ def preload_skills(
                 decisions.append(
                     {"skill": name, "decision": getattr(decision, "value", None)} | decision_evidence(decision, jev_lm)
                 )
-            selected = [row["skill"] for row in decisions if row["decision"] == "relevant"]
+            selected = [name for (name, _), row in zip(skills, decisions, strict=True) if row["decision"] == "relevant"]
             selected = selected[:_MAX_PRELOADED_SKILLS]
             span.set_outputs({"selected": selected, "decisions": decisions})
     except Exception as exc:
         if turn_is_over(exc):
             raise
         _LOGGER.warning("Optional Skill selection failed (%s); using the catalog only", type(exc).__name__)
-        return skills_catalog
-    preloaded = []
-    for name in selected:
-        try:
-            text = sandbox_mgr.read_workspace_file(f"skills/{name}/SKILL.md").decode("utf-8")
-        except (OSError, ValueError, RuntimeError, UnicodeError):
-            continue
-        body = text[:_MAX_PRELOADED_SKILL_CHARS].replace("</preloaded_skill>", "")
-        preloaded.append(f'<preloaded_skill name="{name}">\n{body}\n</preloaded_skill>')
-    sandbox_mgr.emit("skill_selection", selected=selected, decisions=decisions)
-    return "\n".join([skills_catalog, *preloaded])
+        return []
+    emit("skill_selection", selected=selected, decisions=decisions)
+    return selected
 
 
 def select_route(
     *,
     triage: dspy.Predict,
-    sandbox_mgr: DaytonaSandboxManager,
+    consume_budget: Callable[..., Any],
+    emit: Callable[..., Any],
     jev_lm: Any | None,
-    sub_lm: dspy.LM,
+    route_lm: Any,
     sub_adapter: dspy.Adapter,
     mode: str,
     task: str,
     workspace_manifest: str,
     skills_catalog: str,
-    context: Any,
+    has_context: bool,
 ) -> Route:
     """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""
     route = Route.FLEX
-    route_lm = jev_lm or SandboxLM(sub_lm, partial(sandbox_mgr.consume_budget, category="routing"))
     triage_inputs = {
         "task": task,
         "workspace_manifest": workspace_manifest,
@@ -131,7 +129,7 @@ def select_route(
             summary = f"Session mode {mode} selects this route without hybrid triage."
         else:
             if jev_lm is not None:
-                sandbox_mgr.consume_budget(category="routing")
+                consume_budget(category="routing")
             # A generative backend has its own LM child span; do not count the wrapper twice.
             with evidence_span(
                 "typesafe_route_selection",
@@ -150,7 +148,7 @@ def select_route(
         _LOGGER.warning(
             "Optional route selection failed (%s: %s); continuing with bounded RLM execution",
             type(exc).__name__,
-            _safe_route_error(exc, jev_lm or sub_lm),
+            _safe_route_error(exc, route_lm),
         )
         route = Route.RLM
         reason = "routing_error"
@@ -158,7 +156,7 @@ def select_route(
 
     # Triage never routes a context-bearing task to the context-free direct prompt. An operator
     # who selects direct mode explicitly keeps it: the direct branch inlines the context.
-    if context is not None and route is Route.DIRECT and mode != "direct":
+    if has_context and route is Route.DIRECT and mode != "direct":
         reason = "selected_context"
         route = Route.RLM
         summary = "Context is selected; overriding the context-free direct route with bounded RLM execution."
@@ -167,5 +165,53 @@ def select_route(
     active_span = mlflow.get_current_active_span()
     if active_span is not None:
         active_span.set_attribute("fleet.routing", routing)
-    sandbox_mgr.emit("triage_decision", mode=mode, route=route.value, summary=summary, evidence=routing)
+    emit("triage_decision", mode=mode, route=route.value, summary=summary, evidence=routing)
     return route
+
+
+class Routing(dspy.Module):
+    """Own native route prediction and effective-route policy, without workspace access."""
+
+    def __init__(self, route_lm: Any, jev_lm: Any, adapter: dspy.Adapter, consume_budget: Any, emit: Any) -> None:
+        super().__init__()
+        self.predict = dspy.Predict(TurnTriage)
+        self.predict.set_criteria("route", TRIAGE_CRITERIA)
+        self._route_lm, self._jev_lm, self._adapter = route_lm, jev_lm, adapter
+        self._consume_budget, self._emit = consume_budget, emit
+
+    def forward(self, task: str, workspace_manifest: str, skills_catalog: str, mode: str, has_context: bool) -> Route:
+        """Apply strict-mode bypass or native hybrid triage with host-enforced safeguards."""
+        return select_route(
+            triage=self.predict,
+            consume_budget=self._consume_budget,
+            emit=self._emit,
+            jev_lm=self._jev_lm,
+            route_lm=self._route_lm,
+            sub_adapter=self._adapter,
+            mode=mode,
+            task=task,
+            workspace_manifest=workspace_manifest,
+            skills_catalog=skills_catalog,
+            has_context=has_context,
+        )
+
+
+class SkillSelection(dspy.Module):
+    """Own native batched relevance prediction over host-supplied catalog metadata."""
+
+    def __init__(self, jev_lm: Any, consume_budget: Any, emit: Any) -> None:
+        super().__init__()
+        self.predict = dspy.Predict(SkillRelevance)
+        self._jev_lm, self._consume_budget, self._emit = jev_lm, consume_budget, emit
+
+    def forward(self, task: str, skills_catalog: str, route: Route) -> list[str]:
+        """Select catalog identities without loading or activating their bytes."""
+        return select_skills(
+            skill_selector=self.predict,
+            consume_budget=self._consume_budget,
+            emit=self._emit,
+            jev_lm=self._jev_lm,
+            task=task,
+            skills_catalog=skills_catalog,
+            route=route,
+        )

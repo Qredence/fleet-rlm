@@ -67,22 +67,31 @@ assert (wheel_root / "fleet_rlm/bundled_skills/delegation/SKILL.md").is_file()
 assert not (wheel_root / "fleet_rlm/release_checks.py").exists()
 assert not (wheel_root / "fleet_rlm/program_file.py").exists()
 import dspy
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.compiled import program_envelope
+from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 fixture = Path(sys.argv[3])
 saved = json.loads(fixture.read_text())
 lm = dspy.LM("openai/offline", engine="lm15", cache=False)
-engine = AdaptiveFleetEngine(
+try:
+    FleetRuntime(DaytonaSandboxManager("key", "org", "volume", "wheel-legacy"), lm, lm, compiled_path=str(fixture))
+except ValueError:
+    pass
+else:
+    raise AssertionError("Historical state is inspectable, not installable")
+assert "flex_agent" in saved
+engine = FleetRuntime(
     DaytonaSandboxManager("key", "org", "volume", "wheel-state"),
-    lm, lm, compiled_path=str(fixture),
+    lm, lm,
 )
-loaded = engine.dump_state()
-assert {key: loaded[key] for key in saved} == saved
-assert set(loaded) - set(saved) == {"children.leaf_action", "children.delegating_action", "fleet_child_policy_version"}
-assert loaded["fleet_child_policy_version"] == 1
-for name, default in engine.children.default_actions.items():
-    assert loaded[f"children.{name}"] == default
-assert engine.flex_agent.module_src == saved["flex_agent"]["module_src"]
+engine.program.routing.predict.signature = engine.program.routing.predict.signature.with_instructions("WHEEL TUNED")
+current = fixture.with_name("fleet-program.json")
+current.write_bytes(program_envelope(engine.program))
+restored = FleetRuntime(
+    DaytonaSandboxManager("key", "org", "volume", "wheel-fresh"), lm, lm, compiled_path=str(current)
+)
+assert restored.program.dump_state() == engine.program.dump_state()
+assert restored.program.routing.predict.signature.instructions == "WHEEL TUNED"
 print(json.dumps({"module": str(module_path), "fingerprint": evidence["dependency_fingerprint"]}))
 """
     environment = os.environ.copy()

@@ -21,6 +21,8 @@ import dspy
 import mlflow
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.engine.compiled import PROGRAM_SCHEMA, CompiledProgramFile, load_program_envelope
+from fleet_rlm.engine.programs import FleetProgram
 
 _FLEX_TYPE = cast(type[dspy.Module], dspy.Flex)
 
@@ -81,6 +83,7 @@ def approval_evidence(settings: FleetSettings, incumbent_digest: str, *, scorer_
     """Evidence must still match when a separately invoked approval installs the candidate."""
     return {
         "evidence_format": str(APPROVAL_EVIDENCE_VERSION),
+        "program_schema": PROGRAM_SCHEMA,
         "dspy": dspy.__version__,
         "gepa": package_version("gepa"),
         "mlflow": mlflow.__version__,
@@ -300,7 +303,12 @@ def write_manifest(path: Path, manifest: ArtifactManifest) -> None:
 
 
 def approve_candidate(
-    candidate_path: Path, manifest: ArtifactManifest, destination: Path, *, evidence: Mapping[str, str]
+    candidate_path: Path,
+    manifest: ArtifactManifest,
+    destination: Path,
+    *,
+    evidence: Mapping[str, str],
+    program: FleetProgram,
 ) -> None:
     """Install an evaluated candidate as the file the Session engine reloads at its next Turn.
 
@@ -319,11 +327,12 @@ def approve_candidate(
     incumbent = digest_bytes(destination.read_bytes()) if destination.exists() else ""
     if evidence.get("incumbent_digest") != incumbent:
         raise ValueError("active incumbent changed; reevaluate before approval")
-    content = candidate_path.read_bytes()
+    content = CompiledProgramFile(str(candidate_path)).read()
     if digest_bytes(content) != manifest.digest:
         raise ValueError("candidate digest does not match its manifest")
     if destination.is_symlink():
         raise ValueError("Compiled program path may not be a symbolic link")
+    load_program_envelope(program.deepcopy(), content)
     atomic_write(destination, content)
 
 

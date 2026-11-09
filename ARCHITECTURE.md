@@ -43,8 +43,19 @@ flowchart LR
 - Each runtime combines a Daytona manager, shared Store reference, Skill manager, and DSPy engine.
   `SessionRuntime` owns memory, history, idempotency, and Turn-record policies; Store owns SQL and transactions.
 - The runtime does not import the offline optimizer: shared route, input, and evidence
-  contracts live in neutral modules (`contracts`, `execution_evidence`). The bounded native
-  compiled-program loader lives beside the engine in `engine/programs.py`.
+  contracts live in neutral modules (`contracts`, `execution_evidence`).
+- `engine/programs.py` owns `FleetProgram(dspy.Module)`: Routing, Skill selection,
+  Reasoning and Child policies own the native learned graph. They do not own Store,
+  compiled-file selection or Turn finalization.
+- `engine/invocation.py` constructs that graph with host capabilities and shares
+  dataset admission, native invocation, callbacks and authoritative evidence between
+  serving and freshly reconstructed isolated rollouts. Outer Turn/Session owners
+  retain persistence, cancellation arbitration and teardown.
+- `engine/compiled.py` accepts only complete `fleet-program-a1` envelopes. Legacy
+  native JSON remains inspectable, not installable; there is no old-root alias or
+  key conversion. A missing selected artifact refuses execution, including after
+  restart. Absent Session selection means baseline; serving only records artifact
+  promotion and never overwrites an approval with a stale baseline observation.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
@@ -163,11 +174,13 @@ Child execution:
 - Explicit children execute fresh native `dspy.RLM(ChildTask, ...)` instances on the metered sub LM.
   Fleet retains selected inputs, allowlisted tools, bounded slices, concurrent context propagation,
   failure classification, success-only promotion, and cleanup.
-- The root owns `children.leaf_action` and `children.delegating_action` as native DSPy predictors.
+- The root owns `child_policies.leaf_action` and `child_policies.delegating_action` as native DSPy predictors.
   Each invocation copies its role's learned instructions/demos into a fresh child action predictor;
   tools, resource limits, interpreter, and metered LM remain runtime-owned. Distinct signature
   field descriptions preserve native GEPA attribution even with identical learned instructions.
   Child extraction and arbitrary RLMs constructed by Flex are not separately tuned policies.
+- `sandbox/delegation.py` owns allocation/execution and accepts copied policy state,
+  not a program reference. It has no dependency on the engine's learned modules.
 - Explicit children receive Skills plus selected inputs.
 - Native nested RLMs copy their parent's `files/` and `skills/`.
 - Children use isolated Volume paths and promote only successful changed outputs.

@@ -12,6 +12,8 @@ import pytest
 from dspy.utils import DummyLM
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.engine.compiled import program_envelope
+from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.optimization_runs import add_optimization_arguments
 from fleet_rlm.optimize import artifacts, dataset, validation
 from fleet_rlm.optimize import gepa as workflow
@@ -26,6 +28,7 @@ from fleet_rlm.optimize.dataset import grouped_split
 from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
 from fleet_rlm.optimize.validation import IsolatedFleetProgram, score_split
 from fleet_rlm.replay import encode_snapshot
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 EVENT_PREFIX = "FLEET_EVENT "
 
@@ -130,6 +133,9 @@ class MemoryOptimizationStore:
 
     def runtime_settings(self, session_id):
         return self.settings.get(session_id, {})
+
+    def save_runtime_settings(self, session_id, settings):
+        self.settings.setdefault(session_id, {}).update(settings)
 
     def close(self):
         self.closed = True
@@ -524,13 +530,18 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     monkeypatch.setattr(validation, "DaytonaSandboxManager", Manager)
 
     class Engine(SimpleNamespace):
+        @property
+        def program(self):
+            return self
+
         def dump_state(self):
             return {}
 
         def load_state(self, state):
             assert state == {}
 
-    monkeypatch.setattr(validation, "AdaptiveFleetEngine", Engine)
+    monkeypatch.setattr(validation, "FleetProgram", Engine)
+    monkeypatch.setattr(validation, "FleetRuntime", Engine)
     current = FleetSettings(
         _env_file=None, execution_mode="flex", turn_timeout_seconds=123, fleet_root_model="openai/current-deployment"
     )
@@ -711,25 +722,29 @@ def test_promotion_requires_composite_gain_but_critical_quality_can_be_perfect_w
 def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path):
     active = tmp_path / "active.json"
     candidate = tmp_path / "candidate.json"
-    candidate.write_text('{"candidate":1}')
+    lm = dspy.LM("openai/offline")
+    program = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program
+    candidate.write_bytes(program_envelope(program))
     evidence = {"evidence_format": "2", "incumbent_digest": "", "configuration_digest": "current"}
     manifest = _manifest(candidate, "s1-1", _evaluation())
     manifest = replace(manifest, dependencies=evidence)
 
     legacy = replace(manifest, dependencies={**evidence, "scorer": "fleet-metric-v5"})
     with pytest.raises(ValueError, match="stale"):
-        approve_candidate(candidate, legacy, active, evidence={**evidence, "scorer": SCORER_VERSION})
+        approve_candidate(candidate, legacy, active, evidence={**evidence, "scorer": SCORER_VERSION}, program=program)
     with pytest.raises(ValueError, match="stale"):
-        approve_candidate(candidate, manifest, active, evidence={**evidence, "configuration_digest": "changed"})
-    approve_candidate(candidate, manifest, active, evidence=evidence)
+        approve_candidate(
+            candidate, manifest, active, evidence={**evidence, "configuration_digest": "changed"}, program=program
+        )
+    approve_candidate(candidate, manifest, active, evidence=evidence, program=program)
     with pytest.raises(ValueError, match="incumbent changed"):
-        approve_candidate(candidate, manifest, active, evidence=evidence)
+        approve_candidate(candidate, manifest, active, evidence=evidence, program=program)
     assert active.read_bytes() == candidate.read_bytes()
     new_evidence = {**evidence, "incumbent_digest": digest_bytes(active.read_bytes())}
     manifest = replace(manifest, dependencies=new_evidence)
     candidate.write_text('{"tampered":1}')
     with pytest.raises(ValueError, match="digest"):
-        approve_candidate(candidate, manifest, active, evidence=new_evidence)
+        approve_candidate(candidate, manifest, active, evidence=new_evidence, program=program)
 
 
 def test_approval_rejects_changed_effective_generation_with_identical_raw_settings(tmp_path, monkeypatch):
@@ -746,9 +761,11 @@ def test_approval_rejects_changed_effective_generation_with_identical_raw_settin
     candidate, active = tmp_path / "candidate.json", tmp_path / "active.json"
     candidate.write_text('{"candidate":1}')
     manifest = replace(_manifest(candidate, "s1-1", _evaluation()), dependencies=previous)
+    lm = dspy.LM("openai/offline")
+    program = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program
 
     with pytest.raises(ValueError, match="stale"):
-        approve_candidate(candidate, manifest, active, evidence=current)
+        approve_candidate(candidate, manifest, active, evidence=current, program=program)
     assert not active.exists()
 
 
@@ -1005,17 +1022,17 @@ def test_metric_accepts_native_sixth_program_trace_argument() -> None:
 
 
 def test_changed_components_detects_flex_source_and_predictor_instruction_changes() -> None:
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     lm = dspy.LM("openai/test", engine="lm15", cache=False)
-    baseline = AdaptiveFleetEngine(DaytonaSandboxManager("k", "o", "v", "a"), lm, lm)
-    candidate = AdaptiveFleetEngine(DaytonaSandboxManager("k", "o", "v", "b"), lm, lm)
-    assert "flex_agent" in tunable_components(baseline)
+    baseline = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "a"), lm, lm).program
+    candidate = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "b"), lm, lm).program
+    assert "reasoning.flex" in tunable_components(baseline)
     assert [item["component"] for item in workflow.component_diffs(baseline, candidate)] == []
 
     state = candidate.dump_state()
-    state["flex_agent"]["module_src"] += "\n# GEPA rewrite\n"
+    state["reasoning.flex"]["module_src"] += "\n# GEPA rewrite\n"
 
     class Predictors(dspy.Module):
         def __init__(self):
@@ -1029,32 +1046,44 @@ def test_changed_components_detects_flex_source_and_predictor_instruction_change
     ]
 
     candidate.load_state(state)
-    assert [item["component"] for item in workflow.component_diffs(baseline, candidate)] == ["flex_agent"]
+    assert [item["component"] for item in workflow.component_diffs(baseline, candidate)] == ["reasoning.flex"]
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
 def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatch, capsys, interrupted) -> None:
     """The loop closes: an approved candidate is the file the Session engine reloads and runs next Turn."""
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     lm = dspy.LM("openai/test", engine="lm15", cache=False)
 
-    def engine(session: str, compiled_path: str | None = None) -> AdaptiveFleetEngine:
-        return AdaptiveFleetEngine(DaytonaSandboxManager("k", "o", "v", session), lm, lm, compiled_path=compiled_path)
+    def engine(session: str, compiled_path: str | None = None) -> FleetRuntime:
+        return FleetRuntime(
+            DaytonaSandboxManager("k", "o", "v", session),
+            lm,
+            lm,
+            compiled_path=compiled_path,
+            baseline=compiled_path is not None and not Path(compiled_path).exists(),
+        )
 
-    settings = FleetSettings(_env_file=None).model_copy(update={"compiled_program_dir": str(tmp_path)})
+    settings = FleetSettings(
+        _env_file=None,
+        compiled_program_dir=str(tmp_path),
+        fleet_daytona_api_key="key",
+        fleet_daytona_org_id="org",
+        fleet_daytona_volume_id="volume",
+    )
     live = engine("sess_loop", compiled_path=str(tmp_path / "sess_loop.json"))
     assert not live.compiled.digest
 
     # What `fleet optimize` leaves behind: the GEPA program (wrapper keys) and its manifest.
-    candidate = engine("opt-template")
-    tuned = candidate.direct_cot.predict.signature.with_instructions("TUNED: answer in one word.")
-    candidate.direct_cot.predict.signature = tuned
+    candidate = engine("opt-template").program
+    tuned = candidate.reasoning.direct.predict.signature.with_instructions("TUNED: answer in one word.")
+    candidate.reasoning.direct.predict.signature = tuned
     version = "sess_loop-abc123"
     path = tmp_path / "candidates" / f"{version}.json"
     path.parent.mkdir()
-    IsolatedFleetProgram(candidate, None).save(str(path))
+    path.write_bytes(program_envelope(IsolatedFleetProgram(candidate, None).program))
     manifest = ArtifactManifest(
         version,
         digest_bytes(path.read_bytes()),
@@ -1096,11 +1125,14 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
     with pytest.raises(ValueError, match="only a completed"):
         store.reject_optimization_run("sess_loop", version)
 
-    live.compiled.reload_if_changed(live)  # what the engine does at the start of every Turn
+    live.compiled.reload_if_changed(live.program)  # the shared host invocation boundary
     assert live.compiled.digest == manifest.digest
     serving = DummyLM([{"reasoning": "r", "answer": "Paris"}])
     with dspy.context(lm=serving):
-        assert live.direct_cot(memory_summary="", session_history="", task="Capital of France?").answer == "Paris"
+        assert (
+            live.program.reasoning.direct(memory_summary="", session_history="", task="Capital of France?").answer
+            == "Paris"
+        )
     assert "TUNED: answer in one word." in serving.history[-1]["messages"][0]["content"]
 
 
@@ -1109,11 +1141,20 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     tmp_path, monkeypatch, capsys, stale_evidence
 ) -> None:
 
-    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    settings = FleetSettings(
+        _env_file=None,
+        compiled_program_dir=str(tmp_path),
+        fleet_daytona_api_key="key",
+        fleet_daytona_org_id="org",
+        fleet_daytona_volume_id="volume",
+    )
     version = "sess-managed-approval"
     candidate = tmp_path / "candidates" / f"{version}.json"
     candidate.parent.mkdir()
-    candidate.write_bytes(b"candidate bytes")
+    lm = dspy.LM("openai/offline")
+    candidate.write_bytes(
+        program_envelope(FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program)
+    )
     evidence = artifacts.approval_evidence(settings, "", scorer_version=SCORER_VERSION)
     if stale_evidence:
         evidence = {**evidence, "configuration_digest": "stale"}
@@ -1345,7 +1386,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     from concurrent.futures import ThreadPoolExecutor
     from contextlib import nullcontext
 
-    from fleet_rlm.engine.programs import AdaptiveFleetEngine
+    from fleet_rlm.engine.invocation import FleetRuntime
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
     settings = FleetSettings(
@@ -1358,10 +1399,12 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         fleet_daytona_volume_id="v",
     )
     lm = dspy.LM("openai/test", cache=False)
-    incumbent = AdaptiveFleetEngine(DaytonaSandboxManager("k", "o", "v", "s1"), lm, lm)
-    incumbent.direct_cot.predict.signature = incumbent.direct_cot.predict.signature.with_instructions("INCUMBENT")
+    incumbent = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "s1"), lm, lm).program
+    incumbent.reasoning.direct.predict.signature = incumbent.reasoning.direct.predict.signature.with_instructions(
+        "INCUMBENT"
+    )
     active = tmp_path / "s1.json"
-    incumbent.save(str(active))
+    active.write_bytes(program_envelope(incumbent))
     digest = digest_bytes(active.read_bytes())
     store = MemoryOptimizationStore(
         [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
@@ -1447,11 +1490,12 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
                 store.records[("s1", "s1-run")]["stop_requested"] = True
                 assert optimizer_kwargs["gepa_kwargs"]["stop_callbacks"][1](None)
             assert trainset is train and valset is dev
-            assert baseline.program.direct_cot.predict.signature.instructions == "INCUMBENT"
-            assert baseline.program.execution_mode == "flex"
+            assert baseline.program.reasoning.direct.predict.signature.instructions == "INCUMBENT"
+            # Mode is runtime policy, not a learned program attribute.
+            assert not hasattr(baseline.program, "execution_mode")
             candidate = baseline.deepcopy()
             state = candidate.program.dump_state()
-            state["flex_agent"]["module_src"] += "\n# optimized source\n"
+            state["reasoning.flex"]["module_src"] += "\n# optimized source\n"
             candidate.program.load_state(state)
             candidate.detailed_results = SimpleNamespace(to_dict=lambda: {"best_idx": 1}, total_metric_calls=4)
             searched.append(True)
@@ -1465,7 +1509,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         if cancel_after_validation == "interrupt_validation":
             raise KeyboardInterrupt
         assert searched and actual_dev is dev and actual_holdout is holdout
-        changed = "optimized source" in program.program.flex_agent.module_src
+        changed = "optimized source" in program.program.reasoning.flex.module_src
         measured.append(changed)
         if (cancel_after_validation == "cleanup_incumbent" and not changed) or (
             cancel_after_validation == "cleanup_candidate" and changed
@@ -1622,9 +1666,9 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     manifest_path = next((tmp_path / "candidates").glob("*.manifest.json"))
     manifest = json.loads(manifest_path.read_text())
     assert manifest["dependencies"]["incumbent_digest"] == digest
-    assert manifest["evaluation"]["candidate"]["changed_components"] == ["flex_agent"]
+    assert manifest["evaluation"]["candidate"]["changed_components"] == ["reasoning.flex"]
     diff = manifest["evaluation"]["candidate"]["component_diffs"][0]
-    assert diff["component"] == "flex_agent"
+    assert diff["component"] == "reasoning.flex"
     assert diff["before"] and diff["after"]
     assert "-" in diff["diff"] and "+" in diff["diff"]
     comparison_json = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".comparison.json"))
@@ -1735,11 +1779,20 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
     from fleet_rlm.optimization_runs import ExperimentOptions
     from fleet_rlm.optimize.artifacts import ArtifactManifest, digest_bytes
 
-    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    settings = FleetSettings(
+        _env_file=None,
+        compiled_program_dir=str(tmp_path),
+        fleet_daytona_api_key="key",
+        fleet_daytona_org_id="org",
+        fleet_daytona_volume_id="volume",
+    )
     version = "sess-legacy-approval"
     candidate_path = tmp_path / "candidates" / f"{version}.json"
     candidate_path.parent.mkdir()
-    candidate_path.write_bytes(b"candidate bytes")
+    lm = dspy.LM("openai/offline")
+    candidate_path.write_bytes(
+        program_envelope(FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program)
+    )
     incumbent_bytes = b"recorded incumbent"
     active_path = tmp_path / "sess.json"
     active_bytes = {

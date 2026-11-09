@@ -14,6 +14,7 @@ src/fleet_rlm/
 │   ├── manager.py     # Daytona root/child sandboxes, lifecycle, and budgets
 │   ├── workspace_io.py # Session workspace files, context datasets, and learned notes mixin
 │   ├── interpreter.py # DSPy CodeInterpreter and host-tool dispatch
+│   ├── delegation.py  # Explicit child execution, bounded fan-out, copied policy snapshots
 │   ├── repl.py        # run_code transport and stdout bridge protocol
 │   ├── snapshots.py   # Packaged definition, runtime preflight/cache, explicit operator operations
 │   ├── snapshot-requirements.txt # Packaged hash-locked Python environment
@@ -23,9 +24,13 @@ src/fleet_rlm/
 ├── workspace.py       # Session ID and workspace path validation, serializable dataset handles
 ├── engine/
 │   ├── signatures.py  # Static native execution and judge declarations
-│   ├── programs.py    # Native program assembly and bounded compiled-state loader
+│   ├── programs.py    # FleetProgram composition and complete native state contract
+│   ├── decisions.py   # Routing and optional Skill selection modules/predictors
+│   ├── reasoning.py   # Native Direct/RLM/Flex and route input/output projection
+│   ├── invocation.py  # Shared host construction, admission, invocation and evidence
+│   ├── compiled.py    # Strict fleet-program-a1 envelope and bounded atomic state loading
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
-│   └── children.py    # spawn_agent, spawn_agents
+│   └── children.py    # ChildPolicies: two persistent native action predictors
 ├── store.py          # SQL, numbered additive migrations, one pool, Turn transactions
 ├── optimize/          # GEPA/evaluation worker modules; imported by CLI subprocesses only
 │   ├── objectives.py  # Pure scoring objectives: no MLflow, LM, or filesystem
@@ -68,14 +73,16 @@ remains an independently callable synchronous CLI workflow. `optimization_runs.p
 is neutral to the serving boundary and holds shared options, worker events, and
 artifact reads without rewriting the source files.
 
-The package contains 62 Python files: 54 implementation modules and eight package
-initializers. Resources bring the tracked source/resource target to 69 files. This
-reduces navigation boundaries, not the number of application capabilities. Release
-checks live in repository tooling at `scripts/release_checks.py`, outside the wheel.
+Release checks live in repository tooling at `scripts/release_checks.py`, outside
+the wheel. Module boundaries follow learned composition versus host authority;
+they do not add a new reasoning loop or lifecycle owner.
 
 ### Python import changes
 
-- `fleet_rlm.program_file.CompiledProgramFile` → `fleet_rlm.engine.programs.CompiledProgramFile`.
+- `fleet_rlm.engine.programs.AdaptiveFleetEngine` is removed, without an alias.
+  Use `engine.invocation.FleetRuntime` for host execution and its `.program`
+  (`engine.programs.FleetProgram`) for native DSPy state/traversal.
+- `fleet_rlm.engine.programs.CompiledProgramFile` → `fleet_rlm.engine.compiled.CompiledProgramFile`.
 - `fleet_rlm.lm_usage` → `fleet_rlm.observability`.
 - `fleet_rlm.store.db` → `fleet_rlm.store`; `fleet_rlm.setup.service` → `fleet_rlm.setup`.
 - Snapshot definition, preflight, and operations now share `fleet_rlm.sandbox.snapshots`.
@@ -85,8 +92,10 @@ checks live in repository tooling at `scripts/release_checks.py`, outside the wh
 - Saved mode/root/sub overrides use `FleetSettings.for_session`; the former harness
   methods live directly on `SessionRuntime`, with `runtime.store` for persistence.
 
-Old submodule paths have no compatibility shims. CLI/HTTP operations and native JSON
-state keys (including the isolated wrapper's `program.` prefix) remain stable.
+Old submodule paths have no compatibility shims. CLI/HTTP operations remain stable;
+Gate A intentionally changes compiled format and native parameter paths. The
+isolated wrapper still prefixes its internal state with `program.`, but installation
+accepts only an explicitly exported unwrapped root envelope, not arbitrary prefixes.
 `engine/signatures.py` remains a declaration boundary; GEPA traverses the instantiated
 student, not declaration files. `contracts.py` stays a leaf. Optimizer dependencies
 flow from `gepa` to dataset/validation/artifacts/scorers, never back into orchestration.

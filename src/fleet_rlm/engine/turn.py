@@ -434,7 +434,7 @@ def run_turn(
 
                 try:
                     associate_turn_agent(
-                        runtime.engine,
+                        runtime.engine.program,
                         runtime_configuration(settings, runtime)["digest"],
                         mlflow_experiment_id,
                         span,

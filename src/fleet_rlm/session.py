@@ -16,7 +16,7 @@ from typing import Any
 import psycopg
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.models import build_lm
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.skills import SkillManager
@@ -45,7 +45,7 @@ class SessionRuntime:
     sandbox_mgr: DaytonaSandboxManager
     store: Store
     skill_mgr: SkillManager
-    engine: AdaptiveFleetEngine
+    engine: FleetRuntime
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
     context: WorkspaceDataset | None = None
     lease: psycopg.Connection | None = None
@@ -335,7 +335,7 @@ class SessionRuntime:
         self.engine.execution_mode = mode
         self.configuration_overrides["execution_mode"] = mode
 
-    def set_engine(self, engine: AdaptiveFleetEngine) -> None:
+    def set_engine(self, engine: FleetRuntime) -> None:
         """Install a rebuilt engine and point the sandbox manager at its sub LM."""
         self.engine = engine
         self.sandbox_mgr.sub_lm = engine.sub_lm
@@ -450,6 +450,18 @@ class SessionRuntimeRegistry:
         if self.store is None:
             raise RuntimeError("Session storage is not configured")
         store = self.store
+        saved = store.runtime_settings(session_id)
+        compiled_path = Path(settings.compiled_program_dir) / f"{session_id}.json"
+
+        def reconcile_selection(source: str) -> str:
+            # Absence already means baseline. Only promote here: approval has an
+            # independent lease, so persisting baseline could erase its selection.
+            selected = store.runtime_settings(session_id).get("program_selection", "baseline")
+            if source == "artifact" and selected != "artifact":
+                store.save_runtime_settings(session_id, {"program_selection": "artifact"})
+                return "artifact"
+            return selected
+
         sandbox_mgr = DaytonaSandboxManager(
             api_key=settings.fleet_daytona_api_key,
             org_id=settings.fleet_daytona_org_id,
@@ -472,12 +484,15 @@ class SessionRuntimeRegistry:
             sandbox_mgr=sandbox_mgr,
             store=store,
             skill_mgr=SkillManager(sandbox_mgr, Path(settings.local_skills_dir)),
-            engine=AdaptiveFleetEngine(
+            engine=FleetRuntime(
                 sandbox_mgr=sandbox_mgr,
                 root_lm=self.root_lm,
                 sub_lm=self.sub_lm,
                 jev_lm=self.jev_lm,
-                compiled_path=str(Path(settings.compiled_program_dir) / f"{session_id}.json"),
+                compiled_path=str(compiled_path),
+                baseline=saved.get("program_selection") != "artifact"
+                and not (compiled_path.exists() or compiled_path.is_symlink()),
+                reconcile_selection=reconcile_selection,
                 execution_mode=settings.execution_mode,
                 root_adapter=settings.resolved_model("root").build_adapter(),
                 sub_adapter=settings.resolved_model("sub").build_adapter(),
@@ -510,6 +525,7 @@ class SessionRuntimeRegistry:
             sandbox_mgr.ownership_resource_mutate = mutate_sandbox_resource
             sandbox_mgr.reconcile_sandbox_ownership(ownership["resources"])
             store.fail_interrupted_turns(session_id, ownership_epoch)
+            runtime.engine.reload_program()
             saved = store.runtime_settings(session_id)
             if "mode" in saved:
                 runtime.set_mode(settings.for_session(saved).execution_mode)
@@ -523,17 +539,19 @@ class SessionRuntimeRegistry:
             raise
         return runtime
 
-    def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> AdaptiveFleetEngine:
+    def engine_for_models(self, runtime: SessionRuntime, models: dict[str, str]) -> FleetRuntime:
         """Build an engine for this Session that uses the given root and sub model names."""
         settings = self.settings.for_session({"models": models})
         root = build_lm(settings, settings.fleet_root_model, "root")
         sub = build_lm(settings, settings.fleet_sub_model, "sub")
-        return AdaptiveFleetEngine(
+        return FleetRuntime(
             sandbox_mgr=runtime.sandbox_mgr,
             root_lm=root,
             sub_lm=sub,
             jev_lm=self.jev_lm,
             compiled_path=runtime.engine.compiled_path,
+            baseline=not runtime.engine.compiled.digest,
+            reconcile_selection=runtime.engine.reconcile_selection,
             execution_mode=runtime.engine.execution_mode,
             root_adapter=settings.resolved_model("root").build_adapter(),
             sub_adapter=settings.resolved_model("sub").build_adapter(),

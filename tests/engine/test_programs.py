@@ -14,13 +14,14 @@ import pytest
 from dspy import AdapterParseError
 
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs, Route
-from fleet_rlm.engine.decisions import preload_skills, select_route
-from fleet_rlm.engine.programs import AdaptiveFleetEngine
+from fleet_rlm.engine.compiled import program_envelope
+from fleet_rlm.engine.invocation import FleetRuntime
+from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 
-def _engine(manager: DaytonaSandboxManager, **kwargs: Any) -> AdaptiveFleetEngine:
-    return AdaptiveFleetEngine(
+def _engine(manager: DaytonaSandboxManager, **kwargs: Any) -> FleetRuntime:
+    return FleetRuntime(
         manager,
         dspy.LM("openai/fleet-root", engine="lm15", cache=False),
         dspy.LM("openai/fleet-sub", engine="lm15", cache=False),
@@ -32,7 +33,7 @@ def test_engine_forward_inputs_match_the_shared_contract():
     """`contracts.ENGINE_INPUT_FIELDS` is the literal rollout whitelist; forward must not drift from it."""
     import inspect
 
-    parameters = set(inspect.signature(AdaptiveFleetEngine.forward).parameters)
+    parameters = set(inspect.signature(FleetProgram.forward).parameters)
     assert set(ENGINE_INPUT_FIELDS) <= parameters
     assert parameters - set(ENGINE_INPUT_FIELDS) == {"self", "context", "execution_mode"}
 
@@ -43,17 +44,18 @@ def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path:
     engine = _engine(
         manager,
         compiled_path=str(compiled_path),
+        baseline=True,
     )
-    engine.save(str(compiled_path))
+    compiled_path.write_bytes(program_envelope(engine.program))
     known_good = compiled_path.read_bytes()
     corrupt = json.loads(known_good)
-    corrupt["flex_agent"]["module_src"] = "class Invalid(:\n"
+    corrupt["state"]["reasoning.flex"]["module_src"] = "class Invalid(:\n"
     compiled_path.write_text(json.dumps(corrupt))
 
     with pytest.raises((KeyError, SyntaxError, ValueError)):
-        engine.compiled.reload_if_changed(engine)
+        engine.compiled.reload_if_changed(engine.program)
 
-    assert engine.flex_agent.module_src == json.loads(known_good)["flex_agent"]["module_src"]
+    assert engine.program.reasoning.flex.module_src == json.loads(known_good)["state"]["reasoning.flex"]["module_src"]
 
 
 def test_compiled_program_path_is_not_shared_by_default() -> None:
@@ -76,8 +78,8 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
         def __call__(self, **_kwargs: Any) -> Any:
             raise RuntimeError("403: invalid token typesafe-test-token")
 
-    engine.triage = FailingTriage()  # type: ignore[assignment]
-    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+    engine.program.routing.predict = FailingTriage()  # type: ignore[assignment]
+    engine.program.reasoning.rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
         answer="bounded fallback",
         learned_skill_note="",
     )
@@ -125,16 +127,56 @@ def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
     assert calls == {"reset": 0, "end": 0}
 
 
-def _answering_engine() -> AdaptiveFleetEngine:
+def _answering_engine() -> FleetRuntime:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     engine = _engine(
         manager,
         execution_mode="rlm",
     )
-    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+    engine.program.reasoning.rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
         answer="computed", learned_skill_note=""
     )
     return engine
+
+
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("isolated", [False, True])
+def test_shared_invocation_preserves_native_callbacks_and_overwrites_candidate_receipts(monkeypatch, failure, isolated):
+    from dspy.utils import BaseCallback
+
+    from fleet_rlm.optimize.validation import IsolatedFleetProgram
+
+    runtime = _answering_engine()
+    observed = []
+
+    class Callback(BaseCallback):
+        def on_module_start(self, call_id, instance, inputs):
+            assert call_id
+            if isinstance(instance, FleetProgram):
+                observed.append(inputs["kwargs"]["task"])
+
+    def learned(task, **_inputs):
+        assert task == "callback fixture"
+        if failure:
+            raise ValueError("candidate failed")
+        return dspy.Prediction(answer="computed", lm_calls=999, execution_evidence={"forged": True})
+
+    monkeypatch.setattr(runtime.program, "forward", learned)
+    monkeypatch.setattr(DaytonaSandboxManager, "turn_usage", lambda _self: {"lm_calls": 3})
+    monkeypatch.setattr(DaytonaSandboxManager, "execution_evidence", lambda _self: {"receipt": "host"})
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", lambda _self: True)
+    entry = IsolatedFleetProgram(runtime.program, lambda *_args: runtime) if isolated else runtime
+    callback, ambient_adapter = Callback(), dspy.JSONAdapter()
+    with dspy.context(callbacks=[callback], adapter=ambient_adapter):
+        if failure:
+            with pytest.raises(ValueError, match="candidate failed"):
+                entry(workspace_manifest="", memory_summary="", task="callback fixture")
+        else:
+            result = entry(workspace_manifest="", memory_summary="", task="callback fixture")
+            assert result.answer == "computed" and result.lm_calls == 3
+            assert result.execution_evidence == {"receipt": "host", "python": {}}
+        assert dspy.settings.callbacks == [callback] and dspy.settings.adapter is ambient_adapter
+    assert observed == ["callback fixture"]
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -154,9 +196,9 @@ def test_dataset_revision_check_uses_remote_stat_before_execution(monkeypatch, c
     try:
         if changed:
             with pytest.raises(ValueError, match="Dataset source changed"):
-                engine._run_turn("", "", "read", "", "", dataset, "rlm")
+                engine("", "", "read", "", "", dataset, "rlm")
         else:
-            assert engine._run_turn("", "", "read", "", "", dataset, "rlm").answer == "computed"
+            assert engine("", "", "read", "", "", dataset, "rlm").answer == "computed"
         assert inspected == ["files/selected.csv"]
     finally:
         engine.sandbox_mgr.end_turn()
@@ -200,7 +242,7 @@ def test_child_parse_failure_is_returned_to_the_parent_instead_of_aborting_the_t
     engine = _engine(
         manager,
     )
-    tools = engine.primary_rlm._user_tools
+    tools = engine.program.reasoning.rlm._user_tools
 
     class FailingChild:
         def __init__(self, *_args, **_kwargs) -> None:
@@ -234,7 +276,7 @@ def test_child_budget_exhaustion_still_aborts_the_turn(monkeypatch) -> None:
     monkeypatch.setattr(dspy, "RLM", ExhaustedChild)
 
     with pytest.raises(RuntimeError, match="budget exhausted"):
-        engine.primary_rlm._user_tools["spawn_agent"](subtask="subtask", input_paths=[])
+        engine.program.reasoning.rlm._user_tools["spawn_agent"](subtask="subtask", input_paths=[])
 
 
 def _engine_with_fake_children(monkeypatch, child_call):
@@ -251,7 +293,7 @@ def _engine_with_fake_children(monkeypatch, child_call):
             return SimpleNamespace(findings=child_call(**kwargs))
 
     monkeypatch.setattr(dspy, "RLM", FakeChild)
-    return engine.primary_rlm._user_tools["spawn_agents"]
+    return engine.program.reasoning.rlm._user_tools["spawn_agents"]
 
 
 def test_spawn_agents_runs_children_concurrently_and_keeps_order(monkeypatch) -> None:
@@ -317,7 +359,7 @@ def _spawn_agent_with_fake_child(monkeypatch, child_call):
     engine = _engine(
         manager,
     )
-    spawn_agent = engine.primary_rlm._user_tools["spawn_agent"]
+    spawn_agent = engine.program.reasoning.rlm._user_tools["spawn_agent"]
     calls: list[str] = []
     interpreter = SimpleNamespace(
         owns_manager=True,
@@ -369,9 +411,9 @@ def test_execution_adapter_policy_is_scoped_and_injectable(monkeypatch, route, a
         assert selected is root_adapter
         return dspy.Prediction(answer="ok", learned_skill_note="")
 
-    setattr(engine, {"direct": "direct_cot", "rlm": "primary_rlm", "flex": "flex_agent"}[route], execute)
+    setattr(engine.program.reasoning, route, execute)
     with dspy.context(adapter=ambient):
-        assert engine._execute(Route(route), "", "", "test", "", "", None, "direct").answer == "ok"
+        assert engine.program.reasoning(Route(route), "", "", "test", "", "", None, "direct").answer == "ok"
         assert dspy.settings.adapter is ambient
 
 
@@ -396,14 +438,10 @@ CATALOG = (
 )
 
 
-def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> tuple[AdaptiveFleetEngine, dict]:
+def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> tuple[FleetRuntime, dict]:
     from fleet_rlm.contracts import Route
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
-    engine = _engine(
-        manager,
-        jev_lm=SimpleNamespace(model="jev-test") if jev else None,
-    )
     seen: dict[str, Any] = {"budget": 0, "events": [], "batched": []}
 
     def batch(examples, *, num_threads, timeout):
@@ -416,7 +454,6 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
             for example in examples
         ]
 
-    monkeypatch.setattr(engine.skill_selector, "batch", batch)
     monkeypatch.setattr(
         DaytonaSandboxManager,
         "consume_budget",
@@ -428,21 +465,21 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
         lambda _self, path, **_limits: f"---\nname: {path.split('/')[1]}\n---\nUse csv.DictReader.".encode(),
     )
     monkeypatch.setattr(DaytonaSandboxManager, "emit", lambda _self, _event, **payload: seen["events"].append(payload))
+    engine = _engine(manager, jev_lm=SimpleNamespace(model="jev-test") if jev else None)
+    monkeypatch.setattr(engine.program.skill_selection.predict, "batch", batch)
     seen["route"] = Route
     return engine, seen
+
+
+def _selected_catalog(engine, *, task="task", catalog=CATALOG, route=Route.FLEX):
+    selected = engine.program.skill_selection(task=task, skills_catalog=catalog, route=route)
+    return engine.workspace.load_skills(catalog, selected)
 
 
 def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) -> None:
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
 
-    catalog = preload_skills(
-        skill_selector=engine.skill_selector,
-        sandbox_mgr=engine.sandbox_mgr,
-        jev_lm=engine.jev_lm,
-        task="Total revenue per region in files/sales.csv",
-        skills_catalog=CATALOG,
-        route=seen["route"].FLEX,
-    )
+    catalog = _selected_catalog(engine, task="Total revenue per region in files/sales.csv")
 
     assert seen["batched"] == ["tabular-analysis", "delegation"] and seen["budget"] == 2
     assert catalog.startswith(CATALOG)
@@ -453,72 +490,32 @@ def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) ->
 
 def test_skill_selection_is_skipped_without_jev_or_for_direct_answers(monkeypatch) -> None:
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"}, jev=False)
-    assert (
-        preload_skills(
-            skill_selector=engine.skill_selector,
-            sandbox_mgr=engine.sandbox_mgr,
-            jev_lm=engine.jev_lm,
-            task="task",
-            skills_catalog=CATALOG,
-            route=seen["route"].FLEX,
-        )
-        == CATALOG
-    )
+    assert _selected_catalog(engine) == CATALOG
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
-    assert (
-        preload_skills(
-            skill_selector=engine.skill_selector,
-            sandbox_mgr=engine.sandbox_mgr,
-            jev_lm=engine.jev_lm,
-            task="hello",
-            skills_catalog=CATALOG,
-            route=seen["route"].DIRECT,
-        )
-        == CATALOG
-    )
-    assert preload_skills(
-        skill_selector=engine.skill_selector,
-        sandbox_mgr=engine.sandbox_mgr,
-        jev_lm=engine.jev_lm,
-        task="task",
-        skills_catalog="<available_skills>No Skills installed.</available_skills>",
-        route=seen["route"].RLM,
+    assert _selected_catalog(engine, task="hello", route=Route.DIRECT) == CATALOG
+    assert _selected_catalog(
+        engine, catalog="<available_skills>No Skills installed.</available_skills>", route=Route.RLM
     )
     assert seen["batched"] == [] and seen["budget"] == 0
 
 
 def test_skill_selection_failure_keeps_the_catalog_but_budget_exhaustion_ends_the_turn(monkeypatch) -> None:
-    engine, seen = _selecting_engine(monkeypatch, set())
+    engine, _seen = _selecting_engine(monkeypatch, set())
 
     def broken(*_args, **_kwargs):
         raise ConnectionError("jev unavailable")
 
-    monkeypatch.setattr(engine.skill_selector, "batch", broken)
-    assert (
-        preload_skills(
-            skill_selector=engine.skill_selector,
-            sandbox_mgr=engine.sandbox_mgr,
-            jev_lm=engine.jev_lm,
-            task="task",
-            skills_catalog=CATALOG,
-            route=seen["route"].RLM,
-        )
-        == CATALOG
-    )
+    monkeypatch.setattr(engine.program.skill_selection.predict, "batch", broken)
+    assert _selected_catalog(engine, route=Route.RLM) == CATALOG
 
     def exhausted(_self, _count=1, **_kwargs):
         raise RuntimeError("Shared RLM budget exhausted (3 calls)")
 
-    monkeypatch.setattr(DaytonaSandboxManager, "consume_budget", exhausted)
+    monkeypatch.setattr(
+        engine.program.skill_selection, "_consume_budget", lambda *args, **kwargs: exhausted(None, *args, **kwargs)
+    )
     with pytest.raises(RuntimeError, match="budget exhausted"):
-        preload_skills(
-            skill_selector=engine.skill_selector,
-            sandbox_mgr=engine.sandbox_mgr,
-            jev_lm=engine.jev_lm,
-            task="task",
-            skills_catalog=CATALOG,
-            route=seen["route"].RLM,
-        )
+        _selected_catalog(engine, route=Route.RLM)
 
 
 def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch) -> None:
@@ -529,72 +526,63 @@ def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch
         "consume_budget",
         lambda _self, count=1, *, category="generation_query": charged.append((count, category)),
     )
-    engine.triage = lambda **_kwargs: SimpleNamespace(route="flex")
+    engine.program.routing.predict = lambda **_kwargs: SimpleNamespace(route="flex")
+    engine.program.routing._consume_budget = engine.sandbox_mgr.consume_budget
 
     assert (
-        select_route(
-            triage=engine.triage,
-            sandbox_mgr=engine.sandbox_mgr,
-            jev_lm=engine.jev_lm,
-            sub_lm=engine.sub_lm,
-            sub_adapter=engine.sub_adapter,
+        engine.program.routing(
             mode="hybrid",
             task="task",
             workspace_manifest="",
             skills_catalog=CATALOG,
-            context=None,
+            has_context=False,
         )
         is seen["route"].FLEX
     )
     assert charged == [(1, "routing")]
 
 
-def test_a_program_saved_before_the_skill_selector_still_loads(tmp_path: Path) -> None:
+def test_incomplete_state_is_not_merged_with_defaults(tmp_path: Path) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     path = tmp_path / "session-a.json"
     engine = _engine(
         manager,
         compiled_path=str(path),
+        baseline=True,
     )
-    engine.save(str(path))
+    path.write_bytes(program_envelope(engine.program))
     state = json.loads(path.read_text())
-    state.pop("skill_selector")
-    state["triage"]["signature"]["instructions"] = "Older approved triage instructions."
+    before = deepcopy(engine.program.dump_state())
+    state["state"].pop("skill_selection.predict")
+    state["state"]["routing.predict"]["signature"]["instructions"] = "Partial state must not apply."
     path.write_text(json.dumps(state))
 
-    engine.compiled.reload_if_changed(engine)
-
-    assert engine.triage.signature.instructions == "Older approved triage instructions."
+    with pytest.raises(ValueError, match="exactly"):
+        engine.compiled.reload_if_changed(engine.program)
+    assert engine.program.dump_state() == before
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session-budgets")
     engine = _engine(manager)
-    assert engine.flex_agent.module_src == engine.flex_agent._baseline_src()
-    assert engine.flex_agent._interpreter_factory().rlm_defaults == {
+    assert engine.program.reasoning.flex.module_src == engine.program.reasoning.flex._baseline_src()
+    assert engine.program.reasoning.flex._interpreter_factory().rlm_defaults == {
         "max_iters": 16,
         "max_llm_calls": manager.max_llm_calls,
     }
-    assert engine.primary_rlm._interpreter_factory().rlm_defaults == {}
+    assert engine.program.reasoning.rlm._interpreter_factory().rlm_defaults == {}
 
 
-def test_pre_consolidation_native_state_loads_unchanged():
+def test_pre_consolidation_state_remains_inspectable_but_is_not_executable():
     from pathlib import Path
 
     manager = DaytonaSandboxManager("key", "org", "volume", "state-fixture")
     engine = _engine(manager)
     fixture = Path(__file__).parents[1] / "fixtures/pre_consolidation_program.json"
     state = json.loads(fixture.read_text())
-    engine.load_state(state)
-    migrated = engine.dump_state()
-    assert {name: migrated[name] for name in state} == state
-    assert set(migrated) - set(state) == {
-        "children.leaf_action",
-        "children.delegating_action",
-        "fleet_child_policy_version",
-    }
-    assert migrated["fleet_child_policy_version"] == 1
-    for name, default in engine.children.default_actions.items():
-        assert migrated[f"children.{name}"] == default
-    assert "max_iters=16" in engine.flex_agent.module_src
+    assert "flex_agent" in state and "max_iters=16" in state["flex_agent"]["module_src"]
+    before = deepcopy(engine.program.dump_state())
+    with pytest.raises(ValueError, match="exactly"):
+        engine.program.load_state(state)
+    assert engine.program.dump_state() == before
 
 
 @pytest.mark.parametrize("entrypoint", ["native", "compiled", "isolated"])
@@ -603,33 +591,37 @@ def test_child_policy_artifacts_reject_incomplete_or_unsafe_state_atomically(tmp
     from fleet_rlm.optimize.validation import IsolatedFleetProgram
 
     engine = _engine(DaytonaSandboxManager("key", "org", "volume", "policy-artifact"))
-    engine.children.leaf_action.signature = engine.children.leaf_action.signature.with_instructions("Incumbent leaf")
-    before = deepcopy(engine.dump_state())
+    policies = engine.program.child_policies
+    policies.leaf_action.signature = policies.leaf_action.signature.with_instructions("Incumbent leaf")
+    before = deepcopy(engine.program.dump_state())
     state = deepcopy(before)
     if invalid in {"missing_one", "missing_both"}:
-        del state["children.leaf_action"]
+        del state["child_policies.leaf_action"]
         if invalid == "missing_both":
-            del state["children.delegating_action"]
+            del state["child_policies.delegating_action"]
     elif invalid == "version":
         state["fleet_child_policy_version"] = 99
     elif invalid == "role":
-        state["children.leaf_action"]["signature"]["fields"] = state["children.delegating_action"]["signature"][
-            "fields"
-        ]
+        state["child_policies.leaf_action"]["signature"]["fields"] = state["child_policies.delegating_action"][
+            "signature"
+        ]["fields"]
     else:
-        state["children.leaf_action"]["lm"] = dspy.LM("openai/unmetered").dump_state()
+        state["child_policies.leaf_action"]["lm"] = dspy.LM("openai/unmetered").dump_state()
 
     with pytest.raises(ValueError):
         if entrypoint == "native":
-            engine.load_state(state)
+            engine.program.load_state(state)
         elif entrypoint == "isolated":
-            IsolatedFleetProgram(engine, None).load_state({f"program.{key}": value for key, value in state.items()})
+            IsolatedFleetProgram(engine.program, None).load_state(
+                {f"program.{key}": value for key, value in state.items()}
+            )
         else:
             path = tmp_path / "wrapped.json"
-            path.write_text(json.dumps({f"program.{key}": value for key, value in state.items()}))
-            engine.compiled.path = str(path)
-            engine.compiled.load_initial(engine)
-    assert engine.dump_state() == before
+            envelope = json.loads(program_envelope(engine.program))
+            envelope["state"] = state
+            path.write_text(json.dumps(envelope))
+            _engine(engine.sandbox_mgr, compiled_path=str(path))
+    assert engine.program.dump_state() == before
 
 
 def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypatch) -> None:
@@ -637,7 +629,7 @@ def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypa
     engine = _engine(
         manager,
     )
-    tools = engine.primary_rlm._user_tools
+    tools = engine.program.reasoning.rlm._user_tools
 
     class FailingChild:
         def __init__(self, *_args, **_kwargs) -> None:
@@ -658,7 +650,7 @@ def test_solo_and_batched_children_treat_a_runtime_failure_the_same_way(monkeypa
 
 def test_route_errors_redact_the_serving_lm_credential(caplog: pytest.LogCaptureFixture) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-redact")
-    engine = AdaptiveFleetEngine(
+    engine = FleetRuntime(
         manager,
         dspy.LM("openai/fleet-root", engine="lm15", cache=False),
         dspy.LM("openai/fleet-sub", engine="lm15", cache=False, api_key="real-serving-token"),
@@ -668,8 +660,8 @@ def test_route_errors_redact_the_serving_lm_credential(caplog: pytest.LogCapture
         def __call__(self, **_kwargs: Any) -> Any:
             raise RuntimeError("401: rejected real-serving-token")
 
-    engine.triage = FailingTriage()  # type: ignore[assignment]
-    engine.primary_rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
+    engine.program.routing.predict = FailingTriage()  # type: ignore[assignment]
+    engine.program.reasoning.rlm = lambda **_kwargs: SimpleNamespace(  # type: ignore[assignment]
         answer="bounded fallback",
         learned_skill_note="",
     )
@@ -695,11 +687,9 @@ def test_direct_route_inlines_only_dataset_files_into_one_prompt(monkeypatch):
     contents = {"files/context.txt": b"AAA", "files/extra.txt": b"BBB"}
     monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, path: contents[path])
     prompts: list[str] = []
-    engine.direct_cot = lambda **kwargs: prompts.append(kwargs["task"]) or SimpleNamespace(answer="ok")
+    engine.program.reasoning.direct = lambda **kwargs: prompts.append(kwargs["task"]) or SimpleNamespace(answer="ok")
 
-    prediction = engine._execute(
-        mode="direct",
-        route=Route.DIRECT,
+    prediction = engine(
         workspace_manifest="/workspace/files/context.txt",
         memory_summary="",
         task="Q?",
@@ -724,12 +714,10 @@ def test_direct_route_records_truncation_instead_of_clipping_silently(monkeypatc
     engine = _engine(manager, execution_mode="direct")
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: ["files/context.txt"])
     monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, _path: b"x" * 50)
-    monkeypatch.setattr("fleet_rlm.engine.programs._MAX_DIRECT_CONTEXT_CHARS", 10)
-    engine.direct_cot = lambda **_kwargs: SimpleNamespace(answer="ok")
+    monkeypatch.setattr("fleet_rlm.engine.invocation._MAX_DIRECT_CONTEXT_CHARS", 10)
+    engine.program.reasoning.direct = lambda **_kwargs: SimpleNamespace(answer="ok")
 
-    prediction = engine._execute(
-        mode="direct",
-        route=Route.DIRECT,
+    prediction = engine(
         workspace_manifest="/workspace/files/context.txt",
         memory_summary="",
         task="Q?",
@@ -747,7 +735,7 @@ def test_hybrid_direct_does_not_inline_workspace_files(monkeypatch):
 
     manager = DaytonaSandboxManager("key", "org", "volume", "session")
     engine = _engine(manager, execution_mode="hybrid")
-    monkeypatch.setattr(engine, "triage", lambda **_kwargs: SimpleNamespace(route=Route.DIRECT.value))
+    monkeypatch.setattr(engine.program.routing, "predict", lambda **_kwargs: SimpleNamespace(route=Route.DIRECT.value))
     monkeypatch.setattr(
         DaytonaSandboxManager, "list_workspace_files", lambda *_args: pytest.fail("no workspace listing")
     )
@@ -755,9 +743,9 @@ def test_hybrid_direct_does_not_inline_workspace_files(monkeypatch):
     events = []
     monkeypatch.setattr(DaytonaSandboxManager, "emit", lambda _self, kind, **_kwargs: events.append(kind))
     prompts = []
-    engine.direct_cot = lambda **kwargs: prompts.append(kwargs["task"]) or SimpleNamespace(answer="ok")
+    engine.program.reasoning.direct = lambda **kwargs: prompts.append(kwargs["task"]) or SimpleNamespace(answer="ok")
 
-    prediction = engine._run_turn("/workspace/files/context.txt", "", "Q?", "", "", None, None)
+    prediction = engine("/workspace/files/context.txt", "", "Q?", "", "", None, None)
 
     assert prompts == ["Q?"]
     assert prediction.direct_context_chars == 0
