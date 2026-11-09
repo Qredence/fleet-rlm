@@ -226,6 +226,8 @@ class SSERuntimeCallback(LMUsageCallback):
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._pending: set[Future] = set()
+        # Bound scheduled loop callbacks too, not just the destination queue.
+        self._activity_slots = threading.BoundedSemaphore(queue.maxsize or 100)
         self._calls: dict[str, dict[str, Any]] = {}
         # Progress is the lowest-priority event class: one retained value per scope per second.
         self._progress_pending: dict[tuple[str, str], dict[str, Any]] = {}
@@ -239,12 +241,11 @@ class SSERuntimeCallback(LMUsageCallback):
                 future.cancel()
 
     def _emit(self, payload: dict[str, Any]) -> None:
-        # Backpressure reaches the producer rather than discarding a prior outcome.
-        """Queue an annotated event from a worker; coalesce progress without blocking.
+        """Offer bounded activity without blocking execution; wait only for terminal delivery.
 
-        Drops events after close and non-`done` events after a terminal outcome. Other
-        queue writes wait up to 30 seconds, raising TimeoutError for a slow consumer;
-        queue or loop errors propagate, except cancellation caused by closing this callback.
+        Drops activity under backpressure, after close, or after a terminal outcome.
+        Outcomes and `done` wait up to 30 seconds for queue space; delivery errors propagate,
+        except cancellation caused by closing this callback.
         """
         if self._closed.is_set():
             return
@@ -264,6 +265,9 @@ class SSERuntimeCallback(LMUsageCallback):
         # A withheld progress value is offered before a lifecycle event only when its second has
         # elapsed; it is a non-blocking offer, so a full queue still drops it rather than delaying.
         self._release_progress(now)
+        if payload.get("event") not in {"turn_complete", "error", "turn_cancelled", "done"}:
+            self._deliver_activity(payload)
+            return
         future = asyncio.run_coroutine_threadsafe(self.queue.put(payload), self.loop)
         with self._lock:
             self._pending.add(future)
@@ -300,28 +304,32 @@ class SSERuntimeCallback(LMUsageCallback):
                 return
             self._progress_last[key] = now
             newest = self._progress_pending.pop(key)
-        self._deliver_progress(newest)
+        self._deliver_activity(newest)
 
-    def _deliver_progress(self, payload: dict[str, Any]) -> None:
-        """Offer one progress marker without waiting; a full queue drops it, never delays it."""
-        loop = self.loop
-        queue = self.queue
-        if self._closed.is_set():
-            return
+    def _deliver_activity(self, payload: dict[str, Any]) -> None:
+        """Offer activity on the loop, dropping it when the bounded handoff or queue is full."""
 
         def deliver() -> None:
-            """Offer progress only while the stream is live, dropping it if the queue is full."""
-            with self._lock:
-                if self._closed.is_set() or self.status.terminal:
-                    return
-                with contextlib.suppress(asyncio.QueueFull):
-                    queue.put_nowait(payload)
+            """Deliver accepted activity before the outcome; discard progress once it is obsolete."""
+            try:
+                with self._lock:
+                    if self._closed.is_set() or (payload.get("event") == "progress" and self.status.terminal):
+                        return
+                    with contextlib.suppress(asyncio.QueueFull):
+                        self.queue.put_nowait(payload)
+            finally:
+                self._activity_slots.release()
 
-        try:
-            loop.call_soon_threadsafe(deliver)
-        except RuntimeError:
-            # The stream closed between the check and the schedule; the marker is simply dropped.
-            return
+        with self._lock:
+            if self._closed.is_set() or self.status.terminal or not self._activity_slots.acquire(blocking=False):
+                return
+            # Serialize acceptance/scheduling with terminal ingestion: accepted activity must be
+            # scheduled before terminal queue writes, even when several worker threads emit.
+            try:
+                self.loop.call_soon_threadsafe(deliver)
+            except RuntimeError:
+                self._activity_slots.release()
+                # The loop closed between the check and the schedule; activity is simply dropped.
 
     def _take_due_progress(self, now: float) -> list[dict[str, Any]]:
         """Pop the newest withheld value for every scope whose one-second window elapsed."""
@@ -340,7 +348,7 @@ class SSERuntimeCallback(LMUsageCallback):
     def _release_progress(self, now: float) -> None:
         """Offer due progress markers from a worker thread without ever waiting."""
         for payload in self._take_due_progress(now):
-            self._deliver_progress(payload)
+            self._deliver_activity(payload)
 
     def pump_progress(self) -> None:
         """Deliver the newest withheld progress value for scopes whose second has elapsed.
@@ -442,7 +450,7 @@ class SSERuntimeCallback(LMUsageCallback):
         self._end("tool", call_id, exception, output=activity_preview(outputs))
 
     def emit(self, payload: dict[str, Any]) -> None:
-        """Queue one event for the stream; blocks the producer when the consumer falls behind."""
+        """Offer activity without waiting; apply backpressure only to outcomes and `done`."""
         self._emit(payload)
 
 

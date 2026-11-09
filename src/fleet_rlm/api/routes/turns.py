@@ -8,7 +8,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from threading import Event, Lock
 from typing import Annotated, Any
 
@@ -52,7 +52,7 @@ def _turn_executor(request: Request) -> ThreadPoolExecutor:
 TurnExecutor = Annotated[ThreadPoolExecutor, Depends(_turn_executor)]
 
 
-async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[None]:
+async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[AsyncExitStack]:
     """Hold the Session's lock for the whole streamed response, or raise 409 like the other routes.
 
     A request-scoped dependency: it is released after the stream has finished and the Turn has
@@ -65,12 +65,13 @@ async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[No
     try:
         if getattr(request.app.state, "setup_applying", False):
             raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
-        yield
+        async with AsyncExitStack() as cleanup:
+            yield cleanup
     finally:
         runtime.turn_lock.release()
 
 
-TurnLock = Annotated[None, Depends(hold_turn_lock)]
+TurnLock = Annotated[AsyncExitStack, Depends(hold_turn_lock)]
 
 
 @router.post(
@@ -135,6 +136,21 @@ async def stream_turn(
     connected = True
     finished = False
     reported = False
+
+    @_lock.push_async_callback
+    async def drain() -> None:
+        """Drain before unlocking, even if SSE forwarding abandons this generator at a yield."""
+        if getter is not None:
+            getter.cancel()
+        callback.close()
+        # Shielded: the response may be tearing down, but the lock must outlive the sandbox work.
+        with anyio.CancelScope(shield=True):
+            if not job.cancel() and not job.done():
+                if not finished and not reported:
+                    await _cancel(runtime, completion_committed, completion_lock)
+                await asyncio.wait({worker})
+        _log_failure(job, turn_id)
+
     try:
         status = envelope.wrap({"event": "turn_status", "phase": "preparation"})
         yield frame_envelope(status)
@@ -190,16 +206,9 @@ async def stream_turn(
             )
             yield frame_envelope(failure)
     finally:
-        if getter is not None:
-            getter.cancel()
-        callback.close()
-        # Shielded: the response may be tearing down, but the lock must outlive the sandbox work.
-        with anyio.CancelScope(shield=True):
-            if not job.cancel() and not job.done():
-                if not finished and not reported:
-                    await _cancel(runtime, completion_committed, completion_lock)
-                await asyncio.wait({worker})
-        _log_failure(job, turn_id)
+        # The request dependency owns this same stack. Closing it here consumes the finalizer;
+        # if forwarding was cancelled instead, dependency teardown runs it before releasing the lock.
+        await _lock.aclose()
 
 
 async def _acquire(runtime: SessionRuntime) -> bool:

@@ -9,7 +9,7 @@ import hashlib
 import json
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import AsyncExitStack, contextmanager
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -438,7 +438,7 @@ async def test_disconnect_during_postcommit_observation_preserves_success(monkey
             runtime,
             api_settings(),
             executor,
-            None,
+            AsyncExitStack(),
         )
         try:
             assert (await anext(stream)).data["event"] == "turn_status"
@@ -2071,6 +2071,142 @@ def test_a_client_disconnect_mid_turn_cancels_it_and_releases_the_lock():
     assert not runtime.turn_lock.locked()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+@pytest.mark.parametrize("committed", [False, True])
+async def test_blocked_send_disconnect_drains_before_unlock_even_when_generator_is_retained(
+    monkeypatch, spec_version, committed
+):
+    import sys
+
+    import anyio
+    from starlette.requests import ClientDisconnect
+
+    release, stopped, cleanup_started = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+    warm_root = object()
+
+    def cancel():
+        calls.append("cancel")
+        manager._cancelled.set()
+        manager._sandbox = None
+        cleanup_started.set()
+
+    def work(*_args, emit, completion_committed, **_kwargs):
+        try:
+            if committed:
+                completion_committed.set()
+            for value in range(12):
+                emit({"event": "budget_update", "lm_calls": value})
+            assert release.wait(10), "the test must release the draining worker"
+        finally:
+            stopped.set()
+
+    manager = FakeManager(_sandbox=warm_root, cancel_turn=cancel)
+    runtime = runtime_with(sandbox_mgr=manager)
+    _, app = client_for(runtime)
+    monkeypatch.setattr(turns_route, "run_turn", work)
+    close = SSERuntimeCallback.close
+
+    def close_and_signal(callback):
+        close(callback)
+        if committed:
+            cleanup_started.set()
+
+    monkeypatch.setattr(SSERuntimeCallback, "close", close_and_signal)
+    forwarded, disconnected = asyncio.Event(), asyncio.Event()
+    frame = turns_route.frame_envelope
+    frames = 0
+
+    def count_frame(envelope):
+        nonlocal frames
+        frames += 1
+        # One frame is blocked in HTTP send, with the remaining native forwarding buffers full.
+        if frames == 5:
+            forwarded.set()
+        return frame(envelope)
+
+    monkeypatch.setattr(turns_route, "frame_envelope", count_frame)
+    generators = []
+    hooks = sys.get_asyncgen_hooks()
+
+    def retain_stream(generator):
+        if hooks.firstiter:
+            hooks.firstiter(generator)
+        if generator.ag_code.co_name == "stream_turn":
+            generators.append(generator)
+
+    sys.set_asyncgen_hooks(firstiter=retain_stream, finalizer=hooks.finalizer)
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": b'{"task":"offline"}', "more_body": False}
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            if spec_version == "2.4":
+                await disconnected.wait()
+                raise OSError("offline connection closed")
+            await asyncio.Event().wait()
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": spec_version},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/sessions/session-a/turn",
+        "raw_path": b"/sessions/session-a/turn",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"content-type", b"application/json"), (b"host", b"test")],
+        "client": ("testclient", 50000),
+        "server": ("test", 80),
+        "state": {},
+    }
+
+    async def serve():
+        try:
+            await app(scope, receive, send)
+        except* (anyio.BrokenResourceError, ClientDisconnect):
+            # Native SSE forwarding can report a closed receive stream during disconnect.
+            pass
+
+    try:
+        async with app.router.lifespan_context(app):
+            request = asyncio.create_task(serve())
+            try:
+                await asyncio.wait_for(forwarded.wait(), 5)
+                assert len(generators) == 1
+                # Framing precedes the route's disconnect poll. Wait until that poll has finished
+                # and the generator is actually suspended at yield, not still inside __anext__.
+                async with asyncio.timeout(5):
+                    while generators[0].ag_await is not None:
+                        await asyncio.sleep(0)
+                disconnected.set()
+                assert await asyncio.to_thread(cleanup_started.wait, 2), "request teardown must not depend on GC"
+                assert not request.done() and not stopped.is_set()
+                acquired = runtime.turn_lock.acquire(blocking=False)
+                if acquired:
+                    runtime.turn_lock.release()
+                assert not acquired, "the old worker still owns this Session"
+            finally:
+                release.set()
+                await asyncio.wait_for(request, 5)
+                for generator in generators:
+                    await generator.aclose()
+            assert stopped.is_set() and not runtime.turn_lock.locked()
+            assert calls == ([] if committed else ["cancel"])
+            assert manager._sandbox is (warm_root if committed else None)
+    finally:
+        sys.set_asyncgen_hooks(*hooks)
+
+
 _REQUEST_MARKER: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_marker", default=None)
 
 
@@ -2380,7 +2516,13 @@ async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypa
             is_disconnected=is_disconnected,
         )
         stream = turns_route.stream_turn(
-            "session-a", turns_route.TurnRequest(task="hello"), request, runtime, api_settings(), executor, None
+            "session-a",
+            turns_route.TurnRequest(task="hello"),
+            request,
+            runtime,
+            api_settings(),
+            executor,
+            AsyncExitStack(),
         )
         try:
             status = await anext(stream)

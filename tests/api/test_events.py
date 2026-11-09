@@ -46,10 +46,12 @@ def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> N
 
 
 def _usage_callback() -> tuple[Any, list[dict]]:
+    import asyncio
+
     import fleet_rlm.api.events as server
 
     events: list[dict] = []
-    callback = server.SSERuntimeCallback(None, None)  # type: ignore[arg-type]
+    callback = server.SSERuntimeCallback(None, asyncio.Queue())  # type: ignore[arg-type]
     callback._emit = events.append  # type: ignore[method-assign]
     return callback, events
 
@@ -315,12 +317,13 @@ def test_a_checkpoint_flood_is_coalesced_and_never_delays_cancellation_or_done()
     names = [event.get("event") for event in events]
     progress = [event for event in events if event.get("event") == "progress"]
     assert len(progress) <= 5, f"more than one progress event per second: {len(progress)}"
-    assert progress[-1]["checkpoint"] == 2_999, "the newest checkpoint must be retained"
+    # Cancellation no longer waits for activity delivery; an outcome discards unsent progress.
     assert all(type(event["checkpoint"]) is int for event in progress)
     for lifecycle in ("cancellation_requested", "turn_cancelled", "done"):
         assert lifecycle in names
     assert names.index("done") == len(names) - 1
-    assert names.index("cancellation_requested") > names.index("progress")
+    if progress:
+        assert names.index("cancellation_requested") > names.index("progress")
     serialized = json.dumps(events)
     assert not any(token in serialized for token in ("%", "percent", "complete", "remaining", "ETA"))
 
@@ -378,10 +381,18 @@ def test_terminal_outcome_discards_withheld_and_late_progress() -> None:
         assert (await queue.get())["event"] == "progress"
         clock.now = 0.5
         await asyncio.to_thread(callback.emit, {**progress, "phase": "checkpoint", "checkpoint": 1})
+        clock.now = 0.75
+        await asyncio.to_thread(callback.emit, {**progress, "phase": "checkpoint", "checkpoint": 2})
+        assert queue.empty()
+        clock.now = 1.0
+        callback.pump_progress()
+        assert queue.get_nowait()["checkpoint"] == 2, "coalescing keeps the newest checkpoint while active"
+        clock.now = 1.5
+        await asyncio.to_thread(callback.emit, {**progress, "phase": "checkpoint", "checkpoint": 3})
         await asyncio.to_thread(callback.emit, {"event": "turn_complete"})
         clock.now = 2.0
         callback.pump_progress()
-        await asyncio.to_thread(callback.emit, {**progress, "phase": "checkpoint", "checkpoint": 2})
+        await asyncio.to_thread(callback.emit, {**progress, "phase": "checkpoint", "checkpoint": 4})
         await asyncio.to_thread(callback.emit, {"event": "done"})
         return [queue.get_nowait() for _ in range(queue.qsize())]
 
@@ -415,3 +426,45 @@ def test_progress_emission_never_raises_the_slow_consumer_timeout_on_a_full_queu
         return queue.qsize()
 
     assert asyncio.run(scenario()) == 100, "progress is dropped when full, never put to the queue"
+
+
+def test_full_activity_queue_cannot_interrupt_budget_tools_or_cancellation() -> None:
+    import asyncio
+
+    from fleet_rlm.api.events import SSERuntimeCallback
+    from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
+    from fleet_rlm.sandbox.manager import CLEANUP_STOPPED, DaytonaSandboxManager
+
+    async def scenario() -> None:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
+        for _ in range(100):
+            queue.put_nowait({"event": "filler"})
+        callback = SSERuntimeCallback(asyncio.get_running_loop(), queue)
+        manager = DaytonaSandboxManager("offline", "offline", "offline", "offline", event_callback=callback.emit)
+        manager.reset_turn_budget(deadline_seconds=None)
+        stopped: list[str] = []
+        manager._sandbox = SimpleNamespace(id="offline-root")
+        manager._client = SimpleNamespace(stop=lambda sandbox, **_kwargs: stopped.append(sandbox.id))
+        interpreter = DaytonaInterpreter(manager, tools={"subtract": lambda a, b: a - b})
+
+        def work() -> dict[str, Any]:
+            manager.consume_budget(3)
+            result = interpreter.answer_host_call({"id": "tool-1", "tool": "subtract", "args": [19, 7]})
+            manager.request_cancellation()
+            return result
+
+        producer = asyncio.create_task(asyncio.to_thread(work))
+        try:
+            done, _ = await asyncio.wait({producer}, timeout=2)
+            assert producer in done, "activity delivery must not wait for the consumer before doing real work"
+            assert producer.result() == {"value": 12}
+            assert manager.turn_usage()["lm_calls"] == 3
+            assert manager.cleanup_outcome == CLEANUP_STOPPED
+            assert stopped == ["offline-root"]
+            assert queue.qsize() == 100
+        finally:
+            callback.close()
+            await producer
+            manager.end_turn()
+
+    asyncio.run(scenario())

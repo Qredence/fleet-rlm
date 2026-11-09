@@ -262,7 +262,13 @@ runtime and rebuilds it on the next request once any draining Turn finishes.
 Events include `version`, `session_id`, `turn_id`, agent/parent/sandbox IDs,
 monotonic per-stream `seq`, timestamp, and `payload`. Flat payload fields remain
 for compatibility. Generated code, bounded outputs, allocation/deletion, routing,
-and call-budget events are available. Queues apply producer backpressure.
+and call-budget events are available. Nonterminal activity is best effort: bounded
+queue and cross-thread handoff saturation may drop events, including either half
+of an activity pair, without delaying execution or cleanup. Progress is coalesced.
+Only outcome events (`turn_complete`, `error`, `turn_cancelled`) and `done` apply
+producer backpressure, waiting up to 30 seconds for queue space. Delivery failure
+cannot reverse durable completion; recover the outcome through Turn status or
+idempotent completion lookup, not by automatically retrying side effects.
 Module/model/tool activity has paired `*_start` and `*_end` events with `call_id`;
 DSPy callbacks also include `parent_call_id`. End events report `ok`, `error_type`,
 and `duration_ms`. Tool `inputs` and `output` are bounded, redacted text previews;
@@ -282,9 +288,11 @@ bounded Turn arms the watchdog. A deadline-free Turn sends `run_code(timeout=0)`
 explicitly and no Fleet component substitutes a fallback bound, so the call waits
 until it returns or the Turn is cancelled; Daytona's provider TTL and idle bounds
 still apply. Closing a stream before durable completion requests remote
-cancellation and drains the worker, serialized against commit/readback. After durable completion, disconnecting
-preserves a successful Turn's warm root while the worker finishes. Reconnection
-is not an automatic side-effect retry.
+cancellation and drains the worker, serialized against commit/readback. Request
+cleanup retains the Session lock until the worker drains, including when HTTP
+forwarding is blocked after consuming a yielded event. After durable completion,
+disconnecting preserves a successful Turn's warm root while the worker finishes.
+Reconnection is not an automatic side-effect retry.
 
 New completion events and their persisted idempotent outcomes also include
 host-owned `lm_calls`, `sandbox_errors`, `submit_rejections`, and
