@@ -1457,6 +1457,7 @@ def test_postgres_examples_span_every_session() -> None:
         "optional_tracking",
         "optional_stdout",
         "optional_tracking_setup",
+        "optional_narration",
         "unchanged",
     ],
 )
@@ -1625,6 +1626,16 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return _evaluation()["candidate" if changed else "baseline"]["passes"][0]
 
     monkeypatch.setattr(workflow, "score_stage", score)
+    narration_budgets = []
+    if cancel_after_validation == "optional_narration":
+
+        def narration(_lm, _report, budget):
+            budget.cap = 1
+            budget.used = 2
+            narration_budgets.append(budget)
+            return "Optional summary."
+
+        monkeypatch.setattr(workflow, "_comparison_rationale", narration)
     if cancel_after_validation == "evidence_change":
         digest_calls = 0
 
@@ -1768,6 +1779,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         "optional_tracking",
         "optional_stdout",
         "optional_tracking_setup",
+        "optional_narration",
     }:
         with pytest.raises(workflow.OptimizationCancelledError, match="stop requested"):
             workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
@@ -1777,6 +1789,8 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
 
     workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+    if cancel_after_validation == "optional_narration":
+        assert narration_budgets and narration_budgets[0].used == 2
     assert run_tags["fleet.optimization.run_id"] == "s1-run"
     assert any(
         isinstance(callback, workflow.GEPAProgressReporter) for callback in optimizer_kwargs["gepa_kwargs"]["callbacks"]
@@ -1797,7 +1811,8 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     comparison_md = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".comparison.md"))
     full_report = json.loads(comparison_json.read_text())
     assert full_report["manifest"]["evaluation"]["candidate"]["component_diffs"] == [diff]
-    assert full_report["rationale"] == "" and "rationale" not in manifest
+    assert full_report["rationale"] == ("Optional summary." if cancel_after_validation == "optional_narration" else "")
+    assert "rationale" not in manifest
     # The worker counts finished validation rollouts: 2 stages x 3 passes x (1 dev + 1 holdout).
     progress = store.records["s1-run"]["progress"]
     assert (progress["validation_done"], progress["validation_total"]) == (12, 12)

@@ -1467,7 +1467,7 @@ def _compile(
         full_report_path = destination.with_suffix(".comparison.json")
         report_path.write_text(report)
         # A reader's aid only: the gate above never sees it, and any failure leaves it empty.
-        rationale = "" if not changes else _comparison_rationale(reflection_lm, report, tokens)
+        rationale = ""
         full_report_path.write_text(
             json.dumps(
                 {"manifest": asdict(manifest), "report": report, "rationale": rationale}, ensure_ascii=False, indent=2
@@ -1519,6 +1519,26 @@ def _compile(
             dataset_sizes={"train": len(trainset), "dev": len(devset), "holdout": len(holdout)},
         )
         check_boundary()
+        # Narration follows every required budget boundary: its measured cost must not
+        # invalidate completed candidate evidence. Cancellation still arbitrates at run end.
+        if changes:
+            try:
+                rationale = _comparison_rationale(reflection_lm, report, tokens)
+                if rationale:
+                    atomic_write(
+                        full_report_path,
+                        (
+                            json.dumps(
+                                {"manifest": asdict(manifest), "report": report, "rationale": rationale},
+                                ensure_ascii=False,
+                                indent=2,
+                            )
+                            + "\n"
+                        ).encode(),
+                    )
+                    _optional_mlflow(mlflow.log_artifact, str(full_report_path), artifact_path="candidate")
+            except Exception:
+                logger.warning("Optional comparison narration failed; sensitive details omitted.")
     with suppress(Exception):
         print(report)
         print(f"Candidate saved at {destination}; not installed.")

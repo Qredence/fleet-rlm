@@ -241,6 +241,7 @@ class ImproveScreen(ModalScreen[None]):
         self.evaluations: list[dict[str, Any]] = []
         self.improve_settings: dict[str, Any] | None = None
         self._settings_loaded = False
+        self._loaded_settings: dict[str, Any] = {}
         self.records: list[dict[str, Any]] = []
         self.progress: dict[str, Any] = {}
         self.comparison: dict[str, Any] | None = None
@@ -635,6 +636,10 @@ class ImproveScreen(ModalScreen[None]):
                 text += f"\nAUTO-RUN BLOCKED  {prefs['auto_run_blocked']}"
             if not self._settings_loaded:
                 self._settings_loaded = True
+                self._loaded_settings = {
+                    name: prefs.get(name)
+                    for name in ("auto_run", "min_new_labels", "max_metric_calls", "max_total_tokens")
+                }
                 self.query_one("#auto-run", Checkbox).value = bool(prefs.get("auto_run"))
                 self.query_one("#auto-min-labels", Input).value = str(prefs.get("min_new_labels", ""))
                 self.query_one("#auto-metric-calls", Input).value = str(prefs.get("max_metric_calls") or "")
@@ -947,6 +952,7 @@ class ImproveScreen(ModalScreen[None]):
         except ValueError:
             self.app.notify("Settings must be whole numbers", severity="error")
             return
+        body = {name: value for name, value in body.items() if value != self._loaded_settings.get(name)}
         self.run_worker(
             self._put_settings(body), name="improve-settings", group="improve-settings", exit_on_error=False
         )

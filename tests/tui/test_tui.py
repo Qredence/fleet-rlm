@@ -1969,6 +1969,11 @@ def test_readiness_tab_shows_auto_run_state_and_saves_edited_settings() -> None:
             assert "AUTO-RUN  off · after 5 new labels · light budget · token cap unlimited" in text
             assert "nothing installs without your approval" in text
             assert screen.query_one("#auto-min-labels", Input).value == "5"
+            screen.query_one("#settings-save").press()
+            await _wait_for(pilot, lambda: api.get("saved_settings"))
+            await pilot.pause(0.1)
+            assert api["saved_settings"] == [{}]
+            api["saved_settings"].clear()
             screen.query_one("#auto-run", Checkbox).value = True
             screen.query_one("#auto-min-labels", Input).value = "3"
             screen.query_one("#auto-metric-calls", Input).value = "40"
