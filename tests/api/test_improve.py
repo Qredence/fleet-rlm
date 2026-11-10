@@ -1158,8 +1158,8 @@ class _LabelStore(MemoryStore):
     def approved_program(self) -> dict[str, Any]:
         return self.ledger
 
-    def improve_queue(self, limit: int) -> list[dict[str, Any]]:
-        return self.queue[:limit]
+    def improve_queue(self, limit: int, offset: int = 0) -> list[dict[str, Any]]:
+        return self.queue[offset : offset + limit]
 
     def turn_reference(self, turn_id: str) -> dict[str, Any] | None:
         return self.references.get(turn_id)
