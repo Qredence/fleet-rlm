@@ -934,8 +934,19 @@ class FleetSettings(BaseSettings):
         return target
 
     def judge_environment(self) -> dict[str, str]:
-        """MLflow diagnostic providers use their own native environment configuration."""
-        return {}
+        """Environment that points MLflow's `openai:/` scorers at the judge role's own endpoint and key.
+
+        Only an explicitly configured judge (`[llm.judge].model` with its endpoint and credential) is
+        paired, so the DSPy correctness judge and the MLflow scorers use the same provider. Other
+        providers, and judges that merely inherit the shared connection, use MLflow's native environment.
+        """
+        resolved = self.resolved_model("judge")
+        key = resolved.api_key.get_secret_value()
+        if not (self.fleet_judge_model.startswith("openai:/") and self.fleet_correctness_model):
+            return {}
+        if not (resolved.api_base and key):
+            return {}
+        return {"OPENAI_API_BASE": resolved.api_base, "OPENAI_API_KEY": key}
 
     def build_jev_lm(self) -> Any | None:
         """The TypeSafe System One client, or None when no credential is configured.

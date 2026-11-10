@@ -53,7 +53,7 @@ def save_label(client: httpx.Client, body: dict[str, Any]) -> dict[str, Any]:
 
 def label_figures(answer: str) -> list[str]:
     """The answer's number literals, in the same bounded form the queue API serves."""
-    return list(figures(answer))[:MAX_FIGURES]
+    return list(figures(answer, include_small=True))[:MAX_FIGURES]
 
 
 def confirm_text(options: Mapping[str, Any]) -> str:

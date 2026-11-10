@@ -242,8 +242,12 @@ def item_decision(choices: list[str]) -> type[dspy.Signature]:
 _FIGURE = re.compile(r"(?<![\w.])\$?-?\d[\d,]*(?:\.\d+)?")
 
 
-def figures(text: str) -> dict[str, float]:
-    """Normalized number literals in `text`; small integers carry no evidence and are ignored."""
+def figures(text: str, *, include_small: bool = False) -> dict[str, float]:
+    """Normalized number literals in `text`.
+
+    Small integers carry no grounding evidence and are ignored by default; `include_small` keeps every
+    literal, which is what a gold label needs.
+    """
     found: dict[str, float] = {}
     for match in _FIGURE.finditer(text):
         literal = match.group().replace("$", "").replace(",", "")
@@ -251,7 +255,7 @@ def figures(text: str) -> dict[str, float]:
             value = float(literal)
         except ValueError:
             continue
-        if "." in literal or abs(value) >= 10:
+        if include_small or "." in literal or abs(value) >= 10:
             found[literal] = value
     return found
 

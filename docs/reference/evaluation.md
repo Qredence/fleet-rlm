@@ -633,6 +633,35 @@ the gateway. Judge nondeterminism is possible and must be measured. GEPA reflect
 uses `FLEET_REFLECTION_MODEL`; the checked-in configuration currently uses Claude
 Haiku 5.5 at temperature 1.0 with a 32,000-token output budget.
 
+### Judging on an OpenAI-compatible provider (for example Command Code)
+
+Every role is an independent LM instance, so judging can use a provider other than serving. For Command Code
+(`https://api.commandcode.ai/provider/v1`) give each model an `openai/` route, because a bare
+`deepseek/...` route is sent to the DeepSeek API instead of the configured endpoint (the symptom is
+`LMUnsupportedModelError: Model "..." is not supported on this endpoint`):
+
+```toml
+[llm.judge]            # fleet_metric's DSPy judge
+model = "openai/deepseek/deepseek-v4.1-flash"
+api_base = "https://api.commandcode.ai/provider/v1"
+api_key_env = "COMMAND_CODE_API_KEY"
+
+[evaluation]
+judge_model = "openai:/deepseek/deepseek-v4.1-flash"   # MLflow scorers
+```
+
+With an explicit `[llm.judge]` model, endpoint and key, `judge_environment()` pairs the MLflow `openai:/` scorers
+with that endpoint (`OPENAI_API_BASE`/`OPENAI_API_KEY`); `fleet eval run`, `fleet eval score`, and synthetic jobs
+all call the one `apply_judge_environment` helper. Configure `[llm.reflection]` the same way for GEPA and the
+comparison rationale. Known limit: the `execution_evidence_diagnostics` scorer asks for a structured
+`dict[str, bool]` answer, which Command Code's schema validation rejects; `evaluate_rescore` therefore applies
+Fleet's metric and the gold-value check only, and `fleet eval score` reports that diagnostic as failed on this provider.
+
+A judge failure during optimization or replay scores that example 0.0 with feedback and stops the job with
+`JudgeFailedError` at its next safe boundary; MLflow's DSPy autologging otherwise turns a raising metric into a
+`None` score. Failed jobs show their class and, for provider and Fleet contract errors only, a short message with
+credentials and paths redacted; other exceptions are named without quoting evaluated content.
+
 ## Trace contents and selected replay evidence
 
 The `fleet_turn` root span records `session_id`, `turn_id`, task, workspace

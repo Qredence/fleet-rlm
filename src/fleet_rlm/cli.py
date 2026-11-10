@@ -137,8 +137,7 @@ def _score_command(args: argparse.Namespace, settings: Any, experiment_id: str) 
         if trace is None:
             raise SystemExit(f"Trace {trace_id} is not readable; retry its saved trace ID")
         traces.append(trace)
-    for name, value in settings.judge_environment().items():
-        os.environ[name] = value
+    evaluation.apply_judge_environment(settings)
     try:
         result = evaluation.score_evaluation_traces(
             traces,

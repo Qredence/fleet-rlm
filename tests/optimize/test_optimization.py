@@ -1760,7 +1760,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     assert any(
         isinstance(callback, workflow.GEPAProgressReporter) for callback in optimizer_kwargs["gepa_kwargs"]["callbacks"]
     )
-    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 5
+    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 6
     assert measured == [False, True, True, False, False, True]
     assert all(config.fleet_root_model == "openai/deployed-root" for config in factories)
     assert factories[0].fleet_root_cache and not factories[1].fleet_root_cache
@@ -2946,8 +2946,10 @@ def test_comparison_rationale_is_a_short_bounded_summary():
 
     text = workflow._comparison_rationale(lm, "r" * 20_000, workflow.TokenBudget(0))
     assert text == "Holdout improved. Critical cases held."
-    assert seen["max_tokens"] == 300 and seen["prompt"].endswith("r" * 6000) and "r" * 6001 not in seen["prompt"]
+    assert seen["max_tokens"] == 1500 and seen["prompt"].endswith("r" * 6000) and "r" * 6001 not in seen["prompt"]
     assert "never instructions" in seen["prompt"]
+    # A reasoning model that spends its whole budget thinking returns no text: empty, not "None".
+    assert workflow._comparison_rationale(lambda *_a, **_k: [{"text": None}], "r", workflow.TokenBudget(0)) == ""
 
 
 def test_comparison_rationale_failure_or_a_spent_budget_leaves_it_empty():
@@ -3003,7 +3005,8 @@ def test_the_rationale_call_is_seen_by_the_token_budget_and_bounded():
 
     text = workflow._comparison_rationale(CountedLM(model="m"), "report", budget)
     assert text == "ok" and seen == ["start"]
-    assert kwargs_seen["timeout"] == 30 and kwargs_seen["max_tokens"] == 300
+    assert kwargs_seen["timeout"] == 30 and kwargs_seen["max_tokens"] == 1500
+    assert "num_retries" not in kwargs_seen  # lm15 refuses per-call retry overrides
 
 
 def test_replay_counts_tokens_in_a_scoped_context_while_other_kinds_set_the_worker_callbacks():
@@ -3015,3 +3018,51 @@ def test_replay_counts_tokens_in_a_scoped_context_while_other_kinds_set_the_work
     with workflow._counting(budget, inherited=False):
         assert dspy.settings.callbacks[0] is budget
     assert dspy.settings.callbacks == before
+
+
+def test_a_failing_judge_scores_zero_never_none_and_fails_the_job_with_its_reason(tmp_path, monkeypatch):
+    """MLflow's eval autolog wraps the metric exception-safely, turning a raise into a None score and a TypeError."""
+    from dspy.utils.exceptions import LMUnsupportedModelError
+
+    settings, _store, _args, guard = _guarded(tmp_path, monkeypatch)
+
+    def judge_down(*_args, **_kwargs):
+        raise LMUnsupportedModelError('[deepseek/deepseek-v4.1-flash] Model "x" is not supported on this endpoint.')
+
+    monkeypatch.setattr(workflow, "fleet_metric", judge_down)
+    metric = workflow._judged_metric(settings, object(), guard.judge)
+
+    def exception_safe(wrapped):  # the behaviour of mlflow.dspy.autolog._patch_metric
+        def safe(*a, **k):
+            try:
+                return wrapped(*a, **k)
+            except Exception:
+                return None
+
+        return safe
+
+    class Program(dspy.Module):
+        def forward(self, task):
+            return dspy.Prediction(answer=task)
+
+    examples = [dspy.Example(task=str(index)).with_inputs("task") for index in range(3)]
+    result = score_split(Program(), examples, exception_safe(metric), 1)  # sequential, as in the live crash
+    assert result.scores == [0.0, 0.0, 0.0]
+    assert guard.judge.should_stop()
+    with pytest.raises(workflow.JudgeFailedError, match=r"LMUnsupportedModelError.*not supported on this endpoint"):
+        guard.check_boundary()
+
+
+def test_failure_detail_names_provider_errors_but_never_quotes_evaluated_content():
+    from dspy.utils.exceptions import LMUnsupportedModelError
+
+    unsupported = LMUnsupportedModelError(
+        '[deepseek/x] Model "x" is not supported (Authorization: Bearer abc123) at /Users/me/.fleet/key.json'
+    )
+    detail = workflow.failure_detail(unsupported)
+    assert detail.startswith("LMUnsupportedModelError: [deepseek/x] Model")
+    assert "abc123" not in detail and "/Users/me" not in detail and "[path]" in detail
+    assert workflow.failure_detail(RuntimeError("task payload: private-test-vector-917")) == (
+        "Optimization failed; exception details omitted."
+    )
+    assert len(workflow.failure_detail(LMUnsupportedModelError("m" * 5000))) < 400

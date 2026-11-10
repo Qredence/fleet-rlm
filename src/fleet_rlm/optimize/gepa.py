@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
+import re
 import sys
 import threading
 import uuid
@@ -51,7 +51,7 @@ from fleet_rlm.optimize.dataset import (
     load_examples,
     readiness,
 )
-from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
+from fleet_rlm.optimize.scorers import SCORER_VERSION, expected_values_present, fleet_metric, fleet_scorer
 from fleet_rlm.optimize.validation import (
     IsolatedFleetProgram,
     RolloutCleanup,
@@ -231,6 +231,35 @@ class GEPAProgressReporter:
 
 class OptimizationCancelledError(Exception):
     """Raised after a cooperative GEPA or validation stop request is observed."""
+
+
+class JudgeFailedError(RuntimeError):
+    """The correctness judge raised, so scores computed from it are not evidence."""
+
+
+# Messages are shown only for failures that describe a provider, endpoint, or Fleet's own contracts. Other
+# exceptions can embed evaluated content (task text, answers, payloads), so they are named but not quoted.
+_QUOTABLE_MODULES = ("dspy", "litellm", "openai", "httpx", "fleet_rlm.optimize.gepa", "fleet_rlm.optimize.evaluation")
+_PATH = re.compile(r"(?<![\w.:\]-])/(?:[\w.~-]+/)+[\w.~-]*|[A-Za-z]:\\[^\s'\"]+")
+_FAILURE_MESSAGE_CHARS = 300
+_GENERIC_FAILURE = "Optimization failed; exception details omitted."
+
+
+def failure_reason(error: BaseException) -> str:
+    """The error's class and, for provider or contract errors only, a short message with secrets and paths redacted."""
+    from fleet_rlm.observability import activity_text
+
+    name = type(error).__name__
+    if not type(error).__module__.startswith(_QUOTABLE_MODULES):
+        return name
+    message = _PATH.sub("[path]", activity_text(" ".join(str(error).split()), limit=_FAILURE_MESSAGE_CHARS))
+    return f"{name}: {message}" if message else name
+
+
+def failure_detail(error: BaseException) -> str:
+    """The job's stored failure detail: the safe reason when there is a message to show, else a generic line."""
+    reason = failure_reason(error)
+    return reason if ": " in reason else _GENERIC_FAILURE
 
 
 class BudgetExhaustedError(OptimizationCancelledError):
@@ -790,10 +819,7 @@ def _finalize_optimization_run(
         "candidate_version": run_id if status == "completed" and candidate else None,
     }
     if failure is not None:
-        details["failure"] = {
-            "type": type(failure).__name__,
-            "detail": "Optimization failed; exception details omitted.",
-        }
+        details["failure"] = {"type": type(failure).__name__, "detail": failure_detail(failure)}
     try:
         if managed_run_id:
             worker_outcome = details
@@ -886,8 +912,35 @@ def _serving_runtime(settings: FleetSettings) -> FleetRuntime:
     )
 
 
-def _judged_metric(settings: FleetSettings, judge_lm: Any) -> Any:
-    """Fleet's shared metric, scored with the explicit judge and its native adapter."""
+class _JudgeLatch:
+    """Remember the first judge failure so the job fails with a clear reason instead of scoring on a broken judge."""
+
+    def __init__(self) -> None:
+        self.reason: str | None = None
+        self._lock = threading.Lock()
+
+    def record(self, error: BaseException) -> None:
+        with self._lock:
+            if self.reason is None:
+                self.reason = failure_reason(error)
+
+    def should_stop(self, *_args: Any, **_kwargs: Any) -> bool:
+        """GEPA's native stop predicate."""
+        return self.reason is not None
+
+    def raise_if_failed(self) -> None:
+        if self.reason is not None:
+            raise JudgeFailedError(f"The correctness judge failed ({self.reason})")
+
+
+def _judged_metric(settings: FleetSettings, judge_lm: Any, latch: _JudgeLatch) -> Any:
+    """Fleet's shared metric, scored with the explicit judge and its native adapter.
+
+    The metric never raises and never returns None. MLflow's DSPy autologging wraps the evaluation metric
+    exception-safely and turns a raising metric into a None score, which crashes DSPy's progress reporting.
+    A judge failure therefore scores the example 0.0 with feedback and is latched; the job stops at its
+    next safe boundary with `JudgeFailedError`, so zeros from a broken judge are never reported as results.
+    """
 
     def metric(
         gold: Any,
@@ -899,8 +952,16 @@ def _judged_metric(settings: FleetSettings, judge_lm: Any) -> Any:
     ) -> Any:
         # GEPA passes program_trace by keyword only because this signature declares it.
         """Score a rollout with the explicit judge and forward GEPA's component and program traces."""
-        with dspy.context(adapter=settings.resolved_model("judge").build_adapter()):
-            return fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge_lm)
+        try:
+            with dspy.context(adapter=settings.resolved_model("judge").build_adapter()):
+                return fleet_metric(gold, pred, trace, pred_name, pred_trace, program_trace, judge_lm=judge_lm)
+        except Exception as error:
+            latch.record(error)
+            return dspy.Prediction(
+                score=0.0,
+                feedback=f"FAIL judge: the correctness judge failed ({type(error).__name__}).",
+                objective_scores={"answer_correctness": 0.0, "quality": 0.0, "usage_available": 0.0},
+            )
 
     return metric
 
@@ -930,6 +991,7 @@ class _JobGuard:
             run_id, store=store, owner_id=owner_id, emit_events=False, tokens=self.tokens
         )
         self.cleanup = RolloutCleanup()
+        self.judge = _JudgeLatch()
 
     def check_boundary(self) -> None:
         """Raise when persistence failed, a stop or ownership change was observed, or the token cap is spent."""
@@ -943,6 +1005,7 @@ class _JobGuard:
         if record.get("status") != "running":
             raise OptimizationPersistenceError("Optimization status changed")
         self.cleanup.raise_if_failed()
+        self.judge.raise_if_failed()
         if self.tokens.reached:
             raise BudgetExhaustedError("Optimization token budget exhausted")
 
@@ -952,7 +1015,8 @@ class _JobGuard:
         self.reporter.update(stage=name)
 
 
-_RATIONALE_MAX_TOKENS = 300
+# Reasoning models spend part of this budget thinking before they write the summary.
+_RATIONALE_MAX_TOKENS = 1500
 _RATIONALE_INPUT_CHARS = 6000
 _RATIONALE_CHARS = 1200
 _RATIONALE_TIMEOUT_SECONDS = 30
@@ -971,7 +1035,8 @@ def _comparison_rationale(lm: Any, report: str, tokens: TokenBudget) -> str:
 
     This is optional narration, not evidence: it is never an input to ``promotion_gate``. The call is
     skipped once the token cap is spent, is counted by the job's budget when the LM reports usage, is
-    bounded by tokens and a timeout, and any failure returns an empty string instead of failing the job.
+    bounded by tokens and a timeout (lm15 rejects per-call retry overrides), and any failure returns an
+    empty string instead of failing the job.
     """
     if tokens.reached:
         return ""
@@ -987,11 +1052,10 @@ def _comparison_rationale(lm: Any, report: str, tokens: TokenBudget) -> str:
                 max_tokens=_RATIONALE_MAX_TOKENS,
                 temperature=0,
                 timeout=_RATIONALE_TIMEOUT_SECONDS,
-                num_retries=0,
             )
         text = outputs[0] if outputs else ""
-        text = text.get("text", "") if isinstance(text, dict) else text
-        return " ".join(str(text).split())[:_RATIONALE_CHARS]
+        text = text.get("text") if isinstance(text, dict) else text
+        return " ".join(str(text or "").split())[:_RATIONALE_CHARS]
     except Exception:
         logger.warning("Optional comparison rationale failed; sensitive details omitted.")
         return ""
@@ -1082,11 +1146,12 @@ def _rescore(
         validation_ratio=args.validation_ratio,
         evaluation_experiment_name=target.eval_experiment_name,
     )
-    for name, value in settings.judge_environment().items():
-        os.environ[name] = value
-    judge_lm = settings.build_judge_lm()
-    adapter = settings.resolved_model("judge").build_adapter()
-    jev_lm = settings.build_jev_lm()
+    # Rescoring applies Fleet's metric (the judge GEPA optimizes against) and the gold-value check. The MLflow
+    # diagnostic suite is left to `fleet eval score`: its structured-output judges are provider-sensitive.
+    scorers = [
+        fleet_scorer(settings.build_judge_lm(), settings.resolved_model("judge").build_adapter()),
+        expected_values_present,
+    ]
     splits, excluded = {}, 0
     for name, members in zip(("train", "dev", "holdout"), partitions, strict=True):
         traces = [(example, _example_trace(store, example)) for example in members]
@@ -1099,9 +1164,7 @@ def _rescore(
             result = evaluation.score_evaluation_traces(
                 chunk,
                 judge_model=settings.fleet_judge_model,
-                judge_lm=judge_lm,
-                judge_adapter=adapter,
-                jev_lm=jev_lm,
+                scorers=scorers,
                 report=lambda _message: None,
             )
             chunk_scores, chunk_critical = jobs.rescore_scores(result)
@@ -1124,7 +1187,7 @@ def _replay(
         evaluation_experiment_name=target.eval_experiment_name,
     )
     examples = [*trainset, *devset, *holdout]
-    metric = _judged_metric(settings, settings.build_judge_lm())
+    metric = _judged_metric(settings, settings.build_judge_lm(), guard.judge)
     template = _serving_runtime(settings).program
     # Serving caches are off so every rollout is measured, as in candidate validation.
     quiet = settings.with_explicit_overrides(fleet_root_cache=False, fleet_sub_cache=False)
@@ -1229,7 +1292,7 @@ def _compile(
     factory = build_isolated_engine_factory(settings, store, [*trainset, *devset], cleanup=cleanup)
     baseline = IsolatedFleetProgram(template, factory, cleanup)
 
-    metric = _judged_metric(settings, judge_lm)
+    metric = _judged_metric(settings, judge_lm, guard.judge)
 
     version = run_id
     budget = {"max_metric_calls": args.max_metric_calls} if args.max_metric_calls else {"auto": args.gepa_budget}
@@ -1240,6 +1303,7 @@ def _compile(
         reporter.should_stop,
         cleanup.should_stop,
         tokens.should_stop,
+        guard.judge.should_stop,
     ]
     if (proposals := getattr(args, "max_candidate_proposals", None)) is not None:
         stop_callbacks.append(build_proposal_stop_callback(proposals))

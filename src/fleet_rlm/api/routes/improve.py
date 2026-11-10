@@ -168,7 +168,7 @@ def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
                     session_id=row["session_id"],
                     task=_preview(row["task"]),
                     answer=_preview(row["answer"]),
-                    figures=list(figures(row["answer"] or ""))[:_MAX_FIGURES],
+                    figures=list(figures(row["answer"] or "", include_small=True))[:_MAX_FIGURES],
                     label=row["review_status"] or "unlabelled",
                     expected_answer=row["expected_answer"],
                     expected_values=row["expected_values"] or [],

@@ -537,6 +537,12 @@ def evaluation_experiment(settings: Any) -> Any:
     )
 
 
+def apply_judge_environment(settings: Any) -> None:
+    """Pair the MLflow judges with their provider credential; `eval run`, `eval score`, and jobs all use this."""
+    for name, value in settings.judge_environment().items():
+        os.environ[name] = value
+
+
 def run_cases(
     settings: Any,
     cases: list[EvalCase],
@@ -547,8 +553,7 @@ def run_cases(
     report: Callable[[str], None] = print,
 ) -> Any:
     """Run cases against a live server with the configured judges; the `fleet eval run` path and synthetic jobs."""
-    for name, value in settings.judge_environment().items():
-        os.environ[name] = value
+    apply_judge_environment(settings)
     target = settings.mlflow_target()
     return evaluate_cases(
         cases,
