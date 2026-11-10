@@ -344,11 +344,17 @@ def run_turn(
                             "configuration": runtime_configuration(settings, runtime),
                             "provenance": {"fleet_rlm_version": version("fleet-rlm")},
                         }
-                        replay_snapshot = encode_snapshot(snapshot)
+                        from fleet_rlm.replay import ReplaySizeError
+
+                        try:
+                            replay_snapshot = encode_snapshot(snapshot)
+                        except ReplaySizeError as error:
+                            inputs["replay_selected"] = False
+                            emit({"event": "replay_skipped", "bytes": error.size, "limit": error.limit})
                         phase.set_attributes(
                             {
-                                "snapshot_id": replay_snapshot[0],
-                                "snapshot_bytes": len(replay_snapshot[1]),
+                                "snapshot_id": replay_snapshot[0] if replay_snapshot else None,
+                                "snapshot_bytes": len(replay_snapshot[1]) if replay_snapshot else 0,
                                 "replay_files": len(inputs["replay_files"]),
                             }
                         )

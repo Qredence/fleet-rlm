@@ -1137,3 +1137,28 @@ def test_unverified_remote_format_receipts_remain_generic(sandbox, mismatch, mon
         interpreter.execute("broken()")
     assert "The Turn failed" in _failure_message(raised.value, "test")
     assert interpreter._format_failures == {}
+
+
+def test_resource_sample_admission_is_atomic(sandbox, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    release = threading.Event()
+    calls = []
+    monkeypatch.setattr("fleet_rlm.sandbox.manager.RESOURCE_SAMPLE_TIMEOUT_SECONDS", 0.02)
+    sandbox.get_metrics_latest = lambda: calls.append(1) or release.wait(2)
+    manager = manager_on(sandbox)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(manager.resource_sample) for _ in range(2)]
+            assert [future.result() for future in futures] == [None, None]
+        assert calls == [1]
+    finally:
+        release.set()
+
+
+def test_cancellation_during_resource_sampling_refuses_completed_result(sandbox, monkeypatch):
+    manager = manager_on(sandbox)
+    interpreter = DaytonaInterpreter(manager)
+    monkeypatch.setattr(type(manager), "resource_sample", lambda self: self.root._cancelled.set())
+    with pytest.raises(RuntimeError, match="cancelled"):
+        interpreter.execute("1 + 1")

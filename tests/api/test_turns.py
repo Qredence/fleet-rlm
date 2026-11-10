@@ -856,6 +856,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     assert outcome == "completed"
     assert duration_seconds >= 0
     assert payload == {
+        "replay_snapshot_selected": True,
         "answer": "processed locally",
         "route": "flex",
         "learned_skill_note": "Reuse the digit window check.",
@@ -2809,3 +2810,12 @@ async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypa
     assert calls == []
     assert not manager._cancelled.is_set()
     assert manager._sandbox is warm_root
+
+
+def test_expanded_replay_size_limit_has_a_distinct_skip_reason(monkeypatch):
+    from fleet_rlm import replay
+
+    monkeypatch.setattr(replay, "MAX_REPLAY_JSON_BYTES", 5)
+    with pytest.raises(replay.ReplaySizeError) as raised:
+        replay.encode_snapshot({"task": "large"})
+    assert raised.value.size > raised.value.limit == 5
