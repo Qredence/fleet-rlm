@@ -1,0 +1,33 @@
+src/fleet_rlm/engine/turn.py
+  s_ed74e9ba8d193d::t_4a521ffa73f6be 347-353,356-357
+src/fleet_rlm/replay.py
+  s_ed74e9ba8d193d::t_c15f007aded019 78-86,91,94
+src/fleet_rlm/sandbox/interpreter.py
+  s_ed74e9ba8d193d::t_1c5a6c5bea6953 493-498
+src/fleet_rlm/sandbox/manager.py
+  s_ed74e9ba8d193d::t_b89d05b944da9b 756-781
+src/fleet_rlm/session.py
+  s_ed74e9ba8d193d::t_a43e3d4a9b9cdf 257
+tests/api/test_turns.py
+  s_ed74e9ba8d193d::t_8eee3d9f76cd50 859,2813-2821
+tests/fixtures/turn_results.json
+  s_ed74e9ba8d193d::t_c302e51c0a5f11 10-12,16-21,36-37,54-61,67-76
+tests/sandbox/test_interpreter.py
+  s_ed74e9ba8d193d::t_8e0f0b41f5b88f 1140-1164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4eff25b774c6eb627d994fab80ec4dd9742bc06a",
+  "prompts": {},
+  "sessions": {
+    "s_ed74e9ba8d193d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c563-a642-7f92-bd87-845964894f74",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
