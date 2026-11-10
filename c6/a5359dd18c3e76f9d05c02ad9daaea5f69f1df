@@ -1,0 +1,47 @@
+ARCHITECTURE.md
+  s_f99ab9bf268253::t_3013d341c4c407 101
+docs/reference/configuration.md
+  s_f99ab9bf268253::t_4a3cbcc711c99f 20
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_9420fd0e4adc74 611-612,617-619,697-698
+docs/reference/http-api.md
+  s_f99ab9bf268253::t_122d6cbf3f17e1 144-145,360-361
+src/fleet_rlm/sandbox/runtime/fs_ops.py
+  s_f99ab9bf268253::t_6adbb14fa8036b 29,31,98-99
+src/fleet_rlm/sandbox/workspace_io.py
+  s_f99ab9bf268253::t_70dd3e0cffd3c6 92,95-100
+tests/engine/test_programs.py
+  s_f99ab9bf268253::t_f3ff9903434c16 726-733
+src/fleet_rlm/engine/turn.py
+  s_ed74e9ba8d193d::t_de0d77f0aa9988 843-847,849
+src/fleet_rlm/sandbox/manager.py
+  s_ed74e9ba8d193d::t_dd4266b1956c27 52,167,757-758,760-782
+tests/api/test_turns.py
+  s_ed74e9ba8d193d::t_174ae9dfce7929 2084-2103
+tests/sandbox/test_interpreter.py
+  s_ed74e9ba8d193d::t_cfdf063421bfcb 390-403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6a5359dd18c3e76f9d05c02ad9daaea5f69f1df",
+  "prompts": {},
+  "sessions": {
+    "s_ed74e9ba8d193d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c563-a642-7f92-bd87-845964894f74",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
