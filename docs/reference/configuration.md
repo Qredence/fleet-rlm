@@ -17,7 +17,7 @@ source control.
 | `FLEET_DAYTONA_API_KEY` | empty | Daytona API credential. |
 | `FLEET_DAYTONA_ORG_ID` | empty | Daytona organization ID. |
 | `FLEET_DAYTONA_VOLUME_ID` | empty | Daytona Volume ID. |
-| `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes written for review (never read into Turns). Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
+| `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes written for review (not automatically injected into Turn prompts). Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
 | `FLEET_ROOT_MODEL` | empty; resolves to `openai/system.ai.deepseek-v4-1-flash-1017` | Root model override. Without a role override, an explicitly configured shared `FLEET_LLM_MODEL` / `[llm].model` wins; otherwise DeepSeek is used, including with the public example. Endpoint and credential inheritance are unchanged. |
 | `FLEET_SUB_MODEL` | empty; resolves to `openai/system.ai.deepseek-v4-1-flash-1017` | Sub-model override, with the same shared-model precedence as root. Reflection and judge defaults are unchanged. Configure the gateway endpoint and credentials separately; the model name alone does not select them. |

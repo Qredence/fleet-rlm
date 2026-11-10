@@ -26,7 +26,9 @@ _WORKSPACE_FILES_CODE = (
 DIGESTS_CODE = (
     _WORKSPACE_FILES_CODE + "import hashlib\n"
     "digests={}\n"
+    "sizes={}\n"
     "for relative in items:\n"
+    " sizes[relative]=os.path.getsize(os.path.join(root,relative))\n"
     " digest=hashlib.sha256()\n"
     " with open(os.path.join(root,relative),'rb') as handle:\n"
     "  for block in iter(lambda: handle.read(1048576), b''): digest.update(block)\n"
@@ -93,7 +95,8 @@ def turn_inputs_code() -> str:
     return (
         DIGESTS_CODE
         + ENVIRONMENT_CODE
-        + "print(json.dumps({'digests': digests, 'environment': environment, 'missing': missing}, sort_keys=True))"
+        + "print(json.dumps({'digests': digests, 'sizes': sizes, 'environment': environment, "
+        "'missing': missing}, sort_keys=True))"
     )
 
 

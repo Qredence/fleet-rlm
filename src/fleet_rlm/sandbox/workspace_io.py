@@ -89,8 +89,15 @@ class WorkspaceIOMixin:
             _workspace_relative_path(path)
         self._report_incomplete_environment(result.get("missing"))
         environment = result.get("environment")
+        sizes = result.get("sizes")
         return {
             "digests": digests,
+            # Advisory byte counts let replay capture skip an oversized workspace before downloading it.
+            "sizes": {
+                path: size
+                for path, size in (sizes if isinstance(sizes, dict) else {}).items()
+                if path in digests and isinstance(size, int) and not isinstance(size, bool) and size >= 0
+            },
             "environment": environment if isinstance(environment, str) else "",
         }
 
