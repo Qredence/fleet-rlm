@@ -176,7 +176,8 @@ the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
 `/improve` (and `/experiments`) opens the Improve screen, a pure client of the `/improve/*`
 API, with four tabs:
 
-- **Review** lists replay-captured Turns from every Session. Selecting one shows its task and
+- **Review** pages through replay-captured Turns from every Session, 50 at a time, using Newer/Older.
+  Selecting one shows its task and
   answer and the answer's figures as pre-checked boxes, plus inputs for the expected answer
   (prefilled with the answer; blank when the preview was truncated), extra values, a critical
   toggle, and a group. `✓ Approve` saves the checked figures and extras as the approved gold.
@@ -198,10 +199,9 @@ until you type. `ctrl+y` approves that Turn with its answer and figures; `ctrl+n
 it. The status bar shows `ready to optimize` when `/improve/readiness` is green.
 
 In the fullscreen TUI, `/optimize` without arguments opens the Runs tab, where `Run optimize` asks
-for confirmation. In the non-TTY fallback there is no confirmation screen: `/optimize` with or without
-arguments submits the job immediately, with the server's default controls (including `FLEET_JOB_MAX_TOKENS`)
-when none are given. `/optimize [args]` runs `fleet optimize [args]` over the labels of every Session.
-The review queue lists the newest 200 replay-captured Turns.
+for confirmation. In the non-TTY fallback, `/optimize` without arguments only prints guidance;
+with explicit arguments it submits a job using server defaults for controls not supplied.
+`/optimize [args]` runs `fleet optimize [args]` over the curated labels from every Session.
 It submits an API-owned job and inherits the server's effective settings;
 the CLI uses the same controls but remains a standalone synchronous workflow.
 Client disconnect does not cancel API-owned work. Use the Improve screen's
