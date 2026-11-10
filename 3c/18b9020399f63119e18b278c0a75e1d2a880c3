@@ -1,0 +1,61 @@
+ARCHITECTURE.md
+  s_f99ab9bf268253::t_48cfeecb52d380 35
+docs/reference/cli.md
+  s_f99ab9bf268253::t_cdb658805b6a6b 210-212
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_b12839fe393478 541-545
+src/fleet_rlm/cli.py
+  s_f99ab9bf268253::t_f3df5f2f91e018 102-114,117,131-132
+src/fleet_rlm/contracts.py
+  s_f99ab9bf268253::t_dfe16b42a47a77 241-243,255,262-264
+src/fleet_rlm/engine/compiled.py
+  s_f99ab9bf268253::t_47d55f21ae4e07 64-74
+src/fleet_rlm/optimize/dataset.py
+  s_f99ab9bf268253::t_0134c8630817ec 38-46,61,256
+src/fleet_rlm/optimize/evaluation.py
+  s_f99ab9bf268253::t_6ce685e16fd4db 10,216-230,232,247-249,292,299-300,305-306
+src/fleet_rlm/optimize/gepa.py
+  s_f99ab9bf268253::t_1f1a087d4c83a1 23,547-550,561,565-570,879-881,935
+tests/lite/test_dspy_contracts.py
+  s_f99ab9bf268253::t_d4b737ae391ea2 354-370
+tests/optimize/test_optimization.py
+  s_f99ab9bf268253::t_4f296b331f3b93 6-7,57-59,63,2652-2676,2719-2747
+tests/store/test_optimization_runs.py
+  s_f99ab9bf268253::t_179f7402e1aff4 349-350,370-372,374,388
+docs/reference/http-api.md
+  s_ed74e9ba8d193d::t_5786fb32816065 91-93
+openapi.yaml
+  s_ed74e9ba8d193d::t_8b7e3083ff7822 2593-2600,2612
+src/fleet_rlm/api/routes/improve.py
+  s_ed74e9ba8d193d::t_0d7724c23e2fae 76,85
+src/fleet_rlm/api/schemas.py
+  s_ed74e9ba8d193d::t_677b97e87a5319 134,136
+src/fleet_rlm/store.py
+  s_ed74e9ba8d193d::t_556ed837bfcd3e 153-159
+tests/api/test_improve.py
+  s_ed74e9ba8d193d::t_68e87bbaab99b6 1244-1250,1295,1310-1311,1315,1324-1327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3c18b9020399f63119e18b278c0a75e1d2a880c3",
+  "prompts": {},
+  "sessions": {
+    "s_ed74e9ba8d193d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c563-a642-7f92-bd87-845964894f74",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
