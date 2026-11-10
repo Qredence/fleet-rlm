@@ -302,16 +302,23 @@ def test_isolated_invocation_uses_recorded_required_instructions_not_deployment_
 def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_files(rollout, monkeypatch):
     candidate, example, factory, managers, _cleanup = rollout
     before = deepcopy(candidate.dump_state())
+    rollout_thread = threading.local()
 
-    def refuse(*_args, **_kwargs):
-        pytest.fail("Rollout must not save, create or unlink candidate transport files")
+    def guard_transport_files(original):
+        def guarded(*args, **kwargs):
+            if getattr(rollout_thread, "active", False):
+                pytest.fail("Rollout must not save, create or unlink candidate transport files")
+            return original(*args, **kwargs)
 
-    monkeypatch.setattr(FleetProgram, "save", refuse)
-    monkeypatch.setattr(tempfile, "mkstemp", refuse)
-    monkeypatch.setattr(Path, "unlink", refuse)
+        return guarded
+
+    # Guard rollout workers, not unrelated MLflow exporter threads writing native trace artifacts.
+    for owner, name in ((FleetProgram, "save"), (tempfile, "mkstemp"), (Path, "unlink")):
+        monkeypatch.setattr(owner, name, guard_transport_files(getattr(owner, name)))
     barrier = threading.Barrier(2)
 
     def run(index):
+        rollout_thread.active = True
         engine = factory(example, candidate)
         try:
             assert engine.program.dump_state() == before

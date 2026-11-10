@@ -26,6 +26,8 @@ def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> N
                 dspy.Predict("question -> answer")(question="private-prompt")
 
         await asyncio.to_thread(run)
+        # A completed executor future need not yield; drain its scheduled activity before close discards it.
+        await asyncio.sleep(0)
         callback.close()
         return [queue.get_nowait() for _ in range(queue.qsize())]
 
