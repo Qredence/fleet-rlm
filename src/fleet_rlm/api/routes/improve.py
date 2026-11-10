@@ -111,16 +111,24 @@ def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
         return _readiness(store, settings)[0]
 
 
-def _improve_settings(store: Store, settings: FleetSettings) -> dict[str, Any]:
-    """Environment defaults overridden by the saved global settings."""
+_NEEDS_TOKEN_CAP = "Auto-run needs a token cap: set max_total_tokens above 0 (0 is unlimited)."
+
+
+def _effective_settings(saved: dict[str, Any], settings: FleetSettings) -> dict[str, Any]:
+    """Environment defaults overridden by saved values, plus why auto-run cannot start (if it cannot)."""
     defaults = {
         "auto_run": settings.auto_optimize,
         "min_new_labels": settings.auto_optimize_min_new_labels,
         "max_metric_calls": settings.auto_optimize_max_metric_calls,
         "max_total_tokens": settings.job_max_tokens,
     }
-    saved = store.global_settings(_SETTINGS_SCOPE)
-    return {**defaults, **{name: value for name, value in saved.items() if name in defaults}}
+    merged = {**defaults, **{name: value for name, value in saved.items() if name in defaults}}
+    blocked = _NEEDS_TOKEN_CAP if merged["auto_run"] and merged["max_total_tokens"] == 0 else None
+    return {**merged, "auto_run_blocked": blocked}
+
+
+def _improve_settings(store: Store, settings: FleetSettings) -> dict[str, Any]:
+    return _effective_settings(store.global_settings(_SETTINGS_SCOPE), settings)
 
 
 @router.get("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
@@ -134,13 +142,16 @@ def get_improve_settings(store: StoreDep, settings: Settings) -> dict[str, Any]:
 def put_improve_settings(body: ImproveSettingsUpdate, store: StoreDep, settings: Settings) -> dict[str, Any]:
     """Save the supplied fields; an explicit null clears a saved value back to its environment default."""
     with translate("Improve settings could not be saved"):
+        changes = body.model_dump(exclude_unset=True)
         saved = store.global_settings(_SETTINGS_SCOPE)
-        for name, value in body.model_dump(exclude_unset=True).items():
-            if value is None:
-                saved.pop(name, None)
-            else:
-                saved[name] = value
-        store.save_global_settings(_SETTINGS_SCOPE, saved)
+        proposed = {
+            **{k: v for k, v in saved.items() if k not in changes},
+            **{k: v for k, v in changes.items() if v is not None},
+        }
+        # Automatic jobs spend money unattended, so they are never allowed without a token cap.
+        if _effective_settings(proposed, settings)["auto_run_blocked"]:
+            raise ValueError(_NEEDS_TOKEN_CAP)
+        store.update_global_settings(_SETTINGS_SCOPE, changes)
         return _improve_settings(store, settings)
 
 
@@ -188,6 +199,7 @@ def _save_label(body: LabelRequest, store: Store) -> LabelSaved:
                 answer=body.expected_answer,
                 values=body.expected_values,
                 critical=body.critical,
+                default_answer=reference.get("answer"),
             )
         except EvaluationError as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
@@ -213,6 +225,9 @@ async def _auto_run(store: Store, settings: FleetSettings, manager: ExperimentMa
         preferences = await asyncio.to_thread(_improve_settings, store, settings)
         if not preferences["auto_run"]:
             return
+        if preferences["auto_run_blocked"]:
+            _LOGGER.info("Automatic optimize skipped: %s", preferences["auto_run_blocked"])
+            return
         report, last_run = await asyncio.to_thread(_readiness, store, settings)
         if not report["ready"] or report["new_labels_since_last_run"] < preferences["min_new_labels"]:
             return
@@ -224,8 +239,10 @@ async def _auto_run(store: Store, settings: FleetSettings, manager: ExperimentMa
             max_total_tokens=preferences["max_total_tokens"],
         )
         await manager.start(f"auto-{stamp}", options, "optimize", trigger="auto")
-    except Exception as error:
-        _LOGGER.warning("Automatic optimize check failed (%s)", type(error).__name__)
+    except ExperimentBusyError:
+        _LOGGER.debug("Automatic optimize skipped: another operation holds the job slot")
+    except Exception:
+        _LOGGER.warning("Automatic optimize check failed", exc_info=True)
 
 
 @router.post("/labels", response_model=LabelSaved, responses=_ERROR_RESPONSES)

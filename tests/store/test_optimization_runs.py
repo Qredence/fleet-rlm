@@ -41,7 +41,8 @@ def test_create_optimization_run_records_active_identity_and_returns_metadata():
     assert record["created_at"] == "2026-10-26T00:00:00+00:00"
     sql, params = pool.conn.statements[1]
     assert "ON CONFLICT (request_id) DO NOTHING RETURNING *" in sql
-    assert params == ("run-1", "request-1", "optimize", '{"max_metric_calls":20}', "worker-1", True)
+    assert "jsonb_build_object('trigger',%s::text)" in sql  # recorded in the row's own insert
+    assert params == ("run-1", "request-1", "optimize", '{"max_metric_calls":20}', "worker-1", True, "manual")
 
 
 def test_create_optimization_run_refuses_an_unknown_kind_before_sql():
@@ -355,7 +356,7 @@ def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_
                     (session, run, request, created),
                 )
             # A schema that applied an earlier draft of v11 may already hold an empty settings table.
-            admin.execute("CREATE TABLE fleet_lite_global_settings (scope TEXT PRIMARY KEY, settings JSONB)")
+            admin.execute("CREATE TABLE fleet_lite_global_settings (scope TEXT, settings JSONB)")  # no key
             store = Store.open(url, wait=True, schema=schema)
             try:
                 store.initialize()
@@ -383,8 +384,9 @@ def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_
                 assert "fleet_lite_optimization_runs_pkey" in indexes
                 assert "fleet_lite_optimization_runs_request_id_key" in indexes
                 assert admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0] == 12
-                store.save_global_settings("improve", {"auto_run": True})
-                assert store.global_settings("improve") == {"auto_run": True}
+                store.update_global_settings("improve", {"auto_run": True, "min_new_labels": 3})
+                store.update_global_settings("improve", {"min_new_labels": None, "max_total_tokens": 9})
+                assert store.global_settings("improve") == {"auto_run": True, "max_total_tokens": 9}
                 # The legacy row stays readable through the Store and keeps its legacy marker.
                 assert store.get_optimization_run("run-a1-dup-s2")["legacy_session_id"] == "s2"
             finally:

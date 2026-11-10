@@ -237,6 +237,7 @@ class ImproveScreen(ModalScreen[None]):
         self.selected_turn_id: str | None = turn_id
         self._figure_boxes: list[tuple[str, Checkbox]] = []
         self._loaded_turn: str | None = None
+        self._prefilled_answer = ""
         self._polling = False
         self._refresh_pending = False
         self._ticks = 0
@@ -540,7 +541,8 @@ class ImproveScreen(ModalScreen[None]):
             container.mount(Static("Figures that must appear in the answer:"), *(box for _, box in self._figure_boxes))
         answer = self.query_one("#review-answer", Input)
         truncated = len(item["answer"]) >= PREVIEW_CHARS
-        answer.value = item.get("expected_answer") or ("" if truncated else item["answer"])
+        self._prefilled_answer = item.get("expected_answer") or ("" if truncated else item["answer"])
+        answer.value = self._prefilled_answer
         answer.placeholder = "answer was truncated; type the expected answer" if truncated else "expected answer"
         self.query_one("#review-extra", Input).value = ", ".join(v for v in saved if v not in listed)
         self.query_one("#review-critical", Checkbox).value = bool(item.get("critical"))
@@ -572,6 +574,8 @@ class ImproveScreen(ModalScreen[None]):
                 f"new labels · {budget} · token cap {prefs.get('max_total_tokens') or 'unlimited'}\n"
                 "An automatic run only creates a candidate; nothing installs without your approval."
             )
+            if prefs.get("auto_run_blocked"):
+                text += f"\nAUTO-RUN BLOCKED  {prefs['auto_run_blocked']}"
             if not self._settings_loaded:
                 self._settings_loaded = True
                 self.query_one("#auto-run", Checkbox).value = bool(prefs.get("auto_run"))
@@ -899,7 +903,8 @@ class ImproveScreen(ModalScreen[None]):
             body["expected_values"] = label_figures(answer) + extra
         else:
             return {"turn_id": item["turn_id"], "status": "rejected"}
-        if answer:
+        # The form shows a whitespace-collapsed preview; only a deliberate edit overrides the server's full answer.
+        if answer and answer != self._prefilled_answer:
             body["expected_answer"] = answer
         if group := self.query_one("#review-group", Input).value.strip():
             body["group"] = group

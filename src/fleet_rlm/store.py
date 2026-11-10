@@ -169,6 +169,10 @@ _GLOBAL_SETTINGS_TABLE = """
         settings JSONB NOT NULL DEFAULT '{}'::jsonb
     )
 """
+# An older draft's table may lack the primary key that `ON CONFLICT (scope)` needs.
+_GLOBAL_SETTINGS_SCOPE_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_global_settings_scope_key ON fleet_lite_global_settings(scope)"
+)
 _OPTIMIZATION_RUNS_ACTIVE_INDEX = """
     CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run
     ON fleet_lite_optimization_runs ((1))
@@ -286,7 +290,7 @@ _SCHEMA_MIGRATIONS = (
     (9, (_MANAGED_SESSION_BINDINGS, _MANAGED_SESSION_OUTBOX, _MANAGED_SESSION_OUTBOX_INDEX, _MANAGED_PIPELINE_RUNS)),
     (10, (_MANAGED_SESSION_OUTBOX_PURPOSE,)),
     (11, _OPTIMIZATION_RUNS_GLOBAL),
-    (12, (_GLOBAL_SETTINGS_TABLE,)),
+    (12, (_GLOBAL_SETTINGS_TABLE, _GLOBAL_SETTINGS_SCOPE_INDEX)),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -610,13 +614,19 @@ class Store:
         return row[0] if row else {}
 
     @_retry_once
-    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
-        """Replace a scope's saved settings."""
+    def update_global_settings(self, scope: str, changes: dict[str, Any]) -> None:
+        """Merge `changes` into a scope's settings in SQL; a None value removes its key.
+
+        Concurrent callers touch only their own keys, so neither overwrites the other's change.
+        """
+        removed = [name for name, value in changes.items() if value is None]
+        kept = {name: value for name, value in changes.items() if value is not None}
         with self.pool.connection() as connection:
             connection.execute(
                 "INSERT INTO fleet_lite_global_settings(scope,settings) VALUES(%s,%s::jsonb) "
-                "ON CONFLICT(scope) DO UPDATE SET settings=EXCLUDED.settings",
-                (scope, json.dumps(settings)),
+                "ON CONFLICT(scope) DO UPDATE SET "
+                "settings=(fleet_lite_global_settings.settings - %s::text[]) || EXCLUDED.settings",
+                (scope, json.dumps(kept), removed),
             )
 
     # Memories
@@ -1051,7 +1061,7 @@ class Store:
                 connection.cursor(row_factory=dict_row)
                 .execute(
                     "SELECT replay.session_id, replay.turn_id, replay.sha256 AS replay_snapshot_sha256, "
-                    "turns.result->>'trace_id' AS trace_id "
+                    "turns.result->>'trace_id' AS trace_id, turns.result->>'answer' AS answer "
                     "FROM fleet_lite_replay_snapshots AS replay "
                     "JOIN fleet_lite_turns AS turns "
                     "ON turns.session_id=replay.session_id AND turns.turn_id=replay.turn_id "
@@ -1117,8 +1127,12 @@ class Store:
         *,
         kind: str = "optimize",
         managed: bool = False,
+        trigger: str = "manual",
     ) -> dict[str, Any]:
-        """Create one globally active job, or return an identical idempotent request retry."""
+        """Create one globally active job, or return an identical idempotent request retry.
+
+        `trigger` (manual or auto) is recorded in the same insert as the row.
+        """
         run_id = validate_run_id(run_id)
         request_id = self._optimization_request_id(request_id)
         owner_id = self._optimization_owner_id(owner_id)
@@ -1133,10 +1147,10 @@ class Store:
             with self.pool.connection() as connection, connection.transaction():
                 inserted = connection.execute(
                     "INSERT INTO fleet_lite_optimization_runs "
-                    "(run_id,request_id,kind,options,owner_id,managed,status,stage) "
-                    "VALUES (%s,%s,%s,%s::jsonb,%s,%s,'running','preparing') "
+                    "(run_id,request_id,kind,options,owner_id,managed,status,stage,metadata) "
+                    "VALUES (%s,%s,%s,%s::jsonb,%s,%s,'running','preparing',jsonb_build_object('trigger',%s::text)) "
                     "ON CONFLICT (request_id) DO NOTHING RETURNING *",
-                    (run_id, request_id, kind, options_json, owner_id, managed),
+                    (run_id, request_id, kind, options_json, owner_id, managed, trigger),
                 ).fetchone()
                 if inserted is not None:
                     return self._optimization_run_record(inserted)

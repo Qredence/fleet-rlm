@@ -70,7 +70,8 @@ label state (`unlabelled` or a review status with the stored gold). A Session's
 older Turns fall out of the task preview once they leave its bounded history.
 `POST /improve/labels` takes `turn_id`, `status` (default `approved`),
 `expected_answer`, `expected_values`, `critical`, and `group`; unset fields keep the
-Turn's existing label. The server resolves the trace from the stored Turn, then
+Turn's existing label. An approved label with no `expected_answer` and no earlier one takes the Turn's stored full
+answer (the queue shows a whitespace-collapsed preview). The server resolves the trace from the stored Turn, then
 writes MLflow expectations and PostgreSQL curation exactly as `fleet eval label`
 does. An unknown Turn is `404`; a Turn without a trace, or invalid labels, `422`;
 a partial synchronization `503` with the retry hint.
@@ -123,7 +124,9 @@ approval returns `409` because their incumbent was a per-Session program.
 **Evaluate jobs.** The three evaluate kinds run in the same worker process, ledger, stage and
 progress reporting, stop checks, and token cap as `optimize`, but create no candidate and install nothing
 (approving one returns `409`). `evaluate_rescore` re-judges the saved traces of labelled Turns with the
-current judges and runs no Turn again. `evaluate_replay` runs the labelled examples against the installed
+current judges and runs no Turn again. It uses the optimization split over every curated example (PostgreSQL and
+MLflow); an example whose Turn has no readable trace carrying an approved MLflow label cannot be re-judged and is
+counted in `evaluation.excluded_without_trace` rather than silently dropped. `evaluate_replay` runs the labelled examples against the installed
 global program (the baseline when none is installed) in isolated rollouts on the same grouped
 train/dev/holdout split as optimization. `evaluate_synthetic` is the `fleet eval run` path: it runs the
 generated cases against this server and, like that command, refuses a server whose trace destination is not
@@ -131,8 +134,9 @@ the evaluation experiment, so the job ends `failed` instead of mixing benchmark 
 The finished job carries `evaluation`: `kind`, the `program` measured (`digest` and the approved job `version`,
 or `baseline`), per-split `splits` (`n`, `mean`, `errors`, and `critical` `passed`/`n`), and a `headline` of
 the `holdout` mean and `critical_pass_rate`. Synthetic cases are not split, so they report one `synthetic`
-entry and a `null` holdout. The token cap is checked between splits: one `dspy.Evaluate` or MLflow scoring
-call cannot be interrupted, and a synthetic job only counts the judge calls it makes, not the server's Turns.
+entry and a `null` holdout. Work is scored in chunks of 8 examples and the stop flags and token cap are checked
+between chunks, so a stop or the cap overshoots by at most one chunk; a synthetic job only counts the judge calls it
+makes, not the server's Turns.
 A job's `trigger` is `manual` or `auto`.
 
 **Rationale.** After an optimize job's paired validation, one bounded reflection-model call summarizes the
@@ -142,7 +146,10 @@ It is a reader's summary, never evidence: the promotion gate and approval never 
 
 **Auto-run and settings.** `GET /improve/settings` returns `auto_run` (default off), `min_new_labels` (default 5),
 `max_metric_calls` for automatic jobs (default unset: the light budget), and `max_total_tokens` (the default
-cap for every job unless a request sets its own). Saved values override `FLEET_AUTO_OPTIMIZE`,
+cap for every job unless a request sets its own). Auto-run spends unattended, so `PUT` refuses `auto_run: true`
+with `422` while the effective `max_total_tokens` is `0`, and an automatic check skips (logging why) if the cap
+later becomes `0`; `auto_run_blocked` carries that reason. Saving merges only the supplied keys in SQL, so
+concurrent updates do not overwrite each other. Saved values override `FLEET_AUTO_OPTIMIZE`,
 `FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS`, `FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS`, and `FLEET_JOB_MAX_TOKENS`.
 `PUT` saves only the supplied fields; an explicit `null` returns that field to its environment default.
 After each successful `POST /improve/labels`, if auto-run is on, readiness is green, at least

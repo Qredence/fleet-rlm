@@ -48,13 +48,17 @@ def split_summary(scores: Iterable[float], critical_scores: Iterable[float] = ()
     }
 
 
-def evaluation_result(kind: str, splits: Mapping[str, dict[str, Any]], program: dict[str, str]) -> dict[str, Any]:
+def evaluation_result(
+    kind: str, splits: Mapping[str, dict[str, Any]], program: dict[str, str], *, excluded: int = 0
+) -> dict[str, Any]:
     """Persisted job result; the headline is the holdout mean and the critical pass rate across splits."""
     passed = sum(split["critical"]["passed"] for split in splits.values())
     critical = sum(split["critical"]["n"] for split in splits.values())
     return {
         "kind": kind,
         "program": program,
+        # Rescore cannot re-judge an example whose Turn has no readable, approved-labelled trace.
+        "excluded_without_trace": excluded,
         "splits": dict(splits),
         "headline": {
             "holdout": splits.get("holdout", {}).get("mean"),

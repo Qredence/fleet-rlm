@@ -417,7 +417,7 @@ Use `/improve` (or `/optimize` / `/experiments`) to open the Improve screen. Job
 labels, and the installed program are global: every Session contributes examples and
 every Session serves the approved program. The workflow is:
 
-1. **Label.** Run Turns with replay capture on. After each captured Turn press `ctrl+y` to
+1. **Label.** Run Turns with replay capture on. After each captured Turn press `ctrl+l` to
    approve it with its answer and figures, or `ctrl+n` to open the **Review** tab at it, where
    you can uncheck figures, add values, mark it critical, set its group, reject it, or
    correct the answer.

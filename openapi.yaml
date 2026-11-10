@@ -2529,6 +2529,11 @@ components:
           type: integer
           minimum: 0.0
           title: Max Total Tokens
+        auto_run_blocked:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Auto Run Blocked
       type: object
       required:
       - auto_run

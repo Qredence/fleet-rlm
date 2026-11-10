@@ -322,7 +322,7 @@ class FleetTextualApp(App[str | None]):
         Binding("escape", "dismiss_or_cancel", "Cancel/Dismiss", show=False),
         Binding("ctrl+c", "clear_or_cancel", "Clear/Cancel", show=False),
         Binding("ctrl+d", "quit_if_idle", "Quit", show=False, priority=True),
-        Binding("ctrl+y", "label_approve", "Label approved", show=False, priority=True),
+        Binding("ctrl+l", "label_approve", "Label approved", show=False, priority=True),
         Binding("ctrl+n", "label_review", "Review label", show=False, priority=True),
     ]
 
@@ -433,7 +433,7 @@ class FleetTextualApp(App[str | None]):
         hints.append(" repl", style="#71717a")
         if self._label_offer is not None:
             hints.append("   label: ", style="#71717a")
-            hints.append(" ctrl+y ", style="bold #34d399 on #14291f")
+            hints.append(" ctrl+l ", style="bold #34d399 on #14291f")
             hints.append(" ✓ / ", style="#71717a")
             hints.append(" ctrl+n ", style="bold #fbbf24 on #292014")
             hints.append(" ✗", style="#71717a")
@@ -881,7 +881,7 @@ class FleetTextualApp(App[str | None]):
             self.run_worker(self._refresh_readiness(), name="readiness", exit_on_error=False)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:  # noqa: ARG002
-        """Claim ctrl+y / ctrl+n only while a label is on offer; otherwise the composer keeps them."""
+        """Claim ctrl+l / ctrl+n only while a label is on offer; otherwise the composer keeps them."""
         if action in {"label_approve", "label_review"}:
             return self._label_offer is not None and len(self.screen_stack) == 1
         return True
@@ -893,17 +893,16 @@ class FleetTextualApp(App[str | None]):
         turn_id, answer = self._label_offer
         self._label_offer = None
         self.refresh_chrome()
+        # The server defaults the expected answer to the Turn's stored full answer.
         body: dict[str, Any] = {"turn_id": turn_id, "status": "approved", "expected_values": label_figures(answer)}
-        if answer:
-            body["expected_answer"] = answer
-        self.run_worker(self._post_offered_label(body), name="label", group="label", exit_on_error=False)
+        self.run_worker(self._post_offered_label(body, answer), name="label", group="label", exit_on_error=False)
 
-    async def _post_offered_label(self, body: dict[str, Any]) -> None:
+    async def _post_offered_label(self, body: dict[str, Any], answer: str) -> None:
         """Save the label and toast the outcome; restore the offer on failure so it can be retried."""
         try:
             await asyncio.to_thread(save_label, self.client, body)
         except httpx.HTTPError as error:
-            self._label_offer = (body["turn_id"], body.get("expected_answer", ""))
+            self._label_offer = (body["turn_id"], answer)
             self.refresh_chrome()
             self.notify(f"Label not saved: {error_text(error)}", severity="error")
             return

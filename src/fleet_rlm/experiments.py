@@ -216,19 +216,10 @@ class ExperimentManager:
                     self.owner_id,
                     kind=kind,
                     managed=True,
+                    trigger=trigger,
                 )
             except ValueError as error:
                 raise ExperimentBusyError(str(error)) from None
-            record = (
-                await asyncio.to_thread(
-                    self.store.update_optimization_run,
-                    run_id,
-                    {"trigger": trigger},
-                    owner_id=self.owner_id,
-                    expected_statuses=("running",),
-                )
-                or record
-            )
             self._task = asyncio.create_task(self._execute(run_id, kind, options, approval=False))
             return record
 

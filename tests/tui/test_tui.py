@@ -1748,9 +1748,8 @@ def test_review_buttons_post_labels_from_the_form() -> None:
                 "status": "approved",
                 "expected_values": ["1250.50", "2026", "Q3"],
                 "critical": True,
-                "expected_answer": _QUEUE_ITEM["answer"],
                 "group": "finance",
-            }
+            }  # the unedited preview is not sent: the server defaults to the Turn's full stored answer
             # The form moves on to the next Turn; rejecting the unchanged answer is a plain rejection.
             await _wait_for(pilot, lambda: screen.query_one("#review-answer", Input).value == second["answer"])
             screen.query_one("#label-reject").press()
@@ -2015,7 +2014,7 @@ def _turn_transport(replay_selected: bool):
     return httpx.MockTransport(handler), api
 
 
-def test_ctrl_y_labels_the_offered_turn_and_ctrl_n_opens_review() -> None:
+def test_ctrl_l_labels_the_offered_turn_and_ctrl_n_opens_review() -> None:
     transport, api = _turn_transport(True)
 
     async def scenario() -> None:
@@ -2023,19 +2022,18 @@ def test_ctrl_y_labels_the_offered_turn_and_ctrl_n_opens_review() -> None:
             tui.submit_text("total?")
             await _wait_for(pilot, lambda: tui._label_offer is not None)
             hints = str(tui.query_one("#composer-hints").render())
-            assert "label:" in hints and "ctrl+y" in hints and "ctrl+n" in hints
-            await pilot.press("ctrl+y")
+            assert "label:" in hints and "ctrl+l" in hints and "ctrl+n" in hints
+            await pilot.press("ctrl+l")
             await _wait_for(pilot, lambda: api.get("labels"))
             assert api["labels"] == [
                 {
                     "turn_id": "turn-9",
                     "status": "approved",
                     "expected_values": ["1250.50", "17"],
-                    "expected_answer": "Total was 1250.50 over 17 days.",
                 }
             ]
             assert tui._label_offer is None
-            assert "ctrl+y" not in str(tui.query_one("#composer-hints").render())
+            assert "ctrl+l" not in str(tui.query_one("#composer-hints").render())
 
             # Typing anything withdraws a later offer; ctrl+n opens Review at the offered Turn.
             tui.submit_text("again?")

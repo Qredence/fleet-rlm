@@ -73,7 +73,9 @@ class MemoryOptimizationStore:
         self.migration_pool_closed = True
         self.events.append(("migration.close", None))
 
-    def create_optimization_run(self, run_id, request_id, options, owner_id, *, kind="optimize", managed=False):
+    def create_optimization_run(
+        self, run_id, request_id, options, owner_id, *, kind="optimize", managed=False, trigger="manual"
+    ):
         if any(record["status"] in {"running", "approving"} for record in self.records.values()):
             raise ValueError("An optimization run is already active")
         record = {
@@ -83,6 +85,7 @@ class MemoryOptimizationStore:
             "options": dict(options),
             "owner_id": owner_id,
             "managed": managed,
+            "trigger": trigger,
             "status": "running",
             "stage": "preparing",
             "stop_requested": False,
@@ -2716,8 +2719,9 @@ def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tm
     store = MemoryOptimizationStore()
     _patched_worker(monkeypatch, store)
     splits = _split_results()
-    for body in ("_rescore", "_replay", "_synthetic"):
+    for body in ("_replay", "_synthetic"):
         monkeypatch.setattr(workflow, body, lambda *_args, **_kw: splits)
+    monkeypatch.setattr(workflow, "_rescore", lambda *_args, **_kw: (splits, 2))
     monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
@@ -2726,6 +2730,7 @@ def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tm
     assert record["kind"] == f"evaluate_{kind}" and record["run_id"].startswith(f"evaluate-{kind}-")
     assert record["status"] == "completed" and record["candidate_version"] is None
     assert record["evaluation"]["splits"] == splits
+    assert record["evaluation"]["excluded_without_trace"] == (2 if kind == "rescore" else 0)
     assert record["evaluation"]["program"] == {"digest": "", "version": "baseline"}
     assert record["evaluation"]["headline"] == {"holdout": 0.5, "critical_pass_rate": 1.0}
     assert [e["status"] for e in worker_events(capsys.readouterr().out) if e["type"] == "terminal"] == ["completed"]
@@ -2771,7 +2776,7 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
     def score(program, examples, _metric, threads):
         assert isinstance(program, IsolatedFleetProgram) and program.program is template and threads == 1
         scored.append(examples)
-        critical = [1.0, 0.0] if examples is holdout else []
+        critical = [1.0, 0.0] if examples[0] is holdout[0] else []
         return SimpleNamespace(scores=[1.0, 0.5], critical_scores=critical, errors=1)
 
     monkeypatch.setattr(workflow, "score_split", score)
@@ -2782,19 +2787,33 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
     assert splits["train"]["critical"] == {"passed": 0, "n": 0}
 
 
-def test_rescore_rejudges_labelled_traces_by_source_group_without_running_turns(tmp_path, monkeypatch):
+def test_rescore_uses_the_optimization_split_and_counts_examples_without_a_labelled_trace(tmp_path, monkeypatch):
     import pandas as pd
 
     from fleet_rlm.optimize import evaluation
 
     settings, _store, args, guard = _guarded(tmp_path, monkeypatch)
-    traces = [
-        SimpleNamespace(info=SimpleNamespace(trace_id=f"tr-{index}", trace_metadata={}), group=f"g{index % 4}")
+    # Four MLflow-origin and four PostgreSQL-origin examples, already split as curation would.
+    examples = [
+        dspy.Example(
+            task=f"t{index}",
+            source_group=f"g{index % 4}",
+            replay_turn_id=f"turn-{index}",
+            provenance=f"mlflow-trace:tr-{index}:turn-{index}" if index < 4 else f"postgres-session:s:turn-{index}",
+        )
         for index in range(8)
     ]
-    monkeypatch.setattr(workflow, "approved_traces", lambda _name: traces)
+    train, dev, holdout = examples[:3], examples[3:6], examples[6:]
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
+    synced_gold = {"tr-0", "tr-1", "tr-3", "tr-4", "tr-7"}  # tr-5: a PostgreSQL-only label (no MLflow gold yet)
+    references = {f"turn-{index}": {"trace_id": f"tr-{index}"} for index in range(4, 8)} | {"turn-6": None}
+    store = SimpleNamespace(turn_reference=lambda turn_id: references.get(turn_id))
+    traces = {f"tr-{index}": SimpleNamespace(info=SimpleNamespace(trace_id=f"tr-{index}")) for index in range(8)}
+    monkeypatch.setattr(workflow.mlflow, "get_trace", lambda trace_id, **_k: traces.get(trace_id))
     monkeypatch.setattr(
-        workflow, "labels_of", lambda trace: {"source_group": trace.group, "critical": trace.info.trace_id == "tr-0"}
+        workflow,
+        "labels_of",
+        lambda trace: {"review_status": "approved"} if trace.info.trace_id in synced_gold else {},
     )
     judged = []
 
@@ -2811,10 +2830,49 @@ def test_rescore_rejudges_labelled_traces_by_source_group_without_running_turns(
 
     monkeypatch.setattr(evaluation, "score_evaluation_traces", score)
     monkeypatch.setattr(evaluation, "evaluate_cases", lambda *_a, **_k: pytest.fail("Turns must not run again"))
-    splits = workflow._rescore(args, settings, settings.mlflow_target(), guard)
-    assert sorted(trace for batch in judged for trace in batch) == [f"tr-{index}" for index in range(8)]
-    assert sum(split["n"] for split in splits.values()) == 8 and set(splits) == {"train", "dev", "holdout"}
-    assert splits["holdout"]["critical"] == {"passed": 1, "n": 1}
+    splits, excluded = workflow._rescore(args, settings, store, settings.mlflow_target(), guard)
+    # tr-2 is not approved in MLflow, tr-5 is a PostgreSQL-only label, turn-6 has no trace at all.
+    assert judged == [["tr-0", "tr-1"], ["tr-3", "tr-4"], ["tr-7"]]
+    assert excluded == 3
+    assert {name: split["n"] for name, split in splits.items()} == {"train": 2, "dev": 2, "holdout": 1}
+    assert splits["train"]["critical"] == {"passed": 1, "n": 1}
+
+
+def test_a_postgres_label_whose_trace_carries_gold_is_rescored_in_its_split(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from fleet_rlm.optimize import evaluation
+
+    settings, _store, args, guard = _guarded(tmp_path, monkeypatch)
+    example = dspy.Example(task="t", source_group="g", replay_turn_id="turn-1", provenance="postgres-session:s:turn-1")
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([example], [], []))
+    trace = SimpleNamespace(info=SimpleNamespace(trace_id="tr-1"))
+    monkeypatch.setattr(workflow.mlflow, "get_trace", lambda *_a, **_k: trace)
+    monkeypatch.setattr(workflow, "labels_of", lambda _trace: {"review_status": "approved"})
+    frame = pd.DataFrame({"fleet_metric/value": [0.25], "expectations": [{}]})
+    monkeypatch.setattr(evaluation, "score_evaluation_traces", lambda *_a, **_k: SimpleNamespace(result_df=frame))
+    store = SimpleNamespace(turn_reference=lambda turn_id: {"trace_id": "tr-1"} if turn_id == "turn-1" else None)
+    splits, excluded = workflow._rescore(args, settings, store, settings.mlflow_target(), guard)
+    assert excluded == 0 and splits == {"train": {"n": 1, "mean": 0.25, "errors": 0, "critical": {"passed": 0, "n": 0}}}
+
+
+def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_most_one(tmp_path, monkeypatch):
+    settings, store, args, guard = _guarded(tmp_path, monkeypatch, cap=100)
+    holdout = [dspy.Example(task=f"h{index}", source_group="h", critical=False) for index in range(20)]
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([], [], holdout))
+    monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=object()))
+    monkeypatch.setattr(workflow, "build_isolated_engine_factory", lambda *_a, **_k: object())
+    sizes = []
+
+    def score(_program, chunk, _metric, _threads):
+        sizes.append(len(chunk))
+        guard.tokens.used += 60  # the second chunk crosses the cap
+        return SimpleNamespace(scores=[1.0] * len(chunk), critical_scores=[], errors=0)
+
+    monkeypatch.setattr(workflow, "score_split", score)
+    with pytest.raises(workflow.BudgetExhaustedError):
+        workflow._replay(args, settings, store, settings.mlflow_target(), guard)
+    assert sizes == [8, 8]  # stopped before the third chunk of 4; never a whole split
 
 
 def test_synthetic_runs_the_eval_run_path_against_this_server_behind_its_destination_guard(tmp_path, monkeypatch):
@@ -2837,7 +2895,11 @@ def test_synthetic_runs_the_eval_run_path_against_this_server_behind_its_destina
     url = f"http://{settings.host}:{settings.port}"
     assert verified == [(url, settings.mlflow_descriptor(evaluation=True))]
     assert ran["base_url"] == url and ran["experiment_id"] == "exp-7" and ran["cases"]
-    assert splits == {"synthetic": {"n": 2, "mean": 0.5, "errors": 0, "critical": {"passed": 0, "n": 0}}}
+    calls = len(evaluation.synthetic_cases(seed=7)) / 8
+    assert calls > 1 and len(ran["cases"]) <= 8
+    assert splits == {
+        "synthetic": {"n": 2 * int(-(-calls // 1)), "mean": 0.5, "errors": 0, "critical": {"passed": 0, "n": 0}}
+    }
 
 
 def test_a_synthetic_job_refuses_a_server_with_another_destination(tmp_path, monkeypatch):
@@ -2923,3 +2985,33 @@ def test_installed_program_names_the_approved_job_whose_manifest_matches_the_fil
     assert installed_program(settings, store)["version"] == "unrecorded"
     result = evaluation_result("synthetic", {"synthetic": split_summary([1.0, 0.0], [1.0, 0.0])}, {})
     assert result["headline"] == {"holdout": None, "critical_pass_rate": 0.5}
+
+
+def test_the_rationale_call_is_seen_by_the_token_budget_and_bounded():
+    budget = workflow.TokenBudget(0)
+    seen, kwargs_seen = [], {}
+    budget.on_lm_start = lambda *_a, **_k: seen.append("start")
+
+    class CountedLM(dspy.BaseLM):
+        def forward(self, *_args, **kwargs):
+            kwargs_seen.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None), finish_reason="stop")],
+                usage={},
+                model="m",
+            )
+
+    text = workflow._comparison_rationale(CountedLM(model="m"), "report", budget)
+    assert text == "ok" and seen == ["start"]
+    assert kwargs_seen["timeout"] == 30 and kwargs_seen["max_tokens"] == 300
+
+
+def test_replay_counts_tokens_in_a_scoped_context_while_other_kinds_set_the_worker_callbacks():
+    budget = workflow.TokenBudget(0)
+    before = list(dspy.settings.callbacks)
+    with workflow._counting(budget, inherited=True):
+        assert dspy.settings.callbacks[0] is budget and dspy.settings.callbacks[1:] == before
+    assert dspy.settings.callbacks == before
+    with workflow._counting(budget, inherited=False):
+        assert dspy.settings.callbacks[0] is budget
+    assert dspy.settings.callbacks == before

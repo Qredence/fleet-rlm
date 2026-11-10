@@ -225,6 +225,7 @@ def label_turn(
     critical: bool | None = None,
     reviewer: str = "human",
     expectations: dict[str, Any] | None = None,
+    default_answer: str | None = None,
 ) -> dict[str, Any]:
     """Resolve partial updates once, preflight the replay, then synchronize MLflow and PostgreSQL.
 
@@ -266,6 +267,9 @@ def label_turn(
     ):
         if value is not None:
             labels[name] = value
+    # The stored full answer is the gold when nothing else was given; previews are lossy.
+    if labels["expected_answer"] is None and labels["review_status"] == "approved" and default_answer:
+        labels["expected_answer"] = default_answer
     request = trace_object(getattr(getattr(trace, "data", None), "request", None))
     selected = request.get("replay_snapshot_selected") is True
     validate_review_labels(labels, require_gold=selected)

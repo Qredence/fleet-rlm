@@ -164,15 +164,6 @@ def labels_of(trace: Any) -> dict[str, Any]:
     return {item.name: item.value for item in items}
 
 
-def approved_traces(experiment_name: str, max_results: int = _MAX_EXAMPLES) -> list[Any]:
-    """Turn traces carrying an approved label, for re-judging without running their Turns again."""
-    return [
-        trace
-        for trace in turn_traces(experiment_name, max_results)
-        if labels_of(trace).get("review_status") == "approved"
-    ]
-
-
 def load_examples_from_mlflow(
     experiment_name: str,
     max_results: int = _MAX_EXAMPLES,

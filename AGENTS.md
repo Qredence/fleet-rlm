@@ -23,6 +23,7 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries; cons
 - Preserve snapshot resource floors and provider-resolved provenance, historical `pre-provenance` readability, Store migrations, and runtime lease fencing. Stored history cannot restore live interpreter state.
 - Keep ordinary API access loopback by default, explicit non-loopback opt-in, and a secured boundary for external exposure.
 - Use scoped `dspy.context`; preserve native tracing, evaluation, and serialization, and validate pinned integration contracts on upgrades.
+  Exception: evaluate rescore/synthetic jobs set `dspy.configure` callbacks inside their one-job worker process, because MLflow scorer threads do not inherit `dspy.context`.
 
 Details: [HTTP API](docs/reference/http-api.md), [configuration](docs/reference/configuration.md),
 [sandbox](docs/reference/sandbox-environment.md), and [database](docs/reference/database.md).

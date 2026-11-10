@@ -395,6 +395,7 @@ class ImproveSettings(BaseModel):
     min_new_labels: int = Field(ge=1)
     max_metric_calls: int | None = Field(default=None, ge=1)
     max_total_tokens: int = Field(ge=0)
+    auto_run_blocked: str | None = None
 
 
 class ImproveSettingsUpdate(_Request):

@@ -193,8 +193,8 @@ API, with four tabs:
   (baseline, candidate, delta; largest gain first), and the installed holdout trend from
   `/improve/history`. `Approve` and `Reject` follow the review rules below.
 
-After a Turn whose replay snapshot was captured, the composer shows `label: ctrl+y ✓ / ctrl+n ✗`
-until you type. `ctrl+y` approves that Turn with its answer and figures; `ctrl+n` opens Review at
+After a Turn whose replay snapshot was captured, the composer shows `label: ctrl+l ✓ / ctrl+n ✗`
+until you type. `ctrl+l` approves that Turn with its answer and figures; `ctrl+n` opens Review at
 it. The status bar shows `ready to optimize` when `/improve/readiness` is green.
 
 `/optimize` without arguments opens the Runs tab. `/optimize [args]` runs `fleet optimize [args]`

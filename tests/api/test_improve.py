@@ -114,8 +114,9 @@ class MemoryStore:
     def global_settings(self, scope: str) -> dict[str, Any]:
         return dict(self.settings.get(scope, {}))
 
-    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
-        self.settings[scope] = dict(settings)
+    def update_global_settings(self, scope: str, changes: dict[str, Any]) -> None:
+        merged = {**self.settings.get(scope, {}), **changes}
+        self.settings[scope] = {name: value for name, value in merged.items() if value is not None}
 
     def acquire_optimization_owner_lease(self, owner_id):
         with self._lock:
@@ -142,6 +143,7 @@ class MemoryStore:
         *,
         kind: str = "optimize",
         managed: bool = False,
+        trigger: str = "manual",
     ) -> dict[str, Any]:
         with self._lock:
             if any(row["status"] in {"running", "approving"} for row in self.rows.values()):
@@ -156,6 +158,7 @@ class MemoryStore:
                 "options": dict(options),
                 "owner_id": owner_id,
                 "managed": managed,
+                "trigger": trigger,
                 "status": "running",
                 "stage": "preparing",
                 "stop_requested": False,
@@ -1285,7 +1288,12 @@ def test_queue_lists_turns_across_sessions_with_label_state_and_extracted_figure
 
 def test_label_route_resolves_the_trace_from_the_stored_turn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _LabelStore()
-    store.references["turn-1"] = {"session_id": "sess_a", "turn_id": "turn-1", "trace_id": "tr-1"}
+    store.references["turn-1"] = {
+        "session_id": "sess_a",
+        "turn_id": "turn-1",
+        "trace_id": "tr-1",
+        "answer": "Full stored answer",
+    }
     store.references["turn-2"] = {"session_id": "sess_a", "turn_id": "turn-2", "trace_id": None}
     calls: list[tuple[Any, ...]] = []
 
@@ -1320,6 +1328,7 @@ def test_label_route_resolves_the_trace_from_the_stored_turn(tmp_path: Path, mon
         assert client.post("/improve/labels", json={"turn_id": "turn-2"}).status_code == 422
         assert client.post("/improve/labels", json={"turn_id": "turn-1", "status": "maybe"}).status_code == 422
     assert [(call[0], call[1]) for call in calls] == [(store, "tr-1")]
+    assert calls[0][2]["default_answer"] == "Full stored answer"
 
 
 def test_label_route_reports_a_failed_synchronization_with_its_recovery_hint(
@@ -1429,16 +1438,25 @@ def test_settings_default_to_the_environment_and_saved_values_override_them(tmp_
             "min_new_labels": 5,
             "max_metric_calls": None,
             "max_total_tokens": 0,
+            "auto_run_blocked": None,
         }
+        # Unattended jobs need a spending cap, so auto-run cannot be enabled while the cap is unlimited.
+        refused = client.put("/improve/settings", json={"auto_run": True})
+        assert refused.status_code == 422 and "token cap" in refused.json()["detail"]
+        assert store.settings == {}
+        client.put("/improve/settings", json={"max_total_tokens": 5000})
         saved = client.put("/improve/settings", json={"auto_run": True, "min_new_labels": 2, "max_metric_calls": 30})
         assert saved.status_code == 200 and saved.json()["auto_run"] is True and saved.json()["min_new_labels"] == 2
-        client.put("/improve/settings", json={"max_total_tokens": 5000})
         assert client.get("/improve/settings").json() == {
             "auto_run": True,
             "min_new_labels": 2,
             "max_metric_calls": 30,
             "max_total_tokens": 5000,
+            "auto_run_blocked": None,
         }
+        # Removing the cap while auto-run is on is refused too, and leaves the saved values untouched.
+        assert client.put("/improve/settings", json={"max_total_tokens": 0}).status_code == 422
+        assert client.get("/improve/settings").json()["max_total_tokens"] == 5000
         cleared = client.put("/improve/settings", json={"max_metric_calls": None})
         assert cleared.json()["max_metric_calls"] is None and cleared.json()["auto_run"] is True
         assert client.put("/improve/settings", json={"min_new_labels": 0}).status_code == 422
@@ -1446,9 +1464,18 @@ def test_settings_default_to_the_environment_and_saved_values_override_them(tmp_
     assert store.settings["improve"] == {"auto_run": True, "min_new_labels": 2, "max_total_tokens": 5000}
 
 
+def test_an_environment_change_that_removes_the_cap_blocks_auto_run_and_says_why(tmp_path: Path) -> None:
+    store = _LabelStore()
+    store.update_global_settings("improve", {"auto_run": True})
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        settings = client.get("/improve/settings").json()
+    assert settings["auto_run"] is True and "token cap" in settings["auto_run_blocked"]
+
+
 def test_a_job_request_inherits_the_saved_token_cap_unless_it_sets_its_own(tmp_path: Path) -> None:
     store = _LabelStore()
-    store.save_global_settings("improve", {"max_total_tokens": 777})
+    store.update_global_settings("improve", {"max_total_tokens": 777})
     _app, client = _app_client(tmp_path, store)
     with client:
         assert (
@@ -1474,19 +1501,19 @@ def _auto_ready(monkeypatch: pytest.MonkeyPatch, store: _LabelStore, *, ready: b
     )
 
 
-@pytest.mark.parametrize("case", ["enabled", "disabled", "not_ready", "below_threshold", "active_job"])
+@pytest.mark.parametrize("case", ["enabled", "disabled", "not_ready", "below_threshold", "active_job", "uncapped"])
 def test_auto_run_starts_one_optimize_job_only_when_every_condition_holds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
     store = _LabelStore()  # four new labels since the last run
     _auto_ready(monkeypatch, store, ready=case != "not_ready")
-    store.save_global_settings(
+    store.update_global_settings(
         "improve",
         {
             "auto_run": case != "disabled",
             "min_new_labels": 5 if case == "below_threshold" else 4,
             "max_metric_calls": 12,
-            "max_total_tokens": 4000,
+            "max_total_tokens": 0 if case == "uncapped" else 4000,
         },
     )
     if case == "active_job":
@@ -1517,7 +1544,7 @@ def test_auto_run_starts_one_optimize_job_only_when_every_condition_holds(
 def test_auto_run_records_its_trigger_and_never_approves_or_installs(tmp_path: Path, monkeypatch) -> None:
     store = _LabelStore()
     _auto_ready(monkeypatch, store)
-    store.save_global_settings("improve", {"auto_run": True, "min_new_labels": 1})
+    store.update_global_settings("improve", {"auto_run": True, "min_new_labels": 1, "max_total_tokens": 900})
     _app, client = _app_client(tmp_path, store)
 
     async def fake_execute(run_id: str, _kind: str, _options: ExperimentOptions, *, approval: bool) -> None:
@@ -1535,7 +1562,7 @@ def test_auto_run_records_its_trigger_and_never_approves_or_installs(tmp_path: P
 def test_a_failing_auto_run_check_never_fails_the_saved_label(tmp_path: Path, monkeypatch) -> None:
     store = _LabelStore()
     _auto_ready(monkeypatch, store)
-    store.save_global_settings("improve", {"auto_run": True})
+    store.update_global_settings("improve", {"auto_run": True, "max_total_tokens": 900})
     monkeypatch.setattr(store, "new_review_labels", lambda _since: (_ for _ in ()).throw(RuntimeError("db down")))
     _app, client = _app_client(tmp_path, store)
     with client:

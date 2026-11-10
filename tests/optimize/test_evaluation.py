@@ -711,3 +711,37 @@ def test_scoring_requires_feedback_from_current_run(monkeypatch, assessment):
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
     with pytest.raises(evaluation.EvaluationError, match="Scoring incomplete"):
         evaluation.score_evaluation_traces([object()], judge_model="m", scorers=[object()])
+
+
+def _label_trace_fixture(monkeypatch, existing_answer=None):
+    saved = {}
+    trace = SimpleNamespace(
+        info=SimpleNamespace(trace_metadata={"mlflow.trace.session": "session-1"}),
+        data=SimpleNamespace(request={}),
+        search_assessments=lambda **_kwargs: (
+            [SimpleNamespace(name="expected_answer", value=existing_answer, create_time_ms=1)]
+            if existing_answer
+            else []
+        ),
+    )
+    monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *_a, **_k: trace)
+    monkeypatch.setattr(evaluation, "label_trace", lambda _id, **labels: saved.update(labels))
+    return saved
+
+
+def test_label_turn_defaults_the_expected_answer_to_the_stored_full_answer(monkeypatch) -> None:
+    saved = _label_trace_fixture(monkeypatch)
+    labels = evaluation.label_turn(SimpleNamespace(), "tr-1", values=["42"], default_answer="the full stored answer")
+    assert labels["expected_answer"] == saved["expected_answer"] == "the full stored answer"
+
+
+def test_label_turn_keeps_a_given_or_existing_answer_over_the_default(monkeypatch) -> None:
+    saved = _label_trace_fixture(monkeypatch)
+    evaluation.label_turn(SimpleNamespace(), "tr-1", answer="typed", default_answer="stored")
+    assert saved["expected_answer"] == "typed"
+    saved = _label_trace_fixture(monkeypatch, existing_answer="earlier gold")
+    evaluation.label_turn(SimpleNamespace(), "tr-1", default_answer="stored")
+    assert saved["expected_answer"] == "earlier gold"
+    saved = _label_trace_fixture(monkeypatch)
+    evaluation.label_turn(SimpleNamespace(), "tr-1", status="rejected", default_answer="stored")
+    assert saved["expected_answer"] is None

@@ -801,7 +801,8 @@ def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(m
 
 def test_migration_twelve_creates_the_global_settings_table_even_if_an_older_draft_left_one():
     version, statements = _SCHEMA_MIGRATIONS[11]
-    assert version == 12 and len(statements) == 1
+    assert version == 12 and len(statements) == 2
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in statements[1] and "global_settings(scope)" in statements[1]
     assert "CREATE TABLE IF NOT EXISTS fleet_lite_global_settings" in statements[0]
     assert "scope TEXT PRIMARY KEY" in statements[0] and "settings JSONB NOT NULL" in statements[0]
 
@@ -810,10 +811,11 @@ def test_global_settings_round_trip_by_scope_and_default_to_empty():
     store, pool = make_store([({"auto_run": True},)], [])
     assert store.global_settings("improve") == {"auto_run": True}
     assert store.global_settings("missing") == {}
-    store.save_global_settings("improve", {"min_new_labels": 3})
+    store.update_global_settings("improve", {"min_new_labels": 3, "max_metric_calls": None})
     sql, params = pool.conn.statements[-1]
-    assert "INSERT INTO fleet_lite_global_settings" in sql and "DO UPDATE SET settings=EXCLUDED.settings" in sql
-    assert params == ("improve", '{"min_new_labels": 3}')
+    # Merged in SQL, so concurrent updates touch only their own keys; None removes a key.
+    assert "settings=(fleet_lite_global_settings.settings - %s::text[]) || EXCLUDED.settings" in sql
+    assert params == ("improve", '{"min_new_labels": 3}', ["max_metric_calls"])
 
 
 def test_commit_turn_requires_a_turn_id_so_a_connection_retry_cannot_duplicate_the_record():
