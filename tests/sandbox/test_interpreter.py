@@ -359,11 +359,20 @@ def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch
     monkeypatch.setattr(
         interpreter_module.mlflow, "start_span", lambda name, span_type: recording_span(spans, name, span_type)
     )
+    sandbox.get_metrics_latest = lambda: SimpleNamespace(
+        cpu_used_pct=12.5, mem_used=2048, mem_total=4096, disk_used=1024
+    )
     interpreter = DaytonaInterpreter(manager_on(sandbox), tools={"lookup": lambda: 17})
 
     assert interpreter.execute("lookup() + lookup()") == 34
 
     [span] = [span for span in spans if span["name"] == "sandbox.exec"]
+    assert {key: value for key, value in span["attributes"].items() if key.startswith("sandbox.")} == {
+        "sandbox.cpu_used_pct": 12.5,
+        "sandbox.mem_used_bytes": 2048,
+        "sandbox.mem_total_bytes": 4096,
+        "sandbox.disk_used_bytes": 1024,
+    }
     assert (span["name"], span["span_type"], span["open"]) == ("sandbox.exec", SpanType.TOOL, False)
     assert span["attributes"]["host_calls"] == 2
     assert span["attributes"]["phase"] == "task" and span["attributes"]["namespace"] == interpreter.ns_id
@@ -376,6 +385,25 @@ def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch
     assert prepared["attributes"]["namespace"] == interpreter.ns_id
     assert prepared["attributes"]["agent_id"] == interpreter.manager.agent_id
     assert prepared["outputs"]["completed"] is True
+
+
+def test_exec_span_survives_an_unavailable_resource_sample(sandbox, monkeypatch):
+    spans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        interpreter_module.mlflow, "start_span", lambda name, span_type: recording_span(spans, name, span_type)
+    )
+
+    def unavailable() -> None:
+        raise RuntimeError("metrics endpoint down")
+
+    sandbox.get_metrics_latest = unavailable
+    interpreter = DaytonaInterpreter(manager_on(sandbox))
+
+    assert interpreter.execute("1 + 1") == 2
+
+    [span] = [span for span in spans if span["name"] == "sandbox.exec"]
+    assert span["attributes"]["outcome"] == "completed"
+    assert not any(key.startswith("sandbox.") for key in span["attributes"])
 
 
 def test_provisioning_is_traced_only_when_it_creates_the_sandbox(sandbox, monkeypatch):
@@ -746,7 +774,7 @@ _OBSERVED_MISSING = ["scipy", "sympy", "gmpy2", "polars", "pyarrow", "sklearn"]
 
 
 def _environment_probe(missing: list[str], environment: str = _OBSERVED_ENVIRONMENT) -> str:
-    return json.dumps({"digests": {}, "notes": [], "environment": environment, "missing": missing}, sort_keys=True)
+    return json.dumps({"digests": {}, "environment": environment, "missing": missing}, sort_keys=True)
 
 
 def _install_environment_probe(monkeypatch, missing: list[str] = _OBSERVED_MISSING) -> None:

@@ -45,8 +45,11 @@ class TurnRequest(_Request):
         return names
 
     record_replay: bool = Field(
-        default=False,
-        description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",
+        default=True,
+        description=(
+            "Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data. "
+            "A workspace over the snapshot limit skips capture instead of failing the Turn."
+        ),
     )
     timeout_seconds: DeadlineValue = Field(
         default=None,

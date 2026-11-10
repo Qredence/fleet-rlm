@@ -98,7 +98,7 @@ Workspace inputs:
 
 - Each Turn syncs bundled Skills, then user Skills from `.fleet/skills/`.
 - User Skills override bundled names. `.agents/skills/` is excluded from sync.
-- Optional `/learned` notes are unreviewed hints, separate from memories and executable Skills.
+- Optional `/learned` notes are written for human review and are not injected into Turns; they stay separate from memories and executable Skills.
 - Datasets stay in Daytona as file-backed `WorkspaceDataset` handles.
 - Handles expose bounded previews and digests through the DSPy sandbox serialization contract.
 

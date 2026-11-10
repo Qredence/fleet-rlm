@@ -21,7 +21,7 @@ from fleet_rlm.workspace import validate_session_id
 
 
 class FakeManager(SimpleNamespace):
-    def __init__(self, *, notes: list[dict[str, str]] | None = None, **overrides: Any) -> None:
+    def __init__(self, **overrides: Any) -> None:
         defaults: dict[str, Any] = {
             "event_callback": None,
             "_cancelled": threading.Event(),
@@ -85,13 +85,12 @@ class FakeManager(SimpleNamespace):
         if "execution_evidence" not in overrides:
             self.execution_evidence = self._execution_evidence
         if "turn_inputs" not in overrides:
-            # Derived from the other fakes so tests that only fake listing, contents, or notes stay consistent.
+            # Derived from the other fakes so tests that only fake listing or contents stay consistent.
             self.turn_inputs = lambda: {
                 "digests": {
                     path: hashlib.sha256(self.read_workspace_file(path)).hexdigest()
                     for path in self.list_workspace_files()
                 },
-                "notes": notes or [],
                 "environment": "",
             }
 

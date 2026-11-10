@@ -746,6 +746,26 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
             span.set_attribute("action", "create")
             return self._ensure_sandbox()
 
+    def resource_sample(self) -> dict[str, float | int] | None:
+        """Latest CPU, memory, and disk usage of the live sandbox, or None when unavailable.
+
+        Never provisions a sandbox. This is optional telemetry, so any failure is logged and dropped.
+        """
+        sandbox = self._sandbox
+        if sandbox is None:
+            return None
+        try:
+            metrics = sandbox.get_metrics_latest()
+            return {
+                "sandbox.cpu_used_pct": metrics.cpu_used_pct,
+                "sandbox.mem_used_bytes": metrics.mem_used,
+                "sandbox.mem_total_bytes": metrics.mem_total,
+                "sandbox.disk_used_bytes": metrics.disk_used,
+            }
+        except Exception as exc:
+            _LOGGER.debug("Sandbox resource sample unavailable (%s)", type(exc).__name__)
+            return None
+
     def _refuse_unresolved_cleanup(self) -> None:
         """Deny writable use while this agent or its root still awaits cleanup confirmation.
 

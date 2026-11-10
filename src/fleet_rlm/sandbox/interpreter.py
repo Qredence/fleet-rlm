@@ -525,6 +525,11 @@ class DaytonaInterpreter:
                 if phase == "task":
                     self._observe(f"{response.get('stdout', '')}\n{response.get('value', '')}")
                 span.set_attribute("host_calls", self._host_calls - host_calls_before)
+                # Sample only executions that ran; cancel, deadline, and transport paths never wait on telemetry.
+                ran = response.get("outcome") in {"completed", "remote_code_error", "ungrounded_submit_rejected"}
+                sample = getattr(self.manager, "resource_sample", lambda: None)() if ran else None
+                if sample is not None:
+                    span.set_attributes(sample)
                 self.manager.emit(
                     "repl_output",
                     namespace=self.ns_id,

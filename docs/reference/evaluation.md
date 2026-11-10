@@ -608,14 +608,15 @@ Haiku 5.5 at temperature 1.0 with a 32,000-token output budget.
 
 The `fleet_turn` root span records `session_id`, `turn_id`, task, workspace
 manifest, file digests, whether replay capture was selected, and the snapshot
-digest. Capture is off by default. A selected Turn stores an immutable snapshot
+digest. Capture is on by default (`record_replay: false` opts out). A selected Turn stores an immutable snapshot
 in `fleet_lite_replay_snapshots` in the same transaction as successful Turn
 completion. It contains bounded exact workspace file bytes, conversation history,
 memory (including the captured sandbox environment hint), selected dataset handle,
 Skills catalog and revision, execution mode,
 non-secret configuration, timeout, and Fleet version. Total workspace input is
-limited to 8 MB; oversized
-selected Turns fail before model execution. Snapshot bytes remain in Lakebase;
+limited to 8 MB; an oversized
+workspace skips capture (a `replay_skipped` event, `replay_snapshot_selected` false) and
+the Turn proceeds. Snapshot bytes remain in Lakebase;
 the GEPA dataset carries only the Session/Turn reference and digest.
 
 The validation ratio is inclusive `0.1–0.5`, default `0.35`, across CLI, HTTP,
@@ -654,7 +655,7 @@ The `compiled_program_digest`
 attribute names the approved program that served the Turn (empty when none is
 installed). Selected replay snapshots expire after 30 days and are pruned when
 the Store initializes; their Lakebase curation rows are deleted with them. Do
-not enable capture for data that is not approved for this use.
+not leave capture on for data that is not approved for this use.
 `fleet eval label` writes MLflow assessments and, for a selected replay, copies
 the review status, source group, answer/expected values, route, critical marker,
 reviewer, and matching replay provenance into `fleet_lite_review_labels` in

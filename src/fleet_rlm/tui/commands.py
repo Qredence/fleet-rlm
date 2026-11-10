@@ -38,7 +38,7 @@ class SessionState:
     root_model: str = ""
     sub_model: str = ""
     context_path: str | None = None
-    record_replay: bool = False
+    record_replay: bool = True
     requested_skills: tuple[str, ...] = ()
     # Client-local `/timeout` override: None inherits, 0 disables the Fleet deadline.
     # It is sent as `TurnRequest.timeout_seconds` and is never stored on the Session.

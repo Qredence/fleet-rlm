@@ -133,16 +133,18 @@ immutable or certify later script execution: Gate C review/activation and host-e
 consumption are not implemented. Skills never grant host permissions or extra budget.
 The client supports `/skills require <names...>` and `/skills clear` for subsequent Turns.
 
-`record_replay` defaults to `false`. Set it to `true` only when this Turn's
-inputs should be retained as a possible reviewed GEPA example. Fleet captures
+`record_replay` defaults to `true`; set it to `false` for a Turn whose inputs must
+not be retained as a possible reviewed GEPA example. Fleet captures
 the exact bounded conversation, memory, selected dataset handle, Skills
 catalog/revision, non-secret runtime configuration, and workspace file bytes
 (up to 8 MB total). The snapshot
 is stored in Lakebase only after the Turn completes successfully and is not
 eligible for GEPA until its MLflow trace is explicitly labeled `approved` with
 gold expectations. This option can retain sensitive workspace content; use it
-only for data approved for that purpose. An oversized workspace fails before
-the engine runs. The TUI exposes the same opt-in with `/replay on` and `/replay off`.
+only for data approved for that purpose. An oversized workspace skips capture
+instead of failing the Turn: the stream carries a `replay_skipped` event (`bytes`,
+`limit`) and the stored Turn reports `replay_snapshot_selected: false`. The TUI
+exposes the same switch with `/replay on` and `/replay off`.
 New snapshots use replay v2 and retain ordered required intent, origins and captured
 bytes. Isolated reconstruction verifies those bytes rather than reading current host
 Skills. Historical v1 remains readable as empty required intent, without invented origins.
@@ -354,6 +356,9 @@ increments `sandbox_errors`.
 `repl_output.outcome` distinguishes `remote_code_error` from
 `ungrounded_submit_rejected`, so a host rejection is not displayed as a remote
 Python failure during recovery.
+
+`replay_skipped` is emitted once during preparation when the workspace exceeds the
+replay byte limit; it carries `bytes` and `limit`.
 
 `learned_note_warning` carries a `namespace`, `field` (`learned_skill_note`),
 and bounded `figures` list. It does not block submission. Existing
