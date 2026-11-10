@@ -1,0 +1,60 @@
+tests/sandbox/test_interpreter.py
+  s_f99ab9bf268253::t_c4aec43c04361b 777
+  s_f99ab9bf268253::t_621fa3e4df5dab 362-364,370-375,390-406
+  s_f99ab9bf268253::t_a2d84e25e9bc28 407-408
+ARCHITECTURE.md
+  s_f99ab9bf268253::t_29474ab473c4a5 101
+tests/api/test_turns.py
+  s_f99ab9bf268253::t_99e4025a45b420 793
+  s_f99ab9bf268253::t_9d9fc1de8d71fa 1188-1194,1196-1202,1205-1209
+  s_f99ab9bf268253::t_4f09ec2e7ef0e1 674-676,808-810,934-935,990-992,1195,1203-1204,2075
+  s_f99ab9bf268253::t_94da132c690dca 1272,2058,2063,2068-2074,2076-2081
+  s_f99ab9bf268253::t_348161544ca835 1693,1723,1745
+src/fleet_rlm/engine/turn.py
+  s_f99ab9bf268253::t_95c84a03cb7234 103,282-289,307,429,789,795-797,800,839-840,852-856,876-877
+src/fleet_rlm/sandbox/workspace_io.py
+  s_f99ab9bf268253::t_dd567eeb1132b3 70-71,73,81
+docs/reference/http-api.md
+  s_f99ab9bf268253::t_29474ab473c4a5 136-137,144-147,360-361
+  s_f99ab9bf268253::t_725de1b4c29f10 362
+tests/sandbox/test_manager.py
+  s_f99ab9bf268253::t_c4aec43c04361b 1394,1411-1412,1488
+src/fleet_rlm/engine/signatures.py
+  s_f99ab9bf268253::t_4f09ec2e7ef0e1 53
+src/fleet_rlm/sandbox/runtime/fs_ops.py
+  s_f99ab9bf268253::t_dd567eeb1132b3 91-92,96
+openapi.yaml
+  s_f99ab9bf268253::t_2c0cc398ba1ed3 2877-2878
+src/fleet_rlm/sandbox/manager.py
+  s_f99ab9bf268253::t_31587d55e4fbc6 749-768
+src/fleet_rlm/tui/commands.py
+  s_f99ab9bf268253::t_92f01aa77d8b54 41
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_29474ab473c4a5 611,617-619,658
+docs/reference/configuration.md
+  s_f99ab9bf268253::t_29474ab473c4a5 20
+tests/api/fakes.py
+  s_f99ab9bf268253::t_94da132c690dca 24,88
+src/fleet_rlm/api/schemas.py
+  s_f99ab9bf268253::t_31587d55e4fbc6 48-52
+src/fleet_rlm/sandbox/interpreter.py
+  s_f99ab9bf268253::t_2c60f7edd143a6 528
+  s_f99ab9bf268253::t_31587d55e4fbc6 531-532
+  s_f99ab9bf268253::t_c7955836f440dc 529-530
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e708e15965b4c6e37e9aca026ea386fd9625830",
+  "prompts": {},
+  "sessions": {
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
