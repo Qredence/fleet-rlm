@@ -75,14 +75,23 @@ def selected_snapshot(store: Any, session_id: str, turn_id: str, digest: str) ->
     return {**snapshot, "provenance_state": provenance_state(snapshot)}
 
 
+class ReplaySizeError(ValueError):
+    """A replay exceeded a capture limit without invalidating its Turn."""
+
+    def __init__(self, size: int, limit: int) -> None:
+        super().__init__("Selected replay snapshot exceeds its size limit")
+        self.size = size
+        self.limit = limit
+
+
 def encode_snapshot(snapshot: dict[str, Any]) -> tuple[str, bytes]:
     """Return a deterministic digest and compressed representation of a replay snapshot."""
     raw = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(raw) > MAX_REPLAY_JSON_BYTES:
-        raise ValueError("Selected replay snapshot exceeds the expanded size limit")
+        raise ReplaySizeError(len(raw), MAX_REPLAY_JSON_BYTES)
     compressed = gzip.compress(raw, mtime=0)
     if len(compressed) > MAX_REPLAY_SNAPSHOT_BYTES:
-        raise ValueError("Selected replay snapshot exceeds the storage limit")
+        raise ReplaySizeError(len(compressed), MAX_REPLAY_SNAPSHOT_BYTES)
     return hashlib.sha256(compressed).hexdigest(), compressed
 
 

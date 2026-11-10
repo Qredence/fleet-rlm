@@ -753,31 +753,32 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
 
         Never provisions a sandbox. This is optional telemetry, so any failure is logged and dropped.
         """
-        sandbox = self._sandbox
-        stalled = self._resource_sampler
-        if sandbox is None or (stalled is not None and stalled.is_alive()):
-            return None
-        outcome: list[Any] = []
+        with self._lock:
+            sandbox = self._sandbox
+            stalled = self._resource_sampler
+            if sandbox is None or (stalled is not None and stalled.is_alive()):
+                return None
+            outcome: list[Any] = []
 
-        def sample() -> None:
-            try:
-                metrics = sandbox.get_metrics_latest()
-                outcome.append(
-                    {
-                        "sandbox.cpu_used_pct": metrics.cpu_used_pct,
-                        "sandbox.mem_used_bytes": metrics.mem_used,
-                        "sandbox.mem_total_bytes": metrics.mem_total,
-                        "sandbox.disk_used_bytes": metrics.disk_used,
-                    }
-                )
-            except Exception as exc:
-                _LOGGER.debug("Sandbox resource sample unavailable (%s)", type(exc).__name__)
+            def sample() -> None:
+                try:
+                    metrics = sandbox.get_metrics_latest()
+                    outcome.append(
+                        {
+                            "sandbox.cpu_used_pct": metrics.cpu_used_pct,
+                            "sandbox.mem_used_bytes": metrics.mem_used,
+                            "sandbox.mem_total_bytes": metrics.mem_total,
+                            "sandbox.disk_used_bytes": metrics.disk_used,
+                        }
+                    )
+                except Exception as exc:
+                    _LOGGER.debug("Sandbox resource sample unavailable (%s)", type(exc).__name__)
 
-        # The SDK call has no timeout, so a daemon thread bounds the wait; a stalled request is
-        # abandoned (and not stacked) instead of delaying the Turn's terminal event.
-        sampler = threading.Thread(target=sample, name="sandbox-resource-sample", daemon=True)
-        self._resource_sampler = sampler
-        sampler.start()
+            # The SDK call has no timeout, so a daemon thread bounds the wait; a stalled request is
+            # abandoned (and not stacked) instead of delaying the Turn's terminal event.
+            sampler = threading.Thread(target=sample, name="sandbox-resource-sample", daemon=True)
+            self._resource_sampler = sampler
+            sampler.start()
         sampler.join(RESOURCE_SAMPLE_TIMEOUT_SECONDS)
         return outcome[0] if outcome else None
 
