@@ -411,17 +411,29 @@ Approval rechecks that the current incumbent, configuration, code, and
 dependencies match the candidate manifest. A mismatch requires reevaluation;
 old manifests are not an unchecked rollback path.
 
-### Experiments in the Fleet TUI
+### Improve in the Fleet TUI
 
-Use `/optimize` to open the Experiments screen and start or focus a GEPA job. Jobs,
+Use `/improve` (or `/optimize` / `/experiments`) to open the Improve screen. Jobs,
 labels, and the installed program are global: every Session contributes examples and
-every Session serves the approved program.
+every Session serves the approved program. The workflow is:
+
+1. **Label.** Run Turns with replay capture on. After each captured Turn press `ctrl+y` to
+   approve it with its answer and figures, or `ctrl+n` to open the **Review** tab at it, where
+   you can uncheck figures, add values, mark it critical, set its group, reject it, or
+   correct the answer.
+2. **Check readiness.** The **Readiness** tab (and the `ready to optimize` status badge) report
+   the counts, split sizes, missing requirements, and new labels since the last run.
+3. **Run.** In **Runs**, `Run optimize` confirms the search budget and token cap, then submits the job.
+   The stage stepper, metric-call and token bars, best score, and score sparkline update once per second.
+4. **Review.** In **Results**, inspect the gate, means, per-example wins and losses, component
+   diffs, and the installed holdout trend; `Approve` installs a passing candidate and `Reject` records the decision.
+
 The API owns the job and runs the existing CLI optimizer in a subprocess. Its
 lifecycle is recorded in PostgreSQL; candidate files remain in the configured
 artifact directory and MLflow stores the optimization run, traces, and evidence.
 The API admits one job or review and does not queue requests.
-The screen polls snapshots once per second and lists the history of every Session for
-completed, failed, cancelled, rejected, and approved runs. Select a run to inspect
+The screen polls job snapshots once per second (labels, readiness, and history every few
+seconds) and lists the jobs of every Session. Select a run to inspect
 its saved comparison, exact before/after component text, bounded diffs, objective
 and quality changes, gate reasons, and sanitized validation failures. Approve
 rechecks the candidate's current evidence; Reject records an explicit decision

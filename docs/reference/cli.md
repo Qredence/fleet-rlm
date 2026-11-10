@@ -161,7 +161,7 @@ configured tracking destination; it is not run during serving.
 Commands include `/setup`, `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
 `/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
-`/timeout <seconds|off|default>`, `/sessions`, `/optimize`, `/config`,
+`/timeout <seconds|off|default>`, `/sessions`, `/improve` (also `/experiments`), `/optimize`, `/config`,
 `/settings`, `/models`, `/model`, and `/exit`.
 `/skills require tabular-analysis delegation` sets ordered required Skill names for
 subsequent Turns in this client; `/skills clear` removes them. At most three exact
@@ -173,10 +173,35 @@ files remain subject to host admission and do not grant tool permissions. See th
 `/memory [query]` reads this Session's saved memories, optionally
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
-`/optimize [args]` runs `fleet optimize [args]` over the labels of every Session.
+`/improve` (and `/experiments`) opens the Improve screen, a pure client of the `/improve/*`
+API, with four tabs:
+
+- **Review** lists replay-captured Turns from every Session. Selecting one shows its task and
+  answer and the answer's figures as pre-checked boxes, plus inputs for the expected answer
+  (prefilled with the answer; blank when the preview was truncated), extra values, a critical
+  toggle, and a group. `✓ Approve` saves the checked figures and extras as the approved gold.
+  `✗ Reject` rejects the Turn; if you first edit the expected answer, it saves the correction
+  as approved gold (with the correction's own figures) instead.
+- **Readiness** shows the counts, groups, critical cases, split sizes, each missing
+  requirement in plain words, and the new labels since the last run.
+- **Runs** lists jobs with status. The selected job shows its stage stepper
+  (preparing, search, validation, finalization), metric-call and token bars, best score with a
+  score-trajectory sparkline, and elapsed time. `Run optimize` asks for confirmation (budget and
+  token cap) before it submits; `Cancel` requests a cooperative stop.
+- **Results** shows the selected completed job: dev and holdout baseline-to-candidate means,
+  the promotion gate and its reasons, component before/after diffs, a per-example table
+  (baseline, candidate, delta; largest gain first), and the installed holdout trend from
+  `/improve/history`. `Approve` and `Reject` follow the review rules below.
+
+After a Turn whose replay snapshot was captured, the composer shows `label: ctrl+y ✓ / ctrl+n ✗`
+until you type. `ctrl+y` approves that Turn with its answer and figures; `ctrl+n` opens Review at
+it. The status bar shows `ready to optimize` when `/improve/readiness` is green.
+
+`/optimize` without arguments opens the Runs tab. `/optimize [args]` runs `fleet optimize [args]`
+over the labels of every Session.
 It submits an API-owned job and inherits the server's effective settings;
 the CLI uses the same controls but remains a standalone synchronous workflow.
-Client disconnect does not cancel API-owned work. Use the Experiments screen's
+Client disconnect does not cancel API-owned work. Use the Improve screen's
 explicit cancel action for cooperative stopping. The API allows one active
 job or review and rejects concurrent requests without queueing.
 It compiles and gates a GEPA candidate from self-contained, explicitly selected

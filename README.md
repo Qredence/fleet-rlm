@@ -110,7 +110,7 @@ managed MLflow with Unity Catalog tracing after configuring that profile. Pass
 Standalone `fleet serve` starts only the API and needs its tracking destination
 available.
 
-The TUI's `/optimize` starts an API-owned GEPA job that continues if the client
+The TUI's `/improve` screen labels Turns and starts API-owned GEPA jobs (`/optimize` opens its Runs tab) that continue if the client
 disconnects; use its explicit cancel action to request cooperative stopping.
 On normal exit, the owning `fleet cli`/`fleet web` launcher drains the job before
 it stops services it owns. `uv run fleet optimize` (labels from every Session; `--check` prints readiness) remains

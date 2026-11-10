@@ -52,7 +52,7 @@ class SessionState:
     pending_model_choice: tuple[str, list[str]] | None = None
     optimizer_launcher: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     optimizer_reviewer: Callable[[str, str, str], None] | None = field(default=None, repr=False)
-    experiments_opener: Callable[[], None] | None = field(default=None, repr=False)
+    improve_opener: Callable[[str], None] | None = field(default=None, repr=False)
     pending_optimizer_request: dict[str, Any] | None = field(default=None, repr=False)
 
 
@@ -531,12 +531,12 @@ def _sessions(ctx: Context, _arg: str) -> None:
         )
 
 
-def _experiments(ctx: Context, _arg: str) -> None:
-    """Open the session-scoped GEPA run history in fullscreen mode."""
-    if ctx.state.experiments_opener is None:
-        _out(ctx).print("[yellow]Experiments are available in the fullscreen TUI.[/yellow]")
+def _improve(ctx: Context, _arg: str) -> None:
+    """Open the Improve screen (labels, readiness, runs, results) in fullscreen mode."""
+    if ctx.state.improve_opener is None:
+        _out(ctx).print("[yellow]Improve is available in the fullscreen TUI.[/yellow]")
         return
-    ctx.state.experiments_opener()
+    ctx.state.improve_opener("review")
 
 
 def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], str | None] | None:
@@ -582,7 +582,13 @@ def _finish_optimizer_request(state: SessionState, request_id: str) -> None:
 
 
 def _optimize(ctx: Context, arg: str) -> None:
-    """Start or review a global optimization job through the Fleet API."""
+    """Start or review a global optimization job through the Fleet API.
+
+    Without arguments the fullscreen TUI only opens the Runs tab, where starting is confirmed.
+    """
+    if ctx.state.fullscreen and not arg.strip() and ctx.state.improve_opener is not None:
+        ctx.state.improve_opener("runs")
+        return
     parsed = _parse_optimizer_arguments(ctx, arg)
     if parsed is None:
         return
@@ -590,7 +596,7 @@ def _optimize(ctx: Context, arg: str) -> None:
     if ctx.state.fullscreen:
         callback = ctx.state.optimizer_reviewer if approve_run is not None else ctx.state.optimizer_launcher
         if callback is None:
-            _out(ctx).print("[red]The fullscreen experiments screen is unavailable.[/red]")
+            _out(ctx).print("[red]The fullscreen Improve screen is unavailable.[/red]")
             return
         if approve_run is not None:
             assert ctx.state.optimizer_reviewer is not None
@@ -739,12 +745,13 @@ COMMANDS: dict[str, Command] = {
         category="Evaluation & Traces",
     ),
     "/sessions": Command("/sessions", "list saved Sessions", _sessions, category="Session & Models"),
-    "/experiments": Command(
-        "/experiments",
-        "review GEPA run history and candidate evidence",
-        _experiments,
+    "/improve": Command(
+        "/improve",
+        "label Turns, check readiness, and run and review GEPA jobs (also /experiments, /optimize)",
+        _improve,
         category="Evaluation & Traces",
     ),
+    "/experiments": Command("/experiments", "open the Improve screen", _improve, category="Evaluation & Traces"),
     "/optimize": Command(
         "/optimize [--max-metric-calls N | --approve VERSION]",
         "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",

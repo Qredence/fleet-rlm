@@ -45,7 +45,7 @@ from fleet_rlm.tui.commands import (
     completion_options,
     handle_command,
 )
-from fleet_rlm.tui.experiments import ExperimentsScreen
+from fleet_rlm.tui.improve import ImproveScreen, confirm_text, error_text, label_figures, save_label
 from fleet_rlm.tui.mentions import attach_local_mentions, completed_mention_cursor, mention_completions
 from fleet_rlm.tui.render import (
     CONSOLE,
@@ -54,6 +54,7 @@ from fleet_rlm.tui.render import (
     print_http_error,
     render_event,
 )
+from fleet_rlm.tui.setup import ConfirmAction
 from fleet_rlm.tui.stream import _request_turn, _turn_events
 from fleet_rlm.tui.widgets import (
     _CommandMenu,
@@ -320,6 +321,8 @@ class FleetTextualApp(App[str | None]):
         Binding("escape", "dismiss_or_cancel", "Cancel/Dismiss", show=False),
         Binding("ctrl+c", "clear_or_cancel", "Clear/Cancel", show=False),
         Binding("ctrl+d", "quit_if_idle", "Quit", show=False, priority=True),
+        Binding("ctrl+y", "label_approve", "Label approved", show=False, priority=True),
+        Binding("ctrl+n", "label_review", "Review label", show=False, priority=True),
     ]
 
     def __init__(self, client: httpx.Client, session_id: str, state: SessionState) -> None:
@@ -339,9 +342,13 @@ class FleetTextualApp(App[str | None]):
         self._optimizer_snapshot_polling = False
         self._optimization_run_id: str | None = None
         self._optimization_terminal_status: str | None = None
+        # The latest replay-captured Turn and its answer, offered for a one-key label until the next input.
+        self._label_offer: tuple[str, str] | None = None
+        self._readiness_ready = False
+        self._ticks = 0
         self.state.optimizer_launcher = self._start_optimization
         self.state.optimizer_reviewer = self._review_optimization
-        self.state.experiments_opener = self._open_experiments
+        self.state.improve_opener = self._open_improve
         self._history_entries: list[str] = []
         self._history_index: int = 0
         self._history_draft = ""
@@ -423,6 +430,12 @@ class FleetTextualApp(App[str | None]):
         hints.append(" context  ", style="#71717a")
         hints.append(" ctrl+o ", style="bold #d4d4d8 on #27272a")
         hints.append(" repl", style="#71717a")
+        if self._label_offer is not None:
+            hints.append("   label: ", style="#71717a")
+            hints.append(" ctrl+y ", style="bold #34d399 on #14291f")
+            hints.append(" ✓ / ", style="#71717a")
+            hints.append(" ctrl+n ", style="bold #fbbf24 on #292014")
+            hints.append(" ✗", style="#71717a")
         return hints
 
     def _render_status_left(self) -> Text:
@@ -441,6 +454,9 @@ class FleetTextualApp(App[str | None]):
             left.append("  stopping…" if self._optimization_stopping else "  optimizing…", style="bold #fbbf24")
         elif self._last_ctrl_c and (time.monotonic() - self._last_ctrl_c) <= 2.5:
             left.append("  press ctrl+c again to exit", style="bold #fbbf24")
+        elif self._readiness_ready:
+            left.append("  ")
+            left.append(" ready to optimize ", style="bold #34d399 on #14291f")
         return left
 
     def _render_status_right(self) -> Text:
@@ -485,6 +501,7 @@ class FleetTextualApp(App[str | None]):
         self.query_one("#status-left", Static).update(self._render_status_left())
         self.query_one("#status-right", Static).update(self._render_status_right())
         self.query_one("#shortcut-bar", Static).update(self._render_shortcut_bar())
+        self.query_one("#composer-hints", Static).update(self._render_composer_hints())
         inp = self.query_one("#prompt-input", _PromptInput)
         if self.state.pending_model_choice is not None:
             role, models = self.state.pending_model_choice
@@ -499,12 +516,14 @@ class FleetTextualApp(App[str | None]):
                 self._active_turn_widget.sync_status()
 
     def _tick_optimizer_snapshot(self) -> None:
-        """Keep observing an active API run while its history screen is closed."""
-        if (
-            not self._optimization_active
-            or isinstance(self.screen, ExperimentsScreen)
-            or self._optimizer_snapshot_polling
-        ):
+        """Keep observing an active API run while its history screen is closed.
+
+        The same tick refreshes the "ready to optimize" badge every 30 seconds.
+        """
+        self._ticks += 1
+        if self._ticks % 30 == 1 and not isinstance(self.screen, ImproveScreen):
+            self.run_worker(self._refresh_readiness(), name="readiness", group="readiness", exit_on_error=False)
+        if not self._optimization_active or isinstance(self.screen, ImproveScreen) or self._optimizer_snapshot_polling:
             return
         self._optimizer_snapshot_polling = True
         self.run_worker(
@@ -538,6 +557,17 @@ class FleetTextualApp(App[str | None]):
             pass
         finally:
             self._optimizer_snapshot_polling = False
+
+    async def _refresh_readiness(self) -> None:
+        """Update the "ready to optimize" badge, keeping the last state on handled fetch errors."""
+        try:
+            response = await asyncio.to_thread(self.client.get, "/improve/readiness")
+            response.raise_for_status()
+            report = response.json()
+            self._readiness_ready = isinstance(report, dict) and report.get("ready") is True
+        except (httpx.HTTPError, ValueError):
+            return
+        self.refresh_chrome()
 
     @contextmanager
     def _capture_console(self) -> Generator[tuple[io.StringIO, Console]]:
@@ -672,6 +702,9 @@ class FleetTextualApp(App[str | None]):
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Update composer height and the floating `/` or `@` popup when text changes."""
         if event.text_area.id == "prompt-input":
+            if self._label_offer is not None and event.text_area.text:
+                self._label_offer = None
+                self.refresh_chrome()
             self._sync_input_state(event.text_area.text)
 
     def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
@@ -788,30 +821,92 @@ class FleetTextualApp(App[str | None]):
                 self._refresh_last_turn_widget()
                 event.stop()
 
-    def _open_experiments(self) -> None:
-        """Open or refresh the Experiments screen."""
-        if isinstance(self.screen, ExperimentsScreen):
-            self.screen.refresh_history()
+    def _open_improve(self, tab: str = "review", turn_id: str | None = None) -> None:
+        """Open the Improve screen on `tab` (optionally at one Turn), or refresh it when already open."""
+        if isinstance(self.screen, ImproveScreen):
+            self.screen.refresh_state()
             return
         self.push_screen(
-            ExperimentsScreen(
+            ImproveScreen(
                 self.client,
                 on_run=self._start_default_optimization,
                 on_cancel=self._request_optimizer_stop,
                 on_review=self._review_optimization,
                 on_snapshot=self._optimizer_snapshot,
-            )
+                tab=tab,
+                turn_id=turn_id,
+            ),
+            self._after_improve,
         )
 
+    def _after_improve(self, _result: None) -> None:
+        """Refresh the readiness badge once the Improve screen closes."""
+        self.run_worker(self._refresh_readiness(), name="readiness", exit_on_error=False)
+
     def _start_default_optimization(self) -> None:
-        """Build the same default request as the slash-command launch."""
+        """Build the same default request as the slash command, started only after the user confirms its cost."""
         parsed = commands_mod._parse_optimizer_arguments(Context(self.client, self.session_id, self.state), "")
-        if parsed is not None:
-            self._start_optimization(parsed[0])
+        if parsed is None:
+            return
+        options = parsed[0]
+
+        def confirmed(accepted: bool | None) -> None:
+            if accepted:
+                self._start_optimization(options)
+
+        self.push_screen(ConfirmAction(confirm_text(options)), confirmed)
+
+    def _offer_label(self, tracker: TurnTracker) -> None:
+        """Offer a one-key label for a Turn whose replay snapshot was captured."""
+        event = tracker.terminal_event or {}
+        turn_id, answer = event.get("turn_id"), event.get("answer")
+        if event.get("event") == "turn_complete" and event.get("replay_snapshot_selected") is True and turn_id:
+            self._label_offer = (str(turn_id), str(answer or ""))
+            self.refresh_chrome()
+            self.run_worker(self._refresh_readiness(), name="readiness", exit_on_error=False)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:  # noqa: ARG002
+        """Claim ctrl+y / ctrl+n only while a label is on offer; otherwise the composer keeps them."""
+        if action in {"label_approve", "label_review"}:
+            return self._label_offer is not None and len(self.screen_stack) == 1
+        return True
+
+    def action_label_approve(self) -> None:
+        """Approve the offered Turn with its answer and pre-extracted figures as the gold label."""
+        if self._label_offer is None:
+            return
+        turn_id, answer = self._label_offer
+        self._label_offer = None
+        self.refresh_chrome()
+        body: dict[str, Any] = {"turn_id": turn_id, "status": "approved", "expected_values": label_figures(answer)}
+        if answer:
+            body["expected_answer"] = answer
+        self.run_worker(self._post_offered_label(body), name="label", group="label", exit_on_error=False)
+
+    async def _post_offered_label(self, body: dict[str, Any]) -> None:
+        """Save the label and toast the outcome; restore the offer on failure so it can be retried."""
+        try:
+            await asyncio.to_thread(save_label, self.client, body)
+        except httpx.HTTPError as error:
+            self._label_offer = (body["turn_id"], body.get("expected_answer", ""))
+            self.refresh_chrome()
+            self.notify(f"Label not saved: {error_text(error)}", severity="error")
+            return
+        self.notify("Turn labelled ✓ approved")
+        await self._refresh_readiness()
+
+    def action_label_review(self) -> None:
+        """Open the Review tab at the offered Turn so it can be corrected or rejected."""
+        if self._label_offer is None:
+            return
+        turn_id = self._label_offer[0]
+        self._label_offer = None
+        self.refresh_chrome()
+        self._open_improve("review", turn_id)
 
     def _start_optimization(self, options: dict[str, Any]) -> None:
         """Submit an API-owned optimization; closing the screen only stops observation."""
-        self._open_experiments()
+        self._open_improve("runs")
         self.run_worker(
             self._post_optimization(options),
             name="experiment-start",
@@ -834,8 +929,8 @@ class FleetTextualApp(App[str | None]):
                 commands_mod._finish_optimizer_request(self.state, request_id)
             self._optimizer_snapshot(record)
             self.append_markup(f"[cyan]Optimization {record.get('status', 'started')}:[/cyan] {record.get('run_id')}")
-            if isinstance(self.screen, ExperimentsScreen):
-                self.screen.refresh_history()
+            if isinstance(self.screen, ImproveScreen):
+                self.screen.refresh_state()
         except httpx.HTTPError as exc:
             request_id = options.get("request_id")
             if (
@@ -870,14 +965,14 @@ class FleetTextualApp(App[str | None]):
             )
             response.raise_for_status()
             self._optimizer_snapshot(response.json().get("job", {}))
-            if isinstance(self.screen, ExperimentsScreen):
+            if isinstance(self.screen, ImproveScreen):
                 self.screen._finish_review_request(run_id, decision)
-                self.screen.refresh_history()
+                self.screen.refresh_state()
         except httpx.HTTPError as exc:
             if (
                 isinstance(exc, httpx.HTTPStatusError)
                 and exc.response.status_code < 500
-                and isinstance(self.screen, ExperimentsScreen)
+                and isinstance(self.screen, ImproveScreen)
             ):
                 self.screen._finish_review_request(run_id, decision)
             self.append_markup(f"[red]Experiment review failed ({type(exc).__name__}); retry from history.[/red]")
@@ -1139,6 +1234,7 @@ class FleetTextualApp(App[str | None]):
                             self.call_from_thread(self.append_markup, "[yellow]Ignoring malformed SSE event.[/yellow]")
                             continue
                         self._notify_turn_update(turn_widget, scroll=True)
+                self.call_from_thread(self._offer_label, tracker)
                 if self._cancel_requested and tracker.terminal_event is None:
                     with self._lock:
                         tracker.finished_at = time.monotonic()
