@@ -1,0 +1,98 @@
+src/fleet_rlm/experiments.py
+  s_f99ab9bf268253::t_f9e972fa101331 36-42,195-198,222-231,281-282
+tests/store/test_store.py
+  s_f99ab9bf268253::t_5ffcd59e0f2094 102,802-818,841
+tests/api/test_improve.py
+  s_f99ab9bf268253::t_eb11d91b13ed7c 1493
+  s_f99ab9bf268253::t_b220231bcc7e9e 1381
+  s_f99ab9bf268253::t_79b3ab656874d3 1523
+  s_f99ab9bf268253::t_0fd266932b4d58 112-118,1358,1364-1380,1382-1453,1458-1476,1478-1492,1495-1522,1524-1544,1590
+  s_f99ab9bf268253::t_4501d6e3438ba4 1454-1457,1477
+  s_f99ab9bf268253::t_116f67b1e0fad8 1494
+src/fleet_rlm/tui/improve.py
+  s_f99ab9bf268253::t_da0cf83b93ae23 188,267-279
+  s_f99ab9bf268253::t_4501d6e3438ba4 73-110,187,211,221,227-229,289-293,311,350,431-434,568-580,590,614-617,664-666,669-674,696-697,702-703,809-812,839-842,858-887
+  s_f99ab9bf268253::t_0280c6d1810682 667-668,888
+src/fleet_rlm/optimize/jobs.py
+  s_f99ab9bf268253::t_d615647af2c14d 1-38,40-79
+  s_f99ab9bf268253::t_fe7dfafe6c090c 39
+docs/reference/configuration.md
+  s_f99ab9bf268253::t_211d8e1b366c20 42-44
+docs/reference/http-api.md
+  s_f99ab9bf268253::t_211d8e1b366c20 26,81-82,123-154,156-157
+docs/reference/cli.md
+  s_f99ab9bf268253::t_1315845ce0d872 242-243
+src/fleet_rlm/optimize/gepa.py
+  s_f99ab9bf268253::t_870e9229c72bdd 61
+  s_f99ab9bf268253::t_7e0248367e537a 33
+  s_f99ab9bf268253::t_fe7dfafe6c090c 931-933
+  s_f99ab9bf268253::t_0fa04efa532c06 861-909,1159,1169
+  s_f99ab9bf268253::t_3d7b4a09305f00 47-55
+  s_f99ab9bf268253::t_f749c427147e24 451-453,475,486,495,532,552,768,792
+  s_f99ab9bf268253::t_1c101ef738e5aa 910-930,934-956,1140-1142
+  s_f99ab9bf268253::t_170646c73919a6 957-961,963-971,980-1013,1020-1027,1029-1093,1095-1113
+  s_f99ab9bf268253::t_58da0faff6ff01 1014-1019,1028,1094
+  s_f99ab9bf268253::t_956284df9ef38f 1294,1297-1300
+  s_f99ab9bf268253::t_824fd472c91a37 962,972-979,1295
+  s_f99ab9bf268253::t_17e3c854edf9bc 8
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_211d8e1b366c20 428-434,437-441
+  s_f99ab9bf268253::t_55e5b0f6a9e0ea 442
+tests/store/test_optimization_runs.py
+  s_f99ab9bf268253::t_5ffcd59e0f2094 331-332,357-358,385-387
+src/fleet_rlm/api/schemas.py
+  s_f99ab9bf268253::t_052d7231cccc24 119,354-355,391-406
+  s_f99ab9bf268253::t_e25f16ed13ed63 407-408
+tests/tui/test_tui.py
+  s_f99ab9bf268253::t_9892fd49707aec 1879,1882
+  s_f99ab9bf268253::t_886dc64e58dbd4 1178-1182,1184-1187,1853-1878,1880-1881,1883-1991,1993
+  s_f99ab9bf268253::t_67d491be76c4d8 1992,1994-1995
+src/fleet_rlm/optimize/dataset.py
+  s_f99ab9bf268253::t_fef29f17489983 167-175
+docs/reference/database.md
+  s_f99ab9bf268253::t_211d8e1b366c20 57,60-64
+src/fleet_rlm/store.py
+  s_f99ab9bf268253::t_f2c40025639188 164-171,289,603-619
+  s_f99ab9bf268253::t_d5491e7c62eefa 620-621
+src/fleet_rlm/api/routes/improve.py
+  s_f99ab9bf268253::t_fe7dfafe6c090c 8,10,23-24,36,38,42-44,82-106,111-144,173,205-241,256,259-264
+  s_f99ab9bf268253::t_7e0248367e537a 34
+src/fleet_rlm/config.py
+  s_f99ab9bf268253::t_7c1d6b94abb65c 591-607
+src/fleet_rlm/optimization_runs.py
+  s_f99ab9bf268253::t_26a63e6c72bf7e 138-142
+  s_f99ab9bf268253::t_1bca8751b2411c 27-28,224-225
+openapi.yaml
+  s_f99ab9bf268253::t_42265fe4c5a073 1711-1792,1844,1846-1848,2513-2570,2674-2684,3348-3352
+src/fleet_rlm/optimize/evaluation.py
+  s_f99ab9bf268253::t_aa04edacbe5e5e 11,521-562,564
+  s_f99ab9bf268253::t_9cc6bd6d3197e2 563,565-566
+src/fleet_rlm/cli.py
+  s_f99ab9bf268253::t_aa04edacbe5e5e 177,196-197,201
+src/fleet_rlm/tui/app.py
+  s_f99ab9bf268253::t_4501d6e3438ba4 49,836,861-872
+  s_f99ab9bf268253::t_1b94c01021c8f2 11
+  s_f99ab9bf268253::t_40ce614a800e30 873
+tests/optimize/test_optimization.py
+  s_f99ab9bf268253::t_6cccc7924146cb 2695-2880,2883-2884,2886,2889-2891,2893-2894,2896-2897
+  s_f99ab9bf268253::t_35bc24f4524364 2881-2882,2887-2888,2892
+  s_f99ab9bf268253::t_0265109372e739 1486-1491,1776
+  s_f99ab9bf268253::t_824fd472c91a37 2885,2895,2898
+  s_f99ab9bf268253::t_26a63e6c72bf7e 2899-2925
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0e87ceb3a42f458b8865a1e78c90819ee3762d40",
+  "prompts": {},
+  "sessions": {
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
