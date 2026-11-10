@@ -1416,3 +1416,15 @@ def test_improve_routes_replace_the_session_scoped_experiment_routes(tmp_path: P
         "/improve/history",
     } <= paths
     assert not any("/experiments" in path and path.startswith("/sessions") for path in paths)
+
+
+def test_review_queue_pages_every_captured_turn(tmp_path):
+    store = _LabelStore()
+    store.queue = [_queue_row(turn_id=f"turn-{index}") for index in range(53)]
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        first = client.get("/improve/queue").json()
+        second = client.get("/improve/queue?offset=50").json()
+        assert len(first["items"]) == 50 and first["next_offset"] == 50
+        assert len(second["items"]) == 3 and second["next_offset"] is None
+        assert client.get("/improve/queue?offset=-1").status_code == 422
