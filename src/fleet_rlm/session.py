@@ -254,6 +254,7 @@ class SessionRuntime:
                     # Direct mode inlines the workspace; the caller needs that measurement too.
                     "direct_context_chars",
                     "direct_context_truncated",
+                    "replay_snapshot_selected",
                     "requested_skills",
                     "required_skills",
                 )
