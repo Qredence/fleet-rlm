@@ -63,6 +63,14 @@ requirements in plain words, and `new_labels_since_last_run` (approved labels
 written after the latest completed or approved optimize job was created). It uses the same loader and
 checks as a job, so a green report means a job will not refuse for data.
 
+**What can improve.** Readiness also returns `min_split_examples` (read-only, `FLEET_MIN_SPLIT_EXAMPLES`,
+default 5: dev and holdout each need that many examples, enforced in the one `readiness()` that curation,
+`fleet optimize --check` and this report share), `components` (each tunable program part with a one-line
+description), `improvable_examples` (labelled examples whose newest finished rescore or replay scored below 1.0,
+`null` until one has run), and a `note` when that count is 0 (advisory, never a blocker). The total example
+requirement scales with the dev share, `ceil(min_split_examples / validation_ratio)` and never below 8, and splits
+are by source group, so more Sessions can be needed than the arithmetic suggests.
+
 **Labelling.** `GET /improve/queue?limit=` (1–200, default 50) lists completed,
 replay-captured Turns across Sessions, newest first: `turn_id`, `session_id`,
 task and answer previews, the answer's number literals as `figures`, and the
@@ -75,6 +83,9 @@ answer (the queue shows a whitespace-collapsed preview). The server resolves the
 writes MLflow expectations and PostgreSQL curation exactly as `fleet eval label`
 does. An unknown Turn is `404`; a Turn without a trace, or invalid labels, `422`;
 a partial synchronization `503` with the retry hint.
+
+Each queue item also carries `flags` (stored trouble signals: sandbox errors, rejected SUBMITs, or a
+below-1.0 latest evaluation) and `evaluation_score`; flagged Turns are listed first because they teach GEPA the most.
 
 **Jobs.** A `POST /improve/jobs` body contains a `kind`, the shared optimizer
 options (`gepa_budget` or `max_metric_calls`, `threads`,
@@ -120,6 +131,13 @@ dependency identity checks as standalone `fleet optimize --approve`, and install
 is not installed automatically. Jobs recorded before the program became global keep
 their Session as `legacy_session_id`: they stay readable and can be rejected, but
 approval returns `409` because their incumbent was a per-Session program.
+
+**Progress and fail-fast.** During paired validation the worker persists `validation_done` and
+`validation_total` in `progress` (rollouts finished of 2 stages x 3 passes x dev+holdout examples). When the search
+returns a candidate that changes no instruction or Flex code, validation is skipped and the job completes with the
+gate's own reason, `candidate changes no instructions or Flex code`. Job detail adds `summary`, computed from the saved
+comparison: `changed` components (of `components_total`), per-split baseline and candidate means with `improved`,
+`regressed` and `ties` counts over the paired per-example scores, the critical count, and a one-line `headline`.
 
 **Evaluate jobs.** The three evaluate kinds run in the same worker process, ledger, stage and
 progress reporting, stop checks, and token cap as `optimize`, but create no candidate and install nothing

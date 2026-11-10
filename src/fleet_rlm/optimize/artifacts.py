@@ -99,6 +99,15 @@ def approval_evidence(settings: FleetSettings, incumbent_digest: str, *, scorer_
 
 def format_report(manifest: ArtifactManifest, holdout: list[dspy.Example]) -> str:
     """Scores per stage and per holdout example, so whoever approves can tell a gain from noise."""
+    if manifest.evaluation.get("validation") == VALIDATION_SKIPPED:
+        return "\n".join(
+            [
+                f"## Fleet-RLM Lite GEPA candidate `{manifest.version}`",
+                "",
+                "No predictor instructions or Flex source changed; paired validation was skipped.",
+                f"Gate: FAIL: {'; '.join(manifest.gate['reasons'])}",
+            ]
+        )
     baseline, candidate = manifest.evaluation["baseline"], manifest.evaluation["candidate"]
     lines = [
         f"## Fleet-RLM Lite GEPA candidate `{manifest.version}`",
@@ -209,6 +218,11 @@ def component_diffs(baseline: dspy.Module, candidate: dspy.Module) -> list[dict[
     return changes
 
 
+NO_CHANGE_REASON = "candidate changes no instructions or Flex code"
+# The evaluation of a candidate identical to the incumbent: paired validation is skipped, the gate still decides.
+VALIDATION_SKIPPED = "skipped_unchanged"
+
+
 @dataclass(frozen=True)
 class EvaluationGate:
     """Hold a promotion verdict and the reasons it failed, if any."""
@@ -228,6 +242,10 @@ def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
     # Retired dataset-specific objectives are not comparable with Fleet's metric.
     if evaluation.get("objective_policy") is not None:
         return EvaluationGate(False, ("unsupported objective policy; reevaluate with Fleet metrics",))
+    candidate = evaluation.get("candidate")
+    changed = candidate.get("changed_components") if isinstance(candidate, Mapping) else None
+    if evaluation.get("validation") == VALIDATION_SKIPPED and not changed:
+        return EvaluationGate(False, (NO_CHANGE_REASON,))
     reasons: list[str] = []
     observations = {}
     for stage in ("baseline", "candidate"):
@@ -279,8 +297,8 @@ def promotion_gate(evaluation: Mapping[str, Any]) -> EvaluationGate:
         )
         if quality_after < quality_before:
             reasons.append(f"{split} correctness regressed")
-    if not (evaluation.get("candidate") or {}).get("changed_components"):
-        reasons.append("candidate changes no instructions or Flex code")
+    if not changed:
+        reasons.append(NO_CHANGE_REASON)
     return EvaluationGate(not reasons, tuple(dict.fromkeys(reasons)))
 
 

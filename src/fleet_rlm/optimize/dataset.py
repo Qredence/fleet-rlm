@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
 import dspy
 import mlflow
 
+from fleet_rlm.config import MIN_SPLIT_EXAMPLES
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, LINEAGE_INPUT_FIELDS
 from fleet_rlm.observability import trace_object
 from fleet_rlm.optimization_runs import VALIDATION_RATIO_DEFAULT, VALIDATION_RATIO_MAX, VALIDATION_RATIO_MIN
@@ -228,6 +230,7 @@ class Readiness:
     critical: int
     split_sizes: dict[str, int]
     missing: list[str]
+    min_split_examples: int
 
     @property
     def ready(self) -> bool:
@@ -244,14 +247,25 @@ def _check_ratio(validation_ratio: float) -> None:
         raise ValueError(f"validation_ratio must be between {VALIDATION_RATIO_MIN} and {VALIDATION_RATIO_MAX}")
 
 
-def readiness(examples: list[dspy.Example], *, validation_ratio: float = VALIDATION_RATIO_DEFAULT) -> Readiness:
-    """Check the requirements for a run once; curation and the HTTP report both rely on this."""
+def readiness(
+    examples: list[dspy.Example],
+    *,
+    validation_ratio: float = VALIDATION_RATIO_DEFAULT,
+    min_split_examples: int = MIN_SPLIT_EXAMPLES,
+) -> Readiness:
+    """Check the requirements for a run once; curation, `--check`, and the HTTP report all rely on this.
+
+    Dev and holdout each need `min_split_examples` examples, so the total is at least what the dev share of the
+    split needs to reach that, and never below `MIN_EXAMPLES`. Splits are by source group, so more Sessions may
+    be needed than the arithmetic alone suggests.
+    """
     _check_ratio(validation_ratio)
     groups = {example.source_group for example in examples}
     critical = sum(getattr(example, "critical", False) is True for example in examples)
     missing = []
-    if len(examples) < MIN_EXAMPLES:
-        missing.append(f"{MIN_EXAMPLES} approved gold-labeled examples are needed; found {len(examples)}")
+    needed = max(MIN_EXAMPLES, math.ceil(min_split_examples / validation_ratio))
+    if len(examples) < needed:
+        missing.append(f"{needed} approved gold-labeled examples are needed; found {len(examples)}")
     if len(groups) < MIN_GROUPS:
         missing.append(f"examples from {MIN_GROUPS} source groups are needed; found {len(groups)}")
     if not critical:
@@ -267,7 +281,13 @@ def readiness(examples: list[dspy.Example], *, validation_ratio: float = VALIDAT
             empty = [name for name, count in sizes.items() if not count]
             if empty:
                 missing.append(f"the {', '.join(empty)} split would be empty")
-    return Readiness(len(examples), len(groups), critical, sizes, missing)
+            missing += [
+                f"{name} would have {sizes[name]} example{'s' if sizes[name] != 1 else ''}; need {min_split_examples}"
+                " — label more Turns from more Sessions"
+                for name in ("dev", "holdout")
+                if sizes[name] and sizes[name] < min_split_examples
+            ]
+    return Readiness(len(examples), len(groups), critical, sizes, missing, min_split_examples)
 
 
 def curate_dataset(
@@ -276,11 +296,12 @@ def curate_dataset(
     *,
     validation_ratio: float = VALIDATION_RATIO_DEFAULT,
     evaluation_experiment_name: str | None = None,
+    min_split_examples: int = MIN_SPLIT_EXAMPLES,
 ) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
     """Return train/dev/holdout from reviewed examples; refuse to optimize until `readiness` passes."""
     _check_ratio(validation_ratio)
     examples = load_examples(store, experiment_name, evaluation_experiment_name)
-    status = readiness(examples, validation_ratio=validation_ratio)
+    status = readiness(examples, validation_ratio=validation_ratio, min_split_examples=min_split_examples)
     if not status.ready:
         raise ValueError(
             "GEPA is not ready: "

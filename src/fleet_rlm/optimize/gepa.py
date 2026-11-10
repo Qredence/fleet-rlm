@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import logging
 import re
@@ -34,6 +35,7 @@ from fleet_rlm.optimize import jobs
 from fleet_rlm.optimize.artifacts import (
     APPROVAL_POLICY_VERSION,
     VALIDATION_PASSES,
+    VALIDATION_SKIPPED,
     ArtifactManifest,
     approval_evidence,
     approve_candidate,
@@ -42,6 +44,7 @@ from fleet_rlm.optimize.artifacts import (
     digest_bytes,
     format_report,
     promotion_gate,
+    tunable_components,
     write_manifest,
 )
 from fleet_rlm.optimize.dataset import (
@@ -169,6 +172,8 @@ class GEPAProgressReporter:
                     "metric_calls_remaining",
                     "best_score",
                     "score_trajectory",
+                    "validation_done",
+                    "validation_total",
                 }
             }
             # Only the cumulative total is monotonic. Delta and remaining are observations.
@@ -179,7 +184,7 @@ class GEPAProgressReporter:
             if self.tokens is not None:
                 progress |= {"tokens_used": self.tokens.used, "token_cap": self.tokens.cap}
             snapshot = self._progress | progress
-            self.update(progress=snapshot, stage="search")
+            self.update(progress=snapshot, stage=event.get("stage", "search"))
             self._progress = snapshot
 
     def _observe(self, progress: Mapping[str, Any]) -> None:
@@ -223,6 +228,10 @@ class GEPAProgressReporter:
             if event["is_best_program"] or "best_score" not in self._progress:
                 update["best_score"] = score
         self._observe(update)
+
+    def on_validation_progress(self, done: int, total: int) -> None:
+        """Persist how many paired-validation rollouts have finished; the worker owns this counter."""
+        self._observe({"stage": "validation", "validation_done": done, "validation_total": total})
 
     def on_optimization_end(self, event: Mapping[str, Any]) -> None:
         """Retain prior counters while updating GEPA's final observed total."""
@@ -599,7 +608,9 @@ def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> Non
         examples = load_examples(store, target.experiment_name, target.eval_experiment_name)
     finally:
         store.close()
-    status = readiness(examples, validation_ratio=options.validation_ratio)
+    status = readiness(
+        examples, validation_ratio=options.validation_ratio, min_split_examples=settings.min_split_examples
+    )
     print(json.dumps(status.as_dict(), indent=2))
     if not status.ready:
         raise SystemExit(1)
@@ -992,6 +1003,8 @@ class _JobGuard:
         )
         self.cleanup = RolloutCleanup()
         self.judge = _JudgeLatch()
+        # Each labelled Turn's latest evaluation score, by Turn ID, for the Improve views.
+        self.example_scores: dict[str, float] = {}
 
     def check_boundary(self) -> None:
         """Raise when persistence failed, a stop or ownership change was observed, or the token cap is spent."""
@@ -1112,7 +1125,10 @@ def _evaluate(
         else:
             splits = _synthetic(settings, guard)
     guard.check_boundary()
-    guard.reporter.update(evaluation=jobs.evaluation_result(kind, splits, program, excluded=excluded))
+    guard.reporter.update(
+        evaluation=jobs.evaluation_result(kind, splits, program, excluded=excluded),
+        example_scores=guard.example_scores,
+    )
     guard.check_boundary()
 
 
@@ -1145,6 +1161,7 @@ def _rescore(
         target.experiment_name,
         validation_ratio=args.validation_ratio,
         evaluation_experiment_name=target.eval_experiment_name,
+        min_split_examples=settings.min_split_examples,
     )
     # Rescoring applies Fleet's metric (the judge GEPA optimizes against) and the gold-value check. The MLflow
     # diagnostic suite is left to `fleet eval score`: its structured-output judges are provider-sensitive.
@@ -1152,11 +1169,12 @@ def _rescore(
         fleet_scorer(settings.build_judge_lm(), settings.resolved_model("judge").build_adapter()),
         expected_values_present,
     ]
-    splits, excluded = {}, 0
+    splits, excluded, turn_of = {}, 0, {}
     for name, members in zip(("train", "dev", "holdout"), partitions, strict=True):
         traces = [(example, _example_trace(store, example)) for example in members]
         excluded += sum(trace is None for _, trace in traces)
         usable = [trace for _, trace in traces if trace is not None]
+        turn_of.update({trace.info.trace_id: example.replay_turn_id for example, trace in traces if trace is not None})
         scores: list[float] = []
         critical: list[float] = []
         for chunk in _chunks(usable):
@@ -1167,9 +1185,12 @@ def _rescore(
                 scorers=scorers,
                 report=lambda _message: None,
             )
-            chunk_scores, chunk_critical = jobs.rescore_scores(result)
+            chunk_scores, chunk_critical, by_trace = jobs.rescore_scores(result)
             scores += chunk_scores
             critical += chunk_critical
+            guard.example_scores.update(
+                {turn_of[trace_id]: value for trace_id, value in by_trace.items() if trace_id in turn_of}
+            )
             guard.check_boundary()
         if usable:
             splits[name] = jobs.split_summary(scores, critical)
@@ -1185,6 +1206,7 @@ def _replay(
         target.experiment_name,
         validation_ratio=args.validation_ratio,
         evaluation_experiment_name=target.eval_experiment_name,
+        min_split_examples=settings.min_split_examples,
     )
     examples = [*trainset, *devset, *holdout]
     metric = _judged_metric(settings, settings.build_judge_lm(), guard.judge)
@@ -1205,6 +1227,9 @@ def _replay(
                 scores += score.scores
                 critical += score.critical_scores
                 errors += score.errors
+                guard.example_scores.update(
+                    {example.replay_turn_id: value for example, value in zip(chunk, score.scores, strict=True)}
+                )
                 guard.check_boundary()
             splits[name] = jobs.split_summary(scores, critical, errors=errors)
     return splits
@@ -1230,7 +1255,7 @@ def _synthetic(settings: FleetSettings, guard: _JobGuard) -> dict[str, dict[str,
             experiment_id=experiment.experiment_id,
             report=lambda _message: None,
         )
-        chunk_scores, chunk_critical = jobs.rescore_scores(result)
+        chunk_scores, chunk_critical, _ = jobs.rescore_scores(result)
         scores += chunk_scores
         critical += chunk_critical
         guard.check_boundary()
@@ -1275,6 +1300,7 @@ def _compile(
         target.experiment_name,
         validation_ratio=args.validation_ratio,
         evaluation_experiment_name=target.eval_experiment_name,
+        min_split_examples=settings.min_split_examples,
     )
     examples = [*trainset, *devset, *holdout]
     reflection_lm = build_lm(settings, settings.fleet_reflection_model, "reflection")
@@ -1346,47 +1372,69 @@ def _compile(
                 **budget,
             ).compile(baseline, trainset=trainset, valset=devset)
         check_boundary()
-        set_stage("validation")
-        # GEPA compile/evaluation autologging suppresses DSPy Evaluate traces by default.
-        # Enable them only after search so final paired cases export with our context tags.
-        _optional_mlflow(_enable_validation_tracing, trace_search=bool(getattr(args, "trace_search", False)))
-        # The selected candidate is final before either program sees the holdout.
-        validation_settings = settings.with_explicit_overrides(fleet_root_cache=False, fleet_sub_cache=False)
-        validation_factory = build_isolated_engine_factory(validation_settings, store, examples, cleanup=cleanup)
-        incumbent_validation = IsolatedFleetProgram(template, validation_factory, cleanup)
-        candidate_validation = IsolatedFleetProgram(optimized.program, validation_factory, cleanup)
-        paired = {"baseline": [], "candidate": []}
-        for pass_index in range(VALIDATION_PASSES):
-            # Alternate order to reduce systematic warmup/order effects.
-            order = ("baseline", "candidate") if pass_index % 2 == 0 else ("candidate", "baseline")
-            for stage in order:
-                check_boundary()
-                program = incumbent_validation if stage == "baseline" else candidate_validation
-                paired[stage].append(
-                    score_stage(
-                        program,
-                        devset,
-                        holdout,
-                        metric,
-                        args.threads,
-                        trace_run_id=mlflow_run_id,
-                        stage=stage,
-                        pass_index=pass_index,
-                    )
-                )
-                check_boundary()
-        # Native DSPy may discard straggler results before their attempts finish. Seal
-        # admission and observe every admitted cleanup before certifying any evidence.
-        cleanup.close()
-        check_boundary()
-        set_stage("finalization")
-        evaluation: dict[str, Any] = {
-            "policy_version": APPROVAL_POLICY_VERSION,
-            **{stage: summarize_passes(passes) for stage, passes in paired.items()},
-        }
         changes = component_diffs(template, optimized.program)
+        evaluation: dict[str, Any]
+        if changes:
+            set_stage("validation")
+            # GEPA compile/evaluation autologging suppresses DSPy Evaluate traces by default.
+            # Enable them only after search so final paired cases export with our context tags.
+            _optional_mlflow(_enable_validation_tracing, trace_search=bool(getattr(args, "trace_search", False)))
+            # The selected candidate is final before either program sees the holdout.
+            validation_settings = settings.with_explicit_overrides(fleet_root_cache=False, fleet_sub_cache=False)
+            validation_factory = build_isolated_engine_factory(validation_settings, store, examples, cleanup=cleanup)
+            incumbent_validation = IsolatedFleetProgram(template, validation_factory, cleanup)
+            candidate_validation = IsolatedFleetProgram(optimized.program, validation_factory, cleanup)
+            paired = {"baseline": [], "candidate": []}
+            validation_total = 2 * VALIDATION_PASSES * (len(devset) + len(holdout))
+            finished = itertools.count(1)
+            reporter.on_validation_progress(0, validation_total)
+
+            def rollout_done() -> None:
+                reporter.on_validation_progress(next(finished), validation_total)
+
+            for pass_index in range(VALIDATION_PASSES):
+                # Alternate order to reduce systematic warmup/order effects.
+                order = ("baseline", "candidate") if pass_index % 2 == 0 else ("candidate", "baseline")
+                for stage in order:
+                    check_boundary()
+                    program = incumbent_validation if stage == "baseline" else candidate_validation
+                    paired[stage].append(
+                        score_stage(
+                            program,
+                            devset,
+                            holdout,
+                            metric,
+                            args.threads,
+                            trace_run_id=mlflow_run_id,
+                            stage=stage,
+                            pass_index=pass_index,
+                            on_rollout=rollout_done,
+                        )
+                    )
+                    check_boundary()
+            # Native DSPy may discard straggler results before their attempts finish. Seal
+            # admission and observe every admitted cleanup before certifying any evidence.
+            cleanup.close()
+            check_boundary()
+            set_stage("finalization")
+            evaluation = {
+                "policy_version": APPROVAL_POLICY_VERSION,
+                **{stage: summarize_passes(passes) for stage, passes in paired.items()},
+            }
+        else:
+            # An unchanged candidate cannot beat the incumbent; the gate names that, so skip the paired rollouts.
+            cleanup.close()
+            check_boundary()
+            set_stage("finalization")
+            evaluation = {
+                "policy_version": APPROVAL_POLICY_VERSION,
+                "validation": VALIDATION_SKIPPED,
+                "baseline": {},
+                "candidate": {},
+            }
         evaluation["candidate"]["component_diffs"] = changes
         evaluation["candidate"]["changed_components"] = [item["component"] for item in changes]
+        evaluation["candidate"]["components_total"] = len(tunable_components(optimized.program))
         evaluation["validation_cache"] = "serving_response_cache_disabled"
         gate = promotion_gate(evaluation)
         check_boundary()
@@ -1419,7 +1467,7 @@ def _compile(
         full_report_path = destination.with_suffix(".comparison.json")
         report_path.write_text(report)
         # A reader's aid only: the gate above never sees it, and any failure leaves it empty.
-        rationale = _comparison_rationale(reflection_lm, report, tokens)
+        rationale = "" if not changes else _comparison_rationale(reflection_lm, report, tokens)
         full_report_path.write_text(
             json.dumps(
                 {"manifest": asdict(manifest), "report": report, "rationale": rationale}, ensure_ascii=False, indent=2
@@ -1433,6 +1481,7 @@ def _compile(
                 f"{stage}_{split}": evaluation[stage][split]
                 for stage in ("baseline", "candidate")
                 for split in ("dev", "holdout")
+                if split in evaluation[stage]
             }
             | {"gate_passed": float(gate.passed)},
         )
@@ -1443,7 +1492,7 @@ def _compile(
             mlflow.log_params,
             {
                 "validation_passes": VALIDATION_PASSES,
-                "validation_rollouts": 2 * VALIDATION_PASSES * (len(devset) + len(holdout)),
+                "validation_rollouts": 2 * VALIDATION_PASSES * (len(devset) + len(holdout)) if changes else 0,
                 "search_metric_calls": optimized.detailed_results.total_metric_calls,
             },
         )
@@ -1457,7 +1506,16 @@ def _compile(
             full_report_path=str(full_report_path),
             manifest_digest=manifest.digest,
             gate={"passed": gate.passed, "reasons": list(gate.reasons)},
-            scores={stage: {split: evaluation[stage][split] for split in ("dev", "holdout")} for stage in paired},
+            **(
+                {
+                    "scores": {
+                        stage: {split: evaluation[stage][split] for split in ("dev", "holdout")}
+                        for stage in ("baseline", "candidate")
+                    }
+                }
+                if changes
+                else {}
+            ),
             dataset_sizes={"train": len(trainset), "dev": len(devset), "holdout": len(holdout)},
         )
         check_boundary()

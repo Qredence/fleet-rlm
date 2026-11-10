@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -34,7 +34,7 @@ from fleet_rlm.api.schemas import (
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import figures
 from fleet_rlm.experiments import ExperimentBusyError, ExperimentManager
-from fleet_rlm.optimization_runs import ExperimentOptions, public_run
+from fleet_rlm.optimization_runs import COMPONENT_DESCRIPTIONS, ExperimentOptions, comparison_summary, public_run
 from fleet_rlm.store import Store
 
 __all__ = ["router"]
@@ -79,6 +79,35 @@ def _preview(text: Any) -> str:
     return " ".join(str(text or "").split())[:_PREVIEW_CHARS]
 
 
+def _latest_example_scores(jobs: list[dict[str, Any]]) -> dict[str, float]:
+    """Each labelled Turn's score from the most recently finished rescore or replay job."""
+    finished = [
+        job
+        for job in jobs
+        if job["kind"] in {"evaluate_rescore", "evaluate_replay"}
+        and job["status"] == "completed"
+        and job.get("example_scores")
+    ]
+    return max(finished, key=lambda job: str(job["updated_at"]))["example_scores"] if finished else {}
+
+
+def _unflagged(item: QueueItem) -> bool:
+    return not item.flags
+
+
+def _turn_flags(row: dict[str, Any], score: float | None) -> list[str]:
+    """Trouble signals already stored with the Turn, plus a below-perfect latest evaluation."""
+    flags = []
+    with suppress(TypeError, ValueError):
+        if int(row.get("sandbox_errors") or 0) > 0:
+            flags.append(f"{row['sandbox_errors']} sandbox errors")
+    if str(row.get("submit_rejections") or "").strip() not in {"", "0", "null", "[]", "{}"}:
+        flags.append("SUBMIT was rejected")
+    if score is not None and score < 1.0:
+        flags.append(f"scored {score:.2f} in the latest evaluation")
+    return flags
+
+
 def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], str | None]:
     """The readiness report and the start time of the last finished optimize job the label count follows."""
     from fleet_rlm.engine.compiled import installed_program_error
@@ -86,22 +115,35 @@ def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], s
     from fleet_rlm.optimize.jobs import installed_digest
 
     target = settings.mlflow_target()
-    report = readiness(load_examples(store, target.experiment_name, target.eval_experiment_name)).as_dict()
+    report = readiness(
+        load_examples(store, target.experiment_name, target.eval_experiment_name),
+        min_split_examples=settings.min_split_examples,
+    ).as_dict()
     # An installed program that contradicts the ledger would make every Turn refuse, so a job
     # would start from the wrong incumbent.
     if problem := installed_program_error(installed_digest(settings), store.approved_program()):
         report["missing"].append(problem)
         report["ready"] = False
+    jobs = store.list_optimization_runs()
     # Only a run that finished consumed the labels that existed when it started.
     last_run = max(
-        (
-            job["created_at"]
-            for job in store.list_optimization_runs()
-            if job["kind"] == "optimize" and job["status"] in {"completed", "approved"}
-        ),
+        (job["created_at"] for job in jobs if job["kind"] == "optimize" and job["status"] in {"completed", "approved"}),
         default=None,
     )
-    return {**report, "new_labels_since_last_run": store.new_review_labels(last_run)}, last_run
+    scores = _latest_example_scores(jobs)
+    improvable = None if not scores else sum(value < 1.0 for value in scores.values())
+    return {
+        **report,
+        "new_labels_since_last_run": store.new_review_labels(last_run),
+        "components": [{"name": name, "description": text} for name, text in COMPONENT_DESCRIPTIONS.items()],
+        "improvable_examples": improvable,
+        "note": (
+            "All labelled examples already pass; optimizing now is unlikely to change anything. "
+            "Label Turns Fleet got wrong, slow, or misrouted."
+            if improvable == 0
+            else None
+        ),
+    }, last_run
 
 
 @router.get("/readiness", response_model=ImproveReadiness, responses=_ERROR_RESPONSES)
@@ -161,24 +203,28 @@ def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
     with translate("Review queue is unavailable"):
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
-        return ImproveQueue(
-            items=[
-                QueueItem(
-                    turn_id=row["turn_id"],
-                    session_id=row["session_id"],
-                    task=_preview(row["task"]),
-                    answer=_preview(row["answer"]),
-                    figures=list(figures(row["answer"] or "", include_small=True))[:_MAX_FIGURES],
-                    label=row["review_status"] or "unlabelled",
-                    expected_answer=row["expected_answer"],
-                    expected_values=row["expected_values"] or [],
-                    critical=bool(row["critical"]),
-                    group=row["source_group"],
-                    updated_at=row["updated_at"].isoformat(),
-                )
-                for row in store.improve_queue(limit)
-            ]
-        )
+        scores = _latest_example_scores(store.list_optimization_runs())
+        items: list[QueueItem] = [
+            QueueItem(
+                turn_id=row["turn_id"],
+                session_id=row["session_id"],
+                task=_preview(row["task"]),
+                answer=_preview(row["answer"]),
+                figures=list(figures(row["answer"] or "", include_small=True))[:_MAX_FIGURES],
+                label=row["review_status"] or "unlabelled",
+                expected_answer=row["expected_answer"],
+                expected_values=row["expected_values"] or [],
+                critical=bool(row["critical"]),
+                group=row["source_group"],
+                updated_at=row["updated_at"].isoformat(),
+                flags=_turn_flags(row, scores.get(row["turn_id"])),
+                evaluation_score=scores.get(row["turn_id"]),
+            )
+            for row in store.improve_queue(limit)
+        ]
+        # Flagged Turns first (the sort is stable, so newest-first order holds within each group).
+        ordered = sorted(items, key=_unflagged)
+        return ImproveQueue(items=ordered)
 
 
 def _save_label(body: LabelRequest, store: Store) -> LabelSaved:
@@ -284,9 +330,10 @@ async def start_job(body: StartJob, manager: Experiments, store: StoreDep, setti
 
 @router.get("/jobs/{run_id}", response_model=JobDetail, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
 async def job_detail(run_id: str, manager: Experiments) -> dict[str, Any]:
-    """Return a snapshot and its bounded saved comparison."""
+    """Return a snapshot, its bounded saved comparison, and that comparison's computed summary."""
     with _job_errors():
-        return await manager.detail(run_id)
+        detail = await manager.detail(run_id)
+        return {**detail, "summary": comparison_summary(detail["comparison"])}
 
 
 @router.post(

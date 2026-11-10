@@ -250,7 +250,7 @@ class _Lease:
 
 
 def _settings(root: Path) -> FleetSettings:
-    return FleetSettings(_env_file=None, compiled_program_dir=str(root))
+    return FleetSettings(_env_file=None, compiled_program_dir=str(root), min_split_examples=1)
 
 
 def _manager_with_store(root: Path) -> tuple[MemoryStore, ExperimentManager]:
@@ -1617,3 +1617,92 @@ def test_improve_routes_replace_the_session_scoped_experiment_routes(tmp_path: P
         "/improve/settings",
     } <= paths
     assert not any("/experiments" in path and path.startswith("/sessions") for path in paths)
+
+
+def test_readiness_lists_tunable_components_and_what_could_still_improve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    examples = [_example(f"sess_{index % 4}", critical=index == 0) for index in range(8)]
+    for index, example in enumerate(examples):
+        example.replay_turn_id = f"turn-{index}"
+    monkeypatch.setattr("fleet_rlm.optimize.dataset.load_examples", lambda *_args: examples)
+    store = _LabelStore()
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        unknown = client.get("/improve/readiness").json()
+        assert unknown["improvable_examples"] is None and unknown["note"] is None
+        assert unknown["min_split_examples"] == 1
+        names = {item["name"] for item in unknown["components"]}
+        assert {"routing", "skill_selection", "reasoning.rlm", "reasoning.flex", "child_policies"} <= names
+        assert all(item["description"] for item in unknown["components"])
+        _completed(
+            store,
+            "evaluate-replay-1",
+            kind="evaluate_replay",
+            example_scores={"turn-0": 1.0, "turn-1": 0.4, "turn-2": 0.0},
+        )
+        assert client.get("/improve/readiness").json()["improvable_examples"] == 2
+        _completed(
+            store,
+            "evaluate-replay-2",
+            kind="evaluate_replay",
+            example_scores={"turn-0": 1.0, "turn-1": 1.0},
+            updated_at="2999-01-01T00:00:00+00:00",
+        )
+        passing = client.get("/improve/readiness").json()
+    assert passing["improvable_examples"] == 0
+    assert "already pass" in passing["note"] and "wrong, slow, or misrouted" in passing["note"]
+    assert passing["ready"] is True  # advisory only, never a blocker
+
+
+def test_queue_flags_trouble_and_weak_scores_and_lists_flagged_turns_first(tmp_path: Path) -> None:
+    store = _LabelStore()
+    store.queue = [
+        _queue_row(turn_id="calm"),
+        _queue_row(turn_id="errored", sandbox_errors="2"),
+        _queue_row(turn_id="rejected", submit_rejections="1"),
+        _queue_row(turn_id="weak", review_status="approved", expected_answer="1"),
+        _queue_row(turn_id="strong", review_status="approved", expected_answer="1"),
+    ]
+    _completed(store, "evaluate-replay-1", kind="evaluate_replay", example_scores={"weak": 0.5, "strong": 1.0})
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        items = client.get("/improve/queue").json()["items"]
+    assert [item["turn_id"] for item in items] == ["errored", "rejected", "weak", "calm", "strong"]
+    by_id = {item["turn_id"]: item for item in items}
+    assert by_id["errored"]["flags"] == ["2 sandbox errors"]
+    assert by_id["rejected"]["flags"] == ["SUBMIT was rejected"]
+    assert (
+        by_id["weak"]["flags"] == ["scored 0.50 in the latest evaluation"] and by_id["weak"]["evaluation_score"] == 0.5
+    )
+    assert by_id["strong"]["flags"] == [] and by_id["strong"]["evaluation_score"] == 1.0
+    assert by_id["calm"]["flags"] == [] and by_id["calm"]["evaluation_score"] is None
+
+
+def test_job_detail_carries_the_computed_summary_beside_the_comparison(tmp_path: Path) -> None:
+    store = _LabelStore()
+    _completed(store, "optimize-summarized")
+    _app, client = _app_client(tmp_path, store)
+    comparison = {
+        "manifest": {
+            "evaluation": {
+                "baseline": {"dev_scores": [0.5, 0.5]},
+                "candidate": {
+                    "changed_components": ["routing.predict"],
+                    "components_total": 8,
+                    "dev_scores": [1.0, 0.5],
+                },
+            }
+        }
+    }
+
+    async def detail(run_id: str) -> dict[str, Any]:
+        return {"job": {"run_id": run_id, "status": "completed"}, "comparison": comparison}
+
+    with client:
+        client.app.state.experiments.detail = detail
+        body = client.get("/improve/jobs/optimize-summarized").json()
+    assert body["summary"]["splits"]["dev"]["improved"] == 1
+    assert body["summary"]["headline"].startswith(
+        "Changed 1 of 8: routing.predict · dev 0.50→0.75 (1 improved, 0 regressed of 2)"
+    )

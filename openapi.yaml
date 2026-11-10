@@ -1970,7 +1970,7 @@ paths:
       tags:
       - improve
       summary: Job Detail
-      description: Return a snapshot and its bounded saved comparison.
+      description: Return a snapshot, its bounded saved comparison, and that comparison's computed summary.
       operationId: job_detail_improve_jobs__run_id__get
       parameters:
       - name: run_id
@@ -2496,9 +2496,27 @@ components:
             type: string
           type: array
           title: Missing
+        min_split_examples:
+          type: integer
+          title: Min Split Examples
         new_labels_since_last_run:
           type: integer
           title: New Labels Since Last Run
+        components:
+          items:
+            $ref: '#/components/schemas/TunableComponent'
+          type: array
+          title: Components
+        improvable_examples:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Improvable Examples
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Note
       type: object
       required:
       - ready
@@ -2507,9 +2525,11 @@ components:
       - critical
       - split_sizes
       - missing
+      - min_split_examples
       - new_labels_since_last_run
+      - components
       title: ImproveReadiness
-      description: What the labelled examples support today and what a run still needs.
+      description: What the labelled examples support today, what a run still needs, and what could improve.
     ImproveSettings:
       properties:
         auto_run:
@@ -2704,12 +2724,19 @@ components:
             type: object
           - type: 'null'
           title: Comparison
+        summary:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Summary
       type: object
       required:
       - job
       - comparison
       title: JobDetail
-      description: One public job and its optional saved comparison evidence.
+      description: One public job, its optional saved comparison evidence, and that comparison's computed
+        summary.
     JobEnvelope:
       properties:
         job:
@@ -3107,6 +3134,16 @@ components:
           - type: string
           - type: 'null'
           title: Updated At
+        flags:
+          items:
+            type: string
+          type: array
+          title: Flags
+        evaluation_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Evaluation Score
       type: object
       required:
       - turn_id
@@ -3379,6 +3416,20 @@ components:
       - status
       title: Status
       description: Plain status acknowledgement, such as a cleared context.
+    TunableComponent:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+      type: object
+      required:
+      - name
+      - description
+      title: TunableComponent
+      description: One part of the program GEPA can rewrite, in plain words.
     TurnRequest:
       properties:
         task:

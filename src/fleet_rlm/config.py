@@ -29,6 +29,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from fleet_rlm.models import Endpoint, EnvReference, ModelRoute, ResolvedModel, Role
 from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
+# Dev and holdout each need this many labelled examples before a run can tell a gain from noise.
+MIN_SPLIT_EXAMPLES = 5
 _SECRET_FIELDS = {
     "fleet_database_url",
     "fleet_database_migration_url",
@@ -604,6 +606,12 @@ class FleetSettings(BaseSettings):
         ge=1,
         description="Search metric calls for automatic jobs; unset keeps the light automatic budget.",
         validation_alias="FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS",
+    )
+    min_split_examples: int = Field(
+        default=MIN_SPLIT_EXAMPLES,
+        ge=1,
+        description="Labelled examples the dev and holdout splits each need before an optimize job may start.",
+        validation_alias="FLEET_MIN_SPLIT_EXAMPLES",
     )
     max_upload_bytes: int = Field(
         default=MAX_WORKSPACE_FILE_BYTES,

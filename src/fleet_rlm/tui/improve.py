@@ -22,6 +22,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, DataTable, Input, Sparkline, Static, TabbedContent, TabPane
 
 from fleet_rlm.contracts import figures
+from fleet_rlm.optimization_runs import comparison_summary
 
 STAGES = ("preparing", "search", "validation", "finalization")
 # The queue API truncates task and answer previews at this length.
@@ -146,8 +147,8 @@ def stepper(record: Mapping[str, Any]) -> Text:
     return text
 
 
-def example_rows(comparison: Mapping[str, Any] | None) -> list[tuple[str, str, str, str]]:
-    """Per-example baseline and candidate scores, largest gain first."""
+def example_rows(comparison: Mapping[str, Any] | None) -> list[tuple[str, str, str, str, str]]:
+    """Per-example baseline and candidate scores with the verdict, largest gain first."""
     manifest = comparison.get("manifest") if comparison else None
     evaluation = manifest.get("evaluation") if isinstance(manifest, Mapping) else None
     if not isinstance(evaluation, Mapping):
@@ -164,7 +165,16 @@ def example_rows(comparison: Mapping[str, Any] | None) -> list[tuple[str, str, s
             if _number(x) is not None and _number(y) is not None
         )
     rows.sort(key=lambda row: -row[0])
-    return [(name, f"{x:.3f}", f"{y:.3f}", f"{delta:+.3f}") for delta, name, x, y in rows]
+    return [
+        (
+            name,
+            f"{x:.3f}",
+            f"{y:.3f}",
+            f"{delta:+.3f}",
+            "better" if delta > 1e-9 else "worse" if delta < -1e-9 else "same",
+        )
+        for delta, name, x, y in rows
+    ]
 
 
 class ImproveScreen(ModalScreen[None]):
@@ -191,6 +201,7 @@ class ImproveScreen(ModalScreen[None]):
     #review-detail-scroll, #runs-scroll, #results-scroll, #readiness-scroll {
         width: 1fr; height: 1fr; min-height: 0; border: round $panel; padding: 0 1;
     }
+    #review-legend { height: auto; color: $warning; }
     #review-text, #runs-detail, #results-text, #readiness-text, #review-figures { height: auto; }
     #review-figures Checkbox { height: auto; padding: 0; border: none; }
     #review-detail-scroll Input { margin: 0; }
@@ -253,6 +264,7 @@ class ImproveScreen(ModalScreen[None]):
             yield Static("", id="improve-progress")
             with TabbedContent(initial=self.initial_tab, id="improve-tabs"):
                 with TabPane("Review", id="review"):
+                    yield Static("", id="review-legend")
                     with Horizontal(id="review-body", classes="pane-body"):
                         yield DataTable(id="review-queue", cursor_type="row", zebra_stripes=True)
                         with VerticalScroll(id="review-detail-scroll"):
@@ -310,7 +322,9 @@ class ImproveScreen(ModalScreen[None]):
         """Build the tables, load the API state, and keep it refreshed while open."""
         self.query_one("#review-queue", DataTable).add_columns("Label", "Session", "Task", "Answer")
         self.query_one("#runs-table", DataTable).add_columns("Run", "Kind", "Trigger", "Status", "Stage")
-        self.query_one("#results-examples", DataTable).add_columns("Example", "Baseline", "Candidate", "Delta")
+        self.query_one("#results-examples", DataTable).add_columns(
+            "Example", "Baseline", "Candidate", "Delta", "Result"
+        )
         self.refresh_state()
         self.set_interval(1.0, self.refresh_state)
 
@@ -467,9 +481,12 @@ class ImproveScreen(ModalScreen[None]):
 
     def _render_progress(self) -> None:
         """Display observed metric-call counts, stage, or terminal status without estimating progress."""
-        kind, stage = self.progress.get("type"), self.progress.get("stage")
         active = self._active_record()
-        if type(self.progress.get("metric_calls_used")) is int:
+        kind, stage = self.progress.get("type"), self.progress.get("stage") or (active or {}).get("stage")
+        validation = (self.progress.get("validation_done"), self.progress.get("validation_total"))
+        if stage == "validation" and type(validation[0]) is int and type(validation[1]) is int:
+            message = f"Validation · {validation[0]}/{validation[1]} rollouts"
+        elif type(self.progress.get("metric_calls_used")) is int:
             used, remaining = self.progress["metric_calls_used"], self.progress.get("metric_calls_remaining")
             message = f"Search · {used} metric calls used"
             if type(remaining) is int and remaining >= 0:
@@ -507,7 +524,7 @@ class ImproveScreen(ModalScreen[None]):
             (
                 item["turn_id"],
                 (
-                    str(item.get("label", "")),
+                    ("⚑ " if item.get("flags") else "") + str(item.get("label", "")),
                     str(item.get("session_id", ""))[-10:],
                     item["task"][:40],
                     item["answer"][:40],
@@ -516,6 +533,11 @@ class ImproveScreen(ModalScreen[None]):
             for item in self.queue
         ]
         self._sync_table(self.query_one("#review-queue", DataTable), rows, self.selected_turn_id)
+        self.query_one("#review-legend", Static).update(
+            "⚑ flagged Turns teach GEPA the most (errors, rejected SUBMITs, or a below-perfect evaluation)"
+            if any(item.get("flags") for item in self.queue)
+            else ""
+        )
         item = self._selected_item()
         if item is None:
             if not self.queue:
@@ -531,8 +553,14 @@ class ImproveScreen(ModalScreen[None]):
         labelled = item.get("label") != "unlabelled"
         saved = list(item.get("expected_values") or [])
         listed = list(item.get("figures") or [])
+        flags = item.get("flags") or []
         self.query_one("#review-text", Static).update(
-            Text(f"Label  {item.get('label')}\n\nTASK\n{item['task']}\n\nANSWER\n{item['answer']}", overflow="fold")
+            Text(
+                f"Label  {item.get('label')}"
+                + (f"\n⚑ {'; '.join(flags)}" if flags else "")
+                + f"\n\nTASK\n{item['task']}\n\nANSWER\n{item['answer']}",
+                overflow="fold",
+            )
         )
         container = self.query_one("#review-figures", Vertical)
         container.remove_children()
@@ -566,6 +594,16 @@ class ImproveScreen(ModalScreen[None]):
             missing = report.get("missing") or []
             if missing:
                 lines += ["", "STILL NEEDED", *(f"  • {item}" for item in missing)]
+            lines.append(f"Each of dev and holdout needs at least {report.get('min_split_examples', '?')} examples.")
+            lines += ["", "WHAT CAN IMPROVE (GEPA can rewrite these)"]
+            lines += [f"  • {item['name']}: {item['description']}" for item in report.get("components") or []]
+            improvable = report.get("improvable_examples")
+            lines.append(
+                "Labelled examples scoring below 1.0 in the latest evaluation: "
+                + ("unknown (run an Evaluate first)" if improvable is None else str(improvable))
+            )
+            if report.get("note"):
+                lines.append(str(report["note"]))
             text = "\n".join(lines)
         if (prefs := self.improve_settings) is not None:
             budget = f"{prefs['max_metric_calls']} metric calls" if prefs.get("max_metric_calls") else "light budget"
@@ -624,6 +662,9 @@ class ImproveScreen(ModalScreen[None]):
             out.append("\n")
             if used is not None:
                 out.append(f"Metric calls {_bar(used, used + remaining if remaining is not None else None)}\n")
+            done, total = _number(progress.get("validation_done")), _number(progress.get("validation_total"))
+            if done is not None and total:
+                out.append(f"Validation   {_bar(done, total)} rollouts\n")
             if tokens is not None:
                 out.append(f"Tokens       {_bar(tokens, cap)}{'' if cap else ' (no cap)'}\n")
             best = _number(progress.get("best_score"))
@@ -681,6 +722,11 @@ class ImproveScreen(ModalScreen[None]):
         """Format saved outcomes and diagnostics, using comparison evidence only for the matching run."""
         run_id = str(record.get("run_id", "unknown"))
         lines = []
+        report = self.comparison if self.comparison_run_id == run_id else None
+        if summary := comparison_summary(report):
+            lines += ["OUTCOME  " + summary["headline"], ""]
+        if report is not None and report.get("rationale"):
+            lines += ["SUMMARY (a model's reading of this comparison, not evidence)", str(report["rationale"]), ""]
         if trend := self._trend():
             lines += [trend, ""]
         lines += [
@@ -702,9 +748,6 @@ class ImproveScreen(ModalScreen[None]):
         failure = record.get("failure")
         if isinstance(failure, Mapping):
             lines.extend(["", "FAILURE", f"{failure.get('type', 'Error')}: {failure.get('detail', '')}"])
-        report = self.comparison if self.comparison_run_id == run_id else None
-        if report is not None and report.get("rationale"):
-            lines.extend(["", "SUMMARY (a model's reading of this comparison, not evidence)", str(report["rationale"])])
         if report is None:
             lines.extend(["", "Comparison report unavailable."])
             return "\n".join(lines)

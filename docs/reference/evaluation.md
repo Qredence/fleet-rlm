@@ -434,6 +434,15 @@ every Session serves the approved program. The workflow is:
 5. **Review.** In **Results**, inspect the gate, means, per-example wins and losses, component
    diffs, and the installed holdout trend; `Approve` installs a passing candidate and `Reject` records the decision.
 
+**Rigor.** Readiness lists what GEPA can rewrite, how many labelled examples still score below 1.0 in the
+latest Evaluate (or says it is unknown), and requires `FLEET_MIN_SPLIT_EXAMPLES` (default 5) examples in each of dev and
+holdout; with everything already passing, optimizing is unlikely to change anything, so label Turns Fleet got wrong,
+slow, or misrouted. GEPA learns from failures and feedback, the valset picks the winner, and the holdout influences
+neither. The Review tab flags Turns with stored trouble signals or a below-1.0 evaluation and lists them first. During
+validation the Runs tab shows `validation 14/36` rollouts; a candidate identical to the incumbent skips validation and ends
+with the gate's reason. Results opens with a one-line outcome (components changed, per-split means with improved,
+regressed and tied counts, critical cases) before the model-written summary and the per-example table.
+
 **Auto-run.** The Readiness tab shows and edits the auto-run switch, the new-label threshold, the automatic
 metric-call budget, and the default token cap (`PUT /improve/settings`). When enabled, a saved label that makes
 readiness green with enough new labels and no active job starts an `optimize` job marked `auto`; it only

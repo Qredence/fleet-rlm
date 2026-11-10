@@ -1372,7 +1372,7 @@ def test_missing_critical_holdout_refuses_curation_before_search_or_serving_mode
 
 def test_readiness_counts_examples_groups_critical_cases_and_the_split_they_would_form() -> None:
     examples = [Example(f"task-{index}", f"group-{index % 4}", critical=index == 0) for index in range(8)]
-    ready = dataset.readiness(examples)
+    ready = dataset.readiness(examples, min_split_examples=1)
     assert ready.ready and ready.missing == []
     assert (ready.examples, ready.groups, ready.critical) == (8, 4, 1)
     assert sum(ready.split_sizes.values()) == 8 and all(ready.split_sizes.values())
@@ -1380,7 +1380,7 @@ def test_readiness_counts_examples_groups_critical_cases_and_the_split_they_woul
 
 
 def test_readiness_names_every_missing_requirement_in_plain_words() -> None:
-    thin = dataset.readiness([Example("only", "g1")])
+    thin = dataset.readiness([Example("only", "g1")], min_split_examples=1)
     assert not thin.ready and thin.split_sizes == {}
     assert len(thin.missing) == 3
     assert "8 approved gold-labeled examples are needed; found 1" in thin.missing[0]
@@ -1392,7 +1392,7 @@ def test_readiness_surfaces_an_unusable_split_instead_of_raising() -> None:
     # Two critical groups leave a single noncritical group, which cannot form train and dev.
     groups = ["c1", "c2", "n1"]
     examples = [Example(f"task-{index}", groups[index % 3], critical=index < 2) for index in range(8)]
-    status = dataset.readiness(examples)
+    status = dataset.readiness(examples, min_split_examples=1)
     assert not status.ready and any("Source-group split needs" in item for item in status.missing)
 
 
@@ -1451,6 +1451,7 @@ def test_postgres_examples_span_every_session() -> None:
         "optional_tracking",
         "optional_stdout",
         "optional_tracking_setup",
+        "unchanged",
     ],
 )
 def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
@@ -1586,7 +1587,8 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             assert not hasattr(baseline.program, "execution_mode")
             candidate = baseline.deepcopy()
             state = candidate.program.dump_state()
-            state["reasoning.flex"]["module_src"] += "\n# optimized source\n"
+            if cancel_after_validation != "unchanged":
+                state["reasoning.flex"]["module_src"] += "\n# optimized source\n"
             candidate.program.load_state(state)
             candidate.detailed_results = SimpleNamespace(to_dict=lambda: {"best_idx": 1}, total_metric_calls=4)
             searched.append(True)
@@ -1602,6 +1604,8 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         assert searched and actual_dev is dev and actual_holdout is holdout
         changed = "optimized source" in program.program.reasoning.flex.module_src
         measured.append(changed)
+        for _ in range(2):  # one dev and one holdout rollout per scored stage
+            _kwargs["on_rollout"]()
         if (cancel_after_validation == "cleanup_incumbent" and not changed) or (
             cancel_after_validation == "cleanup_candidate" and changed
         ):
@@ -1666,6 +1670,17 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         structured_events=True,
         max_total_tokens=50 if cancel_after_validation == "token_budget" else None,
     )
+    if cancel_after_validation == "unchanged":
+        workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+        # No rollouts are wasted on a candidate identical to the incumbent; the gate names the reason.
+        assert measured == []
+        manifest = json.loads(next((tmp_path / "candidates").glob("*.manifest.json")).read_text())
+        assert manifest["gate"] == {"passed": False, "reasons": ["candidate changes no instructions or Flex code"]}
+        assert manifest["evaluation"]["validation"] == "skipped_unchanged"
+        full = json.loads(next((tmp_path / "candidates").glob("*.comparison.json")).read_text())
+        assert full["rationale"] == "" and "paired validation was skipped" in full["report"]
+        assert "scores" not in store.records["s1-run"]
+        return
     if cancel_after_validation == "token_budget":
         with pytest.raises(workflow.BudgetExhaustedError):
             workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
@@ -1777,6 +1792,10 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     full_report = json.loads(comparison_json.read_text())
     assert full_report["manifest"]["evaluation"]["candidate"]["component_diffs"] == [diff]
     assert full_report["rationale"] == "" and "rationale" not in manifest
+    # The worker counts finished validation rollouts: 2 stages x 3 passes x (1 dev + 1 holdout).
+    progress = store.records["s1-run"]["progress"]
+    assert (progress["validation_done"], progress["validation_total"]) == (12, 12)
+    assert manifest["evaluation"]["candidate"]["components_total"] == 8
     assert "Candidate diffs" in comparison_md.read_text()
     assert active.read_bytes() and digest_bytes(active.read_bytes()) == digest
 
@@ -2648,7 +2667,9 @@ def test_check_exits_zero_when_ready(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
     parser = _optimization_parser()
     workflow.run(
-        parser.parse_args(["--check"]), parser, FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+        parser.parse_args(["--check"]),
+        parser,
+        FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path), min_split_examples=1),
     )
     assert json.loads(capsys.readouterr().out)["ready"] is True
 
@@ -2762,7 +2783,11 @@ def _guarded(tmp_path, monkeypatch, *, cap=None):
 def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path, monkeypatch):
     settings, store, args, guard = _guarded(tmp_path, monkeypatch)
     train, dev, holdout = (
-        [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
+        [
+            dspy.Example(task=name, source_group=name, critical=name == "holdout", replay_turn_id=f"{name}-{index}")
+            for index in range(2)
+        ]
+        for name in ("train", "dev", "holdout")
     )
     monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
     template = object()
@@ -2858,7 +2883,10 @@ def test_a_postgres_label_whose_trace_carries_gold_is_rescored_in_its_split(tmp_
 
 def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_most_one(tmp_path, monkeypatch):
     settings, store, args, guard = _guarded(tmp_path, monkeypatch, cap=100)
-    holdout = [dspy.Example(task=f"h{index}", source_group="h", critical=False) for index in range(20)]
+    holdout = [
+        dspy.Example(task=f"h{index}", source_group="h", critical=False, replay_turn_id=f"h{index}")
+        for index in range(20)
+    ]
     monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([], [], holdout))
     monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=object()))
     monkeypatch.setattr(workflow, "build_isolated_engine_factory", lambda *_a, **_k: object())
@@ -3066,3 +3094,65 @@ def test_failure_detail_names_provider_errors_but_never_quotes_evaluated_content
         "Optimization failed; exception details omitted."
     )
     assert len(workflow.failure_detail(LMUnsupportedModelError("m" * 5000))) < 400
+
+
+def test_the_gate_alone_rejects_a_skipped_validation_and_cannot_be_forged_into_passing():
+    from fleet_rlm.optimize.artifacts import NO_CHANGE_REASON, VALIDATION_SKIPPED, promotion_gate
+
+    base = {"policy_version": artifacts.APPROVAL_POLICY_VERSION, "validation": VALIDATION_SKIPPED}
+    gate = promotion_gate({**base, "baseline": {}, "candidate": {"changed_components": []}})
+    assert not gate.passed and gate.reasons == (NO_CHANGE_REASON,)
+    forged = promotion_gate({**base, "baseline": {}, "candidate": {"changed_components": ["routing.predict"]}})
+    assert not forged.passed and NO_CHANGE_REASON not in forged.reasons
+
+
+def test_comparison_summary_counts_improved_regressed_and_tied_examples_per_split():
+    from fleet_rlm.optimization_runs import comparison_summary
+
+    comparison = {
+        "manifest": {
+            "gate": {"passed": False, "reasons": ["dev did not improve"]},
+            "evaluation": {
+                "baseline": {"dev_scores": [0.5, 1.0, 0.0], "holdout_scores": [1.0, 1.0]},
+                "candidate": {
+                    "changed_components": ["routing.predict", "reasoning.rlm.extract"],
+                    "components_total": 8,
+                    "dev_scores": [1.0, 0.5, 0.0],
+                    "holdout_scores": [1.0, 1.0],
+                    "holdout_critical_scores": [1.0, 1.0],
+                },
+            },
+        }
+    }
+    summary = comparison_summary(comparison)
+    assert summary["splits"]["dev"] == {
+        "n": 3,
+        "baseline": 0.5,
+        "candidate": 0.5,
+        "improved": 1,
+        "regressed": 1,
+        "ties": 1,
+    }
+    assert summary["splits"]["holdout"]["ties"] == 2 and summary["critical"] == {"passed": 2, "n": 2}
+    assert summary["headline"] == (
+        "Changed 2 of 8: routing.predict, reasoning.rlm.extract · dev 0.50→0.50 (1 improved, 1 regressed of 3)"
+        " · holdout 1.00→1.00 (0 improved, 0 regressed of 2) · critical 2/2 · gate: dev did not improve"
+    )
+    assert comparison_summary(None) is None and comparison_summary({"manifest": {}}) is None
+
+
+def test_readiness_requires_the_minimum_examples_in_dev_and_holdout_in_one_place(monkeypatch):
+    # 20 examples over ten groups split 8 train / 6 dev / 6 holdout.
+    examples = [Example(f"task-{index}", f"group-{index // 2}", critical=index < 2) for index in range(20)]
+    assert dataset.readiness(examples, min_split_examples=5).ready
+    status = dataset.readiness(examples, min_split_examples=7)
+    assert status.min_split_examples == 7
+    for name in ("dev", "holdout"):
+        assert f"{name} would have 6 examples; need 7 — label more Turns from more Sessions" in status.missing
+    assert dataset.readiness(examples, min_split_examples=1).ready
+    # The total scales with the dev share: five dev examples at a 0.35 share need fifteen examples.
+    assert dataset.readiness(examples[:14], min_split_examples=5).missing[0].startswith("15 approved gold-labeled")
+    # Curation, `--check`, and the HTTP report all call this same function, so a run refuses the same way.
+    monkeypatch.setattr(dataset, "load_examples", lambda *_a: examples)
+    with pytest.raises(ValueError, match="dev would have 6 examples; need 7"):
+        dataset.curate_dataset(SimpleNamespace(), "exp", min_split_examples=7)

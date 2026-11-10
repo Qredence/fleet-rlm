@@ -1835,10 +1835,10 @@ def test_results_tab_sorts_examples_by_delta_and_shows_the_installed_trend() -> 
             table = screen.query_one("#results-examples", DataTable)
             rows = [table.get_row_at(i) for i in range(table.row_count)]
             assert rows == [
-                ["holdout #1", "0.000", "1.000", "+1.000"],
-                ["dev #1", "0.500", "0.500", "+0.000"],
-                ["holdout #2", "0.500", "0.500", "+0.000"],
-                ["dev #2", "1.000", "0.250", "-0.750"],
+                ["holdout #1", "0.000", "1.000", "+1.000", "better"],
+                ["dev #1", "0.500", "0.500", "+0.000", "same"],
+                ["holdout #2", "0.500", "0.500", "+0.000", "same"],
+                ["dev #2", "1.000", "0.250", "-0.750", "worse"],
             ]
             text = str(screen.query_one("#results-text").render())
             assert "Promotion gate  FAIL" in text and "dev regressed" in text
@@ -2078,5 +2078,100 @@ def test_status_bar_badge_follows_readiness() -> None:
             api["readiness"] = {**api["readiness"], "ready": False}
             await tui._refresh_readiness()
             assert "ready to optimize" not in str(tui.query_one("#status-left").render())
+
+    asyncio.run(scenario())
+
+
+def test_validation_progress_readiness_sections_and_review_flags_render() -> None:
+    from textual.widgets import DataTable, TabbedContent
+
+    running = _experiment_record("sess_val-run", "running")
+    running.update(
+        stage="validation",
+        progress={"metric_calls_used": 10, "metric_calls_remaining": 6, "validation_done": 14, "validation_total": 36},
+    )
+    transport, api = _experiment_transport([running])
+    api["queue"] = {
+        "items": [
+            {**_QUEUE_ITEM, "turn_id": "turn-flag", "flags": ["2 sandbox errors"], "evaluation_score": None},
+            {**_QUEUE_ITEM, "turn_id": "turn-calm", "flags": []},
+        ]
+    }
+    api["readiness"] = {
+        "ready": False,
+        "examples": 8,
+        "groups": 4,
+        "critical": 1,
+        "split_sizes": {"train": 4, "dev": 2, "holdout": 2},
+        "missing": ["dev would have 2 examples; need 5 — label more Turns from more Sessions"],
+        "min_split_examples": 5,
+        "new_labels_since_last_run": 0,
+        "components": [{"name": "routing", "description": "Chooses direct, flex, or rlm for a task."}],
+        "improvable_examples": 0,
+        "note": "All labelled examples already pass; optimizing now is unlikely to change anything.",
+    }
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_val", (120, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen.queue and screen.readiness and screen.records)
+            await pilot.pause(0.1)
+            assert "Validation · 14/36 rollouts" in str(screen.query_one("#improve-progress").render())
+            assert "flagged Turns teach GEPA the most" in str(screen.query_one("#review-legend").render())
+            queue = screen.query_one("#review-queue", DataTable)
+            assert queue.get_row_at(0)[0].startswith("⚑") and not queue.get_row_at(1)[0].startswith("⚑")
+            assert "2 sandbox errors" in str(screen.query_one("#review-text").render())
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await pilot.pause(0.1)
+            assert "14/36" in str(screen.query_one("#runs-detail").render())
+            screen.query_one("#improve-tabs", TabbedContent).active = "readiness"
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#readiness-text").render())
+            for expected in (
+                "need 5",
+                "Each of dev and holdout needs at least 5 examples",
+                "WHAT CAN IMPROVE",
+                "routing: Chooses direct, flex, or rlm",
+                "scoring below 1.0 in the latest evaluation: 0",
+                "already pass",
+            ):
+                assert expected in text, text
+
+    asyncio.run(scenario())
+
+
+def test_results_open_with_the_outcome_headline_then_the_unverified_summary() -> None:
+    from textual.widgets import TabbedContent
+
+    comparison = {
+        "manifest": {
+            "evaluation": {
+                "baseline": {"dev_scores": [0.5, 0.5], "holdout_scores": [1.0]},
+                "candidate": {
+                    "changed_components": ["routing.predict"],
+                    "components_total": 8,
+                    "dev_scores": [1.0, 0.5],
+                    "holdout_scores": [1.0],
+                },
+            }
+        },
+        "rationale": "Routing changed and one dev example improved.",
+    }
+    transport, _api = _experiment_transport([_experiment_record("sess_head-run")], comparison=comparison)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_head", (120, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "results"
+            await _wait_for(pilot, lambda: screen.comparison)
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#results-text").render())
+            headline = text.index("OUTCOME  Changed 1 of 8: routing.predict")
+            summary = text.index("not evidence")
+            assert "1 improved, 0 regressed of 2" in text and headline < summary < text.index("RUN  sess_head-run")
 
     asyncio.run(scenario())

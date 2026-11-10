@@ -370,14 +370,22 @@ class JobEnvelope(BaseModel):
 
 
 class JobDetail(BaseModel):
-    """One public job and its optional saved comparison evidence."""
+    """One public job, its optional saved comparison evidence, and that comparison's computed summary."""
 
     job: Job
     comparison: dict[str, Any] | None
+    summary: dict[str, Any] | None = None
+
+
+class TunableComponent(BaseModel):
+    """One part of the program GEPA can rewrite, in plain words."""
+
+    name: str
+    description: str
 
 
 class ImproveReadiness(BaseModel):
-    """What the labelled examples support today and what a run still needs."""
+    """What the labelled examples support today, what a run still needs, and what could improve."""
 
     ready: bool
     examples: int
@@ -385,7 +393,12 @@ class ImproveReadiness(BaseModel):
     critical: int
     split_sizes: dict[str, int]
     missing: list[str]
+    min_split_examples: int
     new_labels_since_last_run: int
+    components: list[TunableComponent]
+    # Labelled examples whose latest evaluation scored below 1.0; None while nothing was ever evaluated.
+    improvable_examples: int | None = None
+    note: str | None = None
 
 
 class ImproveSettings(BaseModel):
@@ -421,6 +434,9 @@ class QueueItem(BaseModel):
     critical: bool = False
     group: str | None = None
     updated_at: str | None = None
+    # Why this Turn is worth labelling or relabelling; flagged Turns teach GEPA the most.
+    flags: list[str] = Field(default_factory=list)
+    evaluation_score: float | None = None
 
 
 class ImproveQueue(BaseModel):

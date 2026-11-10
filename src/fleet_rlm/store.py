@@ -1026,6 +1026,8 @@ class Store:
                            replay.sha256 AS replay_snapshot_sha256,
                            turns.result->>'answer' AS answer,
                            turns.result->>'trace_id' AS trace_id,
+                           turns.result->>'sandbox_errors' AS sandbox_errors,
+                           turns.result->>'submit_rejections' AS submit_rejections,
                            turns.updated_at,
                            COALESCE(labels.task, (
                                SELECT entry->>'task'

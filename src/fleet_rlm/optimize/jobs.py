@@ -44,7 +44,7 @@ def split_summary(scores: Iterable[float], critical_scores: Iterable[float] = ()
         "n": len(values),
         "mean": round(sum(values) / len(values), 4) if values else None,
         "errors": errors,
-        "critical": {"passed": sum(score == 1.0 for score in critical), "n": len(critical)},
+        "critical": {"passed": sum(score >= 1.0 for score in critical), "n": len(critical)},
     }
 
 
@@ -67,17 +67,20 @@ def evaluation_result(
     }
 
 
-def rescore_scores(result: Any) -> tuple[list[float], list[float]]:
-    """Per-trace Fleet metric values from an MLflow evaluation, and those of its critical examples."""
+def rescore_scores(result: Any) -> tuple[list[float], list[float], dict[str, float]]:
+    """Fleet metric values from an MLflow evaluation, those of its critical examples, and each trace's own."""
     frame = result.result_df
     if "fleet_metric/value" not in frame:
-        return [], []
+        return [], [], {}
     expectations = frame["expectations"] if "expectations" in frame else [None] * len(frame)
-    scores, critical = [], []
-    for value, expected in zip(frame["fleet_metric/value"], expectations, strict=True):
+    trace_ids = frame["trace_id"] if "trace_id" in frame else [None] * len(frame)
+    scores, critical, by_trace = [], [], {}
+    for value, expected, trace_id in zip(frame["fleet_metric/value"], expectations, trace_ids, strict=True):
         if value is None or value != value:
             continue
         scores.append(float(value))
+        if trace_id:
+            by_trace[str(trace_id)] = float(value)
         if isinstance(expected, dict) and expected.get("critical") is True:
             critical.append(float(value))
-    return scores, critical
+    return scores, critical, by_trace

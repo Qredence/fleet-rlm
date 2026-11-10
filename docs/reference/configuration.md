@@ -42,6 +42,7 @@ source control.
 | `FLEET_AUTO_OPTIMIZE` | `false` | Start an `optimize` job after enough new labels. Candidates still wait for explicit approval. A value saved through `PUT /improve/settings` overrides it. |
 | `FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS` | `5` | New approved labels since the last finished optimize job that trigger an automatic job. Overridden by the saved setting. |
 | `FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS` | unset | Search metric calls for automatic jobs; unset keeps the light budget. Overridden by the saved setting. |
+| `FLEET_MIN_SPLIT_EXAMPLES` | `5` | Labelled examples the dev and holdout splits each need before an optimize job may start. The total requirement is `ceil(this / validation_ratio)`, never below 8; splits are by source group. |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
 | `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory; the installed program is `fleet.json` in it, shared by every Session. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |

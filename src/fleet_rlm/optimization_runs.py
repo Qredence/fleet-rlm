@@ -26,6 +26,17 @@ EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
 # One job system: `kind` selects the worker body inside the same subprocess and ledger.
 JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
+# What GEPA can rewrite, in plain words. Names match `tunable_components`.
+COMPONENT_DESCRIPTIONS = {
+    "routing": "Chooses direct, flex, or rlm for a task.",
+    "skill_selection": "Picks which Skills to load for a task (inactive without a TypeSafe/Jev credential).",
+    "reasoning.direct": "Answers simple, self-contained tasks without a sandbox.",
+    "reasoning.rlm": "Plans and writes the code the sandbox runs, and extracts the final answer.",
+    "reasoning.flex": "The generated Flex program for programmable multi-step workflows.",
+    "child_policies": "Instructions for delegated child agents (leaf and delegating).",
+}
+
+
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _MAX_REPORT_BYTES = 4_000_000
 VALIDATION_RATIO_MIN = 0.1
@@ -225,6 +236,79 @@ _PUBLIC_FIELDS = frozenset(
         "trigger",
     }
 )
+
+
+_EPSILON = 1e-9
+
+
+def _paired_counts(before: Any, after: Any) -> dict[str, Any] | None:
+    if not (isinstance(before, list) and isinstance(after, list) and len(before) == len(after) and before):
+        return None
+    pairs = [
+        (x, y)
+        for x, y in zip(before, after, strict=True)
+        if isinstance(x, (int, float)) and isinstance(y, (int, float))
+    ]
+    if len(pairs) != len(before):
+        return None
+    return {
+        "n": len(pairs),
+        "baseline": round(sum(x for x, _ in pairs) / len(pairs), 4),
+        "candidate": round(sum(y for _, y in pairs) / len(pairs), 4),
+        "improved": sum(y > x + _EPSILON for x, y in pairs),
+        "regressed": sum(y < x - _EPSILON for x, y in pairs),
+        "ties": sum(abs(y - x) <= _EPSILON for x, y in pairs),
+    }
+
+
+def comparison_summary(comparison: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The one-line outcome of a saved comparison: what changed, per-split improved/regressed counts, criticals.
+
+    Computed from the stored paired scores alone; no model is involved.
+    """
+    manifest = comparison.get("manifest") if comparison else None
+    evaluation = manifest.get("evaluation") if isinstance(manifest, Mapping) else None
+    if not isinstance(evaluation, Mapping):
+        return None
+    candidate = evaluation.get("candidate") if isinstance(evaluation.get("candidate"), Mapping) else {}
+    baseline = evaluation.get("baseline") if isinstance(evaluation.get("baseline"), Mapping) else {}
+    changed = list(candidate.get("changed_components") or [])
+    total = candidate.get("components_total")
+    splits = {
+        split: counts
+        for split in ("dev", "holdout")
+        if (counts := _paired_counts(baseline.get(f"{split}_scores"), candidate.get(f"{split}_scores")))
+    }
+    critical = candidate.get("holdout_critical_scores")
+    critical_summary = (
+        {"passed": sum(score >= 1.0 for score in critical), "n": len(critical)}
+        if isinstance(critical, list) and critical
+        else None
+    )
+    parts = [
+        f"Changed {len(changed)}"
+        + (f" of {total}" if isinstance(total, int) else "")
+        + ": "
+        + (", ".join(changed) or "nothing")
+    ]
+    for split, counts in splits.items():
+        parts.append(
+            f"{split} {counts['baseline']:.2f}→{counts['candidate']:.2f} "
+            f"({counts['improved']} improved, {counts['regressed']} regressed of {counts['n']})"
+        )
+    if critical_summary:
+        parts.append(f"critical {critical_summary['passed']}/{critical_summary['n']}")
+    raw_gate = manifest.get("gate") if isinstance(manifest, Mapping) else None
+    gate: Mapping[str, Any] = raw_gate if isinstance(raw_gate, Mapping) else {}
+    if gate.get("passed") is False and gate.get("reasons"):
+        parts.append("gate: " + "; ".join(str(reason) for reason in gate["reasons"]))
+    return {
+        "changed": changed,
+        "components_total": total if isinstance(total, int) else None,
+        "splits": splits,
+        "critical": critical_summary,
+        "headline": " · ".join(parts),
+    }
 
 
 def public_run(record: Mapping[str, Any]) -> dict[str, Any]:
