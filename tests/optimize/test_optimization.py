@@ -326,6 +326,47 @@ def test_replay_snapshot_round_trip_rejects_changed_file_bytes() -> None:
         decode_snapshot(hashlib.sha256(invalid).hexdigest(), invalid)
 
 
+def test_required_replay_v2_reconstructs_exact_bytes_and_rejects_mismatched_origins():
+    from copy import deepcopy
+
+    from fleet_rlm.replay import decode_snapshot, required_skills_from_snapshot
+    from fleet_rlm.skills import captured_required_skill
+
+    raw = b"---\r\nname: ledger\r\ndescription: Recorded source\r\n---\r\nKeep CRLF and full text."
+    skill = captured_required_skill("ledger", "workspace", (("SKILL.md", raw), ("scripts/a.py", b"print(19)")))
+    files = {"skills/ledger/" + path: content for path, content in skill.files}
+    snapshot, _, _ = _selected_snapshot("s1", "turn-required", "use ledger", files)
+    snapshot.update(
+        schema_version=2,
+        requested_skills=["ledger"],
+        required_skills=[{"name": "ledger", "source": "workspace", "sha256": skill.sha256}],
+    )
+    snapshot["skill_revision_sha256"] = hashlib.sha256(
+        json.dumps(snapshot["context_files"], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert required_skills_from_snapshot(decode_snapshot(*encode_snapshot(snapshot))) == (skill,)
+    labels = {"expected_answer": "gold never in model inputs", "source_group": "g", "review_status": "approved"}
+    example = dataset._example(snapshot, labels, "a" * 64, "test")
+    assert example.inputs()["requested_skills"] == ["ledger"]
+    assert "gold never" not in str(example.inputs()) and "print(19)" not in str(example.inputs())
+    for mutation in ("order", "digest", "source", "missing", "legacy"):
+        invalid = deepcopy(snapshot)
+        if mutation == "order":
+            invalid["requested_skills"] = ["other"]
+        elif mutation == "digest":
+            invalid["required_skills"][0]["sha256"] = "b" * 64
+        elif mutation == "source":
+            invalid["required_skills"][0]["source"] = "guest"
+        elif mutation == "missing":
+            invalid["replay_files"].pop("skills/ledger/scripts/a.py")
+        else:
+            invalid["schema_version"] = 1
+        with pytest.raises(ValueError):
+            decode_snapshot(*encode_snapshot(invalid))
+    historical, _, _ = _selected_snapshot("s1", "old", "historical", {})
+    assert required_skills_from_snapshot(decode_snapshot(*encode_snapshot(historical))) == ()
+
+
 def test_mapping_reads_a_request_that_unity_catalog_double_encoded() -> None:
     request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)"}
     assert dataset.trace_object(json.dumps(request)) == request

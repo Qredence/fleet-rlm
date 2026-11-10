@@ -144,6 +144,17 @@ def test_trace_span_sanitization_redacts_secret_fields_and_bounds_content():
     assert len(span.outputs["answer"]) < memory_and_eval._TRACE_STRING_LIMIT + 100
 
 
+def test_native_required_skill_arguments_do_not_export_resource_bytes():
+    from fleet_rlm.observability import trace_value
+    from fleet_rlm.skills import captured_required_skill
+
+    raw = b"---\nname: source\ndescription: Source\n---\nInstructions"
+    skill = captured_required_skill("source", "workspace", (("SKILL.md", raw), ("secret.dat", b"private-resource")))
+    exported = trace_value({"required_skills": (skill,)}, nodes=[0])
+    assert exported == {"required_skills": ["[RequiredSkill omitted]"]}
+    assert "private-resource" not in str(exported)
+
+
 def test_trace_shows_reasoning_text_but_streams_still_redact_it() -> None:
     import fleet_rlm.observability as memory_and_eval
 

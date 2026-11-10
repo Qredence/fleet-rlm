@@ -32,6 +32,7 @@ LINEAGE_INPUT_FIELDS = (
     "replay_turn_id",
     "replay_snapshot_sha256",
     "context_files",
+    "requested_skills",
 )
 
 
@@ -44,11 +45,27 @@ class Route(StrEnum):
 
 
 @dataclass(frozen=True)
+class RequiredSkill:
+    """Captured deployment bytes; not learned state or a claim of reviewed execution."""
+
+    name: str
+    source: str
+    sha256: str
+    skill_md: str
+    files: tuple[tuple[str, bytes], ...] = field(repr=False)
+
+
+class SkillAdmissionError(ValueError):
+    """Caller-safe required-Skill refusal, containing no filesystem/provider details."""
+
+
+@dataclass(frozen=True)
 class OptimizationInputs:
     """What only an isolated optimization rollout supplies; absent on every ordinary Turn."""
 
     context: Any = None
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    required_skills: tuple[RequiredSkill, ...] = ()
 
 
 def turn_is_over(exc: BaseException) -> bool:
@@ -137,18 +154,18 @@ ROUTE_DESCRIPTIONS: dict[Route, dict[str, Any]] = {
         "summary": "Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
     },
     Route.RLM: {
-        "triage": "A multi-part task requiring an independent child investigation",
-        "judge": "Substantial multi-step or iterative investigation with broad context exploration",
-        "definition": "Primary RLM for iterative exploration or decomposition",
-        "examples": ["Investigate conflicting evidence", "Explore unfamiliar files and test hypotheses"],
+        "triage": "A task needing code, files, Skills, or iterative investigation",
+        "judge": "Code, file or Skill work, including bounded calculations and iterative investigation",
+        "definition": "Bounded RLM for code, file or Skill work, exploration or decomposition",
+        "examples": ["Compute a specified digit", "Summarize an attached table", "Investigate conflicting evidence"],
         "not": "A route that guarantees delegation; both execution routes can delegate",
         "summary": "Execute a bounded RLM with Daytona Python and optional child agents.",
     },
 }
 
 TRIAGE_INSTRUCTION = (
-    "Choose direct for a simple response, flex for one bounded Python or Skill workflow, "
-    "or rlm for a multi-part task needing independent investigation."
+    "Choose direct for a self-contained response requiring no code, files, or Skills; "
+    "choose rlm for code, file or Skill work, including bounded calculations and iterative investigation."
 )
 
 
@@ -160,10 +177,13 @@ def make_choice_type(options: tuple[tuple[str, str], ...]) -> type[BaseModel]:
     return result
 
 
-TRIAGE_ROUTE = make_choice_type(tuple((route.value, item["triage"]) for route, item in ROUTE_DESCRIPTIONS.items()))
+TRIAGE_ROUTE = make_choice_type(
+    tuple((route.value, ROUTE_DESCRIPTIONS[route]["triage"]) for route in (Route.DIRECT, Route.RLM))
+)
 TRIAGE_CRITERIA = {
     route.value: {"definition": item["definition"], "examples": item["examples"], "not": item["not"]}
     for route, item in ROUTE_DESCRIPTIONS.items()
+    if route in (Route.DIRECT, Route.RLM)
 }
 JUDGE_ROUTE_CHOICES = tuple((route.value, item["judge"]) for route, item in ROUTE_DESCRIPTIONS.items())
 ROUTE_SUMMARIES = {route.value: item["summary"] for route, item in ROUTE_DESCRIPTIONS.items()}

@@ -39,6 +39,18 @@ def events_of(response) -> list[dict[str, Any]]:
     return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
 
 
+@pytest.mark.parametrize(
+    "names", [None, "ledger", [1], [True], [""], ["A"], ["é"], ["../ledger"], ["a", "a"], ["a", "b", "c", "d"], ["a\n"]]
+)
+def test_required_skill_request_shape_is_strict(names):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        TurnRequest(task="task", requested_skills=names)
+    assert TurnRequest(task="task").requested_skills == []
+    assert TurnRequest(task="task", requested_skills=["a", "b", "c"]).requested_skills == ["a", "b", "c"]
+
+
 @pytest.fixture
 def turn_results():
     return json.loads((Path(__file__).parents[1] / "fixtures" / "turn_results.json").read_text())
@@ -148,6 +160,7 @@ def durable_runtime(*, lose_ack=False, unavailable_readback=False):
     )
     store = store_with(
         claim_turn=claim,
+        turn_by_key=lambda _session, key: deepcopy(rows.get(key)),
         commit_turn=persist,
         turn_status=status,
         finish_turn=finish,
@@ -314,6 +327,7 @@ def test_invalid_terminal_frame_keeps_existing_commit_and_cancellation_authority
     if not committed:
 
         def emit_uncommitted_outcome(*_args, emit, **_kwargs):
+            runtime.sandbox_mgr.reset_turn_budget()
             emit({"event": "error", "request_id": "invalid-terminal"})
             assert cancelled.wait(5), "the uncommitted worker should be fenced and drained"
 
@@ -332,13 +346,24 @@ def test_invalid_terminal_frame_keeps_existing_commit_and_cancellation_authority
 
 
 @pytest.mark.usefixtures("traced")
-@pytest.mark.parametrize("fault", ["execution", "lease", "cancelled"])
+@pytest.mark.parametrize("fault", ["execution", "lease", "cancelled", "admission_lease"])
 def test_failure_before_commit_keeps_terminal_cleanup_and_never_completes(fault):
     runtime, state = durable_runtime()
     finished = []
     execute = runtime.engine
+    if fault == "admission_lease":
+        claim = runtime.store.claim_turn
+
+        def lose_lease(*args):
+            prior = claim(*args)
+            runtime.lease_lost.set()
+            return prior
+
+        runtime.store.claim_turn = lose_lease
 
     def engine(**kwargs):
+        if fault == "admission_lease":
+            pytest.fail("A lease lost during admission must fence execution")
         if fault == "execution":
             raise RuntimeError("private execution response")
         prediction = execute(**kwargs)
@@ -1338,6 +1363,7 @@ def _run_turn_direct(
     turn_id: str = "turn-teardown",
     timeout_seconds: int | None = None,
     idempotency_key: str | None = None,
+    requested_skills: tuple[str, ...] = (),
 ) -> None:
     """Run one Turn with an ordered emit log, so `done` is observable outside the SSE route."""
 
@@ -1357,7 +1383,230 @@ def _run_turn_direct(
         callback=object(),
         emit=emit,
         timeout_seconds=timeout_seconds,
+        requested_skills=requested_skills,
     )
+
+
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("change", ["edited", "deleted"])
+def test_completed_required_turn_replays_recorded_intent_without_stopping_root(monkeypatch, tmp_path, change):
+    from fleet_rlm.skills import SkillManager
+
+    folder = tmp_path / "required"
+    folder.mkdir()
+    path = folder / "SKILL.md"
+    raw = b"---\nname: required\ndescription: Required source\n---\nOriginal instructions"
+    path.write_bytes(raw)
+    runtime, state = durable_runtime()
+    files = {}
+    runtime.skill_mgr = SkillManager(runtime.sandbox_mgr, tmp_path, None)
+    runtime.sandbox_mgr.exec_remote_python = lambda _code: "{}"
+    runtime.sandbox_mgr.write_workspace_files = files.update
+    runtime.sandbox_mgr.list_workspace_files = lambda: list(files)
+    runtime.sandbox_mgr.read_workspace_file = files.__getitem__
+    emitted = []
+    _run_turn_direct(runtime, emitted=emitted, idempotency_key="required-key", requested_skills=("required",))
+    completed = next(event for event in emitted if event["event"] == "turn_complete")
+    original = completed["required_skills"]
+    assert original[0]["name"] == "required" and original[0]["source"] == "workspace"
+    if change == "edited":
+        path.write_bytes(raw + b" changed")
+    else:
+        path.unlink()
+    resolve = SkillManager.resolve_required
+    monkeypatch.setattr(
+        SkillManager, "resolve_required", lambda *_args: pytest.fail("Completed receipts must not recapture sources")
+    )
+    replay = []
+    _run_turn_direct(
+        runtime, emitted=replay, turn_id="retry", idempotency_key="required-key", requested_skills=("required",)
+    )
+    replayed = next(event for event in replay if event["event"] == "turn_complete")
+    assert replayed["required_skills"] == original
+    assert replayed["turn_id"] == completed["turn_id"]
+    assert len(state.executions) == 1 and state.cancellations == []
+    if change == "edited":
+        monkeypatch.setattr(SkillManager, "resolve_required", resolve)
+        state.rows["required-key"]["status"] = "failed"
+        conflict = []
+        _run_turn_direct(
+            runtime,
+            emitted=conflict,
+            turn_id="retry-failed",
+            idempotency_key="required-key",
+            requested_skills=("required",),
+        )
+        assert next(event for event in conflict if event["event"] == "error")["error_type"] == "idempotency_conflict"
+        assert state.cancellations == []
+
+
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_required_receipt_and_source_conflict_do_not_own_a_deadline(monkeypatch, status):
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+    from fleet_rlm.skills import captured_required_skill
+
+    raw = b"---\nname: required\ndescription: Required\n---\nOriginal instructions"
+    skill = captured_required_skill("required", "workspace", (("SKILL.md", raw),))
+    changed = captured_required_skill("required", "workspace", (("SKILL.md", raw + b" changed"),))
+    runtime, state = durable_runtime()
+    runtime.claim_turn(
+        "original", "key", "verify termination", requested_skills=("required",), required_skills=(skill,)
+    )
+    state.rows["key"].update(
+        status=status, result={"event": "turn_complete", "turn_id": "original", "answer": "original"}
+    )
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
+    root = object()
+    manager._sandbox = root
+    cancellations = []
+
+    def cancel(_manager):
+        cancellations.append(1)
+        _manager._sandbox = None
+
+    def resolve(_names):
+        time.sleep(10.2)  # Exceeds the smallest supported public deadline, without touching a provider.
+        return (changed,)
+
+    monkeypatch.setattr(DaytonaSandboxManager, "cancel_turn", cancel)
+    runtime.sandbox_mgr = manager
+    runtime.skill_mgr = SimpleNamespace(resolve_required=resolve)
+    emitted = []
+    _run_turn_direct(
+        runtime, emitted=emitted, idempotency_key="key", requested_skills=("required",), timeout_seconds=10
+    )
+    assert cancellations == [] and manager._sandbox is root
+    assert state.executions == []
+    if status == "completed":
+        assert emitted[0]["event"] == "turn_complete" and emitted[0]["turn_id"] == "original"
+    else:
+        assert emitted[0]["error_type"] == "idempotency_conflict"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("status", ["completed", "failed", "new"])
+@pytest.mark.parametrize("disconnect", ["poll", "close"])
+async def test_disconnect_during_required_admission_preserves_receipts_and_conflicts(monkeypatch, status, disconnect):
+    from fleet_rlm.skills import captured_required_skill
+
+    raw = b"---\nname: required\ndescription: Required\n---\nOriginal instructions"
+    skill = captured_required_skill("required", "workspace", (("SKILL.md", raw),))
+    changed = captured_required_skill("required", "workspace", (("SKILL.md", raw + b" changed"),))
+    runtime, state = durable_runtime()
+    if status != "new":
+        runtime.claim_turn("original", "key", "verify", requested_skills=("required",), required_skills=(skill,))
+        state.rows["key"].update(
+            status=status, result={"event": "turn_complete", "turn_id": "original", "answer": "original"}
+        )
+    entered, release = threading.Event(), threading.Event()
+    cancelling = asyncio.Event()
+    lookup = runtime.store.turn_by_key
+
+    def wait():
+        entered.set()
+        assert release.wait(5), "admission must be released after disconnect starts"
+
+    def find(*args):
+        if status == "completed":
+            wait()
+        return lookup(*args)
+
+    def resolve(_names):
+        wait()
+        return (changed,)
+
+    runtime.store.turn_by_key = find
+    runtime.skill_mgr = SimpleNamespace(
+        resolve_required=resolve,
+        sync_local_skills_to_volume=lambda **_kwargs: 1,
+        build_catalog_xml=lambda: "<available_skills />",
+    )
+    files = {"skills/required/SKILL.md": raw + b" changed"}
+    runtime.sandbox_mgr.list_workspace_files = lambda: list(files)
+    runtime.sandbox_mgr.read_workspace_file = files.__getitem__
+    root = runtime.sandbox_mgr._sandbox = object()
+    cancel = turns_route._cancel
+
+    def stop():
+        state.cancellations.append(1)
+        runtime.sandbox_mgr._cancelled.set()
+        runtime.sandbox_mgr._sandbox = None
+
+    runtime.sandbox_mgr.cancel_turn = stop
+
+    async def cancelling_request(*args):
+        cancelling.set()
+        await cancel(*args)
+
+    def finish(_session, turn_id, outcome, result):
+        row = next(row for row in state.rows.values() if row["turn_id"] == turn_id)
+        row.update(status=outcome, result=result)
+
+    runtime.store.finish_turn = finish
+    monkeypatch.setattr(turns_route, "_cancel", cancelling_request)
+    monkeypatch.setattr(turns_route, "_DISCONNECT_POLL_SECONDS", 0.01)
+
+    async def is_disconnected():
+        return entered.is_set()
+
+    async def consume(stream):
+        return [event async for event in stream]
+
+    with turns_route.create_turn_executor() as executor:
+        stream = turns_route.stream_turn(
+            "session-a",
+            TurnRequest(task="verify", idempotency_key="key", requested_skills=["required"]),
+            SimpleNamespace(
+                app=SimpleNamespace(state=SimpleNamespace(mlflow_experiment_id=None)), is_disconnected=is_disconnected
+            ),
+            runtime,
+            api_settings(),
+            executor,
+            AsyncExitStack(),
+        )
+        closing = None
+        try:
+            assert (await anext(stream)).data["event"] == "turn_status"
+            assert await asyncio.to_thread(entered.wait, 2)
+            closing = asyncio.create_task(stream.aclose() if disconnect == "close" else consume(stream))
+            await asyncio.wait_for(cancelling.wait(), 2)
+        finally:
+            release.set()
+            if closing is not None:
+                await asyncio.wait_for(closing, 5)
+            await stream.aclose()
+    assert state.executions == []
+    if status == "new":
+        assert state.cancellations == [1]
+        assert state.rows["key"]["status"] == "cancelled"
+    else:
+        assert state.cancellations == [] and runtime.sandbox_mgr._sandbox is root
+        assert state.rows["key"]["status"] == status
+
+
+@pytest.mark.usefixtures("traced")
+@pytest.mark.parametrize("mode", ["hybrid", "direct"])
+def test_required_admission_refusal_is_durable_and_caller_safe(tmp_path, mode):
+    from fleet_rlm.skills import SkillManager
+
+    runtime, state = durable_runtime()
+    runtime.engine.execution_mode = mode
+    runtime.skill_mgr = SkillManager(runtime.sandbox_mgr, tmp_path, None)
+
+    def finish(_session, turn_id, status, result):
+        row = next(row for row in state.rows.values() if row["turn_id"] == turn_id)
+        row.update(status=status, result=result)
+
+    runtime.store.finish_turn = finish
+    emitted = []
+    _run_turn_direct(runtime, emitted=emitted, idempotency_key="refused", requested_skills=("missing",))
+    failure = next(event for event in emitted if event["event"] == "error")
+    assert str(tmp_path) not in failure["error"]
+    assert state.rows["refused"]["status"] == "failed" and state.executions == []
+    assert state.rows["refused"]["result"]["requested_skills"] == ["missing"]
+    assert runtime.turn_status(failure["turn_id"])["status"] == "failed"
 
 
 @pytest.mark.usefixtures("traced")
@@ -2095,6 +2344,7 @@ async def test_blocked_send_disconnect_drains_before_unlock_even_when_generator_
 
     def work(*_args, emit, completion_committed, **_kwargs):
         try:
+            manager.reset_turn_budget()
             if committed:
                 completion_committed.set()
             for value in range(12):

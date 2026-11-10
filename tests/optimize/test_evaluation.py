@@ -137,7 +137,7 @@ def test_gold_values_match_independent_recomputation():
 
 def test_only_confident_routes_are_labeled():
     routes = {c.category: c.route for c in synthetic_cases()}
-    assert routes == {"direct": "direct", "compute": "flex", "aggregate": "flex", "filter_count": None, "join": None}
+    assert routes == {"direct": "direct", "compute": "rlm", "aggregate": "rlm", "filter_count": None, "join": None}
 
 
 def test_label_trace_writes_each_expectation(monkeypatch):

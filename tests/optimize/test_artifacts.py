@@ -142,7 +142,7 @@ def test_invalid_artifacts_leave_incumbent_and_digest_unchanged(tmp_path, invali
     elif invalid == "version":
         envelope["format_version"] = True
     elif invalid == "schema":
-        envelope["program_schema"] = "fleet-program-b1"
+        envelope["program_schema"] = "fleet-program-a1"
     elif invalid == "extra":
         envelope["unknown"] = 1
     elif invalid == "metadata":

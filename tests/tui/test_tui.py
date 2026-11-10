@@ -146,7 +146,7 @@ def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatc
     assert "Use the ledger-audit Skill for reconciliation." in rendered
     assert "artifacts/summary.csv" in rendered
     assert "MLflow trace ID: trace-123" in rendered
-    assert "`/skills [pull|push]`" in rendered and "`/exit`" in rendered
+    assert "`/skills [pull|push|require <names...>|clear]`" in rendered and "`/exit`" in rendered
 
 
 def test_rich_cli_renders_versioned_event_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1012,6 +1012,31 @@ def test_timeout_override_is_transmitted_per_turn(override, expected):
         assert submitted[0]["timeout_seconds"] == expected["timeout_seconds"]
     else:
         assert "timeout_seconds" not in submitted[0]
+
+
+def test_required_skills_command_preserves_order_validates_and_transmits(monkeypatch):
+    output, _console = _capture_console(monkeypatch)
+    state = commands.SessionState()
+    commands.handle_command(None, "/skills require tabular-analysis delegation", "s1", state=state)
+    assert state.requested_skills == ("tabular-analysis", "delegation")
+    for invalid in ("A", "a a", "a b c d", "../escape"):
+        commands.handle_command(None, "/skills require " + invalid, "s1", state=state)
+        assert state.requested_skills == ("tabular-analysis", "delegation")
+    submitted = []
+
+    def handle(request):
+        submitted.append(json.loads(request.content))
+        return httpx.Response(200, content=b"")
+
+    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
+        with app._request_turn(client, "s1", "task", state) as response:
+            response.read()
+        commands.handle_command(None, "/skills clear", "s1", state=state)
+        with app._request_turn(client, "s1", "next task", state) as response:
+            response.read()
+    assert submitted[0]["requested_skills"] == ["tabular-analysis", "delegation"]
+    assert "requested_skills" not in submitted[1] and state.requested_skills == ()
+    assert "Required Skills" in output.getvalue()
 
 
 def test_tui_status_area_renders_advisory_labels_without_completion_claims() -> None:

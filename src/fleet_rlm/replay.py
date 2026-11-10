@@ -10,6 +10,8 @@ import json
 import re
 from typing import Any
 
+from fleet_rlm.contracts import RequiredSkill
+from fleet_rlm.skills import MAX_SKILL_TOTAL_BYTES, captured_required_skill, validate_requested_skills
 from fleet_rlm.workspace import _workspace_relative_path, validate_session_id
 
 MAX_REPLAY_FILE_BYTES = 8_000_000
@@ -96,7 +98,11 @@ def decode_snapshot(digest: str, compressed: bytes) -> dict[str, Any]:
         value = json.loads(raw)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Replay snapshot is corrupt") from exc
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
+    if (
+        not isinstance(value, dict)
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] not in {1, 2}
+    ):
         raise ValueError("Replay snapshot version is unsupported")
     contexts = value.get("context_files")
     files = value.get("replay_files")
@@ -135,4 +141,37 @@ def decode_snapshot(digest: str, compressed: bytes) -> dict[str, Any]:
         path = dataset_context.get("workspace_path")
         if not isinstance(path, str) or contexts.get(path) != dataset_context.get("sha256"):
             raise ValueError("Replay snapshot dataset context does not match its immutable file")
+    required_skills_from_snapshot(value)
     return value
+
+
+def required_skills_from_snapshot(snapshot: dict[str, Any]) -> tuple[RequiredSkill, ...]:
+    """Rebuild intent exclusively from immutable replay bytes, never current deployment files."""
+    if snapshot["schema_version"] == 1:
+        if snapshot.get("requested_skills") or snapshot.get("required_skills"):
+            raise ValueError("Historical v1 replays cannot assert required Skill origins")
+        return ()
+    names, identities = snapshot.get("requested_skills"), snapshot.get("required_skills")
+    if not isinstance(names, list) or not isinstance(identities, list) or len(names) != len(identities):
+        raise ValueError("Replay required Skill intent is invalid")
+    validate_requested_skills(tuple(names))
+    resolved = []
+    for name, identity in zip(names, identities, strict=True):
+        if not isinstance(identity, dict) or set(identity) != {"name", "source", "sha256"} or identity["name"] != name:
+            raise ValueError("Replay required Skill identity is invalid")
+        prefix = f"skills/{name}/"
+        files = tuple(
+            (path.removeprefix(prefix), base64.b64decode(encoded, validate=True))
+            for path, encoded in sorted(snapshot["replay_files"].items())
+            if path.startswith(prefix)
+        )
+        try:
+            skill = captured_required_skill(name, identity["source"], files)
+        except (KeyError, ValueError, UnicodeError) as exc:
+            raise ValueError("Replay required Skill files are invalid") from exc
+        if skill.sha256 != identity["sha256"]:
+            raise ValueError("Replay required Skill source manifest does not match captured files")
+        resolved.append(skill)
+    if sum(len(content) for skill in resolved for _, content in skill.files) > MAX_SKILL_TOTAL_BYTES:
+        raise ValueError("Replay required Skills exceed aggregate byte bounds")
+    return tuple(resolved)

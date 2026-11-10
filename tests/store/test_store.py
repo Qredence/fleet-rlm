@@ -443,6 +443,19 @@ def test_stale_ownership_epoch_cannot_claim_a_turn():
     assert not any(statement.startswith("INSERT INTO fleet_lite_turns") for statement, _ in pool.conn.statements)
 
 
+@pytest.mark.parametrize("found", [False, True])
+def test_existing_turn_receipt_lookup_is_session_scoped_and_read_only(found):
+    receipt = {"turn_id": "original", "task_sha256": "digest", "status": "completed", "result": {"answer": "saved"}}
+    store, pool = make_store([receipt] if found else [])
+    assert store.turn_by_key("s1", "key") == (receipt if found else None)
+    assert pool.conn.statements == [
+        (
+            "SELECT turn_id,task_sha256,status,result FROM fleet_lite_turns WHERE session_id=%s AND idempotency_key=%s",
+            ("s1", "key"),
+        )
+    ]
+
+
 def test_stale_ownership_epoch_cannot_commit_a_turn_record():
     store, pool = make_store([], [("s1",)], [("9",)])
 

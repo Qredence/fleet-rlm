@@ -269,7 +269,7 @@ def test_routing_evidence_distinguishes_backend_and_override(monkeypatch, backen
         route=TRIAGE_ROUTE(
             value="direct",
             confidence=0.8,
-            probabilities={"direct": 0.8, "flex": 0.1, "rlm": 0.1},
+            probabilities={"direct": 0.8, "rlm": 0.2},
         )
     )
     engine.program.reasoning.direct = lambda **_kwargs: SimpleNamespace(answer="ok")
@@ -292,7 +292,7 @@ def test_routing_regression_cases_cover_each_effective_route():
     from pathlib import Path
 
     cases = json.loads((Path(__file__).parents[1] / "fixtures/triage_cases.json").read_text())
-    assert Counter(case["route"] for case in cases) == {"direct": 6, "flex": 6, "rlm": 6}
+    assert Counter(case["route"] for case in cases) == {"direct": 6, "rlm": 12}
     assert len({case["id"] for case in cases}) == 18
     assert all(case["review_status"] == "developer_reviewed" and case["rationale"] for case in cases)
 

@@ -111,6 +111,7 @@ async def stream_turn(
     context = contextvars.copy_context()
     completion_committed = Event()
     completion_lock = Lock()
+    cancellation_requested = Event()
     job = executor.submit(
         context.run,
         run_turn,
@@ -124,9 +125,11 @@ async def stream_turn(
         callback=callback,
         emit=callback.emit,
         record_replay=req.record_replay,
+        requested_skills=tuple(req.requested_skills),
         timeout_seconds=req.timeout_seconds,
         completion_committed=completion_committed,
         completion_lock=completion_lock,
+        cancellation_requested=cancellation_requested,
     )
     worker = asyncio.wrap_future(job)
     # The wrapper owns a separate exception notification. Always retrieve it, even
@@ -147,7 +150,7 @@ async def stream_turn(
         with anyio.CancelScope(shield=True):
             if not job.cancel() and not job.done():
                 if not finished and not reported:
-                    await _cancel(runtime, completion_committed, completion_lock)
+                    await _cancel(runtime, completion_committed, completion_lock, cancellation_requested)
                 await asyncio.wait({worker})
         _log_failure(job, turn_id)
 
@@ -176,7 +179,7 @@ async def stream_turn(
                 if connected and await request.is_disconnected():
                     connected = False
                     if not reported:
-                        await _cancel(runtime, completion_committed, completion_lock)
+                        await _cancel(runtime, completion_committed, completion_lock, cancellation_requested)
                 continue
             getter = None
             if event is None:
@@ -192,7 +195,7 @@ async def stream_turn(
             if connected and await request.is_disconnected():
                 connected = False
                 if not reported:
-                    await _cancel(runtime, completion_committed, completion_lock)
+                    await _cancel(runtime, completion_committed, completion_lock, cancellation_requested)
             if connected:
                 yield framed
             if event.get("event") == "done":
@@ -221,12 +224,17 @@ async def _acquire(runtime: SessionRuntime) -> bool:
     return True
 
 
-async def _cancel(runtime: SessionRuntime, completion_committed: Event, completion_lock: Lock) -> None:
+async def _cancel(
+    runtime: SessionRuntime, completion_committed: Event, completion_lock: Lock, cancellation_requested: Event
+) -> None:
     """Claim the disconnected Turn's one teardown; a racing terminal branch joins it instead."""
+    # Record disconnect before waiting on source/receipt admission, so a new claim cannot
+    # start execution when the waiting canceller has not acquired the lock yet.
+    cancellation_requested.set()
 
     def cancel_uncommitted() -> None:
         with completion_lock:
-            if not completion_committed.is_set():
+            if not completion_committed.is_set() and runtime.sandbox_mgr.turn_active:
                 runtime.sandbox_mgr.request_cancellation()
 
     with suppress(Exception):

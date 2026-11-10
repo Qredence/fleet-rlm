@@ -176,7 +176,7 @@ compiled programs. A standalone consumer loading native LM JSON outside
 Fleet must first construct a Fleet LM for that endpoint to register its
 native declaration, then provide its credential separately. Historical native LM
 JSON remains inspectable, but Fleet installation requires the complete
-`fleet-program-a1` envelope described in [evaluation](evaluation.md). Learned state
+`fleet-program-b1` envelope described in [evaluation](evaluation.md). Learned state
 must not contain non-null LM bindings: current role models, credentials, adapters
 and budget accounting are supplied by the runtime. Legacy compiled predictor paths
 are not translated or partially loaded.

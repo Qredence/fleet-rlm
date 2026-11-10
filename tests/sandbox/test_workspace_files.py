@@ -16,6 +16,56 @@ from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.workspace_io import WorkspaceIOMixin
 
 
+@pytest.mark.parametrize("case", ["no_artifacts", "unchanged_input", "new_empty_file"])
+def test_empty_child_promotion_preserves_success_without_parent_io(monkeypatch, case):
+    events = []
+    parent = DaytonaSandboxManager("key", "org", "volume", "empty-promotion", event_callback=events.append)
+    child = DaytonaSandboxManager("key", "org", "volume", "empty-promotion", parent=parent)
+    path = "artifacts/result.txt"
+    raw = b"copied input" if case == "unchanged_input" else b""
+    inputs = {path: hashlib.sha256(raw).hexdigest()} if case == "unchanged_input" else {}
+    parent._child_receipts[child.agent_id] = {
+        "agent_id": child.agent_id,
+        "inputs": inputs,
+        "artifacts": [],
+        "status": "running",
+    }
+    published = {}
+
+    def list_files(manager):
+        if manager is child:
+            return ["skills/check/SKILL.md", *([] if case == "no_artifacts" else [path])]
+        assert case == "new_empty_file", "empty promotion must not inspect the parent workspace"
+        return []
+
+    def destinations(_manager, _code):
+        assert case == "new_empty_file", "empty promotion must not probe parent destinations"
+        return "[]"
+
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", list_files)
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, _path: raw)
+    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", destinations)
+    monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_files", lambda _self, files: published.update(files))
+
+    result = child.collect_child_artifacts()
+
+    target = f"artifacts/{child.agent_id}/result.txt"
+    expected = (
+        [{"path": target, "sha256": hashlib.sha256(b"").hexdigest(), "agent_id": child.agent_id}]
+        if case == "new_empty_file"
+        else []
+    )
+    assert result == expected
+    assert published == ({target: b""} if case == "new_empty_file" else {})
+    receipt = parent.execution_evidence()["children"][0]
+    assert receipt["status"] == "succeeded"
+    assert receipt["artifacts"] == [{**row, "root_path": row["path"]} for row in expected]
+    assert parent.execution_evidence()["children_complete"] is True
+    assert events[-1]["event"] == "agent_result"
+    assert events[-1]["status"] == "succeeded"
+    assert events[-1]["artifacts"] == expected
+
+
 def test_child_promotion_quota_preflight_performs_no_public_writes() -> None:
     writes = []
     child_files = [f"artifacts/{index:03}.txt" for index in range(101)]

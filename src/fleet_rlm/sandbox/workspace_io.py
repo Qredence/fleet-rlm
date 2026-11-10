@@ -351,12 +351,15 @@ class WorkspaceIOMixin:
             _workspace_relative_path(target)
             if len(raw) > _MAX_PROMOTED_BYTES:
                 raise ValueError("Child output promotion quota exceeded")
-        own_paths = set(self.parent.list_workspace_files())
-        collisions = own_paths.intersection(destinations)
-        occupied = json.loads(self.parent.exec_remote_python(existing_workspace_paths_code(destinations)))
-        if not isinstance(occupied, list) or not all(isinstance(path, str) for path in occupied):
-            raise RuntimeError("Invalid child output destination check")
-        collisions.update(occupied)
+        collisions: set[str] = set()
+        # An empty promotion still records success, but has no parent destinations to inspect.
+        if destinations:
+            own_paths = set(self.parent.list_workspace_files())
+            collisions = own_paths.intersection(destinations)
+            occupied = json.loads(self.parent.exec_remote_python(existing_workspace_paths_code(destinations)))
+            if not isinstance(occupied, list) or not all(isinstance(path, str) for path in occupied):
+                raise RuntimeError("Invalid child output destination check")
+            collisions.update(occupied)
         # A destination already holding identical bytes is a completed publication, so a retried
         # promotion stays idempotent instead of failing on its own earlier work.
         by_destination = {target: raw for _, target, raw in selected}

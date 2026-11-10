@@ -4,6 +4,7 @@ from typing import Any
 
 import dspy
 
+from fleet_rlm.contracts import RequiredSkill
 from fleet_rlm.engine.children import ChildPolicies
 from fleet_rlm.engine.decisions import Routing, SkillSelection
 from fleet_rlm.engine.reasoning import Reasoning
@@ -32,7 +33,7 @@ class FleetProgram(dspy.Module):
     def load_state(self, state: dict[str, Any], *, allow_unsafe_lm_state: bool = False) -> None:
         """Accept complete native state only; model selection and field contracts are host-owned."""
         if not isinstance(state, dict) or set(state) != set(self._state_contract):
-            raise ValueError("FleetProgram requires exactly the fleet-program-a1 parameter paths")
+            raise ValueError("FleetProgram requires exactly the current native parameter paths")
         for name, default in self._state_contract.items():
             value = state[name]
             if not isinstance(value, dict) or value.get("lm") is not None:
@@ -70,6 +71,7 @@ class FleetProgram(dspy.Module):
         session_history: str = "",
         context: Any = None,
         execution_mode: str = "hybrid",
+        required_skills: tuple[RequiredSkill, ...] = (),
     ) -> dspy.Prediction:
         """Compose effective-route policy, optional Skill selection and native reasoning."""
         route = self.routing(
@@ -78,14 +80,17 @@ class FleetProgram(dspy.Module):
             skills_catalog=skills_catalog,
             mode=execution_mode,
             has_context=context is not None,
+            has_required_skills=bool(required_skills),
         )
-        selected = self.skill_selection(task=task, skills_catalog=skills_catalog, route=route)
+        selected = self.skill_selection(
+            task=task, skills_catalog=skills_catalog, route=route, required_skills=required_skills
+        )
         return self.reasoning(
             route=route,
             workspace_manifest=workspace_manifest,
             memory_summary=memory_summary,
             task=task,
-            skills_catalog=self._load_skills(skills_catalog, selected),
+            skills_catalog=self._load_skills(skills_catalog, selected, required_skills=required_skills),
             session_history=session_history,
             context=context,
             mode=execution_mode,

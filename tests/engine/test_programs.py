@@ -35,7 +35,7 @@ def test_engine_forward_inputs_match_the_shared_contract():
 
     parameters = set(inspect.signature(FleetProgram.forward).parameters)
     assert set(ENGINE_INPUT_FIELDS) <= parameters
-    assert parameters - set(ENGINE_INPUT_FIELDS) == {"self", "context", "execution_mode"}
+    assert parameters - set(ENGINE_INPUT_FIELDS) == {"self", "context", "execution_mode", "required_skills"}
 
 
 def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path: Path) -> None:
@@ -56,6 +56,27 @@ def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path:
         engine.compiled.reload_if_changed(engine.program)
 
     assert engine.program.reasoning.flex.module_src == json.loads(known_good)["state"]["reasoning.flex"]["module_src"]
+
+
+@pytest.mark.parametrize("schema", ["fleet-program-a1", "fleet-program-b2", "unknown"])
+def test_incompatible_selected_program_refuses_without_mutating_or_selecting_baseline(tmp_path, schema):
+    manager = DaytonaSandboxManager("key", "org", "volume", "schema-migration")
+    path = tmp_path / "selected.json"
+    engine = _engine(manager, compiled_path=str(path), baseline=True)
+    content = json.loads(program_envelope(engine.program))
+    assert content["program_schema"] == "fleet-program-b1"
+    path.write_text(json.dumps(content))
+    engine.compiled.reload_if_changed(engine.program)
+    before = deepcopy(engine.program.dump_state())
+    content["program_schema"] = schema
+    content["state"]["routing.predict"]["signature"]["instructions"] = "Obsolete policy"
+    path.write_text(json.dumps(content))
+    with pytest.raises(ValueError, match="fleet-program-b1"):
+        engine.compiled.reload_if_changed(engine.program)
+    assert engine.program.dump_state() == before
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        engine.compiled.reload_if_changed(engine.program)
 
 
 def test_compiled_program_path_is_not_shared_by_default() -> None:
@@ -96,6 +117,68 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
     assert "RuntimeError" in caplog.text
     assert "403: invalid token" in caplog.text
     assert "typesafe-test-token" not in caplog.text
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize(
+    "mode,label,expected",
+    [
+        ("hybrid", "direct", "direct"),
+        ("hybrid", "rlm", "rlm"),
+        ("hybrid", "flex", "rlm"),
+        ("hybrid", "obsolete", "rlm"),
+        ("hybrid", None, "rlm"),
+        ("direct", "flex", "direct"),
+        ("flex", "direct", "flex"),
+        ("rlm", "direct", "rlm"),
+    ],
+)
+def test_automatic_routes_are_two_way_but_explicit_flex_remains(monkeypatch, typed, mode, label, expected):
+    manager = DaytonaSandboxManager("key", "org", "volume", "route-contract")
+    events, predictions = [], []
+    manager.event_callback = events.append
+    engine = _engine(manager, jev_lm=SimpleNamespace(model="typed") if typed else None)
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
+
+    def predict(**_kwargs):
+        predictions.append(label)
+        return SimpleNamespace(route=label)
+
+    def reason(**_kwargs):
+        manager.consume_budget(category="generation_query")
+        return dspy.Prediction(answer="verified lane", learned_skill_note="")
+
+    engine.program.routing.predict = predict
+    for route in ("direct", "flex", "rlm"):
+        setattr(engine.program.reasoning, route, reason)
+    result = engine("", "", "route fixture", execution_mode=mode)
+    assert result.route == expected and result.answer == "verified lane"
+    assert predictions == ([label] if mode == "hybrid" else [])
+    assert result.lm_calls == 1 + int(typed and mode == "hybrid")
+    evidence = next(event["evidence"] for event in events if event["event"] == "triage_decision")
+    assert evidence["raw_choice"] == (label if mode == "hybrid" else None)
+    assert evidence["confidence"] is None and evidence["probabilities"] is None
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize(
+    "failure",
+    [TimeoutError("deadline"), RuntimeError("Turn cancelled"), RuntimeError("Shared RLM budget exhausted")],
+)
+def test_routing_does_not_convert_terminal_failures_to_fallback(typed, failure):
+    manager = DaytonaSandboxManager("key", "org", "volume", "terminal-route")
+    engine = _engine(manager, jev_lm=SimpleNamespace(model="typed") if typed else None)
+
+    def predict(**_kwargs):
+        raise failure
+
+    engine.program.routing.predict = predict
+    adapter = dspy.JSONAdapter()
+    with dspy.context(adapter=adapter):
+        with pytest.raises(type(failure)) as caught:
+            engine.program.routing("task", "", "", "hybrid", False)
+        assert caught.value is failure
+        assert dspy.settings.adapter is adapter
 
 
 def test_a_started_deadline_free_turn_keeps_its_ownership(monkeypatch) -> None:
@@ -488,6 +571,75 @@ def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) ->
     assert seen["events"][0]["selected"] == ["tabular-analysis"]
 
 
+@pytest.mark.parametrize("full", [False, True])
+def test_three_required_skills_allow_three_optional_within_character_budget(monkeypatch, full):
+    from fleet_rlm.skills import captured_required_skill
+
+    names = ("third", "first", "second")
+    required = []
+    for name in names:
+        text = f"---\nname: {name}\ndescription: Required\n---\nKeep this complete.\r\n"
+        if full:
+            text += "é" * (20_000 - len(text))
+        required.append(captured_required_skill(name, "workspace", (("SKILL.md", text.encode()),)))
+    required = tuple(required)
+    optional = [f"optional-{index}" for index in range(21)]
+    catalog = (
+        "<available_skills>"
+        + "".join(f'<skill name="{name}">Description</skill>' for name in ["first", *optional, "third", "second"])
+        + "</available_skills>"
+    )
+    engine, seen = _selecting_engine(monkeypatch, set(optional))
+    selected = engine.program.skill_selection(
+        task="task", skills_catalog=catalog, route=Route.RLM, required_skills=required
+    )
+    loaded = engine.workspace.load_skills(catalog, selected, required_skills=required).removeprefix(catalog)
+    assert seen["batched"] == ([] if full else optional[:20])
+    assert seen["budget"] == (0 if full else 20)
+    assert selected == ([] if full else optional[:3])
+    assert loaded.startswith(f'\n<preloaded_skill name="third">\n{required[0].skill_md}\n</preloaded_skill>')
+    assert loaded.count("<preloaded_skill ") == (3 if full else 6)
+    assert all(skill.skill_md in loaded for skill in required)
+
+
+@pytest.mark.parametrize("mode,route", [("hybrid", "rlm"), ("rlm", "rlm"), ("flex", "flex"), ("direct", None)])
+@pytest.mark.parametrize("changed", [False, True])
+def test_required_skills_bypass_triage_but_preserve_explicit_modes(monkeypatch, mode, route, changed):
+    import hashlib
+
+    from fleet_rlm.contracts import SkillAdmissionError
+    from fleet_rlm.skills import captured_required_skill
+
+    raw = b"---\nname: required\ndescription: exact required input\n---\nComplete instructions"
+    skill = captured_required_skill("required", "workspace", (("SKILL.md", raw),))
+    manager = DaytonaSandboxManager("key", "org", "volume", "required-mode")
+    engine = _engine(manager)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "stat_workspace_file",
+        lambda *_args: {"sha256": hashlib.sha256(raw + (b" changed" if changed else b"")).hexdigest()},
+    )
+    engine.program.routing.predict = lambda **_kw: pytest.fail("No triage for required Skills")
+
+    def answer(**kwargs):
+        assert skill.skill_md in kwargs["skills_catalog"]
+        manager.consume_budget(category="generation_query")
+        return dspy.Prediction(answer="required loaded", learned_skill_note="")
+
+    engine.program.reasoning.rlm = answer
+    engine.program.reasoning.flex = answer
+    if route is None:
+        with pytest.raises(SkillAdmissionError, match="Direct"):
+            engine("", "", "task", execution_mode=mode, required_skills=(skill,))
+    elif changed:
+        with pytest.raises(SkillAdmissionError, match="changed before execution"):
+            engine("", "", "task", execution_mode=mode, required_skills=(skill,))
+        assert manager.turn_usage()["lm_calls"] == 0
+    else:
+        result = engine("", "", "task", execution_mode=mode, required_skills=(skill,))
+        assert result.route == route and result.lm_calls == 1
+
+
 def test_skill_selection_is_skipped_without_jev_or_for_direct_answers(monkeypatch) -> None:
     engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"}, jev=False)
     assert _selected_catalog(engine) == CATALOG
@@ -526,7 +678,7 @@ def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch
         "consume_budget",
         lambda _self, count=1, *, category="generation_query": charged.append((count, category)),
     )
-    engine.program.routing.predict = lambda **_kwargs: SimpleNamespace(route="flex")
+    engine.program.routing.predict = lambda **_kwargs: SimpleNamespace(route="rlm")
     engine.program.routing._consume_budget = engine.sandbox_mgr.consume_budget
 
     assert (
@@ -537,7 +689,7 @@ def test_hybrid_route_charges_one_routing_unit_per_typesafe_decision(monkeypatch
             skills_catalog=CATALOG,
             has_context=False,
         )
-        is seen["route"].FLEX
+        is seen["route"].RLM
     )
     assert charged == [(1, "routing")]
 

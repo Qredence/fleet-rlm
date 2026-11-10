@@ -16,6 +16,7 @@ from typing import Any
 import psycopg
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.contracts import RequiredSkill, SkillAdmissionError
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.models import build_lm
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -32,6 +33,12 @@ _MAX_TURN_RECORD_BYTES = 1_000_000
 _SESSION_HISTORY_TURNS = 8
 _SESSION_HISTORY_CHARS = 16_000
 _MAX_STORED_TURNS = 200
+
+
+def _required_intent_digest(task: str, names: tuple[str, ...]) -> str:
+    return hashlib.sha256(
+        json.dumps(["fleet-turn-intent-v2", task, list(names)], ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 @dataclass(slots=True)
@@ -97,12 +104,47 @@ class SessionRuntime:
         """Delete one memory after validating its ID."""
         self.store.delete_memory(self.session_id, validate_session_id(memory_id))
 
-    def claim_turn(self, turn_id: str, key: str, task: str) -> dict[str, Any] | None:
+    def completed_turn(self, key: str, task: str, requested_skills: tuple[str, ...]) -> dict[str, Any] | None:
+        """Recover required-intent success before reading today's deployment sources."""
+        prior = self.store.turn_by_key(self.session_id, key)
+        if prior is None or prior["status"] != "completed":
+            return None
+        if not prior["task_sha256"].startswith(f"v2:{_required_intent_digest(task, requested_skills)}:"):
+            raise IdempotencyConflictError("Idempotency key already belongs to another task")
+        return prior
+
+    def claim_turn(
+        self,
+        turn_id: str,
+        key: str,
+        task: str,
+        *,
+        requested_skills: tuple[str, ...] = (),
+        required_skills: tuple[RequiredSkill, ...] = (),
+        admission_error: SkillAdmissionError | None = None,
+    ) -> dict[str, Any] | None:
         """Persist intent before side effects; an uncertain running turn is never replayed."""
         digest = hashlib.sha256(task.encode()).hexdigest()
+        intent = None
+        if requested_skills:
+            intent = _required_intent_digest(task, requested_skills)
+            identities = [[skill.name, skill.source, skill.sha256] for skill in required_skills]
+            source = (
+                "refused:admission"
+                if admission_error is not None
+                else hashlib.sha256(json.dumps(identities, separators=(",", ":")).encode()).hexdigest()
+            )
+            digest = f"v2:{intent}:{source}"
         ownership = {"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}
         prior = self.store.claim_turn(self.session_id, turn_id, key, digest, **ownership)
         if prior is not None and prior["task_sha256"] != digest:
+            # A completed request is a receipt, not permission to execute today's deployment.
+            if (
+                intent is not None
+                and prior["status"] == "completed"
+                and prior["task_sha256"].startswith(f"v2:{intent}:")
+            ):
+                return prior
             raise IdempotencyConflictError("Idempotency key already belongs to another task")
         return prior
 
@@ -212,6 +254,8 @@ class SessionRuntime:
                     # Direct mode inlines the workspace; the caller needs that measurement too.
                     "direct_context_chars",
                     "direct_context_truncated",
+                    "requested_skills",
+                    "required_skills",
                 )
                 if key in turn_record
             },

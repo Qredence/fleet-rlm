@@ -7,7 +7,9 @@ import hashlib
 import html
 import json
 import logging
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -16,6 +18,7 @@ import mlflow
 import yaml
 from mlflow.entities import SpanType
 
+from fleet_rlm.contracts import RequiredSkill, SkillAdmissionError
 from fleet_rlm.sandbox.runtime.fs_ops import export_skills_code, inspect_skills_code
 
 if TYPE_CHECKING:
@@ -29,6 +32,9 @@ FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 MAX_SKILL_FILE_BYTES = 1_000_000
 MAX_SKILL_FILES = 200
 MAX_SKILL_TOTAL_BYTES = 5_000_000
+MAX_REQUIRED_SKILLS = 3
+MAX_PRELOADED_SKILL_CHARS = 20_000
+MAX_PRELOADED_TOTAL_CHARS = 60_000
 
 SANDBOX_SKILL_HELPERS_CODE = r'''
 import ast, json, os, re, subprocess
@@ -248,6 +254,8 @@ def save_skill(name, description, instructions_md, scripts=None, references=None
 
 def parse_and_validate_skill_md(folder_name: str, raw_text: str) -> tuple[dict[str, str], str]:
     """Validate Agent Skills frontmatter and return string metadata plus body."""
+    if "\x00" in raw_text or "</preloaded_skill>" in raw_text:
+        raise ValueError("Skill instructions contain a reserved preload delimiter or NUL")
     if not isinstance(folder_name, str) or not SKILL_NAME_RE.fullmatch(folder_name) or len(folder_name) > 64:
         raise ValueError("Skill folder name must be lowercase alphanumeric words separated by single hyphens")
     match = FRONTMATTER_RE.match(raw_text)
@@ -279,6 +287,49 @@ def _validated_relative_file_path(value: str) -> PurePosixPath:
     return path
 
 
+def validate_requested_skills(names: tuple[str, ...]) -> None:
+    """Require exact, ordered, unique names without coercion or normalization."""
+    if (
+        len(names) > MAX_REQUIRED_SKILLS
+        or any(not isinstance(name, str) or len(name) > 64 or not SKILL_NAME_RE.fullmatch(name) for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise SkillAdmissionError(
+            "Request at most three unique exact Skill names (lowercase words separated by hyphens)"
+        )
+
+
+def captured_required_skill(name: str, source: str, files: tuple[tuple[str, bytes], ...]) -> RequiredSkill:
+    """Validate captured/replayed bytes identically and derive the canonical full-file identity."""
+    validate_requested_skills((name,))
+    if (
+        not isinstance(source, str)
+        or source not in {"workspace", "bundled"}
+        or not files
+        or len(files) > MAX_SKILL_FILES
+    ):
+        raise ValueError("Invalid required Skill source or file count")
+    if files != tuple(sorted(files)) or len(dict(files)) != len(files):
+        raise ValueError("Required Skill files must have unique sorted paths")
+    total = 0
+    manifest = []
+    for path, content in files:
+        if _validated_relative_file_path(path).as_posix() != path or "\\" in path:
+            raise ValueError("Invalid required Skill file path")
+        if not isinstance(content, bytes) or len(content) > MAX_SKILL_FILE_BYTES:
+            raise ValueError("Required Skill file exceeds the byte limit")
+        total += len(content)
+        manifest.append([path, len(content), hashlib.sha256(content).hexdigest()])
+    if total > MAX_SKILL_TOTAL_BYTES:
+        raise ValueError("Required Skill exceeds the byte limit")
+    text = dict(files)["SKILL.md"].decode("utf-8")
+    parse_and_validate_skill_md(name, text)
+    if len(text) > MAX_PRELOADED_SKILL_CHARS:
+        raise ValueError("Complete required SKILL.md exceeds 20,000 characters")
+    digest = hashlib.sha256(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    return RequiredSkill(name, source, digest, text, files)
+
+
 @dataclass(slots=True)
 class SkillManager:
     """Synchronize trusted local Skills with one session's private Volume path."""
@@ -304,13 +355,86 @@ class SkillManager:
                 selected[name] = skill_md.parent
         return selected
 
-    def sync_local_skills_to_volume(self) -> int:
+    def resolve_required(self, names: tuple[str, ...]) -> tuple[RequiredSkill, ...]:
+        """Capture trusted deployment sources without remote work or following path components."""
+        validate_requested_skills(names)
+        if not names:
+            return ()
+
+        captured: list[tuple[str, bytes]] = []
+        captured_bytes = 0
+
+        def capture(directory: int, prefix: str = "") -> None:
+            nonlocal captured_bytes
+            for entry in sorted(os.listdir(directory)):
+                path = prefix + entry
+                info = os.stat(entry, dir_fd=directory, follow_symlinks=False)
+                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                if stat.S_ISDIR(info.st_mode):
+                    child = os.open(entry, flags | os.O_DIRECTORY, dir_fd=directory)
+                    try:
+                        capture(child, path + "/")
+                    finally:
+                        os.close(child)
+                elif stat.S_ISREG(info.st_mode):
+                    with os.fdopen(os.open(entry, flags, dir_fd=directory), "rb") as stream:
+                        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                            raise ValueError("Required Skill resource is not a regular file")
+                        content = stream.read(MAX_SKILL_FILE_BYTES + 1)
+                        captured.append((path, content))
+                        captured_bytes += len(content)
+                else:
+                    raise ValueError("Required Skill resources must be regular files or directories")
+                if len(captured) > MAX_SKILL_FILES or captured_bytes > MAX_SKILL_TOTAL_BYTES:
+                    raise ValueError("Required Skill exceeds capture bounds")
+
+        resolved = []
+        try:
+            directories = self._skill_dirs()
+            for name in names:
+                path = directories[name]
+                if ".." in path.parts:
+                    raise ValueError("Required Skill source may not traverse parent directories")
+                captured = []
+                # Walk from / using descriptors: no ancestor, Skill or resource link may redirect capture.
+                descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    for part in path.absolute().parts[1:]:
+                        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+                        os.close(descriptor)
+                        descriptor = child
+                    capture(descriptor)
+                    files = tuple(sorted(captured))
+                finally:
+                    os.close(descriptor)
+                source = "bundled" if path.parent == self.bundled_skills_dir else "workspace"
+                resolved.append(captured_required_skill(name, source, files))
+            if sum(len(content) for skill in resolved for _, content in skill.files) > MAX_SKILL_TOTAL_BYTES:
+                raise ValueError("Required Skills exceed aggregate byte bounds")
+        except (OSError, ValueError, KeyError, UnicodeError, RecursionError) as exc:
+            raise SkillAdmissionError(
+                "Required Skills are unavailable, invalid, linked, or exceed the documented limits"
+            ) from exc
+        return tuple(resolved)
+
+    def sync_local_skills_to_volume(self, *, required_skills: tuple[RequiredSkill, ...] = ()) -> int:
         """Upload validated bundled and local Skills; developer-only `.agents/skills` is never read."""
         count = 0
         total_bytes = 0
         staged_files: list[tuple[str, bytes]] = []
         bundled_paths: set[str] = set()
-        for skill_dir in self._skill_dirs().values():
+        required_names = {skill.name for skill in required_skills}
+        for skill in required_skills:
+            for path, content in skill.files:
+                relative = f"skills/{skill.name}/{path}"
+                staged_files.append((relative, content))
+                total_bytes += len(content)
+                if skill.source == "bundled":
+                    bundled_paths.add(relative)
+            count += 1
+        for name, skill_dir in self._skill_dirs().items():
+            if name in required_names:
+                continue
             bundled = self.bundled_skills_dir is not None and skill_dir.parent == self.bundled_skills_dir
             skill_md = skill_dir / "SKILL.md"
             if skill_dir.is_symlink() or skill_md.is_symlink() or skill_md.stat().st_size > MAX_SKILL_FILE_BYTES:
@@ -338,6 +462,8 @@ class SkillManager:
             if count > MAX_SKILL_FILES:
                 raise ValueError("Too many local Skills to synchronize")
 
+        if total_bytes > MAX_SKILL_TOTAL_BYTES:
+            raise ValueError("Local Skills exceed the synchronization bounds")
         inspection_code = inspect_skills_code([relative for relative, _ in staged_files])
         with mlflow.start_span(name="skills.inspect_remote", span_type=SpanType.TOOL) as span:
             span.set_inputs({"file_count": len(staged_files)})

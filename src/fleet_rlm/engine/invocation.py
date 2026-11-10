@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable
 from functools import partial
@@ -10,7 +11,7 @@ from typing import Any
 import dspy
 from dspy.primitives.facade import SandboxLM
 
-from fleet_rlm.contracts import OptimizationInputs, turn_is_over
+from fleet_rlm.contracts import OptimizationInputs, RequiredSkill, SkillAdmissionError, turn_is_over
 from fleet_rlm.engine.children import ChildPolicies
 from fleet_rlm.engine.compiled import CompiledProgramFile
 from fleet_rlm.engine.decisions import Routing, SkillSelection
@@ -21,11 +22,11 @@ from fleet_rlm.observability import turn_callbacks
 from fleet_rlm.sandbox.delegation import ChildDelegation
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
+from fleet_rlm.skills import MAX_PRELOADED_SKILL_CHARS, MAX_PRELOADED_TOTAL_CHARS
 from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_DIRECT_CONTEXT_CHARS = 1_000_000
-_MAX_PRELOADED_SKILL_CHARS = 20_000
 
 
 class FleetRuntime:
@@ -108,6 +109,7 @@ class FleetRuntime:
         session_history: str = "",
         context: Any = None,
         execution_mode: str | None = None,
+        required_skills: tuple[RequiredSkill, ...] = (),
     ) -> dspy.Prediction:
         """Use the same host path for ordinary Turns and reconstructed evaluation rollouts."""
         return invoke_program(
@@ -119,6 +121,7 @@ class FleetRuntime:
             session_history=session_history,
             context=context,
             execution_mode=execution_mode or self.execution_mode,
+            required_skills=required_skills,
         )
 
     def execution_evidence(self) -> dict[str, Any]:
@@ -155,15 +158,22 @@ class WorkspaceInputs:
     def __init__(self, sandbox_mgr: DaytonaSandboxManager) -> None:
         self.sandbox_mgr = sandbox_mgr
 
-    def load_skills(self, catalog: str, selected: list[str]) -> str:
+    def load_skills(self, catalog: str, selected: list[str], *, required_skills: tuple[RequiredSkill, ...] = ()) -> str:
         """Resolve selected metadata identities through the existing bounded host reader."""
-        preloaded = []
-        for name in selected:
+        preloaded = [
+            f'<preloaded_skill name="{skill.name}">\n{skill.skill_md}\n</preloaded_skill>' for skill in required_skills
+        ]
+        remaining = MAX_PRELOADED_TOTAL_CHARS - sum(len(skill.skill_md) for skill in required_skills)
+        required_names = {skill.name for skill in required_skills}
+        for name in [name for name in selected if name not in required_names][:3]:
+            if remaining <= 0:
+                break
             try:
                 text = self.sandbox_mgr.read_workspace_file(f"skills/{name}/SKILL.md").decode("utf-8")
             except (OSError, ValueError, RuntimeError, UnicodeError):
                 continue
-            body = text[:_MAX_PRELOADED_SKILL_CHARS].replace("</preloaded_skill>", "")
+            body = text[: min(MAX_PRELOADED_SKILL_CHARS, remaining)].replace("</preloaded_skill>", "")
+            remaining -= len(body)
             preloaded.append(f'<preloaded_skill name="{name}">\n{body}\n</preloaded_skill>')
         return "\n".join([catalog, *preloaded])
 
@@ -201,8 +211,18 @@ def invoke_program(runtime: FleetRuntime, **inputs: Any) -> dspy.Prediction:
     mode = inputs["execution_mode"]
     if mode not in {"direct", "flex", "rlm", "hybrid"}:
         raise ValueError("Invalid execution mode")
+    required = inputs.get("required_skills", ())
+    if required and mode == "direct":
+        raise SkillAdmissionError("Direct mode cannot use required Skills; select Hybrid, RLM or Flex")
     with manager.turn_scope():
         manager.check_turn()
+        for skill in required:
+            for path, content in skill.files:
+                if (
+                    manager.stat_workspace_file(f"skills/{skill.name}/{path}")["sha256"]
+                    != hashlib.sha256(content).hexdigest()
+                ):
+                    raise SkillAdmissionError("Required Skill files changed before execution")
         context = inputs.get("context")
         if isinstance(context, WorkspaceDataset):
             metadata = manager.stat_workspace_file(context.workspace_path)

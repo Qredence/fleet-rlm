@@ -115,6 +115,7 @@ def _example(snapshot: dict[str, Any], labels: dict[str, Any], digest: str, prov
         critical=labels.get("critical") is True,
         category=labels.get("category", ""),
         context_files=snapshot["context_files"],
+        requested_skills=snapshot.get("requested_skills", []),
         source_group=labels["source_group"],
         source_session=snapshot["session_id"],
         replay_turn_id=snapshot["turn_id"],

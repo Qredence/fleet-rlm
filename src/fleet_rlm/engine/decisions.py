@@ -13,7 +13,9 @@ from mlflow.entities import SpanType
 from fleet_rlm.contracts import (
     ROUTE_SUMMARIES,
     TRIAGE_CRITERIA,
+    RequiredSkill,
     Route,
+    SkillAdmissionError,
     catalog_entries,
     decision_evidence,
     parse_route,
@@ -21,6 +23,7 @@ from fleet_rlm.contracts import (
 )
 from fleet_rlm.engine.signatures import SkillRelevance, TurnTriage
 from fleet_rlm.observability import activity_text, evidence_span, typed_decision_scope
+from fleet_rlm.skills import MAX_PRELOADED_TOTAL_CHARS
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_SELECTABLE_SKILLS = 20
@@ -61,10 +64,19 @@ def select_skills(
     task: str,
     skills_catalog: str,
     route: Route,
+    required_skills: tuple[RequiredSkill, ...] = (),
 ) -> list[str]:
     """Select bounded catalog identities; resolving their bytes remains a host capability."""
-    skills = (catalog_entries(skills_catalog) or [])[:_MAX_SELECTABLE_SKILLS]
-    if jev_lm is None or route is Route.DIRECT or not skills:
+    required_names = {skill.name for skill in required_skills}
+    skills = [entry for entry in (catalog_entries(skills_catalog) or []) if entry[0] not in required_names][
+        :_MAX_SELECTABLE_SKILLS
+    ]
+    if (
+        jev_lm is None
+        or route is Route.DIRECT
+        or not skills
+        or sum(len(skill.skill_md) for skill in required_skills) >= MAX_PRELOADED_TOTAL_CHARS
+    ):
         return []
     try:
         consume_budget(len(skills), category="skill_selection")
@@ -111,9 +123,10 @@ def select_route(
     workspace_manifest: str,
     skills_catalog: str,
     has_context: bool,
+    has_required_skills: bool = False,
 ) -> Route:
     """Pick the route (session mode, or hybrid triage), record the evidence, and announce it."""
-    route = Route.FLEX
+    route = Route.RLM
     triage_inputs = {
         "task": task,
         "workspace_manifest": workspace_manifest,
@@ -122,11 +135,17 @@ def select_route(
     summary = "Hybrid router selected an execution route."
     evidence = decision_evidence(None, route_lm)
     reason = None
+    if mode == "direct" and has_required_skills:
+        raise SkillAdmissionError("Direct mode cannot use required Skills; select Hybrid, RLM or Flex")
     try:
         if mode != "hybrid":
             reason = "session_mode"
             route = {"direct": Route.DIRECT, "rlm": Route.RLM}.get(mode, Route.FLEX)
             summary = f"Session mode {mode} selects this route without hybrid triage."
+        elif has_required_skills:
+            route = Route.RLM
+            reason = "requested_skills"
+            summary = "Required Skills select bounded RLM without hybrid triage."
         else:
             if jev_lm is not None:
                 consume_budget(category="routing")
@@ -139,8 +158,12 @@ def select_route(
                 with typed_decision_scope(lm=route_lm, span=span, typesafe=jev_lm is not None, adapter=sub_adapter):
                     decision = triage(**triage_inputs).route
                 evidence = decision_evidence(decision, route_lm)
-                # An unknown or missing label takes the bounded RLM path.
+                # Unknown, missing and obsolete automatic Flex labels take bounded RLM.
                 route = parse_route(decision) or Route.RLM
+                if route not in (Route.DIRECT, Route.RLM):
+                    route = Route.RLM
+                    reason = "invalid_automatic_route"
+                    summary = "Obsolete automatic route; falling back to bounded RLM execution."
                 span.set_outputs({"route": route.value, **evidence})
     except Exception as exc:
         if turn_is_over(exc):
@@ -179,7 +202,15 @@ class Routing(dspy.Module):
         self._route_lm, self._jev_lm, self._adapter = route_lm, jev_lm, adapter
         self._consume_budget, self._emit = consume_budget, emit
 
-    def forward(self, task: str, workspace_manifest: str, skills_catalog: str, mode: str, has_context: bool) -> Route:
+    def forward(
+        self,
+        task: str,
+        workspace_manifest: str,
+        skills_catalog: str,
+        mode: str,
+        has_context: bool,
+        has_required_skills: bool = False,
+    ) -> Route:
         """Apply strict-mode bypass or native hybrid triage with host-enforced safeguards."""
         return select_route(
             triage=self.predict,
@@ -193,6 +224,7 @@ class Routing(dspy.Module):
             workspace_manifest=workspace_manifest,
             skills_catalog=skills_catalog,
             has_context=has_context,
+            has_required_skills=has_required_skills,
         )
 
 
@@ -204,7 +236,9 @@ class SkillSelection(dspy.Module):
         self.predict = dspy.Predict(SkillRelevance)
         self._jev_lm, self._consume_budget, self._emit = jev_lm, consume_budget, emit
 
-    def forward(self, task: str, skills_catalog: str, route: Route) -> list[str]:
+    def forward(
+        self, task: str, skills_catalog: str, route: Route, required_skills: tuple[RequiredSkill, ...] = ()
+    ) -> list[str]:
         """Select catalog identities without loading or activating their bytes."""
         return select_skills(
             skill_selector=self.predict,
@@ -214,4 +248,5 @@ class SkillSelection(dspy.Module):
             task=task,
             skills_catalog=skills_catalog,
             route=route,
+            required_skills=required_skills,
         )

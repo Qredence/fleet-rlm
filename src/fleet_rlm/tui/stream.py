@@ -44,6 +44,8 @@ def _request_turn(
         "idempotency_key": uuid.uuid4().hex,
         "record_replay": state.record_replay,
     }
+    if state.requested_skills:
+        body["requested_skills"] = list(state.requested_skills)
     # Client-local `/timeout` state travels per Turn. Omitting the field inherits the
     # server configuration; `0` explicitly disables the Fleet deadline for this Turn.
     if state.timeout_seconds is not None:

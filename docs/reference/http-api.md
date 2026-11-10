@@ -110,6 +110,29 @@ The JSON request has one required `task` string:
 {"task":"Summarize the attached CSV and verify the totals with Python.","idempotency_key":"ledger-review-1"}
 ```
 
+`requested_skills` optionally lists up to three unique exact Skill names in caller
+order (lowercase single-hyphen-separated words, 1–64 characters). Omitted and `[]`
+are equivalent; invalid names, duplicates, non-string items and excess names return
+`422`. Paths, digests and approval assertions are not request inputs.
+Required Skills resolve only from configured host user Skills (overriding bundled
+Skills), never from remote-only authored Skills. Fleet captures their validated
+files once before remote work and preloads the entire UTF-8-decoded `SKILL.md`
+from those exact bytes, without newline normalization or clipping. Full instructions
+including frontmatter must fit 20,000 Unicode characters each; required plus optional
+raw preload text fits 60,000 characters. Existing file-count/byte/link/path limits
+also apply. NUL and the reserved closing preload delimiter are invalid.
+Up to three **additional optional** Skills may fill remaining space. Required names
+are excluded before the optional first-20 relevance selection, and incur no relevance
+charge. Explicit Direct refuses required intent; Hybrid forces RLM without a routing
+model call; explicit RLM/Flex keeps its mode. Source/size/mode refusals inside the
+stream are durable error outcomes followed by `done`, not late HTTP errors.
+Completion and stored results carry ordered `requested_skills` and host-derived
+`required_skills` entries (`name`, `source`, `sha256`). Source identity hashes all
+captured files, not only instructions. These guarantees do not make the guest copy
+immutable or certify later script execution: Gate C review/activation and host-enforced
+consumption are not implemented. Skills never grant host permissions or extra budget.
+The client supports `/skills require <names...>` and `/skills clear` for subsequent Turns.
+
 `record_replay` defaults to `false`. Set it to `true` only when this Turn's
 inputs should be retained as a possible reviewed GEPA example. Fleet captures
 the exact bounded conversation, memory, selected dataset handle, Skills
@@ -120,6 +143,9 @@ eligible for GEPA until its MLflow trace is explicitly labeled `approved` with
 gold expectations. This option can retain sensitive workspace content; use it
 only for data approved for that purpose. An oversized workspace fails before
 the engine runs. The TUI exposes the same opt-in with `/replay on` and `/replay off`.
+New snapshots use replay v2 and retain ordered required intent, origins and captured
+bytes. Isolated reconstruction verifies those bytes rather than reading current host
+Skills. Historical v1 remains readable as empty required intent, without invented origins.
 
 `timeout_seconds` is an optional strict integer and the only per-Turn deadline
 override. Omitting it or sending `null` (the default) inherits
@@ -239,6 +265,23 @@ Sessions run one Turn at a time; a second Turn on a busy Session gets `409` afte
 validated by the runtime; use simple URL-safe identifiers.
 An optional idempotency key persists intent before execution. Completed requests
 replay their recorded outcome; failed/uncertain requests do not replay side effects.
+Empty required intent retains the legacy task-only digest. With required Skills,
+the existing digest column records versioned task/ordered-name intent and captured
+source identities (or a bounded admission refusal). Completed requests match **intent**:
+the same task and ordered names replay the original receipt even after source edits
+or deletion, without executing today's files. Other claims remain **source-bound**:
+changed origins/resource bytes conflict under the old key; unchanged failed/running
+claims still do not rerun. Changed task, name or order always conflicts, as does adding
+required intent to a legacy task-only key. Use a new key to execute new source content.
+This deliberately favors recovering completed work over invalidating its receipt when
+deployment files change; a completed replay is not evidence that current files ran.
+Completed required-intent receipts are checked before reading current Skill sources.
+Receipt lookup and source comparison do not own live execution or arm its watchdog.
+The execution deadline starts after a new Turn is claimed. Disconnect during admission
+is recorded and drained: replay/conflict preserves the warm root, while a new claim is
+cancelled before model or sandbox execution starts. Admission and disconnect cancellation
+share the same lock; source capture itself remains synchronous and must drain before
+the Session is unlocked.
 Replay outcome events carry the original persisted `turn_id`, so the status route
 can recover that same outcome rather than looking up the retry's preparation ID.
 A successful completion is assembled once and committed with the Turn record,

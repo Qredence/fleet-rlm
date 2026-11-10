@@ -58,54 +58,54 @@
     "task": "Use Python to calculate sum(i*i for i in range(1,101)) and verify the result.",
     "workspace_manifest": "",
     "skills_catalog": "<available_skills/>",
-    "route": "flex",
+    "route": "rlm",
     "review_status": "developer_reviewed",
-    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+    "rationale": "Automatic code work uses bounded RLM, even with known inputs."
   },
   {
     "id": "flex-2",
     "task": "Read files/sales.csv, group revenue by region, and write the totals as an artifact.",
     "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
     "skills_catalog": "<available_skills/>",
-    "route": "flex",
+    "route": "rlm",
     "review_status": "developer_reviewed",
-    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+    "rationale": "Automatic file work uses bounded RLM, even with known inputs."
   },
   {
     "id": "flex-3",
     "task": "Tell me the 1492252th digits after the decimal point of Pi",
     "workspace_manifest": "",
     "skills_catalog": "<available_skills/>",
-    "route": "flex",
+    "route": "rlm",
     "review_status": "developer_reviewed",
-    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+    "rationale": "Automatic computation uses bounded RLM."
   },
   {
     "id": "flex-4",
     "task": "Use the available Skill to convert files/input.json into a CSV artifact.",
     "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
     "skills_catalog": "<available_skills><skill name=\"convert-json-csv\"/></available_skills>",
-    "route": "flex",
+    "route": "rlm",
     "review_status": "developer_reviewed",
-    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+    "rationale": "Automatic Skill work uses bounded RLM."
   },
   {
     "id": "flex-5",
     "task": "Execute two independent arithmetic checks in parallel child tasks and combine their results.",
     "workspace_manifest": "",
     "skills_catalog": "<available_skills/>",
-    "route": "flex",
+    "route": "rlm",
     "review_status": "developer_reviewed",
-    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+    "rationale": "Automatic code and delegation work uses bounded RLM."
   },
   {
     "id": "flex-6",
     "task": "Using the same files/sales.csv selected earlier, compute its row count in Python.",
     "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
     "skills_catalog": "<available_skills/>",
-    "route": "flex",
+    "route": "rlm",
     "review_status": "developer_reviewed",
-    "rationale": "Known inputs and a programmable workflow with verifiable outputs."
+    "rationale": "Automatic selected-file work uses bounded RLM."
   },
   {
     "id": "rlm-1",

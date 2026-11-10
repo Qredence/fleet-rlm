@@ -51,7 +51,7 @@ flowchart LR
   dataset admission, native invocation, callbacks and authoritative evidence between
   serving and freshly reconstructed isolated rollouts. Outer Turn/Session owners
   retain persistence, cancellation arbitration and teardown.
-- `engine/compiled.py` accepts only complete `fleet-program-a1` envelopes. Legacy
+- `engine/compiled.py` accepts only complete `fleet-program-b1` envelopes. Legacy
   native JSON remains inspectable, not installable; there is no old-root alias or
   key conversion. A missing selected artifact refuses execution, including after
   restart. Absent Session selection means baseline; serving only records artifact
@@ -157,6 +157,7 @@ Deadlines:
 - Routes are `direct`, `flex`, and `rlm`.
 - Strict modes bypass triage.
 - Hybrid uses Jev when configured, otherwise generative routing.
+- Automatic Hybrid chooses Direct or RLM; Flex remains an explicit mode only.
 - Routing errors or unknown labels fall back to RLM.
 - Selected datasets cannot use context-free direct answers.
 - RLM tunes instructions. Flex rewrites module source and initially wraps RLM when given tools.

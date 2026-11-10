@@ -24,7 +24,7 @@ from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.models import build_lm
-from fleet_rlm.replay import selected_snapshot
+from fleet_rlm.replay import required_skills_from_snapshot, selected_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
 from fleet_rlm.store import Store
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
@@ -164,6 +164,7 @@ class IsolatedFleetProgram(dspy.Module):
                 arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
                 if engine.optimization is not None:
                     arguments["context"] = engine.optimization.context
+                    arguments["required_skills"] = engine.optimization.required_skills
                 return engine(**arguments)
             except BaseException as exc:
                 error = exc
@@ -215,6 +216,9 @@ def build_isolated_engine_factory(
         )
         if any(snapshot[name] != getattr(example, name) for name in (*ENGINE_INPUT_FIELDS, "context_files")):
             raise ValueError("Curated replay snapshot does not match the reviewed example")
+        if snapshot.get("requested_skills", []) != getattr(example, "requested_skills", []):
+            raise ValueError("Curated required Skill intent does not match the reviewed example")
+        required_skills = required_skills_from_snapshot(snapshot)
         if snapshot.get("sandbox_transport") != SANDBOX_TRANSPORT:
             raise ValueError("Curated replay snapshot uses an unsupported sandbox transport")
         if not isinstance(program, FleetProgram):
@@ -255,6 +259,7 @@ def build_isolated_engine_factory(
             )
             engine.program.load_state(deepcopy(program.dump_state()))
             engine.optimization = OptimizationInputs(
+                required_skills=required_skills,
                 context=WorkspaceDataset(**replay_context) if replay_context else None,
                 verifications=tuple(
                     verifications.get(

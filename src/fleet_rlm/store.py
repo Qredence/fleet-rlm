@@ -649,6 +649,20 @@ class Store:
         return prior
 
     @_retry_once
+    def turn_by_key(self, session_id: str, key: str) -> dict[str, Any] | None:
+        """Read an existing receipt without claiming a new Turn or touching live execution."""
+        with self.pool.connection() as connection:
+            return (
+                connection.cursor(row_factory=dict_row)
+                .execute(
+                    "SELECT turn_id,task_sha256,status,result FROM fleet_lite_turns "
+                    "WHERE session_id=%s AND idempotency_key=%s",
+                    (session_id, key),
+                )
+                .fetchone()
+            )
+
+    @_retry_once
     def finish_turn(
         self,
         session_id: str,

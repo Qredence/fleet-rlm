@@ -27,7 +27,7 @@ from mlflow.entities import SpanType
 from mlflow.entities.trace_location import MlflowExperimentLocation
 
 from fleet_rlm.config import resolve_turn_deadline
-from fleet_rlm.contracts import Route
+from fleet_rlm.contracts import RequiredSkill, Route, SkillAdmissionError
 from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
 from fleet_rlm.sandbox.interpreter import StructuredResponseError
@@ -39,6 +39,7 @@ from fleet_rlm.sandbox.manager import (
 )
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.sandbox.snapshots import MAX_REFUSAL_CHARS, SnapshotUnavailableError
+from fleet_rlm.skills import validate_requested_skills
 from fleet_rlm.store import IdempotencyConflictError
 
 if TYPE_CHECKING:
@@ -103,9 +104,11 @@ def run_turn(
     callback: Any,
     emit: Emit,
     record_replay: bool = False,
+    requested_skills: tuple[str, ...] = (),
     timeout_seconds: int | None = None,
     completion_committed: Event | None = None,
     completion_lock: Lock | None = None,
+    cancellation_requested: Event | None = None,
 ) -> None:
     """Run one Turn for a Session, claiming its id and emitting progress events through emit.
 
@@ -118,8 +121,10 @@ def run_turn(
     become terminal events after teardown; success keeps the root sandbox warm.
     Observation and delivery errors after commit cannot reverse the durable outcome.
     `completion_committed` lets the transport preserve success across a disconnect
-    before the terminal event can be queued. `completion_lock` serializes that signal
-    and the commit/readback with disconnect cancellation. Finalization errors may propagate.
+    before the terminal event can be queued. `completion_lock` serializes admission,
+    that signal and commit/readback with disconnect cancellation. Requests cancelled
+    during source admission cannot start execution. The execution deadline starts only
+    for a newly claimed Turn, not receipt lookup or source comparison. Finalization errors may propagate.
     """
     manager = runtime.sandbox_mgr
     started_at = time.monotonic()
@@ -135,6 +140,9 @@ def run_turn(
     commit_attempted = False
     terminal_event: dict[str, Any] | None = None
     turn_ended = False
+    required_skills: tuple[RequiredSkill, ...] = ()
+    admission_error: SkillAdmissionError | None = None
+    skill_intent: dict[str, Any] = {}
 
     def end_execution() -> None:
         """End the execution deadline once, before observing or delivering committed success."""
@@ -146,6 +154,16 @@ def run_turn(
     def resolve_exception(exc: Exception) -> None:
         """Fence both span scopes with the same durable outcome and bounded readback."""
         nonlocal committed, terminal_event
+        if isinstance(exc, IdempotencyConflictError):
+            # No work was admitted and no new row was claimed. Do not stop a prior warm root.
+            terminal_event = {
+                "event": "error",
+                "turn_id": turn_id,
+                "request_id": turn_id,
+                "error": str(exc),
+                "error_type": "idempotency_conflict",
+            }
+            return
         uncertain = False
         if committed is None and terminal_event is None and commit_attempted:
             try:
@@ -172,6 +190,7 @@ def run_turn(
             trace_id=trace_id,
             started_at=started_at,
             persist=not uncertain,
+            skill_intent=skill_intent,
         )
         if uncertain:
             # Leave intent intact: a later idempotency lookup may prove completion. Never
@@ -181,12 +200,43 @@ def run_turn(
     try:
         runtime.assert_lease_held()
         manager.event_callback = emit
-        manager.reset_turn_budget(
-            deadline_seconds=policy.effective_seconds,
-            deadline_source=policy.source,
-        )
         with completion_lock if completion_lock is not None else nullcontext():
-            prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task)
+            # Replay and source comparison own no live execution. A disconnect waits for
+            # this decision, recording its intent without stopping a prior warm root.
+            prior = (
+                runtime.completed_turn(idempotency_key or turn_id, task, requested_skills) if requested_skills else None
+            )
+            if prior is not None:
+                committed = {**_replayed(prior), "turn_id": prior["turn_id"]}
+                if completion_committed is not None:
+                    completion_committed.set()
+                return
+            if requested_skills:
+                try:
+                    validate_requested_skills(requested_skills)
+                    if runtime.engine.execution_mode == "direct":
+                        raise SkillAdmissionError("Direct mode cannot use required Skills; select Hybrid, RLM or Flex")
+                    required_skills = runtime.skill_mgr.resolve_required(requested_skills)
+                except SkillAdmissionError as exc:
+                    admission_error = exc
+                skill_intent = {
+                    "requested_skills": list(requested_skills),
+                    "required_skills": [
+                        {"name": skill.name, "source": skill.source, "sha256": skill.sha256}
+                        for skill in required_skills
+                    ],
+                }
+            if requested_skills:
+                prior = runtime.claim_turn(
+                    turn_id,
+                    idempotency_key or turn_id,
+                    task,
+                    requested_skills=requested_skills,
+                    required_skills=required_skills,
+                    admission_error=admission_error,
+                )
+            else:
+                prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task)
             if prior is not None:
                 terminal_event = {**_replayed(prior), "turn_id": prior["turn_id"]}
                 if prior["status"] == "completed":
@@ -194,6 +244,17 @@ def run_turn(
                     if completion_committed is not None:
                         completion_committed.set()
                 return
+            manager.reset_turn_budget(
+                deadline_seconds=policy.effective_seconds,
+                deadline_source=policy.source,
+            )
+            # Source admission may outlive a lease probe; reset must not revive a lost owner.
+            runtime.assert_lease_held()
+            if cancellation_requested is not None and cancellation_requested.is_set():
+                manager.request_cancellation()
+                raise RuntimeError("Turn cancelled")
+        if admission_error is not None:
+            raise admission_error
         # The destination travels with the span: `mlflow.set_experiment` is process-wide and would race
         # across Sessions that trace to different experiments.
         destination = MlflowExperimentLocation(mlflow_experiment_id) if mlflow_experiment_id else None
@@ -202,7 +263,7 @@ def run_turn(
                 trace_id = getattr(span, "trace_id", None) if mlflow_experiment_id else None
                 # Keep enough context on the trace if preparation fails. The complete prepared inputs
                 # replace this small initial payload once they are available.
-                span.set_inputs({"session_id": session_id, "task": task, "turn_id": turn_id})
+                span.set_inputs({"session_id": session_id, "task": task, "turn_id": turn_id, **skill_intent})
                 # Resolved once above; a failure anywhere after this point still reports it.
                 span.set_attributes(manager.deadline_provenance())
 
@@ -218,7 +279,9 @@ def run_turn(
                 if resolved_identity is not None:
                     record_snapshot_identity(resolved_identity)
                 with phase_span("turn.prepare_inputs", session_id=session_id, record_replay=record_replay) as phase:
-                    inputs = _prepare_inputs(runtime, session_id, task, record_replay=record_replay)
+                    inputs = _prepare_inputs(
+                        runtime, session_id, task, record_replay=record_replay, required_skills=required_skills
+                    )
                     # Counts only: the prepared text is already on the root span's inputs.
                     phase.set_outputs(
                         {
@@ -241,7 +304,9 @@ def run_turn(
 
                     with phase_span("turn.capture_replay", turn_id=turn_id) as phase:
                         snapshot = {
-                            "schema_version": 1,
+                            "schema_version": 2,
+                            "requested_skills": list(requested_skills),
+                            "required_skills": skill_intent.get("required_skills", []),
                             "turn_id": turn_id,
                             "session_id": session_id,
                             "task": task,
@@ -283,7 +348,16 @@ def run_turn(
                             }
                         )
                 _describe_turn(
-                    span, runtime, settings, session_id, task, turn_id, idempotency_key, inputs, replay_snapshot
+                    span,
+                    runtime,
+                    settings,
+                    session_id,
+                    task,
+                    turn_id,
+                    idempotency_key,
+                    inputs,
+                    replay_snapshot,
+                    skill_intent=skill_intent,
                 )
                 with dspy.context(callbacks=stream_callbacks(callback), disable_history=True):
                     prediction = runtime.engine(
@@ -294,6 +368,7 @@ def run_turn(
                         task=task,
                         execution_mode=runtime.engine.execution_mode,
                         context=runtime.context,
+                        **({"required_skills": required_skills} if required_skills else {}),
                     )
                 answer = str(prediction.answer)
                 usage = {
@@ -327,6 +402,7 @@ def run_turn(
                 # joined within the documented two-second tolerance of MLflow's own span duration.
                 duration_seconds = round(time.monotonic() - started_at, 3)
                 turn_record = {
+                    **skill_intent,
                     "task": task,
                     "workspace_manifest": inputs["manifest"],
                     "skills_catalog": inputs["skills_catalog"],
@@ -496,6 +572,7 @@ def _terminal_failure(
     trace_id: str | None,
     started_at: float,
     persist: bool = True,
+    skill_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve one failed or cancelled outcome, tear the Turn down, and store it before acknowledgment.
 
@@ -520,6 +597,7 @@ def _terminal_failure(
     # Measured after teardown so the recorded wall duration covers everything before acknowledgment.
     duration_seconds = round(time.monotonic() - started_at, 3)
     failure: dict[str, Any] = {
+        **(skill_intent or {}),
         "event": "turn_cancelled" if cancelled else "error",
         "turn_id": turn_id,
         "outcome": outcome,
@@ -555,6 +633,8 @@ def _failure_message(exc: BaseException, turn_id: str) -> str:
     credentials, or provider payloads.
     """
     if isinstance(exc, IdempotencyConflictError):
+        return str(exc)
+    if isinstance(exc, SkillAdmissionError):
         return str(exc)
     if isinstance(exc, SnapshotUnavailableError):
         return str(exc)[:MAX_REFUSAL_CHARS]
@@ -723,7 +803,12 @@ def _distinct_notes(
 
 
 def _prepare_inputs(
-    runtime: SessionRuntime, session_id: str, task: str, *, record_replay: bool = False
+    runtime: SessionRuntime,
+    session_id: str,
+    task: str,
+    *,
+    record_replay: bool = False,
+    required_skills: tuple[RequiredSkill, ...] = (),
 ) -> dict[str, Any]:
     """Sync Skills and assemble workspace digests, memory, history, and the Skill catalog.
 
@@ -740,7 +825,13 @@ def _prepare_inputs(
         phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
     # Skills land first so their files are hashed; everything else remote arrives in one exec.
     with phase_span("turn.sync_skills") as phase:
-        phase.set_outputs({"skills": runtime.skill_mgr.sync_local_skills_to_volume()})
+        phase.set_outputs(
+            {
+                "skills": runtime.skill_mgr.sync_local_skills_to_volume(
+                    **({"required_skills": required_skills} if required_skills else {})
+                )
+            }
+        )
     with phase_span("turn.workspace_inputs") as phase:
         remote = runtime.sandbox_mgr.turn_inputs()
         phase.set_outputs(
@@ -762,6 +853,18 @@ def _prepare_inputs(
         )
     # Workspace files are model-writable, so they cannot approve executable programs.
     context_files = remote["digests"]
+    required_files = {
+        f"skills/{skill.name}/{path}": content for skill in required_skills for path, content in skill.files
+    }
+    for skill in required_skills:
+        prefix = f"skills/{skill.name}/"
+        if {path for path in context_files if path.startswith(prefix)} != {
+            path for path in required_files if path.startswith(prefix)
+        }:
+            raise SkillAdmissionError("Required Skill resource manifest changed during preparation")
+    for path, content in required_files.items():
+        if context_files.get(path) != hashlib.sha256(content).hexdigest():
+            raise SkillAdmissionError("Required Skill files changed during preparation")
     files = sorted(context_files)
     replay_files: dict[str, str] = {}
     replay_bytes = 0
@@ -769,7 +872,9 @@ def _prepare_inputs(
     if record_replay:
         with phase_span("turn.replay_files") as phase:
             for path in files:
-                content = runtime.sandbox_mgr.read_workspace_file(path)
+                content = (
+                    required_files[path] if path in required_files else runtime.sandbox_mgr.read_workspace_file(path)
+                )
                 if hashlib.sha256(content).hexdigest() != context_files[path]:
                     raise ValueError(f"Workspace file changed while the Turn was prepared: {path}")
                 replay_bytes += len(content)
@@ -807,6 +912,8 @@ def _describe_turn(
     idempotency_key: str | None,
     inputs: dict[str, Any],
     replay_snapshot: tuple[str, bytes] | None,
+    *,
+    skill_intent: dict[str, Any] | None = None,
 ) -> None:
     """Record prepared input references, configuration, and sandbox provenance on the Turn trace."""
     from fleet_rlm.session import runtime_configuration
@@ -821,6 +928,7 @@ def _describe_turn(
             "session_id": session_id,
             "task": task,
             "turn_id": turn_id,
+            **(skill_intent or {}),
             "workspace_manifest": inputs["manifest"],
             "context_files": inputs["context_files"],
             "replay_snapshot_selected": replay_snapshot is not None,

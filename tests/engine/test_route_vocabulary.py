@@ -25,9 +25,9 @@ def test_parse_route_reads_only_current_names(raw, expected):
     assert parse_route(raw) is expected
 
 
-def test_triage_choices_are_exactly_the_route_values():
-    assert set(TRIAGE_ROUTE.criteria()) == {route.value for route in Route}
-    assert set(TRIAGE_CRITERIA) == {route.value for route in Route}
+def test_automatic_choices_exclude_explicit_flex():
+    assert set(TRIAGE_ROUTE.criteria()) == {"direct", "rlm"}
+    assert set(TRIAGE_CRITERIA) == {"direct", "rlm"}
 
 
 def test_route_wording_has_one_source():
@@ -40,14 +40,14 @@ def test_route_wording_has_one_source():
         assert {"triage", "judge", "definition", "examples", "not", "summary"} <= set(item), route
 
 
-def test_triage_instruction_text_is_unchanged():
+def test_triage_instruction_matches_automatic_policy():
     # The router's output description is a GEPA-tuned instruction; its wording is contract, not prose.
     from fleet_rlm.contracts import TRIAGE_INSTRUCTION
     from fleet_rlm.engine.signatures import TurnTriage
 
     assert TRIAGE_INSTRUCTION == (
-        "Choose direct for a simple response, flex for one bounded Python or Skill workflow, "
-        "or rlm for a multi-part task needing independent investigation."
+        "Choose direct for a self-contained response requiring no code, files, or Skills; "
+        "choose rlm for code, file or Skill work, including bounded calculations and iterative investigation."
     )
     assert TurnTriage.model_fields["route"].json_schema_extra["desc"] == TRIAGE_INSTRUCTION
 

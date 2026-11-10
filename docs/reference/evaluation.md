@@ -108,7 +108,7 @@ merely by being installed.
   a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
   lineage, status, outcome, code, stdout, stderr, and return values (including
   `SUBMIT` payloads), with bounded redaction. These assessments use
-  `fleet-trace-assessments-v7`. It does not ask the judge to
+  `fleet-trace-assessments-v8`. It does not ask the judge to
   reconstruct evidence from a serialized full trace. Execution rationales cite
   real sandbox span IDs; malformed results, placeholder rationales, or unknown
   citations are scorer errors. The evidence summary includes at most eight
@@ -130,7 +130,7 @@ merely by being installed.
   and final answer, up to 20,000 characters each. It does not replace the middle
   of either field with a preview. Missing, empty, oversized, or already truncated
   evidence produces a scorer error before any judge call. Diagnostic version
-  `fleet-trace-assessments-v7` invalidates comparisons with earlier partial-text
+  `fleet-trace-assessments-v8` retains v7's invalidation of comparisons with earlier partial-text
   judgments. This diagnostic does not change the shared metric or GEPA objectives.
 - `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
   actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
@@ -308,7 +308,7 @@ provenance; replay uses the current deployment configuration and credentials.
 
 Its components are:
 
-- `routing.predict` (`TurnTriage`): three-way route choice
+- `routing.predict` (`TurnTriage`): automatic Direct/RLM route choice; explicit Flex bypasses it
 - `skill_selection.predict` (`SkillRelevance`): optional Skill relevance
 - `reasoning.direct.predict` (`DirectAnswer`): the no-code answer
 - `reasoning.rlm.generate_action` and `reasoning.rlm.extract` (`FleetTask`): the native RLM loop
@@ -514,13 +514,22 @@ interpreter's constructor adapter, not by source rewriting or a second state loa
 DSPy support is pinned to the tested 3.4.1 release because this facade protocol is internal. JSON state preserves optimized instructions
 and Flex source; the host reconstructs the Daytona interpreter and current
 credentials. Installation now requires a complete host envelope with
-`format="fleet-program"`, `format_version=1`, `program_schema="fleet-program-a1"`,
+`format="fleet-program"`, `format_version=1`, `program_schema="fleet-program-b1"`,
 `child_policy_contract=1`, canonical unwrapped native `state`, and string-valued
 `metadata`. The exporter deliberately reads the isolated wrapper's `.program`;
 native `.save()` output is not an installation artifact. Missing/extra parameters,
 incompatible field contracts, malformed Flex source and any non-null learned LM
 binding are rejected before any state changes. Native field criteria/configuration
 are preserved and validated by DSPy, not translated by Fleet.
+
+Gate A `fleet-program-a1` envelopes are incompatible with the two-way automatic
+route contract. They remain inspectable, not installable. Explicit baseline
+selection or a newly reviewed/revalidated B1 artifact is required; there is no
+automatic transplant of old instructions, demos or criteria. Native parameter
+paths and `child_policy_contract=1` are unchanged. Route assessments use
+`jev-route-v2` / `fleet-trace-assessments-v8`: bounded code, file and Skill work
+can reasonably use RLM; explicit Flex remains valid. The independent route judge
+still has three choices and the same Noul threshold and evidence requirements.
 
 Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
@@ -628,7 +637,7 @@ errors remain visible to the caller.
 
 Root, sub and Jev model roles, execution mode and Turn budgets come from the
 current deployment constructors. All non-null learned predictor/Flex LM bindings
-are rejected. Published candidates use the complete `fleet-program-a1` envelope,
+are rejected. Published candidates use the complete `fleet-program-b1` envelope,
 manifest/digest approval and the bounded serving loader described above. Historical
 bare state, `program.` wrapper keys and `fleet_child_policy_version` markers are
 not accepted for installation. This code/schema change invalidates prior approval

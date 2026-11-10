@@ -2861,6 +2861,15 @@ components:
             maxLength: 128
           - type: 'null'
           title: Idempotency Key
+        requested_skills:
+          items:
+            type: string
+            maxLength: 64
+            minLength: 1
+            pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+          type: array
+          maxItems: 3
+          title: Requested Skills
         record_replay:
           type: boolean
           title: Record Replay

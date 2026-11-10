@@ -23,6 +23,7 @@ from rich.text import Text
 from fleet_rlm.config import FleetSettings, validate_turn_timeout_seconds
 from fleet_rlm.contracts import catalog_entries
 from fleet_rlm.optimization_runs import ExperimentOptions, add_search_arguments
+from fleet_rlm.skills import validate_requested_skills
 from fleet_rlm.tui.render import CONSOLE, TurnTracker, print_http_error
 
 MODES = ("direct", "flex", "rlm", "hybrid")
@@ -38,6 +39,7 @@ class SessionState:
     sub_model: str = ""
     context_path: str | None = None
     record_replay: bool = False
+    requested_skills: tuple[str, ...] = ()
     # Client-local `/timeout` override: None inherits, 0 disables the Fleet deadline.
     # It is sent as `TurnRequest.timeout_seconds` and is never stored on the Session.
     timeout_seconds: int | None = None
@@ -295,7 +297,15 @@ def _format_skills_catalog(catalog_xml: str) -> str:
 
 def _skills(ctx: Context, arg: str) -> None:
     params = {"session_id": ctx.session_id}
-    if arg == "pull":
+    if arg == "require" or arg.startswith("require "):
+        names = tuple(arg.split()[1:])
+        validate_requested_skills(names)
+        ctx.state.requested_skills = names
+        _out(ctx).print("Required Skills for subsequent Turns: " + (", ".join(names) or "none"))
+    elif arg == "clear":
+        ctx.state.requested_skills = ()
+        _out(ctx).print("Required Skills cleared")
+    elif arg == "pull":
         _out(ctx).print(f"[green]Exported:[/green] {ctx.post('/skills/pull', params=params).json()['exported']}")
     elif arg == "push":
         _out(ctx).print(f"[green]Pushed:[/green] {ctx.post('/skills/push', params=params).json()['pushed']} Skills")
@@ -640,10 +650,10 @@ COMMANDS: dict[str, Command] = {
         category="Workspace & Context",
     ),
     "/skills": Command(
-        "/skills [pull|push]",
-        "show the Skills catalog; pull exports to `.fleet/skills/`, push syncs local Skills",
+        "/skills [pull|push|require <names...>|clear]",
+        "show/sync Skills; require exact trusted names for subsequent Turns, or clear them",
         _skills,
-        {"push": None, "pull": None},
+        {"push": None, "pull": None, "require": None, "clear": None},
         category="Skills & Memory",
     ),
     "/tree": Command(

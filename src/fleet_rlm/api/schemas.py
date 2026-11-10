@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
 from fleet_rlm.optimization_runs import ExperimentOptions
+from fleet_rlm.skills import validate_requested_skills
 from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
 MAX_TASK_CHARS = 100_000
@@ -32,6 +33,17 @@ class TurnRequest(_Request):
 
     task: str = Field(min_length=1, max_length=MAX_TASK_CHARS)
     idempotency_key: str | None = Field(default=None, max_length=128)
+    requested_skills: list[
+        Annotated[str, Field(strict=True, min_length=1, max_length=64, pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$")]
+    ] = Field(default_factory=list, max_length=3)
+
+    @field_validator("requested_skills")
+    @classmethod
+    def exact_skill_names(cls, names: list[str]) -> list[str]:
+        """Reject duplicate intent rather than silently deduplicating it."""
+        validate_requested_skills(tuple(names))
+        return names
+
     record_replay: bool = Field(
         default=False,
         description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",

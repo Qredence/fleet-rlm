@@ -163,6 +163,13 @@ Commands include `/setup`, `/help`, `/attach <path>`, `/files`, `/artifacts`, `/
 `/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
 `/timeout <seconds|off|default>`, `/sessions`, `/optimize`, `/config`,
 `/settings`, `/models`, `/model`, and `/exit`.
+`/skills require tabular-analysis delegation` sets ordered required Skill names for
+subsequent Turns in this client; `/skills clear` removes them. At most three exact
+trusted names are accepted. Hybrid forces RLM, explicit RLM/Flex stays explicit,
+and Direct refuses required intent. Required instructions load completely, with up
+to three additional optional preloads sharing the 60,000-character limit; required
+files remain subject to host admission and do not grant tool permissions. See the
+[HTTP contract](http-api.md#run-a-turn) for source trust, limits and replay semantics.
 `/memory [query]` reads this Session's saved memories, optionally
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).

@@ -131,7 +131,7 @@ async def test_escape_keeps_the_input_and_explicit_tab_reopens_completion(menu_a
     [
         ("/mode ", ["direct", "flex", "rlm", "hybrid"]),
         ("/timeout ", ["off", "default"]),
-        ("/skills ", ["push", "pull"]),
+        ("/skills ", ["push", "pull", "require", "clear"]),
         ("/replay ", ["on", "off"]),
         ("/model ", ["root", "sub"]),
         ("/config ", ["mode ", "json"]),

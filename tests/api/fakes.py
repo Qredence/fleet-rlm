@@ -74,6 +74,12 @@ class FakeManager(SimpleNamespace):
                 }
 
             self.reset_turn_budget = reset_turn_budget
+        if "end_turn" not in overrides:
+
+            def end_turn() -> None:
+                self.turn_active = False
+
+            self.end_turn = end_turn
         if "stat_workspace_file" not in overrides:
             self.stat_workspace_file = self._stat_file
         if "execution_evidence" not in overrides:

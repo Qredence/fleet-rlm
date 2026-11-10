@@ -23,8 +23,7 @@ def test_triage_signature_keeps_the_typed_choice_and_criteria():
     assert decision.value == "rlm"
     assert TRIAGE_ROUTE.criteria() == {
         "direct": "Simple response requiring no code, files, or Skills",
-        "flex": "A task needing one bounded Python or Skill workflow",
-        "rlm": "A multi-part task requiring an independent child investigation",
+        "rlm": "A task needing code, files, Skills, or iterative investigation",
     }
 
 

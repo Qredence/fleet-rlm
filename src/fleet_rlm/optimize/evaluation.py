@@ -31,12 +31,12 @@ from fleet_rlm.replay import validate_review_labels
 _REGIONS = ("north", "south", "east", "west", "central")
 _STATUSES = ("on_time", "late", "cancelled")
 _SELF_CONTAINED = (
-    ("Convert 72 degrees Fahrenheit to Celsius, rounded to one decimal place.", "22.2", Route.FLEX),
-    ("What is 17 multiplied by 23?", "391", Route.FLEX),
+    ("Convert 72 degrees Fahrenheit to Celsius, rounded to one decimal place.", "22.2", Route.RLM),
+    ("What is 17 multiplied by 23?", "391", Route.RLM),
     ("How many days are there in a leap year?", "366", Route.DIRECT),
-    ("What is the sum of the integers from 1 to 100?", "5050", Route.FLEX),
-    ("What is 15 percent of 240?", "36", Route.FLEX),
-    ("How many minutes are in 3.5 hours?", "210", Route.FLEX),
+    ("What is the sum of the integers from 1 to 100?", "5050", Route.RLM),
+    ("What is 15 percent of 240?", "36", Route.RLM),
+    ("How many minutes are in 3.5 hours?", "210", Route.RLM),
 )
 
 
@@ -122,7 +122,7 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
                 category="aggregate",
                 source_group=f"aggregate-{index:02d}",
                 files={"files/sales.csv": _csv(["region", "revenue"], sales)},
-                route=Route.FLEX.value,
+                route=Route.RLM.value,
                 critical=True,
             )
         )

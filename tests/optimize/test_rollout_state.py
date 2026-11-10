@@ -113,13 +113,15 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
         assert durable_runtime.program.dump_state() == native.dump_state()
         for runtime in (native_runtime, durable_runtime):
             engine = runtime.program
-            for route in Route:
+            for route in (Route.DIRECT, Route.RLM):
                 decision_lm = dspy.utils.DummyLM(
                     [
                         {
                             "route": json.dumps(
                                 {
-                                    "probabilities": {item.value: float(item is route) for item in Route},
+                                    "probabilities": {
+                                        item.value: float(item is route) for item in (Route.DIRECT, Route.RLM)
+                                    },
                                     "confidence": 1.0,
                                 }
                             )
@@ -132,6 +134,7 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
                     ).route
                 assert isinstance(decision, engine.routing.predict.signature.fields["route"].annotation)
                 assert decision.value == route.value
+            for route in Route:
                 result = runtime("", "", "solve fixture", "", "", None, route.value)
                 assert result.answer == "right" and result.route == route.value
 
@@ -176,7 +179,7 @@ def test_native_load_failure_does_not_mutate_candidate_or_target():
 
 
 @pytest.fixture
-def rollout(monkeypatch):
+def rollout(monkeypatch, request):
     template = _engine()
     candidate = template.program
     candidate.reasoning.direct.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
@@ -190,13 +193,41 @@ def rollout(monkeypatch):
         "size_bytes": 7,
         "sha256": replay["context_files"]["files/input.csv"],
     }
+    if getattr(request, "param", False):
+        import base64
+
+        from fleet_rlm.skills import captured_required_skill
+
+        raw = b"---\r\nname: recorded\r\ndescription: Immutable source\r\n---\r\nUse exact original text."
+        skill = captured_required_skill("recorded", "workspace", (("SKILL.md", raw),))
+        replay.update(
+            schema_version=2,
+            requested_skills=["recorded"],
+            required_skills=[{"name": skill.name, "source": skill.source, "sha256": skill.sha256}],
+        )
+        replay["context_files"]["skills/recorded/SKILL.md"] = hashlib.sha256(raw).hexdigest()
+        replay["replay_files"]["skills/recorded/SKILL.md"] = base64.b64encode(raw).decode()
+        replay["workspace_manifest"] = ", ".join(f"/workspace/{path}" for path in sorted(replay["context_files"]))
+        replay["skill_revision_sha256"] = hashlib.sha256(
+            json.dumps(
+                {"skills/recorded/SKILL.md": hashlib.sha256(raw).hexdigest()}, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
     digest, compressed = encode_snapshot(replay)
     example = dspy.Example(
         **{key: replay[key] for key in (*ENGINE_INPUT_FIELDS, "context_files")},
         source_session="s1",
         replay_turn_id="t1",
         replay_snapshot_sha256=digest,
-    ).with_inputs(*ENGINE_INPUT_FIELDS, "context_files", "source_session", "replay_turn_id", "replay_snapshot_sha256")
+        requested_skills=replay.get("requested_skills", []),
+    ).with_inputs(
+        *ENGINE_INPUT_FIELDS,
+        "context_files",
+        "source_session",
+        "replay_turn_id",
+        "replay_snapshot_sha256",
+        "requested_skills",
+    )
     managers = []
 
     class OfflineManager(DaytonaSandboxManager):
@@ -244,6 +275,30 @@ def rollout(monkeypatch):
     return candidate, example, factory, managers, cleanup
 
 
+@pytest.mark.parametrize("rollout", [True], indirect=True)
+def test_isolated_invocation_uses_recorded_required_instructions_not_deployment_files(rollout):
+    candidate, example, factory, managers, cleanup = rollout
+    observed = []
+
+    def prepared(item, program):
+        runtime = factory(item, program)
+
+        def answer(**inputs):
+            observed.append(inputs["skills_catalog"])
+            return dspy.Prediction(answer="recorded", learned_skill_note="")
+
+        runtime.program.reasoning.rlm = answer
+        return runtime
+
+    result = IsolatedFleetProgram(candidate, prepared, cleanup)(**example.inputs())
+    assert result.answer == "recorded" and result.route == "rlm"
+    assert len(observed) == 1 and "Use exact original text." in observed[0]
+    skill_bytes = managers[0].test_files["skills/recorded/SKILL.md"]
+    assert skill_bytes.decode("utf-8") in observed[0]
+    assert managers[0].shutdown_calls == 1
+
+
+@pytest.mark.parametrize("rollout", [False, True], indirect=True)
 def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_files(rollout, monkeypatch):
     candidate, example, factory, managers, _cleanup = rollout
     before = deepcopy(candidate.dump_state())
@@ -278,6 +333,14 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
     assert candidate.dump_state() == before
     assert len({manager.session_id for manager in managers}) == 2
     assert engines[0].optimization.context is not engines[1].optimization.context
+    if example.requested_skills:
+        first, second = [engine.optimization.required_skills for engine in engines]
+        assert first == second and first is not second and first[0] is not second[0]
+        loaded = [
+            engine.workspace.load_skills("", [], required_skills=engine.optimization.required_skills)
+            for engine in engines
+        ]
+        assert loaded[0] == loaded[1] and "Use exact original text." in loaded[0]
     for index, engine in zip((2, 3), engines, strict=True):
         program = engine.program
         assert program.reasoning.direct.predict.demos[0]["nested"] == [1, index]

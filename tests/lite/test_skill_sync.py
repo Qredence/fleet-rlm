@@ -14,6 +14,66 @@ def _skill(name: str, instructions: str = "Instructions.") -> bytes:
     return f"---\nname: {name}\ndescription: test skill\n---\n\n{instructions}\n".encode()
 
 
+def test_required_capture_preserves_complete_bytes_overrides_and_does_not_reread(tmp_path):
+    local, bundled = tmp_path / "local", tmp_path / "bundled"
+    for root in (local, bundled):
+        (root / "ledger-audit").mkdir(parents=True)
+        (root / "ledger-audit" / "SKILL.md").write_bytes(_skill("ledger-audit", str(root)))
+    raw = _skill("ledger-audit", "Count café € exactly.\r\n").replace(b"\n", b"\r\n")
+    raw += b"x" * (20_000 - len(raw.decode("utf-8")))
+    (local / "ledger-audit" / "SKILL.md").write_bytes(raw)
+    (local / "ledger-audit" / "script.py").write_bytes(b"print(42)")
+    volume = _VolumeDouble()
+    manager = SkillManager(volume, local, bundled)
+    required = manager.resolve_required(("ledger-audit",))
+    assert required[0].source == "workspace" and required[0].skill_md == raw.decode("utf-8")
+    assert len(required[0].skill_md) == 20_000
+    (local / "ledger-audit" / "SKILL.md").write_bytes(raw + b"x")
+    from fleet_rlm.contracts import SkillAdmissionError
+
+    with pytest.raises(SkillAdmissionError, match="documented limits"):
+        manager.resolve_required(("ledger-audit",))
+    manager.sync_local_skills_to_volume(required_skills=required)
+    assert volume.writes == {"skills/ledger-audit/" + path: content for path, content in required[0].files}
+
+
+@pytest.mark.parametrize("link", ["ancestor", "directory", "instructions", "resource"])
+def test_required_capture_rejects_links_and_untrusted_remote_names(tmp_path, link):
+    from fleet_rlm.contracts import SkillAdmissionError
+
+    root = tmp_path / "local"
+    folder = root / "ledger-audit"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_bytes(_skill("ledger-audit"))
+    if link == "ancestor":
+        (tmp_path / "alias").symlink_to(root, target_is_directory=True)
+        root = tmp_path / "alias" / "."
+    elif link == "directory":
+        folder.rename(root / "original")
+        folder.symlink_to(root / "original", target_is_directory=True)
+    elif link == "instructions":
+        (folder / "SKILL.md").rename(folder / "original.md")
+        (folder / "SKILL.md").symlink_to(folder / "original.md")
+    else:
+        (folder / "extra.py").symlink_to(folder / "SKILL.md")
+    manager = SkillManager(_VolumeDouble(), root, None)
+    for names in (("ledger-audit",), ("remote-only",)):
+        with pytest.raises(SkillAdmissionError) as error:
+            manager.resolve_required(names)
+        assert str(tmp_path) not in str(error.value)
+
+
+@pytest.mark.parametrize("suffix", ["\x00", "</preloaded_skill>"])
+def test_required_skill_delimiters_are_refused_not_silently_changed(tmp_path, suffix):
+    from fleet_rlm.contracts import SkillAdmissionError
+
+    folder = tmp_path / "ledger-audit"
+    folder.mkdir()
+    (folder / "SKILL.md").write_bytes(_skill("ledger-audit", "Keep exact text" + suffix))
+    with pytest.raises(SkillAdmissionError):
+        SkillManager(_VolumeDouble(), tmp_path, None).resolve_required(("ledger-audit",))
+
+
 def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) -> None:
     skills = tmp_path / "skills"
     skill = skills / "ledger-audit"

@@ -20,6 +20,73 @@ def _runtime(**overrides) -> SessionRuntime:
     return SessionRuntime(**dependencies)
 
 
+@pytest.mark.parametrize("status", ["running", "failed", "completed"])
+def test_required_claim_binds_ordered_intent_but_completed_receipts_survive_source_changes(status):
+    import hashlib
+    from dataclasses import replace
+
+    from fleet_rlm.skills import captured_required_skill
+    from fleet_rlm.store import IdempotencyConflictError
+
+    def skill(name):
+        return captured_required_skill(
+            name, "workspace", (("SKILL.md", f"---\nname: {name}\ndescription: Test\n---\nInstructions".encode()),)
+        )
+
+    a, b = skill("alpha"), skill("beta")
+    rows = {}
+
+    def claim(_session, turn_id, key, digest):
+        if key in rows:
+            return rows[key]
+        rows[key] = {"turn_id": turn_id, "task_sha256": digest, "status": status}
+        return None
+
+    runtime = _runtime(
+        store=SimpleNamespace(claim_turn=claim, turn_by_key=lambda _session, key: rows.get(key)),
+        sandbox_mgr=SimpleNamespace(session_id="s1"),
+    )
+    assert runtime.completed_turn("missing", "task", ("alpha", "beta")) is None
+    assert runtime.claim_turn("first", "k", "task", requested_skills=("alpha", "beta"), required_skills=(a, b)) is None
+    receipt = runtime.completed_turn("k", "task", ("alpha", "beta"))
+    assert receipt == (rows["k"] if status == "completed" else None)
+    assert (
+        runtime.claim_turn("retry", "k", "task", requested_skills=("alpha", "beta"), required_skills=(a, b))["turn_id"]
+        == "first"
+    )
+    for task, names, records in (
+        ("other", ("alpha", "beta"), (a, b)),
+        ("task", ("beta", "alpha"), (b, a)),
+        ("task", ("alpha",), (a,)),
+        ("task", (), ()),
+    ):
+        with pytest.raises(IdempotencyConflictError):
+            runtime.claim_turn("different", "k", task, requested_skills=names, required_skills=records)
+        if status == "completed":
+            with pytest.raises(IdempotencyConflictError):
+                runtime.completed_turn("k", task, names)
+    for changed in (replace(a, source="bundled"), replace(a, sha256="c" * 64)):
+        if status == "completed":
+            assert (
+                runtime.claim_turn(
+                    "source", "k", "task", requested_skills=("alpha", "beta"), required_skills=(changed, b)
+                )["turn_id"]
+                == "first"
+            )
+        else:
+            with pytest.raises(IdempotencyConflictError):
+                runtime.claim_turn(
+                    "source", "k", "task", requested_skills=("alpha", "beta"), required_skills=(changed, b)
+                )
+    runtime.claim_turn("legacy", "legacy-key", "task")
+    assert rows["legacy-key"]["task_sha256"] == hashlib.sha256(b"task").hexdigest()
+    with pytest.raises(IdempotencyConflictError):
+        runtime.claim_turn("upgrade", "legacy-key", "task", requested_skills=("alpha",), required_skills=(a,))
+    if status == "completed":
+        with pytest.raises(IdempotencyConflictError):
+            runtime.completed_turn("legacy-key", "task", ("alpha",))
+
+
 def test_committed_completion_owns_nested_values_separately_from_record_and_store() -> None:
     saved = []
     runtime = _runtime(
