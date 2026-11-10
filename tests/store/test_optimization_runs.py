@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -7,7 +9,7 @@ import psycopg
 import pytest
 from test_store import make_store
 
-from fleet_rlm.store import _OPTIMIZATION_LOCK_SCOPE
+from fleet_rlm.store import _OPTIMIZATION_LOCK_SCOPE, _SCHEMA_MIGRATIONS, _SCHEMA_VERSION_TABLE, Store
 
 
 def run_row(**changes: Any) -> dict[str, Any]:
@@ -321,3 +323,67 @@ def test_owner_probe_does_not_treat_database_errors_as_owner_death(monkeypatch):
     monkeypatch.setattr(psycopg.Connection, "connect", classmethod(fail))
     with pytest.raises(psycopg.OperationalError):
         store.optimization_owner_alive("api-1")
+
+
+@pytest.mark.skipif(
+    not os.environ.get("FLEET_TEST_POSTGRES_URL"), reason="set FLEET_TEST_POSTGRES_URL to run against a real PostgreSQL"
+)
+def test_migration_eleven_on_real_postgres_preserves_history_despite_cross_session_collisions():
+    """Opt-in: builds schema v10 in a scratch schema, seeds colliding ids, applies v11, re-initializes."""
+    url = os.environ["FLEET_TEST_POSTGRES_URL"]
+    schema = "fleet_mig_" + uuid.uuid4().hex[:8]
+    with psycopg.connect(url, autocommit=True) as admin:
+        admin.execute(f"CREATE SCHEMA {schema}")
+        try:
+            admin.execute(f"SET search_path TO {schema}")
+            admin.execute(_SCHEMA_VERSION_TABLE)
+            for version, statements in _SCHEMA_MIGRATIONS[:10]:
+                for statement in statements:
+                    admin.execute(statement)
+                admin.execute("INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s)", (version,))
+            seeds = [
+                # (session, run, request, created) -- run-a1 and req-1 collide across sessions.
+                ("s1", "run-a1", "req-1", "2026-01-01"),
+                ("s2", "run-a1", "req-1", "2026-01-02"),
+                ("s3", "run-a3", "req-3", "2026-01-03"),
+            ]
+            for session, run, request, created in seeds:
+                admin.execute(
+                    "INSERT INTO fleet_lite_optimization_runs "
+                    "(session_id,run_id,request_id,owner_id,status,stage,metadata,created_at) "
+                    "VALUES (%s,%s,%s,'owner','completed','completed','{\"candidate_version\":\"v\"}',%s)",
+                    (session, run, request, created),
+                )
+            store = Store.open(url, wait=True, schema=schema)
+            try:
+                store.initialize()
+                store.initialize()  # idempotent: nothing pending the second time
+                rows = {
+                    row[0]: row
+                    for row in admin.execute(
+                        "SELECT run_id,request_id,kind,metadata->>'legacy_session_id',metadata->>'candidate_version' "
+                        "FROM fleet_lite_optimization_runs"
+                    ).fetchall()
+                }
+                assert set(rows) == {"run-a1", "run-a1-dup-s2", "run-a3"}
+                assert rows["run-a1"][3] == "s1" and rows["run-a1-dup-s2"][3] == "s2" and rows["run-a3"][3] == "s3"
+                assert all(row[2] == "optimize" and row[4] == "v" for row in rows.values())
+                assert len({row[1] for row in rows.values()}) == 3 and rows["run-a1"][1] == "req-1"
+                assert not admin.execute(
+                    "SELECT 1 FROM information_schema.columns WHERE table_schema=%s "
+                    "AND table_name='fleet_lite_optimization_runs' AND column_name='session_id'",
+                    (schema,),
+                ).fetchall()
+                indexes = {
+                    row[0] for row in admin.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s", (schema,))
+                }
+                assert "fleet_lite_one_active_optimization_run" in indexes
+                assert "fleet_lite_optimization_runs_pkey" in indexes
+                assert "fleet_lite_optimization_runs_request_id_key" in indexes
+                assert admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0] == 11
+                # The legacy row stays readable through the Store and keeps its legacy marker.
+                assert store.get_optimization_run("run-a1-dup-s2")["legacy_session_id"] == "s2"
+            finally:
+                store.close()
+        finally:
+            admin.execute(f"DROP SCHEMA {schema} CASCADE")

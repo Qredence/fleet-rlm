@@ -1,12 +1,14 @@
-"""Global improvement loop: readiness, labelling queue, jobs, history, and settings.
+"""Global improvement loop: readiness, labelling queue, jobs, and history.
 
 The API owns job processes but never imports GEPA; examples, programs, and jobs belong to no Session.
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -17,7 +19,6 @@ from fleet_rlm.api.schemas import (
     ImproveHistory,
     ImproveQueue,
     ImproveReadiness,
-    ImproveSettings,
     JobDetail,
     JobEnvelope,
     JobList,
@@ -34,7 +35,6 @@ from fleet_rlm.optimization_runs import ExperimentOptions, public_run
 __all__ = ["router"]
 
 router = APIRouter(prefix="/improve", tags=["improve"])
-_SETTINGS_SCOPE = "improve"
 _PREVIEW_CHARS = 500
 _MAX_FIGURES = 20
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -74,15 +74,29 @@ def _preview(text: Any) -> str:
 @router.get("/readiness", response_model=ImproveReadiness, responses=_ERROR_RESPONSES)
 def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
     """Report what the labelled examples support, what is missing, and how many labels are new."""
+    from fleet_rlm.engine.compiled import CompiledProgramFile, installed_program_error
     from fleet_rlm.optimize.dataset import load_examples, readiness
 
     with translate("Readiness is unavailable"):
         target = settings.mlflow_target()
-        status = readiness(load_examples(store, target.experiment_name, target.eval_experiment_name))
+        report = readiness(load_examples(store, target.experiment_name, target.eval_experiment_name)).as_dict()
+        # An installed program that contradicts the ledger would make every Turn refuse, so a job
+        # would start from the wrong incumbent.
+        path = Path(settings.compiled_program_dir) / "fleet.json"
+        digest = hashlib.sha256(CompiledProgramFile(str(path)).read()).hexdigest() if path.exists() else ""
+        if problem := installed_program_error(digest, store.approved_program()):
+            report["missing"].append(problem)
+            report["ready"] = False
+        # Only a run that finished consumed the labels that existed when it started.
         last_run = max(
-            (job["created_at"] for job in store.list_optimization_runs() if job["kind"] == "optimize"), default=None
+            (
+                job["created_at"]
+                for job in store.list_optimization_runs()
+                if job["kind"] == "optimize" and job["status"] in {"completed", "approved"}
+            ),
+            default=None,
         )
-        return {**status.as_dict(), "new_labels_since_last_run": store.new_review_labels(last_run)}
+        return {**report, "new_labels_since_last_run": store.new_review_labels(last_run)}
 
 
 @router.get("/queue", response_model=ImproveQueue, responses=_ERROR_RESPONSES)
@@ -205,23 +219,12 @@ def improve_history(store: StoreDep) -> dict[str, Any]:
     with translate("Improve history is unavailable"):
         jobs = store.list_optimization_runs()
         return {
-            "versions": [public_run(job) for job in jobs if job["kind"] == "optimize" and job["status"] == "approved"],
+            "versions": [
+                public_run(job)
+                for job in jobs
+                if job["kind"] == "optimize" and job["status"] == "approved" and not job.get("legacy_session_id")
+            ],
             "evaluations": [
                 public_run(job) for job in jobs if job["kind"] != "optimize" and job["status"] == "completed"
             ],
         }
-
-
-@router.get("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
-def get_improve_settings(store: StoreDep) -> ImproveSettings:
-    """Return the saved loop controls, or their defaults."""
-    with translate("Improve settings are unavailable"):
-        return ImproveSettings.model_validate(store.global_settings(_SETTINGS_SCOPE))
-
-
-@router.put("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
-def put_improve_settings(body: ImproveSettings, store: StoreDep) -> ImproveSettings:
-    """Replace the saved loop controls."""
-    with translate("Improve settings could not be saved"):
-        store.save_global_settings(_SETTINGS_SCOPE, body.model_dump())
-        return body

@@ -2060,87 +2060,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /improve/settings:
-    get:
-      tags:
-      - improve
-      summary: Get Improve Settings
-      description: Return the saved loop controls, or their defaults.
-      operationId: get_improve_settings_improve_settings_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ImproveSettings'
-        '404':
-          description: The requested job does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '409':
-          description: The operation conflicts with the job or current manager state.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '422':
-          description: The request or job identity is invalid.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: Improve storage or worker service is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    put:
-      tags:
-      - improve
-      summary: Put Improve Settings
-      description: Replace the saved loop controls.
-      operationId: put_improve_settings_improve_settings_put
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ImproveSettings'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ImproveSettings'
-        '404':
-          description: The requested job does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '409':
-          description: The operation conflicts with the job or current manager state.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '422':
-          description: The request or job identity is invalid.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: Improve storage or worker service is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
 components:
   schemas:
     Action:
@@ -2506,34 +2425,6 @@ components:
       - new_labels_since_last_run
       title: ImproveReadiness
       description: What the labelled examples support today and what a run still needs.
-    ImproveSettings:
-      properties:
-        auto_run:
-          type: boolean
-          title: Auto Run
-          default: false
-        min_new_labels:
-          type: integer
-          minimum: 1.0
-          title: Min New Labels
-          default: 5
-        max_metric_calls:
-          anyOf:
-          - type: integer
-            minimum: 1.0
-          - type: 'null'
-          title: Max Metric Calls
-        max_total_tokens:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: 'null'
-          title: Max Total Tokens
-      additionalProperties: false
-      type: object
-      title: ImproveSettings
-      description: Improve-loop controls shared by every Session; auto-run itself starts jobs in a later
-        release.
     Job:
       properties:
         run_id:
@@ -3300,11 +3191,7 @@ components:
           title: Max Total Tokens
         kind:
           type: string
-          enum:
-          - optimize
-          - evaluate_rescore
-          - evaluate_replay
-          - evaluate_synthetic
+          const: optimize
           title: Kind
           default: optimize
         request_id:

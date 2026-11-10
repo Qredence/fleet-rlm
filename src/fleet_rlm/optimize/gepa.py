@@ -816,7 +816,7 @@ def _finalize_optimization_run(
                     store,
                     run_id,
                     owner_id=owner_id,
-                    expected_statuses=("completed", "cancelled", "failed"),
+                    expected_statuses=("completed", "cancelled", "failed", "budget_exhausted"),
                     status="failed",
                     stage="failed",
                     candidate_version=None,

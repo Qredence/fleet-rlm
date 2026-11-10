@@ -594,6 +594,7 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
         runtime_settings=lambda _session_id: {},
         save_runtime_settings=lambda _session_id, value: calls.append(value),
         claim_environment_report=claim,
+        approved_program=lambda: {"approved": None, "approving": []},
     )
     monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
     monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
@@ -615,6 +616,7 @@ def _global_program_registry(tmp_path, monkeypatch):
     from fleet_rlm.session import SessionRuntimeRegistry
 
     saved = {}
+    ledger = {"approved": None, "approving": []}
     store = SimpleNamespace(
         ensure_session=lambda _session_id: None,
         acquire_session_lease=lambda _session_id: SimpleNamespace(close=lambda: None),
@@ -624,6 +626,7 @@ def _global_program_registry(tmp_path, monkeypatch):
         runtime_settings=lambda _session_id: dict(saved),
         save_runtime_settings=lambda _session_id, value: saved.update(value),
         claim_environment_report=lambda _session_id: True,
+        approved_program=lambda: dict(ledger),
     )
     monkeypatch.setattr(DaytonaSandboxManager, "reconcile_sandbox_ownership", lambda *_args: None)
     monkeypatch.setattr(DaytonaSandboxManager, "execution_evidence", lambda _self: {})
@@ -639,6 +642,7 @@ def _global_program_registry(tmp_path, monkeypatch):
         store,
     )
     registry.root_lm = registry.sub_lm = dspy.LM("openai/offline")
+    registry.ledger = ledger
     return registry, saved
 
 
@@ -670,6 +674,64 @@ def test_global_program_file_is_the_only_selection_for_every_session(tmp_path, m
     assert fresh.engine.compiled.digest == ""
     for runtime in (first, second, fresh):
         runtime.close_lease()
+
+
+def _approved_bytes(registry) -> bytes:
+    from fleet_rlm.engine.compiled import program_envelope
+
+    runtime = registry._build("seed")
+    candidate = runtime.engine.program.deepcopy()
+    candidate.routing.predict.signature = candidate.routing.predict.signature.with_instructions("Approved policy")
+    runtime.close_lease()
+    return program_envelope(candidate)
+
+
+@pytest.mark.parametrize("problem", ["missing", "changed"])
+def test_once_a_global_job_was_approved_a_missing_or_changed_program_refuses_every_turn(
+    tmp_path, monkeypatch, problem
+) -> None:
+    import hashlib
+
+    registry, _saved = _global_program_registry(tmp_path, monkeypatch)
+    content = _approved_bytes(registry)
+    registry.ledger["approved"] = hashlib.sha256(content).hexdigest()
+    path = tmp_path / "fleet.json"
+    path.write_bytes(content)
+    live = registry._build("s1")
+    assert live.engine.program.routing.predict.signature.instructions == "Approved policy"
+    if problem == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(content + b" ")  # still valid JSON, but not what the approval installed
+    with pytest.raises((ValueError, FileNotFoundError)):
+        live.engine("", "", "task")
+    # A brand new runtime, however old the process, enforces the same ledger instead of serving baseline.
+    with pytest.raises(ValueError, match="approved global program"):
+        registry._build("s2")
+    live.close_lease()
+
+
+def test_an_approval_in_flight_may_already_have_replaced_the_file(tmp_path, monkeypatch) -> None:
+    import hashlib
+
+    registry, _saved = _global_program_registry(tmp_path, monkeypatch)
+    content = _approved_bytes(registry)
+    registry.ledger.update(
+        approved=hashlib.sha256(b"older approval").hexdigest(), approving=[hashlib.sha256(content).hexdigest()]
+    )
+    (tmp_path / "fleet.json").write_bytes(content)
+    registry._build("s1").close_lease()
+    registry.ledger["approving"] = []
+    with pytest.raises(ValueError, match="approved global program"):
+        registry._build("s2")
+
+
+def test_per_session_artifacts_from_before_the_global_program_are_ignored(tmp_path, monkeypatch) -> None:
+    registry, _saved = _global_program_registry(tmp_path, monkeypatch)
+    (tmp_path / "s1.json").write_text("not a program at all")
+    runtime = registry._build("s1")
+    assert runtime.engine.compiled.digest == ""
+    runtime.close_lease()
 
 
 def test_invalid_global_program_refuses_the_session_instead_of_serving_baseline(tmp_path, monkeypatch) -> None:
@@ -761,6 +823,7 @@ def test_build_does_not_terminalize_running_turns_when_resource_reconciliation_f
         fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
         runtime_settings=lambda _session_id: {},
         claim_environment_report=lambda _session_id: True,
+        approved_program=lambda: {"approved": None, "approving": []},
     )
     monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
     monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
@@ -806,6 +869,7 @@ def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
         fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
         runtime_settings=lambda _session_id: {},
         claim_environment_report=lambda _session_id: True,
+        approved_program=lambda: {"approved": None, "approving": []},
     )
     monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
     monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())

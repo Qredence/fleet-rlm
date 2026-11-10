@@ -1325,7 +1325,8 @@ def test_autolog_trace_configuration(monkeypatch, tmp_path, phase, trace_search)
     assert autolog == [expected]
 
 
-def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("outcome", ["completed", "budget_exhausted"])
+def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypatch, tmp_path, outcome) -> None:
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
     close = store.close
@@ -1339,7 +1340,12 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
     monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+
+    def compile_outcome(*_args, **_kwargs):
+        if outcome == "budget_exhausted":
+            raise workflow.BudgetExhaustedError("Optimization token budget exhausted")
+
+    monkeypatch.setattr(workflow, "_compile", compile_outcome)
     parser = _optimization_parser()
 
     with pytest.raises(RuntimeError, match="pool close failed"):
@@ -2663,3 +2669,19 @@ def test_approval_refuses_a_legacy_per_session_candidate(tmp_path, monkeypatch) 
         workflow.run(parser.parse_args(["--approve", version]), parser, settings)
     assert store.get_optimization_run(version)["status"] == "completed"
     assert not (tmp_path / "fleet.json").exists()
+
+
+def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_composition() -> None:
+    from fleet_rlm.observability import LMUsageCallback, turn_callbacks
+
+    budget = workflow.TokenBudget(0)
+    # The inner context is what invoke_program does for every Turn and every isolated rollout.
+    with dspy.context(callbacks=[budget]), dspy.context(callbacks=turn_callbacks()):
+        callbacks = dspy.settings.callbacks
+        assert [callback for callback in callbacks if isinstance(callback, LMUsageCallback)] == [budget]
+        for callback in callbacks:
+            callback.on_lm_start("rollout-call", SimpleNamespace(model="m"), {})
+        dspy.settings.usage_tracker.add_usage("m", {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7})
+        for callback in callbacks:
+            callback.on_lm_end("rollout-call", None)
+    assert budget.used == 7

@@ -112,15 +112,17 @@ def test_migration_five_records_the_environment_observation_on_the_session_row()
 def test_migration_eleven_rekeys_jobs_by_run_id_and_preserves_the_legacy_session():
     version, statements = _SCHEMA_MIGRATIONS[10]
     assert version == 11
-    kind, legacy, dedupe, drop, primary, unique, settings = statements
+    kind, legacy, dedupe_run, dedupe_request, drop, primary, unique = statements
     assert "ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'optimize'" in kind
     assert "'optimize','evaluate_rescore','evaluate_replay','evaluate_synthetic'" in kind
     assert "jsonb_build_object('legacy_session_id', session_id)" in legacy
-    assert "HAVING COUNT(*) > 1" in dedupe
+    assert "r.run_id || '-dup-' || r.session_id" in dedupe_run
+    assert "r.request_id || ':' || r.run_id" in dedupe_request
+    # Deduplication must run while session_id still exists, before the key is re-created.
+    assert statements.index(dedupe_run) < statements.index(drop) < statements.index(primary)
     assert drop.endswith("DROP COLUMN session_id")
     assert "ADD PRIMARY KEY (run_id)" in primary
     assert "UNIQUE (request_id)" in unique
-    assert "fleet_lite_global_settings" in settings
     # The one-active-job partial index is untouched by the re-key.
     assert not any("fleet_lite_one_active_optimization_run" in statement for statement in statements)
 
@@ -133,12 +135,15 @@ def test_reviewed_examples_span_every_session():
     assert params == (10,)
 
 
-def test_global_settings_round_trip_by_scope():
-    store, pool = make_store([({"auto_run": True},)], [])
-    assert store.global_settings("improve") == {"auto_run": True}
-    store.save_global_settings("improve", {"auto_run": False})
-    assert pool.conn.statements[0][1] == ("improve",)
-    assert pool.conn.statements[1][1] == ("improve", '{"auto_run": false}')
+def test_approved_program_reports_the_latest_approved_digest_and_approvals_in_flight():
+    store, pool = make_store([("approving", "d-new"), ("approved", "d-latest"), ("approved", "d-old")])
+    assert store.approved_program() == {"approved": "d-latest", "approving": ["d-new"]}
+    sql = pool.conn.statements[0][0]
+    assert "NOT (metadata ? 'legacy_session_id')" in sql and "kind='optimize'" in sql
+    store, _pool = make_store([("approving", "d-new")])
+    assert store.approved_program() == {"approved": None, "approving": ["d-new"]}
+    store, _pool = make_store([])
+    assert store.approved_program() == {"approved": None, "approving": []}
 
 
 def test_new_review_labels_counts_only_approved_labels_after_the_cutoff():

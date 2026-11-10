@@ -106,7 +106,6 @@ class MemoryStore:
 
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, Any]] = {}
-        self.settings: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._lease = threading.Lock()
         self._owners: dict[str, threading.Lock] = {}
@@ -229,12 +228,6 @@ class MemoryStore:
                 raise ValueError("Another optimization run is active")
             self.rows[record["run_id"]] = {"kind": "optimize", **record}
             return True
-
-    def global_settings(self, scope: str) -> dict[str, Any]:
-        return dict(self.settings.get(scope, {}))
-
-    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
-        self.settings[scope] = dict(settings)
 
 
 class _Lease:
@@ -1160,6 +1153,10 @@ class _LabelStore(MemoryStore):
         self.queue: list[dict[str, Any]] = []
         self.references: dict[str, dict[str, Any]] = {}
         self.new_labels_since: list[str | None] = []
+        self.ledger: dict[str, Any] = {"approved": None, "approving": []}
+
+    def approved_program(self) -> dict[str, Any]:
+        return self.ledger
 
     def improve_queue(self, limit: int) -> list[dict[str, Any]]:
         return self.queue[:limit]
@@ -1207,6 +1204,41 @@ def test_readiness_reports_missing_requirements_and_new_labels_since_the_last_ru
     assert len(report["missing"]) == 3
     assert report["new_labels_since_last_run"] == 4
     assert store.new_labels_since == ["2026-10-01T00:00:00+00:00"]
+
+
+def test_new_labels_count_from_the_latest_run_that_finished_not_a_failed_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _LabelStore()
+    _completed(store, "optimize-finished", created_at="2026-10-01T00:00:00+00:00")
+    _completed(store, "optimize-failed", status="failed", created_at="2026-10-09T00:00:00+00:00")
+    _completed(store, "optimize-cancelled", status="cancelled", created_at="2026-10-10T00:00:00+00:00")
+    monkeypatch.setattr("fleet_rlm.optimize.dataset.load_examples", lambda *_args: [])
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        assert client.get("/improve/readiness").status_code == 200
+    assert store.new_labels_since == ["2026-10-01T00:00:00+00:00"]
+
+
+@pytest.mark.parametrize("installed", ["missing", "changed", "matching", "never_approved"])
+def test_readiness_reports_an_installed_program_that_contradicts_the_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed: str
+) -> None:
+    store = _LabelStore()
+    store.ledger = {
+        "approved": None if installed == "never_approved" else hashlib.sha256(b"approved").hexdigest(),
+        "approving": [],
+    }
+    if installed in {"changed", "matching"}:
+        (tmp_path / "fleet.json").write_bytes(b"approved" if installed == "matching" else b"tampered")
+    examples = [_example(f"sess_{index % 4}", critical=index == 0) for index in range(8)]
+    monkeypatch.setattr("fleet_rlm.optimize.dataset.load_examples", lambda *_args: examples)
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        report = client.get("/improve/readiness").json()
+    broken = installed in {"missing", "changed"}
+    assert report["ready"] is not broken
+    assert any("approved global program" in item for item in report["missing"]) is broken
 
 
 def test_readiness_is_green_with_enough_groups_and_a_critical_holdout(
@@ -1301,23 +1333,12 @@ def test_label_route_reports_a_failed_synchronization_with_its_recovery_hint(
     assert response.status_code == 503 and "Lakebase curation failed" in response.text
 
 
-def test_settings_default_then_persist_across_requests(tmp_path: Path) -> None:
-    _app, client = _app_client(tmp_path, _LabelStore())
-    with client:
-        defaults = client.get("/improve/settings").json()
-        assert defaults == {"auto_run": False, "min_new_labels": 5, "max_metric_calls": None, "max_total_tokens": None}
-        update = {"auto_run": True, "min_new_labels": 8, "max_metric_calls": 60, "max_total_tokens": 2_000_000}
-        assert client.put("/improve/settings", json=update).json() == update
-        assert client.get("/improve/settings").json() == update
-        assert client.put("/improve/settings", json={**update, "min_new_labels": 0}).status_code == 422
-        assert client.put("/improve/settings", json={**update, "extra": 1}).status_code == 422
-
-
 def test_history_lists_approved_versions_and_completed_evaluations(tmp_path: Path) -> None:
     store = _LabelStore()
     scores = {"baseline": {"dev": 0.4, "holdout": 0.5}, "candidate": {"dev": 0.6, "holdout": 0.7}}
     _completed(store, "optimize-approved", status="approved", scores=scores)
     _completed(store, "optimize-waiting")
+    _completed(store, "sess_old-approved", status="approved", legacy_session_id="sess_old", scores=scores)
     _completed(store, "evaluate-rescore-done", kind="evaluate_rescore", scores=scores)
     _app, client = _app_client(tmp_path, store)
     with client:
@@ -1327,7 +1348,7 @@ def test_history_lists_approved_versions_and_completed_evaluations(tmp_path: Pat
     assert [job["run_id"] for job in history["evaluations"]] == ["evaluate-rescore-done"]
 
 
-def test_only_the_optimize_kind_has_a_managed_worker_yet(tmp_path: Path) -> None:
+def test_only_the_optimize_kind_exists_yet(tmp_path: Path) -> None:
     _app, client = _app_client(tmp_path, _LabelStore())
     with client:
         response = client.post("/improve/jobs", json={"request_id": "rescore", "kind": "evaluate_rescore"})
@@ -1380,6 +1401,5 @@ def test_improve_routes_replace_the_session_scoped_experiment_routes(tmp_path: P
         "/improve/jobs/{run_id}/cancel",
         "/improve/jobs/{run_id}/review",
         "/improve/history",
-        "/improve/settings",
     } <= paths
     assert not any("/experiments" in path and path.startswith("/sessions") for path in paths)

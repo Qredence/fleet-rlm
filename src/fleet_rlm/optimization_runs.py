@@ -24,8 +24,9 @@ if TYPE_CHECKING:
 
 EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
-# One job system: `kind` selects the worker. Only `optimize` has a managed worker so far.
-JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
+# One job system: `kind` selects the worker. Only `optimize` exists; the ledger's CHECK is broader
+# so later kinds need no migration.
+JOB_KINDS = ("optimize",)
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _MAX_REPORT_BYTES = 4_000_000
 VALIDATION_RATIO_MIN = 0.1

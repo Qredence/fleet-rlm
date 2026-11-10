@@ -116,7 +116,7 @@ class ModelRequest(_Request):
 class StartJob(ExperimentOptions):
     """A job kind, its validated controls, and a retry-safe caller identity."""
 
-    kind: Literal["optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic"] = "optimize"
+    kind: Literal["optimize"] = "optimize"
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
@@ -136,15 +136,6 @@ class LabelRequest(_Request):
     expected_values: list[str] | None = Field(default=None, max_length=100)
     critical: bool | None = None
     group: str | None = Field(default=None, min_length=1, max_length=256)
-
-
-class ImproveSettings(_Request):
-    """Improve-loop controls shared by every Session; auto-run itself starts jobs in a later release."""
-
-    auto_run: bool = False
-    min_new_labels: int = Field(default=5, ge=1, strict=True)
-    max_metric_calls: int | None = Field(default=None, ge=1, strict=True)
-    max_total_tokens: int | None = Field(default=None, ge=0, strict=True)
 
 
 # Responses

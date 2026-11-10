@@ -149,18 +149,17 @@ _OPTIMIZATION_RUNS_GLOBAL = (
     "CHECK (kind IN ('optimize','evaluate_rescore','evaluate_replay','evaluate_synthetic'))",
     "UPDATE fleet_lite_optimization_runs "
     "SET metadata = metadata || jsonb_build_object('legacy_session_id', session_id)",
-    "UPDATE fleet_lite_optimization_runs SET request_id = request_id || ':' || run_id "
-    "WHERE request_id IN (SELECT request_id FROM fleet_lite_optimization_runs GROUP BY request_id HAVING COUNT(*) > 1)",
+    # Two Sessions could share a run or request ID; keep the earliest row's and suffix the others'.
+    "UPDATE fleet_lite_optimization_runs AS r SET run_id = r.run_id || '-dup-' || r.session_id "
+    "WHERE EXISTS (SELECT 1 FROM fleet_lite_optimization_runs AS o WHERE o.run_id = r.run_id "
+    "AND (o.created_at, o.session_id) < (r.created_at, r.session_id))",
+    "UPDATE fleet_lite_optimization_runs AS r SET request_id = r.request_id || ':' || r.run_id "
+    "WHERE EXISTS (SELECT 1 FROM fleet_lite_optimization_runs AS o WHERE o.request_id = r.request_id "
+    "AND (o.created_at, o.run_id) < (r.created_at, r.run_id))",
     "ALTER TABLE fleet_lite_optimization_runs DROP COLUMN session_id",
     "ALTER TABLE fleet_lite_optimization_runs ADD PRIMARY KEY (run_id)",
     "ALTER TABLE fleet_lite_optimization_runs ADD CONSTRAINT fleet_lite_optimization_runs_request_id_key "
     "UNIQUE (request_id)",
-    """
-    CREATE TABLE IF NOT EXISTS fleet_lite_global_settings (
-        scope TEXT PRIMARY KEY,
-        settings JSONB NOT NULL DEFAULT '{}'::jsonb
-    )
-    """,
 )
 _OPTIMIZATION_RUNS_ACTIVE_INDEX = """
     CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run
@@ -592,25 +591,6 @@ class Store:
                 (session_id, json.dumps(settings)),
             )
 
-    @_retry_once
-    def global_settings(self, scope: str) -> dict[str, Any]:
-        """Return a scope's saved settings that belong to no Session, or an empty dict."""
-        with self.pool.connection() as connection:
-            row = connection.execute(
-                "SELECT settings FROM fleet_lite_global_settings WHERE scope=%s", (scope,)
-            ).fetchone()
-        return row[0] if row else {}
-
-    @_retry_once
-    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
-        """Replace a scope's saved settings."""
-        with self.pool.connection() as connection:
-            connection.execute(
-                "INSERT INTO fleet_lite_global_settings(scope,settings) VALUES(%s,%s::jsonb) "
-                "ON CONFLICT(scope) DO UPDATE SET settings=EXCLUDED.settings",
-                (scope, json.dumps(settings)),
-            )
-
     # Memories
 
     @_retry_once
@@ -966,6 +946,23 @@ class Store:
                 )
                 .fetchall()
             )
+
+    @_retry_once
+    def approved_program(self) -> dict[str, Any]:
+        """The installed global program as the ledger records it.
+
+        `approved` is the manifest digest of the latest approved, non-legacy optimize job (None when
+        none was ever approved); `approving` lists digests of approvals in flight, whose file may
+        already be on disk before the ledger says so.
+        """
+        with self.pool.connection() as connection:
+            rows = connection.execute(
+                "SELECT status, metadata->>'manifest_digest' FROM fleet_lite_optimization_runs "
+                "WHERE kind='optimize' AND status IN ('approved','approving') AND NOT (metadata ? 'legacy_session_id') "
+                "ORDER BY updated_at DESC"
+            ).fetchall()
+        approved = next((row[1] for row in rows if row[0] == "approved" and row[1]), None)
+        return {"approved": approved, "approving": [row[1] for row in rows if row[0] == "approving" and row[1]]}
 
     @_retry_once
     def new_review_labels(self, since: str | None) -> int:

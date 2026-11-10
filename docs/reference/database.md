@@ -41,12 +41,22 @@ Migration 11 makes jobs global. It adds `kind` (`optimize`, `evaluate_rescore`,
 `session_id` column, and re-keys `fleet_lite_optimization_runs` by `run_id` with
 `request_id` unique across all jobs (idempotency is now global). Each existing
 row keeps its former Session as `legacy_session_id` in its metadata; request IDs
-that collided across Sessions are suffixed with their run ID. Old rows stay
+that collided across Sessions are suffixed with their run ID, and a run ID shared by
+two Sessions keeps the earliest row's and gives the other `<run_id>-dup-<session_id>`,
+so the new primary key cannot abort startup. Old rows stay
 readable, and approval refuses them because their incumbent was a per-Session
-program. The one-active-job partial index is unchanged. The migration also
-creates `fleet_lite_global_settings` (`scope`, `settings` JSONB) for controls that
-belong to no Session, such as the Improve settings. The migration is not
-reversible by an older Fleet, which keys runs by Session.
+program. The one-active-job partial index is unchanged. The migration is not
+reversible by an older Fleet, which keys runs by Session: do not point an older
+build at a database already migrated to 11.
+
+To try a branch with a migration against real data without touching the main
+schema, set `FLEET_DATABASE_SCHEMA` (for example `fleet_rlm_pr2`) to a new
+lowercase name in that process's environment. Fleet creates the schema, applies
+every migration inside it, and uses it through `search_path`; the default schema
+and any older Fleet build keep working against their own tables. Drop the schema
+when finished. An opt-in test applies migration 11 to a scratch schema of a real
+PostgreSQL: set `FLEET_TEST_POSTGRES_URL` and run
+`uv run pytest tests/store/test_optimization_runs.py -k real_postgres`.
 Migration 7 adds an expression GIN index matching memory search's
 `to_tsvector('english', content)` predicate. PostgreSQL chooses whether to use
 it; it does not eliminate ranking work. The initial index build runs under the

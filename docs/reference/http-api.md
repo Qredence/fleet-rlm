@@ -23,7 +23,6 @@ Fleet exposes a FastAPI application with the following routes:
 | `POST` | `/improve/jobs/{run_id}/cancel` | Request cooperative cancellation of a running job. |
 | `POST` | `/improve/jobs/{run_id}/review` | Explicitly approve or reject a candidate. |
 | `GET` | `/improve/history` | Approved versions and completed evaluation jobs, for the quality trend. |
-| `GET`, `PUT` | `/improve/settings` | Read or replace the loop controls shared by every Session. |
 | `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `direct`, `flex`, `rlm`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
 | `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
@@ -60,7 +59,7 @@ routes do not acquire a Session runtime lease.
 **Readiness.** `GET /improve/readiness` returns `ready`, the counts (`examples`,
 `groups`, `critical`), the `split_sizes` the examples would form, `missing`
 requirements in plain words, and `new_labels_since_last_run` (approved labels
-written after the latest optimize job was created). It uses the same loader and
+written after the latest completed or approved optimize job was created). It uses the same loader and
 checks as a job, so a green report means a job will not refuse for data.
 
 **Labelling.** `GET /improve/queue?limit=` (1–200, default 50) lists completed,
@@ -78,10 +77,7 @@ a partial synchronization `503` with the retry hint.
 **Jobs.** A `POST /improve/jobs` body contains a `kind`, the shared optimizer
 options (`gepa_budget` or `max_metric_calls`, `threads`,
 `reflection_minibatch_size`, `max_candidate_proposals`, `validation_ratio`,
-`trace_search`, and `max_total_tokens`) plus a caller-generated `request_id`. The
-ledger reserves `optimize`, `evaluate_rescore`, `evaluate_replay`, and
-`evaluate_synthetic`; only `optimize` has a managed worker, and the others return
-`422`. `validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls
+`trace_search`, and `max_total_tokens`) plus a caller-generated `request_id`. `kind` is `optimize`, the only job kind today; other values return `422`. `validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls
 return `422` before run creation. Unusable curated splits, including a missing
 critical holdout, fail preparation before search.
 Repeating the same request ID with the same kind and options returns the existing
@@ -122,12 +118,21 @@ is not installed automatically. Jobs recorded before the program became global k
 their Session as `legacy_session_id`: they stay readable and can be rejected, but
 approval returns `409` because their incumbent was a per-Session program.
 
-**History and settings.** `GET /improve/history` returns `versions` (approved
+**History.** `GET /improve/history` returns `versions` (approved, non-legacy
 optimize jobs with their `scores`) and `evaluations` (completed evaluate jobs),
-newest first. `GET`/`PUT /improve/settings` hold `auto_run` (default `false`),
-`min_new_labels` (default 5), `max_metric_calls`, and `max_total_tokens`. They are
-stored in PostgreSQL for all Sessions; the auto-run trigger that consumes them is
-not implemented yet.
+newest first.
+
+**Installed program.** Once any global job was approved, only the file that
+approval installed may serve: if `fleet.json` is missing or differs from the latest
+approved job's digest, new Session runtimes and every later Turn are refused with a
+clear error, however long the process has run, and `GET /improve/readiness` lists
+the problem in `missing` with `ready: false`. Baseline serves only while no global
+job was ever approved. Per-Session artifacts from before the program became global
+are ignored.
+
+**Exposure.** `/improve/queue` returns task and answer previews of Turns from every
+Session, so exposing the API beyond loopback needs the secured boundary described
+below; the routes add no authentication of their own.
 
 There is no caller authentication. The service binds to loopback by default;
 binding elsewhere does not add authentication. Only use on a trusted host or

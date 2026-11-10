@@ -54,9 +54,10 @@ flowchart LR
 - `engine/compiled.py` accepts only complete `fleet-program-b1` envelopes. Legacy
   native JSON remains inspectable, not installable; there is no old-root alias or
   key conversion. There is one global installed program, `fleet.json`; an absent
-  file means baseline, an invalid one refuses the Turn, and every Session picks up an
-  approval at its next Turn. A runtime that already serves the artifact refuses to
-  continue if the file disappears.
+  file means baseline only while no global job was ever approved. The ledger
+  (`Store.approved_program`) is checked at runtime creation and every Turn, so a
+  missing or changed file refuses execution regardless of process age; an invalid
+  file refuses too. Every Session picks up an approval at its next Turn.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
