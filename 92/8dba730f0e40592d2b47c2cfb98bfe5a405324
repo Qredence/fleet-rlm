@@ -1,0 +1,68 @@
+src/fleet_rlm/api/routes/improve.py
+  s_f99ab9bf268253::t_966ddd5e945996 114-118,125-131,145,151-154,202,228-230,242-245
+  s_f99ab9bf268253::t_cd8dfe4727f97a 147-150
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_0b6305a697ca28 420
+src/fleet_rlm/experiments.py
+  s_f99ab9bf268253::t_65c8518558e7a3 219
+tests/store/test_store.py
+  s_f99ab9bf268253::t_c205876d6f5375 804-805,814,816-818
+AGENTS.md
+  s_f99ab9bf268253::t_cd8dfe4727f97a 26
+src/fleet_rlm/optimize/evaluation.py
+  s_f99ab9bf268253::t_966ddd5e945996 228,270-272
+src/fleet_rlm/store.py
+  s_f99ab9bf268253::t_65c8518558e7a3 172-175,293,617-623,627-629,1064,1130,1132-1135,1150-1151,1153
+openapi.yaml
+  s_f99ab9bf268253::t_2c0acf899df7af 2532-2536
+src/fleet_rlm/optimize/jobs.py
+  s_f99ab9bf268253::t_cd8dfe4727f97a 51-53,60-61
+tests/optimize/test_evaluation.py
+  s_f99ab9bf268253::t_1013a1e3623e94 722-724
+  s_f99ab9bf268253::t_fcf332a374ba26 714-721,725-747
+tests/api/test_improve.py
+  s_f99ab9bf268253::t_f385ba916e26c0 117-119,146,161,1441,1443-1447,1455,1457-1459,1467-1475,1478,1504,1510,1516,1547,1565
+  s_f99ab9bf268253::t_fcf332a374ba26 1291-1296,1331
+tests/store/test_optimization_runs.py
+  s_f99ab9bf268253::t_c205876d6f5375 359,387-389
+  s_f99ab9bf268253::t_4e0039f3b2b3e0 44-45
+src/fleet_rlm/api/schemas.py
+  s_f99ab9bf268253::t_966ddd5e945996 398
+docs/reference/cli.md
+  s_f99ab9bf268253::t_0b6305a697ca28 196-197
+tests/optimize/test_optimization.py
+  s_f99ab9bf268253::t_eb9ef4305a99b4 2779,2898-2902
+  s_f99ab9bf268253::t_1013a1e3623e94 76-78,2790,2796-2803,2806-2812,2814-2816,2833-2875,2988-2995,2997-3017
+  s_f99ab9bf268253::t_ce9362e290d198 88,2996
+  s_f99ab9bf268253::t_19ae700c7e383d 2722,2724,2733
+tests/tui/test_tui.py
+  s_f99ab9bf268253::t_eed8c250256b8a 1752
+  s_f99ab9bf268253::t_0b6305a697ca28 2017,2025-2026,2036
+docs/reference/http-api.md
+  s_f99ab9bf268253::t_49db5d6ccc64af 127-129,137-139,149-152
+  s_f99ab9bf268253::t_eb9d1f537c5972 73-74
+src/fleet_rlm/tui/improve.py
+  s_f99ab9bf268253::t_760200b2856f64 240,544-545,577-578,906-907
+src/fleet_rlm/tui/app.py
+  s_f99ab9bf268253::t_0b6305a697ca28 325,436,884
+  s_f99ab9bf268253::t_760200b2856f64 896,898,900,905
+src/fleet_rlm/optimize/gepa.py
+  s_f99ab9bf268253::t_6c9f9c1682802e 12,1001
+  s_f99ab9bf268253::t_cd8dfe4727f97a 958-966,972-974,978,980-991,1000,1002-1019,1034-1035,1042-1043,1045,1051,1055-1067,1069-1071,1073-1076,1079-1084,1090-1113,1136-1146,1159-1174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "928dba730f0e40592d2b47c2cfb98bfe5a405324",
+  "prompts": {},
+  "sessions": {
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
