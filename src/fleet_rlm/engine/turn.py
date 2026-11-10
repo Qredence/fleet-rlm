@@ -344,11 +344,17 @@ def run_turn(
                             "configuration": runtime_configuration(settings, runtime),
                             "provenance": {"fleet_rlm_version": version("fleet-rlm")},
                         }
-                        replay_snapshot = encode_snapshot(snapshot)
+                        from fleet_rlm.replay import ReplaySizeError
+
+                        try:
+                            replay_snapshot = encode_snapshot(snapshot)
+                        except ReplaySizeError as error:
+                            inputs["replay_selected"] = False
+                            emit({"event": "replay_skipped", "bytes": error.size, "limit": error.limit})
                         phase.set_attributes(
                             {
-                                "snapshot_id": replay_snapshot[0],
-                                "snapshot_bytes": len(replay_snapshot[1]),
+                                "snapshot_id": replay_snapshot[0] if replay_snapshot else None,
+                                "snapshot_bytes": len(replay_snapshot[1]) if replay_snapshot else 0,
                                 "replay_files": len(inputs["replay_files"]),
                             }
                         )
@@ -840,8 +846,13 @@ def _prepare_inputs(
     replay_skipped_bytes: int | None = None
     # Only a selected replay needs the bytes; other Turns record the remotely computed digests.
     if record_replay:
+        # Remote sizes decide before any download: an oversized workspace is never pulled just to be dropped.
+        remote_sizes = remote.get("sizes", {})
+        known_bytes = sum(len(required_files[p]) if p in required_files else remote_sizes.get(p, 0) for p in files)
+        if known_bytes > MAX_REPLAY_FILE_BYTES:
+            replay_selected, replay_skipped_bytes = False, known_bytes
         with phase_span("turn.replay_files") as phase:
-            for path in files:
+            for path in files if replay_selected else ():
                 content = (
                     required_files[path] if path in required_files else runtime.sandbox_mgr.read_workspace_file(path)
                 )

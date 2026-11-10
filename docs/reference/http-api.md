@@ -102,8 +102,9 @@ MLflow experiment and candidates to the configured artifact directory.
 
 `max_total_tokens` caps the generative LM tokens a job may spend. Omitted, it
 inherits `FLEET_JOB_MAX_TOKENS`; `0` is unlimited. The worker sums the usage the
-LM calls report; when the cap is reached it stops search and validation at the
-next safe boundary and the job ends `budget_exhausted` with no candidate. TypeSafe
+LM calls report; usage is counted after each call, so in-flight calls can push
+`tokens_used` past the cap. When the cap is reached it stops search and validation at
+the next safe boundary and the job ends `budget_exhausted` with no candidate. TypeSafe
 decision calls are not counted. The cap is telemetry: it never affects the
 persistence failure latch. `progress` carries `tokens_used` and `token_cap`.
 
@@ -251,8 +252,8 @@ catalog/revision, non-secret runtime configuration, and workspace file bytes
 is stored in Lakebase only after the Turn completes successfully and is not
 eligible for GEPA until its MLflow trace is explicitly labeled `approved` with
 gold expectations. This option can retain sensitive workspace content; use it
-only for data approved for that purpose. An oversized workspace skips capture
-instead of failing the Turn: the stream carries a `replay_skipped` event (`bytes`,
+only for data approved for that purpose. When capture is enabled, an oversized
+workspace skips it instead of failing the Turn: the stream carries a `replay_skipped` event (`bytes`,
 `limit`) and the stored Turn reports `replay_snapshot_selected: false`. The TUI
 exposes the same switch with `/replay on` and `/replay off`.
 New snapshots use replay v2 and retain ordered required intent, origins and captured
@@ -467,8 +468,8 @@ increments `sandbox_errors`.
 `ungrounded_submit_rejected`, so a host rejection is not displayed as a remote
 Python failure during recovery.
 
-`replay_skipped` is emitted once during preparation when the workspace exceeds the
-replay byte limit; it carries `bytes` and `limit`.
+`replay_skipped` is emitted once during preparation when replay capture is enabled and
+the workspace exceeds the replay byte limit; it carries `bytes` and `limit`.
 
 `learned_note_warning` carries a `namespace`, `field` (`learned_skill_note`),
 and bounded `figures` list. It does not block submission. Existing
@@ -546,3 +547,18 @@ Setup-mode `/health` returns `status="setup"` and `mlflow=null`; it must not be
 reused as a ready reasoning API. Setup mode exposes no Session routes and opens no
 database or tracking resources. After the controlled restart, normal startup
 initializes the schema and tracing destination under the existing lifecycle.
+
+
+Synthetic jobs are deferred until isolated evaluation and complete serving/judge
+usage accounting are supported. API and CLI requests are refused before a worker starts; the TUI
+shows Synthetic disabled. Historical Synthetic job records remain readable.
+Rescore judges saved historical executions and does not measure the current installed program;
+its results are excluded from program-version trends. Replay measures the installed program.
+Token caps use reported generative usage and cooperative safe-point checks, with in-flight overshoot;
+metric-call budgets are separate and do not establish a dollar ceiling.
+The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
+Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.
+
+`GET /improve/queue` accepts nonnegative `offset` and `limit` (1–200, default 50).
+The response includes nullable `next_offset`; null means the final page.
+The canonical `turn_complete` payload includes the effective `replay_snapshot_selected` boolean.

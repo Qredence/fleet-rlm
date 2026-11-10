@@ -853,7 +853,7 @@ def test_improve_queue_joins_turns_across_sessions_with_optional_labels():
     sql, params = pool.conn.statements[0]
     assert "FROM fleet_lite_replay_snapshots AS replay" in sql and "LEFT JOIN fleet_lite_review_labels" in sql
     assert "WHERE replay.session_id" not in sql and "turns.status='completed'" in sql
-    assert params == (25,)
+    assert params == (25, 0)
 
 
 def test_turn_reference_resolves_a_turn_id_to_its_session_trace_and_snapshot():

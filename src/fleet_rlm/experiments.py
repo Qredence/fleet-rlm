@@ -196,7 +196,7 @@ class ExperimentManager:
         self, request_id: str, options: ExperimentOptions, kind: str = "optimize", *, trigger: str = "manual"
     ) -> dict[str, Any]:
         """Persist an idempotent intent, and what started it, before spawning any paid work."""
-        if kind not in _WORKER_COMMANDS:
+        if kind == "evaluate_synthetic" or kind not in _WORKER_COMMANDS:
             raise ValueError(f"{kind} jobs are not available")
         await self._reconcile_stale_runs()
         async with self._lock:

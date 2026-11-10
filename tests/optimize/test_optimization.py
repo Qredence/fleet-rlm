@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,9 +54,13 @@ class Example:
 class MemoryOptimizationStore:
     """Small offline fake for the optimizer's PostgreSQL lifecycle contract."""
 
+    def approved_program(self) -> dict:
+        return self.ledger
+
     def __init__(self, records: list[dict] | None = None) -> None:
         self.records = {row["run_id"]: {"kind": "optimize", **row} for row in records or []}
         self.closed = False
+        self.ledger: dict = {"approved": None, "approving": []}
         self.initialized = False
         self.migration_pool_closed = False
         self.events: list[tuple[str, dict | None]] = []
@@ -2674,6 +2680,31 @@ def test_check_exits_zero_when_ready(tmp_path, monkeypatch, capsys) -> None:
     assert json.loads(capsys.readouterr().out)["ready"] is True
 
 
+@pytest.mark.parametrize("installed", ["missing", "changed", "unreadable"])
+def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledger(
+    tmp_path, monkeypatch, capsys, installed
+) -> None:
+    store = MemoryOptimizationStore()
+    store.ledger = {"approved": digest_bytes(b"approved"), "approving": []}
+    if installed == "changed":
+        (tmp_path / "fleet.json").write_bytes(b"tampered")
+    if installed == "unreadable":
+        (tmp_path / "fleet.json").mkdir()
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
+    examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
+    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
+    monkeypatch.setattr(workflow, "build_lm", pytest.fail)
+    parser = _optimization_parser()
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    with pytest.raises(SystemExit):
+        workflow.run(parser.parse_args(["--check"]), parser, settings)
+    report = json.loads(capsys.readouterr().out)
+    assert report["ready"] is False and any("fleet.json" in item for item in report["missing"])
+    with pytest.raises(ValueError, match=r"fleet\.json"):
+        workflow._compile(parser.parse_args([]), settings, store, SimpleNamespace(), "optimize-x")
+
+
 def test_approval_refuses_a_legacy_per_session_candidate(tmp_path, monkeypatch) -> None:
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     version = "sess_old-abc"
@@ -2735,7 +2766,7 @@ def _split_results() -> dict:
     }
 
 
-@pytest.mark.parametrize("kind", ["rescore", "replay", "synthetic"])
+@pytest.mark.parametrize("kind", ["rescore", "replay"])
 def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tmp_path, monkeypatch, capsys, kind):
     store = MemoryOptimizationStore()
     _patched_worker(monkeypatch, store)
@@ -2752,7 +2783,10 @@ def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tm
     assert record["status"] == "completed" and record["candidate_version"] is None
     assert record["evaluation"]["splits"] == splits
     assert record["evaluation"]["excluded_without_trace"] == (2 if kind == "rescore" else 0)
-    assert record["evaluation"]["program"] == {"digest": "", "version": "baseline"}
+    assert record["evaluation"]["program"] == {
+        "digest": "",
+        "version": "historical" if kind == "rescore" else "baseline",
+    }
     assert record["evaluation"]["headline"] == {"holdout": 0.5, "critical_pass_rate": 1.0}
     assert [e["status"] for e in worker_events(capsys.readouterr().out) if e["type"] == "terminal"] == ["completed"]
     # Measuring never creates a candidate or touches the installed program.
@@ -2903,45 +2937,9 @@ def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_m
     assert sizes == [8, 8]  # stopped before the third chunk of 4; never a whole split
 
 
-def test_synthetic_runs_the_eval_run_path_against_this_server_behind_its_destination_guard(tmp_path, monkeypatch):
-    import pandas as pd
-
-    from fleet_rlm import launcher
-    from fleet_rlm.optimize import evaluation
-
+def test_synthetic_jobs_are_deferred_before_live_work(tmp_path, monkeypatch):
     settings, _store, _args, guard = _guarded(tmp_path, monkeypatch)
-    verified, ran = [], {}
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda url, expected: verified.append((url, expected)))
-    monkeypatch.setattr(evaluation, "evaluation_experiment", lambda _settings: SimpleNamespace(experiment_id="exp-7"))
-
-    def run_cases(_settings, cases, **kwargs):
-        ran.update(cases=cases, **kwargs)
-        return SimpleNamespace(result_df=pd.DataFrame({"fleet_metric/value": [1.0, 0.0], "expectations": [{}, {}]}))
-
-    monkeypatch.setattr(evaluation, "run_cases", run_cases)
-    splits = workflow._synthetic(settings, guard)
-    url = f"http://{settings.host}:{settings.port}"
-    assert verified == [(url, settings.mlflow_descriptor(evaluation=True))]
-    assert ran["base_url"] == url and ran["experiment_id"] == "exp-7" and ran["cases"]
-    calls = len(evaluation.synthetic_cases(seed=7)) / 8
-    assert calls > 1 and len(ran["cases"]) <= 8
-    assert splits == {
-        "synthetic": {"n": 2 * int(-(-calls // 1)), "mean": 0.5, "errors": 0, "critical": {"passed": 0, "n": 0}}
-    }
-
-
-def test_a_synthetic_job_refuses_a_server_with_another_destination(tmp_path, monkeypatch):
-    from fleet_rlm import launcher
-    from fleet_rlm.optimize import evaluation
-
-    settings, _store, _args, guard = _guarded(tmp_path, monkeypatch)
-
-    def mismatch(*_args):
-        raise launcher.LaunchError("destination mismatch")
-
-    monkeypatch.setattr(launcher, "verify_api_destination", mismatch)
-    monkeypatch.setattr(evaluation, "run_cases", lambda *_a, **_k: pytest.fail("no Turn may run"))
-    with pytest.raises(launcher.LaunchError):
+    with pytest.raises(ValueError, match="deferred"):
         workflow._synthetic(settings, guard)
 
 
@@ -3088,8 +3086,8 @@ def test_failure_detail_names_provider_errors_but_never_quotes_evaluated_content
         '[deepseek/x] Model "x" is not supported (Authorization: Bearer abc123) at /Users/me/.fleet/key.json'
     )
     detail = workflow.failure_detail(unsupported)
-    assert detail.startswith("LMUnsupportedModelError: [deepseek/x] Model")
-    assert "abc123" not in detail and "/Users/me" not in detail and "[path]" in detail
+    assert detail == "LMUnsupportedModelError: model is not supported on this endpoint"
+    assert "abc123" not in detail and "/Users/me" not in detail
     assert workflow.failure_detail(RuntimeError("task payload: private-test-vector-917")) == (
         "Optimization failed; exception details omitted."
     )
@@ -3156,3 +3154,47 @@ def test_readiness_requires_the_minimum_examples_in_dev_and_holdout_in_one_place
     monkeypatch.setattr(dataset, "load_examples", lambda *_a: examples)
     with pytest.raises(ValueError, match="dev would have 6 examples; need 7"):
         dataset.curate_dataset(SimpleNamespace(), "exp", min_split_examples=7)
+
+
+def test_labelling_an_unselected_trace_never_opens_the_database_and_edits_are_serialized(monkeypatch):
+    from fleet_rlm.optimize import evaluation
+
+    labels = {"review_status": "approved", "expected_answer": "4", "expected_values": ["4"]}
+    trace = _trace("tr9", "s9", {"task": "add"}, {})
+    trace.search_assessments = lambda **_kw: [SimpleNamespace(name=k, value=v) for k, v in labels.items()]
+    inside, overlaps = [], []
+
+    def get_trace(*_args, **_kw):
+        inside.append(1)
+        overlaps.append(len(inside))
+        time.sleep(0.05)
+        inside.pop()
+        return trace
+
+    monkeypatch.setattr(evaluation.mlflow, "get_trace", get_trace)
+    monkeypatch.setattr(evaluation, "label_trace", lambda *_args, **_kw: None)
+    opener = pytest.fail
+    threads = [
+        threading.Thread(target=evaluation.label_turn, args=(opener, "tr9"), kwargs={"answer": str(i)})
+        for i in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert overlaps == [1, 1, 1, 1]
+
+
+def test_validation_progress_never_moves_backwards():
+    reporter = workflow.GEPAProgressReporter(emit_events=False)
+    reporter.on_validation_progress(12, 12)
+    reporter.on_validation_progress(11, 12)
+    assert reporter._progress["validation_done"] == 12
+
+
+def test_adapter_failure_never_exposes_evaluated_content():
+    from dspy.utils.exceptions import AdapterParseError
+
+    error = AdapterParseError("JSONAdapter", dspy.Signature("question -> answer"), "private evaluated answer")
+    assert workflow.failure_reason(error) == "AdapterParseError"
+    assert "private evaluated answer" not in workflow.failure_detail(error)

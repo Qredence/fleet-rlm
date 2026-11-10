@@ -232,8 +232,9 @@ each Turn and by `/trace`. The HTTP `POST /improve/labels` runs the same labelli
 configured judge in the evaluation experiment, without running their Turns again.
 
 `fleet optimize --check` prints readiness as JSON (`ready`, `examples`, `groups`,
-`critical`, `split_sizes`, `missing`) and exits non-zero when a run would refuse to
-start; it reads PostgreSQL and MLflow only, with no model or Daytona call.
+`critical`, `split_sizes`, `missing`) and exits non-zero when dataset readiness fails
+or the installed `fleet.json` contradicts the approval ledger. It reads PostgreSQL,
+MLflow and the local program file only; it does not check model or Daytona availability.
 
 `fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
@@ -389,3 +390,14 @@ Configuration fields and defaults are listed in the
 [configuration reference](configuration.md). Live Daytona execution requires
 valid API key, org ID, and Volume ID. No Daytona connectivity is asserted by
 this reference.
+
+
+Synthetic jobs are deferred until isolated evaluation and complete serving/judge
+usage accounting are supported. API and CLI requests are refused before a worker starts; the TUI
+shows Synthetic disabled. Historical Synthetic job records remain readable.
+Rescore judges saved historical executions and does not measure the current installed program;
+its results are excluded from program-version trends. Replay measures the installed program.
+Token caps use reported generative usage and cooperative safe-point checks, with in-flight overshoot;
+metric-call budgets are separate and do not establish a dollar ceiling.
+The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
+Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.

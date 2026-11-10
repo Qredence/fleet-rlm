@@ -22,7 +22,7 @@ import dspy
 import mlflow
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.engine.compiled import load_program_envelope, program_envelope
+from fleet_rlm.engine.compiled import installed_program_problem, load_program_envelope, program_envelope
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.models import build_lm
 from fleet_rlm.observability import LMUsageCallback, configure_mlflow_observability
@@ -176,6 +176,10 @@ class GEPAProgressReporter:
                     "validation_total",
                 }
             }
+            if "validation_done" in progress and progress.get("validation_total") == self._progress.get(
+                "validation_total"
+            ):
+                progress["validation_done"] = max(progress["validation_done"], self._progress.get("validation_done", 0))
             # Only the cumulative total is monotonic. Delta and remaining are observations.
             if "metric_calls_used" in progress and progress["metric_calls_used"] < self._progress.get(
                 "metric_calls_used", 0
@@ -248,7 +252,6 @@ class JudgeFailedError(RuntimeError):
 
 # Messages are shown only for failures that describe a provider, endpoint, or Fleet's own contracts. Other
 # exceptions can embed evaluated content (task text, answers, payloads), so they are named but not quoted.
-_QUOTABLE_MODULES = ("dspy", "litellm", "openai", "httpx", "fleet_rlm.optimize.gepa", "fleet_rlm.optimize.evaluation")
 _PATH = re.compile(r"(?<![\w.:\]-])/(?:[\w.~-]+/)+[\w.~-]*|[A-Za-z]:\\[^\s'\"]+")
 _FAILURE_MESSAGE_CHARS = 300
 _GENERIC_FAILURE = "Optimization failed; exception details omitted."
@@ -259,7 +262,9 @@ def failure_reason(error: BaseException) -> str:
     from fleet_rlm.observability import activity_text
 
     name = type(error).__name__
-    if not type(error).__module__.startswith(_QUOTABLE_MODULES):
+    if name == "LMUnsupportedModelError":
+        return "LMUnsupportedModelError: model is not supported on this endpoint"
+    if not type(error).__module__.startswith(("fleet_rlm.optimize.gepa",)) or isinstance(error, JudgeFailedError):
         return name
     message = _PATH.sub("[path]", activity_text(" ".join(str(error).split()), limit=_FAILURE_MESSAGE_CHARS))
     return f"{name}: {message}" if message else name
@@ -485,6 +490,8 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         return
     directory = Path(settings.compiled_program_dir)
     evaluate = getattr(args, "evaluate", None)
+    if evaluate == "synthetic":
+        parser.error("Synthetic jobs are deferred until isolation and complete token accounting are supported")
     kind = f"evaluate_{evaluate}" if evaluate else "optimize"
     run_id = managed_run_id or f"{kind.replace('_', '-')}-{uuid.uuid4().hex}"
     owner_id = managed_owner_id or uuid.uuid4().hex
@@ -596,6 +603,10 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         raise failure
 
 
+def _active_program_path(settings: FleetSettings) -> str:
+    return str(Path(settings.compiled_program_dir) / "fleet.json")
+
+
 def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> None:
     """Print what the labelled examples support, then exit non-zero when a run would refuse to start.
 
@@ -606,13 +617,18 @@ def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> Non
     store = _open_optimization_store(settings, initialize=False)
     try:
         examples = load_examples(store, target.experiment_name, target.eval_experiment_name)
+        problem = installed_program_problem(_active_program_path(settings), store.approved_program())
     finally:
         store.close()
     status = readiness(
         examples, validation_ratio=options.validation_ratio, min_split_examples=settings.min_split_examples
     )
-    print(json.dumps(status.as_dict(), indent=2))
-    if not status.ready:
+    report = status.as_dict()
+    if problem:
+        report["missing"].append(problem)
+        report["ready"] = False
+    print(json.dumps(report, indent=2))
+    if not report["ready"]:
         raise SystemExit(1)
 
 
@@ -1112,9 +1128,11 @@ def _evaluate(
     chunks of `_EVALUATION_CHUNK` examples, which bounds the overshoot to one chunk.
     """
     kind = args.evaluate
+    if kind == "synthetic":
+        raise ValueError("Synthetic jobs are deferred until isolation and complete token accounting are supported")
     guard = _JobGuard(args, settings, store, run_id, owner_id)
     guard.set_stage("preparing")
-    program = jobs.installed_program(settings, store)
+    program = {"version": "historical", "digest": ""} if kind == "rescore" else jobs.installed_program(settings, store)
     guard.reporter.update(evaluation={"kind": kind, "program": program})
     excluded = 0
     with _counting(guard.tokens, inherited=kind == "replay"):
@@ -1235,31 +1253,11 @@ def _replay(
     return splits
 
 
-def _synthetic(settings: FleetSettings, guard: _JobGuard) -> dict[str, dict[str, Any]]:
+def _synthetic(_settings: FleetSettings, _guard: _JobGuard) -> dict[str, dict[str, Any]]:
     """Run the generated cases against this server (`fleet eval run`); they are one unsplit set."""
-    from fleet_rlm import launcher
-    from fleet_rlm.optimize import evaluation
-
-    url = f"http://{settings.host}:{settings.port}"
-    # The same destination guard as `fleet eval run`: synthetic traces must never reach the curated experiment.
-    launcher.verify_api_destination(url, settings.mlflow_descriptor(evaluation=True))
-    experiment = evaluation.evaluation_experiment(settings)
-    scores: list[float] = []
-    critical: list[float] = []
-    for chunk in _chunks(evaluation.synthetic_cases(seed=7)):
-        guard.set_stage("synthetic")
-        result = evaluation.run_cases(
-            settings,
-            chunk,
-            base_url=url,
-            experiment_id=experiment.experiment_id,
-            report=lambda _message: None,
-        )
-        chunk_scores, chunk_critical, _ = jobs.rescore_scores(result)
-        scores += chunk_scores
-        critical += chunk_critical
-        guard.check_boundary()
-    return {"synthetic": jobs.split_summary(scores, critical)}
+    raise ValueError(
+        "Synthetic jobs are deferred until isolated evaluation and complete token accounting are supported"
+    )
 
 
 def _compile(
@@ -1288,6 +1286,8 @@ def _compile(
     Dataset, provider, storage, and artifact write errors also propagate.
     """
     directory = Path(settings.compiled_program_dir)
+    if problem := installed_program_problem(_active_program_path(settings), store.approved_program()):
+        raise ValueError(problem)
     guard = _JobGuard(args, settings, store, run_id, owner_id)
     stop_file, tokens, reporter, cleanup = guard.stop_file, guard.tokens, guard.reporter, guard.cleanup
     check_boundary, set_stage = guard.check_boundary, guard.set_stage

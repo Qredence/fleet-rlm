@@ -1168,8 +1168,8 @@ class _LabelStore(MemoryStore):
     def approved_program(self) -> dict[str, Any]:
         return self.ledger
 
-    def improve_queue(self, limit: int) -> list[dict[str, Any]]:
-        return self.queue[:limit]
+    def improve_queue(self, limit: int, offset: int = 0) -> list[dict[str, Any]]:
+        return self.queue[offset : offset + limit]
 
     def turn_reference(self, turn_id: str) -> dict[str, Any] | None:
         return self.references.get(turn_id)
@@ -1251,6 +1251,13 @@ def test_readiness_reports_an_installed_program_that_contradicts_the_ledger(
     assert any("approved global program" in item for item in report["missing"]) is broken
 
 
+def test_readiness_counts_source_groups_the_way_the_split_does() -> None:
+    from fleet_rlm.optimize.dataset import readiness
+
+    examples = [_example(f"sess_{index % 4}" + (" " if index % 2 else ""), critical=index == 0) for index in range(8)]
+    assert readiness(examples).groups == 4
+
+
 def test_readiness_is_green_with_enough_groups_and_a_critical_holdout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1300,7 +1307,7 @@ def test_label_route_resolves_the_trace_from_the_stored_turn(tmp_path: Path, mon
     def fake_label(store_arg: Any, trace_id: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((store_arg, trace_id, kwargs))
         return {
-            "review_status": kwargs["status"],
+            "review_status": kwargs["status"] or "rejected",
             "expected_answer": kwargs["answer"],
             "expected_values": kwargs["values"] or [],
             "critical": bool(kwargs["critical"]),
@@ -1315,10 +1322,12 @@ def test_label_route_resolves_the_trace_from_the_stored_turn(tmp_path: Path, mon
             json={"turn_id": "turn-1", "expected_answer": "1250.5", "expected_values": ["1250.5"], "critical": True},
         )
         assert saved.status_code == 200, saved.text
+        # An omitted status stays omitted: a partial edit must not silently approve an existing label.
+        assert calls[0][2]["status"] is None
         assert saved.json() == {
             "turn_id": "turn-1",
             "trace_id": "tr-1",
-            "status": "approved",
+            "status": "rejected",
             "expected_answer": "1250.5",
             "expected_values": ["1250.5"],
             "critical": True,
@@ -1327,6 +1336,10 @@ def test_label_route_resolves_the_trace_from_the_stored_turn(tmp_path: Path, mon
         assert client.post("/improve/labels", json={"turn_id": "missing"}).status_code == 404
         assert client.post("/improve/labels", json={"turn_id": "turn-2"}).status_code == 422
         assert client.post("/improve/labels", json={"turn_id": "turn-1", "status": "maybe"}).status_code == 422
+        assert (
+            client.post("/improve/labels", json={"turn_id": "turn-1", "expected_values": ["x" * 100_001]}).status_code
+            == 422
+        )
     assert [(call[0], call[1]) for call in calls] == [(store, "tr-1")]
     assert calls[0][2]["default_answer"] == "Full stored answer"
 
@@ -1375,7 +1388,6 @@ def test_unknown_job_kinds_are_rejected_and_evaluate_kinds_are_accepted(tmp_path
     [
         ("evaluate_rescore", ["--evaluate", "rescore"]),
         ("evaluate_replay", ["--evaluate", "replay"]),
-        ("evaluate_synthetic", ["--evaluate", "synthetic"]),
         ("optimize", []),
     ],
 )
@@ -1706,3 +1718,15 @@ def test_job_detail_carries_the_computed_summary_beside_the_comparison(tmp_path:
     assert body["summary"]["headline"].startswith(
         "Changed 1 of 8: routing.predict · dev 0.50→0.75 (1 improved, 0 regressed of 2)"
     )
+
+
+def test_review_queue_pages_every_captured_turn(tmp_path):
+    store = _LabelStore()
+    store.queue = [_queue_row(turn_id=f"turn-{index}") for index in range(53)]
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        first = client.get("/improve/queue").json()
+        second = client.get("/improve/queue?offset=50").json()
+        assert len(first["items"]) == 50 and first["next_offset"] == 50
+        assert len(second["items"]) == 3 and second["next_offset"] is None
+        assert client.get("/improve/queue?offset=-1").status_code == 422

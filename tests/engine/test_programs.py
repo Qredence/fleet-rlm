@@ -723,6 +723,14 @@ def test_incomplete_state_is_not_merged_with_defaults(tmp_path: Path) -> None:
     assert engine.program.reasoning.rlm._interpreter_factory().rlm_defaults == {}
 
 
+def test_signature_prompt_wording_is_not_part_of_saved_program_state():
+    """FleetTask field descriptions can change without invalidating compiled artifacts."""
+    engine = _engine(DaytonaSandboxManager("key", "org", "volume", "wording"))
+    state = engine.program.dump_state()
+    assert "Bounded learned notes" not in json.dumps(state)
+    engine.program.load_state(deepcopy(state))
+
+
 def test_pre_consolidation_state_remains_inspectable_but_is_not_executable():
     from pathlib import Path
 

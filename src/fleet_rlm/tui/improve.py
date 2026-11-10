@@ -64,7 +64,7 @@ def confirm_text(options: Mapping[str, Any]) -> str:
     cap = options.get("max_total_tokens")
     tokens = "server default (FLEET_JOB_MAX_TOKENS)" if cap is None else ("unlimited" if cap == 0 else f"{cap:,}")
     return (
-        "Run optimize over every labelled Turn?\n\n"
+        "Run optimize over the bounded curated dataset of approved replay Turns?\n\n"
         f"Search budget: {budget} (reflection and validation cost extra)\n"
         f"Token cap: {tokens}\n\n"
         "This calls the model provider and Daytona."
@@ -232,6 +232,9 @@ class ImproveScreen(ModalScreen[None]):
         self.on_evaluate = on_evaluate
         self.on_snapshot = on_snapshot
         self.initial_tab = tab
+        self.queue_offset = 0
+        self.next_queue_offset: int | None = None
+        self.queue_error = False
         self.queue: list[dict[str, Any]] = []
         self.readiness: dict[str, Any] | None = None
         self.history: list[dict[str, Any]] = []
@@ -275,6 +278,8 @@ class ImproveScreen(ModalScreen[None]):
                             yield Checkbox("Critical (pinned to holdout)", id="review-critical")
                             yield Input(placeholder="group (default: the Session)", id="review-group")
                     with Horizontal(classes="pane-actions"):
+                        yield Button("Newer", id="queue-newer")
+                        yield Button("Older", id="queue-older")
                         yield Button("✓ Approve", variant="success", id="label-approve", disabled=True)
                         yield Button("✗ Reject", variant="error", id="label-reject", disabled=True)
                 with TabPane("Readiness", id="readiness"):
@@ -303,7 +308,11 @@ class ImproveScreen(ModalScreen[None]):
                         yield Static("Evaluate ▸", id="evaluate-label")
                         yield Button("Rescore", id="evaluate_rescore")
                         yield Button("Replay", id="evaluate_replay")
-                        yield Button("Synthetic", id="evaluate_synthetic")
+                        yield Button(
+                            "Synthetic",
+                            id="evaluate_synthetic",
+                            tooltip="Deferred: isolated evaluation and complete usage accounting are required",
+                        )
                 with TabPane("Results", id="results"):
                     with VerticalScroll(id="results-scroll", classes="pane-body"):
                         yield Static("Select a run in Runs to inspect its evidence.", id="results-text")
@@ -359,7 +368,7 @@ class ImproveScreen(ModalScreen[None]):
         """Fetch the slower-moving views, omitting any that fail so the others still update."""
         fetched: dict[str, Any] = {}
         for name, path in (
-            ("queue", "/improve/queue"),
+            ("queue", f"/improve/queue?offset={self.queue_offset}"),
             ("readiness", "/improve/readiness"),
             ("history", "/improve/history"),
             ("settings", "/improve/settings"),
@@ -437,7 +446,11 @@ class ImproveScreen(ModalScreen[None]):
             fetched = await asyncio.to_thread(self._fetch_slow)
             if not self.is_attached:
                 return
+            self.queue_error = "queue" not in fetched
+            if self.queue_error:
+                self.queue = []
             if isinstance(fetched.get("queue", {}).get("items"), list):
+                self.next_queue_offset = fetched["queue"].get("next_offset")
                 self.queue = [item for item in fetched["queue"]["items"] if isinstance(item, dict)]
             if "readiness" in fetched:
                 self.readiness = fetched["readiness"]
@@ -538,10 +551,16 @@ class ImproveScreen(ModalScreen[None]):
             if any(item.get("flags") for item in self.queue)
             else ""
         )
+        self.query_one("#queue-newer", Button).disabled = self.queue_offset == 0
+        self.query_one("#queue-older", Button).disabled = self.queue_error or self.next_queue_offset is None
         item = self._selected_item()
         if item is None:
             if not self.queue:
-                self.query_one("#review-text", Static).update("No replay-captured Turns yet. Run one with /replay on.")
+                self.query_one("#review-text", Static).update(
+                    "Review queue is unavailable; retrying."
+                    if self.queue_error
+                    else "No replay-captured Turns on this page."
+                )
         elif self._loaded_turn != item["turn_id"]:
             self._load_form(item)
         for button in ("#label-approve", "#label-reject"):
@@ -709,6 +728,8 @@ class ImproveScreen(ModalScreen[None]):
         text = f"INSTALLED TREND · HOLDOUT ({len(points)} versions)  " + " → ".join(points) if points else None
         measured = []
         for job in reversed(self.evaluations):
+            if job.get("kind") == "evaluate_rescore":
+                continue
             raw = job.get("evaluation")
             result: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
             value = _number((result.get("headline") or {}).get("holdout"))
@@ -846,6 +867,8 @@ class ImproveScreen(ModalScreen[None]):
         gate = record.get("gate", {}) if record else {}
         self.query_one("#job-approve", Button).disabled = not (
             (reviewable or recoverable)
+            and record.get("kind", "optimize") == "optimize"
+            and not record.get("legacy_session_id")
             and self.comparison is not None
             and self.comparison_run_id == record.get("run_id")
             and isinstance(gate, Mapping)
@@ -856,7 +879,7 @@ class ImproveScreen(ModalScreen[None]):
         idle = self.accepting and self.active_run_id is None
         self.query_one("#job-run", Button).disabled = not idle
         for kind in EVALUATIONS:
-            self.query_one(f"#{kind}", Button).disabled = not idle
+            self.query_one(f"#{kind}", Button).disabled = not idle or kind == "evaluate_synthetic"
 
     # Events
 
@@ -881,6 +904,14 @@ class ImproveScreen(ModalScreen[None]):
         button_id = event.button.id
         if button_id == "improve-close":
             self.dismiss()
+        elif button_id in {"queue-newer", "queue-older"}:
+            self.queue_offset = (
+                max(0, self.queue_offset - 50) if button_id == "queue-newer" else (self.next_queue_offset or 0)
+            )
+            self.selected_turn_id = None
+            self._loaded_turn = None
+            self._slow_now = True
+            self.refresh_state()
         elif button_id == "job-run":
             self.on_run()
         elif button_id in EVALUATIONS:
@@ -941,7 +972,7 @@ class ImproveScreen(ModalScreen[None]):
         if approve:
             body["expected_values"] = [value for value, box in self._figure_boxes if box.value] + extra
             body["critical"] = self.query_one("#review-critical", Checkbox).value
-        elif answer and answer != item["answer"]:
+        elif answer and answer != self._prefilled_answer.strip() and answer != item["answer"]:
             # A corrected answer replaces the Turn's answer as the gold; its own figures are the expected values.
             body["expected_values"] = label_figures(answer) + extra
         else:

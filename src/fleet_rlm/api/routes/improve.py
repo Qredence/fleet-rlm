@@ -110,9 +110,10 @@ def _turn_flags(row: dict[str, Any], score: float | None) -> list[str]:
 
 def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], str | None]:
     """The readiness report and the start time of the last finished optimize job the label count follows."""
-    from fleet_rlm.engine.compiled import installed_program_error
+    from pathlib import Path
+
+    from fleet_rlm.engine.compiled import installed_program_problem
     from fleet_rlm.optimize.dataset import load_examples, readiness
-    from fleet_rlm.optimize.jobs import installed_digest
 
     target = settings.mlflow_target()
     report = readiness(
@@ -121,13 +122,19 @@ def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], s
     ).as_dict()
     # An installed program that contradicts the ledger would make every Turn refuse, so a job
     # would start from the wrong incumbent.
-    if problem := installed_program_error(installed_digest(settings), store.approved_program()):
+    if problem := installed_program_problem(
+        str(Path(settings.compiled_program_dir) / "fleet.json"), store.approved_program()
+    ):
         report["missing"].append(problem)
         report["ready"] = False
     jobs = store.list_optimization_runs()
     # Only a run that finished consumed the labels that existed when it started.
     last_run = max(
-        (job["created_at"] for job in jobs if job["kind"] == "optimize" and job["status"] in {"completed", "approved"}),
+        (
+            job["created_at"]
+            for job in jobs
+            if job["kind"] == "optimize" and job["status"] in {"completed", "approved", "rejected"}
+        ),
         default=None,
     )
     scores = _latest_example_scores(jobs)
@@ -198,11 +205,14 @@ def put_improve_settings(body: ImproveSettingsUpdate, store: StoreDep, settings:
 
 
 @router.get("/queue", response_model=ImproveQueue, responses=_ERROR_RESPONSES)
-def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
+def improve_queue(store: StoreDep, limit: int = 50, offset: int = 0) -> ImproveQueue:
     """List replay-captured Turns from every Session with their label state and answer figures."""
     with translate("Review queue is unavailable"):
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
+        if offset < 0:
+            raise ValueError("offset must be nonnegative")
+        rows = store.improve_queue(limit + 1, offset)
         scores = _latest_example_scores(store.list_optimization_runs())
         items: list[QueueItem] = [
             QueueItem(
@@ -220,11 +230,11 @@ def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
                 flags=_turn_flags(row, scores.get(row["turn_id"])),
                 evaluation_score=scores.get(row["turn_id"]),
             )
-            for row in store.improve_queue(limit)
+            for row in rows[:limit]
         ]
         # Flagged Turns first (the sort is stable, so newest-first order holds within each group).
         ordered = sorted(items, key=_unflagged)
-        return ImproveQueue(items=ordered)
+        return ImproveQueue(items=ordered, next_offset=offset + limit if len(rows) > limit else None)
 
 
 def _save_label(body: LabelRequest, store: Store) -> LabelSaved:

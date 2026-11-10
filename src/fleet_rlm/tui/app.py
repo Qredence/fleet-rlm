@@ -344,6 +344,7 @@ class FleetTextualApp(App[str | None]):
         self._optimization_run_id: str | None = None
         self._optimization_terminal_status: str | None = None
         # The latest replay-captured Turn and its answer, offered for a one-key label until the next input.
+        self._label_generation = 0
         self._label_offer: tuple[str, str] | None = None
         self._readiness_ready = False
         self._ticks = 0
@@ -703,6 +704,7 @@ class FleetTextualApp(App[str | None]):
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Update composer height and the floating `/` or `@` popup when text changes."""
         if event.text_area.id == "prompt-input":
+            self._label_generation += 1
             if self._label_offer is not None and event.text_area.text:
                 self._label_offer = None
                 self.refresh_chrome()
@@ -875,6 +877,7 @@ class FleetTextualApp(App[str | None]):
         """Offer a one-key label for a Turn whose replay snapshot was captured."""
         event = tracker.terminal_event or {}
         turn_id, answer = event.get("turn_id"), event.get("answer")
+        self._label_generation += 1
         if event.get("event") == "turn_complete" and event.get("replay_snapshot_selected") is True and turn_id:
             self._label_offer = (str(turn_id), str(answer or ""))
             self.refresh_chrome()
@@ -895,14 +898,20 @@ class FleetTextualApp(App[str | None]):
         self.refresh_chrome()
         # The server defaults the expected answer to the Turn's stored full answer.
         body: dict[str, Any] = {"turn_id": turn_id, "status": "approved", "expected_values": label_figures(answer)}
-        self.run_worker(self._post_offered_label(body, answer), name="label", group="label", exit_on_error=False)
+        self.run_worker(
+            self._post_offered_label(body, answer, self._label_generation),
+            name="label",
+            group="label",
+            exit_on_error=False,
+        )
 
-    async def _post_offered_label(self, body: dict[str, Any], answer: str) -> None:
+    async def _post_offered_label(self, body: dict[str, Any], answer: str, generation: int) -> None:
         """Save the label and toast the outcome; restore the offer on failure so it can be retried."""
         try:
             await asyncio.to_thread(save_label, self.client, body)
         except httpx.HTTPError as error:
-            self._label_offer = (body["turn_id"], answer)
+            if generation == self._label_generation and self._label_offer is None:
+                self._label_offer = (body["turn_id"], answer)
             self.refresh_chrome()
             self.notify(f"Label not saved: {error_text(error)}", severity="error")
             return
@@ -1045,6 +1054,7 @@ class FleetTextualApp(App[str | None]):
 
     def submit_text(self, user_input: str) -> None:
         """Process a submitted command, model selection, or Turn prompt."""
+        self._label_generation += 1
         if self.state.pending_model_choice is not None:
             role, models = self.state.pending_model_choice
             self.state.pending_model_choice = None

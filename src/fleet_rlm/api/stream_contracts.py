@@ -57,6 +57,7 @@ class TurnCompletePayload(_TurnEnvironment):
     sandbox_errors: int | None = None
     submit_rejections: int | None = None
     budget_breakdown: dict[str, Any] | None = None
+    replay_snapshot_selected: bool | None = None
     outcome: Literal["completed"] | None = None
     duration_seconds: float | None = None
     trace_id: str | None = None

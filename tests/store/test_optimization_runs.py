@@ -347,6 +347,8 @@ def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_
                 ("s1", "run-a1", "req-1", "2026-01-01"),
                 ("s2", "run-a1", "req-1", "2026-01-02"),
                 ("s3", "run-a3", "req-3", "2026-01-03"),
+                # An existing run ID that equals the natural dedup suffix must not be clobbered.
+                ("s4", "run-a1-dup-s2", "req-4", "2026-01-04"),
             ]
             for session, run, request, created in seeds:
                 admin.execute(
@@ -368,10 +370,11 @@ def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_
                         "FROM fleet_lite_optimization_runs"
                     ).fetchall()
                 }
-                assert set(rows) == {"run-a1", "run-a1-dup-s2", "run-a3"}
-                assert rows["run-a1"][3] == "s1" and rows["run-a1-dup-s2"][3] == "s2" and rows["run-a3"][3] == "s3"
+                assert set(rows) == {"run-a1", "run-a1-dup-s2", "run-a1-dup-s2-1", "run-a3"}
+                assert rows["run-a1"][3] == "s1" and rows["run-a1-dup-s2"][3] == "s4"
+                assert rows["run-a1-dup-s2-1"][3] == "s2" and rows["run-a3"][3] == "s3"
                 assert all(row[2] == "optimize" and row[4] == "v" for row in rows.values())
-                assert len({row[1] for row in rows.values()}) == 3 and rows["run-a1"][1] == "req-1"
+                assert len({row[1] for row in rows.values()}) == 4 and rows["run-a1"][1] == "req-1"
                 assert not admin.execute(
                     "SELECT 1 FROM information_schema.columns WHERE table_schema=%s "
                     "AND table_name='fleet_lite_optimization_runs' AND column_name='session_id'",
@@ -388,7 +391,7 @@ def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_
                 store.update_global_settings("improve", {"min_new_labels": None, "max_total_tokens": 9})
                 assert store.global_settings("improve") == {"auto_run": True, "max_total_tokens": 9}
                 # The legacy row stays readable through the Store and keeps its legacy marker.
-                assert store.get_optimization_run("run-a1-dup-s2")["legacy_session_id"] == "s2"
+                assert store.get_optimization_run("run-a1-dup-s2-1")["legacy_session_id"] == "s2"
             finally:
                 store.close()
         finally:

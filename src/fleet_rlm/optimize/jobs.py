@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -76,7 +77,7 @@ def rescore_scores(result: Any) -> tuple[list[float], list[float], dict[str, flo
     trace_ids = frame["trace_id"] if "trace_id" in frame else [None] * len(frame)
     scores, critical, by_trace = [], [], {}
     for value, expected, trace_id in zip(frame["fleet_metric/value"], expectations, trace_ids, strict=True):
-        if value is None or value != value:
+        if value is None or math.isnan(value):
             continue
         scores.append(float(value))
         if trace_id:

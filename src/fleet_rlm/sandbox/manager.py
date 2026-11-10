@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 
 _LOGGER = logging.getLogger(__name__)
+RESOURCE_SAMPLE_TIMEOUT_SECONDS = 2.0
 SANDBOX_TRANSPORT = "daytona_code_interpreter"
 
 # The cleanup outcome a terminal Turn records. `stopped` and `unconfirmed` are produced by the
@@ -163,6 +164,7 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
     agent_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     _children: dict[str, DaytonaSandboxManager] = field(default_factory=dict, init=False, repr=False)
     _allocations: int = field(default=0, init=False, repr=False)
+    _resource_sampler: threading.Thread | None = field(default=None, init=False, repr=False)
     _cancelled: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     # One publication token per live execution. Cancellation closes them and nothing reopens one:
     # the next Turn clears `_cancelled` for its own work, never these tokens.
@@ -751,20 +753,34 @@ class DaytonaSandboxManager(WorkspaceIOMixin):
 
         Never provisions a sandbox. This is optional telemetry, so any failure is logged and dropped.
         """
-        sandbox = self._sandbox
-        if sandbox is None:
-            return None
-        try:
-            metrics = sandbox.get_metrics_latest()
-            return {
-                "sandbox.cpu_used_pct": metrics.cpu_used_pct,
-                "sandbox.mem_used_bytes": metrics.mem_used,
-                "sandbox.mem_total_bytes": metrics.mem_total,
-                "sandbox.disk_used_bytes": metrics.disk_used,
-            }
-        except Exception as exc:
-            _LOGGER.debug("Sandbox resource sample unavailable (%s)", type(exc).__name__)
-            return None
+        with self._lock:
+            sandbox = self._sandbox
+            stalled = self._resource_sampler
+            if sandbox is None or (stalled is not None and stalled.is_alive()):
+                return None
+            outcome: list[Any] = []
+
+            def sample() -> None:
+                try:
+                    metrics = sandbox.get_metrics_latest()
+                    outcome.append(
+                        {
+                            "sandbox.cpu_used_pct": metrics.cpu_used_pct,
+                            "sandbox.mem_used_bytes": metrics.mem_used,
+                            "sandbox.mem_total_bytes": metrics.mem_total,
+                            "sandbox.disk_used_bytes": metrics.disk_used,
+                        }
+                    )
+                except Exception as exc:
+                    _LOGGER.debug("Sandbox resource sample unavailable (%s)", type(exc).__name__)
+
+            # The SDK call has no timeout, so a daemon thread bounds the wait; a stalled request is
+            # abandoned (and not stacked) instead of delaying the Turn's terminal event.
+            sampler = threading.Thread(target=sample, name="sandbox-resource-sample", daemon=True)
+            self._resource_sampler = sampler
+            sampler.start()
+        sampler.join(RESOURCE_SAMPLE_TIMEOUT_SECONDS)
+        return outcome[0] if outcome else None
 
     def _refuse_unresolved_cleanup(self) -> None:
         """Deny writable use while this agent or its root still awaits cleanup confirmation.

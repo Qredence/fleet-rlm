@@ -1805,6 +1805,13 @@ paths:
           type: integer
           default: 50
           title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Offset
       responses:
         '200':
           description: Successful Response
@@ -2467,6 +2474,11 @@ components:
             $ref: '#/components/schemas/QueueItem'
           type: array
           title: Items
+        next_offset:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Offset
       type: object
       required:
       - items
@@ -2776,14 +2788,15 @@ components:
           minLength: 1
           title: Turn Id
         status:
-          type: string
-          enum:
-          - approved
-          - benchmark
-          - synthetic
-          - rejected
+          anyOf:
+          - type: string
+            enum:
+            - approved
+            - benchmark
+            - synthetic
+            - rejected
+          - type: 'null'
           title: Status
-          default: approved
         expected_answer:
           anyOf:
           - type: string
@@ -2794,6 +2807,7 @@ components:
           anyOf:
           - items:
               type: string
+              maxLength: 100000
             type: array
             maxItems: 100
           - type: 'null'

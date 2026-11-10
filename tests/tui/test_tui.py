@@ -1871,7 +1871,8 @@ def test_evaluate_choices_start_each_kind_and_only_replay_and_synthetic_ask_to_c
             # The mock ledger now holds a running job, so the next kinds wait for it to finish.
             api["records"][0]["status"] = "completed"
             await _wait_for(pilot, lambda: not screen.query_one("#evaluate_replay").disabled)
-            for kind, words in (("evaluate_replay", "Replay"), ("evaluate_synthetic", "synthetic cases")):
+            assert screen.query_one("#evaluate_synthetic").disabled
+            for kind, words in (("evaluate_replay", "Replay"),):
                 await pilot.click(f"#{kind}")
                 await pilot.pause(0.1)
                 assert isinstance(tui.screen, app.ConfirmAction) and words in tui.screen.message
@@ -1885,7 +1886,7 @@ def test_evaluate_choices_start_each_kind_and_only_replay_and_synthetic_ask_to_c
                 await _wait_for(pilot, lambda kind=kind: kind in {post["kind"] for post in posts()})
                 api["records"][0]["status"] = "completed"
                 await _wait_for(pilot, lambda: not screen.query_one("#evaluate_replay").disabled)
-            assert len({post["request_id"] for post in posts()}) == 3
+            assert len({post["request_id"] for post in posts()}) == 2
 
     asyncio.run(scenario())
 
@@ -2173,5 +2174,98 @@ def test_results_open_with_the_outcome_headline_then_the_unverified_summary() ->
             headline = text.index("OUTCOME  Changed 1 of 8: routing.predict")
             summary = text.index("not evidence")
             assert "1 improved, 0 regressed of 2" in text and headline < summary < text.index("RUN  sess_head-run")
+
+    asyncio.run(scenario())
+
+
+def test_rejecting_unchanged_corrected_gold_remains_rejected():
+    from types import SimpleNamespace
+
+    from fleet_rlm.tui.improve import ImproveScreen
+
+    widgets = {"#review-answer": SimpleNamespace(value="Correct answer 42"), "#review-extra": SimpleNamespace(value="")}
+    form = SimpleNamespace(query_one=lambda selector, *_args: widgets[selector], _prefilled_answer="Correct answer 42")
+    assert ImproveScreen._label_body(form, {"turn_id": "t", "answer": "Wrong answer 41"}, approve=False) == {
+        "turn_id": "t",
+        "status": "rejected",
+    }
+
+
+def test_reject_of_a_previously_corrected_turn_stays_a_rejection_and_queue_failure_is_visible() -> None:
+    corrected = {
+        **_QUEUE_ITEM,
+        "label": "approved",
+        "expected_answer": "A corrected answer of 42.",
+        "expected_values": ["42"],
+    }
+    transport, api = _experiment_transport([_experiment_record("legacy-run")])
+    api["records"][0]["legacy_session_id"] = "sess_old"
+    api["queue"] = {"items": [corrected]}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_reject", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen._figure_boxes and screen.records)
+            screen.query_one("#label-reject").press()
+            await _wait_for(pilot, lambda: api.get("labels"))
+            assert api["labels"][0] == {"turn_id": "turn-1", "status": "rejected"}
+            # A per-Session job from before jobs were global is never approvable, whatever its evidence.
+            screen.comparison, screen.comparison_run_id = {"ok": True}, "legacy-run"
+            screen._update_job_actions(screen._selected())
+            assert screen.query_one("#job-approve").disabled
+
+    asyncio.run(scenario())
+
+    transport, _api = _experiment_transport([])
+
+    async def unavailable() -> None:
+        async with _running_tui(transport, "sess_noq", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            await _wait_for(pilot, lambda: tui.screen.queue_error)
+            await pilot.pause(0.1)
+            assert "unavailable" in str(tui.screen.query_one("#review-text").render())
+
+    asyncio.run(unavailable())
+
+
+def test_ctrl_y_labels_the_offered_turn_and_ctrl_n_opens_review() -> None:
+    transport, api = _turn_transport(True)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_offer", (110, 40)) as (_client, tui, pilot):
+            tui.submit_text("total?")
+            await _wait_for(pilot, lambda: tui._label_offer is not None)
+            hints = str(tui.query_one("#composer-hints").render())
+            assert "label:" in hints and "ctrl+y" in hints and "ctrl+n" in hints
+            await pilot.press("ctrl+y")
+            await _wait_for(pilot, lambda: api.get("labels"))
+            assert api["labels"] == [
+                {
+                    "turn_id": "turn-9",
+                    "status": "approved",
+                    "expected_values": ["1250.50", "17"],
+                    "expected_answer": "Total was 1250.50 over 17 days.",
+                }
+            ]
+            assert tui._label_offer is None
+            assert "ctrl+y" not in str(tui.query_one("#composer-hints").render())
+
+            # Typing anything withdraws a later offer; ctrl+n opens Review at the offered Turn.
+            tui.submit_text("again?")
+            await _wait_for(pilot, lambda: tui._label_offer is not None)
+            tui.query_one("#prompt-input", app._PromptInput).insert("x")
+            await pilot.pause(0.05)
+            assert tui._label_offer is None
+            tui.query_one("#prompt-input", app._PromptInput).clear()
+            tui.submit_text("third?")
+            await _wait_for(pilot, lambda: tui._label_offer is not None)
+            await pilot.press("ctrl+n")
+            await pilot.pause(0.1)
+            assert isinstance(tui.screen, app.ImproveScreen)
+            assert tui.screen.selected_turn_id == "turn-9"
+            assert tui.screen.query_one("#improve-tabs").active == "review"
 
     asyncio.run(scenario())

@@ -37,6 +37,15 @@ def dataset_digest(splits: dict[str, list[dspy.Example]]) -> str:
     return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
+def _lineage(example: Any) -> str:
+    """The stripped source lineage `grouped_split` groups by; readiness counts groups the same way."""
+    try:
+        inputs = getattr(example, "inputs", lambda: {})()
+    except ValueError:  # a dspy.Example whose inputs were never declared
+        inputs = {}
+    return str(inputs.get("source_group", "")).strip() or str(getattr(example, "source_group", "")).strip()
+
+
 def grouped_split(
     examples: list[Any], *, seed: int = 0, train_ratio: float = 0.6, dev_ratio: float = 0.2
 ) -> dict[str, list[Any]]:
@@ -51,10 +60,7 @@ def grouped_split(
         raise ValueError("train_ratio and dev_ratio must be positive and sum to less than one")
     groups: dict[str, list[Any]] = {}
     for example in examples:
-        inputs = getattr(example, "inputs", lambda: {})()
-        lineage = str(inputs.get("source_group", "")).strip()
-        if not lineage:
-            lineage = str(getattr(example, "source_group", "")).strip()
+        lineage = _lineage(example)
         if not lineage:
             raise ValueError("Every curated example must have a source_group lineage")
         group = hashlib.sha256(lineage.encode()).hexdigest()
@@ -260,7 +266,7 @@ def readiness(
     be needed than the arithmetic alone suggests.
     """
     _check_ratio(validation_ratio)
-    groups = {example.source_group for example in examples}
+    groups = {_lineage(example) for example in examples}
     critical = sum(getattr(example, "critical", False) is True for example in examples)
     missing = []
     needed = max(MIN_EXAMPLES, math.ceil(min_split_examples / validation_ratio))

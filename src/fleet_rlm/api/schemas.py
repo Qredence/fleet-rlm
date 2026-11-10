@@ -131,9 +131,9 @@ class LabelRequest(_Request):
     """A gold label for one replay-captured Turn; unset fields keep the Turn's existing label."""
 
     turn_id: str = Field(min_length=1, max_length=128)
-    status: Literal["approved", "benchmark", "synthetic", "rejected"] = "approved"
+    status: Literal["approved", "benchmark", "synthetic", "rejected"] | None = None
     expected_answer: str | None = Field(default=None, max_length=100_000)
-    expected_values: list[str] | None = Field(default=None, max_length=100)
+    expected_values: list[Annotated[str, Field(max_length=100_000)]] | None = Field(default=None, max_length=100)
     critical: bool | None = None
     group: str | None = Field(default=None, min_length=1, max_length=256)
 
@@ -443,6 +443,7 @@ class ImproveQueue(BaseModel):
     """Replay-captured Turns across every Session, newest first."""
 
     items: list[QueueItem]
+    next_offset: int | None = None
 
 
 class LabelSaved(BaseModel):

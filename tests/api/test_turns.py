@@ -856,6 +856,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     assert outcome == "completed"
     assert duration_seconds >= 0
     assert payload == {
+        "replay_snapshot_selected": True,
         "answer": "processed locally",
         "route": "flex",
         "learned_skill_note": "Reuse the digit window check.",
@@ -2081,6 +2082,26 @@ def test_prepare_inputs_skips_replay_capture_for_an_oversized_workspace(monkeypa
     assert inputs["replay_skipped_bytes"] == 10
 
 
+def test_prepare_inputs_decides_replay_size_from_remote_sizes_before_downloading(monkeypatch) -> None:
+    monkeypatch.setattr(turn_module, "MAX_REPLAY_FILE_BYTES", 8)
+    digests = {"files/big.bin": hashlib.sha256(b"x").hexdigest()}
+
+    def no_download(_path):
+        raise AssertionError("an oversized workspace must not be downloaded")
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            turn_inputs=lambda: {"digests": digests, "sizes": {"files/big.bin": 30_000_000}, "environment": ""},
+            read_workspace_file=no_download,
+        )
+    )
+
+    inputs = turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=True)
+
+    assert inputs["replay_files"] == {} and inputs["replay_selected"] is False
+    assert inputs["replay_skipped_bytes"] == 30_000_000
+
+
 def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> None:
     runtime = runtime_with(
         sandbox_mgr=FakeManager(
@@ -2789,3 +2810,12 @@ async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypa
     assert calls == []
     assert not manager._cancelled.is_set()
     assert manager._sandbox is warm_root
+
+
+def test_expanded_replay_size_limit_has_a_distinct_skip_reason(monkeypatch):
+    from fleet_rlm import replay
+
+    monkeypatch.setattr(replay, "MAX_REPLAY_JSON_BYTES", 5)
+    with pytest.raises(replay.ReplaySizeError) as raised:
+        replay.encode_snapshot({"task": "large"})
+    assert raised.value.size > raised.value.limit == 5
