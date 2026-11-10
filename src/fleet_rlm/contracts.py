@@ -238,8 +238,9 @@ def item_decision(choices: list[str]) -> type[dspy.Signature]:
     return _item_decision_cached(tuple(choices))
 
 
-# A figure: an optionally signed number, with `$` and thousands separators allowed; not part of an identifier.
-_FIGURE = re.compile(r"(?<![\w.])\$?-?\d[\d,]*(?:\.\d+)?")
+# A figure: an optionally signed number (the sign may precede or follow `$`), with `.5`, exponent forms and
+# properly grouped thousands separators; `10,20` is two figures. Never part of an identifier.
+_FIGURE = re.compile(r"(?<![\w.])(?:-?\$|\$?-?)(?:\d{1,3}(?:,\d{3})+|\d+|(?=\.\d))(?:\.\d+)?(?:[eE][+-]?\d+)?")
 
 
 def figures(text: str) -> dict[str, float]:
@@ -251,12 +252,14 @@ def figures(text: str) -> dict[str, float]:
             value = float(literal)
         except ValueError:
             continue
-        if "." in literal or abs(value) >= 10:
+        if "." in literal or "e" in literal.lower() or abs(value) >= 10:
             found[literal] = value
     return found
 
 
 def figure_grounded(literal: str, value: float, observed: set[float]) -> bool:
     """A typed figure is grounded when some observed value rounds to it at the typed precision."""
-    places = len(literal.split(".", 1)[1]) if "." in literal else 0
+    mantissa, _, exponent = literal.lower().partition("e")
+    places = len(mantissa.split(".", 1)[1]) if "." in mantissa else 0
+    places = max(0, places - int(exponent or 0))
     return any(round(seen, places) == round(value, places) for seen in observed)

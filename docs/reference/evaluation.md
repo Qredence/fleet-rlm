@@ -538,9 +538,11 @@ still has three choices and the same Noul threshold and evidence requirements.
 Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
 keys to simulate migration: reconstruct/re-evaluate a new candidate under the running
-schema, or explicitly select its baseline. For an operator-approved baseline reset,
-retire the active `fleet.json` while the runtime is stopped and reject or supersede
-the approved job in the ledger; deleting the artifact alone makes Turns refuse. No new selection endpoint or automatic rollback is added by Gate A.
+schema. While no job was ever approved, retiring the active `fleet.json` selects the
+baseline. After a global approval a baseline reset is unsupported: an approved job
+cannot be rejected and the ledger requires exactly the file it installed, so deleting
+the artifact makes Turns refuse. Restore the approved artifact or approve a new
+candidate. No new selection endpoint, ledger operation or automatic rollback is added by Gate A.
 An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
 While no global job was ever approved, an absent `fleet.json` means baseline; once one
 was, the ledger requires exactly the file it installed and refuses Turns otherwise.

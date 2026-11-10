@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,9 +54,13 @@ class Example:
 class MemoryOptimizationStore:
     """Small offline fake for the optimizer's PostgreSQL lifecycle contract."""
 
+    def approved_program(self) -> dict:
+        return self.ledger
+
     def __init__(self, records: list[dict] | None = None) -> None:
         self.records = {row["run_id"]: {"kind": "optimize", **row} for row in records or []}
         self.closed = False
+        self.ledger: dict = {"approved": None, "approving": []}
         self.initialized = False
         self.migration_pool_closed = False
         self.events: list[tuple[str, dict | None]] = []
@@ -2643,6 +2649,31 @@ def test_check_exits_zero_when_ready(tmp_path, monkeypatch, capsys) -> None:
     assert json.loads(capsys.readouterr().out)["ready"] is True
 
 
+@pytest.mark.parametrize("installed", ["missing", "changed", "unreadable"])
+def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledger(
+    tmp_path, monkeypatch, capsys, installed
+) -> None:
+    store = MemoryOptimizationStore()
+    store.ledger = {"approved": digest_bytes(b"approved"), "approving": []}
+    if installed == "changed":
+        (tmp_path / "fleet.json").write_bytes(b"tampered")
+    if installed == "unreadable":
+        (tmp_path / "fleet.json").mkdir()
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
+    examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
+    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
+    monkeypatch.setattr(workflow, "build_lm", pytest.fail)
+    parser = _optimization_parser()
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    with pytest.raises(SystemExit):
+        workflow.run(parser.parse_args(["--check"]), parser, settings)
+    report = json.loads(capsys.readouterr().out)
+    assert report["ready"] is False and any("fleet.json" in item for item in report["missing"])
+    with pytest.raises(ValueError, match=r"fleet\.json"):
+        workflow._compile(parser.parse_args([]), settings, store, SimpleNamespace(), "optimize-x")
+
+
 def test_approval_refuses_a_legacy_per_session_candidate(tmp_path, monkeypatch) -> None:
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     version = "sess_old-abc"
@@ -2685,3 +2716,32 @@ def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_compos
         for callback in callbacks:
             callback.on_lm_end("rollout-call", None)
     assert budget.used == 7
+
+
+def test_labelling_an_unselected_trace_never_opens_the_database_and_edits_are_serialized(monkeypatch):
+    from fleet_rlm.optimize import evaluation
+
+    labels = {"review_status": "approved", "expected_answer": "4", "expected_values": ["4"]}
+    trace = _trace("tr9", "s9", {"task": "add"}, {})
+    trace.search_assessments = lambda **_kw: [SimpleNamespace(name=k, value=v) for k, v in labels.items()]
+    inside, overlaps = [], []
+
+    def get_trace(*_args, **_kw):
+        inside.append(1)
+        overlaps.append(len(inside))
+        time.sleep(0.05)
+        inside.pop()
+        return trace
+
+    monkeypatch.setattr(evaluation.mlflow, "get_trace", get_trace)
+    monkeypatch.setattr(evaluation, "label_trace", lambda *_args, **_kw: None)
+    opener = pytest.fail
+    threads = [
+        threading.Thread(target=evaluation.label_turn, args=(opener, "tr9"), kwargs={"answer": str(i)})
+        for i in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert overlaps == [1, 1, 1, 1]

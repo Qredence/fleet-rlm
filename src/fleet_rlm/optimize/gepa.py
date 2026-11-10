@@ -20,7 +20,7 @@ import dspy
 import mlflow
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.engine.compiled import load_program_envelope, program_envelope
+from fleet_rlm.engine.compiled import installed_program_problem, load_program_envelope, program_envelope
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.models import build_lm
 from fleet_rlm.observability import LMUsageCallback, configure_mlflow_observability
@@ -544,6 +544,10 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         raise failure
 
 
+def _active_program_path(settings: FleetSettings) -> str:
+    return str(Path(settings.compiled_program_dir) / "fleet.json")
+
+
 def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> None:
     """Print what the labelled examples support, then exit non-zero when a run would refuse to start.
 
@@ -554,11 +558,16 @@ def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> Non
     store = _open_optimization_store(settings, initialize=False)
     try:
         examples = load_examples(store, target.experiment_name, target.eval_experiment_name)
+        problem = installed_program_problem(_active_program_path(settings), store.approved_program())
     finally:
         store.close()
     status = readiness(examples, validation_ratio=options.validation_ratio)
-    print(json.dumps(status.as_dict(), indent=2))
-    if not status.ready:
+    report = status.as_dict()
+    if problem:
+        report["missing"].append(problem)
+        report["ready"] = False
+    print(json.dumps(report, indent=2))
+    if not report["ready"]:
         raise SystemExit(1)
 
 
@@ -867,6 +876,9 @@ def _compile(
     Dataset, provider, storage, and artifact write errors also propagate.
     """
     directory = Path(settings.compiled_program_dir)
+    # A job must start from the approved program: refuse before any paid work when fleet.json contradicts the ledger.
+    if problem := installed_program_problem(_active_program_path(settings), store.approved_program()):
+        raise ValueError(problem)
     stop_file = directory / "runs" / run_id / "gepa.stop"
     stop_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -920,7 +932,7 @@ def _compile(
         sub_lm=sub_lm,
         max_llm_calls=settings.max_llm_calls_per_turn,
     )
-    active = Path(settings.compiled_program_dir) / "fleet.json"
+    active = Path(_active_program_path(settings))
     template_runtime = FleetRuntime(
         template_manager,
         root_lm,

@@ -150,7 +150,13 @@ _OPTIMIZATION_RUNS_GLOBAL = (
     "UPDATE fleet_lite_optimization_runs "
     "SET metadata = metadata || jsonb_build_object('legacy_session_id', session_id)",
     # Two Sessions could share a run or request ID; keep the earliest row's and suffix the others'.
-    "UPDATE fleet_lite_optimization_runs AS r SET run_id = r.run_id || '-dup-' || r.session_id "
+    # The suffix is numbered until it matches no existing run ID, so it cannot collide with one.
+    "UPDATE fleet_lite_optimization_runs AS r SET run_id = ("
+    "SELECT candidate.run_id FROM ("
+    "SELECT r.run_id || '-dup-' || r.session_id || CASE WHEN n = 0 THEN '' ELSE '-' || n END AS run_id, n "
+    "FROM generate_series(0, 1000) AS n) AS candidate "
+    "WHERE NOT EXISTS (SELECT 1 FROM fleet_lite_optimization_runs AS x WHERE x.run_id = candidate.run_id) "
+    "ORDER BY candidate.n LIMIT 1) "
     "WHERE EXISTS (SELECT 1 FROM fleet_lite_optimization_runs AS o WHERE o.run_id = r.run_id "
     "AND (o.created_at, o.session_id) < (r.created_at, r.session_id))",
     "UPDATE fleet_lite_optimization_runs AS r SET request_id = r.request_id || ':' || r.run_id "

@@ -7,6 +7,7 @@ never from historical traces or stored Turns.
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import random
 import threading
@@ -212,8 +213,23 @@ def label_trace(
         mlflow.log_expectation(trace_id=trace_id, name=name, value=value, source=source)
 
 
+_LABEL_LOCKS = tuple(threading.Lock() for _ in range(32))
+
+
+def _serialized_per_trace(function: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Run label edits for one trace one at a time so concurrent partial updates cannot overwrite each other."""
+
+    @functools.wraps(function)
+    def serialized(store: Any, trace_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        with _LABEL_LOCKS[hash(trace_id) % len(_LABEL_LOCKS)]:
+            return function(store, trace_id, *args, **kwargs)
+
+    return serialized
+
+
+@_serialized_per_trace
 def label_turn(
-    store: Store,
+    store: Store | Callable[[], Store],
     trace_id: str,
     *,
     status: str | None = None,
@@ -228,7 +244,9 @@ def label_turn(
     """Resolve partial updates once, preflight the replay, then synchronize MLflow and PostgreSQL.
 
     Unset arguments keep the trace's existing label, then the defaults (approved, the trace's Session
-    as source group). Return the stored labels.
+    as source group). Return the stored labels. `store` may be a zero-argument opener, called only
+    for a Turn with a selected replay, so unselected traces are labelled without a database.
+    Edits to one trace are serialized within this process.
 
     Raises:
         ValueError: The labels, reviewer, or replay reference are invalid; nothing was written.
@@ -271,19 +289,21 @@ def label_turn(
     if not reviewer.strip():
         raise ValueError("review labels require a reviewer")
     session_id = turn_id = digest = ""
+    curation: Store | None = None
     if selected:
         session_id = request.get("session_id", "")
         turn_id = request.get("turn_id", "")
         digest = request.get("replay_snapshot_sha256", "")
         if session_id != trace.info.trace_metadata.get("mlflow.trace.session"):
             raise ValueError("Trace session metadata does not match its replay reference")
-        selected_snapshot(store, session_id, turn_id, digest)
+        curation = store if isinstance(store, Store) or not callable(store) else store()
+        selected_snapshot(curation, session_id, turn_id, digest)
     mlflow_saved = False
     try:
         label_trace(trace_id, **labels, reviewer=reviewer)
         mlflow_saved = True
-        if selected:
-            store.save_review_labels(session_id, turn_id, digest, **labels, reviewer=reviewer)
+        if curation is not None:
+            curation.save_review_labels(session_id, turn_id, digest, **labels, reviewer=reviewer)
     except Exception as exc:
         if mlflow_saved:
             raise EvaluationError(

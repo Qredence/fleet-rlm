@@ -5,7 +5,6 @@ The API owns job processes but never imports GEPA; examples, programs, and jobs 
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -74,7 +73,7 @@ def _preview(text: Any) -> str:
 @router.get("/readiness", response_model=ImproveReadiness, responses=_ERROR_RESPONSES)
 def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
     """Report what the labelled examples support, what is missing, and how many labels are new."""
-    from fleet_rlm.engine.compiled import CompiledProgramFile, installed_program_error
+    from fleet_rlm.engine.compiled import installed_program_problem
     from fleet_rlm.optimize.dataset import load_examples, readiness
 
     with translate("Readiness is unavailable"):
@@ -83,8 +82,7 @@ def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
         # An installed program that contradicts the ledger would make every Turn refuse, so a job
         # would start from the wrong incumbent.
         path = Path(settings.compiled_program_dir) / "fleet.json"
-        digest = hashlib.sha256(CompiledProgramFile(str(path)).read()).hexdigest() if path.exists() else ""
-        if problem := installed_program_error(digest, store.approved_program()):
+        if problem := installed_program_problem(str(path), store.approved_program()):
             report["missing"].append(problem)
             report["ready"] = False
         # Only a run that finished consumed the labels that existed when it started.

@@ -99,15 +99,22 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
         from fleet_rlm.execution_evidence import parse_expectations_file
 
         expectations = parse_expectations_file(args.expectations_file)
-    store = Store.open(
-        settings.fleet_database_url,
-        wait=True,
-        lakebase_endpoint=settings.fleet_lakebase_endpoint,
-        schema=settings.fleet_database_schema,
-    )
+    opened: list[Store] = []
+
+    def open_store() -> Store:
+        opened.append(
+            Store.open(
+                settings.fleet_database_url,
+                wait=True,
+                lakebase_endpoint=settings.fleet_lakebase_endpoint,
+                schema=settings.fleet_database_schema,
+            )
+        )
+        return opened[-1]
+
     try:
         labels = label_turn(
-            store,
+            open_store,
             args.trace_id,
             status=args.status,
             group=args.group,
@@ -121,7 +128,8 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
     except (EvaluationError, ValueError) as exc:
         raise SystemExit(str(exc)) from None
     finally:
-        store.close()
+        for store in opened:
+            store.close()
     _CONSOLE.print(f"Labeled {args.trace_id} as {labels['review_status']}")
 
 

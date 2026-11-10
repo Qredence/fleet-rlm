@@ -351,6 +351,23 @@ def test_figure_extraction_is_shared_by_submit_grounding_and_the_review_queue():
 
     found = figures("Revenue $1,250.50 over 42 orders (id=a12345, ratio 0.5, n=7)")
     assert found == {"1250.50": 1250.5, "42": 42.0, "0.5": 0.5}
+    # Exponent, leading-dot, negative-currency and compact-list literals are typed figures too.
+    assert figures("1e6 and .5 and -$1,250 and 1.5e3 and 2.5e-3") == {
+        "1e6": 1e6,
+        ".5": 0.5,
+        "-1250": -1250.0,
+        "1.5e3": 1500.0,
+        "2.5e-3": 0.0025,
+    }
+    assert figures("scores 10,20,30 and 1,234,567 and a1e6 v1.2 (1.2)") == {
+        "10": 10.0,
+        "20": 20.0,
+        "30": 30.0,
+        "1234567": 1234567.0,
+        "1.2": 1.2,
+    }
+    assert figure_grounded("1e6", 1e6, {1_000_000.0}) and not figure_grounded("1e6", 1e6, {999_000.0})
+    assert figure_grounded("1e-3", 0.001, {0.001}) and not figure_grounded("1e-3", 0.001, {0.0004})
     assert figure_grounded("1250.5", 1250.5, {1250.49}) and not figure_grounded("1250.5", 1250.5, {1250.0})
     # The interpreter imports the same helpers rather than a private copy.
     from fleet_rlm.sandbox import interpreter

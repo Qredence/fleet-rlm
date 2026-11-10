@@ -207,8 +207,9 @@ each Turn and by `/trace`. The HTTP `POST /improve/labels` runs the same labelli
 configured judge in the evaluation experiment, without running their Turns again.
 
 `fleet optimize --check` prints readiness as JSON (`ready`, `examples`, `groups`,
-`critical`, `split_sizes`, `missing`) and exits non-zero when a run would refuse to
-start; it reads PostgreSQL and MLflow only, with no model or Daytona call.
+`critical`, `split_sizes`, `missing`) and exits non-zero when dataset readiness fails
+or the installed `fleet.json` contradicts the approval ledger. It reads PostgreSQL,
+MLflow and the local program file only; it does not check model or Daytona availability.
 
 `fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,

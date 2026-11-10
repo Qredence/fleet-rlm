@@ -61,6 +61,17 @@ def installed_program_error(digest: str, ledger: Mapping[str, Any]) -> str | Non
     return None
 
 
+def installed_program_problem(path: str, ledger: Mapping[str, Any]) -> str | None:
+    """`installed_program_error` for the file at `path`; an unreadable file is a problem, not an exception."""
+    try:
+        digest = hashlib.sha256(CompiledProgramFile(path).read()).hexdigest() if os.path.lexists(path) else ""
+    except Exception:
+        return (
+            "The installed program fleet.json cannot be read as a regular file. Restore it or approve a new candidate."
+        )
+    return installed_program_error(digest, ledger)
+
+
 class CompiledProgramFile:
     """Bounded regular-file loading: a file that exists must be valid; absence is baseline.
 

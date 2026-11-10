@@ -88,8 +88,9 @@ MLflow experiment and candidates to the configured artifact directory.
 
 `max_total_tokens` caps the generative LM tokens a job may spend. Omitted, it
 inherits `FLEET_JOB_MAX_TOKENS`; `0` is unlimited. The worker sums the usage the
-LM calls report; when the cap is reached it stops search and validation at the
-next safe boundary and the job ends `budget_exhausted` with no candidate. TypeSafe
+LM calls report; usage is counted after each call, so in-flight calls can push
+`tokens_used` past the cap. When the cap is reached it stops search and validation at
+the next safe boundary and the job ends `budget_exhausted` with no candidate. TypeSafe
 decision calls are not counted. The cap is telemetry: it never affects the
 persistence failure latch. `progress` carries `tokens_used` and `token_cap`.
 
