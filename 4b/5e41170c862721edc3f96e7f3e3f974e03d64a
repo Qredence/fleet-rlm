@@ -1,0 +1,86 @@
+src/fleet_rlm/config.py
+  s_f99ab9bf268253::t_f50f7b9e7d3a83 32-33
+  s_f99ab9bf268253::t_651087e0cbf99a 610-615
+tests/api/test_improve.py
+  s_f99ab9bf268253::t_9a7afa6899d0e6 253
+  s_f99ab9bf268253::t_618097372b45ba 1620-1708
+src/fleet_rlm/api/routes/improve.py
+  s_f99ab9bf268253::t_6a3b722aaa8da4 12,82,92-110,118-121,127,130,133-146,206-222
+  s_f99ab9bf268253::t_6ccee8211ec902 37
+  s_f99ab9bf268253::t_318a615050b8f5 87-89
+  s_f99ab9bf268253::t_be19d8aaf19d8a 83-86,90-91
+  s_f99ab9bf268253::t_a08d5ca3f3b6f9 223-225
+  s_ed74e9ba8d193d::t_0e72519461ca3c 226-227,333,335-336
+src/fleet_rlm/api/schemas.py
+  s_f99ab9bf268253::t_6a3b722aaa8da4 373,377-384,388,396,398-401,437-439
+docs/reference/configuration.md
+  s_f99ab9bf268253::t_ef8613496dda00 45
+src/fleet_rlm/optimize/jobs.py
+  s_f99ab9bf268253::t_ba2b386f5e352e 70-71,74,76-78,82-83,86
+  s_ed74e9ba8d193d::t_5e41dea1b98acf 47
+tests/tui/test_tui.py
+  s_f99ab9bf268253::t_618097372b45ba 2083-2177
+  s_f99ab9bf268253::t_df5aabbbca32f3 1838-1841
+src/fleet_rlm/optimize/gepa.py
+  s_f99ab9bf268253::t_92e6a66d5fe5e8 611-613,1164,1209,1303
+  s_f99ab9bf268253::t_ba2b386f5e352e 1006-1007,1128-1131,1172,1177,1188,1191-1193,1230-1232,1258
+  s_f99ab9bf268253::t_920ee6e0fd7a9d 6,38,47,175-176,187,232-235,1376-1434,1437,1470,1484,1495,1509-1518
+src/fleet_rlm/store.py
+  s_f99ab9bf268253::t_6a3b722aaa8da4 1029-1030
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_ef8613496dda00 437-445
+src/fleet_rlm/optimization_runs.py
+  s_f99ab9bf268253::t_b0f9bd6df9878c 301-302
+  s_f99ab9bf268253::t_651087e0cbf99a 241-246,252-288,293-300,303-311
+  s_f99ab9bf268253::t_f50f7b9e7d3a83 247-251,289-292
+  s_f99ab9bf268253::t_6ccee8211ec902 29-39
+  s_f99ab9bf268253::t_b227c526181ffb 312-313
+openapi.yaml
+  s_f99ab9bf268253::t_ef8613496dda00 1973,2499-2501,2505-2519,2528,2530,2532,2727-2732,2738-2739,3137-3146,3419-3432
+src/fleet_rlm/optimize/artifacts.py
+  s_f99ab9bf268253::t_651087e0cbf99a 102-110,221-223,247-248,300-301
+  s_f99ab9bf268253::t_c86879d9b8d13e 245-246
+  s_f99ab9bf268253::t_721b17e3d24514 224-225
+src/fleet_rlm/optimize/validation.py
+  s_f99ab9bf268253::t_f50f7b9e7d3a83 12-13,395
+  s_f99ab9bf268253::t_651087e0cbf99a 304,308,355-357,381,461,482,491
+src/fleet_rlm/tui/improve.py
+  s_f99ab9bf268253::t_be19d8aaf19d8a 485
+  s_f99ab9bf268253::t_ac8c99f306a2b8 25,150-151,168-177,204,267,325-327,486-489,527,536-540,556,558-563,597-606,665-667,725-729
+docs/reference/http-api.md
+  s_f99ab9bf268253::t_ef8613496dda00 66-73,87-89,135-140
+  s_f99ab9bf268253::t_8d2591df9eb8f8 141
+tests/optimize/test_optimization.py
+  s_f99ab9bf268253::t_618097372b45ba 2886-2889,3097-3144,3146,3152-3156
+  s_f99ab9bf268253::t_9a7afa6899d0e6 1375,1383,1395
+  s_f99ab9bf268253::t_2ee661e5fe5d20 1454,1590-1591,1607-1608,1673-1683,1795-1798
+  s_f99ab9bf268253::t_72c95df77eccb8 2786-2789
+  s_f99ab9bf268253::t_6f4b213e223c43 2670-2672,2790
+  s_f99ab9bf268253::t_318a615050b8f5 3145,3147-3151,3157-3158
+src/fleet_rlm/optimize/dataset.py
+  s_f99ab9bf268253::t_2fa37bb04e5cdc 7,14,233,250-261,266-268,284-290,299,304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b5e41170c862721edc3f96e7f3e3f974e03d64a",
+  "prompts": {},
+  "sessions": {
+    "s_ed74e9ba8d193d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c563-a642-7f92-bd87-845964894f74",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
