@@ -141,8 +141,8 @@ catalog/revision, non-secret runtime configuration, and workspace file bytes
 is stored in Lakebase only after the Turn completes successfully and is not
 eligible for GEPA until its MLflow trace is explicitly labeled `approved` with
 gold expectations. This option can retain sensitive workspace content; use it
-only for data approved for that purpose. An oversized workspace skips capture
-instead of failing the Turn: the stream carries a `replay_skipped` event (`bytes`,
+only for data approved for that purpose. When capture is enabled, an oversized
+workspace skips it instead of failing the Turn: the stream carries a `replay_skipped` event (`bytes`,
 `limit`) and the stored Turn reports `replay_snapshot_selected: false`. The TUI
 exposes the same switch with `/replay on` and `/replay off`.
 New snapshots use replay v2 and retain ordered required intent, origins and captured
@@ -357,8 +357,8 @@ increments `sandbox_errors`.
 `ungrounded_submit_rejected`, so a host rejection is not displayed as a remote
 Python failure during recovery.
 
-`replay_skipped` is emitted once during preparation when the workspace exceeds the
-replay byte limit; it carries `bytes` and `limit`.
+`replay_skipped` is emitted once during preparation when replay capture is enabled and
+the workspace exceeds the replay byte limit; it carries `bytes` and `limit`.
 
 `learned_note_warning` carries a `namespace`, `field` (`learned_skill_note`),
 and bounded `figures` list. It does not block submission. Existing
