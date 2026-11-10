@@ -431,6 +431,10 @@ class ExperimentManager:
         status = "interrupted"
         updates: dict[str, Any] = {}
         try:
+            manifest_name = os.path.abspath(manifest_path)
+            if not manifest_name.startswith(os.path.abspath(directory) + os.sep):
+                raise ValueError("approval manifest escapes candidate directory")
+            manifest_path = Path(manifest_name)
             if directory.is_symlink() or manifest_path.is_symlink() or active_path.is_symlink():
                 raise ValueError("invalid approval artifact")
             resolved_manifest = os.path.realpath(manifest_path)
