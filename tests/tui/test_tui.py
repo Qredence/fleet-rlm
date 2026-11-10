@@ -1762,6 +1762,46 @@ def test_review_buttons_post_labels_from_the_form() -> None:
     asyncio.run(scenario())
 
 
+def test_reject_of_a_previously_corrected_turn_stays_a_rejection_and_queue_failure_is_visible() -> None:
+    corrected = {
+        **_QUEUE_ITEM,
+        "label": "approved",
+        "expected_answer": "A corrected answer of 42.",
+        "expected_values": ["42"],
+    }
+    transport, api = _experiment_transport([_experiment_record("legacy-run")])
+    api["records"][0]["legacy_session_id"] = "sess_old"
+    api["queue"] = {"items": [corrected]}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_reject", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen._figure_boxes and screen.records)
+            screen.query_one("#label-reject").press()
+            await _wait_for(pilot, lambda: api.get("labels"))
+            assert api["labels"][0] == {"turn_id": "turn-1", "status": "rejected"}
+            # A per-Session job from before jobs were global is never approvable, whatever its evidence.
+            screen.comparison, screen.comparison_run_id = {"ok": True}, "legacy-run"
+            screen._update_job_actions(screen._selected())
+            assert screen.query_one("#job-approve").disabled
+
+    asyncio.run(scenario())
+
+    transport, _api = _experiment_transport([])
+
+    async def unavailable() -> None:
+        async with _running_tui(transport, "sess_noq", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            await _wait_for(pilot, lambda: tui.screen.queue_error)
+            await pilot.pause(0.1)
+            assert "unavailable" in str(tui.screen.query_one("#review-text").render())
+
+    asyncio.run(unavailable())
+
+
 def test_run_button_confirms_budget_and_token_cap_before_posting_the_job() -> None:
     from textual.widgets import TabbedContent
 

@@ -586,8 +586,11 @@ def _optimize(ctx: Context, arg: str) -> None:
 
     Without arguments the fullscreen TUI only opens the Runs tab, where starting is confirmed.
     """
-    if ctx.state.fullscreen and not arg.strip() and ctx.state.improve_opener is not None:
-        ctx.state.improve_opener("runs")
+    if not arg.strip():
+        if ctx.state.fullscreen and ctx.state.improve_opener is not None:
+            ctx.state.improve_opener("runs")
+        else:
+            _out(ctx).print("Use the fullscreen TUI to review and confirm an optimization run.")
         return
     parsed = _parse_optimizer_arguments(ctx, arg)
     if parsed is None:

@@ -888,8 +888,10 @@ class FleetTextualApp(App[str | None]):
         try:
             await asyncio.to_thread(save_label, self.client, body)
         except httpx.HTTPError as error:
-            self._label_offer = (body["turn_id"], body.get("expected_answer", ""))
-            self.refresh_chrome()
+            # Restore the shortcut only while nothing newer has replaced it and the user is not composing.
+            if self._label_offer is None and not self.query_one("#prompt-input", TextArea).text:
+                self._label_offer = (body["turn_id"], body.get("expected_answer", ""))
+                self.refresh_chrome()
             self.notify(f"Label not saved: {error_text(error)}", severity="error")
             return
         self.notify("Turn labelled ✓ approved")

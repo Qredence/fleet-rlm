@@ -421,8 +421,8 @@ every Session serves the approved program. The workflow is:
    approve it with its answer and figures, or `ctrl+n` to open the **Review** tab at it, where
    you can uncheck figures, add values, mark it critical, set its group, reject it, or
    correct the answer.
-2. **Check readiness.** The **Readiness** tab (and the `ready to optimize` status badge) report
-   the counts, split sizes, missing requirements, and new labels since the last run.
+2. **Check readiness.** The **Readiness** tab reports the counts, split sizes, missing requirements,
+   and new labels since the last run; the `ready to optimize` status badge only indicates readiness.
 3. **Run.** In **Runs**, `Run optimize` confirms the search budget and token cap, then submits the job.
    The stage stepper, metric-call and token bars, best score, and score sparkline update once per second.
 4. **Review.** In **Results**, inspect the gate, means, per-example wins and losses, component

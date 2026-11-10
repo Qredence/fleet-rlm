@@ -27,6 +27,7 @@ STAGES = ("preparing", "search", "validation", "finalization")
 # The queue API truncates task and answer previews at this length.
 PREVIEW_CHARS = 500
 MAX_FIGURES = 20
+QUEUE_LIMIT = 50
 _SLOW_EVERY = 5
 
 
@@ -63,7 +64,7 @@ def confirm_text(options: Mapping[str, Any]) -> str:
     cap = options.get("max_total_tokens")
     tokens = "server default (FLEET_JOB_MAX_TOKENS)" if cap is None else ("unlimited" if cap == 0 else f"{cap:,}")
     return (
-        "Run optimize over every labelled Turn?\n\n"
+        "Run optimize over the labelled Turns (up to the newest 500 approved labels)?\n\n"
         f"Search budget: {budget} (reflection and validation cost extra)\n"
         f"Token cap: {tokens}\n\n"
         "This calls the model provider and Daytona."
@@ -192,6 +193,10 @@ class ImproveScreen(ModalScreen[None]):
         self.selected_turn_id: str | None = turn_id
         self._figure_boxes: list[tuple[str, Checkbox]] = []
         self._loaded_turn: str | None = None
+        self._prefilled_answer = ""
+        self.queue_error = False
+        self.queue_offset = 0
+        self.next_queue_offset = None
         self._polling = False
         self._refresh_pending = False
         self._ticks = 0
@@ -217,6 +222,8 @@ class ImproveScreen(ModalScreen[None]):
                             yield Checkbox("Critical (pinned to holdout)", id="review-critical")
                             yield Input(placeholder="group (default: the Session)", id="review-group")
                     with Horizontal(classes="pane-actions"):
+                        yield Button("Newer", id="queue-newer")
+                        yield Button("Older", id="queue-older")
                         yield Button("✓ Approve", variant="success", id="label-approve", disabled=True)
                         yield Button("✗ Reject", variant="error", id="label-reject", disabled=True)
                 with TabPane("Readiness", id="readiness"), VerticalScroll(id="readiness-scroll"):
@@ -283,7 +290,7 @@ class ImproveScreen(ModalScreen[None]):
         """Fetch the slower-moving views, omitting any that fail so the others still update."""
         fetched: dict[str, Any] = {}
         for name, path in (
-            ("queue", "/improve/queue"),
+            ("queue", f"/improve/queue?limit={QUEUE_LIMIT}&offset={self.queue_offset}"),
             ("readiness", "/improve/readiness"),
             ("history", "/improve/history"),
         ):
@@ -360,7 +367,11 @@ class ImproveScreen(ModalScreen[None]):
             fetched = await asyncio.to_thread(self._fetch_slow)
             if not self.is_attached:
                 return
-            if isinstance(fetched.get("queue", {}).get("items"), list):
+            self.queue_error = not isinstance(fetched.get("queue", {}).get("items"), list)
+            if self.queue_error:
+                self.queue = []
+            if not self.queue_error:
+                self.next_queue_offset = fetched["queue"].get("next_offset")
                 self.queue = [item for item in fetched["queue"]["items"] if isinstance(item, dict)]
             if "readiness" in fetched:
                 self.readiness = fetched["readiness"]
@@ -449,10 +460,16 @@ class ImproveScreen(ModalScreen[None]):
             for item in self.queue
         ]
         self._sync_table(self.query_one("#review-queue", DataTable), rows, self.selected_turn_id)
+        self.query_one("#queue-newer", Button).disabled = self.queue_offset == 0
+        self.query_one("#queue-older", Button).disabled = self.queue_error or self.next_queue_offset is None
         item = self._selected_item()
         if item is None:
             if not self.queue:
-                self.query_one("#review-text", Static).update("No replay-captured Turns yet. Run one with /replay on.")
+                self.query_one("#review-text", Static).update(
+                    "The review queue is unavailable; retrying."
+                    if self.queue_error
+                    else "No replay-captured Turns yet. Run one with /replay on."
+                )
         elif self._loaded_turn != item["turn_id"]:
             self._load_form(item)
         for button in ("#label-approve", "#label-reject"):
@@ -475,6 +492,7 @@ class ImproveScreen(ModalScreen[None]):
         answer = self.query_one("#review-answer", Input)
         truncated = len(item["answer"]) >= PREVIEW_CHARS
         answer.value = item.get("expected_answer") or ("" if truncated else item["answer"])
+        self._prefilled_answer = answer.value
         answer.placeholder = "answer was truncated; type the expected answer" if truncated else "expected answer"
         self.query_one("#review-extra", Input).value = ", ".join(v for v in saved if v not in listed)
         self.query_one("#review-critical", Checkbox).value = bool(item.get("critical"))
@@ -702,6 +720,8 @@ class ImproveScreen(ModalScreen[None]):
         gate = record.get("gate", {}) if record else {}
         self.query_one("#job-approve", Button).disabled = not (
             (reviewable or recoverable)
+            # Per-Session jobs from before jobs became global stay readable but the API never approves them.
+            and not record.get("legacy_session_id")
             and self.comparison is not None
             and self.comparison_run_id == record.get("run_id")
             and isinstance(gate, Mapping)
@@ -734,6 +754,14 @@ class ImproveScreen(ModalScreen[None]):
         button_id = event.button.id
         if button_id == "improve-close":
             self.dismiss()
+        elif button_id in {"queue-newer", "queue-older"}:
+            self.queue_offset = (
+                max(0, self.queue_offset - QUEUE_LIMIT) if button_id == "queue-newer" else (self.next_queue_offset or 0)
+            )
+            self.selected_turn_id = None
+            self._loaded_turn = None
+            self._slow_now = True
+            self.refresh_state()
         elif button_id == "job-run":
             self.on_run()
         elif button_id == "job-cancel":
@@ -759,8 +787,9 @@ class ImproveScreen(ModalScreen[None]):
         if approve:
             body["expected_values"] = [value for value, box in self._figure_boxes if box.value] + extra
             body["critical"] = self.query_one("#review-critical", Checkbox).value
-        elif answer and answer != item["answer"]:
-            # A corrected answer replaces the Turn's answer as the gold; its own figures are the expected values.
+        elif answer and answer not in {item["answer"], self._prefilled_answer}:
+            # Only an answer the user typed replaces the Turn's answer as the gold; its own figures are the
+            # expected values. A prefilled saved answer left untouched is still a plain rejection.
             body["expected_values"] = label_figures(answer) + extra
         else:
             return {"turn_id": item["turn_id"], "status": "rejected"}

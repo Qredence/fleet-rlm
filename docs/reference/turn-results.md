@@ -21,6 +21,7 @@ enclosing row. New successful results include it in their JSON as well.
 | `answer`, `route`, `learned_skill_note` | Present; Session defaults missing record values to empty strings | Absent on new failures; old completed results retain their original missing/null values |
 | `artifacts` | Present, sorted unique `artifacts/` paths from the existing workspace listing | Absent on failures; old results retain their original artifact value or absence |
 | `lm_calls`, `sandbox_errors`, `submit_rejections`, `budget_breakdown` | Copied when present in the record, preserving explicit null; coordinator records all four (null when the Prediction has no value) | Absent on new failures; historical keys/values remain unchanged |
+| `replay_snapshot_selected` | Copied when present in the record (true when this Turn's replay snapshot was committed); lets a live client offer a label only for captured Turns | Absent on failures and on historical results |
 | `snapshot_name`, `snapshot_id`, `snapshot_cpu`, `snapshot_mem`, `snapshot_disk`, `snapshot_definition_digest`, `snapshot_build_digest` | Provider-resolved values copied when present, including null | Same environment fields on new failures; no historical backfill |
 | `deadline_source`, `effective_seconds` | Copied when present; disabled Fleet deadline is explicit `effective_seconds: null` | Same resolved pair on new failures; absent historical fields remain absent |
 | `outcome`, `duration_seconds` | `completed` and one measured duration from the record | `failed`/`cancelled`, with duration measured after teardown; old results are not rewritten |
@@ -35,8 +36,7 @@ enclosing row. New successful results include it in their JSON as well.
 
 Record-only fields remain on history/tracing/replay inputs: `task`,
 `workspace_manifest`, `skills_catalog`, `idempotency_key`, `execution_mode`,
-`context_files`, `artifact_changes`, `replay_snapshot_selected`, and
-`replay_snapshot_sha256`. They are not new completion fields. Execution evidence
+`context_files`, `artifact_changes`, and `replay_snapshot_sha256`. They are not new completion fields. Execution evidence
 remains a span/host-receipt concern. Arbitrary record fields are not promoted into
 new results; unknown fields already stored in a historical result are preserved.
 

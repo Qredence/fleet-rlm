@@ -197,8 +197,11 @@ After a Turn whose replay snapshot was captured, the composer shows `label: ctrl
 until you type. `ctrl+y` approves that Turn with its answer and figures; `ctrl+n` opens Review at
 it. The status bar shows `ready to optimize` when `/improve/readiness` is green.
 
-`/optimize` without arguments opens the Runs tab. `/optimize [args]` runs `fleet optimize [args]`
-over the labels of every Session.
+In the fullscreen TUI, `/optimize` without arguments opens the Runs tab, where `Run optimize` asks
+for confirmation. In the non-TTY fallback there is no confirmation screen: `/optimize` with or without
+arguments submits the job immediately, with the server's default controls (including `FLEET_JOB_MAX_TOKENS`)
+when none are given. `/optimize [args]` runs `fleet optimize [args]` over the labels of every Session.
+The review queue lists the newest 200 replay-captured Turns.
 It submits an API-owned job and inherits the server's effective settings;
 the CLI uses the same controls but remains a standalone synchronous workflow.
 Client disconnect does not cancel API-owned work. Use the Improve screen's
