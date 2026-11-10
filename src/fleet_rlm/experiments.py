@@ -424,6 +424,10 @@ class ExperimentManager:
         try:
             if directory.is_symlink() or manifest_path.is_symlink() or active_path.is_symlink():
                 raise ValueError("invalid approval artifact")
+            resolved_manifest = os.path.realpath(manifest_path)
+            if not resolved_manifest.startswith(os.path.realpath(directory) + os.sep):
+                raise ValueError("approval manifest escapes candidate directory")
+            manifest_path = Path(resolved_manifest)
             if manifest_path.stat().st_size > 4_000_000:
                 raise ValueError("invalid approval manifest")
             manifest = json.loads(await asyncio.to_thread(manifest_path.read_bytes))
