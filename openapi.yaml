@@ -2590,14 +2590,15 @@ components:
           minLength: 1
           title: Turn Id
         status:
-          type: string
-          enum:
-          - approved
-          - benchmark
-          - synthetic
-          - rejected
+          anyOf:
+          - type: string
+            enum:
+            - approved
+            - benchmark
+            - synthetic
+            - rejected
+          - type: 'null'
           title: Status
-          default: approved
         expected_answer:
           anyOf:
           - type: string
@@ -2608,6 +2609,7 @@ components:
           anyOf:
           - items:
               type: string
+              maxLength: 100000
             type: array
             maxItems: 100
           - type: 'null'

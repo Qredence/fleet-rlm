@@ -550,9 +550,11 @@ still has three choices and the same Noul threshold and evidence requirements.
 Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
 keys to simulate migration: reconstruct/re-evaluate a new candidate under the running
-schema, or explicitly select its baseline. For an operator-approved baseline reset,
-retire the active `fleet.json` while the runtime is stopped and reject or supersede
-the approved job in the ledger; deleting the artifact alone makes Turns refuse. No new selection endpoint or automatic rollback is added by Gate A.
+schema. While no job was ever approved, retiring the active `fleet.json` selects the
+baseline. After a global approval a baseline reset is unsupported: an approved job
+cannot be rejected and the ledger requires exactly the file it installed, so deleting
+the artifact makes Turns refuse. Restore the approved artifact or approve a new
+candidate. No new selection endpoint, ledger operation or automatic rollback is added by Gate A.
 An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
 While no global job was ever approved, an absent `fleet.json` means baseline; once one
 was, the ledger requires exactly the file it installed and refuses Turns otherwise.
@@ -625,15 +627,15 @@ Haiku 5.5 at temperature 1.0 with a 32,000-token output budget.
 
 The `fleet_turn` root span records `session_id`, `turn_id`, task, workspace
 manifest, file digests, whether replay capture was selected, and the snapshot
-digest. Capture is on by default (`record_replay: false` opts out). A selected Turn stores an immutable snapshot
-in `fleet_lite_replay_snapshots` in the same transaction as successful Turn
+digest. Capture is on by default (`record_replay: false` opts out). A selected Turn
+stores an immutable snapshot in `fleet_lite_replay_snapshots` in the same transaction as successful Turn
 completion. It contains bounded exact workspace file bytes, conversation history,
 memory (including the captured sandbox environment hint), selected dataset handle,
 Skills catalog and revision, execution mode,
 non-secret configuration, timeout, and Fleet version. Total workspace input is
-limited to 8 MB; an oversized
-workspace skips capture (a `replay_skipped` event, `replay_snapshot_selected` false) and
-the Turn proceeds. Snapshot bytes remain in Lakebase;
+limited to 8 MB. When replay capture is enabled, an oversized workspace skips it
+(a `replay_skipped` event, `replay_snapshot_selected` false) and the Turn proceeds;
+the size is checked from remote file sizes before any bytes are downloaded. Snapshot bytes remain in Lakebase;
 the GEPA dataset carries only the Session/Turn reference and digest.
 
 The validation ratio is inclusive `0.1–0.5`, default `0.35`, across CLI, HTTP,
@@ -711,8 +713,8 @@ of files produced by that Turn. This diagnostic does not change scoring or gold
 approval semantics. A root rewrite or removal of promoted child output records
 `superseded_child_receipts` in the final capture; rewritten files use workspace
 provenance, while the original promotion receipt remains in execution evidence.
-Prior answers in history and unreviewed learned notes remain
-program inputs; a continuation with those inputs does not measure unseen-task
+Prior answers in history and Session memories (which can include learned-note text)
+remain program inputs; `/learned` files are not separately injected; a continuation with those inputs does not measure unseen-task
 performance.
 Fixed-size host usage counters precede artifact metadata in root outputs so
 artifact-heavy Turns retain scoring evidence under trace sanitization limits. The

@@ -2081,6 +2081,26 @@ def test_prepare_inputs_skips_replay_capture_for_an_oversized_workspace(monkeypa
     assert inputs["replay_skipped_bytes"] == 10
 
 
+def test_prepare_inputs_decides_replay_size_from_remote_sizes_before_downloading(monkeypatch) -> None:
+    monkeypatch.setattr(turn_module, "MAX_REPLAY_FILE_BYTES", 8)
+    digests = {"files/big.bin": hashlib.sha256(b"x").hexdigest()}
+
+    def no_download(_path):
+        raise AssertionError("an oversized workspace must not be downloaded")
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            turn_inputs=lambda: {"digests": digests, "sizes": {"files/big.bin": 30_000_000}, "environment": ""},
+            read_workspace_file=no_download,
+        )
+    )
+
+    inputs = turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=True)
+
+    assert inputs["replay_files"] == {} and inputs["replay_selected"] is False
+    assert inputs["replay_skipped_bytes"] == 30_000_000
+
+
 def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> None:
     runtime = runtime_with(
         sandbox_mgr=FakeManager(

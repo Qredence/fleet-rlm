@@ -387,6 +387,20 @@ def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch
     assert prepared["outputs"]["completed"] is True
 
 
+def test_stalled_resource_sample_is_abandoned_not_awaited(sandbox, monkeypatch):
+    release = threading.Event()
+    calls: list[int] = []
+    monkeypatch.setattr("fleet_rlm.sandbox.manager.RESOURCE_SAMPLE_TIMEOUT_SECONDS", 0.05)
+    sandbox.get_metrics_latest = lambda: calls.append(1) or release.wait(5)
+    manager = manager_on(sandbox)
+    try:
+        assert manager.resource_sample() is None
+        assert manager.resource_sample() is None  # a stalled sampler is not stacked
+        assert calls == [1]
+    finally:
+        release.set()
+
+
 def test_exec_span_survives_an_unavailable_resource_sample(sandbox, monkeypatch):
     spans: list[dict[str, Any]] = []
     monkeypatch.setattr(
