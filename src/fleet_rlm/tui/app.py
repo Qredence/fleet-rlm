@@ -8,6 +8,7 @@ import shlex
 import sys
 import threading
 import time
+import uuid
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -45,7 +46,7 @@ from fleet_rlm.tui.commands import (
     completion_options,
     handle_command,
 )
-from fleet_rlm.tui.improve import ImproveScreen, confirm_text, error_text, label_figures, save_label
+from fleet_rlm.tui.improve import EVALUATIONS, ImproveScreen, confirm_text, error_text, label_figures, save_label
 from fleet_rlm.tui.mentions import attach_local_mentions, completed_mention_cursor, mention_completions
 from fleet_rlm.tui.render import (
     CONSOLE,
@@ -832,6 +833,7 @@ class FleetTextualApp(App[str | None]):
                 on_run=self._start_default_optimization,
                 on_cancel=self._request_optimizer_stop,
                 on_review=self._review_optimization,
+                on_evaluate=self._start_evaluation,
                 on_snapshot=self._optimizer_snapshot,
                 tab=tab,
                 turn_id=turn_id,
@@ -855,6 +857,19 @@ class FleetTextualApp(App[str | None]):
                 self._start_optimization(options)
 
         self.push_screen(ConfirmAction(confirm_text(options)), confirmed)
+
+    def _start_evaluation(self, kind: str) -> None:
+        """Start an evaluate job; replay and synthetic spend provider and sandbox time, so they ask first."""
+        options = {"request_id": str(uuid.uuid4()), "kind": kind}
+        if kind == "evaluate_rescore":
+            self._start_optimization(options)
+            return
+
+        def confirmed(accepted: bool | None) -> None:
+            if accepted:
+                self._start_optimization(options)
+
+        self.push_screen(ConfirmAction(EVALUATIONS[kind]), confirmed)
 
     def _offer_label(self, tracker: TurnTracker) -> None:
         """Offer a one-key label for a Turn whose replay snapshot was captured."""

@@ -425,8 +425,20 @@ every Session serves the approved program. The workflow is:
    the counts, split sizes, missing requirements, and new labels since the last run.
 3. **Run.** In **Runs**, `Run optimize` confirms the search budget and token cap, then submits the job.
    The stage stepper, metric-call and token bars, best score, and score sparkline update once per second.
-4. **Review.** In **Results**, inspect the gate, means, per-example wins and losses, component
+4. **Measure.** In **Runs**, `Evaluate ▸` starts `Rescore` (re-judge saved traces with the current judges; no Turn
+   runs again), `Replay` (run every labelled example against the installed program in isolated rollouts on the
+   optimization split), or `Synthetic` (the `fleet eval run` cases against this server). Replay and Synthetic
+   confirm their cost first. **Results** shows the program measured, each split's mean and critical pass count,
+   and the holdout headline; the installed-trend line includes these evaluations. Standalone,
+   `fleet optimize --evaluate rescore|replay|synthetic` runs the same worker body.
+5. **Review.** In **Results**, inspect the gate, means, per-example wins and losses, component
    diffs, and the installed holdout trend; `Approve` installs a passing candidate and `Reject` records the decision.
+
+**Auto-run.** The Readiness tab shows and edits the auto-run switch, the new-label threshold, the automatic
+metric-call budget, and the default token cap (`PUT /improve/settings`). When enabled, a saved label that makes
+readiness green with enough new labels and no active job starts an `optimize` job marked `auto`; it only
+creates a candidate. Results also shows a short model-written summary of each comparison, labelled as a summary
+and not evidence: it never feeds the promotion gate.
 
 The API owns the job and runs the existing CLI optimizer in a subprocess. Its
 lifecycle is recorded in PostgreSQL; candidate files remain in the configured

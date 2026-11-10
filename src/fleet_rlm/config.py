@@ -588,6 +588,23 @@ class FleetSettings(BaseSettings):
         description="Generative LM tokens one optimization job may spend; 0 means unlimited.",
         validation_alias="FLEET_JOB_MAX_TOKENS",
     )
+    auto_optimize: bool = Field(
+        default=False,
+        description="Start an optimize job after enough new labels; candidates still wait for human approval.",
+        validation_alias="FLEET_AUTO_OPTIMIZE",
+    )
+    auto_optimize_min_new_labels: int = Field(
+        default=5,
+        ge=1,
+        description="New approved labels since the last finished optimize job that trigger an automatic one.",
+        validation_alias="FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS",
+    )
+    auto_optimize_max_metric_calls: int | None = Field(
+        default=None,
+        ge=1,
+        description="Search metric calls for automatic jobs; unset keeps the light automatic budget.",
+        validation_alias="FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS",
+    )
     max_upload_bytes: int = Field(
         default=MAX_WORKSPACE_FILE_BYTES,
         ge=1,

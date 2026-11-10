@@ -109,6 +109,13 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._lease = threading.Lock()
         self._owners: dict[str, threading.Lock] = {}
+        self.settings: dict[str, dict[str, Any]] = {}
+
+    def global_settings(self, scope: str) -> dict[str, Any]:
+        return dict(self.settings.get(scope, {}))
+
+    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
+        self.settings[scope] = dict(settings)
 
     def acquire_optimization_owner_lease(self, owner_id):
         with self._lock:
@@ -1348,12 +1355,191 @@ def test_history_lists_approved_versions_and_completed_evaluations(tmp_path: Pat
     assert [job["run_id"] for job in history["evaluations"]] == ["evaluate-rescore-done"]
 
 
-def test_only_the_optimize_kind_exists_yet(tmp_path: Path) -> None:
+def test_unknown_job_kinds_are_rejected_and_evaluate_kinds_are_accepted(tmp_path: Path) -> None:
     _app, client = _app_client(tmp_path, _LabelStore())
     with client:
-        response = client.post("/improve/jobs", json={"request_id": "rescore", "kind": "evaluate_rescore"})
-        assert response.status_code == 422
         assert client.post("/improve/jobs", json={"request_id": "bad", "kind": "deploy"}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("kind", "flags"),
+    [
+        ("evaluate_rescore", ["--evaluate", "rescore"]),
+        ("evaluate_replay", ["--evaluate", "replay"]),
+        ("evaluate_synthetic", ["--evaluate", "synthetic"]),
+        ("optimize", []),
+    ],
+)
+def test_each_job_kind_launches_the_same_worker_with_its_own_body(tmp_path: Path, kind: str, flags: list[str]) -> None:
+    store, manager = _manager_with_store(tmp_path)
+    command = list(manager._command("run-1", kind, ExperimentOptions(max_total_tokens=9), approval=False))
+    assert command[1:4] == ["-m", "fleet_rlm.cli", "optimize"]
+    assert command[4 : 4 + len(flags)] == flags
+    assert "--managed-run-id" in command and command[command.index("--max-total-tokens") + 1] == "9"
+
+    async def scenario() -> None:
+        async def fake_execute(run_id: str, kind_arg: str, _options: ExperimentOptions, *, approval: bool) -> None:
+            assert (kind_arg, approval) == (kind, False)
+            store.update_optimization_run(run_id, {"status": "completed"}, owner_id=manager.owner_id)
+
+        manager._execute = fake_execute  # type: ignore[method-assign]
+        record = await manager.start(f"request-{kind}", ExperimentOptions(), kind)
+        await manager.close()
+        assert record["kind"] == kind and record["trigger"] == "manual"
+        assert record["run_id"].startswith(kind.replace("_", "-") + "-")
+
+    asyncio.run(scenario())
+
+
+def test_an_evaluate_job_has_no_candidate_to_approve(tmp_path: Path) -> None:
+    store = _LabelStore()
+    _completed(store, "evaluate-replay-done", kind="evaluate_replay", candidate_version=None)
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        refused = client.post(
+            "/improve/jobs/evaluate-replay-done/review", json={"decision": "approved", "request_id": "approve-eval"}
+        )
+    assert refused.status_code == 409 and "optimize" in refused.json()["detail"]
+    assert store.get_optimization_run("evaluate-replay-done")["status"] == "completed"
+
+
+def test_history_trend_carries_the_program_each_evaluation_measured(tmp_path: Path) -> None:
+    store = _LabelStore()
+    result = {
+        "kind": "replay",
+        "program": {"digest": "a" * 64, "version": "optimize-approved"},
+        "splits": {"holdout": {"n": 3, "mean": 0.8, "errors": 0, "critical": {"passed": 1, "n": 1}}},
+        "headline": {"holdout": 0.8, "critical_pass_rate": 1.0},
+    }
+    _completed(store, "evaluate-replay-done", kind="evaluate_replay", evaluation=result, trigger="manual")
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        evaluations = client.get("/improve/history").json()["evaluations"]
+        listed = client.get("/improve/jobs").json()["jobs"]
+    assert evaluations[0]["evaluation"] == result and evaluations[0]["trigger"] == "manual"
+    assert listed[0]["evaluation"]["headline"] == {"holdout": 0.8, "critical_pass_rate": 1.0}
+
+
+def test_settings_default_to_the_environment_and_saved_values_override_them(tmp_path: Path) -> None:
+    store = _LabelStore()
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        assert client.get("/improve/settings").json() == {
+            "auto_run": False,
+            "min_new_labels": 5,
+            "max_metric_calls": None,
+            "max_total_tokens": 0,
+        }
+        saved = client.put("/improve/settings", json={"auto_run": True, "min_new_labels": 2, "max_metric_calls": 30})
+        assert saved.status_code == 200 and saved.json()["auto_run"] is True and saved.json()["min_new_labels"] == 2
+        client.put("/improve/settings", json={"max_total_tokens": 5000})
+        assert client.get("/improve/settings").json() == {
+            "auto_run": True,
+            "min_new_labels": 2,
+            "max_metric_calls": 30,
+            "max_total_tokens": 5000,
+        }
+        cleared = client.put("/improve/settings", json={"max_metric_calls": None})
+        assert cleared.json()["max_metric_calls"] is None and cleared.json()["auto_run"] is True
+        assert client.put("/improve/settings", json={"min_new_labels": 0}).status_code == 422
+        assert client.put("/improve/settings", json={"surprise": 1}).status_code == 422
+    assert store.settings["improve"] == {"auto_run": True, "min_new_labels": 2, "max_total_tokens": 5000}
+
+
+def test_a_job_request_inherits_the_saved_token_cap_unless_it_sets_its_own(tmp_path: Path) -> None:
+    store = _LabelStore()
+    store.save_global_settings("improve", {"max_total_tokens": 777})
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        assert (
+            client.post("/improve/jobs", json={"request_id": "inherit"}).json()["job"]["options"]["max_total_tokens"]
+            == 777
+        )
+
+
+def _auto_ready(monkeypatch: pytest.MonkeyPatch, store: _LabelStore, *, ready: bool = True) -> None:
+    count = 8 if ready else 3
+    examples = [_example(f"sess_{index % 4}", critical=index == 0) for index in range(count)]
+    monkeypatch.setattr("fleet_rlm.optimize.dataset.load_examples", lambda *_args: examples)
+    store.references["turn-1"] = {"session_id": "sess_a", "turn_id": "turn-1", "trace_id": "tr-1"}
+    monkeypatch.setattr(
+        "fleet_rlm.optimize.evaluation.label_turn",
+        lambda *_args, **_kwargs: {
+            "review_status": "approved",
+            "expected_answer": "1",
+            "expected_values": [],
+            "critical": False,
+            "source_group": "sess_a",
+        },
+    )
+
+
+@pytest.mark.parametrize("case", ["enabled", "disabled", "not_ready", "below_threshold", "active_job"])
+def test_auto_run_starts_one_optimize_job_only_when_every_condition_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    store = _LabelStore()  # four new labels since the last run
+    _auto_ready(monkeypatch, store, ready=case != "not_ready")
+    store.save_global_settings(
+        "improve",
+        {
+            "auto_run": case != "disabled",
+            "min_new_labels": 5 if case == "below_threshold" else 4,
+            "max_metric_calls": 12,
+            "max_total_tokens": 4000,
+        },
+    )
+    if case == "active_job":
+        store.create_optimization_run("busy-run", "busy", {}, "someone", managed=True)
+        store.acquire_optimization_owner_lease("someone")  # a live owner keeps its run active
+    _app, client = _app_client(tmp_path, store)
+    started: list[tuple[str, ExperimentOptions, str, str]] = []
+
+    async def fake_start(request_id, options, kind="optimize", *, trigger="manual"):
+        started.append((request_id, options, kind, trigger))
+        return {}
+
+    with client:
+        client.app.state.experiments.start = fake_start
+        saved = client.post("/improve/labels", json={"turn_id": "turn-1"})
+        assert saved.status_code == 200
+        repeat = client.post("/improve/labels", json={"turn_id": "turn-1"})
+        assert repeat.status_code == 200
+    if case != "enabled":
+        assert started == []
+        return
+    assert len(started) == 2 and started[0][0] == started[1][0] and started[0][0].startswith("auto-")
+    _request, options, kind, trigger = started[0]
+    assert (kind, trigger) == ("optimize", "auto")
+    assert (options.max_metric_calls, options.max_total_tokens) == (12, 4000)
+
+
+def test_auto_run_records_its_trigger_and_never_approves_or_installs(tmp_path: Path, monkeypatch) -> None:
+    store = _LabelStore()
+    _auto_ready(monkeypatch, store)
+    store.save_global_settings("improve", {"auto_run": True, "min_new_labels": 1})
+    _app, client = _app_client(tmp_path, store)
+
+    async def fake_execute(run_id: str, _kind: str, _options: ExperimentOptions, *, approval: bool) -> None:
+        assert approval is False
+        store.update_optimization_run(run_id, {"status": "completed", "stage": "completed"})
+
+    with client:
+        client.app.state.experiments._execute = fake_execute
+        assert client.post("/improve/labels", json={"turn_id": "turn-1"}).status_code == 200
+        jobs = client.get("/improve/jobs").json()["jobs"]
+    assert [(job["kind"], job["trigger"], job["status"]) for job in jobs] == [("optimize", "auto", "completed")]
+    assert jobs[0].get("decision") is None and not (tmp_path / "fleet.json").exists()
+
+
+def test_a_failing_auto_run_check_never_fails_the_saved_label(tmp_path: Path, monkeypatch) -> None:
+    store = _LabelStore()
+    _auto_ready(monkeypatch, store)
+    store.save_global_settings("improve", {"auto_run": True})
+    monkeypatch.setattr(store, "new_review_labels", lambda _since: (_ for _ in ()).throw(RuntimeError("db down")))
+    _app, client = _app_client(tmp_path, store)
+    with client:
+        assert client.post("/improve/labels", json={"turn_id": "turn-1"}).status_code == 200
 
 
 def test_a_legacy_per_session_candidate_stays_readable_and_rejectable_but_never_approvable(tmp_path: Path) -> None:
@@ -1401,5 +1587,6 @@ def test_improve_routes_replace_the_session_scoped_experiment_routes(tmp_path: P
         "/improve/jobs/{run_id}/cancel",
         "/improve/jobs/{run_id}/review",
         "/improve/history",
+        "/improve/settings",
     } <= paths
     assert not any("/experiments" in path and path.startswith("/sessions") for path in paths)

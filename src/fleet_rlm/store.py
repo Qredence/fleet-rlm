@@ -161,6 +161,14 @@ _OPTIMIZATION_RUNS_GLOBAL = (
     "ALTER TABLE fleet_lite_optimization_runs ADD CONSTRAINT fleet_lite_optimization_runs_request_id_key "
     "UNIQUE (request_id)",
 )
+# Settings that belong to no Session. Schemas that applied an earlier draft of migration 11 may
+# already hold an empty table of this name, so creation must tolerate it.
+_GLOBAL_SETTINGS_TABLE = """
+    CREATE TABLE IF NOT EXISTS fleet_lite_global_settings (
+        scope TEXT PRIMARY KEY,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+"""
 _OPTIMIZATION_RUNS_ACTIVE_INDEX = """
     CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run
     ON fleet_lite_optimization_runs ((1))
@@ -278,6 +286,7 @@ _SCHEMA_MIGRATIONS = (
     (9, (_MANAGED_SESSION_BINDINGS, _MANAGED_SESSION_OUTBOX, _MANAGED_SESSION_OUTBOX_INDEX, _MANAGED_PIPELINE_RUNS)),
     (10, (_MANAGED_SESSION_OUTBOX_PURPOSE,)),
     (11, _OPTIMIZATION_RUNS_GLOBAL),
+    (12, (_GLOBAL_SETTINGS_TABLE,)),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -589,6 +598,25 @@ class Store:
                 "ON CONFLICT(session_id) DO UPDATE "
                 "SET settings=fleet_lite_runtime_settings.settings || EXCLUDED.settings",
                 (session_id, json.dumps(settings)),
+            )
+
+    @_retry_once
+    def global_settings(self, scope: str) -> dict[str, Any]:
+        """Return a scope's saved settings that belong to no Session, or an empty dict."""
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT settings FROM fleet_lite_global_settings WHERE scope=%s", (scope,)
+            ).fetchone()
+        return row[0] if row else {}
+
+    @_retry_once
+    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
+        """Replace a scope's saved settings."""
+        with self.pool.connection() as connection:
+            connection.execute(
+                "INSERT INTO fleet_lite_global_settings(scope,settings) VALUES(%s,%s::jsonb) "
+                "ON CONFLICT(scope) DO UPDATE SET settings=EXCLUDED.settings",
+                (scope, json.dumps(settings)),
             )
 
     # Memories

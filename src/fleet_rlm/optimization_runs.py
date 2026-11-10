@@ -24,9 +24,8 @@ if TYPE_CHECKING:
 
 EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
-# One job system: `kind` selects the worker. Only `optimize` exists; the ledger's CHECK is broader
-# so later kinds need no migration.
-JOB_KINDS = ("optimize",)
+# One job system: `kind` selects the worker body inside the same subprocess and ledger.
+JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _MAX_REPORT_BYTES = 4_000_000
 VALIDATION_RATIO_MIN = 0.1
@@ -136,6 +135,11 @@ def add_optimization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--check", action="store_true", help="print dataset readiness and exit non-zero if not ready; no live calls"
     )
+    parser.add_argument(
+        "--evaluate",
+        choices=("rescore", "replay", "synthetic"),
+        help="measure the installed program (or baseline) instead of optimizing; creates no candidate",
+    )
     parser.add_argument("--structured-events", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--managed-run-id", help=argparse.SUPPRESS)
     parser.add_argument("--managed-owner-id", help=argparse.SUPPRESS)
@@ -217,6 +221,8 @@ _PUBLIC_FIELDS = frozenset(
         "decision",
         "decision_at",
         "stop_requested",
+        "evaluation",
+        "trigger",
     }
 )
 

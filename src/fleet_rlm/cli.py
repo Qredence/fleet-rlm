@@ -174,16 +174,7 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         return
     if not target.eval_experiment_name:
         raise SystemExit(f"set FLEET_MLFLOW_{target.mode.upper()}_EVAL_EXPERIMENT_NAME to the evaluation experiment")
-    from fleet_rlm.observability import set_mlflow_trace_experiment
-
-    experiment = set_mlflow_trace_experiment(
-        target.eval_experiment_name,
-        databricks=target.mode == "databricks",
-        trace_catalog=getattr(settings, "mlflow_trace_catalog", ""),
-        trace_schema=getattr(settings, "mlflow_trace_schema", ""),
-        trace_table_prefix=getattr(settings, "mlflow_eval_trace_table_prefix", ""),
-        tracing_sql_warehouse_id=getattr(settings, "mlflow_tracing_sql_warehouse_id", ""),
-    )
+    experiment = evaluation.evaluation_experiment(settings)
     if args.eval_command == "score":
         _score_command(args, settings, experiment.experiment_id)
         return
@@ -201,30 +192,15 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
         _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
         return
-    for name, value in settings.judge_environment().items():
-        os.environ[name] = value
     try:
-        result = evaluation.evaluate_cases(
+        result = evaluation.run_cases(
+            settings,
             cases[: args.limit] if args.limit else cases,
             base_url=args.url,
-            judge_model=settings.fleet_judge_model,
-            judge_lm=None if args.collect_only else settings.build_judge_lm(),
-            judge_adapter=None if args.collect_only else settings.resolved_model("judge").build_adapter(),
-            jev_lm=None if args.collect_only else settings.build_jev_lm(),
-            collect_only=args.collect_only,
             experiment_id=experiment.experiment_id,
-            uc_location=(
-                (
-                    settings.mlflow_trace_catalog,
-                    settings.mlflow_trace_schema,
-                    settings.mlflow_eval_trace_table_prefix,
-                )
-                if target.mode == "databricks"
-                else None
-            ),
+            collect_only=args.collect_only,
             report=lambda message: _CONSOLE.print(message, markup=False, soft_wrap=True),
         )
-
     except evaluation.EvaluationError as exc:
         raise SystemExit(str(exc)) from None
     if result is not None:

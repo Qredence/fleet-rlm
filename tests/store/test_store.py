@@ -99,7 +99,7 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 11
+    assert SCHEMA_VERSION == 12
     assert _SCHEMA_MIGRATIONS[7][0] == 8
     assert "ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB" in _SCHEMA_MIGRATIONS[7][1][0]
     version, statements = _SCHEMA_MIGRATIONS[4]
@@ -799,6 +799,23 @@ def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(m
     assert all(call[0] is connection_class and call[1] == "host=lakebase" for call in calls)
 
 
+def test_migration_twelve_creates_the_global_settings_table_even_if_an_older_draft_left_one():
+    version, statements = _SCHEMA_MIGRATIONS[11]
+    assert version == 12 and len(statements) == 1
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_global_settings" in statements[0]
+    assert "scope TEXT PRIMARY KEY" in statements[0] and "settings JSONB NOT NULL" in statements[0]
+
+
+def test_global_settings_round_trip_by_scope_and_default_to_empty():
+    store, pool = make_store([({"auto_run": True},)], [])
+    assert store.global_settings("improve") == {"auto_run": True}
+    assert store.global_settings("missing") == {}
+    store.save_global_settings("improve", {"min_new_labels": 3})
+    sql, params = pool.conn.statements[-1]
+    assert "INSERT INTO fleet_lite_global_settings" in sql and "DO UPDATE SET settings=EXCLUDED.settings" in sql
+    assert params == ("improve", '{"min_new_labels": 3}')
+
+
 def test_commit_turn_requires_a_turn_id_so_a_connection_retry_cannot_duplicate_the_record():
     store, pool = make_store()
     with pytest.raises(ValueError, match="turn_id"):
@@ -821,7 +838,7 @@ def test_retired_managed_memory_migrations_remain_readable_without_runtime_wirin
     assert "fleet_lite_managed_session_outbox" in migrations[9][1]
     assert "fleet_lite_managed_pipeline_runs" in migrations[9][3]
     assert "ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'serving'" in migrations[10][0]
-    store, pool = make_store([], [], [(11,)])
+    store, pool = make_store([], [], [(12,)])
     store.initialize()
     statements = [sql for sql, _params in pool.conn.statements]
     assert not any("INSERT INTO fleet_lite_schema_migrations(version)" in sql for sql in statements)

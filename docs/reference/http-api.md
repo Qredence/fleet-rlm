@@ -23,6 +23,7 @@ Fleet exposes a FastAPI application with the following routes:
 | `POST` | `/improve/jobs/{run_id}/cancel` | Request cooperative cancellation of a running job. |
 | `POST` | `/improve/jobs/{run_id}/review` | Explicitly approve or reject a candidate. |
 | `GET` | `/improve/history` | Approved versions and completed evaluation jobs, for the quality trend. |
+| `GET`, `PUT` | `/improve/settings` | Auto-run switch, its thresholds and budgets, and the default token cap. |
 | `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `direct`, `flex`, `rlm`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
 | `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
@@ -77,7 +78,8 @@ a partial synchronization `503` with the retry hint.
 **Jobs.** A `POST /improve/jobs` body contains a `kind`, the shared optimizer
 options (`gepa_budget` or `max_metric_calls`, `threads`,
 `reflection_minibatch_size`, `max_candidate_proposals`, `validation_ratio`,
-`trace_search`, and `max_total_tokens`) plus a caller-generated `request_id`. `kind` is `optimize`, the only job kind today; other values return `422`. `validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls
+`trace_search`, and `max_total_tokens`) plus a caller-generated `request_id`. `kind` is `optimize` (the default),
+`evaluate_rescore`, `evaluate_replay`, or `evaluate_synthetic`; other values return `422`. `validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls
 return `422` before run creation. Unusable curated splits, including a missing
 critical holdout, fail preparation before search.
 Repeating the same request ID with the same kind and options returns the existing
@@ -118,9 +120,41 @@ is not installed automatically. Jobs recorded before the program became global k
 their Session as `legacy_session_id`: they stay readable and can be rejected, but
 approval returns `409` because their incumbent was a per-Session program.
 
+**Evaluate jobs.** The three evaluate kinds run in the same worker process, ledger, stage and
+progress reporting, stop checks, and token cap as `optimize`, but create no candidate and install nothing
+(approving one returns `409`). `evaluate_rescore` re-judges the saved traces of labelled Turns with the
+current judges and runs no Turn again. `evaluate_replay` runs the labelled examples against the installed
+global program (the baseline when none is installed) in isolated rollouts on the same grouped
+train/dev/holdout split as optimization. `evaluate_synthetic` is the `fleet eval run` path: it runs the
+generated cases against this server and, like that command, refuses a server whose trace destination is not
+the evaluation experiment, so the job ends `failed` instead of mixing benchmark traces into curation.
+The finished job carries `evaluation`: `kind`, the `program` measured (`digest` and the approved job `version`,
+or `baseline`), per-split `splits` (`n`, `mean`, `errors`, and `critical` `passed`/`n`), and a `headline` of
+the `holdout` mean and `critical_pass_rate`. Synthetic cases are not split, so they report one `synthetic`
+entry and a `null` holdout. The token cap is checked between splits: one `dspy.Evaluate` or MLflow scoring
+call cannot be interrupted, and a synthetic job only counts the judge calls it makes, not the server's Turns.
+A job's `trigger` is `manual` or `auto`.
+
+**Rationale.** After an optimize job's paired validation, one bounded reflection-model call summarizes the
+saved comparison in a few plain sentences. It appears as `rationale` beside `manifest` and `report` in the
+detail `comparison`, counts toward the token cap, is skipped once the cap is spent, and is empty on any failure.
+It is a reader's summary, never evidence: the promotion gate and approval never read it.
+
+**Auto-run and settings.** `GET /improve/settings` returns `auto_run` (default off), `min_new_labels` (default 5),
+`max_metric_calls` for automatic jobs (default unset: the light budget), and `max_total_tokens` (the default
+cap for every job unless a request sets its own). Saved values override `FLEET_AUTO_OPTIMIZE`,
+`FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS`, `FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS`, and `FLEET_JOB_MAX_TOKENS`.
+`PUT` saves only the supplied fields; an explicit `null` returns that field to its environment default.
+After each successful `POST /improve/labels`, if auto-run is on, readiness is green, at least
+`min_new_labels` labels are new since the last finished optimize job, and no job is active, the server starts an
+`optimize` job with the automatic budgets and `trigger: auto`. Its request ID derives from the label state, so
+a repeated check cannot start a second job and a failed job is retried only after another label arrives. A failure
+of this check never fails the label. Automatic jobs only create candidates; nothing is approved or installed
+without an explicit review.
+
 **History.** `GET /improve/history` returns `versions` (approved, non-legacy
-optimize jobs with their `scores`) and `evaluations` (completed evaluate jobs),
-newest first.
+optimize jobs with their `scores`) and `evaluations` (completed evaluate jobs with their `evaluation`, so the
+trend shows which installed program each result measured), newest first.
 
 **Installed program.** Once any global job was approved, only the file that
 approval installed may serve: if `fleet.json` is missing or differs from the latest

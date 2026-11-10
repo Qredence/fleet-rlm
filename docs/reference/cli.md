@@ -239,7 +239,8 @@ start; it reads PostgreSQL and MLflow only, with no model or Daytona call.
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
 `--validation-ratio` (inclusive 0.1–0.5, default 0.35), `--max-total-tokens N` (stop
 with `budget_exhausted` after N generative LM tokens; `0` is unlimited; default
-`FLEET_JOB_MAX_TOKENS`), and `--approve VERSION`. Reflection calls and the three paired
+`FLEET_JOB_MAX_TOKENS`), `--evaluate rescore|replay|synthetic` (measure the installed program
+instead of optimizing; no candidate is created), and `--approve VERSION`. Reflection calls and the three paired
 final validation passes are additional work, not covered by the search budget.
 Native GEPA checks the metric-call budget between batches, so it may overshoot.
 `--reflection-minibatch-size N` (default 3) sets the native reflection batch size;

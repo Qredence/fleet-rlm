@@ -116,7 +116,7 @@ class ModelRequest(_Request):
 class StartJob(ExperimentOptions):
     """A job kind, its validated controls, and a retry-safe caller identity."""
 
-    kind: Literal["optimize"] = "optimize"
+    kind: Literal["optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic"] = "optimize"
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
@@ -351,6 +351,8 @@ class Job(BaseModel):
     decision: str | None = None
     decision_at: str | None = None
     stop_requested: bool | None = None
+    evaluation: dict[str, Any] | None = None
+    trigger: str | None = None
 
 
 class JobList(BaseModel):
@@ -384,6 +386,24 @@ class ImproveReadiness(BaseModel):
     split_sizes: dict[str, int]
     missing: list[str]
     new_labels_since_last_run: int
+
+
+class ImproveSettings(BaseModel):
+    """Auto-run switch and budgets; saved values override the FLEET_AUTO_OPTIMIZE* and FLEET_JOB_MAX_TOKENS defaults."""
+
+    auto_run: bool
+    min_new_labels: int = Field(ge=1)
+    max_metric_calls: int | None = Field(default=None, ge=1)
+    max_total_tokens: int = Field(ge=0)
+
+
+class ImproveSettingsUpdate(_Request):
+    """A partial settings update; omitted fields keep their current value."""
+
+    auto_run: bool | None = None
+    min_new_labels: int | None = Field(default=None, ge=1, le=10_000)
+    max_metric_calls: int | None = Field(default=None, ge=1, le=100_000)
+    max_total_tokens: int | None = Field(default=None, ge=0)
 
 
 class QueueItem(BaseModel):

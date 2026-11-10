@@ -33,9 +33,13 @@ from fleet_rlm.optimization_runs import (
 )
 from fleet_rlm.store import Store
 
-# The `fleet` subcommand that runs each job kind. The evaluate kinds are reserved by the ledger and
-# have no managed worker yet.
-_WORKER_COMMANDS: dict[str, tuple[str, ...]] = {"optimize": ("optimize",)}
+# The `fleet` subcommand that runs each job kind: one worker process, one lifecycle, different bodies.
+_WORKER_COMMANDS: dict[str, tuple[str, ...]] = {
+    "optimize": ("optimize",),
+    "evaluate_rescore": ("optimize", "--evaluate", "rescore"),
+    "evaluate_replay": ("optimize", "--evaluate", "replay"),
+    "evaluate_synthetic": ("optimize", "--evaluate", "synthetic"),
+}
 
 
 class ExperimentBusyError(ValueError):
@@ -188,8 +192,10 @@ class ExperimentManager:
             raise ExperimentBusyError("An optimization worker is still active") from None
         await asyncio.to_thread(lease.close)
 
-    async def start(self, request_id: str, options: ExperimentOptions, kind: str = "optimize") -> dict[str, Any]:
-        """Persist an idempotent intent before spawning any paid work."""
+    async def start(
+        self, request_id: str, options: ExperimentOptions, kind: str = "optimize", *, trigger: str = "manual"
+    ) -> dict[str, Any]:
+        """Persist an idempotent intent, and what started it, before spawning any paid work."""
         if kind not in _WORKER_COMMANDS:
             raise ValueError(f"{kind} jobs are not available")
         await self._reconcile_stale_runs()
@@ -213,6 +219,16 @@ class ExperimentManager:
                 )
             except ValueError as error:
                 raise ExperimentBusyError(str(error)) from None
+            record = (
+                await asyncio.to_thread(
+                    self.store.update_optimization_run,
+                    run_id,
+                    {"trigger": trigger},
+                    owner_id=self.owner_id,
+                    expected_statuses=("running",),
+                )
+                or record
+            )
             self._task = asyncio.create_task(self._execute(run_id, kind, options, approval=False))
             return record
 
@@ -262,6 +278,8 @@ class ExperimentManager:
                 raise ValueError("decision must be approved or rejected")
             if record.get("legacy_session_id"):
                 raise ExperimentBusyError("A per-Session candidate cannot be installed globally; run a new job")
+            if record["kind"] != "optimize":
+                raise ExperimentBusyError("Only an optimize job produces a candidate to install")
             await self._available()
             if record["status"] not in {"completed", "approving"}:
                 raise ExperimentBusyError("Only a completed or recoverable job can be approved")

@@ -328,8 +328,8 @@ def test_owner_probe_does_not_treat_database_errors_as_owner_death(monkeypatch):
 @pytest.mark.skipif(
     not os.environ.get("FLEET_TEST_POSTGRES_URL"), reason="set FLEET_TEST_POSTGRES_URL to run against a real PostgreSQL"
 )
-def test_migration_eleven_on_real_postgres_preserves_history_despite_cross_session_collisions():
-    """Opt-in: builds schema v10 in a scratch schema, seeds colliding ids, applies v11, re-initializes."""
+def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_cross_session_collisions():
+    """Opt-in: builds schema v10 in a scratch schema, seeds colliding ids, applies v11 and v12, re-initializes."""
     url = os.environ["FLEET_TEST_POSTGRES_URL"]
     schema = "fleet_mig_" + uuid.uuid4().hex[:8]
     with psycopg.connect(url, autocommit=True) as admin:
@@ -354,6 +354,8 @@ def test_migration_eleven_on_real_postgres_preserves_history_despite_cross_sessi
                     "VALUES (%s,%s,%s,'owner','completed','completed','{\"candidate_version\":\"v\"}',%s)",
                     (session, run, request, created),
                 )
+            # A schema that applied an earlier draft of v11 may already hold an empty settings table.
+            admin.execute("CREATE TABLE fleet_lite_global_settings (scope TEXT PRIMARY KEY, settings JSONB)")
             store = Store.open(url, wait=True, schema=schema)
             try:
                 store.initialize()
@@ -380,7 +382,9 @@ def test_migration_eleven_on_real_postgres_preserves_history_despite_cross_sessi
                 assert "fleet_lite_one_active_optimization_run" in indexes
                 assert "fleet_lite_optimization_runs_pkey" in indexes
                 assert "fleet_lite_optimization_runs_request_id_key" in indexes
-                assert admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0] == 11
+                assert admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0] == 12
+                store.save_global_settings("improve", {"auto_run": True})
+                assert store.global_settings("improve") == {"auto_run": True}
                 # The legacy row stays readable through the Store and keeps its legacy marker.
                 assert store.get_optimization_run("run-a1-dup-s2")["legacy_session_id"] == "s2"
             finally:

@@ -1175,8 +1175,16 @@ def _experiment_transport(records: list[dict[str, Any]], *, comparison: dict[str
             record = _experiment_record("sess_api-run", "running")
             state["records"].insert(0, record)
             return httpx.Response(202, json={"job": record})
-        if request.method == "GET" and parts[-1] in {"queue", "readiness", "history"} and parts[-1] in state:
+        if (
+            request.method == "GET"
+            and parts[-1] in {"queue", "readiness", "history", "settings"}
+            and parts[-1] in state
+        ):
             return httpx.Response(200, json=state[parts[-1]])
+        if request.method == "PUT" and parts[-1] == "settings":
+            state.setdefault("saved_settings", []).append(json.loads(request.content))
+            state["settings"] = {**state.get("settings", {}), **state["saved_settings"][-1]}
+            return httpx.Response(200, json=state["settings"])
         if request.method == "POST" and parts[-1] == "labels":
             state.setdefault("labels", []).append(json.loads(request.content))
             return httpx.Response(200, json={"turn_id": state["labels"][-1]["turn_id"], "status": "approved"})
@@ -1838,6 +1846,149 @@ def test_results_tab_sorts_examples_by_delta_and_shows_the_installed_trend() -> 
             assert "0.500 → 0.750 (+0.250)" in text
             assert "INSTALLED TREND · HOLDOUT (2 versions)  0.600 → 0.800" in text
             assert "1 better, 1 worse, 2 unchanged" in text
+
+    asyncio.run(scenario())
+
+
+def test_evaluate_choices_start_each_kind_and_only_replay_and_synthetic_ask_to_confirm() -> None:
+    from textual.widgets import TabbedContent
+
+    transport, api = _experiment_transport([])
+
+    def posts() -> list[dict[str, Any]]:
+        return [json.loads(r.content) for r in api["requests"] if r.method == "POST" and r.url.path == "/improve/jobs"]
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_eval", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await _wait_for(pilot, lambda: not screen.query_one("#evaluate_rescore").disabled)
+            # Rescore only calls the judges, so it starts without a cost prompt.
+            await pilot.click("#evaluate_rescore")
+            await _wait_for(pilot, posts)
+            assert [post["kind"] for post in posts()] == ["evaluate_rescore"]
+            # The mock ledger now holds a running job, so the next kinds wait for it to finish.
+            api["records"][0]["status"] = "completed"
+            await _wait_for(pilot, lambda: not screen.query_one("#evaluate_replay").disabled)
+            for kind, words in (("evaluate_replay", "Replay"), ("evaluate_synthetic", "synthetic cases")):
+                await pilot.click(f"#{kind}")
+                await pilot.pause(0.1)
+                assert isinstance(tui.screen, app.ConfirmAction) and words in tui.screen.message
+                before = len(posts())
+                await pilot.click("#cancel")
+                await pilot.pause(0.1)
+                assert len(posts()) == before
+                await pilot.click(f"#{kind}")
+                await pilot.pause(0.1)
+                await pilot.click("#confirm")
+                await _wait_for(pilot, lambda kind=kind: kind in {post["kind"] for post in posts()})
+                api["records"][0]["status"] = "completed"
+                await _wait_for(pilot, lambda: not screen.query_one("#evaluate_replay").disabled)
+            assert len({post["request_id"] for post in posts()}) == 3
+
+    asyncio.run(scenario())
+
+
+def test_runs_and_results_show_kind_trigger_evaluation_splits_and_the_unverified_summary() -> None:
+    from textual.widgets import DataTable, TabbedContent
+
+    evaluation = {
+        "kind": "replay",
+        "program": {"digest": "a" * 64, "version": "optimize-abc"},
+        "splits": {
+            "train": {"n": 4, "mean": 0.9, "errors": 0, "critical": {"passed": 0, "n": 0}},
+            "holdout": {"n": 3, "mean": 0.667, "errors": 1, "critical": {"passed": 1, "n": 2}},
+        },
+        "headline": {"holdout": 0.667, "critical_pass_rate": 0.5},
+    }
+    evaluated = _experiment_record("evaluate-replay-1")
+    evaluated.update(kind="evaluate_replay", trigger="manual", gate=None, candidate_version=None, evaluation=evaluation)
+    auto = _experiment_record("optimize-auto-1")
+    auto.update(kind="optimize", trigger="auto")
+    transport, api = _experiment_transport(
+        [evaluated, auto], comparison={"manifest": {"evaluation": {}}, "rationale": "Holdout rose a little."}
+    )
+    api["history"] = {"versions": [], "evaluations": [evaluated]}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_eval_results", (120, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen.records and screen.evaluations)
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await pilot.pause(0.1)
+            table = screen.query_one("#runs-table", DataTable)
+            assert [table.get_row_at(i)[1:3] for i in range(table.row_count)] == [
+                ["evaluate_replay", "manual"],
+                ["optimize", "auto"],
+            ]
+            screen.query_one("#improve-tabs", TabbedContent).active = "results"
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#results-text").render())
+            assert "EVALUATED · HOLDOUT  optimize-abc 0.667" in text
+            assert "Program  optimize-abc (aaaaaaaaaaaa)" in text
+            assert "HEADLINE  holdout 0.667 · critical pass rate 50%" in text
+            assert "holdout    mean 0.667 over 3 examples · critical 1/2 · 1 errors" in text
+            table.move_cursor(row=1)
+            await _wait_for(pilot, lambda: screen.selected_run_id == "optimize-auto-1")
+            await _wait_for(pilot, lambda: screen.comparison_run_id == "optimize-auto-1")
+            await pilot.pause(0.1)
+            assert "not evidence" in str(screen.query_one("#results-text").render())
+            assert "Holdout rose a little." in str(screen.query_one("#results-text").render())
+
+    asyncio.run(scenario())
+
+
+def test_readiness_tab_shows_auto_run_state_and_saves_edited_settings() -> None:
+    from textual.widgets import Checkbox, Input, TabbedContent
+
+    transport, api = _experiment_transport([])
+    api["settings"] = {"auto_run": False, "min_new_labels": 5, "max_metric_calls": None, "max_total_tokens": 0}
+    api["readiness"] = {
+        "ready": True,
+        "examples": 8,
+        "groups": 4,
+        "critical": 1,
+        "split_sizes": {},
+        "missing": [],
+        "new_labels_since_last_run": 0,
+    }
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_settings", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "readiness"
+            await _wait_for(pilot, lambda: screen.improve_settings and screen.readiness)
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#readiness-text").render())
+            assert "AUTO-RUN  off · after 5 new labels · light budget · token cap unlimited" in text
+            assert "nothing installs without your approval" in text
+            assert screen.query_one("#auto-min-labels", Input).value == "5"
+            screen.query_one("#auto-run", Checkbox).value = True
+            screen.query_one("#auto-min-labels", Input).value = "3"
+            screen.query_one("#auto-metric-calls", Input).value = "40"
+            screen.query_one("#auto-tokens", Input).value = ""
+            screen.query_one("#settings-save").press()
+            await _wait_for(pilot, lambda: api.get("saved_settings"))
+            assert api["saved_settings"] == [
+                {"auto_run": True, "min_new_labels": 3, "max_metric_calls": 40, "max_total_tokens": None}
+            ]
+            await _wait_for(
+                pilot,
+                lambda: (
+                    "AUTO-RUN  ON · after 3 new labels · 40 metric calls"
+                    in str(screen.query_one("#readiness-text").render())
+                ),
+            )
+            screen.query_one("#auto-min-labels", Input).value = "many"
+            screen.query_one("#settings-save").press()
+            await pilot.pause(0.2)
+            assert len(api["saved_settings"]) == 1
 
     asyncio.run(scenario())
 

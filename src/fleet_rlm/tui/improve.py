@@ -70,6 +70,44 @@ def confirm_text(options: Mapping[str, Any]) -> str:
     )
 
 
+EVALUATIONS = {
+    "evaluate_rescore": "Re-judge every labelled Turn's saved trace with the current judges?\n\n"
+    "No Turn runs again; this calls the judge models.",
+    "evaluate_replay": "Replay every labelled Turn against the installed program?\n\n"
+    "Each example runs in an isolated rollout and is judged. This calls the model provider and Daytona.",
+    "evaluate_synthetic": "Run the generated synthetic cases against this server?\n\n"
+    "This runs real Turns and judges them, so it calls the model provider and Daytona. The server must export "
+    "traces to the evaluation experiment.",
+}
+
+
+def evaluation_rows(evaluation: Mapping[str, Any] | None) -> list[str]:
+    """Per-split means and critical pass counts of an evaluate job, holdout headline first."""
+    if not isinstance(evaluation, Mapping):
+        return []
+    program = evaluation.get("program") or {}
+    headline = evaluation.get("headline") or {}
+    holdout, critical = _number(headline.get("holdout")), _number(headline.get("critical_pass_rate"))
+    lines = [
+        "EVALUATION · " + str(evaluation.get("kind", "")).upper(),
+        f"Program  {program.get('version', 'unknown')} ({str(program.get('digest') or 'baseline')[:12]})",
+        "HEADLINE  holdout "
+        + (f"{holdout:.3f}" if holdout is not None else "n/a")
+        + " · critical pass rate "
+        + (f"{critical:.0%}" if critical is not None else "n/a"),
+    ]
+    for name, split in (evaluation.get("splits") or {}).items():
+        if not isinstance(split, Mapping):
+            continue
+        mean = _number(split.get("mean"))
+        passed = split.get("critical") or {}
+        lines.append(
+            f"  {name:<10} mean {f'{mean:.3f}' if mean is not None else 'n/a'} over {split.get('n', 0)} examples"
+            f" · critical {passed.get('passed', 0)}/{passed.get('n', 0)} · {split.get('errors', 0)} errors"
+        )
+    return lines
+
+
 def _bar(used: int | float, total: int | float | None, width: int = 24) -> str:
     if not total:
         return f"{used:,.0f} used"
@@ -146,6 +184,8 @@ class ImproveScreen(ModalScreen[None]):
     .pane-body { height: 1fr; min-height: 0; }
     .pane-actions { height: 3; }
     .pane-actions Button { width: 1fr; min-width: 9; margin: 0 1; padding: 0 1; }
+    #evaluate-label { width: 12; padding: 1 1; }
+    #readiness-scroll Input, #readiness-scroll Checkbox { margin: 1 0 0 0; }
     #improve-footer { height: 1; align-horizontal: right; }
     #review-queue, #runs-table { width: 45%; height: 1fr; }
     #review-detail-scroll, #runs-scroll, #results-scroll, #readiness-scroll {
@@ -168,6 +208,7 @@ class ImproveScreen(ModalScreen[None]):
         on_run: Callable[[], None],
         on_cancel: Callable[[str], None],
         on_review: Callable[[str, str, str], None],
+        on_evaluate: Callable[[str], None],
         on_snapshot: Callable[[dict[str, Any] | None], None] | None = None,
         tab: str = "review",
         turn_id: str | None = None,
@@ -177,11 +218,15 @@ class ImproveScreen(ModalScreen[None]):
         self.on_run = on_run
         self.on_cancel = on_cancel
         self.on_review = on_review
+        self.on_evaluate = on_evaluate
         self.on_snapshot = on_snapshot
         self.initial_tab = tab
         self.queue: list[dict[str, Any]] = []
         self.readiness: dict[str, Any] | None = None
         self.history: list[dict[str, Any]] = []
+        self.evaluations: list[dict[str, Any]] = []
+        self.improve_settings: dict[str, Any] | None = None
+        self._settings_loaded = False
         self.records: list[dict[str, Any]] = []
         self.progress: dict[str, Any] = {}
         self.comparison: dict[str, Any] | None = None
@@ -219,8 +264,19 @@ class ImproveScreen(ModalScreen[None]):
                     with Horizontal(classes="pane-actions"):
                         yield Button("✓ Approve", variant="success", id="label-approve", disabled=True)
                         yield Button("✗ Reject", variant="error", id="label-reject", disabled=True)
-                with TabPane("Readiness", id="readiness"), VerticalScroll(id="readiness-scroll"):
-                    yield Static("Loading readiness…", id="readiness-text")
+                with TabPane("Readiness", id="readiness"):
+                    with VerticalScroll(id="readiness-scroll", classes="pane-body"):
+                        yield Static("Loading readiness…", id="readiness-text")
+                        yield Checkbox("Auto-run optimize when enough new labels exist", id="auto-run")
+                        yield Input(placeholder="new labels that trigger a run", id="auto-min-labels")
+                        yield Input(
+                            placeholder="metric calls for auto runs (empty: light budget)", id="auto-metric-calls"
+                        )
+                        yield Input(
+                            placeholder="token cap for jobs (0 unlimited; empty: server default)", id="auto-tokens"
+                        )
+                    with Horizontal(classes="pane-actions"):
+                        yield Button("Save settings", variant="primary", id="settings-save")
                 with TabPane("Runs", id="runs"):
                     with Horizontal(id="runs-body", classes="pane-body"):
                         yield DataTable(id="runs-table", cursor_type="row", zebra_stripes=True)
@@ -230,6 +286,11 @@ class ImproveScreen(ModalScreen[None]):
                     with Horizontal(classes="pane-actions"):
                         yield Button("Run optimize", variant="primary", id="job-run")
                         yield Button("Cancel", variant="warning", id="job-cancel", disabled=True)
+                    with Horizontal(classes="pane-actions"):
+                        yield Static("Evaluate ▸", id="evaluate-label")
+                        yield Button("Rescore", id="evaluate_rescore")
+                        yield Button("Replay", id="evaluate_replay")
+                        yield Button("Synthetic", id="evaluate_synthetic")
                 with TabPane("Results", id="results"):
                     with VerticalScroll(id="results-scroll", classes="pane-body"):
                         yield Static("Select a run in Runs to inspect its evidence.", id="results-text")
@@ -247,7 +308,7 @@ class ImproveScreen(ModalScreen[None]):
     def on_mount(self) -> None:
         """Build the tables, load the API state, and keep it refreshed while open."""
         self.query_one("#review-queue", DataTable).add_columns("Label", "Session", "Task", "Answer")
-        self.query_one("#runs-table", DataTable).add_columns("Run", "Kind", "Status", "Stage")
+        self.query_one("#runs-table", DataTable).add_columns("Run", "Kind", "Trigger", "Status", "Stage")
         self.query_one("#results-examples", DataTable).add_columns("Example", "Baseline", "Candidate", "Delta")
         self.refresh_state()
         self.set_interval(1.0, self.refresh_state)
@@ -286,6 +347,7 @@ class ImproveScreen(ModalScreen[None]):
             ("queue", "/improve/queue"),
             ("readiness", "/improve/readiness"),
             ("history", "/improve/history"),
+            ("settings", "/improve/settings"),
         ):
             try:
                 fetched[name] = self._get(path)
@@ -366,6 +428,10 @@ class ImproveScreen(ModalScreen[None]):
                 self.readiness = fetched["readiness"]
             if isinstance(fetched.get("history", {}).get("versions"), list):
                 self.history = [item for item in fetched["history"]["versions"] if isinstance(item, dict)]
+            if isinstance(fetched.get("history", {}).get("evaluations"), list):
+                self.evaluations = [item for item in fetched["history"]["evaluations"] if isinstance(item, dict)]
+            if "settings" in fetched:
+                self.improve_settings = fetched["settings"]
         self._sync_progress(publish=error is None)
         self._render_all(error)
 
@@ -499,6 +565,19 @@ class ImproveScreen(ModalScreen[None]):
             if missing:
                 lines += ["", "STILL NEEDED", *(f"  • {item}" for item in missing)]
             text = "\n".join(lines)
+        if (prefs := self.improve_settings) is not None:
+            budget = f"{prefs['max_metric_calls']} metric calls" if prefs.get("max_metric_calls") else "light budget"
+            text += (
+                f"\n\nAUTO-RUN  {'ON' if prefs.get('auto_run') else 'off'} · after {prefs.get('min_new_labels')} "
+                f"new labels · {budget} · token cap {prefs.get('max_total_tokens') or 'unlimited'}\n"
+                "An automatic run only creates a candidate; nothing installs without your approval."
+            )
+            if not self._settings_loaded:
+                self._settings_loaded = True
+                self.query_one("#auto-run", Checkbox).value = bool(prefs.get("auto_run"))
+                self.query_one("#auto-min-labels", Input).value = str(prefs.get("min_new_labels", ""))
+                self.query_one("#auto-metric-calls", Input).value = str(prefs.get("max_metric_calls") or "")
+                self.query_one("#auto-tokens", Input).value = str(prefs.get("max_total_tokens", ""))
         self.query_one("#readiness-text", Static).update(Text(text, overflow="fold"))
 
     def _render_runs(self, error: str | None) -> None:
@@ -508,6 +587,7 @@ class ImproveScreen(ModalScreen[None]):
                 (
                     str(record["run_id"])[-14:],
                     str(record.get("kind", "optimize")),
+                    str(record.get("trigger") or "manual"),
                     str(record.get("status", "unknown")),
                     str(record.get("stage") or "—"),
                 ),
@@ -531,7 +611,10 @@ class ImproveScreen(ModalScreen[None]):
             remaining = _number(progress.get("metric_calls_remaining"))
             tokens, cap = _number(progress.get("tokens_used")), _number(progress.get("token_cap"))
             out = Text()
-            out.append(f"RUN {record['run_id']} · {record.get('kind', 'optimize')} · {record.get('status')}\n\n")
+            out.append(
+                f"RUN {record['run_id']} · {record.get('kind', 'optimize')} · {record.get('trigger') or 'manual'} "
+                f"· {record.get('status')}\n\n"
+            )
             out.append("Stage        ")
             out.append_text(stepper(record))
             out.append("\n")
@@ -578,7 +661,17 @@ class ImproveScreen(ModalScreen[None]):
             )
             if value is not None:
                 points.append(f"{value:.3f}")
-        return f"INSTALLED TREND · HOLDOUT ({len(points)} versions)  " + " → ".join(points) if points else None
+        text = f"INSTALLED TREND · HOLDOUT ({len(points)} versions)  " + " → ".join(points) if points else None
+        measured = []
+        for job in reversed(self.evaluations):
+            raw = job.get("evaluation")
+            result: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
+            value = _number((result.get("headline") or {}).get("holdout"))
+            if value is not None:
+                measured.append(f"{str((result.get('program') or {}).get('version', '?'))[-12:]} {value:.3f}")
+        if measured:
+            text = (text + "\n" if text else "") + "EVALUATED · HOLDOUT  " + " → ".join(measured)
+        return text
 
     def _format_record(self, record: dict[str, Any]) -> str:
         """Format saved outcomes and diagnostics, using comparison evidence only for the matching run."""
@@ -600,10 +693,14 @@ class ImproveScreen(ModalScreen[None]):
                 lines.append(f"  Gate reason: {reason}")
         if record.get("mlflow_run_id"):
             lines.append(f"MLflow run  {record['mlflow_run_id']}")
+        if evaluation_lines := evaluation_rows(record.get("evaluation")):
+            lines.extend(["", *evaluation_lines])
         failure = record.get("failure")
         if isinstance(failure, Mapping):
             lines.extend(["", "FAILURE", f"{failure.get('type', 'Error')}: {failure.get('detail', '')}"])
         report = self.comparison if self.comparison_run_id == run_id else None
+        if report is not None and report.get("rationale"):
+            lines.extend(["", "SUMMARY (a model's reading of this comparison, not evidence)", str(report["rationale"])])
         if report is None:
             lines.extend(["", "Comparison report unavailable."])
             return "\n".join(lines)
@@ -709,7 +806,10 @@ class ImproveScreen(ModalScreen[None]):
         )
         self.query_one("#job-reject", Button).disabled = not reviewable
         self.query_one("#job-cancel", Button).disabled = not is_selected_active
-        self.query_one("#job-run", Button).disabled = not self.accepting or self.active_run_id is not None
+        idle = self.accepting and self.active_run_id is None
+        self.query_one("#job-run", Button).disabled = not idle
+        for kind in EVALUATIONS:
+            self.query_one(f"#{kind}", Button).disabled = not idle
 
     # Events
 
@@ -736,6 +836,10 @@ class ImproveScreen(ModalScreen[None]):
             self.dismiss()
         elif button_id == "job-run":
             self.on_run()
+        elif button_id in EVALUATIONS:
+            self.on_evaluate(button_id)
+        elif button_id == "settings-save":
+            self._save_settings()
         elif button_id == "job-cancel":
             if self.selected_run_id:
                 self.on_cancel(self.selected_run_id)
@@ -750,6 +854,37 @@ class ImproveScreen(ModalScreen[None]):
                 return
             decision = "approved" if button_id == "job-approve" else "rejected"
             self.on_review(record["run_id"], decision, self._review_request_id(record["run_id"], decision))
+
+    def _save_settings(self) -> None:
+        """Save the auto-run switch and budgets; an empty box returns that value to its environment default."""
+        try:
+            body: dict[str, Any] = {"auto_run": self.query_one("#auto-run", Checkbox).value}
+            for field, widget in (
+                ("min_new_labels", "#auto-min-labels"),
+                ("max_metric_calls", "#auto-metric-calls"),
+                ("max_total_tokens", "#auto-tokens"),
+            ):
+                raw = self.query_one(widget, Input).value.strip()
+                body[field] = int(raw) if raw else None
+        except ValueError:
+            self.app.notify("Settings must be whole numbers", severity="error")
+            return
+        self.run_worker(
+            self._put_settings(body), name="improve-settings", group="improve-settings", exit_on_error=False
+        )
+
+    async def _put_settings(self, body: dict[str, Any]) -> None:
+        """Save the settings and show the values now in force."""
+        try:
+            response = await asyncio.to_thread(self.client.put, "/improve/settings", json=body)
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            self.app.notify(f"Settings not saved: {error_text(error)}", severity="error")
+            return
+        self.improve_settings = response.json()
+        self._settings_loaded = False
+        self.app.notify("Improve settings saved")
+        self._render_readiness()
 
     def _label_body(self, item: dict[str, Any], *, approve: bool) -> dict[str, Any]:
         """Build the label request: checked figures plus extras, or a rejection (or correction) of the answer."""

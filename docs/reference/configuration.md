@@ -39,6 +39,9 @@ source control.
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
 | `FLEET_JOB_MAX_TOKENS` | `0` | Generative LM tokens one optimization job may spend before it ends `budget_exhausted`; `0` is unlimited. A job request's `max_total_tokens` (or `fleet optimize --max-total-tokens`) overrides it. Also settable as `[runtime].job_max_tokens`. |
+| `FLEET_AUTO_OPTIMIZE` | `false` | Start an `optimize` job after enough new labels. Candidates still wait for explicit approval. A value saved through `PUT /improve/settings` overrides it. |
+| `FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS` | `5` | New approved labels since the last finished optimize job that trigger an automatic job. Overridden by the saved setting. |
+| `FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS` | unset | Search metric calls for automatic jobs; unset keeps the light budget. Overridden by the saved setting. |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
 | `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory; the installed program is `fleet.json` in it, shared by every Session. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |

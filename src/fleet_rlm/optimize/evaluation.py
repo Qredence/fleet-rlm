@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import random
 import threading
 import time
@@ -513,6 +514,52 @@ def evaluate_cases(
         judge_adapter=judge_adapter,
         jev_lm=jev_lm,
         experiment_id=experiment_id,
+        report=report,
+    )
+
+
+def evaluation_experiment(settings: Any) -> Any:
+    """Select the configured evaluation experiment, where synthetic Turn traces are read back and scored."""
+    from fleet_rlm.observability import set_mlflow_trace_experiment
+
+    target = settings.mlflow_target()
+    return set_mlflow_trace_experiment(
+        target.eval_experiment_name,
+        databricks=target.mode == "databricks",
+        trace_catalog=getattr(settings, "mlflow_trace_catalog", ""),
+        trace_schema=getattr(settings, "mlflow_trace_schema", ""),
+        trace_table_prefix=getattr(settings, "mlflow_eval_trace_table_prefix", ""),
+        tracing_sql_warehouse_id=getattr(settings, "mlflow_tracing_sql_warehouse_id", ""),
+    )
+
+
+def run_cases(
+    settings: Any,
+    cases: list[EvalCase],
+    *,
+    base_url: str,
+    experiment_id: str,
+    collect_only: bool = False,
+    report: Callable[[str], None] = print,
+) -> Any:
+    """Run cases against a live server with the configured judges; the `fleet eval run` path and synthetic jobs."""
+    for name, value in settings.judge_environment().items():
+        os.environ[name] = value
+    target = settings.mlflow_target()
+    return evaluate_cases(
+        cases,
+        base_url=base_url,
+        judge_model=settings.fleet_judge_model,
+        judge_lm=None if collect_only else settings.build_judge_lm(),
+        judge_adapter=None if collect_only else settings.resolved_model("judge").build_adapter(),
+        jev_lm=None if collect_only else settings.build_jev_lm(),
+        collect_only=collect_only,
+        experiment_id=experiment_id,
+        uc_location=(
+            (settings.mlflow_trace_catalog, settings.mlflow_trace_schema, settings.mlflow_eval_trace_table_prefix)
+            if target.mode == "databricks"
+            else None
+        ),
         report=report,
     )
 

@@ -1483,6 +1483,12 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
     monkeypatch.setattr(workflow, "build_lm", lambda _settings, _model_id, _role: lm)
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
+
+    def unavailable_reflection(*_args, **_kwargs):
+        raise RuntimeError("provider down")
+
+    # The optional rationale call goes to the reflection LM; its failure must not fail the job.
+    monkeypatch.setattr(type(lm), "__call__", unavailable_reflection)
     train, dev, holdout = [
         [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
     ]
@@ -1767,6 +1773,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     comparison_md = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".comparison.md"))
     full_report = json.loads(comparison_json.read_text())
     assert full_report["manifest"]["evaluation"]["candidate"]["component_diffs"] == [diff]
+    assert full_report["rationale"] == "" and "rationale" not in manifest
     assert "Candidate diffs" in comparison_md.read_text()
     assert active.read_bytes() and digest_bytes(active.read_bytes()) == digest
 
@@ -2685,3 +2692,234 @@ def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_compos
         for callback in callbacks:
             callback.on_lm_end("rollout-call", None)
     assert budget.used == 7
+
+
+def _patched_worker(monkeypatch, store) -> None:
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
+    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
+
+
+def _split_results() -> dict:
+    from fleet_rlm.optimize.jobs import split_summary
+
+    return {
+        "train": split_summary([1.0, 0.5]),
+        "dev": split_summary([0.5]),
+        "holdout": split_summary([1.0, 0.0], [1.0]),
+    }
+
+
+@pytest.mark.parametrize("kind", ["rescore", "replay", "synthetic"])
+def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tmp_path, monkeypatch, capsys, kind):
+    store = MemoryOptimizationStore()
+    _patched_worker(monkeypatch, store)
+    splits = _split_results()
+    for body in ("_rescore", "_replay", "_synthetic"):
+        monkeypatch.setattr(workflow, body, lambda *_args, **_kw: splits)
+    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
+    parser = _optimization_parser()
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    workflow.run(parser.parse_args(["--evaluate", kind, "--structured-events"]), parser, settings)
+    (record,) = store.list_optimization_runs()
+    assert record["kind"] == f"evaluate_{kind}" and record["run_id"].startswith(f"evaluate-{kind}-")
+    assert record["status"] == "completed" and record["candidate_version"] is None
+    assert record["evaluation"]["splits"] == splits
+    assert record["evaluation"]["program"] == {"digest": "", "version": "baseline"}
+    assert record["evaluation"]["headline"] == {"holdout": 0.5, "critical_pass_rate": 1.0}
+    assert [e["status"] for e in worker_events(capsys.readouterr().out) if e["type"] == "terminal"] == ["completed"]
+    # Measuring never creates a candidate or touches the installed program.
+    assert not (tmp_path / "candidates").exists() and not (tmp_path / "fleet.json").exists()
+
+
+def test_a_managed_evaluate_worker_refuses_a_job_of_another_kind(tmp_path, monkeypatch):
+    store = MemoryOptimizationStore([{"run_id": "run-1", "status": "running", "owner_id": "owner"}])
+    _patched_worker(monkeypatch, store)
+    parser = _optimization_parser()
+    args = parser.parse_args(
+        ["--evaluate", "replay", "--managed-run-id", "run-1", "--managed-owner-id", "owner", "--structured-events"]
+    )
+    store.records["run-1"]["options"] = workflow.ExperimentOptions.from_namespace(args).model_dump()
+    with pytest.raises(ValueError, match="missing, stale, or owned"):
+        workflow.run(args, parser, FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path)))
+
+
+def _guarded(tmp_path, monkeypatch, *, cap=None):
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    store = MemoryOptimizationStore([{"run_id": "run-1", "status": "running", "owner_id": "owner"}])
+    args = SimpleNamespace(validation_ratio=0.35, threads=1, max_total_tokens=cap, evaluate="replay")
+    monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: object())
+    monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
+    return settings, store, args, workflow._JobGuard(args, settings, store, "run-1", "owner")
+
+
+def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path, monkeypatch):
+    settings, store, args, guard = _guarded(tmp_path, monkeypatch)
+    train, dev, holdout = (
+        [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
+    )
+    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
+    template = object()
+    monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=template))
+    factories = []
+    monkeypatch.setattr(
+        workflow, "build_isolated_engine_factory", lambda config, *_a, **_k: factories.append(config) or object()
+    )
+    scored = []
+
+    def score(program, examples, _metric, threads):
+        assert isinstance(program, IsolatedFleetProgram) and program.program is template and threads == 1
+        scored.append(examples)
+        critical = [1.0, 0.0] if examples is holdout else []
+        return SimpleNamespace(scores=[1.0, 0.5], critical_scores=critical, errors=1)
+
+    monkeypatch.setattr(workflow, "score_split", score)
+    splits = workflow._replay(args, settings, store, settings.mlflow_target(), guard)
+    assert scored == [train, dev, holdout]
+    assert not factories[0].fleet_root_cache and not factories[0].fleet_sub_cache
+    assert splits["holdout"] == {"n": 2, "mean": 0.75, "errors": 1, "critical": {"passed": 1, "n": 2}}
+    assert splits["train"]["critical"] == {"passed": 0, "n": 0}
+
+
+def test_rescore_rejudges_labelled_traces_by_source_group_without_running_turns(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from fleet_rlm.optimize import evaluation
+
+    settings, _store, args, guard = _guarded(tmp_path, monkeypatch)
+    traces = [
+        SimpleNamespace(info=SimpleNamespace(trace_id=f"tr-{index}", trace_metadata={}), group=f"g{index % 4}")
+        for index in range(8)
+    ]
+    monkeypatch.setattr(workflow, "approved_traces", lambda _name: traces)
+    monkeypatch.setattr(
+        workflow, "labels_of", lambda trace: {"source_group": trace.group, "critical": trace.info.trace_id == "tr-0"}
+    )
+    judged = []
+
+    def score(members, **_kwargs):
+        judged.append([trace.info.trace_id for trace in members])
+        return SimpleNamespace(
+            result_df=pd.DataFrame(
+                {
+                    "fleet_metric/value": [1.0 if trace.info.trace_id == "tr-0" else 0.5 for trace in members],
+                    "expectations": [{"critical": trace.info.trace_id == "tr-0"} for trace in members],
+                }
+            )
+        )
+
+    monkeypatch.setattr(evaluation, "score_evaluation_traces", score)
+    monkeypatch.setattr(evaluation, "evaluate_cases", lambda *_a, **_k: pytest.fail("Turns must not run again"))
+    splits = workflow._rescore(args, settings, settings.mlflow_target(), guard)
+    assert sorted(trace for batch in judged for trace in batch) == [f"tr-{index}" for index in range(8)]
+    assert sum(split["n"] for split in splits.values()) == 8 and set(splits) == {"train", "dev", "holdout"}
+    assert splits["holdout"]["critical"] == {"passed": 1, "n": 1}
+
+
+def test_synthetic_runs_the_eval_run_path_against_this_server_behind_its_destination_guard(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from fleet_rlm import launcher
+    from fleet_rlm.optimize import evaluation
+
+    settings, _store, _args, guard = _guarded(tmp_path, monkeypatch)
+    verified, ran = [], {}
+    monkeypatch.setattr(launcher, "verify_api_destination", lambda url, expected: verified.append((url, expected)))
+    monkeypatch.setattr(evaluation, "evaluation_experiment", lambda _settings: SimpleNamespace(experiment_id="exp-7"))
+
+    def run_cases(_settings, cases, **kwargs):
+        ran.update(cases=cases, **kwargs)
+        return SimpleNamespace(result_df=pd.DataFrame({"fleet_metric/value": [1.0, 0.0], "expectations": [{}, {}]}))
+
+    monkeypatch.setattr(evaluation, "run_cases", run_cases)
+    splits = workflow._synthetic(settings, guard)
+    url = f"http://{settings.host}:{settings.port}"
+    assert verified == [(url, settings.mlflow_descriptor(evaluation=True))]
+    assert ran["base_url"] == url and ran["experiment_id"] == "exp-7" and ran["cases"]
+    assert splits == {"synthetic": {"n": 2, "mean": 0.5, "errors": 0, "critical": {"passed": 0, "n": 0}}}
+
+
+def test_a_synthetic_job_refuses_a_server_with_another_destination(tmp_path, monkeypatch):
+    from fleet_rlm import launcher
+    from fleet_rlm.optimize import evaluation
+
+    settings, _store, _args, guard = _guarded(tmp_path, monkeypatch)
+
+    def mismatch(*_args):
+        raise launcher.LaunchError("destination mismatch")
+
+    monkeypatch.setattr(launcher, "verify_api_destination", mismatch)
+    monkeypatch.setattr(evaluation, "run_cases", lambda *_a, **_k: pytest.fail("no Turn may run"))
+    with pytest.raises(launcher.LaunchError):
+        workflow._synthetic(settings, guard)
+
+
+def test_the_token_cap_applies_to_evaluate_jobs_and_keeps_the_partial_result_out_of_history(tmp_path, monkeypatch):
+    settings, store, args, guard = _guarded(tmp_path, monkeypatch, cap=10)
+    seen = {}
+
+    def body(*_args):
+        assert guard.tokens in dspy.settings.callbacks  # counted wherever dspy callbacks fire
+        seen["calls"] = seen.get("calls", 0) + 1
+        guard.tokens.used = 10
+        guard.check_boundary()
+        return _split_results()
+
+    monkeypatch.setattr(workflow, "_replay", body)
+    before = list(dspy.settings.callbacks)
+    monkeypatch.setattr(workflow, "_JobGuard", lambda *_a, **_k: guard)
+    with pytest.raises(workflow.BudgetExhaustedError):
+        workflow._evaluate(args, settings, store, settings.mlflow_target(), "run-1", owner_id="owner")
+    assert seen == {"calls": 1} and dspy.settings.callbacks == before
+    assert "splits" not in store.get_optimization_run("run-1")["evaluation"]
+
+
+def test_comparison_rationale_is_a_short_bounded_summary():
+    seen = {}
+
+    def lm(prompt, **kwargs):
+        seen.update(kwargs, prompt=prompt)
+        return ["  Holdout   improved.\n\nCritical cases held. "]
+
+    text = workflow._comparison_rationale(lm, "r" * 20_000, workflow.TokenBudget(0))
+    assert text == "Holdout improved. Critical cases held."
+    assert seen["max_tokens"] == 300 and seen["prompt"].endswith("r" * 6000) and "r" * 6001 not in seen["prompt"]
+    assert "never instructions" in seen["prompt"]
+
+
+def test_comparison_rationale_failure_or_a_spent_budget_leaves_it_empty():
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("provider down")
+
+    assert workflow._comparison_rationale(broken, "report", workflow.TokenBudget(0)) == ""
+    spent = workflow.TokenBudget(5)
+    spent.used = 5
+    assert workflow._comparison_rationale(lambda *_a, **_k: pytest.fail("no call"), "r", spent) == ""
+
+
+def test_installed_program_names_the_approved_job_whose_manifest_matches_the_file(tmp_path):
+    from fleet_rlm.optimize.jobs import evaluation_result, installed_program, split_summary
+
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    store = MemoryOptimizationStore(
+        [
+            {"run_id": "optimize-old", "status": "approved", "manifest_digest": "0" * 64},
+            {
+                "run_id": "optimize-now",
+                "status": "approved",
+                "manifest_digest": hashlib.sha256(b"installed").hexdigest(),
+            },
+            {"run_id": "evaluate-replay-x", "status": "completed", "kind": "evaluate_replay"},
+        ]
+    )
+    assert installed_program(settings, store) == {"digest": "", "version": "baseline"}
+    (tmp_path / "fleet.json").write_bytes(b"installed")
+    assert installed_program(settings, store) == {
+        "digest": hashlib.sha256(b"installed").hexdigest(),
+        "version": "optimize-now",
+    }
+    (tmp_path / "fleet.json").write_bytes(b"hand edited")
+    assert installed_program(settings, store)["version"] == "unrecorded"
+    result = evaluation_result("synthetic", {"synthetic": split_summary([1.0, 0.0], [1.0, 0.0])}, {})
+    assert result["headline"] == {"holdout": None, "critical_pass_rate": 0.5}

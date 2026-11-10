@@ -5,10 +5,11 @@ The API owns job processes but never imports GEPA; examples, programs, and jobs 
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +20,8 @@ from fleet_rlm.api.schemas import (
     ImproveHistory,
     ImproveQueue,
     ImproveReadiness,
+    ImproveSettings,
+    ImproveSettingsUpdate,
     JobDetail,
     JobEnvelope,
     JobList,
@@ -28,11 +31,16 @@ from fleet_rlm.api.schemas import (
     ReviewJob,
     StartJob,
 )
+from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import figures
-from fleet_rlm.experiments import ExperimentBusyError
+from fleet_rlm.experiments import ExperimentBusyError, ExperimentManager
 from fleet_rlm.optimization_runs import ExperimentOptions, public_run
+from fleet_rlm.store import Store
 
 __all__ = ["router"]
+
+_LOGGER = logging.getLogger(__name__)
+_SETTINGS_SCOPE = "improve"
 
 router = APIRouter(prefix="/improve", tags=["improve"])
 _PREVIEW_CHARS = 500
@@ -71,32 +79,69 @@ def _preview(text: Any) -> str:
     return " ".join(str(text or "").split())[:_PREVIEW_CHARS]
 
 
+def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], str | None]:
+    """The readiness report and the start time of the last finished optimize job the label count follows."""
+    from fleet_rlm.engine.compiled import installed_program_error
+    from fleet_rlm.optimize.dataset import load_examples, readiness
+    from fleet_rlm.optimize.jobs import installed_digest
+
+    target = settings.mlflow_target()
+    report = readiness(load_examples(store, target.experiment_name, target.eval_experiment_name)).as_dict()
+    # An installed program that contradicts the ledger would make every Turn refuse, so a job
+    # would start from the wrong incumbent.
+    if problem := installed_program_error(installed_digest(settings), store.approved_program()):
+        report["missing"].append(problem)
+        report["ready"] = False
+    # Only a run that finished consumed the labels that existed when it started.
+    last_run = max(
+        (
+            job["created_at"]
+            for job in store.list_optimization_runs()
+            if job["kind"] == "optimize" and job["status"] in {"completed", "approved"}
+        ),
+        default=None,
+    )
+    return {**report, "new_labels_since_last_run": store.new_review_labels(last_run)}, last_run
+
+
 @router.get("/readiness", response_model=ImproveReadiness, responses=_ERROR_RESPONSES)
 def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
     """Report what the labelled examples support, what is missing, and how many labels are new."""
-    from fleet_rlm.engine.compiled import CompiledProgramFile, installed_program_error
-    from fleet_rlm.optimize.dataset import load_examples, readiness
-
     with translate("Readiness is unavailable"):
-        target = settings.mlflow_target()
-        report = readiness(load_examples(store, target.experiment_name, target.eval_experiment_name)).as_dict()
-        # An installed program that contradicts the ledger would make every Turn refuse, so a job
-        # would start from the wrong incumbent.
-        path = Path(settings.compiled_program_dir) / "fleet.json"
-        digest = hashlib.sha256(CompiledProgramFile(str(path)).read()).hexdigest() if path.exists() else ""
-        if problem := installed_program_error(digest, store.approved_program()):
-            report["missing"].append(problem)
-            report["ready"] = False
-        # Only a run that finished consumed the labels that existed when it started.
-        last_run = max(
-            (
-                job["created_at"]
-                for job in store.list_optimization_runs()
-                if job["kind"] == "optimize" and job["status"] in {"completed", "approved"}
-            ),
-            default=None,
-        )
-        return {**report, "new_labels_since_last_run": store.new_review_labels(last_run)}
+        return _readiness(store, settings)[0]
+
+
+def _improve_settings(store: Store, settings: FleetSettings) -> dict[str, Any]:
+    """Environment defaults overridden by the saved global settings."""
+    defaults = {
+        "auto_run": settings.auto_optimize,
+        "min_new_labels": settings.auto_optimize_min_new_labels,
+        "max_metric_calls": settings.auto_optimize_max_metric_calls,
+        "max_total_tokens": settings.job_max_tokens,
+    }
+    saved = store.global_settings(_SETTINGS_SCOPE)
+    return {**defaults, **{name: value for name, value in saved.items() if name in defaults}}
+
+
+@router.get("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
+def get_improve_settings(store: StoreDep, settings: Settings) -> dict[str, Any]:
+    """Auto-run switch and budgets in force: saved values over the environment defaults."""
+    with translate("Improve settings are unavailable"):
+        return _improve_settings(store, settings)
+
+
+@router.put("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
+def put_improve_settings(body: ImproveSettingsUpdate, store: StoreDep, settings: Settings) -> dict[str, Any]:
+    """Save the supplied fields; an explicit null clears a saved value back to its environment default."""
+    with translate("Improve settings could not be saved"):
+        saved = store.global_settings(_SETTINGS_SCOPE)
+        for name, value in body.model_dump(exclude_unset=True).items():
+            if value is None:
+                saved.pop(name, None)
+            else:
+                saved[name] = value
+        store.save_global_settings(_SETTINGS_SCOPE, saved)
+        return _improve_settings(store, settings)
 
 
 @router.get("/queue", response_model=ImproveQueue, responses=_ERROR_RESPONSES)
@@ -125,9 +170,7 @@ def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
         )
 
 
-@router.post("/labels", response_model=LabelSaved, responses=_ERROR_RESPONSES)
-def save_label(body: LabelRequest, store: StoreDep) -> LabelSaved:
-    """Label one Turn; the server resolves its trace, so clients never handle trace or Session IDs."""
+def _save_label(body: LabelRequest, store: Store) -> LabelSaved:
     from fleet_rlm.optimize.evaluation import EvaluationError, label_turn
 
     with translate("Label could not be saved"):
@@ -159,6 +202,43 @@ def save_label(body: LabelRequest, store: StoreDep) -> LabelSaved:
         )
 
 
+async def _auto_run(store: Store, settings: FleetSettings, manager: ExperimentManager) -> None:
+    """Start an optimize job when auto-run is on and ready, enough labels are new, and nothing is active.
+
+    The request ID derives from the label state, so a repeated check cannot start a second job, and a
+    failed job is retried only after another label arrives. The job only creates a candidate: it is
+    never approved here. A label is already saved, so no failure may surface to the caller.
+    """
+    try:
+        preferences = await asyncio.to_thread(_improve_settings, store, settings)
+        if not preferences["auto_run"]:
+            return
+        report, last_run = await asyncio.to_thread(_readiness, store, settings)
+        if not report["ready"] or report["new_labels_since_last_run"] < preferences["min_new_labels"]:
+            return
+        if (await manager.list())["active_run_id"] is not None:
+            return
+        stamp = hashlib.sha256(f"{last_run}:{report['new_labels_since_last_run']}".encode()).hexdigest()[:16]
+        options = ExperimentOptions(
+            **({"max_metric_calls": preferences["max_metric_calls"]} if preferences["max_metric_calls"] else {}),
+            max_total_tokens=preferences["max_total_tokens"],
+        )
+        await manager.start(f"auto-{stamp}", options, "optimize", trigger="auto")
+    except Exception as error:
+        _LOGGER.warning("Automatic optimize check failed (%s)", type(error).__name__)
+
+
+@router.post("/labels", response_model=LabelSaved, responses=_ERROR_RESPONSES)
+async def save_label(body: LabelRequest, store: StoreDep, settings: Settings, manager: Experiments) -> LabelSaved:
+    """Label one Turn; the server resolves its trace, so clients never handle trace or Session IDs.
+
+    A saved label may then start an automatic optimize job when the saved settings allow it.
+    """
+    saved = await asyncio.to_thread(_save_label, body, store)
+    await _auto_run(store, settings, manager)
+    return saved
+
+
 @router.get("/jobs", response_model=JobList, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
 async def list_jobs(manager: Experiments) -> dict[str, Any]:
     """List persisted history and the active job."""
@@ -173,10 +253,15 @@ async def list_jobs(manager: Experiments) -> dict[str, Any]:
     response_model_exclude_unset=True,
     responses=_ERROR_RESPONSES,
 )
-async def start_job(body: StartJob, manager: Experiments) -> dict[str, Any]:
+async def start_job(body: StartJob, manager: Experiments, store: StoreDep, settings: Settings) -> dict[str, Any]:
     """Start once per request ID; a busy server rejects instead of queueing work."""
     with _job_errors():
-        options = ExperimentOptions.model_validate(body.model_dump(exclude={"request_id", "kind"}, exclude_unset=True))
+        values = body.model_dump(exclude={"request_id", "kind"}, exclude_unset=True)
+        # The saved token cap is the default for every job kind; a request's own cap still wins.
+        values.setdefault(
+            "max_total_tokens", (await asyncio.to_thread(_improve_settings, store, settings))["max_total_tokens"]
+        )
+        options = ExperimentOptions.model_validate(values)
         return {"job": public_run(await manager.start(body.request_id, options, body.kind))}
 
 
