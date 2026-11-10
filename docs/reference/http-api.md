@@ -488,3 +488,6 @@ Setup-mode `/health` returns `status="setup"` and `mlflow=null`; it must not be
 reused as a ready reasoning API. Setup mode exposes no Session routes and opens no
 database or tracking resources. After the controlled restart, normal startup
 initializes the schema and tracing destination under the existing lifecycle.
+
+The review queue accepts nonnegative `offset` and bounded `limit` (1–200). Its nullable
+`next_offset` identifies the next page; null means the final page.

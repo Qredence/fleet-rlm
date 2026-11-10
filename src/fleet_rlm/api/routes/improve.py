@@ -98,12 +98,16 @@ def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
 
 
 @router.get("/queue", response_model=ImproveQueue, responses=_ERROR_RESPONSES)
-def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
+def improve_queue(store: StoreDep, limit: int = 50, offset: int = 0) -> ImproveQueue:
     """List replay-captured Turns from every Session with their label state and answer figures."""
     with translate("Review queue is unavailable"):
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
+        if offset < 0:
+            raise ValueError("offset must be nonnegative")
+        rows = store.improve_queue(limit + 1, offset)
         return ImproveQueue(
+            next_offset=offset + limit if len(rows) > limit else None,
             items=[
                 QueueItem(
                     turn_id=row["turn_id"],
@@ -118,8 +122,8 @@ def improve_queue(store: StoreDep, limit: int = 50) -> ImproveQueue:
                     group=row["source_group"],
                     updated_at=row["updated_at"].isoformat(),
                 )
-                for row in store.improve_queue(limit)
-            ]
+                for row in rows[:limit]
+            ],
         )
 
 

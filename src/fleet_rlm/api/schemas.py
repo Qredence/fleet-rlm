@@ -406,6 +406,7 @@ class ImproveQueue(BaseModel):
     """Replay-captured Turns across every Session, newest first."""
 
     items: list[QueueItem]
+    next_offset: int | None = None
 
 
 class LabelSaved(BaseModel):

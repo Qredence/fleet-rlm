@@ -982,7 +982,7 @@ class Store:
         return int(row[0]) if row else 0
 
     @_retry_once
-    def improve_queue(self, limit: int) -> list[dict[str, Any]]:
+    def improve_queue(self, limit: int, offset: int = 0) -> list[dict[str, Any]]:
         """Replay-captured Turns across Sessions, newest first, with their label state when reviewed."""
         with self.pool.connection() as connection:
             return (
@@ -1013,10 +1013,10 @@ class Store:
                     LEFT JOIN fleet_lite_review_labels AS labels
                       ON labels.session_id=replay.session_id AND labels.turn_id=replay.turn_id
                     WHERE turns.status='completed'
-                    ORDER BY turns.updated_at DESC
-                    LIMIT %s
+                    ORDER BY turns.updated_at DESC, replay.session_id, replay.turn_id
+                    LIMIT %s OFFSET %s
                     """,
-                    (limit,),
+                    (limit, offset),
                 )
                 .fetchall()
             )
