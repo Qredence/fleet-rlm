@@ -1,0 +1,20 @@
+src/fleet_rlm/optimize/gepa.py
+  h_f276322eb5eb9f 1470,1522-1541
+src/fleet_rlm/tui/improve.py
+  h_f276322eb5eb9f 244,639-642,955
+tests/optimize/test_optimization.py
+  h_f276322eb5eb9f 1460,1629-1638,1782,1792-1793,1814-1815
+tests/tui/test_tui.py
+  h_f276322eb5eb9f 1972-1976
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7e4fd2866272911e57e9229998718c543269af72",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
