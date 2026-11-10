@@ -628,7 +628,7 @@ class ImproveScreen(ModalScreen[None]):
                 lines.append(f"{name}  {before:.3f} → {after:.3f} ({after - before:+.3f})")
         critical_scores = candidate.get("holdout_critical_scores", [])
         if critical_scores:
-            critical_passes = sum(score == 1.0 for score in critical_scores)
+            critical_passes = sum(score >= 1.0 for score in critical_scores)
             rollout_errors = candidate.get("holdout_errors", "unavailable")
             error_label = "error" if rollout_errors == 1 else "errors"
             lines.append(
