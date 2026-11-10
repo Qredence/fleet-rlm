@@ -500,9 +500,9 @@ def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "POST":
-            return httpx.Response(202, json={"experiment": record})
+            return httpx.Response(202, json={"job": record})
         record.update(status="completed", stage="completed")
-        return httpx.Response(200, json={"experiment": record})
+        return httpx.Response(200, json={"job": record})
 
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     output, _console = _capture_console(monkeypatch, width=100)
@@ -511,7 +511,7 @@ def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
         commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
 
     assert [request.method for request in requests] == ["POST", "GET"]
-    assert requests[0].url.path == "/sessions/sess_cli/experiments"
+    assert requests[0].url.path == "/improve/jobs"
     assert json.loads(requests[0].content)["max_metric_calls"] == 10
     assert "Optimization completed" in output.getvalue()
 
@@ -525,15 +525,13 @@ def test_non_tty_optimize_deduplicates_repeated_stage_output(monkeypatch) -> Non
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal polls
         if request.method == "POST":
-            return httpx.Response(202, json={"experiment": {"run_id": run_id, "status": "running", "stage": "search"}})
+            return httpx.Response(202, json={"job": {"run_id": run_id, "status": "running", "stage": "search"}})
         polls += 1
         if polls < 3:
-            return httpx.Response(200, json={"experiment": {"run_id": run_id, "status": "running", "stage": "search"}})
+            return httpx.Response(200, json={"job": {"run_id": run_id, "status": "running", "stage": "search"}})
         if polls == 3:
-            return httpx.Response(
-                200, json={"experiment": {"run_id": run_id, "status": "running", "stage": "validation"}}
-            )
-        return httpx.Response(200, json={"experiment": {"run_id": run_id, "status": "completed", "stage": "completed"}})
+            return httpx.Response(200, json={"job": {"run_id": run_id, "status": "running", "stage": "validation"}})
+        return httpx.Response(200, json={"job": {"run_id": run_id, "status": "completed", "stage": "completed"}})
 
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     output, _console = _capture_console(monkeypatch, width=100)
@@ -1133,7 +1131,7 @@ def _experiment_transport(records: list[dict[str, Any]], *, comparison: dict[str
     def handler(request: httpx.Request) -> httpx.Response:
         state["requests"].append(request)
         parts = request.url.path.split("/")
-        if request.method == "GET" and parts[-1] == "experiments":
+        if request.method == "GET" and parts[-1] == "jobs":
             active = next(
                 (record["run_id"] for record in state["records"] if record["status"] in {"running", "approving"}),
                 None,
@@ -1141,38 +1139,38 @@ def _experiment_transport(records: list[dict[str, Any]], *, comparison: dict[str
             return httpx.Response(
                 200,
                 json={
-                    "experiments": state["records"],
+                    "jobs": state["records"],
                     "active_run_id": active,
                     "accepting": state["accepting"],
                 },
             )
-        if request.method == "GET" and parts[-2] == "experiments":
+        if request.method == "GET" and parts[-2] == "jobs":
             record = next(r for r in state["records"] if r["run_id"] == parts[-1])
-            return httpx.Response(200, json={"experiment": record, "comparison": state["comparison"]})
+            return httpx.Response(200, json={"job": record, "comparison": state["comparison"]})
         if request.method == "POST" and parts[-1] == "cancel":
             record = next(r for r in state["records"] if r["run_id"] == parts[-2])
             record.update(status="running", stage="stopping")
-            return httpx.Response(202, json={"experiment": record})
+            return httpx.Response(202, json={"job": record})
         if request.method == "POST" and parts[-1] == "review":
             record = next(r for r in state["records"] if r["run_id"] == parts[-2])
             body = json.loads(request.content)
             status = "approving" if body["decision"] == "approved" else "rejected"
             record.update(status=status, decision=body["decision"])
-            return httpx.Response(202, json={"experiment": record})
-        if request.method == "POST" and parts[-1] == "experiments":
+            return httpx.Response(202, json={"job": record})
+        if request.method == "POST" and parts[-1] == "jobs":
             record = _experiment_record("sess_api-run", "running")
             state["records"].insert(0, record)
-            return httpx.Response(202, json={"experiment": record})
+            return httpx.Response(202, json={"job": record})
         return httpx.Response(404, json={"detail": "not found"})
 
     return httpx.MockTransport(handler), state
 
 
-def test_experiments_screen_fetches_session_scoped_api_snapshot_and_detail() -> None:
+def test_experiments_screen_fetches_the_global_job_snapshot_and_detail() -> None:
     run_id = "sess_experiments-run-1"
     records = [_experiment_record(run_id), _experiment_record("sess_other-run-1", "failed")]
     report = {"manifest": {"evaluation": {"baseline": {}, "candidate": {"component_diffs": []}}}}
-    transport, _state = _experiment_transport(records, comparison=report)
+    transport, state = _experiment_transport(records, comparison=report)
 
     async def scenario() -> None:
         async with _running_tui(transport, "sess_experiments", (100, 30)) as (_client, tui, pilot):
@@ -1184,6 +1182,9 @@ def test_experiments_screen_fetches_session_scoped_api_snapshot_and_detail() -> 
             assert run_id in str(tui.screen.query_one("#experiment-history").render())
             assert "sess_other-run-1" in str(tui.screen.query_one("#experiment-history").render())
             assert "3/10 metric calls" in str(tui.screen.query_one("#experiments-progress").render())
+            paths = {request.url.path for request in state["requests"] if request.method == "GET"}
+            assert {"/improve/jobs", f"/improve/jobs/{run_id}"} <= paths
+            assert not any(path.startswith("/sessions") for path in paths)
 
     asyncio.run(scenario())
 
@@ -1198,14 +1199,14 @@ def test_experiment_navigation_discards_delayed_evidence_and_guards_approval(sta
 
     def handler(request):
         run_id = request.url.path.rsplit("/", 1)[-1]
-        if run_id == "experiments":
-            return httpx.Response(200, json={"experiments": records, "active_run_id": None, "accepting": True})
+        if run_id == "jobs":
+            return httpx.Response(200, json={"jobs": records, "active_run_id": None, "accepting": True})
         started[run_id].set()
         assert release[run_id].wait(5), "test did not release detail request"
         if stale_response == "error" and run_id == "s1-run-a":
             return httpx.Response(500)
         record = next(record for record in records if record["run_id"] == run_id)
-        return httpx.Response(200, json={"experiment": record, "comparison": {"evidence_for": run_id}})
+        return httpx.Response(200, json={"job": record, "comparison": {"evidence_for": run_id}})
 
     async def scenario():
         try:
@@ -1249,9 +1250,9 @@ def test_experiment_detail_rejects_mismatched_response_identity():
     record = _experiment_record("s1-run")
 
     def handler(request):
-        if request.url.path.endswith("/experiments"):
-            return httpx.Response(200, json={"experiments": [record], "accepting": True})
-        return httpx.Response(200, json={"experiment": _experiment_record("s1-other"), "comparison": {"wrong": True}})
+        if request.url.path.endswith("/improve/jobs"):
+            return httpx.Response(200, json={"jobs": [record], "accepting": True})
+        return httpx.Response(200, json={"job": _experiment_record("s1-other"), "comparison": {"wrong": True}})
 
     async def scenario():
         async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
@@ -1274,13 +1275,13 @@ def test_experiment_detail_arriving_after_dismissal_is_ignored(late_response):
     started, release = threading.Event(), threading.Event()
 
     def handler(request):
-        if request.url.path.endswith("/experiments"):
-            return httpx.Response(200, json={"experiments": [record], "accepting": True})
+        if request.url.path.endswith("/improve/jobs"):
+            return httpx.Response(200, json={"jobs": [record], "accepting": True})
         started.set()
         assert release.wait(5)
         if late_response == "error":
             return httpx.Response(500)
-        return httpx.Response(200, json={"experiment": record, "comparison": {"late": True}})
+        return httpx.Response(200, json={"job": record, "comparison": {"late": True}})
 
     async def scenario():
         try:
@@ -1411,19 +1412,19 @@ def test_ambiguous_start_retry_reuses_request_id_then_definitive_results_rotate_
     posts: list[dict[str, Any]] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and request.url.path.endswith("/experiments"):
+        if request.method == "GET" and request.url.path.endswith("/improve/jobs"):
             return httpx.Response(
                 200,
-                json={"experiments": [record], "active_run_id": record["run_id"], "accepting": True},
+                json={"jobs": [record], "active_run_id": record["run_id"], "accepting": True},
             )
-        if request.method == "POST" and request.url.path.endswith("/experiments"):
+        if request.method == "POST" and request.url.path.endswith("/improve/jobs"):
             body = json.loads(request.content)
             posts.append(body)
             if state["start_result"] == "network":
                 raise httpx.ConnectError("connection lost after submit", request=request)
             if state["start_result"] == "conflict":
                 return httpx.Response(409, json={"detail": "busy"}, request=request)
-            return httpx.Response(202, json={"experiment": record}, request=request)
+            return httpx.Response(202, json={"job": record}, request=request)
         return httpx.Response(404, request=request)
 
     async def scenario() -> None:
@@ -1480,13 +1481,13 @@ def test_experiment_history_error_keeps_app_observing_after_dismissal():
     state = {"fail": False}
 
     def handler(request):
-        if request.url.path.endswith("/experiments"):
+        if request.url.path.endswith("/improve/jobs"):
             if state["fail"]:
                 return httpx.Response(503)
             active = record["run_id"] if record["status"] == "running" else None
-            return httpx.Response(200, json={"experiments": [record], "active_run_id": active, "accepting": True})
+            return httpx.Response(200, json={"jobs": [record], "active_run_id": active, "accepting": True})
         if request.url.path.endswith(record["run_id"]):
-            return httpx.Response(200, json={"experiment": record, "comparison": None})
+            return httpx.Response(200, json={"job": record, "comparison": None})
         return httpx.Response(200, json={})
 
     async def scenario():
@@ -1556,10 +1557,10 @@ def test_review_request_retries_keep_id_until_known_outcome_then_rotate() -> Non
     state = {"review_error": "conflict"}
 
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and request.url.path.endswith("/experiments"):
-            return httpx.Response(200, json={"experiments": [record], "active_run_id": None, "accepting": True})
-        if request.method == "GET" and request.url.path.endswith(f"/experiments/{record['run_id']}"):
-            return httpx.Response(200, json={"experiment": record, "comparison": None})
+        if request.method == "GET" and request.url.path.endswith("/improve/jobs"):
+            return httpx.Response(200, json={"jobs": [record], "active_run_id": None, "accepting": True})
+        if request.method == "GET" and request.url.path.endswith(f"/improve/jobs/{record['run_id']}"):
+            return httpx.Response(200, json={"job": record, "comparison": None})
         if request.method == "POST" and request.url.path.endswith("/review"):
             if state["review_error"] == "network":
                 raise httpx.ConnectError("connection lost", request=request)

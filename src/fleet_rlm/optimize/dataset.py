@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import dspy
@@ -14,7 +15,6 @@ from fleet_rlm.observability import trace_object
 from fleet_rlm.optimization_runs import VALIDATION_RATIO_DEFAULT, VALIDATION_RATIO_MAX, VALIDATION_RATIO_MIN
 from fleet_rlm.replay import decode_snapshot, selected_snapshot, validate_review_labels
 from fleet_rlm.store import Store
-from fleet_rlm.workspace import validate_session_id
 
 _MAX_EXAMPLES = 500
 MIN_EXAMPLES = 8
@@ -79,15 +79,14 @@ def grouped_split(
     return partitions
 
 
-def load_examples_from_postgres(store: Store, session_id: str) -> list[dspy.Example]:
-    """Load only approved, explicitly gold-labeled turns with source lineage."""
-    session_id = validate_session_id(session_id)
-    rows = store.reviewed_examples(session_id, _MAX_EXAMPLES)
+def load_examples_from_postgres(store: Store) -> list[dspy.Example]:
+    """Load approved, explicitly gold-labeled turns from every Session, each with its source lineage."""
+    rows = store.reviewed_examples(_MAX_EXAMPLES)
     examples = []
     for row in rows:
         try:
             snapshot = decode_snapshot(row["replay_snapshot_sha256"], bytes(row["replay_snapshot"]))
-            if snapshot["session_id"] != session_id or snapshot["turn_id"] != row["turn_id"]:
+            if snapshot["session_id"] != row["session_id"] or snapshot["turn_id"] != row["turn_id"]:
                 continue
             labels = {**row, "expected_answer": row.get("answer"), "review_status": "approved"}
             values = labels.get("expected_values")
@@ -95,7 +94,10 @@ def load_examples_from_postgres(store: Store, session_id: str) -> list[dspy.Exam
                 labels["expected_values"] = json.loads(values)
             examples.append(
                 _example(
-                    snapshot, labels, row["replay_snapshot_sha256"], f"postgres-session:{session_id}:{row['turn_id']}"
+                    snapshot,
+                    labels,
+                    row["replay_snapshot_sha256"],
+                    f"postgres-session:{row['session_id']}:{row['turn_id']}",
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -200,18 +202,11 @@ def load_examples_from_mlflow(
     return examples
 
 
-def curate_dataset(
-    store: Store,
-    experiment_name: str,
-    session_id: str,
-    *,
-    validation_ratio: float = VALIDATION_RATIO_DEFAULT,
-    evaluation_experiment_name: str | None = None,
-) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
-    """Return train/dev/holdout from reviewed examples; refuse to optimize on too little data."""
-    if not VALIDATION_RATIO_MIN <= validation_ratio <= VALIDATION_RATIO_MAX:
-        raise ValueError(f"validation_ratio must be between {VALIDATION_RATIO_MIN} and {VALIDATION_RATIO_MAX}")
-    examples = load_examples_from_postgres(store, session_id)
+def load_examples(
+    store: Store, experiment_name: str, evaluation_experiment_name: str | None = None
+) -> list[dspy.Example]:
+    """Every approved gold-labeled replay from PostgreSQL and MLflow, one example per replay."""
+    examples = load_examples_from_postgres(store)
     examples.extend(load_examples_from_mlflow(experiment_name, store=store))
     if evaluation_experiment_name and evaluation_experiment_name != experiment_name:
         examples.extend(load_examples_from_mlflow(evaluation_experiment_name, store=store))
@@ -221,17 +216,80 @@ def curate_dataset(
         # introduce a second, conflicting gold label for the very same replay.
         identity = (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256)
         deduplicated.setdefault(identity, example)
-    all_examples = list(deduplicated.values())
-    groups = {example.source_group for example in all_examples}
-    if len(all_examples) < MIN_EXAMPLES or len(groups) < MIN_GROUPS:
+    return list(deduplicated.values())
+
+
+@dataclass(frozen=True)
+class Readiness:
+    """What the labelled examples can support today: counts, the split they would form, and what is missing."""
+
+    examples: int
+    groups: int
+    critical: int
+    split_sizes: dict[str, int]
+    missing: list[str]
+
+    @property
+    def ready(self) -> bool:
+        """True when every requirement for a GEPA run is met."""
+        return not self.missing
+
+    def as_dict(self) -> dict[str, Any]:
+        """The wire shape shared by the CLI check and the HTTP report."""
+        return {**asdict(self), "ready": self.ready}
+
+
+def _check_ratio(validation_ratio: float) -> None:
+    if not VALIDATION_RATIO_MIN <= validation_ratio <= VALIDATION_RATIO_MAX:
+        raise ValueError(f"validation_ratio must be between {VALIDATION_RATIO_MIN} and {VALIDATION_RATIO_MAX}")
+
+
+def readiness(examples: list[dspy.Example], *, validation_ratio: float = VALIDATION_RATIO_DEFAULT) -> Readiness:
+    """Check the requirements for a run once; curation and the HTTP report both rely on this."""
+    _check_ratio(validation_ratio)
+    groups = {example.source_group for example in examples}
+    critical = sum(getattr(example, "critical", False) is True for example in examples)
+    missing = []
+    if len(examples) < MIN_EXAMPLES:
+        missing.append(f"{MIN_EXAMPLES} approved gold-labeled examples are needed; found {len(examples)}")
+    if len(groups) < MIN_GROUPS:
+        missing.append(f"examples from {MIN_GROUPS} source groups are needed; found {len(groups)}")
+    if not critical:
+        missing.append("at least one critical example is needed to pin the holdout; critical needs expected values")
+    sizes: dict[str, int] = {}
+    if not missing:
+        try:
+            splits = grouped_split(examples, train_ratio=1.0 - validation_ratio - 0.2, dev_ratio=validation_ratio)
+        except ValueError as error:
+            missing.append(str(error))
+        else:
+            sizes = {name: len(items) for name, items in splits.items()}
+            empty = [name for name, count in sizes.items() if not count]
+            if empty:
+                missing.append(f"the {', '.join(empty)} split would be empty")
+    return Readiness(len(examples), len(groups), critical, sizes, missing)
+
+
+def curate_dataset(
+    store: Store,
+    experiment_name: str,
+    *,
+    validation_ratio: float = VALIDATION_RATIO_DEFAULT,
+    evaluation_experiment_name: str | None = None,
+) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
+    """Return train/dev/holdout from reviewed examples; refuse to optimize until `readiness` passes."""
+    _check_ratio(validation_ratio)
+    examples = load_examples(store, experiment_name, evaluation_experiment_name)
+    status = readiness(examples, validation_ratio=validation_ratio)
+    if not status.ready:
         raise ValueError(
-            f"GEPA needs at least {MIN_EXAMPLES} approved examples from {MIN_GROUPS} source groups; "
-            f"found {len(all_examples)} from {len(groups)}. Run more Turns in more Sessions; "
-            '`fleet eval label <trace-id> --answer "..."` adds a gold answer to one.'
+            "GEPA is not ready: "
+            + "; ".join(status.missing)
+            + '. Label more Turns (`fleet eval label <trace-id> --answer "..."`).'
         )
-    splits = grouped_split(all_examples, train_ratio=1.0 - validation_ratio - 0.2, dev_ratio=validation_ratio)
+    splits = grouped_split(examples, train_ratio=1.0 - validation_ratio - 0.2, dev_ratio=validation_ratio)
     print(
-        f"[dataset] {len(all_examples)} reviewed examples from {len(groups)} groups; "
+        f"[dataset] {status.examples} reviewed examples from {status.groups} groups; "
         f"{len(splits['train'])} train, {len(splits['dev'])} dev, {len(splits['holdout'])} holdout."
     )
     return splits["train"], splits["dev"], splits["holdout"]

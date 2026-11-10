@@ -32,7 +32,7 @@ flowchart LR
 - `launcher.py` owns the local API and optional local MLflow.
 - Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
-- The API owns TUI optimization jobs through one subprocess slot. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
+- The API owns TUI optimization jobs (`/improve/jobs`, one `kind` ledger shared by future evaluate kinds) through one subprocess slot; labels, jobs and the installed program belong to no Session. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
 - The API drains both worker pipes without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and pipe draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
 - A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
 - A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer. Polled status reads reconcile at most once per interval, while startup, admission, review, and shutdown drain reconcile immediately.
@@ -53,9 +53,10 @@ flowchart LR
   retain persistence, cancellation arbitration and teardown.
 - `engine/compiled.py` accepts only complete `fleet-program-b1` envelopes. Legacy
   native JSON remains inspectable, not installable; there is no old-root alias or
-  key conversion. A missing selected artifact refuses execution, including after
-  restart. Absent Session selection means baseline; serving only records artifact
-  promotion and never overwrites an approval with a stale baseline observation.
+  key conversion. There is one global installed program, `fleet.json`; an absent
+  file means baseline, an invalid one refuses the Turn, and every Session picks up an
+  approval at its next Turn. A runtime that already serves the artifact refuses to
+  continue if the file disappears.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 

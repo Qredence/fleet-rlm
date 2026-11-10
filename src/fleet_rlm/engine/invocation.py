@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Callable
 from functools import partial
 from typing import Any
 
@@ -44,13 +43,11 @@ class FleetRuntime:
         sub_adapter: dspy.Adapter | None = None,
         *,
         baseline: bool = False,
-        reconcile_selection: Callable[[str], str] | None = None,
     ) -> None:
         if execution_mode not in {"direct", "flex", "rlm", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.sandbox_mgr, self.root_lm, self.sub_lm, self.jev_lm = sandbox_mgr, root_lm, sub_lm, jev_lm
         self.compiled_path, self.execution_mode = compiled_path, execution_mode
-        self.reconcile_selection = reconcile_selection
         self.root_adapter = root_adapter if root_adapter is not None else dspy.ChatAdapter()
         self.sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
         sandbox_mgr.sub_adapter = self.sub_adapter
@@ -92,13 +89,8 @@ class FleetRuntime:
         self.delegation.bind_policies(self.program.child_policies.snapshot())
 
     def reload_program(self) -> None:
-        """Reconcile durable selection before admission without persisting a stale baseline."""
+        """Pick up the global installed artifact before admission; absent means baseline."""
         self.compiled.reload_if_changed(self.program)
-        source = "artifact" if self.compiled.digest else "baseline"
-        if self.reconcile_selection is not None:
-            selected = self.reconcile_selection(source)
-            if selected == "artifact" and source == "baseline":
-                self.compiled.reload_if_changed(self.program, require_artifact=True)
 
     def __call__(
         self,

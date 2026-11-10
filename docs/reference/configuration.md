@@ -38,8 +38,9 @@ source control.
 | `FLEET_TURN_TIMEOUT_SECONDS` | `0` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. The shipped value is `0`; provider TTL and idle bounds still apply. |
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
+| `FLEET_JOB_MAX_TOKENS` | `0` | Generative LM tokens one optimization job may spend before it ends `budget_exhausted`; `0` is unlimited. A job request's `max_total_tokens` (or `fleet optimize --max-total-tokens`) overrides it. Also settable as `[runtime].job_max_tokens`. |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
-| `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory. |
+| `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory; the installed program is `fleet.json` in it, shared by every Session. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |
 | `FLEET_MLFLOW_LOCAL_PORT` | `5001` | Loopback MLflow port; the tracking URI is derived from it. |
 | `FLEET_MLFLOW_LOCAL_DATA_DIR` | `.fleet/mlflow` | Persistent SQLite and artifact directory for the managed local server. |

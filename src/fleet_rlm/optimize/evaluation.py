@@ -24,9 +24,11 @@ from mlflow.entities import AssessmentSource, AssessmentSourceType
 from mlflow.exceptions import MlflowException
 
 from fleet_rlm.contracts import Route, parse_sse
+from fleet_rlm.observability import trace_object
 from fleet_rlm.optimize.dataset import labels_of
 from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite, expected_values_present
-from fleet_rlm.replay import validate_review_labels
+from fleet_rlm.replay import selected_snapshot, validate_review_labels
+from fleet_rlm.store import Store
 
 _REGIONS = ("north", "south", "east", "west", "central")
 _STATUSES = ("on_time", "late", "cancelled")
@@ -208,6 +210,90 @@ def label_trace(
     source = AssessmentSource(source_type=source_type, source_id=reviewer)
     for name, value in labels.items():
         mlflow.log_expectation(trace_id=trace_id, name=name, value=value, source=source)
+
+
+def label_turn(
+    store: Store,
+    trace_id: str,
+    *,
+    status: str | None = None,
+    group: str | None = None,
+    answer: str | None = None,
+    values: list[str] | None = None,
+    route: str | None = None,
+    critical: bool | None = None,
+    reviewer: str = "human",
+    expectations: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve partial updates once, preflight the replay, then synchronize MLflow and PostgreSQL.
+
+    Unset arguments keep the trace's existing label, then the defaults (approved, the trace's Session
+    as source group). Return the stored labels.
+
+    Raises:
+        ValueError: The labels, reviewer, or replay reference are invalid; nothing was written.
+        EvaluationError: The trace is unreadable, or the two stores could not be synchronized.
+    """
+    trace = None
+    for attempt in range(15):
+        trace = mlflow.get_trace(trace_id, silent=True, flush=True)
+        if trace is not None:
+            break
+        if attempt < 14:
+            time.sleep(1)
+    if trace is None:
+        raise EvaluationError(f"Trace {trace_id} is not readable; retry its saved trace ID")
+    existing = labels_of(trace)
+    labels: dict[str, Any] = {
+        "review_status": "approved",
+        "source_group": trace.info.trace_metadata.get("mlflow.trace.session", ""),
+        "expected_answer": None,
+        "expected_values": [],
+        "route": None,
+        "critical": False,
+        "structured_expectations": {},
+    }
+    labels.update({name: existing[name] for name in labels if name in existing})
+    for name, value in (
+        ("review_status", status),
+        ("source_group", group),
+        ("expected_answer", answer),
+        ("expected_values", values),
+        ("route", route),
+        ("critical", critical),
+        ("structured_expectations", expectations),
+    ):
+        if value is not None:
+            labels[name] = value
+    request = trace_object(getattr(getattr(trace, "data", None), "request", None))
+    selected = request.get("replay_snapshot_selected") is True
+    validate_review_labels(labels, require_gold=selected)
+    if not reviewer.strip():
+        raise ValueError("review labels require a reviewer")
+    session_id = turn_id = digest = ""
+    if selected:
+        session_id = request.get("session_id", "")
+        turn_id = request.get("turn_id", "")
+        digest = request.get("replay_snapshot_sha256", "")
+        if session_id != trace.info.trace_metadata.get("mlflow.trace.session"):
+            raise ValueError("Trace session metadata does not match its replay reference")
+        selected_snapshot(store, session_id, turn_id, digest)
+    mlflow_saved = False
+    try:
+        label_trace(trace_id, **labels, reviewer=reviewer)
+        mlflow_saved = True
+        if selected:
+            store.save_review_labels(session_id, turn_id, digest, **labels, reviewer=reviewer)
+    except Exception as exc:
+        if mlflow_saved:
+            raise EvaluationError(
+                f"MLflow labels were saved, but Lakebase curation failed ({type(exc).__name__}); "
+                "rerun this label command to retry"
+            ) from None
+        raise EvaluationError(
+            f"Review was not synchronized ({type(exc).__name__}); check labels and replay reference, then retry"
+        ) from None
+    return labels
 
 
 def run_case(client: httpx.Client, case: EvalCase, session_id: str) -> dict[str, Any]:

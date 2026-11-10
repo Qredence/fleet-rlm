@@ -53,8 +53,7 @@ class MemoryOptimizationStore:
     """Small offline fake for the optimizer's PostgreSQL lifecycle contract."""
 
     def __init__(self, records: list[dict] | None = None) -> None:
-        self.records = {(row["session_id"], row["run_id"]): dict(row) for row in records or []}
-        self.settings: dict[str, dict] = {}
+        self.records = {row["run_id"]: {"kind": "optimize", **row} for row in records or []}
         self.closed = False
         self.initialized = False
         self.migration_pool_closed = False
@@ -74,13 +73,13 @@ class MemoryOptimizationStore:
         self.migration_pool_closed = True
         self.events.append(("migration.close", None))
 
-    def create_optimization_run(self, session_id, run_id, request_id, options, owner_id, *, managed=False):
+    def create_optimization_run(self, run_id, request_id, options, owner_id, *, kind="optimize", managed=False):
         if any(record["status"] in {"running", "approving"} for record in self.records.values()):
             raise ValueError("An optimization run is already active")
         record = {
-            "session_id": session_id,
             "run_id": run_id,
             "request_id": request_id,
+            "kind": kind,
             "options": dict(options),
             "owner_id": owner_id,
             "managed": managed,
@@ -88,21 +87,19 @@ class MemoryOptimizationStore:
             "stage": "preparing",
             "stop_requested": False,
         }
-        self.records[(session_id, run_id)] = record
+        self.records[run_id] = record
         return dict(record)
 
-    def get_optimization_run(self, session_id, run_id):
-        record = self.records.get((session_id, run_id))
+    def get_optimization_run(self, run_id):
+        record = self.records.get(run_id)
         return dict(record) if record else None
 
-    def list_optimization_runs(self, session_id=None):
-        return [
-            dict(record) for record in self.records.values() if session_id is None or record["session_id"] == session_id
-        ]
+    def list_optimization_runs(self):
+        return [dict(record) for record in self.records.values()]
 
-    def update_optimization_run(self, session_id, run_id, updates, *, owner_id=None, expected_statuses=None):
+    def update_optimization_run(self, run_id, updates, *, owner_id=None, expected_statuses=None):
         self.events.append(("update", dict(updates)))
-        record = self.records.get((session_id, run_id))
+        record = self.records.get(run_id)
         if record is None or (owner_id is not None and record.get("owner_id") != owner_id):
             return None
         if expected_statuses is not None and record.get("status") not in expected_statuses:
@@ -110,32 +107,19 @@ class MemoryOptimizationStore:
         record.update(updates)
         return dict(record)
 
-    def claim_optimization_review(self, session_id, run_id, owner_id):
-        record = self.records[(session_id, run_id)]
+    def claim_optimization_review(self, run_id, owner_id):
+        record = self.records[run_id]
         if record["status"] not in {"completed", "approving"}:
             raise ValueError("only a completed or recoverable approving run can be reviewed")
         record.update(status="approving", owner_id=owner_id)
         return dict(record)
 
-    def reject_optimization_run(self, session_id, run_id):
-        record = self.records[(session_id, run_id)]
+    def reject_optimization_run(self, run_id):
+        record = self.records[run_id]
         if record["status"] != "completed":
             raise ValueError("only a completed optimization run can be rejected")
         record.update(status="rejected", decision="rejected")
         return dict(record)
-
-    def import_optimization_run(self, session_id, record):
-        key = (session_id, record["run_id"])
-        if key in self.records:
-            return False
-        self.records[key] = dict(record)
-        return True
-
-    def runtime_settings(self, session_id):
-        return self.settings.get(session_id, {})
-
-    def save_runtime_settings(self, session_id, settings):
-        self.settings.setdefault(session_id, {}).update(settings)
 
     def close(self):
         self.closed = True
@@ -232,7 +216,6 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
     assert len(examples) == 1 and examples[0].task == task
     assert examples[0].inputs()["session_history"] == "prior conversation"
     monkeypatch.setattr(Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(cli, "_trace_request", lambda _trace: span.inputs)
     monkeypatch.setattr(dataset.mlflow, "get_trace", lambda *_args, **_kw: trace)
     monkeypatch.setattr(dataset.mlflow, "log_expectation", lambda **kw: labels.update({kw["name"]: kw["value"]}))
     settings = SimpleNamespace(
@@ -459,8 +442,8 @@ def test_curation_refuses_too_few_examples_and_names_the_label_command(monkeypat
     ]
     monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
     monkeypatch.setattr(dataset, "load_examples_from_mlflow", lambda *_args, **_kwargs: examples)
-    with pytest.raises(ValueError, match=r"3 source groups; found 9 from 2.*fleet eval label"):
-        dataset.curate_dataset(SimpleNamespace(), "exp", "s1")
+    with pytest.raises(ValueError, match=r"3 source groups are needed; found 2.*fleet eval label"):
+        dataset.curate_dataset(SimpleNamespace(), "exp")
 
 
 @pytest.mark.parametrize("source", ["postgres", "mlflow"])
@@ -498,8 +481,9 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         "replay_snapshot": compressed,
     }
     if source == "postgres":
+        row["session_id"] = "s1"
         store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
-        examples = dataset.load_examples_from_postgres(store, "s1")
+        examples = dataset.load_examples_from_postgres(store)
     else:
         labels = {
             "expected_answer": "",
@@ -1114,7 +1098,7 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
         fleet_daytona_org_id="org",
         fleet_daytona_volume_id="volume",
     )
-    live = engine("sess_loop", compiled_path=str(tmp_path / "sess_loop.json"))
+    live = engine("sess_loop", compiled_path=str(tmp_path / "fleet.json"))
     assert not live.compiled.digest
 
     # What `fleet optimize` leaves behind: the GEPA program (wrapper keys) and its manifest.
@@ -1138,7 +1122,6 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
         [
             {
                 "run_id": version,
-                "session_id": "sess_loop",
                 "status": "approving" if interrupted else "completed",
                 "owner_id": "old-owner",
                 "candidate_version": version,
@@ -1149,11 +1132,11 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     workflow.write_manifest(path.with_suffix(".manifest.json"), manifest)
     if interrupted:
-        (tmp_path / "sess_loop.json").write_bytes(path.read_bytes())
+        (tmp_path / "fleet.json").write_bytes(path.read_bytes())
 
     parser = _optimization_parser()
     workflow.run(
-        parser.parse_args(["--session", "sess_loop", "--approve", version, "--structured-events"]),
+        parser.parse_args(["--approve", version, "--structured-events"]),
         parser,
         settings,
     )
@@ -1161,10 +1144,10 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
     assert store.migration_pool_closed is True
     events = worker_events(capsys.readouterr().out)
     assert [event["status"] for event in events if event["type"] == "terminal"] == ["approved"]
-    record = store.get_optimization_run("sess_loop", version)
+    record = store.get_optimization_run(version)
     assert record["status"] == "approved"
     with pytest.raises(ValueError, match="only a completed"):
-        store.reject_optimization_run("sess_loop", version)
+        store.reject_optimization_run(version)
 
     live.compiled.reload_if_changed(live.program)  # the shared host invocation boundary
     assert live.compiled.digest == manifest.digest
@@ -1212,7 +1195,6 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     store = MemoryOptimizationStore(
         [
             {
-                "session_id": "sess-managed",
                 "run_id": version,
                 "status": "approving",
                 "owner_id": "api-owner",
@@ -1230,8 +1212,6 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     parser = _optimization_parser()
 
     args = [
-        "--session",
-        "sess-managed",
         "--approve",
         version,
         "--structured-events",
@@ -1243,14 +1223,14 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     if stale_evidence:
         with pytest.raises(ValueError, match="evidence is stale"):
             workflow.run(parser.parse_args(args), parser, settings)
-        assert not (tmp_path / "sess-managed.json").exists()
+        assert not (tmp_path / "fleet.json").exists()
         expected = "failed"
     else:
         workflow.run(parser.parse_args(args), parser, settings)
-        assert (tmp_path / "sess-managed.json").read_bytes() == candidate.read_bytes()
+        assert (tmp_path / "fleet.json").read_bytes() == candidate.read_bytes()
         expected = "approved"
 
-    record = store.get_optimization_run("sess-managed", version)
+    record = store.get_optimization_run(version)
     assert record["status"] == "approving"
     assert record["worker_outcome"]["status"] == expected
     assert store.initialized is False
@@ -1298,7 +1278,7 @@ def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_pat
     monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
     parser = _optimization_parser()
 
-    workflow.run(parser.parse_args(["--session", "sess_schema", "--structured-events"]), parser, settings)
+    workflow.run(parser.parse_args(["--structured-events"]), parser, settings)
 
     assert captured["schema"] == "fleet_rlm_lite"
     assert captured["migration_dsn"] == settings.fleet_database_migration_url
@@ -1323,7 +1303,7 @@ def test_autolog_trace_configuration(monkeypatch, tmp_path, phase, trace_search)
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
         monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
         parser = _optimization_parser()
-        argv = ["--session", "sess_trace_search"]
+        argv = []
         if trace_search:
             argv.append("--trace-search")
         workflow.run(parser.parse_args(argv), parser, settings)
@@ -1363,38 +1343,81 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
     parser = _optimization_parser()
 
     with pytest.raises(RuntimeError, match="pool close failed"):
-        workflow.run(parser.parse_args(["--session", "sess_close_failure"]), parser, settings)
+        workflow.run(parser.parse_args([]), parser, settings)
 
-    record = store.list_optimization_runs("sess_close_failure")[0]
+    record = store.list_optimization_runs()[0]
     assert record["status"] == "failed"
     assert record["candidate_version"] is None
     assert record["failure"]["detail"] == "Optimization cleanup failed."
 
 
-def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypatch, tmp_path):
-    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
-    store = MemoryOptimizationStore(
-        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
-    )
-    splits = tuple([dspy.Example(task=name, source_group=name)] for name in ("train", "dev", "holdout"))
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kwargs: splits)
-    monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: None)
+def test_missing_critical_holdout_refuses_curation_before_search_or_serving_models(monkeypatch):
+    examples = [
+        dspy.Example(task=f"t{index}", source_group=f"g{index % 3}", critical=False, source_session="s1")
+        for index in range(9)
+    ]
+    monkeypatch.setattr(dataset, "load_examples", lambda *_args: examples)
+    with pytest.raises(ValueError, match="critical example is needed to pin the holdout"):
+        dataset.curate_dataset(SimpleNamespace(), "exp")
 
-    def forbidden(*_args, **_kwargs):
-        pytest.fail("Unusable splits must not start search or build serving models")
 
-    monkeypatch.setattr(workflow, "build_lm", forbidden)
-    monkeypatch.setattr(dspy, "GEPA", forbidden)
-    with pytest.raises(ValueError, match=r"critical holdout.*'holdout'.*'examples': 1"):
-        workflow._compile(
-            SimpleNamespace(validation_ratio=0.35),
-            settings,
-            store,
-            "s1",
-            SimpleNamespace(experiment_name="offline", eval_experiment_name="offline"),
-            "s1-run",
-            owner_id="owner",
+def test_readiness_counts_examples_groups_critical_cases_and_the_split_they_would_form() -> None:
+    examples = [Example(f"task-{index}", f"group-{index % 4}", critical=index == 0) for index in range(8)]
+    ready = dataset.readiness(examples)
+    assert ready.ready and ready.missing == []
+    assert (ready.examples, ready.groups, ready.critical) == (8, 4, 1)
+    assert sum(ready.split_sizes.values()) == 8 and all(ready.split_sizes.values())
+    assert ready.as_dict()["ready"] is True
+
+
+def test_readiness_names_every_missing_requirement_in_plain_words() -> None:
+    thin = dataset.readiness([Example("only", "g1")])
+    assert not thin.ready and thin.split_sizes == {}
+    assert len(thin.missing) == 3
+    assert "8 approved gold-labeled examples are needed; found 1" in thin.missing[0]
+    assert "3 source groups are needed; found 1" in thin.missing[1]
+    assert "critical" in thin.missing[2]
+
+
+def test_readiness_surfaces_an_unusable_split_instead_of_raising() -> None:
+    # Two critical groups leave a single noncritical group, which cannot form train and dev.
+    groups = ["c1", "c2", "n1"]
+    examples = [Example(f"task-{index}", groups[index % 3], critical=index < 2) for index in range(8)]
+    status = dataset.readiness(examples)
+    assert not status.ready and any("Source-group split needs" in item for item in status.missing)
+
+
+def test_readiness_validates_the_ratio() -> None:
+    with pytest.raises(ValueError, match="validation_ratio"):
+        dataset.readiness([], validation_ratio=0.9)
+
+
+def test_postgres_examples_span_every_session() -> None:
+    rows = []
+    for session, turn_id in (("s1", "turn-1"), ("s2", "turn-2")):
+        replay, digest, compressed = _selected_snapshot(session, turn_id, "add", {})
+        rows.append(
+            {
+                "session_id": session,
+                "turn_id": turn_id,
+                "task": "add",
+                "answer": "4",
+                "expected_values": ["4"],
+                "route": "rlm",
+                "critical": False,
+                "workspace_manifest": replay["workspace_manifest"],
+                "source_group": session,
+                "context_files": {},
+                "replay_snapshot_sha256": digest,
+                "replay_snapshot": compressed,
+            }
         )
+    asked = []
+    store = SimpleNamespace(reviewed_examples=lambda limit: asked.append(limit) or rows)
+    examples = dataset.load_examples_from_postgres(store)
+    assert [example.source_session for example in examples] == ["s1", "s2"]
+    assert [example.source_group for example in examples] == ["s1", "s2"]
+    assert asked == [500]
 
 
 @pytest.mark.parametrize(
@@ -1410,6 +1433,7 @@ def test_missing_critical_holdout_fails_before_search_or_serving_models(monkeypa
         "validation_write_failure",
         "owner_loss",
         "db_cancel",
+        "token_budget",
         "cleanup_search",
         "cleanup_incumbent",
         "cleanup_candidate",
@@ -1433,6 +1457,9 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     settings = FleetSettings(
         _env_file=None,
         compiled_program_dir=str(tmp_path),
+        execution_mode="flex",
+        fleet_root_model="openai/deployed-root",
+        fleet_sub_model="openai/deployed-sub",
         fleet_root_cache=True,
         fleet_reflection_adapter="json",
         fleet_daytona_api_key="k",
@@ -1444,13 +1471,10 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     incumbent.reasoning.direct.predict.signature = incumbent.reasoning.direct.predict.signature.with_instructions(
         "INCUMBENT"
     )
-    active = tmp_path / "s1.json"
+    active = tmp_path / "fleet.json"
     active.write_bytes(program_envelope(incumbent))
     digest = digest_bytes(active.read_bytes())
-    store = MemoryOptimizationStore(
-        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
-    )
-    store.settings["s1"] = {"mode": "flex", "models": {"root": "openai/deployed-root", "sub": "openai/deployed-sub"}}
+    store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
     monkeypatch.setattr(workflow, "build_lm", lambda _settings, _model_id, _role: lm)
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
     train, dev, holdout = [
@@ -1510,7 +1534,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
                 assert result.errors == 1
                 assert any(stop(None) for stop in optimizer_kwargs["gepa_kwargs"]["stop_callbacks"])
                 if cancel_after_validation == "cleanup_cancel":
-                    store.records[("s1", "s1-run")]["stop_requested"] = True
+                    store.records["s1-run"]["stop_requested"] = True
             reporter = optimizer_kwargs["gepa_kwargs"]["callbacks"][0]
             if cancel_after_validation == "callback_failure":
                 from gepa.core.callbacks import notify_callbacks
@@ -1518,17 +1542,28 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
                 original = store.update_optimization_run
 
                 def fail_progress(*args, **kwargs):
-                    if "progress" in args[2]:
+                    if "progress" in args[1]:
                         raise RuntimeError("private persistence credential")
                     return original(*args, **kwargs)
 
                 store.update_optimization_run = fail_progress
                 notify_callbacks([reporter], "on_budget_updated", {"metric_calls_used": 20})
                 assert any(stop(None) for stop in optimizer_kwargs["gepa_kwargs"]["stop_callbacks"])
+            if cancel_after_validation == "token_budget":
+                stops = optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]
+                budget = next(
+                    stop.__self__ for stop in stops if isinstance(getattr(stop, "__self__", None), workflow.TokenBudget)
+                )
+                assert budget.cap == 50 and not any(stop(None) for stop in stops)
+                budget.used = budget.cap
+                assert budget.should_stop() and any(stop(None) for stop in stops)
+                # The cap is telemetry: it must not trip the required-persistence latch.
+                assert not reporter.should_stop()
+                reporter.raise_if_failed()
             if cancel_after_validation == "owner_loss":
-                store.records[("s1", "s1-run")]["owner_id"] = "another-owner"
+                store.records["s1-run"]["owner_id"] = "another-owner"
             if cancel_after_validation == "db_cancel":
-                store.records[("s1", "s1-run")]["stop_requested"] = True
+                store.records["s1-run"]["stop_requested"] = True
                 assert optimizer_kwargs["gepa_kwargs"]["stop_callbacks"][1](None)
             assert trainset is train and valset is dev
             assert baseline.program.reasoning.direct.predict.signature.instructions == "INCUMBENT"
@@ -1591,7 +1626,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         original = store.update_optimization_run
 
         def fail_validation(*args, **kwargs):
-            if args[2].get("stage") == "validation":
+            if args[1].get("stage") == "validation":
                 raise RuntimeError("private write failure")
             return original(*args, **kwargs)
 
@@ -1609,12 +1644,23 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             for name in ("log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
                 monkeypatch.setattr(workflow.mlflow, name, unavailable)
     args = SimpleNamespace(
-        validation_ratio=0.35, max_metric_calls=4, gepa_budget="light", threads=1, structured_events=True
+        validation_ratio=0.35,
+        max_metric_calls=4,
+        gepa_budget="light",
+        threads=1,
+        structured_events=True,
+        max_total_tokens=50 if cancel_after_validation == "token_budget" else None,
     )
+    if cancel_after_validation == "token_budget":
+        with pytest.raises(workflow.BudgetExhaustedError):
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert measured == [] and not list((tmp_path / "candidates").glob("*.json"))
+        assert digest_bytes(active.read_bytes()) == digest
+        return
     if cancel_after_validation == "cleanup_late":
         with ThreadPoolExecutor(max_workers=2) as pool:
             result = pool.submit(
-                workflow._compile, args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner"
+                workflow._compile, args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner"
             )
             try:
                 assert late_entered.wait(timeout=10)
@@ -1632,14 +1678,14 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
     if cancel_after_validation in {"cleanup_search", "cleanup_incumbent", "cleanup_candidate"}:
         with pytest.raises(validation.RolloutCleanupError, match="evidence is invalid"):
-            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
-        assert "candidate_path" not in store.records[("s1", "s1-run")]
+        assert "candidate_path" not in store.records["s1-run"]
         return
     if cancel_after_validation == "cleanup_cancel":
         with pytest.raises(workflow.OptimizationCancelledError) as raised:
-            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
         assert any("cleanup is unconfirmed" in note for note in raised.value.__notes__)
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert not measured
@@ -1651,10 +1697,10 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
         parser = _optimization_parser()
-        args = parser.parse_args(["--session", "s1", "--max-metric-calls", "4", "--threads", "1"])
+        args = parser.parse_args(["--max-metric-calls", "4", "--threads", "1"])
         with pytest.raises(KeyboardInterrupt):
             workflow.run(args, parser, settings)
-        record = store.list_optimization_runs("s1")[0]
+        record = store.list_optimization_runs()[0]
         assert record["status"] == "cancelled"
         assert record["candidate_version"] is None
         assert record["failure"]["type"] == "KeyboardInterrupt"
@@ -1665,19 +1711,19 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
     if cancel_after_validation in {"callback_failure", "validation_write_failure", "owner_loss"}:
         with pytest.raises(workflow.OptimizationPersistenceError):
-            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
         assert not measured
         assert not list((tmp_path / "candidates").glob("*.json"))
         return
     if cancel_after_validation == "db_cancel":
         with pytest.raises(workflow.OptimizationCancelledError):
-            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
         assert not measured
         assert not list((tmp_path / "candidates").glob("*.json"))
         return
     if cancel_after_validation == "evidence_change":
         with pytest.raises(RuntimeError, match="evidence changed during the run"):
-            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
         assert searched and len(measured) == 6
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
@@ -1688,19 +1734,18 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         "optional_tracking_setup",
     }:
         with pytest.raises(workflow.OptimizationCancelledError, match="stop requested"):
-            workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
         assert len(measured) == 6
         assert (tmp_path / "candidates").exists() is (cancel_after_validation == "finalization")
         assert digest_bytes(active.read_bytes()) == digest
         return
 
-    workflow._compile(args, settings, store, "s1", settings.mlflow_target(), "s1-run", owner_id="owner")
-    assert run_tags["fleet.session_id"] == "s1"
+    workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
     assert run_tags["fleet.optimization.run_id"] == "s1-run"
     assert any(
         isinstance(callback, workflow.GEPAProgressReporter) for callback in optimizer_kwargs["gepa_kwargs"]["callbacks"]
     )
-    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 4
+    assert len(optimizer_kwargs["gepa_kwargs"]["stop_callbacks"]) == 5
     assert measured == [False, True, True, False, False, True]
     assert all(config.fleet_root_model == "openai/deployed-root" for config in factories)
     assert factories[0].fleet_root_cache and not factories[1].fleet_root_cache
@@ -1720,12 +1765,10 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     assert active.read_bytes() and digest_bytes(active.read_bytes()) == digest
 
 
-def test_approve_refuses_another_sessions_candidate() -> None:
+def test_optimize_no_longer_accepts_a_session() -> None:
     parser = _optimization_parser()
     with pytest.raises(SystemExit):
-        workflow.run(
-            parser.parse_args(["--session", "sess_a", "--approve", "sess_b-1"]), parser, FleetSettings(_env_file=None)
-        )
+        parser.parse_args(["--session", "sess_a"])
 
 
 def test_relabelling_a_trace_overrides_the_earlier_label() -> None:
@@ -1783,18 +1826,14 @@ def test_gepa_progress_callback_emits_only_observed_metric_call_counts(capsys) -
 
 
 def test_gepa_progress_callback_persists_latest_snapshot_without_transport_events(capsys) -> None:
-    store = MemoryOptimizationStore(
-        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
-    )
-    reporter = workflow.GEPAProgressReporter(
-        "s1-run", store=store, session_id="s1", owner_id="owner", emit_events=False
-    )
+    store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
+    reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False)
 
     reporter.on_budget_updated(
         {"iteration": 4, "metric_calls_used": 7, "metric_calls_delta": 2, "metric_calls_remaining": 3}
     )
 
-    record = store.get_optimization_run("s1", "s1-run")
+    record = store.get_optimization_run("s1-run")
     assert record["stage"] == "search"
     assert record["progress"] == {
         "iteration": 4,
@@ -1835,7 +1874,7 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
         program_envelope(FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program)
     )
     incumbent_bytes = b"recorded incumbent"
-    active_path = tmp_path / "sess.json"
+    active_path = tmp_path / "fleet.json"
     active_bytes = {
         "candidate-active": candidate_path.read_bytes(),
         "incumbent-current-evidence": incumbent_bytes,
@@ -1857,8 +1896,7 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
     )
     workflow.write_manifest(candidate_path.with_suffix(".manifest.json"), manifest)
     store = MemoryOptimizationStore()
-    store.records[("sess", version)] = {
-        "session_id": "sess",
+    store.records[version] = {
         "run_id": version,
         "request_id": "legacy-request",
         "options": ExperimentOptions().model_dump(),
@@ -1876,14 +1914,14 @@ def test_standalone_approval_reconciles_imported_legacy_approving_records(
 
     if scenario == "incumbent-stale-evidence":
         with pytest.raises(ValueError, match="evidence is stale"):
-            workflow.run(parser.parse_args(["--session", "sess", "--approve", version]), parser, settings)
+            workflow.run(parser.parse_args(["--approve", version]), parser, settings)
     elif scenario == "unknown-active":
         with pytest.raises(ValueError, match="unknown incumbent"):
-            workflow.run(parser.parse_args(["--session", "sess", "--approve", version]), parser, settings)
+            workflow.run(parser.parse_args(["--approve", version]), parser, settings)
     else:
-        workflow.run(parser.parse_args(["--session", "sess", "--approve", version]), parser, settings)
+        workflow.run(parser.parse_args(["--approve", version]), parser, settings)
 
-    record = store.get_optimization_run("sess", version)
+    record = store.get_optimization_run(version)
     assert record["status"] == expected_status
     if scenario in {"candidate-active", "incumbent-current-evidence"}:
         assert record["decision"] == "approved"
@@ -1906,17 +1944,15 @@ def test_gepa_stop_file_is_observed_at_safe_boundary(tmp_path) -> None:
 
 
 def test_database_stop_fence_is_checked_at_safe_boundaries(tmp_path) -> None:
-    store = MemoryOptimizationStore(
-        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
-    )
+    store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
     stop_file = tmp_path / "runs" / "s1-run" / "gepa.stop"
-    stopper = workflow._DatabaseStopper(store, "s1", "s1-run")
+    stopper = workflow._DatabaseStopper(store, "s1-run")
 
     workflow._check_cancelled(stop_file)
-    assert not workflow._database_stop_requested(store, "s1", "s1-run")
+    assert not workflow._database_stop_requested(store, "s1-run")
     assert not stopper(None)
-    store.records[("s1", "s1-run")]["stop_requested"] = True
-    assert workflow._database_stop_requested(store, "s1", "s1-run")
+    store.records["s1-run"]["stop_requested"] = True
+    assert workflow._database_stop_requested(store, "s1-run")
     assert stopper(None)
 
 
@@ -1933,9 +1969,9 @@ def test_run_persists_cancellation_without_candidate(tmp_path, monkeypatch) -> N
     )
     parser = _optimization_parser()
 
-    workflow.run(parser.parse_args(["--session", "sess_cancel"]), parser, settings)
+    workflow.run(parser.parse_args([]), parser, settings)
 
-    record = store.list_optimization_runs("sess_cancel")[0]
+    record = store.list_optimization_runs()[0]
     assert record["status"] == "cancelled"
     assert record["candidate_version"] is None
     assert not (tmp_path / "candidates").exists()
@@ -1944,7 +1980,6 @@ def test_run_persists_cancellation_without_candidate(tmp_path, monkeypatch) -> N
 @pytest.mark.parametrize("managed_orphan", [False, True])
 def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypatch, managed_orphan):
     old = {
-        "session_id": "old-session",
         "run_id": "old-session-run",
         "status": "running",
         "owner_id": "dead-owner",
@@ -1966,10 +2001,10 @@ def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypa
 
     update = store.update_optimization_run
 
-    def guarded_update(session_id, run_id, updates, **kwargs):
+    def guarded_update(run_id, updates, **kwargs):
         if run_id == old["run_id"]:
             assert lease_held
-        return update(session_id, run_id, updates, **kwargs)
+        return update(run_id, updates, **kwargs)
 
     store.acquire_optimization_lease = acquire
     store.update_optimization_run = guarded_update
@@ -1980,21 +2015,22 @@ def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypa
 
     def fake_compile(*_args, **_kwargs):
         assert lease_held
-        assert store.get_optimization_run(old["session_id"], old["run_id"])["status"] == "interrupted"
+        assert store.get_optimization_run(old["run_id"])["status"] == "interrupted"
 
     monkeypatch.setattr(workflow, "_compile", fake_compile)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
-    workflow.run(parser.parse_args(["--session", "next-session"]), parser, settings)
-    orphan = store.get_optimization_run(old["session_id"], old["run_id"])
+    workflow.run(parser.parse_args([]), parser, settings)
+    orphan = store.get_optimization_run(old["run_id"])
     assert orphan["status"] == "interrupted" and orphan["stage"] == "interrupted"
     assert orphan["candidate_version"] is None and orphan["finished_at"]
-    assert store.list_optimization_runs("next-session")[0]["status"] == "completed"
+    (new,) = [item for item in store.list_optimization_runs() if item["run_id"] != old["run_id"]]
+    assert new["status"] == "completed"
     assert not lease_held
 
 
 def test_standalone_preserves_live_api_pending_launch(tmp_path, monkeypatch):
-    record = {"session_id": "s1", "run_id": "s1-pending", "status": "running", "owner_id": "live-api", "managed": True}
+    record = {"run_id": "s1-pending", "status": "running", "owner_id": "live-api", "managed": True}
     store = MemoryOptimizationStore([record])
     store.optimization_owner_alive = lambda _owner_id: True
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
@@ -2008,8 +2044,8 @@ def test_standalone_preserves_live_api_pending_launch(tmp_path, monkeypatch):
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     with pytest.raises(ValueError, match="already active"):
-        workflow.run(parser.parse_args(["--session", "s2"]), parser, settings)
-    assert store.get_optimization_run("s1", "s1-pending") == record
+        workflow.run(parser.parse_args([]), parser, settings)
+    assert store.get_optimization_run("s1-pending") == {**record, "kind": "optimize"}
 
 
 def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outcome(tmp_path, monkeypatch, capsys):
@@ -2018,7 +2054,6 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
     store = MemoryOptimizationStore(
         [
             {
-                "session_id": "s1",
                 "run_id": run_id,
                 "status": "running",
                 "owner_id": "api-owner",
@@ -2037,13 +2072,11 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
 
     monkeypatch.setattr(workflow, "_compile", interrupt)
     parser = _optimization_parser()
-    args = parser.parse_args(
-        ["--session", "s1", "--managed-run-id", run_id, "--managed-owner-id", "api-owner", "--structured-events"]
-    )
+    args = parser.parse_args(["--managed-run-id", run_id, "--managed-owner-id", "api-owner", "--structured-events"])
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     with pytest.raises(KeyboardInterrupt):
         workflow.run(args, parser, settings)
-    outcome = store.get_optimization_run("s1", run_id)["worker_outcome"]
+    outcome = store.get_optimization_run(run_id)["worker_outcome"]
     assert outcome["status"] == "cancelled" and outcome["candidate_version"] is None
     terminals = [event for event in worker_events(capsys.readouterr().out) if event["type"] == "terminal"]
     assert len(terminals) == 1
@@ -2059,7 +2092,6 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
     store = MemoryOptimizationStore(
         [
             {
-                "session_id": "sess-managed",
                 "run_id": run_id,
                 "status": "running",
                 "owner_id": "api-owner",
@@ -2076,8 +2108,6 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
     workflow.run(
         parser.parse_args(
             [
-                "--session",
-                "sess-managed",
                 "--structured-events",
                 "--managed-run-id",
                 run_id,
@@ -2088,7 +2118,7 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
         parser,
         settings,
     )
-    record = store.get_optimization_run("sess-managed", run_id)
+    record = store.get_optimization_run(run_id)
     assert record["status"] == "running"
     assert record["worker_outcome"]["status"] == "completed"
     assert store.initialized is False
@@ -2115,9 +2145,9 @@ def test_run_records_failed_lifecycle_with_sanitized_details(tmp_path, monkeypat
     parser = _optimization_parser()
 
     with pytest.raises(RuntimeError, match="Authorization"):
-        workflow.run(parser.parse_args(["--session", "sess_failure"]), parser, settings)
+        workflow.run(parser.parse_args([]), parser, settings)
 
-    records = store.list_optimization_runs("sess_failure")
+    records = store.list_optimization_runs()
     assert len(records) == 1
     assert records[0]["status"] == "failed"
     assert records[0]["failure"]["type"] == "RuntimeError"
@@ -2259,11 +2289,9 @@ def test_score_split_collects_measured_usage_timing_and_artifact_passes() -> Non
 @pytest.mark.parametrize("managed", [False, True])
 def test_worker_partial_progress_is_one_write_and_retains_final_counters(managed):
     store = MemoryOptimizationStore(
-        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner", "managed": managed}]
+        [{"run_id": "s1-run", "status": "running", "owner_id": "owner", "managed": managed}]
     )
-    reporter = workflow.GEPAProgressReporter(
-        "s1-run", store=store, session_id="s1", owner_id="owner", emit_events=False
-    )
+    reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False)
     reporter.on_budget_updated(
         {"iteration": 4, "metric_calls_used": 20, "metric_calls_delta": 2, "metric_calls_remaining": None}
     )
@@ -2272,7 +2300,7 @@ def test_worker_partial_progress_is_one_write_and_retains_final_counters(managed
     reporter.on_budget_updated({"iteration": 1, "metric_calls_used": 10})
     reporter.on_optimization_end({"total_metric_calls": 21})
     reporter.update(stage="validation")
-    record = store.get_optimization_run("s1", "s1-run")
+    record = store.get_optimization_run("s1-run")
     assert record["stage"] == "validation"
     assert record["progress"] == {
         "iteration": 4,
@@ -2324,17 +2352,13 @@ def test_locked_native_gepa_observes_required_persistence_stop_without_provider_
         def forward(self, question):
             return dspy.Prediction(answer=question)
 
-    store = MemoryOptimizationStore(
-        [{"session_id": "s1", "run_id": "s1-run", "status": "running", "owner_id": "owner"}]
-    )
+    store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
 
     def fail(*_args, **_kwargs):
         raise RuntimeError("private database credential")
 
     store.update_optimization_run = fail
-    reporter = workflow.GEPAProgressReporter(
-        "s1-run", store=store, session_id="s1", owner_id="owner", emit_events=False
-    )
+    reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False)
 
     def metric(_gold, _pred, _trace=None, _pred_name=None, _pred_trace=None):
         return dspy.Prediction(score=1.0, feedback="correct")
@@ -2369,13 +2393,11 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
     parser = _optimization_parser()
-    argv = ["--session", "s1"]
+    argv = []
     if managed:
         from fleet_rlm.optimization_runs import ExperimentOptions
 
-        store.create_optimization_run(
-            "s1", "s1-run", "request", ExperimentOptions().model_dump(), "owner", managed=True
-        )
+        store.create_optimization_run("s1-run", "request", ExperimentOptions().model_dump(), "owner", managed=True)
         argv += ["--managed-run-id", "s1-run", "--managed-owner-id", "owner", "--structured-events"]
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
     monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
@@ -2384,21 +2406,21 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
     original = store.update_optimization_run
     failed = False
 
-    def update(session_id, run_id, updates, **kwargs):
+    def update(run_id, updates, **kwargs):
         nonlocal failed
         boundary = updates.get("stage") == failure_at or (failure_at == "candidate" and "candidate_path" in updates)
         outcome = failure_at == "outcome" and ("worker_outcome" in updates or updates.get("status") == "completed")
         if not failed and (boundary or outcome):
             failed = True
             raise RuntimeError("private required write credential")
-        return original(session_id, run_id, updates, **kwargs)
+        return original(run_id, updates, **kwargs)
 
     store.update_optimization_run = update
 
-    def compile_stub(_args, _settings, _store, session_id, _target, run_id, *, owner_id):
-        reporter = workflow.GEPAProgressReporter(run_id, store=store, session_id=session_id, owner_id=owner_id)
+    def compile_stub(_args, _settings, _store, _target, run_id, *, owner_id):
+        reporter = workflow.GEPAProgressReporter(run_id, store=store, owner_id=owner_id)
         if failure_at == "ownership":
-            store.records[(session_id, run_id)]["owner_id"] = "replacement"
+            store.records[run_id]["owner_id"] = "replacement"
             return
         reporter.update(stage="validation")
         reporter.update(stage="finalization")
@@ -2432,7 +2454,7 @@ def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch,
     else:
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", fail)
     parser = _optimization_parser()
-    workflow.run(parser.parse_args(["--session", "s1"]), parser, settings)
+    workflow.run(parser.parse_args([]), parser, settings)
     assert store.list_optimization_runs()[0]["status"] == "completed"
     assert "private telemetry credential" not in caplog.text
 
@@ -2474,7 +2496,7 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
     settings = FleetSettings(
         _env_file=None, fleet_llm_model="openai/shared", compiled_program_dir=str(tmp_path), **overrides
     )
-    store = MemoryOptimizationStore([{"session_id": "s1", "run_id": "run", "status": "running", "owner_id": "owner"}])
+    store = MemoryOptimizationStore([{"run_id": "run", "status": "running", "owner_id": "owner"}])
     lm = SimpleNamespace()
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
     monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
@@ -2494,9 +2516,150 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
             SimpleNamespace(validation_ratio=0.2),
             settings,
             store,
-            "s1",
             settings.mlflow_target(),
             "run",
             owner_id="owner",
         )
     assert ("equals the serving model" in capsys.readouterr().out) is warns
+
+
+def test_valset_events_persist_best_score_and_a_bounded_score_trajectory() -> None:
+    store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
+    reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False)
+
+    def event(iteration: int, score: float, best: bool) -> dict:
+        return {"iteration": iteration, "average_score": score, "is_best_program": best}
+
+    reporter.on_valset_evaluated(event(0, 0.4, True))
+    reporter.on_valset_evaluated(event(1, 0.3, False))
+    reporter.on_valset_evaluated(event(2, 0.6, True))
+    progress = store.get_optimization_run("s1-run")["progress"]
+    assert progress["best_score"] == 0.6
+    assert progress["score_trajectory"] == [[0, 0.4], [1, 0.3], [2, 0.6]]
+
+    for iteration in range(3, 800):
+        reporter.on_valset_evaluated(event(iteration, 0.5, False))
+    progress = store.get_optimization_run("s1-run")["progress"]
+    trajectory = progress["score_trajectory"]
+    assert len(trajectory) <= 200 and trajectory[0] == [0, 0.4] and trajectory[-1] == [799, 0.5]
+    assert [point[0] for point in trajectory] == sorted(point[0] for point in trajectory)
+    assert progress["best_score"] == 0.6
+
+
+def test_progress_carries_token_usage_without_touching_the_persistence_latch() -> None:
+    store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
+    budget = workflow.TokenBudget(100)
+    reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False, tokens=budget)
+    budget.used = 120
+    reporter.on_budget_updated({"iteration": 1, "metric_calls_used": 3})
+    assert store.get_optimization_run("s1-run")["progress"]["tokens_used"] == 120
+    assert store.get_optimization_run("s1-run")["progress"]["token_cap"] == 100
+    assert budget.reached and budget.should_stop()
+    assert not reporter.should_stop()
+    reporter.raise_if_failed()
+
+
+def test_token_budget_sums_reported_usage_and_zero_means_unlimited() -> None:
+    budget, unlimited = workflow.TokenBudget(10), workflow.TokenBudget(0)
+    for call_id, tokens in (("a", 7), ("b", 5)):
+        for collector in (budget, unlimited):
+            collector.on_lm_start(call_id, SimpleNamespace(model="m"), {})
+            dspy.settings.usage_tracker.add_usage(
+                "m", {"prompt_tokens": tokens - 2, "completion_tokens": 2, "total_tokens": tokens}
+            )
+            collector.on_lm_end(call_id, None)
+        assert budget.reached is (call_id == "b")
+    assert budget.used == unlimited.used == 12
+    assert budget.should_stop() and not unlimited.reached and not unlimited.should_stop()
+
+
+def test_token_budget_ignores_typesafe_decision_calls() -> None:
+    budget = workflow.TokenBudget(1)
+    budget.on_lm_start("a", SimpleNamespace(model="m", supports_decision_requests=True), {})
+    budget.on_lm_end("a", None)
+    assert budget.used == 0 and not budget.reached
+
+
+def test_run_records_budget_exhausted_without_a_candidate_or_a_failure(tmp_path, monkeypatch, capsys) -> None:
+    store = MemoryOptimizationStore()
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
+    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
+
+    def exhausted(*_args, **_kwargs):
+        raise workflow.BudgetExhaustedError("Optimization token budget exhausted")
+
+    monkeypatch.setattr(workflow, "_compile", exhausted)
+    parser = _optimization_parser()
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    workflow.run(parser.parse_args(["--structured-events", "--max-total-tokens", "500"]), parser, settings)
+    (record,) = store.list_optimization_runs()
+    assert record["status"] == "budget_exhausted" and record["stage"] == "budget_exhausted"
+    assert record["candidate_version"] is None and "failure" not in record
+    assert record["options"]["max_total_tokens"] == 500
+    assert [e["status"] for e in worker_events(capsys.readouterr().out) if e["type"] == "terminal"] == [
+        "budget_exhausted"
+    ]
+
+
+def test_check_prints_readiness_and_exits_nonzero_without_any_live_call(tmp_path, monkeypatch, capsys) -> None:
+    store = MemoryOptimizationStore()
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
+    monkeypatch.setattr(
+        workflow, "load_examples", lambda *_args: [Example(f"t{index}", f"g{index % 2}") for index in range(3)]
+    )
+    forbidden = pytest.fail
+    monkeypatch.setattr(workflow, "build_lm", forbidden)
+    monkeypatch.setattr(workflow, "DaytonaSandboxManager", forbidden)
+    parser = _optimization_parser()
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    with pytest.raises(SystemExit) as exit_info:
+        workflow.run(parser.parse_args(["--check"]), parser, settings)
+    assert exit_info.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["ready"] is False and (report["examples"], report["groups"]) == (3, 2)
+    assert len(report["missing"]) == 3
+    assert store.records == {} and store.closed
+
+
+def test_check_exits_zero_when_ready(tmp_path, monkeypatch, capsys) -> None:
+    store = MemoryOptimizationStore()
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
+    examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
+    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
+    parser = _optimization_parser()
+    workflow.run(
+        parser.parse_args(["--check"]), parser, FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    )
+    assert json.loads(capsys.readouterr().out)["ready"] is True
+
+
+def test_approval_refuses_a_legacy_per_session_candidate(tmp_path, monkeypatch) -> None:
+    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
+    version = "sess_old-abc"
+    candidate = tmp_path / "candidates" / f"{version}.json"
+    candidate.parent.mkdir()
+    candidate.write_bytes(b"{}")
+    manifest = ArtifactManifest(version, digest_bytes(b"{}"), "now", {}, _evaluation(), {"passed": True}, {})
+    workflow.write_manifest(candidate.with_suffix(".manifest.json"), manifest)
+    store = MemoryOptimizationStore(
+        [
+            {
+                "run_id": version,
+                "status": "completed",
+                "owner_id": "old",
+                "candidate_version": version,
+                "legacy_session_id": "sess_old",
+            }
+        ]
+    )
+    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
+    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
+    parser = _optimization_parser()
+    with pytest.raises(ValueError, match="per-Session candidate"):
+        workflow.run(parser.parse_args(["--approve", version]), parser, settings)
+    assert store.get_optimization_run(version)["status"] == "completed"
+    assert not (tmp_path / "fleet.json").exists()

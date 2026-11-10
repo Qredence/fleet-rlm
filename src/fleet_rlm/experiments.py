@@ -1,6 +1,6 @@
-"""API-owned experiment processes; optimization itself stays in the CLI worker.
+"""API-owned job processes; optimization itself stays in the CLI worker.
 
-There is one live process slot, no queue, and no request-scoped task ownership.
+There is one live process slot for every job kind, no queue, and no request-scoped task ownership.
 PostgreSQL is the lifecycle ledger; subprocess output is advisory progress only.
 """
 
@@ -32,7 +32,10 @@ from fleet_rlm.optimization_runs import (
     worker_settings_payload,
 )
 from fleet_rlm.store import Store
-from fleet_rlm.workspace import validate_session_id
+
+# The `fleet` subcommand that runs each job kind. The evaluate kinds are reserved by the ledger and
+# have no managed worker yet.
+_WORKER_COMMANDS: dict[str, tuple[str, ...]] = {"optimize": ("optimize",)}
 
 
 class ExperimentBusyError(ValueError):
@@ -122,12 +125,10 @@ class ExperimentManager:
                     ):
                         continue
                     try:
-                        await asyncio.to_thread(
-                            self.store.request_optimization_stop, record["session_id"], record["run_id"]
-                        )
+                        await asyncio.to_thread(self.store.request_optimization_stop, record["run_id"])
                     except ValueError:
                         continue
-                    await asyncio.to_thread(request_run_stop, self.root, record["session_id"], record["run_id"])
+                    await asyncio.to_thread(request_run_stop, self.root, record["run_id"])
                 return
             try:
                 await asyncio.to_thread(reconcile_abandoned_running_runs, self.store, inactive_owner_id=self.owner_id)
@@ -143,37 +144,35 @@ class ExperimentManager:
             finally:
                 await asyncio.to_thread(lease.close)
 
-    async def list(self, session_id: str) -> dict[str, Any]:
+    async def list(self) -> dict[str, Any]:
         """Return snapshots without acquiring a runtime or provisioning a sandbox."""
         await self._recover_stale_runs()
-        records = await asyncio.to_thread(self.store.list_optimization_runs, validate_session_id(session_id))
+        records = await asyncio.to_thread(self.store.list_optimization_runs)
         return {
-            "experiments": [public_run(record) for record in records],
+            "jobs": [public_run(record) for record in records],
             "active_run_id": next(
                 (record["run_id"] for record in records if record["status"] in ACTIVE_STATUSES), None
             ),
             "accepting": self.accepting,
         }
 
-    async def get(self, session_id: str, run_id: str) -> dict[str, Any]:
-        """Resolve Session/run identity before reading derived artifact paths.
+    async def get(self, run_id: str) -> dict[str, Any]:
+        """Resolve the run identity before reading derived artifact paths.
 
         Raise FileNotFoundError for a missing run and ValueError for invalid identity;
         storage errors propagate.
         """
-        record = await asyncio.to_thread(
-            self.store.get_optimization_run, validate_session_id(session_id), validate_run_id(run_id)
-        )
+        record = await asyncio.to_thread(self.store.get_optimization_run, validate_run_id(run_id))
         if record is None:
-            raise FileNotFoundError("Experiment was not found")
+            raise FileNotFoundError("Job was not found")
         return record
 
-    async def detail(self, session_id: str, run_id: str) -> dict[str, Any]:
+    async def detail(self, run_id: str) -> dict[str, Any]:
         """Serve saved comparison evidence, never arbitrary paths or worker output."""
         await self._recover_stale_runs()
-        record = await self.get(session_id, run_id)
+        record = await self.get(run_id)
         comparison = await asyncio.to_thread(read_comparison, self.root, record)
-        return {"experiment": public_run(record), "comparison": comparison}
+        return {"job": public_run(record), "comparison": comparison}
 
     async def _available(self) -> None:
         """Check admission and worker availability without retaining the optimization lease.
@@ -189,54 +188,55 @@ class ExperimentManager:
             raise ExperimentBusyError("An optimization worker is still active") from None
         await asyncio.to_thread(lease.close)
 
-    async def start(self, session_id: str, request_id: str, options: ExperimentOptions) -> dict[str, Any]:
+    async def start(self, request_id: str, options: ExperimentOptions, kind: str = "optimize") -> dict[str, Any]:
         """Persist an idempotent intent before spawning any paid work."""
-        session_id = validate_session_id(session_id)
+        if kind not in _WORKER_COMMANDS:
+            raise ValueError(f"{kind} jobs are not available")
         await self._reconcile_stale_runs()
         async with self._lock:
-            for prior in await asyncio.to_thread(self.store.list_optimization_runs, session_id):
+            for prior in await asyncio.to_thread(self.store.list_optimization_runs):
                 if prior["request_id"] == request_id:
-                    if prior["options"] != options.model_dump():
+                    if prior["options"] != options.model_dump() or prior["kind"] != kind:
                         raise ExperimentBusyError("Request ID was already used with different options")
                     return prior
             await self._available()
-            run_id = session_id + "-" + uuid.uuid4().hex
+            run_id = kind.replace("_", "-") + "-" + uuid.uuid4().hex
             try:
                 record = await asyncio.to_thread(
                     self.store.create_optimization_run,
-                    session_id,
                     run_id,
                     request_id,
                     options.model_dump(),
                     self.owner_id,
+                    kind=kind,
                     managed=True,
                 )
             except ValueError as error:
                 raise ExperimentBusyError(str(error)) from None
-            self._task = asyncio.create_task(self._execute(session_id, run_id, options, approval=False))
+            self._task = asyncio.create_task(self._execute(run_id, kind, options, approval=False))
             return record
 
-    async def cancel(self, session_id: str, run_id: str) -> dict[str, Any]:
+    async def cancel(self, run_id: str) -> dict[str, Any]:
         """Accept only a running run's cooperative stop; completion wins after its transition."""
-        record = await self.get(session_id, run_id)
+        record = await self.get(run_id)
         if record["status"] == "cancelled":
             return record
         if record["status"] != "running":
-            raise ExperimentBusyError("Only a running experiment can be cancelled")
+            raise ExperimentBusyError("Only a running job can be cancelled")
         # Persist intent first. The worker also checks this flag, so a marker write failure
         # cannot silently lose an accepted request or authorize a completed candidate.
         try:
-            record = await asyncio.to_thread(self.store.request_optimization_stop, session_id, run_id)
+            record = await asyncio.to_thread(self.store.request_optimization_stop, run_id)
         except ValueError as error:
             raise ExperimentBusyError(str(error)) from None
-        await asyncio.to_thread(request_run_stop, self.root, session_id, run_id)
+        await asyncio.to_thread(request_run_stop, self.root, run_id)
         return record
 
-    async def review(self, session_id: str, run_id: str, decision: str, request_id: str) -> dict[str, Any]:
+    async def review(self, run_id: str, decision: str, request_id: str) -> dict[str, Any]:
         """Serialize explicit review while the existing optimizer performs evidence checks."""
         await self._reconcile_stale_runs()
         async with self._lock:
-            record = await self.get(session_id, run_id)
+            record = await self.get(run_id)
             if record.get("review_request_id") == request_id:
                 if record.get("review_decision") != decision:
                     raise ExperimentBusyError("Review request ID was already used with another decision")
@@ -244,7 +244,7 @@ class ExperimentManager:
                     return record
                 if record["status"] == "approving":
                     await self._available()
-                    record = await self.get(session_id, run_id)
+                    record = await self.get(run_id)
                     if record["status"] == "approving":
                         raise ExperimentBusyError("Approval recovery is still in progress")
                 if record["status"] in {"approved", "rejected"}:
@@ -255,21 +255,22 @@ class ExperimentManager:
                     return record
             if decision == "rejected":
                 try:
-                    return await asyncio.to_thread(self.store.reject_optimization_run, session_id, run_id)
+                    return await asyncio.to_thread(self.store.reject_optimization_run, run_id)
                 except ValueError as error:
                     raise ExperimentBusyError(str(error)) from None
             if decision != "approved":
                 raise ValueError("decision must be approved or rejected")
+            if record.get("legacy_session_id"):
+                raise ExperimentBusyError("A per-Session candidate cannot be installed globally; run a new job")
             await self._available()
             if record["status"] not in {"completed", "approving"}:
-                raise ExperimentBusyError("Only a completed or recoverable experiment can be approved")
+                raise ExperimentBusyError("Only a completed or recoverable job can be approved")
             try:
-                await asyncio.to_thread(self.store.claim_optimization_review, session_id, run_id, self.owner_id)
+                await asyncio.to_thread(self.store.claim_optimization_review, run_id, self.owner_id)
             except ValueError as error:
                 raise ExperimentBusyError(str(error)) from None
             record = await asyncio.to_thread(
                 self.store.update_optimization_run,
-                session_id,
                 run_id,
                 {
                     "review_request_id": request_id,
@@ -281,19 +282,17 @@ class ExperimentManager:
                 expected_statuses=("approving",),
             )
             if record is None:
-                raise ExperimentBusyError("Experiment review ownership changed")
-            self._task = asyncio.create_task(self._execute(session_id, run_id, ExperimentOptions(), approval=True))
+                raise ExperimentBusyError("Job review ownership changed")
+            self._task = asyncio.create_task(self._execute(run_id, record["kind"], ExperimentOptions(), approval=True))
             return record
 
-    def _command(self, session_id: str, run_id: str, options: ExperimentOptions, *, approval: bool) -> Sequence[str]:
-        """Build worker argv for search or approval, carrying managed ownership and progress flags."""
+    def _command(self, run_id: str, kind: str, options: ExperimentOptions, *, approval: bool) -> Sequence[str]:
+        """Build worker argv for a job or its approval, carrying managed ownership and progress flags."""
         return [
             sys.executable,
             "-m",
             "fleet_rlm.cli",
-            "optimize",
-            "--session",
-            session_id,
+            *_WORKER_COMMANDS[kind],
             "--managed-run-id",
             run_id,
             "--managed-owner-id",
@@ -304,7 +303,7 @@ class ExperimentManager:
             *(["--approve", run_id] if approval else options.cli_arguments()),
         ]
 
-    async def _execute(self, session_id: str, run_id: str, options: ExperimentOptions, *, approval: bool) -> None:
+    async def _execute(self, run_id: str, kind: str, options: ExperimentOptions, *, approval: bool) -> None:
         """Run a worker and drain both output pipes before finalizing its ledger outcome.
 
         Ordinary worker or I/O errors become sanitized failure metadata. Task
@@ -319,7 +318,7 @@ class ExperimentManager:
             for key in ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_ID", "FLEET_SETUP_TOKEN"):
                 environment.pop(key, None)
             process = await asyncio.create_subprocess_exec(
-                *self._command(session_id, run_id, options, approval=approval),
+                *self._command(run_id, kind, options, approval=approval),
                 env=environment,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -338,7 +337,7 @@ class ExperimentManager:
             await asyncio.gather(*readers)
         except asyncio.CancelledError:
             if not approval:
-                await self.cancel(session_id, run_id)
+                await self.cancel(run_id)
             raise
         except Exception as error:
             failure = {"type": type(error).__name__, "detail": "Experiment worker failed; sensitive details omitted."}
@@ -350,11 +349,10 @@ class ExperimentManager:
                 results = await asyncio.shield(asyncio.gather(*readers, return_exceptions=True))
                 if any(isinstance(result, BaseException) for result in results):
                     failure = {"type": "WorkerOutput", "detail": "Experiment output could not be drained."}
-            await self._finish(session_id, run_id, process, failure, approval=approval)
+            await self._finish(run_id, process, failure, approval=approval)
 
     async def _finish(
         self,
-        session_id: str,
         run_id: str,
         process: asyncio.subprocess.Process | None,
         failure: dict[str, str] | None,
@@ -367,7 +365,7 @@ class ExperimentManager:
         completed search. Approval uses artifact receipts to recover its outcome.
         Lookup and persistence errors propagate.
         """
-        record = await self.get(session_id, run_id)
+        record = await self.get(run_id)
         if record.get("owner_id") != self.owner_id or record["status"] not in ACTIVE_STATUSES:
             return
         if approval:
@@ -386,7 +384,7 @@ class ExperimentManager:
                 failure
                 or process is None
                 or process.returncode != 0
-                or status not in {"completed", "cancelled", "failed"}
+                or status not in {"completed", "cancelled", "failed", "budget_exhausted"}
             ):
                 status = "failed"
                 failure = (
@@ -403,7 +401,6 @@ class ExperimentManager:
                 updates["failure"] = failure
             await asyncio.to_thread(
                 self.store.update_optimization_run,
-                session_id,
                 run_id,
                 updates,
                 owner_id=self.owner_id,
@@ -421,7 +418,7 @@ class ExperimentManager:
         run_id = validate_run_id(record["run_id"])
         directory = self.root / "candidates"
         manifest_path = directory / f"{run_id}.manifest.json"
-        active_path = self.root / f"{validate_session_id(record['session_id'])}.json"
+        active_path = self.root / "fleet.json"
         status = "interrupted"
         updates: dict[str, Any] = {}
         try:
@@ -469,7 +466,6 @@ class ExperimentManager:
             updates["failure"] = failure
         await asyncio.to_thread(
             self.store.update_optimization_run,
-            record["session_id"],
             run_id,
             updates,
             owner_id=record["owner_id"],

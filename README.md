@@ -113,7 +113,7 @@ available.
 The TUI's `/optimize` starts an API-owned GEPA job that continues if the client
 disconnects; use its explicit cancel action to request cooperative stopping.
 On normal exit, the owning `fleet cli`/`fleet web` launcher drains the job before
-it stops services it owns. `uv run fleet optimize --session SESSION_ID` remains
+it stops services it owns. `uv run fleet optimize` (labels from every Session; `--check` prints readiness) remains
 available as a standalone CLI workflow.
 
 ### 4. Analyze a file and save an artifact

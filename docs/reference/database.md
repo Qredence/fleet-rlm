@@ -36,6 +36,17 @@ at most one globally active run or approval; there is no job queue. The record
 stores request idempotency, validated options, owner, managed-worker marker,
 status/stage, cooperative stop intent, and run metadata. Database owner/status
 checks fence stale workers from publishing lifecycle updates.
+Migration 11 makes jobs global. It adds `kind` (`optimize`, `evaluate_rescore`,
+`evaluate_replay`, or `evaluate_synthetic`, default `optimize`), drops the
+`session_id` column, and re-keys `fleet_lite_optimization_runs` by `run_id` with
+`request_id` unique across all jobs (idempotency is now global). Each existing
+row keeps its former Session as `legacy_session_id` in its metadata; request IDs
+that collided across Sessions are suffixed with their run ID. Old rows stay
+readable, and approval refuses them because their incumbent was a per-Session
+program. The one-active-job partial index is unchanged. The migration also
+creates `fleet_lite_global_settings` (`scope`, `settings` JSONB) for controls that
+belong to no Session, such as the Improve settings. The migration is not
+reversible by an older Fleet, which keys runs by Session.
 Migration 7 adds an expression GIN index matching memory search's
 `to_tsvector('english', content)` predicate. PostgreSQL chooses whether to use
 it; it does not eliminate ranking work. The initial index build runs under the
@@ -161,9 +172,9 @@ not restore Python process memory.
 
 New optimization status is stored in PostgreSQL; candidate manifests, reports,
 and GEPA working files remain in the configured artifact directory, while MLflow
-stores optimization traces and evidence. Existing per-Session JSON run records
-are imported idempotently at startup and before history reads. They are retained
-as read-only migration sources. API restart marks abandoned managed workers
+stores optimization traces and evidence. The installed program is the single file
+`<compiled_program_dir>/fleet.json`; there is no per-Session artifact or selection
+setting, and the dataset spans every Session's approved labels. API restart marks abandoned managed workers
 interrupted and does not rerun provider work; a later explicit review reconciles
 an interrupted approval against the active candidate digests.
 

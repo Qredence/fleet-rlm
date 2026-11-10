@@ -113,17 +113,38 @@ class ModelRequest(_Request):
     model: str = Field(min_length=1, max_length=300, pattern=r"^\S(?:.*\S)?$")
 
 
-class StartExperiment(ExperimentOptions):
-    """Validated search controls and a retry-safe caller identity."""
+class StartJob(ExperimentOptions):
+    """A job kind, its validated controls, and a retry-safe caller identity."""
 
+    kind: Literal["optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic"] = "optimize"
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class ReviewExperiment(_Request):
+class ReviewJob(_Request):
     """An explicit human decision, never an implicit promotion after optimization."""
 
     decision: Literal["approved", "rejected"]
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class LabelRequest(_Request):
+    """A gold label for one replay-captured Turn; unset fields keep the Turn's existing label."""
+
+    turn_id: str = Field(min_length=1, max_length=128)
+    status: Literal["approved", "benchmark", "synthetic", "rejected"] = "approved"
+    expected_answer: str | None = Field(default=None, max_length=100_000)
+    expected_values: list[str] | None = Field(default=None, max_length=100)
+    critical: bool | None = None
+    group: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class ImproveSettings(_Request):
+    """Improve-loop controls shared by every Session; auto-run itself starts jobs in a later release."""
+
+    auto_run: bool = False
+    min_new_labels: int = Field(default=5, ge=1, strict=True)
+    max_metric_calls: int | None = Field(default=None, ge=1, strict=True)
+    max_total_tokens: int | None = Field(default=None, ge=0, strict=True)
 
 
 # Responses
@@ -314,13 +335,14 @@ class ApiError(BaseModel):
     detail: str | list[dict[str, Any]]
 
 
-class ExperimentRun(BaseModel):
-    """Public view of a persisted optimization run, including additive public fields."""
+class Job(BaseModel):
+    """Public view of a persisted job, including additive public fields."""
 
     model_config = ConfigDict(extra="allow")
 
     run_id: str
-    session_id: str
+    kind: str = "optimize"
+    legacy_session_id: str | None = None
     status: str
     stage: str | None = None
     options: dict[str, Any] | None = None
@@ -330,6 +352,7 @@ class ExperimentRun(BaseModel):
     finished_at: str | None = None
     candidate_version: str | None = None
     gate: dict[str, Any] | None = None
+    scores: dict[str, Any] | None = None
     dataset_sizes: dict[str, Any] | None = None
     mlflow_run_id: str | None = None
     progress: dict[str, Any] | None = None
@@ -339,25 +362,78 @@ class ExperimentRun(BaseModel):
     stop_requested: bool | None = None
 
 
-class ExperimentList(BaseModel):
-    """History snapshot and admission state for one Session's experiments."""
+class JobList(BaseModel):
+    """History snapshot and admission state for every job."""
 
-    experiments: list[ExperimentRun]
+    jobs: list[Job]
     active_run_id: str | None
     accepting: bool
 
 
-class ExperimentEnvelope(BaseModel):
-    """One public run returned by start, cancel, or review."""
+class JobEnvelope(BaseModel):
+    """One public job returned by start, cancel, or review."""
 
-    experiment: ExperimentRun
+    job: Job
 
 
-class ExperimentDetail(BaseModel):
-    """One public run and its optional saved comparison evidence."""
+class JobDetail(BaseModel):
+    """One public job and its optional saved comparison evidence."""
 
-    experiment: ExperimentRun
+    job: Job
     comparison: dict[str, Any] | None
+
+
+class ImproveReadiness(BaseModel):
+    """What the labelled examples support today and what a run still needs."""
+
+    ready: bool
+    examples: int
+    groups: int
+    critical: int
+    split_sizes: dict[str, int]
+    missing: list[str]
+    new_labels_since_last_run: int
+
+
+class QueueItem(BaseModel):
+    """A replay-captured Turn awaiting or carrying a gold label."""
+
+    turn_id: str
+    session_id: str
+    task: str
+    answer: str
+    figures: list[str]
+    label: str
+    expected_answer: str | None = None
+    expected_values: list[str] = Field(default_factory=list)
+    critical: bool = False
+    group: str | None = None
+    updated_at: str | None = None
+
+
+class ImproveQueue(BaseModel):
+    """Replay-captured Turns across every Session, newest first."""
+
+    items: list[QueueItem]
+
+
+class LabelSaved(BaseModel):
+    """The label now stored for a Turn."""
+
+    turn_id: str
+    trace_id: str
+    status: str
+    expected_answer: str | None = None
+    expected_values: list[str]
+    critical: bool
+    group: str
+
+
+class ImproveHistory(BaseModel):
+    """Approved versions and evaluation results, newest first, for the quality trend."""
+
+    versions: list[Job]
+    evaluations: list[Job]
 
 
 class ExperimentManagerStatus(BaseModel):
@@ -365,4 +441,4 @@ class ExperimentManagerStatus(BaseModel):
 
     accepting: bool
     busy: bool
-    experiments: list[ExperimentRun]
+    experiments: list[Job]

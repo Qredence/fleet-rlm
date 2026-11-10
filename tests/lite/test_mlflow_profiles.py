@@ -148,7 +148,7 @@ def test_standalone_commands_receive_selected_backend(monkeypatch, backend):
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **_kwargs: seen.append(app.state.settings.mlflow_mode))
     cli.main(["eval", "label", "tr-1", "--mlflow", backend])
     cli.main(["trace", "verify", "tr-1", "--mlflow", backend])
-    cli.main(["optimize", "--session", "s1", "--mlflow", backend])
+    cli.main(["optimize", "--mlflow", backend])
     cli.main(["serve", "--mlflow", backend])
     assert seen == [backend] * 4
 
@@ -437,9 +437,9 @@ def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination
         if request.method == "POST":
             return httpx.Response(
                 202,
-                json={"experiment": {"run_id": "s1-run", "status": "running", "stage": "search"}},
+                json={"job": {"run_id": "s1-run", "status": "running", "stage": "search"}},
             )
-        return httpx.Response(200, json={"experiment": {"run_id": "s1-run", "status": "completed"}})
+        return httpx.Response(200, json={"job": {"run_id": "s1-run", "status": "completed"}})
 
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "stale")
@@ -449,7 +449,7 @@ def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination
         commands._optimize(ctx, "--mlflow=local")
 
     assert [request.method for request in requests] == ["POST", "GET"]
-    assert requests[0].url.path == "/sessions/s1/experiments"
+    assert requests[0].url.path == "/improve/jobs"
     body = json.loads(requests[0].content)
     assert body["max_metric_calls"] == 1
     assert body["request_id"]

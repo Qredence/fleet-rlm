@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import json
 import math
+import re
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -235,3 +236,27 @@ def item_decision(choices: list[str]) -> type[dspy.Signature]:
     it as immutable: build a new signature instead of editing this one.
     """
     return _item_decision_cached(tuple(choices))
+
+
+# A figure: an optionally signed number, with `$` and thousands separators allowed; not part of an identifier.
+_FIGURE = re.compile(r"(?<![\w.])\$?-?\d[\d,]*(?:\.\d+)?")
+
+
+def figures(text: str) -> dict[str, float]:
+    """Normalized number literals in `text`; small integers carry no evidence and are ignored."""
+    found: dict[str, float] = {}
+    for match in _FIGURE.finditer(text):
+        literal = match.group().replace("$", "").replace(",", "")
+        try:
+            value = float(literal)
+        except ValueError:
+            continue
+        if "." in literal or abs(value) >= 10:
+            found[literal] = value
+    return found
+
+
+def figure_grounded(literal: str, value: float, observed: set[float]) -> bool:
+    """A typed figure is grounded when some observed value rounds to it at the typed precision."""
+    places = len(literal.split(".", 1)[1]) if "." in literal else 0
+    return any(round(seen, places) == round(value, places) for seen in observed)

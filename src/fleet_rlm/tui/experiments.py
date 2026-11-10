@@ -1,4 +1,4 @@
-"""Session-scoped GEPA experiment history and review screen."""
+"""Global GEPA job history and review screen."""
 
 from __future__ import annotations
 
@@ -49,7 +49,6 @@ class ExperimentsScreen(ModalScreen[None]):
     def __init__(
         self,
         client: httpx.Client,
-        session_id: str,
         *,
         on_run: Callable[[], None],
         on_cancel: Callable[[str], None],
@@ -58,7 +57,6 @@ class ExperimentsScreen(ModalScreen[None]):
     ) -> None:
         super().__init__()
         self.client = client
-        self.session_id = session_id
         self.on_run = on_run
         self.on_cancel = on_cancel
         self.on_review = on_review
@@ -77,11 +75,11 @@ class ExperimentsScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         """Compose the history, review detail, and guarded actions."""
         with Vertical(id="experiments-panel"):
-            yield Static(f"Experiments · Session {self.session_id}", id="experiments-title")
+            yield Static("Experiments · all Sessions", id="experiments-title")
             yield Static("", id="experiments-progress")
             with Horizontal(id="experiments-content"):
                 with VerticalScroll(id="experiment-history-scroll"):
-                    yield Static("Loading session history…", id="experiment-history")
+                    yield Static("Loading job history…", id="experiment-history")
                 with VerticalScroll(id="experiment-detail-scroll"):
                     yield Static("Select an experiment to inspect its evidence.", id="experiment-detail")
             with Vertical(id="experiment-actions"):
@@ -132,7 +130,7 @@ class ExperimentsScreen(ModalScreen[None]):
             if not self.is_mounted or not self.is_attached:
                 self._polling = False
                 return
-            self.records = [item for item in payload.get("experiments", []) if isinstance(item, dict)]
+            self.records = [item for item in payload.get("jobs", []) if isinstance(item, dict)]
             active = payload.get("active_run_id")
             self.active_run_id = active if isinstance(active, str) else None
             self.accepting = payload.get("accepting") is True
@@ -157,7 +155,7 @@ class ExperimentsScreen(ModalScreen[None]):
                 if not self.is_mounted or not self.is_attached:
                     self._polling = False
                     return
-                experiment = detail.get("experiment")
+                experiment = detail.get("job")
                 if not isinstance(experiment, dict) or experiment.get("run_id") != requested_run_id:
                     raise ValueError("experiment detail identity mismatch")
                 if self.selected_run_id == requested_run_id:
@@ -187,11 +185,11 @@ class ExperimentsScreen(ModalScreen[None]):
             self.refresh_history()
 
     def _fetch_snapshot(self) -> dict[str, Any]:
-        """Fetch this Session's experiment snapshot.
+        """Fetch the global job snapshot.
 
         HTTP and JSON decoding errors propagate; a response that is not an object raises ValueError.
         """
-        response = self.client.get(f"/sessions/{quote(self.session_id, safe='')}/experiments")
+        response = self.client.get("/improve/jobs")
         response.raise_for_status()
         value = response.json()
         if not isinstance(value, dict):
@@ -199,11 +197,11 @@ class ExperimentsScreen(ModalScreen[None]):
         return value
 
     def _fetch_detail(self, run_id: str) -> dict[str, Any]:
-        """Fetch a run's saved evidence within this Session.
+        """Fetch a job's saved evidence.
 
         HTTP and JSON decoding errors propagate; a response that is not an object raises ValueError.
         """
-        response = self.client.get(f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}")
+        response = self.client.get(f"/improve/jobs/{quote(run_id, safe='')}")
         response.raise_for_status()
         value = response.json()
         if not isinstance(value, dict):

@@ -46,6 +46,7 @@ _TOML_FIELDS = {
         "max_child_sandboxes": "max_child_sandboxes",
         "max_active_children": "max_active_children",
         "max_active_sessions": "max_active_sessions",
+        "job_max_tokens": "job_max_tokens",
         "linked_children": "linked_children",
     },
     "gateway": {"host": "databricks_host"},
@@ -580,6 +581,12 @@ class FleetSettings(BaseSettings):
         ge=1,
         le=1024,
         validation_alias=AliasChoices("FLEET_MAX_ACTIVE_SESSIONS", "MAX_ACTIVE_SESSIONS"),
+    )
+    job_max_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="Generative LM tokens one optimization job may spend; 0 means unlimited.",
+        validation_alias="FLEET_JOB_MAX_TOKENS",
     )
     max_upload_bytes: int = Field(
         default=MAX_WORKSPACE_FILE_BYTES,

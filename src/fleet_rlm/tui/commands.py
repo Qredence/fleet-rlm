@@ -546,9 +546,6 @@ def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], 
     except ValueError as exc:
         _out(ctx).print(f"[red]Invalid /optimize arguments:[/red] {exc}")
         return None
-    if any(value == "--session" or value.startswith("--session=") for value in extra):
-        _out(ctx).print("[red]/optimize always uses the active Session.[/red]")
-        return None
     parser = argparse.ArgumentParser(prog="/optimize", add_help=False, exit_on_error=False)
     add_search_arguments(parser)
     parser.add_argument("--approve")
@@ -585,7 +582,7 @@ def _finish_optimizer_request(state: SessionState, request_id: str) -> None:
 
 
 def _optimize(ctx: Context, arg: str) -> None:
-    """Start or review this Session's optimization through the Fleet API."""
+    """Start or review a global optimization job through the Fleet API."""
     parsed = _parse_optimizer_arguments(ctx, arg)
     if parsed is None:
         return
@@ -604,29 +601,29 @@ def _optimize(ctx: Context, arg: str) -> None:
         return
     if approve_run is not None:
         response = ctx.post(
-            f"{ctx.session}/experiments/{quote(approve_run, safe='')}/review",
+            f"/improve/jobs/{quote(approve_run, safe='')}/review",
             json={"decision": "approved", "request_id": str(uuid.uuid4())},
         )
-        run = response.json().get("experiment", {})
+        run = response.json().get("job", {})
     else:
         try:
-            response = ctx.post(f"{ctx.session}/experiments", json=payload)
+            response = ctx.post("/improve/jobs", json=payload)
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 _finish_optimizer_request(ctx.state, str(payload["request_id"]))
             raise
         _finish_optimizer_request(ctx.state, str(payload["request_id"]))
-        run = response.json().get("experiment", {})
+        run = response.json().get("job", {})
     run_id = run.get("run_id")
     if not isinstance(run_id, str):
         _out(ctx).print("[red]Fleet API returned an invalid experiment record.[/red]")
         return
     _out(ctx).print(f"[cyan]Optimization {run.get('status', 'started')}:[/cyan] {run_id}")
-    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected", "budget_exhausted"}
     last_stage: str | None = None
     while run.get("status") not in terminal:
         time.sleep(1)
-        run = ctx.get(f"{ctx.session}/experiments/{quote(run_id, safe='')}").json().get("experiment", {})
+        run = ctx.get(f"/improve/jobs/{quote(run_id, safe='')}").json().get("job", {})
         stage = run.get("stage")
         if stage and stage != last_stage:
             last_stage = stage

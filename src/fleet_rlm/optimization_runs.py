@@ -18,13 +18,14 @@ from typing import TYPE_CHECKING, Any, Literal, TextIO
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, model_validator
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.workspace import validate_session_id
 
 if TYPE_CHECKING:
     from fleet_rlm.store import Store
 
 EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
+# One job system: `kind` selects the worker. Only `optimize` has a managed worker so far.
+JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _MAX_REPORT_BYTES = 4_000_000
 VALIDATION_RATIO_MIN = 0.1
@@ -50,7 +51,6 @@ def reconcile_abandoned_running_runs(store: Store, *, inactive_owner_id: str | N
         ):
             continue
         store.update_optimization_run(
-            record["session_id"],
             record["run_id"],
             {
                 "status": "interrupted",
@@ -80,6 +80,8 @@ class ExperimentOptions(BaseModel):
         default=VALIDATION_RATIO_DEFAULT, ge=VALIDATION_RATIO_MIN, le=VALIDATION_RATIO_MAX, allow_inf_nan=False
     )
     trace_search: bool = False
+    # Total generative LM tokens the job may spend. None inherits FLEET_JOB_MAX_TOKENS; 0 is unlimited.
+    max_total_tokens: int | None = Field(default=None, ge=0, strict=True)
 
     @model_validator(mode="after")
     def one_budget(self) -> ExperimentOptions:
@@ -120,12 +122,19 @@ def add_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-candidate-proposals", type=int)
     parser.add_argument("--validation-ratio", type=float, default=VALIDATION_RATIO_DEFAULT)
     parser.add_argument("--trace-search", action="store_true", help="also trace search rollouts in MLflow")
+    parser.add_argument(
+        "--max-total-tokens",
+        type=int,
+        help="stop with budget_exhausted after this many LM tokens (0 = unlimited; default FLEET_JOB_MAX_TOKENS)",
+    )
 
 
 def add_optimization_arguments(parser: argparse.ArgumentParser) -> None:
     """Build the optimization parser without importing the offline optimizer."""
-    parser.add_argument("--session", required=True, help="Session whose engine serves an approved candidate")
     add_search_arguments(parser)
+    parser.add_argument(
+        "--check", action="store_true", help="print dataset readiness and exit non-zero if not ready; no live calls"
+    )
     parser.add_argument("--structured-events", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--managed-run-id", help=argparse.SUPPRESS)
     parser.add_argument("--managed-owner-id", help=argparse.SUPPRESS)
@@ -151,12 +160,9 @@ def emit_event(event: Mapping[str, Any], *, stream: TextIO | None = None) -> Non
     output.flush()
 
 
-def request_run_stop(root: Path, session_id: str, run_id: str) -> bool:
+def request_run_stop(root: Path, run_id: str) -> bool:
     """Write only GEPA's stop signal; the caller serializes status acceptance in PostgreSQL."""
-    validate_session_id(session_id)
     validate_run_id(run_id)
-    if not run_id.startswith(session_id + "-"):
-        raise ValueError("run_id does not belong to the Session")
     runs = Path(root) / "runs"
     directory = runs / run_id
     for folder in (runs, directory):
@@ -173,7 +179,7 @@ def request_run_stop(root: Path, session_id: str, run_id: str) -> bool:
 def read_comparison(root: Path, record: Mapping[str, Any]) -> dict[str, Any] | None:
     """Read bounded review evidence at its derived path, without following symlinks."""
     version = record.get("candidate_version")
-    if version is None and record.get("status") in {"failed", "cancelled", "interrupted"}:
+    if version is None and record.get("status") in {"failed", "cancelled", "interrupted", "budget_exhausted"}:
         version = record.get("run_id")
     if not isinstance(version, str) or version != record.get("run_id"):
         return None
@@ -191,7 +197,8 @@ def read_comparison(root: Path, record: Mapping[str, Any]) -> dict[str, Any] | N
 _PUBLIC_FIELDS = frozenset(
     {
         "run_id",
-        "session_id",
+        "kind",
+        "legacy_session_id",
         "status",
         "stage",
         "options",
@@ -201,6 +208,7 @@ _PUBLIC_FIELDS = frozenset(
         "finished_at",
         "candidate_version",
         "gate",
+        "scores",
         "dataset_sizes",
         "mlflow_run_id",
         "progress",

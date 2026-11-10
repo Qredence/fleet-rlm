@@ -344,3 +344,15 @@ def test_installed_rlm_lifecycle_promotes_only_a_valid_completed_invocation(fini
         assert events == ["promoted", "closed"]
         assert "deliberate repair probe" in result.trajectory[0]["output"]
         assert (result.final_reasoning == "Extract forced final output") == (finish == "extraction")
+
+
+def test_figure_extraction_is_shared_by_submit_grounding_and_the_review_queue():
+    from fleet_rlm.contracts import figure_grounded, figures
+
+    found = figures("Revenue $1,250.50 over 42 orders (id=a12345, ratio 0.5, n=7)")
+    assert found == {"1250.50": 1250.5, "42": 42.0, "0.5": 0.5}
+    assert figure_grounded("1250.5", 1250.5, {1250.49}) and not figure_grounded("1250.5", 1250.5, {1250.0})
+    # The interpreter imports the same helpers rather than a private copy.
+    from fleet_rlm.sandbox import interpreter
+
+    assert interpreter.figures is figures and interpreter.figure_grounded is figure_grounded

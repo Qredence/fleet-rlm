@@ -15,10 +15,15 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET` | `/sessions/{session_id}/files` | List workspace files and generated artifacts. |
 | `POST` | `/sessions/{session_id}/attach` | Attach a multipart file to `files/` in the session workspace. |
 | `POST` | `/sessions/{session_id}/turn` | Run a Turn and stream progress as SSE. |
-| `GET`, `POST` | `/sessions/{session_id}/experiments` | List persisted experiments or submit an idempotent GEPA run request. |
-| `GET` | `/sessions/{session_id}/experiments/{run_id}` | Read one experiment snapshot and its bounded saved comparison. |
-| `POST` | `/sessions/{session_id}/experiments/{run_id}/cancel` | Request cooperative cancellation of a running experiment. |
-| `POST` | `/sessions/{session_id}/experiments/{run_id}/review` | Explicitly approve or reject a candidate. |
+| `GET` | `/improve/readiness` | Report what the labelled examples support, what is missing, and `new_labels_since_last_run`. |
+| `GET` | `/improve/queue` | List replay-captured Turns across Sessions with label state and pre-extracted figures. |
+| `POST` | `/improve/labels` | Label one Turn by `turn_id`; the server resolves its trace. |
+| `GET`, `POST` | `/improve/jobs` | List persisted jobs or submit an idempotent job request. |
+| `GET` | `/improve/jobs/{run_id}` | Read one job snapshot and its bounded saved comparison. |
+| `POST` | `/improve/jobs/{run_id}/cancel` | Request cooperative cancellation of a running job. |
+| `POST` | `/improve/jobs/{run_id}/review` | Explicitly approve or reject a candidate. |
+| `GET` | `/improve/history` | Approved versions and completed evaluation jobs, for the quality trend. |
+| `GET`, `PUT` | `/improve/settings` | Read or replace the loop controls shared by every Session. |
 | `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `direct`, `flex`, `rlm`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
 | `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
@@ -46,42 +51,83 @@ session lock. While a Turn holds it they answer `409` after two seconds rather t
 `POST /sessions/{session_id}/turn` takes the same lock and answers `409` the same way when another Turn
 or workspace change is running; it holds the lock until the stream ends and the Turn has drained.
 
-## Experiments
+## Improve
 
-The experiments routes do not acquire a Session runtime lease. A `POST` start
-body contains the shared optimizer options (`gepa_budget` or `max_metric_calls`,
-`threads`, `reflection_minibatch_size`, `max_candidate_proposals`,
-`validation_ratio`, and `trace_search`) plus a caller-generated `request_id`.
-`validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls return
-`422` before run creation. Unusable curated splits, including missing critical
-holdout, fail preparation before search.
-Repeating the same request ID with the same options returns the existing run;
-reusing it with different options returns `409`. The API owns the accepted job
+The program and the labelled dataset belong to no Session: one installed program
+serves every Session, and labels from all Sessions feed one dataset. The Improve
+routes do not acquire a Session runtime lease.
+
+**Readiness.** `GET /improve/readiness` returns `ready`, the counts (`examples`,
+`groups`, `critical`), the `split_sizes` the examples would form, `missing`
+requirements in plain words, and `new_labels_since_last_run` (approved labels
+written after the latest optimize job was created). It uses the same loader and
+checks as a job, so a green report means a job will not refuse for data.
+
+**Labelling.** `GET /improve/queue?limit=` (1–200, default 50) lists completed,
+replay-captured Turns across Sessions, newest first: `turn_id`, `session_id`,
+task and answer previews, the answer's number literals as `figures`, and the
+label state (`unlabelled` or a review status with the stored gold). A Session's
+older Turns fall out of the task preview once they leave its bounded history.
+`POST /improve/labels` takes `turn_id`, `status` (default `approved`),
+`expected_answer`, `expected_values`, `critical`, and `group`; unset fields keep the
+Turn's existing label. The server resolves the trace from the stored Turn, then
+writes MLflow expectations and PostgreSQL curation exactly as `fleet eval label`
+does. An unknown Turn is `404`; a Turn without a trace, or invalid labels, `422`;
+a partial synchronization `503` with the retry hint.
+
+**Jobs.** A `POST /improve/jobs` body contains a `kind`, the shared optimizer
+options (`gepa_budget` or `max_metric_calls`, `threads`,
+`reflection_minibatch_size`, `max_candidate_proposals`, `validation_ratio`,
+`trace_search`, and `max_total_tokens`) plus a caller-generated `request_id`. The
+ledger reserves `optimize`, `evaluate_rescore`, `evaluate_replay`, and
+`evaluate_synthetic`; only `optimize` has a managed worker, and the others return
+`422`. `validation_ratio` is inclusive 0.1–0.5 (default 0.35); invalid controls
+return `422` before run creation. Unusable curated splits, including a missing
+critical holdout, fail preparation before search.
+Repeating the same request ID with the same kind and options returns the existing
+job; reusing it with different ones returns `409`. The API owns the accepted job
 across client disconnection. It runs the existing optimizer as a subprocess,
 records lifecycle state in PostgreSQL, and saves traces/evidence to the configured
 MLflow experiment and candidates to the configured artifact directory.
 
-There is one active optimization-or-review slot across Sessions and no queue.
-An occupied or draining slot returns `409`. List returns persisted Session runs,
-`active_run_id`, and whether the manager is accepting new work. Detail returns a
-snapshot plus a bounded comparison document when one exists. The TUI polls these
-snapshots every second; experiment progress is not an SSE stream.
+`max_total_tokens` caps the generative LM tokens a job may spend. Omitted, it
+inherits `FLEET_JOB_MAX_TOKENS`; `0` is unlimited. The worker sums the usage the
+LM calls report; when the cap is reached it stops search and validation at the
+next safe boundary and the job ends `budget_exhausted` with no candidate. TypeSafe
+decision calls are not counted. The cap is telemetry: it never affects the
+persistence failure latch. `progress` carries `tokens_used` and `token_cap`.
 
-Cancellation requires a running run and requests a cooperative stop. The worker
+There is one active job-or-review slot and no queue. An occupied or draining slot
+returns `409`. List returns persisted jobs, `active_run_id`, and whether the
+manager is accepting new work. Detail returns a snapshot plus a bounded comparison
+document when one exists. During search `progress` also carries `best_score` (the
+best validation average GEPA has seen) and a `score_trajectory` of at most 200
+`[iteration, average_score]` points. After validation the job carries `scores`
+(baseline and candidate dev/holdout means). The TUI polls these snapshots every
+second; job progress is not an SSE stream.
+
+Cancellation requires a running job and requests a cooperative stop. The worker
 checks both its stop signal and the PostgreSQL stop flag at safe boundaries;
 terminal status is written only after the worker exits and output drains. A
-disconnect has no cancellation effect. The launcher drains API-owned experiments
+disconnect has no cancellation effect. The launcher drains API-owned jobs
 before a normal service shutdown. If the API process restarts unexpectedly,
 abandoned managed work is marked interrupted and is never automatically rerun.
-Interrupted approval is reconciled against active artifact digests before the
-candidate can be reviewed again.
+Interrupted approval is reconciled against the installed program's digest before
+the candidate can be reviewed again.
 
 Approval uses the same artifact, incumbent, configuration, source, and installed
-dependency identity checks as standalone `fleet optimize --approve`. Review is an
-explicit action; a passing optimization candidate is not installed automatically.
-Standalone `fleet optimize` remains a separate synchronous CLI workflow. Legacy
-per-Session JSON run files are imported idempotently into PostgreSQL and retained
-read-only; PostgreSQL is authoritative for new run lifecycle.
+dependency identity checks as standalone `fleet optimize --approve`, and installs
+`fleet.json` for every Session. Review is an explicit action; a passing candidate
+is not installed automatically. Jobs recorded before the program became global keep
+their Session as `legacy_session_id`: they stay readable and can be rejected, but
+approval returns `409` because their incumbent was a per-Session program.
+
+**History and settings.** `GET /improve/history` returns `versions` (approved
+optimize jobs with their `scores`) and `evaluations` (completed evaluate jobs),
+newest first. `GET`/`PUT /improve/settings` hold `auto_run` (default `false`),
+`min_new_labels` (default 5), `max_metric_calls`, and `max_total_tokens`. They are
+stored in PostgreSQL for all Sessions; the auto-run trigger that consumes them is
+not implemented yet.
 
 There is no caller authentication. The service binds to loopback by default;
 binding elsewhere does not add authentication. Only use on a trusted host or
@@ -251,11 +297,11 @@ id: 3
 
 ```
 
-Experiment list responses contain `experiments`, nullable `active_run_id`, and
-`accepting`. Start, cancel, and review responses contain `experiment`; detail adds
-nullable `comparison`. Public experiment models retain progress, options, failure,
-gate, and review information while excluding private worker settings. Setup
-experiment status and drain return `accepting`, `busy`, and `experiments`.
+Job list responses contain `jobs`, nullable `active_run_id`, and `accepting`. Start,
+cancel, and review responses contain `job`; detail adds nullable `comparison`.
+Public job models retain `kind`, progress, options, failure, gate, scores, and review
+information while excluding private worker settings. Setup experiment status and
+drain (operator routes) return `accepting`, `busy`, and `experiments`, each a job.
 
 Workspace writes require exactly one non-null `content` or `content_base64` field.
 An empty string writes an empty file. Neither or both returns the existing safe

@@ -517,14 +517,12 @@ class FleetTextualApp(App[str | None]):
     async def _poll_optimizer_snapshot(self) -> None:
         """Refresh the active or last observed run, retaining the last state on handled fetch errors."""
         try:
-            response = await asyncio.to_thread(
-                self.client.get, f"/sessions/{quote(self.session_id, safe='')}/experiments"
-            )
+            response = await asyncio.to_thread(self.client.get, "/improve/jobs")
             response.raise_for_status()
             snapshot = response.json()
             if not isinstance(snapshot, dict):
                 return
-            records = snapshot.get("experiments")
+            records = snapshot.get("jobs")
             if not isinstance(records, list):
                 return
             active_id = snapshot.get("active_run_id")
@@ -791,14 +789,13 @@ class FleetTextualApp(App[str | None]):
                 event.stop()
 
     def _open_experiments(self) -> None:
-        """Open or refresh the Experiments screen for the active Session."""
+        """Open or refresh the Experiments screen."""
         if isinstance(self.screen, ExperimentsScreen):
             self.screen.refresh_history()
             return
         self.push_screen(
             ExperimentsScreen(
                 self.client,
-                self.session_id,
                 on_run=self._start_default_optimization,
                 on_cancel=self._request_optimizer_stop,
                 on_review=self._review_optimization,
@@ -829,11 +826,9 @@ class FleetTextualApp(App[str | None]):
         it on success or a 4xx response. Response decoding errors propagate.
         """
         try:
-            response = await asyncio.to_thread(
-                self.client.post, f"/sessions/{quote(self.session_id, safe='')}/experiments", json=options
-            )
+            response = await asyncio.to_thread(self.client.post, "/improve/jobs", json=options)
             response.raise_for_status()
-            record = response.json().get("experiment", {})
+            record = response.json().get("job", {})
             request_id = options.get("request_id")
             if isinstance(request_id, str):
                 commands_mod._finish_optimizer_request(self.state, request_id)
@@ -870,11 +865,11 @@ class FleetTextualApp(App[str | None]):
         try:
             response = await asyncio.to_thread(
                 self.client.post,
-                f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}/review",
+                f"/improve/jobs/{quote(run_id, safe='')}/review",
                 json={"decision": decision, "request_id": request_id},
             )
             response.raise_for_status()
-            self._optimizer_snapshot(response.json().get("experiment", {}))
+            self._optimizer_snapshot(response.json().get("job", {}))
             if isinstance(self.screen, ExperimentsScreen):
                 self.screen._finish_review_request(run_id, decision)
                 self.screen.refresh_history()
@@ -910,10 +905,10 @@ class FleetTextualApp(App[str | None]):
         try:
             response = await asyncio.to_thread(
                 self.client.post,
-                f"/sessions/{quote(self.session_id, safe='')}/experiments/{quote(run_id, safe='')}/cancel",
+                f"/improve/jobs/{quote(run_id, safe='')}/cancel",
             )
             response.raise_for_status()
-            self._optimizer_snapshot(response.json().get("experiment", {}))
+            self._optimizer_snapshot(response.json().get("job", {}))
             self.append_markup("[yellow]Cancellation requested; the API is cleaning up.[/yellow]")
         except httpx.HTTPError as exc:
             self._optimization_stopping = False
@@ -934,7 +929,7 @@ class FleetTextualApp(App[str | None]):
         )
         if not self._optimization_active:
             self._optimizer_stop_requested = False
-        terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+        terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected", "budget_exhausted"}
         self._optimization_terminal_status = status if status in terminal else None
         if self.is_running:
             self.refresh_chrome()

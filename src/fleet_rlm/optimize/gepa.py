@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+import threading
 import uuid
 from collections.abc import Mapping
 from contextlib import ExitStack, closing, contextmanager, suppress
@@ -22,7 +23,7 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.compiled import load_program_envelope, program_envelope
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.models import build_lm
-from fleet_rlm.observability import configure_mlflow_observability
+from fleet_rlm.observability import LMUsageCallback, configure_mlflow_observability
 from fleet_rlm.optimization_runs import (
     ExperimentOptions,
     emit_event,
@@ -41,7 +42,7 @@ from fleet_rlm.optimize.artifacts import (
     promotion_gate,
     write_manifest,
 )
-from fleet_rlm.optimize.dataset import curate_dataset, dataset_digest
+from fleet_rlm.optimize.dataset import curate_dataset, dataset_digest, load_examples, readiness
 from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
 from fleet_rlm.optimize.validation import (
     IsolatedFleetProgram,
@@ -52,13 +53,45 @@ from fleet_rlm.optimize.validation import (
 )
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.store import Store
-from fleet_rlm.workspace import validate_session_id
 
 logger = logging.getLogger(__name__)
 
 
 class OptimizationPersistenceError(RuntimeError):
     """Required optimization persistence or ownership could not be confirmed."""
+
+
+_SCORE_TRAJECTORY_POINTS = 200
+
+
+class TokenBudget(LMUsageCallback):
+    """Sum generative LM tokens across a whole job and report when its optional cap is reached.
+
+    This is telemetry with a stop predicate. It never touches the reporter's persistence latch,
+    and TypeSafe decision calls are excluded exactly as they are from Turn usage.
+    """
+
+    def __init__(self, cap: int) -> None:
+        super().__init__()
+        self.cap = cap
+        self.used = 0
+        self._count_lock = threading.Lock()
+
+    def on_lm_end(self, call_id: str, outputs: Any, exception: BaseException | None = None) -> None:  # noqa: ARG002
+        """Add the call's reported tokens, whether it succeeded or failed."""
+        usage = self.finish_usage(call_id)
+        tokens = usage.get("total_tokens", usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
+        with self._count_lock:
+            self.used += int(tokens)
+
+    @property
+    def reached(self) -> bool:
+        """True once a nonzero cap has been spent."""
+        return self.cap > 0 and self.used >= self.cap
+
+    def should_stop(self, *_args: Any, **_kwargs: Any) -> bool:
+        """GEPA's native stop predicate."""
+        return self.reached
 
 
 class GEPAProgressReporter:
@@ -69,14 +102,14 @@ class GEPAProgressReporter:
         run_id: str | None = None,
         *,
         store: Store | None = None,
-        session_id: str | None = None,
         owner_id: str | None = None,
         emit_events: bool = True,
+        tokens: TokenBudget | None = None,
     ) -> None:
         self.run_id = run_id
         self.store = store
-        self.session_id = session_id
         self.owner_id = owner_id
+        self.tokens = tokens
         self.emit_events = emit_events
         self._lock = RLock()
         self._failure: Exception | None = None
@@ -98,12 +131,11 @@ class GEPAProgressReporter:
         """Persist a required owner-fenced write; retain its first failure for native stopping."""
         with self._lock:
             self.raise_if_failed()
-            if self.store is None or self.session_id is None or self.run_id is None:
+            if self.store is None or self.run_id is None:
                 return
             try:
                 saved = _update_run(
                     self.store,
-                    self.session_id,
                     self.run_id,
                     owner_id=self.owner_id,
                     expected_statuses=("running",),
@@ -120,13 +152,23 @@ class GEPAProgressReporter:
             progress = {
                 key: value
                 for key, value in event.items()
-                if key in {"iteration", "metric_calls_used", "metric_calls_delta", "metric_calls_remaining"}
+                if key
+                in {
+                    "iteration",
+                    "metric_calls_used",
+                    "metric_calls_delta",
+                    "metric_calls_remaining",
+                    "best_score",
+                    "score_trajectory",
+                }
             }
             # Only the cumulative total is monotonic. Delta and remaining are observations.
             if "metric_calls_used" in progress and progress["metric_calls_used"] < self._progress.get(
                 "metric_calls_used", 0
             ):
                 return
+            if self.tokens is not None:
+                progress |= {"tokens_used": self.tokens.used, "token_cap": self.tokens.cap}
             snapshot = self._progress | progress
             self.update(progress=snapshot, stage="search")
             self._progress = snapshot
@@ -160,6 +202,19 @@ class GEPAProgressReporter:
             }
         )
 
+    def on_valset_evaluated(self, event: Mapping[str, Any]) -> None:
+        """Persist the best validation score and a bounded [iteration, score] trajectory."""
+        score = float(event["average_score"])
+        with self._lock:
+            trajectory = [*self._progress.get("score_trajectory", ()), [event["iteration"], score]]
+            if len(trajectory) > _SCORE_TRAJECTORY_POINTS:
+                thinned = trajectory[::2]
+                trajectory = thinned if thinned[-1] is trajectory[-1] else [*thinned, trajectory[-1]]
+            update: dict[str, Any] = {"stage": "search", "score_trajectory": trajectory}
+            if event["is_best_program"] or "best_score" not in self._progress:
+                update["best_score"] = score
+        self._observe(update)
+
     def on_optimization_end(self, event: Mapping[str, Any]) -> None:
         """Retain prior counters while updating GEPA's final observed total."""
         self._observe({"stage": "search", "metric_calls_used": event["total_metric_calls"]})
@@ -169,17 +224,21 @@ class OptimizationCancelledError(Exception):
     """Raised after a cooperative GEPA or validation stop request is observed."""
 
 
+class BudgetExhaustedError(OptimizationCancelledError):
+    """Raised at a safe boundary once the job's total token cap is spent."""
+
+
 def _check_cancelled(stop_file: Path) -> None:
     """Honor a cooperative stop at safe stage boundaries."""
     if stop_file.exists():
         raise OptimizationCancelledError("Optimization stop requested")
 
 
-def _database_stop_requested(store: Store | None, session_id: str | None, run_id: str | None) -> bool:
+def _database_stop_requested(store: Store | None, run_id: str | None) -> bool:
     """Read the durable stop fence between GEPA batches and evaluation stages."""
-    if store is None or session_id is None or run_id is None:
+    if store is None or run_id is None:
         return False
-    record = store.get_optimization_run(session_id, run_id)
+    record = store.get_optimization_run(run_id)
     return record is None or record.get("status") not in {"running", "queued"} or bool(record.get("stop_requested"))
 
 
@@ -235,7 +294,6 @@ def _tracking_run(name: str) -> Any:
 
 def _update_run(
     store: Store,
-    session_id: str,
     run_id: str,
     *,
     owner_id: str | None = None,
@@ -244,7 +302,6 @@ def _update_run(
 ) -> dict[str, Any] | None:
     """Persist one lifecycle snapshot with an owner/status compare-and-swap."""
     return store.update_optimization_run(
-        session_id,
         run_id,
         updates,
         owner_id=owner_id,
@@ -302,14 +359,13 @@ def build_stop_file_callback(stop_file: Path) -> Any:
 class _DatabaseStopper:
     """Expose the DB stop fence as GEPA's native callable stop callback."""
 
-    def __init__(self, store: Store, session_id: str, run_id: str) -> None:
+    def __init__(self, store: Store, run_id: str) -> None:
         self.store = store
-        self.session_id = session_id
         self.run_id = run_id
 
     def __call__(self, *_args: Any, **_kwargs: Any) -> bool:
         """Return whether the run is missing, inactive, or has a durable stop request."""
-        return _database_stop_requested(self.store, self.session_id, self.run_id)
+        return _database_stop_requested(self.store, self.run_id)
 
 
 def _open_optimization_store(
@@ -356,33 +412,32 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
     Cooperative search cancellation records cancellation and returns; other search
     failures are recorded and re-raised. Approval errors propagate.
     """
-    session_id = validate_session_id(args.session)
     managed_run_id = getattr(args, "managed_run_id", None)
     managed_owner_id = getattr(args, "managed_owner_id", None)
     if bool(managed_run_id) != bool(managed_owner_id):
         parser.error("--managed-run-id and --managed-owner-id must be supplied together")
     if managed_run_id and not getattr(args, "structured_events", False):
         parser.error("managed runs require structured events")
-    if managed_run_id and (
-        Path(managed_run_id).name != managed_run_id or not managed_run_id.startswith(session_id + "-")
-    ):
-        parser.error("Managed run ID must belong to this session")
+    if managed_run_id and Path(managed_run_id).name != managed_run_id:
+        parser.error("Managed run ID is invalid")
     try:
         options = ExperimentOptions.from_namespace(args)
     except ValueError as error:
         parser.error(str(error))
+    if args.check:
+        _check_readiness(settings, options)
+        return
     if args.approve:
         _run_approval(
             args,
             parser,
             settings,
-            session_id=session_id,
             managed_run_id=managed_run_id,
             managed_owner_id=managed_owner_id,
         )
         return
     directory = Path(settings.compiled_program_dir)
-    run_id = managed_run_id or f"{session_id}-{uuid.uuid4().hex}"
+    run_id = managed_run_id or f"optimize-{uuid.uuid4().hex}"
     owner_id = managed_owner_id or uuid.uuid4().hex
     structured = getattr(args, "structured_events", False)
     options_dict = options.model_dump()
@@ -399,7 +454,7 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
             )
             stack.enter_context(closing(store.acquire_optimization_lease()))
             if managed_run_id:
-                record = store.get_optimization_run(session_id, run_id)
+                record = store.get_optimization_run(run_id)
                 if (
                     record is None
                     or record.get("owner_id") != owner_id
@@ -410,7 +465,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
             else:
                 reconcile_abandoned_running_runs(store)
                 store.create_optimization_run(
-                    session_id,
                     run_id,
                     request_id=uuid.uuid4().hex,
                     options=options_dict,
@@ -419,7 +473,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 )
             started = _update_run(
                 store,
-                session_id,
                 run_id,
                 owner_id=owner_id,
                 expected_statuses=("running",),
@@ -461,8 +514,10 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 log_traces_from_eval=options_dict["trace_search"],
                 log_compiles=True,
             )
-            _compile(args, settings, store, session_id, target, run_id, owner_id=owner_id)
+            _compile(args, settings, store, target, run_id, owner_id=owner_id)
             status = "completed"
+        except BudgetExhaustedError:
+            status = "budget_exhausted"
         except OptimizationCancelledError:
             status = "cancelled"
         except KeyboardInterrupt as error:
@@ -474,7 +529,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 status, failure, worker_outcome = _finalize_optimization_run(
                     store,
                     directory,
-                    session_id=session_id,
                     run_id=run_id,
                     owner_id=owner_id,
                     managed_run_id=managed_run_id,
@@ -490,18 +544,35 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
         raise failure
 
 
+def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> None:
+    """Print what the labelled examples support, then exit non-zero when a run would refuse to start.
+
+    Reads Store and MLflow only: no model, Daytona, or optimization state is touched.
+    """
+    target = settings.mlflow_target()
+    mlflow.set_tracking_uri(target.tracking_uri)
+    store = _open_optimization_store(settings, initialize=False)
+    try:
+        examples = load_examples(store, target.experiment_name, target.eval_experiment_name)
+    finally:
+        store.close()
+    status = readiness(examples, validation_ratio=options.validation_ratio)
+    print(json.dumps(status.as_dict(), indent=2))
+    if not status.ready:
+        raise SystemExit(1)
+
+
 def _run_approval(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     settings: FleetSettings,
     *,
-    session_id: str,
     managed_run_id: str | None,
     managed_owner_id: str | None,
 ) -> None:
     version = args.approve
-    if Path(version).name != version or not version.startswith(session_id + "-"):
-        parser.error("Version must be a candidate belonging to this session")
+    if Path(version).name != version:
+        parser.error("Version must be a candidate run ID")
     if managed_run_id and managed_run_id != version:
         parser.error("A managed approval must use the candidate's run ID")
     directory = Path(settings.compiled_program_dir)
@@ -522,12 +593,14 @@ def _run_approval(
             mlflow.flush_trace_async_logging()
             if not managed_run_id:
                 reconcile_abandoned_running_runs(store)
-            record = store.get_optimization_run(session_id, version)
+            record = store.get_optimization_run(version)
             if record is None:
                 raise ValueError("Experiment history is missing; this candidate cannot be approved")
+            if record.get("legacy_session_id"):
+                raise ValueError("A per-Session candidate cannot be installed globally; run a new optimization")
             if record.get("candidate_version") not in (None, version):
                 raise ValueError("Candidate does not match the recorded experiment")
-            active = directory / f"{session_id}.json"
+            active = directory / "fleet.json"
             incumbent = digest_bytes(active.read_bytes()) if active.exists() else ""
             recorded_incumbent = record.get("incumbent_digest") or manifest.dependencies.get("incumbent_digest", "")
             recoverable_approval = record.get("status") == "approving"
@@ -543,7 +616,6 @@ def _run_approval(
                     # refusing so a rejected approval cannot block every future optimization.
                     _update_run(
                         store,
-                        session_id,
                         version,
                         expected_statuses=("approving",),
                         status="interrupted",
@@ -556,7 +628,6 @@ def _run_approval(
                     raise ValueError("interrupted approval has an unknown incumbent; reevaluation is required")
                 restored = _update_run(
                     store,
-                    session_id,
                     version,
                     owner_id=managed_owner_id,
                     expected_statuses=(record["status"],),
@@ -567,7 +638,7 @@ def _run_approval(
                 if restored is None:
                     raise ValueError("Interrupted approval changed; review the current experiment status")
                 record = restored
-            current = settings.for_session(store.runtime_settings(session_id))
+            current = settings
             # Construction validates the same native graph as serving without allocating Daytona.
             template = FleetRuntime(
                 DaytonaSandboxManager(
@@ -590,7 +661,7 @@ def _run_approval(
                     raise ValueError("Only a completed, unreviewed experiment can be approved")
                 review_owner_id = managed_owner_id or uuid.uuid4().hex
                 if not preclaimed:
-                    record = store.claim_optimization_review(session_id, version, review_owner_id)
+                    record = store.claim_optimization_review(version, review_owner_id)
                 try:
                     approve_candidate(
                         candidate_path,
@@ -604,7 +675,6 @@ def _run_approval(
                     if observed == incumbent and not managed_run_id:
                         _update_run(
                             store,
-                            session_id,
                             version,
                             owner_id=review_owner_id,
                             expected_statuses=("approving",),
@@ -612,14 +682,12 @@ def _run_approval(
                             worker_outcome=None,
                         )
                     raise
-            store.save_runtime_settings(session_id, {"program_selection": "artifact"})
             decision_at = datetime.now(UTC).isoformat(timespec="seconds")
             if record.get("status") == "approved":
                 saved = record
             elif managed_run_id:
                 saved = _update_run(
                     store,
-                    session_id,
                     version,
                     owner_id=managed_owner_id or record.get("owner_id"),
                     expected_statuses=("approving",),
@@ -630,7 +698,6 @@ def _run_approval(
             else:
                 saved = _update_run(
                     store,
-                    session_id,
                     version,
                     owner_id=managed_owner_id or record.get("owner_id"),
                     expected_statuses=("approving",),
@@ -643,7 +710,7 @@ def _run_approval(
         except Exception as error:
             if managed_run_id:
                 with suppress(Exception):
-                    current_record = store.get_optimization_run(session_id, version)
+                    current_record = store.get_optimization_run(version)
                     if (
                         current_record is not None
                         and current_record.get("owner_id") == managed_owner_id
@@ -660,7 +727,6 @@ def _run_approval(
                         }
                         _update_run(
                             store,
-                            session_id,
                             version,
                             owner_id=managed_owner_id,
                             expected_statuses=("approving",),
@@ -669,7 +735,7 @@ def _run_approval(
                         if getattr(args, "structured_events", False):
                             emit_event({"type": "terminal", "status": "failed", "run_id": version, **outcome})
             raise
-    print(f"Approved {version} (digest {manifest.digest[:12]}); Session {session_id} serves it from its next Turn.")
+    print(f"Approved {version} (digest {manifest.digest[:12]}); every Session serves it from its next Turn.")
     if getattr(args, "structured_events", False):
         emit_event({"type": "terminal", "status": "approved", "run_id": version})
 
@@ -678,7 +744,6 @@ def _finalize_optimization_run(
     store: Store,
     directory: Path,
     *,
-    session_id: str,
     run_id: str,
     owner_id: str,
     managed_run_id: str | None,
@@ -696,7 +761,7 @@ def _finalize_optimization_run(
             status, failure = "failed", error
     if status == "completed":
         try:
-            record = store.get_optimization_run(session_id, run_id)
+            record = store.get_optimization_run(run_id)
             if record is None or record.get("owner_id") != owner_id or record.get("status") != "running":
                 raise OptimizationPersistenceError("Optimization ownership or status changed")
             if (directory / "runs" / run_id / "gepa.stop").exists() or record.get("stop_requested"):
@@ -719,7 +784,6 @@ def _finalize_optimization_run(
             worker_outcome = details
             saved = _update_run(
                 store,
-                session_id,
                 run_id,
                 owner_id=owner_id,
                 expected_statuses=("running",),
@@ -728,7 +792,6 @@ def _finalize_optimization_run(
         else:
             saved = _update_run(
                 store,
-                session_id,
                 run_id,
                 owner_id=owner_id,
                 expected_statuses=("running",),
@@ -751,7 +814,6 @@ def _finalize_optimization_run(
             with suppress(Exception):
                 _update_run(
                     store,
-                    session_id,
                     run_id,
                     owner_id=owner_id,
                     expected_statuses=("completed", "cancelled", "failed"),
@@ -771,7 +833,6 @@ def _finalize_optimization_run(
             with suppress(Exception):
                 _update_run(
                     store,
-                    session_id,
                     run_id,
                     owner_id=owner_id,
                     expected_statuses=("running",),
@@ -784,13 +845,12 @@ def _compile(
     args: argparse.Namespace,
     settings: FleetSettings,
     store: Store,
-    session_id: str,
     target: Any,
-    run_id: str | None = None,
+    run_id: str,
     *,
     owner_id: str | None = None,
 ) -> None:
-    """Search from the Session's incumbent and save a candidate with paired validation evidence.
+    """Search from the globally installed program and save a candidate with paired validation evidence.
 
     Use train/dev examples for GEPA search, then evaluate the selected candidate and
     incumbent on dev and holdout with serving caches disabled. Save candidate,
@@ -806,26 +866,19 @@ def _compile(
 
     Dataset, provider, storage, and artifact write errors also propagate.
     """
-    saved_settings = store.runtime_settings(session_id)
-    settings = settings.for_session(saved_settings)
-    run_id = run_id or f"{session_id}-{uuid.uuid4().hex}"
     directory = Path(settings.compiled_program_dir)
     stop_file = directory / "runs" / run_id / "gepa.stop"
     stop_file.parent.mkdir(parents=True, exist_ok=True)
 
-    reporter = GEPAProgressReporter(
-        run_id,
-        store=store,
-        session_id=session_id,
-        owner_id=owner_id,
-        emit_events=False,
-    )
+    cap = getattr(args, "max_total_tokens", None)
+    tokens = TokenBudget(settings.job_max_tokens if cap is None else cap)
+    reporter = GEPAProgressReporter(run_id, store=store, owner_id=owner_id, emit_events=False, tokens=tokens)
     cleanup = RolloutCleanup()
 
     def check_boundary() -> None:
         reporter.raise_if_failed()
         _check_cancelled(stop_file)
-        record = store.get_optimization_run(session_id, run_id)
+        record = store.get_optimization_run(run_id)
         if record is None or (owner_id is not None and record.get("owner_id") != owner_id):
             raise OptimizationPersistenceError("Optimization ownership changed")
         if record.get("stop_requested"):
@@ -833,6 +886,8 @@ def _compile(
         if record.get("status") != "running":
             raise OptimizationPersistenceError("Optimization status changed")
         cleanup.raise_if_failed()
+        if tokens.reached:
+            raise BudgetExhaustedError("Optimization token budget exhausted")
 
     def set_stage(name: str) -> None:
         check_boundary()
@@ -844,17 +899,9 @@ def _compile(
     trainset, devset, holdout = curate_dataset(
         store,
         target.experiment_name,
-        session_id,
         validation_ratio=args.validation_ratio,
         evaluation_experiment_name=target.eval_experiment_name,
     )
-    splits = {"train": trainset, "dev": devset, "holdout": holdout}
-    counts = {
-        name: {"examples": len(items), "groups": len({item.source_group for item in items})}
-        for name, items in splits.items()
-    }
-    if any(not items for items in splits.values()) or not any(getattr(item, "critical", False) for item in holdout):
-        raise ValueError(f"GEPA requires nonempty train/dev/holdout and critical holdout; found {counts}")
     examples = [*trainset, *devset, *holdout]
     root_lm = build_lm(settings, settings.fleet_root_model, "root")
     sub_lm = build_lm(settings, settings.fleet_sub_model, "sub")
@@ -873,14 +920,14 @@ def _compile(
         sub_lm=sub_lm,
         max_llm_calls=settings.max_llm_calls_per_turn,
     )
-    active = Path(settings.compiled_program_dir) / f"{session_id}.json"
+    active = Path(settings.compiled_program_dir) / "fleet.json"
     template_runtime = FleetRuntime(
         template_manager,
         root_lm,
         sub_lm,
         jev_lm,
         compiled_path=str(active),
-        baseline=saved_settings.get("program_selection") != "artifact" and not (active.exists() or active.is_symlink()),
+        baseline=not (active.exists() or active.is_symlink()),
         execution_mode=settings.execution_mode,
         root_adapter=settings.resolved_model("root").build_adapter(),
         sub_adapter=settings.resolved_model("sub").build_adapter(),
@@ -912,9 +959,10 @@ def _compile(
     gepa_kwargs = {"mlflow_attach_existing": True}
     stop_callbacks = [
         build_stop_file_callback(stop_file),
-        _DatabaseStopper(store, session_id, run_id),
+        _DatabaseStopper(store, run_id),
         reporter.should_stop,
         cleanup.should_stop,
+        tokens.should_stop,
     ]
     if (proposals := getattr(args, "max_candidate_proposals", None)) is not None:
         stop_callbacks.append(build_proposal_stop_callback(proposals))
@@ -922,7 +970,13 @@ def _compile(
     gepa_kwargs["callbacks"] = [reporter]
     set_stage("search")
     check_boundary()
-    with _tracking_run(f"fleet-gepa-{session_id}") as active_run, cleanup.run():
+    # `dspy.context` replaces callbacks, so spread the ambient list; the budget runs first, as the
+    # usage collector must, and Turn rollouts reuse it instead of adding a second collector.
+    with (
+        _tracking_run(f"fleet-gepa-{run_id}") as active_run,
+        cleanup.run(),
+        dspy.context(callbacks=[tokens, *dspy.settings.callbacks]),
+    ):
         mlflow_run_id = getattr(getattr(active_run, "info", None), "run_id", None)
         if mlflow_run_id:
             reporter.update(mlflow_run_id=mlflow_run_id)
@@ -930,7 +984,6 @@ def _compile(
             mlflow.set_tags,
             {
                 "fleet.version": version,
-                "fleet.session_id": session_id,
                 "fleet.optimization.run_id": run_id,
                 "fleet.judge_model": settings.fleet_judge_model,
                 "fleet.trace_search": str(bool(getattr(args, "trace_search", False))).lower(),
@@ -1058,6 +1111,7 @@ def _compile(
             full_report_path=str(full_report_path),
             manifest_digest=manifest.digest,
             gate={"passed": gate.passed, "reasons": list(gate.reasons)},
+            scores={stage: {split: evaluation[stage][split] for split in ("dev", "holdout")} for stage in paired},
             dataset_sizes={"train": len(trainset), "dev": len(devset), "holdout": len(holdout)},
         )
         check_boundary()
@@ -1065,4 +1119,4 @@ def _compile(
         print(report)
         print(f"Candidate saved at {destination}; not installed.")
         if gate.passed:
-            print(f"Approve with: fleet optimize --session {session_id} --approve {version}")
+            print(f"Approve with: fleet optimize --approve {version}")

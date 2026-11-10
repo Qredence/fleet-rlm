@@ -413,12 +413,14 @@ old manifests are not an unchecked rollback path.
 
 ### Experiments in the Fleet TUI
 
-Use `/optimize` to open the Experiments screen and start or focus a GEPA run.
+Use `/optimize` to open the Experiments screen and start or focus a GEPA job. Jobs,
+labels, and the installed program are global: every Session contributes examples and
+every Session serves the approved program.
 The API owns the job and runs the existing CLI optimizer in a subprocess. Its
 lifecycle is recorded in PostgreSQL; candidate files remain in the configured
 artifact directory and MLflow stores the optimization run, traces, and evidence.
-The API admits one optimization or review globally and does not queue requests.
-The screen polls snapshots once per second and lists Session-scoped history for
+The API admits one job or review and does not queue requests.
+The screen polls snapshots once per second and lists the history of every Session for
 completed, failed, cancelled, rejected, and approved runs. Select a run to inspect
 its saved comparison, exact before/after component text, bounded diffs, objective
 and quality changes, gate reasons, and sanitized validation failures. Approve
@@ -433,10 +435,12 @@ it; interrupted approvals are reconciled against active artifact digests before
 they can be reviewed again. Standalone `fleet optimize` remains a separate CLI
 workflow and can also list/approve its stored run records.
 
-Before the PostgreSQL lifecycle table existed, optimizer history was written as
-per-Session JSON files. The first API/CLI read imports those files idempotently;
-the original files are retained read-only. PostgreSQL is authoritative for new
-run states.
+Runs recorded before the program became global are shown with their former Session
+and cannot be approved. `fleet optimize --check` and `GET /improve/readiness` report
+whether the labelled examples satisfy a run's requirements before any live work.
+A job's token cap (`--max-total-tokens`, `max_total_tokens`, `FLEET_JOB_MAX_TOKENS`)
+ends it as `budget_exhausted`; during search `progress` also reports `best_score`
+and `score_trajectory` from GEPA's validation-set callback.
 
 Progress shows named lifecycle stages when no counter is available. During search,
 the counter is GEPA metric calls used/total as reported by its budget callback; it
@@ -535,15 +539,14 @@ Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
 keys to simulate migration: reconstruct/re-evaluate a new candidate under the running
 schema, or explicitly select its baseline. For an operator-approved baseline reset,
-retire the active compiled file and set the existing Session runtime setting
-`program_selection` to `baseline` while the runtime is stopped; do not delete an
+retire the active `fleet.json` while the runtime is stopped; do not delete an
 artifact alone. No new selection endpoint or automatic rollback is added by Gate A.
 An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
-Absent Session selection means baseline; successful installation and serving
-selection record `artifact`. Startup and each invocation reconcile that durable
-selection without writing baseline over a concurrent approval. A missing selected artifact fails across
-restart rather than silently reverting. Invalid replacement bytes retain the valid
-in-memory program/digest but refuse the Turn. No live interpreter state is restored.
+An absent `fleet.json` means baseline; a present one is the program every Session
+serves, picked up at the start of its next Turn, and its digest is recorded as
+`compiled_program_digest` and in the `program_selection` event. There is no per-Session
+selection setting. A present but invalid file is not replaced by baseline: invalid
+replacement bytes retain the valid in-memory program/digest but refuse the Turn. No live interpreter state is restored.
 
 Runtime and configuration digests, a digest of optimization source,
 and a versioned fingerprint of installed distribution names and versions are

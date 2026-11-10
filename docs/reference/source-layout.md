@@ -41,13 +41,13 @@ src/fleet_rlm/
 │   ├── gepa.py        # `fleet optimize`
 │   └── evaluation.py  # Eval cases, synthetic generators, gold labels, `fleet eval` runs
 ├── optimization_runs.py # CLI/API-neutral options, events, import, and artifact reads
-├── experiments.py     # API-owned optimizer process and lifecycle manager
+├── experiments.py     # API-owned job process (ExperimentManager) and lifecycle
 ├── api/
 │   ├── app.py         # create_app, lifespan, routers, health
 │   ├── deps.py        # Dependencies and route-boundary error translation
 │   ├── schemas.py     # Request and response models
 │   ├── events.py      # DSPy activity callback and SSE envelope
-│   └── routes/        # sessions (+ memory, skills), workspace, turns, experiments
+│   └── routes/        # sessions (+ memory, skills), workspace, turns, improve
 ├── setup.py           # Configuration draft, readiness probes, serialized setup operations
 ├── session.py         # Runtime, registry, leases, memory/history/Turn-record policies
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli` and `fleet web`

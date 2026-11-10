@@ -9,8 +9,8 @@ uv run fleet serve [--host 127.0.0.1] [--port 8000] [--mlflow local|databricks]
 uv run fleet web [--host 127.0.0.1] [--port 8080] [--url API_URL]
                 [--public-url URL] [--session SESSION] [--mlflow local|databricks]
                 [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
-uv run fleet eval dataset|run|label ... [--mlflow local|databricks]
-uv run fleet optimize --session SESSION_ID ... [--mlflow local|databricks]
+uv run fleet eval dataset|run|score|label ... [--mlflow local|databricks]
+uv run fleet optimize [--check] ... [--mlflow local|databricks]
 uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
 ```
 
@@ -173,22 +173,24 @@ files remain subject to host admission and do not grant tool permissions. See th
 `/memory [query]` reads this Session's saved memories, optionally
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
-`/optimize [args]` runs `fleet optimize --session <this session> [args]`.
-It submits an API-owned experiment and inherits the server's effective settings;
+`/optimize [args]` runs `fleet optimize [args]` over the labels of every Session.
+It submits an API-owned job and inherits the server's effective settings;
 the CLI uses the same controls but remains a standalone synchronous workflow.
 Client disconnect does not cancel API-owned work. Use the Experiments screen's
 explicit cancel action for cooperative stopping. The API allows one active
-optimization or review globally and rejects concurrent requests without queueing.
+job or review and rejects concurrent requests without queueing.
 It compiles and gates a GEPA candidate from self-contained, explicitly selected
 Turn snapshots with approved gold labels; it does not automatically score
 historical traces. Traces without a matching immutable Lakebase snapshot are
 skipped. It requires at least 8 examples from 3 source groups, as well as the
 corresponding model, Daytona, database, and tracking services. It never installs
 a candidate.
-`/optimize --approve <version>` (or `fleet optimize --approve <version>`) installs one only when
+`/optimize --approve <version>` (or `fleet optimize --approve <version>`) installs one, as the
+single `fleet.json` every Session serves, only when
 the current incumbent, configuration, code, and dependencies match the
-candidate's recorded identities. Old manifests require reevaluation. The engine
-loads an approved candidate at the start of the next Turn.
+candidate's recorded identities. Old manifests, and candidates from the per-Session
+era, require reevaluation. Each Session loads the installed program at the start of
+its next Turn; without `fleet.json` they run the baseline.
 
 `fleet eval label <trace-id> --answer "..." [--value V ...] [--route R] [--critical]`
 writes gold labels onto a trace; partial updates preserve existing expectations.
@@ -198,11 +200,21 @@ each of three paired validation passes. Search fails during preparation, before 
 holdout case is labeled. `--status` defaults to
 `approved` for a new label; updates preserve status and source group unless supplied.
 A new source group defaults to the trace's session id. The trace ID is printed after
-each Turn and by `/trace`.
+each Turn and by `/trace`. The HTTP `POST /improve/labels` runs the same labelling by
+`turn_id`.
+
+`fleet eval score <trace-id>...` scores already collected, labelled traces with the
+configured judge in the evaluation experiment, without running their Turns again.
+
+`fleet optimize --check` prints readiness as JSON (`ready`, `examples`, `groups`,
+`critical`, `split_sizes`, `missing`) and exits non-zero when a run would refuse to
+start; it reads PostgreSQL and MLflow only, with no model or Daytona call.
 
 `fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
-`--validation-ratio` (inclusive 0.1–0.5, default 0.35), and `--approve VERSION`. Reflection calls and the three paired
+`--validation-ratio` (inclusive 0.1–0.5, default 0.35), `--max-total-tokens N` (stop
+with `budget_exhausted` after N generative LM tokens; `0` is unlimited; default
+`FLEET_JOB_MAX_TOKENS`), and `--approve VERSION`. Reflection calls and the three paired
 final validation passes are additional work, not covered by the search budget.
 Native GEPA checks the metric-call budget between batches, so it may overshoot.
 `--reflection-minibatch-size N` (default 3) sets the native reflection batch size;
@@ -211,8 +223,9 @@ three-example dev set with minibatch size 1 and one proposal needs at most eight
 search metric calls, including seed scoring and full candidate validation.
 `--trace-search` opts into search-rollout traces; it is off by default. Final
 paired validation per-case traces are recorded in the optimization MLflow run.
-Optimization lifecycle state is stored in PostgreSQL. Existing JSON history is
-imported idempotently on read and retained unchanged as a legacy source.
+Optimization lifecycle state is stored in PostgreSQL. Runs recorded before the
+program became global keep their Session as `legacy_session_id`; they stay readable
+but cannot be approved.
 
 ## Interactive tasks, settings, and model selection
 

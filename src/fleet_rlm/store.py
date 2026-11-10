@@ -23,8 +23,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from fleet_rlm.optimization_runs import validate_run_id
-from fleet_rlm.workspace import validate_session_id
+from fleet_rlm.optimization_runs import JOB_KINDS, validate_run_id
 
 if TYPE_CHECKING:
     pass
@@ -142,6 +141,27 @@ _OPTIMIZATION_RUNS_TABLE = """
         UNIQUE (session_id, request_id)
     )
 """
+# Jobs are global: the run ID is the identity, `kind` selects the worker, and the Session a run
+# was once scoped to survives only as `legacy_session_id` metadata (such rows are never approvable).
+# Dropping the column drops its composite primary key and (session_id, request_id) uniqueness.
+_OPTIMIZATION_RUNS_GLOBAL = (
+    "ALTER TABLE fleet_lite_optimization_runs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'optimize' "
+    "CHECK (kind IN ('optimize','evaluate_rescore','evaluate_replay','evaluate_synthetic'))",
+    "UPDATE fleet_lite_optimization_runs "
+    "SET metadata = metadata || jsonb_build_object('legacy_session_id', session_id)",
+    "UPDATE fleet_lite_optimization_runs SET request_id = request_id || ':' || run_id "
+    "WHERE request_id IN (SELECT request_id FROM fleet_lite_optimization_runs GROUP BY request_id HAVING COUNT(*) > 1)",
+    "ALTER TABLE fleet_lite_optimization_runs DROP COLUMN session_id",
+    "ALTER TABLE fleet_lite_optimization_runs ADD PRIMARY KEY (run_id)",
+    "ALTER TABLE fleet_lite_optimization_runs ADD CONSTRAINT fleet_lite_optimization_runs_request_id_key "
+    "UNIQUE (request_id)",
+    """
+    CREATE TABLE IF NOT EXISTS fleet_lite_global_settings (
+        scope TEXT PRIMARY KEY,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+    """,
+)
 _OPTIMIZATION_RUNS_ACTIVE_INDEX = """
     CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run
     ON fleet_lite_optimization_runs ((1))
@@ -258,6 +278,7 @@ _SCHEMA_MIGRATIONS = (
     ),
     (9, (_MANAGED_SESSION_BINDINGS, _MANAGED_SESSION_OUTBOX, _MANAGED_SESSION_OUTBOX_INDEX, _MANAGED_PIPELINE_RUNS)),
     (10, (_MANAGED_SESSION_OUTBOX_PURPOSE,)),
+    (11, _OPTIMIZATION_RUNS_GLOBAL),
 )
 SCHEMA_VERSION = _SCHEMA_MIGRATIONS[-1][0]
 _REPLAY_RETENTION_DAYS = 30
@@ -569,6 +590,25 @@ class Store:
                 "ON CONFLICT(session_id) DO UPDATE "
                 "SET settings=fleet_lite_runtime_settings.settings || EXCLUDED.settings",
                 (session_id, json.dumps(settings)),
+            )
+
+    @_retry_once
+    def global_settings(self, scope: str) -> dict[str, Any]:
+        """Return a scope's saved settings that belong to no Session, or an empty dict."""
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT settings FROM fleet_lite_global_settings WHERE scope=%s", (scope,)
+            ).fetchone()
+        return row[0] if row else {}
+
+    @_retry_once
+    def save_global_settings(self, scope: str, settings: dict[str, Any]) -> None:
+        """Replace a scope's saved settings."""
+        with self.pool.connection() as connection:
+            connection.execute(
+                "INSERT INTO fleet_lite_global_settings(scope,settings) VALUES(%s,%s::jsonb) "
+                "ON CONFLICT(scope) DO UPDATE SET settings=EXCLUDED.settings",
+                (scope, json.dumps(settings)),
             )
 
     # Memories
@@ -893,14 +933,15 @@ class Store:
             raise ValueError("Selected replay snapshot is missing or has changed")
 
     @_retry_once
-    def reviewed_examples(self, session_id: str, limit: int) -> list[dict[str, Any]]:
-        """Approved, gold-labeled turns with a complete immutable replay snapshot."""
+    def reviewed_examples(self, limit: int) -> list[dict[str, Any]]:
+        """Approved, gold-labeled turns from every Session with a complete immutable replay snapshot."""
         with self.pool.connection() as connection:
             return (
                 connection.cursor(row_factory=dict_row)
                 .execute(
                     """
-                    SELECT labels.turn_id,
+                    SELECT labels.session_id,
+                           labels.turn_id,
                            labels.task,
                            labels.workspace_manifest,
                            labels.expected_answer AS answer,
@@ -915,16 +956,84 @@ class Store:
                     FROM fleet_lite_review_labels AS labels
                     JOIN fleet_lite_replay_snapshots AS replay
                       ON replay.session_id=labels.session_id AND replay.turn_id=labels.turn_id
-                    WHERE labels.session_id = %s
-                      AND labels.review_status = 'approved'
+                    WHERE labels.review_status = 'approved'
                       AND (NULLIF(labels.expected_answer,'') IS NOT NULL
                            OR jsonb_array_length(labels.expected_values) > 0)
                     ORDER BY labels.updated_at DESC
                     LIMIT %s
                     """,
-                    (session_id, limit),
+                    (limit,),
                 )
                 .fetchall()
+            )
+
+    @_retry_once
+    def new_review_labels(self, since: str | None) -> int:
+        """Count approved labels written after `since` (an ISO timestamp), or all of them when None."""
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM fleet_lite_review_labels "
+                "WHERE review_status='approved' AND (%s::timestamptz IS NULL OR updated_at > %s::timestamptz)",
+                (since, since),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    @_retry_once
+    def improve_queue(self, limit: int) -> list[dict[str, Any]]:
+        """Replay-captured Turns across Sessions, newest first, with their label state when reviewed."""
+        with self.pool.connection() as connection:
+            return (
+                connection.cursor(row_factory=dict_row)
+                .execute(
+                    """
+                    SELECT replay.session_id,
+                           replay.turn_id,
+                           replay.sha256 AS replay_snapshot_sha256,
+                           turns.result->>'answer' AS answer,
+                           turns.result->>'trace_id' AS trace_id,
+                           turns.updated_at,
+                           COALESCE(labels.task, (
+                               SELECT entry->>'task'
+                               FROM jsonb_array_elements(sessions.turns) AS history(entry)
+                               WHERE entry->>'turn_id' = replay.turn_id
+                               LIMIT 1
+                           )) AS task,
+                           labels.review_status,
+                           labels.expected_answer,
+                           labels.expected_values,
+                           labels.critical,
+                           labels.source_group
+                    FROM fleet_lite_replay_snapshots AS replay
+                    JOIN fleet_lite_turns AS turns
+                      ON turns.session_id=replay.session_id AND turns.turn_id=replay.turn_id
+                    JOIN fleet_lite_sessions AS sessions ON sessions.session_id=replay.session_id
+                    LEFT JOIN fleet_lite_review_labels AS labels
+                      ON labels.session_id=replay.session_id AND labels.turn_id=replay.turn_id
+                    WHERE turns.status='completed'
+                    ORDER BY turns.updated_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                .fetchall()
+            )
+
+    @_retry_once
+    def turn_reference(self, turn_id: str) -> dict[str, Any] | None:
+        """Resolve a replay-captured Turn ID to its Session, trace, and snapshot digest, or None."""
+        with self.pool.connection() as connection:
+            return (
+                connection.cursor(row_factory=dict_row)
+                .execute(
+                    "SELECT replay.session_id, replay.turn_id, replay.sha256 AS replay_snapshot_sha256, "
+                    "turns.result->>'trace_id' AS trace_id "
+                    "FROM fleet_lite_replay_snapshots AS replay "
+                    "JOIN fleet_lite_turns AS turns "
+                    "ON turns.session_id=replay.session_id AND turns.turn_id=replay.turn_id "
+                    "WHERE replay.turn_id=%s ORDER BY turns.updated_at DESC LIMIT 1",
+                    (turn_id,),
+                )
+                .fetchone()
             )
 
     @_retry_once
@@ -976,19 +1085,20 @@ class Store:
     @_retry_once
     def create_optimization_run(
         self,
-        session_id: str,
         run_id: str,
         request_id: str,
         options: dict[str, Any],
         owner_id: str,
         *,
+        kind: str = "optimize",
         managed: bool = False,
     ) -> dict[str, Any]:
-        """Create one globally active run, or return an identical idempotent request retry."""
-        session_id = validate_session_id(session_id)
+        """Create one globally active job, or return an identical idempotent request retry."""
         run_id = validate_run_id(run_id)
         request_id = self._optimization_request_id(request_id)
         owner_id = self._optimization_owner_id(owner_id)
+        if kind not in JOB_KINDS:
+            raise ValueError(f"job kind must be one of {JOB_KINDS}")
         if not isinstance(options, dict):
             raise ValueError("optimization options must be an object")
         if type(managed) is not bool:
@@ -998,22 +1108,23 @@ class Store:
             with self.pool.connection() as connection, connection.transaction():
                 inserted = connection.execute(
                     "INSERT INTO fleet_lite_optimization_runs "
-                    "(session_id,run_id,request_id,options,owner_id,managed,status,stage) "
+                    "(run_id,request_id,kind,options,owner_id,managed,status,stage) "
                     "VALUES (%s,%s,%s,%s::jsonb,%s,%s,'running','preparing') "
-                    "ON CONFLICT (session_id,request_id) DO NOTHING RETURNING *",
-                    (session_id, run_id, request_id, options_json, owner_id, managed),
+                    "ON CONFLICT (request_id) DO NOTHING RETURNING *",
+                    (run_id, request_id, kind, options_json, owner_id, managed),
                 ).fetchone()
                 if inserted is not None:
                     return self._optimization_run_record(inserted)
                 prior = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND request_id=%s FOR UPDATE",
-                    (session_id, request_id),
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE request_id=%s FOR UPDATE",
+                    (request_id,),
                 ).fetchone()
                 if prior is None:
                     raise ValueError("optimization run request conflicts with an existing run")
                 record = self._optimization_run_record(prior)
                 if (
                     record["options"] != json.loads(options_json)
+                    or record["kind"] != kind
                     or record["owner_id"] != owner_id
                     or record["managed"] is not managed
                 ):
@@ -1023,38 +1134,25 @@ class Store:
             raise ValueError("An optimization run is already active or the run identity is in use") from exc
 
     @_retry_once
-    def get_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
-        """Return one run from the durable ledger, or None when the Session/run pair is absent."""
-        session_id = validate_session_id(session_id)
+    def get_optimization_run(self, run_id: str) -> dict[str, Any] | None:
+        """Return one job from the durable ledger, or None when it is absent."""
         run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s",
-                (session_id, run_id),
-            ).fetchone()
+            row = connection.execute("SELECT * FROM fleet_lite_optimization_runs WHERE run_id=%s", (run_id,)).fetchone()
         return self._optimization_run_record(row) if row is not None else None
 
     @_retry_once
-    def list_optimization_runs(self, session_id: str | None = None) -> list[dict[str, Any]]:
-        """List optimization history, either for one Session or across all Sessions."""
-        if session_id is not None:
-            session_id = validate_session_id(session_id)
+    def list_optimization_runs(self) -> list[dict[str, Any]]:
+        """List the job history, newest update first."""
         with self.pool.connection() as connection:
-            if session_id is None:
-                rows = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs ORDER BY updated_at DESC,run_id"
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s ORDER BY updated_at DESC,run_id",
-                    (session_id,),
-                ).fetchall()
+            rows = connection.execute(
+                "SELECT * FROM fleet_lite_optimization_runs ORDER BY updated_at DESC,run_id"
+            ).fetchall()
         return [self._optimization_run_record(row) for row in rows]
 
     @_retry_once
     def update_optimization_run(
         self,
-        session_id: str,
         run_id: str,
         updates: dict[str, Any],
         *,
@@ -1068,11 +1166,10 @@ class Store:
         Raise ValueError for invalid updates, identity changes, or an active-run conflict;
         other database errors propagate.
         """
-        session_id = validate_session_id(session_id)
         run_id = validate_run_id(run_id)
         if not isinstance(updates, dict):
             raise ValueError("optimization updates must be an object")
-        forbidden = {"session_id", "run_id", "request_id", "options", "owner_id", "managed", "created_at", "updated_at"}
+        forbidden = {"run_id", "request_id", "kind", "options", "owner_id", "managed", "created_at", "updated_at"}
         if forbidden & updates.keys():
             raise ValueError("optimization run identity fields cannot be changed")
         if "status" in updates and (not isinstance(updates["status"], str) or not updates["status"].strip()):
@@ -1101,7 +1198,7 @@ class Store:
                     "stop_requested=COALESCE(%s,stop_requested),"
                     "metadata=metadata || %s::jsonb || CASE WHEN %s AND stop_requested "
                     "THEN '{\"candidate_version\":null}'::jsonb ELSE '{}'::jsonb END,updated_at=NOW() "
-                    "WHERE session_id=%s AND run_id=%s "
+                    "WHERE run_id=%s "
                     "AND (%s::text IS NULL OR owner_id=%s) "
                     "AND (%s::text[] IS NULL OR status=ANY(%s::text[])) RETURNING *",
                     (
@@ -1112,7 +1209,6 @@ class Store:
                         updates.get("stop_requested"),
                         metadata_json,
                         finishing_completed,
-                        session_id,
                         run_id,
                         owner_id,
                         owner_id,
@@ -1125,21 +1221,19 @@ class Store:
         return self._optimization_run_record(row) if row is not None else None
 
     @_retry_once
-    def request_optimization_stop(self, session_id: str, run_id: str) -> dict[str, Any]:
-        """Set a cooperative stop request for a running optimization; repeated requests are safe."""
-        session_id = validate_session_id(session_id)
+    def request_optimization_stop(self, run_id: str) -> dict[str, Any]:
+        """Set a cooperative stop request for a running job; repeated requests are safe."""
         run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
                 "UPDATE fleet_lite_optimization_runs SET stop_requested=TRUE, "
                 "updated_at=CASE WHEN stop_requested THEN updated_at ELSE NOW() END "
-                "WHERE session_id=%s AND run_id=%s AND status='running' RETURNING *",
-                (session_id, run_id),
+                "WHERE run_id=%s AND status='running' RETURNING *",
+                (run_id,),
             ).fetchone()
             if row is None:
                 row = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s",
-                    (session_id, run_id),
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE run_id=%s", (run_id,)
                 ).fetchone()
         if row is None:
             raise ValueError("optimization run was not found")
@@ -1149,16 +1243,14 @@ class Store:
         return record
 
     @_retry_once
-    def claim_optimization_review(self, session_id: str, run_id: str, owner_id: str) -> dict[str, Any]:
+    def claim_optimization_review(self, run_id: str, owner_id: str) -> dict[str, Any]:
         """Claim a completed candidate for approval, or take over its recoverable approving state."""
-        session_id = validate_session_id(session_id)
         run_id = validate_run_id(run_id)
         owner_id = self._optimization_owner_id(owner_id)
         try:
             with self.pool.connection() as connection, connection.transaction():
                 prior = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE session_id=%s AND run_id=%s FOR UPDATE",
-                    (session_id, run_id),
+                    "SELECT * FROM fleet_lite_optimization_runs WHERE run_id=%s FOR UPDATE", (run_id,)
                 ).fetchone()
                 if prior is None:
                     raise ValueError("optimization run was not found")
@@ -1167,8 +1259,8 @@ class Store:
                     raise ValueError("only a completed or recoverable approving run can be reviewed")
                 row = connection.execute(
                     "UPDATE fleet_lite_optimization_runs SET status='approving',owner_id=%s,updated_at=NOW() "
-                    "WHERE session_id=%s AND run_id=%s AND status IN ('completed','approving') RETURNING *",
-                    (owner_id, session_id, run_id),
+                    "WHERE run_id=%s AND status IN ('completed','approving') RETURNING *",
+                    (owner_id, run_id),
                 ).fetchone()
                 if row is None:
                     raise ValueError("optimization review claim was lost")
@@ -1177,9 +1269,8 @@ class Store:
             raise ValueError("Another optimization run is active") from exc
 
     @_retry_once
-    def reject_optimization_run(self, session_id: str, run_id: str) -> dict[str, Any]:
+    def reject_optimization_run(self, run_id: str) -> dict[str, Any]:
         """Record a rejection for a completed candidate without deleting its artifacts or history."""
-        session_id = validate_session_id(session_id)
         run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
@@ -1187,8 +1278,8 @@ class Store:
                 "metadata=metadata || CASE WHEN status='rejected' THEN '{}'::jsonb "
                 "ELSE jsonb_build_object('decision','rejected','decision_at',NOW()) END,"
                 "updated_at=CASE WHEN status='rejected' THEN updated_at ELSE NOW() END "
-                "WHERE session_id=%s AND run_id=%s AND status IN ('completed','rejected') RETURNING *",
-                (session_id, run_id),
+                "WHERE run_id=%s AND status IN ('completed','rejected') RETURNING *",
+                (run_id,),
             ).fetchone()
         if row is None:
             raise ValueError("only a completed optimization run can be rejected")
@@ -1223,7 +1314,6 @@ class Store:
             values = dict(row)
         else:
             columns = (
-                "session_id",
                 "run_id",
                 "request_id",
                 "options",
@@ -1235,6 +1325,7 @@ class Store:
                 "metadata",
                 "created_at",
                 "updated_at",
+                "kind",
             )
             values = dict(zip(columns, row, strict=False))
         metadata = values.pop("metadata", {}) or {}

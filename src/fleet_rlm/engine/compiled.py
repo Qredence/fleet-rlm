@@ -59,10 +59,8 @@ class CompiledProgramFile:
         if self.path is not None and not self._baseline:
             self._apply(program, self.read())
 
-    def reload_if_changed(self, program: FleetProgram, *, require_artifact: bool = False) -> None:
+    def reload_if_changed(self, program: FleetProgram) -> None:
         """Read bounded bytes at the serialized Turn boundary, including same-size/mtime changes."""
-        if require_artifact:
-            self._baseline = False
         if self.path is None or (self._baseline and not os.path.lexists(self.path)):
             return
         content = self.read()
