@@ -1,0 +1,59 @@
+src/fleet_rlm/engine/compiled.py
+  s_f99ab9bf268253::t_5f542383cfce7f 9,48-63,65-68
+src/fleet_rlm/session.py
+  s_f99ab9bf268253::t_5f542383cfce7f 529,588
+openapi.yaml
+  s_f99ab9bf268253::t_d13d55f43dc7a3 3194
+src/fleet_rlm/api/routes/improve.py
+  s_f99ab9bf268253::t_117e3c4eb5401e 1,8,11,77,82-90,92-97,99,222-226
+tests/store/test_optimization_runs.py
+  s_f99ab9bf268253::t_2835b6c57feb00 3-4,12,326-389
+docs/reference/http-api.md
+  s_f99ab9bf268253::t_d13d55f43dc7a3 80
+  s_f99ab9bf268253::t_b4fd28d7b601e8 62,121,123-135
+docs/reference/database.md
+  s_f99ab9bf268253::t_d6d9b5d1b24c70 44-46,48-59
+tests/lite/test_session.py
+  s_f99ab9bf268253::t_717c4ebb061529 619,629,645,679-734
+  s_f99ab9bf268253::t_f2050fd4b67528 597,826,872
+  s_f99ab9bf268253::t_e352cd2439f3ee 735-736
+tests/api/test_improve.py
+  s_f99ab9bf268253::t_c23737a1ba7887 1156-1159,1209-1243,1341,1351
+docs/reference/evaluation.md
+  s_f99ab9bf268253::t_b4fd28d7b601e8 542-543,545-547
+src/fleet_rlm/engine/invocation.py
+  s_f99ab9bf268253::t_117e3c4eb5401e 16
+  s_f99ab9bf268253::t_5f542383cfce7f 7,47,53,95-98,100-103
+tests/optimize/test_optimization.py
+  s_f99ab9bf268253::t_d333fffd10ce66 1343,2678-2686
+  s_f99ab9bf268253::t_085bb57e74d1d0 1328-1329,1344-1348,2672-2677,2687
+src/fleet_rlm/store.py
+  s_f99ab9bf268253::t_b66a6675e8eff5 152-158,950-965
+  s_f99ab9bf268253::t_2f763e9a2e59fd 966
+src/fleet_rlm/optimization_runs.py
+  s_f99ab9bf268253::t_5f542383cfce7f 27-29
+tests/store/test_store.py
+  s_f99ab9bf268253::t_2835b6c57feb00 115,119-122,138-146
+src/fleet_rlm/api/schemas.py
+  s_f99ab9bf268253::t_5f542383cfce7f 119
+src/fleet_rlm/optimize/gepa.py
+  s_f99ab9bf268253::t_5f542383cfce7f 819
+ARCHITECTURE.md
+  s_f99ab9bf268253::t_b4fd28d7b601e8 57-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22127e89c01760701078b2f1f2a72485acd988f3",
+  "prompts": {},
+  "sessions": {
+    "s_f99ab9bf268253": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09662ff-7118-48aa-9082-e297b65fbb90",
+        "model": "system.ai.claude-opus-5-5"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
