@@ -10,7 +10,7 @@ help:
 	@echo "  make cli          Show terminal client help"
 	@echo "  make eval-dataset Create the synthetic evaluation dataset (writes to Unity Catalog)"
 	@echo "  make eval         Run synthetic cases against a live server (live model and sandbox cost)"
-	@echo "  make optimize SESSION=<id>  Run GEPA compile and gated evaluation (live, explicit approval only)"
+	@echo "  make optimize [ARGS=--check]  Run GEPA over all labelled Turns (live, explicit approval only); --check prints readiness"
 	@echo "  make test         Run non-live unit and boundary tests"
 	@echo "  make coverage     Run offline tests with the enforced coverage threshold"
 	@echo "  make lint         Run Ruff"
@@ -54,8 +54,7 @@ eval:
 	uv run fleet eval run
 
 optimize:
-	@test -n "$(SESSION)" || (echo "SESSION=<id> is required" && exit 2)
-	uv run fleet optimize --session $(SESSION)
+	uv run fleet optimize $(ARGS)
 
 test:
 	uv run pytest

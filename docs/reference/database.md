@@ -36,6 +36,32 @@ at most one globally active run or approval; there is no job queue. The record
 stores request idempotency, validated options, owner, managed-worker marker,
 status/stage, cooperative stop intent, and run metadata. Database owner/status
 checks fence stale workers from publishing lifecycle updates.
+Migration 11 makes jobs global. It adds `kind` (`optimize`, `evaluate_rescore`,
+`evaluate_replay`, or `evaluate_synthetic`, default `optimize`), drops the
+`session_id` column, and re-keys `fleet_lite_optimization_runs` by `run_id` with
+`request_id` unique across all jobs (idempotency is now global). Each existing
+row keeps its former Session as `legacy_session_id` in its metadata; request IDs
+that collided across Sessions are suffixed with their run ID, and a run ID shared by
+two Sessions keeps the earliest row's and gives the other `<run_id>-dup-<session_id>`,
+so the new primary key cannot abort startup. Old rows stay
+readable, and approval refuses them because their incumbent was a per-Session
+program. The one-active-job partial index is unchanged. The migration is not
+reversible by an older Fleet, which keys runs by Session: do not point an older
+build at a database already migrated to 11.
+
+To try a branch with a migration against real data without touching the main
+schema, set `FLEET_DATABASE_SCHEMA` (for example `fleet_rlm_pr2`) to a new
+lowercase name in that process's environment. Fleet creates the schema, applies
+every migration inside it, and uses it through `search_path`; the default schema
+and any older Fleet build keep working against their own tables. Drop the schema
+when finished. An opt-in test applies migrations 11 and 12 to a scratch schema of a real
+PostgreSQL: set `FLEET_TEST_POSTGRES_URL` and run
+`uv run pytest tests/store/test_optimization_runs.py -k real_postgres`.
+Migration 12 creates `fleet_lite_global_settings` (`scope`, `settings` JSONB), which holds settings that
+belong to no Session; the Improve auto-run switch and budgets live under the `improve` scope. It uses
+`CREATE TABLE IF NOT EXISTS`, so a schema that applied an earlier draft of migration 11 and already holds an
+empty table of that name upgrades cleanly. Evaluate jobs store their per-split `evaluation` and the job
+`trigger` in the run row's existing metadata JSONB; no column is added.
 Migration 7 adds an expression GIN index matching memory search's
 `to_tsvector('english', content)` predicate. PostgreSQL chooses whether to use
 it; it does not eliminate ranking work. The initial index build runs under the
@@ -161,9 +187,9 @@ not restore Python process memory.
 
 New optimization status is stored in PostgreSQL; candidate manifests, reports,
 and GEPA working files remain in the configured artifact directory, while MLflow
-stores optimization traces and evidence. Existing per-Session JSON run records
-are imported idempotently at startup and before history reads. They are retained
-as read-only migration sources. API restart marks abandoned managed workers
+stores optimization traces and evidence. The installed program is the single file
+`<compiled_program_dir>/fleet.json`; there is no per-Session artifact or selection
+setting, and the dataset spans every Session's approved labels. API restart marks abandoned managed workers
 interrupted and does not rerun provider work; a later explicit review reconciles
 an interrupted approval against the active candidate digests.
 

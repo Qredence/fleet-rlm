@@ -411,15 +411,50 @@ Approval rechecks that the current incumbent, configuration, code, and
 dependencies match the candidate manifest. A mismatch requires reevaluation;
 old manifests are not an unchecked rollback path.
 
-### Experiments in the Fleet TUI
+### Improve in the Fleet TUI
 
-Use `/optimize` to open the Experiments screen and start or focus a GEPA run.
+Use `/improve` (or `/optimize` / `/experiments`) to open the Improve screen. Jobs,
+labels, and the installed program are global: every Session contributes examples and
+every Session serves the approved program. The workflow is:
+
+1. **Label.** Run Turns with replay capture on. After each captured Turn press `ctrl+l` to
+   approve it with its answer and figures, or `ctrl+n` to open the **Review** tab at it, where
+   you can uncheck figures, add values, mark it critical, set its group, reject it, or
+   correct the answer.
+2. **Check readiness.** The **Readiness** tab (and the `ready to optimize` status badge) report
+   the counts, split sizes, missing requirements, and new labels since the last run.
+3. **Run.** In **Runs**, `Run optimize` confirms the search budget and token cap, then submits the job.
+   The stage stepper, metric-call and token bars, best score, and score sparkline update once per second.
+4. **Measure.** In **Runs**, `Evaluate ▸` starts `Rescore` (re-judge saved traces with the current judges; no Turn
+   runs again), `Replay` (run every labelled example against the installed program in isolated rollouts on the
+   optimization split), or `Synthetic` (the `fleet eval run` cases against this server). Replay and Synthetic
+   confirm their cost first. **Results** shows the program measured, each split's mean and critical pass count,
+   and the holdout headline; the installed-trend line includes these evaluations. Standalone,
+   `fleet optimize --evaluate rescore|replay|synthetic` runs the same worker body.
+5. **Review.** In **Results**, inspect the gate, means, per-example wins and losses, component
+   diffs, and the installed holdout trend; `Approve` installs a passing candidate and `Reject` records the decision.
+
+**Rigor.** Readiness lists what GEPA can rewrite, how many labelled examples still score below 1.0 in the
+latest Evaluate (or says it is unknown), and requires `FLEET_MIN_SPLIT_EXAMPLES` (default 5) examples in each of dev and
+holdout; with everything already passing, optimizing is unlikely to change anything, so label Turns Fleet got wrong,
+slow, or misrouted. GEPA learns from failures and feedback, the valset picks the winner, and the holdout influences
+neither. The Review tab flags Turns with stored trouble signals or a below-1.0 evaluation and lists them first. During
+validation the Runs tab shows `validation 14/36` rollouts; a candidate identical to the incumbent skips validation and ends
+with the gate's reason. Results opens with a one-line outcome (components changed, per-split means with improved,
+regressed and tied counts, critical cases) before the model-written summary and the per-example table.
+
+**Auto-run.** The Readiness tab shows and edits the auto-run switch, the new-label threshold, the automatic
+metric-call budget, and the default token cap (`PUT /improve/settings`). When enabled, a saved label that makes
+readiness green with enough new labels and no active job starts an `optimize` job marked `auto`; it only
+creates a candidate. Results also shows a short model-written summary of each comparison, labelled as a summary
+and not evidence: it never feeds the promotion gate.
+
 The API owns the job and runs the existing CLI optimizer in a subprocess. Its
 lifecycle is recorded in PostgreSQL; candidate files remain in the configured
 artifact directory and MLflow stores the optimization run, traces, and evidence.
-The API admits one optimization or review globally and does not queue requests.
-The screen polls snapshots once per second and lists Session-scoped history for
-completed, failed, cancelled, rejected, and approved runs. Select a run to inspect
+The API admits one job or review and does not queue requests.
+The screen polls job snapshots once per second (labels, readiness, and history every few
+seconds) and lists the jobs of every Session. Select a run to inspect
 its saved comparison, exact before/after component text, bounded diffs, objective
 and quality changes, gate reasons, and sanitized validation failures. Approve
 rechecks the candidate's current evidence; Reject records an explicit decision
@@ -433,10 +468,12 @@ it; interrupted approvals are reconciled against active artifact digests before
 they can be reviewed again. Standalone `fleet optimize` remains a separate CLI
 workflow and can also list/approve its stored run records.
 
-Before the PostgreSQL lifecycle table existed, optimizer history was written as
-per-Session JSON files. The first API/CLI read imports those files idempotently;
-the original files are retained read-only. PostgreSQL is authoritative for new
-run states.
+Runs recorded before the program became global are shown with their former Session
+and cannot be approved. `fleet optimize --check` and `GET /improve/readiness` report
+whether the labelled examples satisfy a run's requirements before any live work.
+A job's token cap (`--max-total-tokens`, `max_total_tokens`, `FLEET_JOB_MAX_TOKENS`)
+ends it as `budget_exhausted`; during search `progress` also reports `best_score`
+and `score_trajectory` from GEPA's validation-set callback.
 
 Progress shows named lifecycle stages when no counter is available. During search,
 the counter is GEPA metric calls used/total as reported by its budget callback; it
@@ -534,16 +571,19 @@ still has three choices and the same Noul threshold and evidence requirements.
 Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
 keys to simulate migration: reconstruct/re-evaluate a new candidate under the running
-schema, or explicitly select its baseline. For an operator-approved baseline reset,
-retire the active compiled file and set the existing Session runtime setting
-`program_selection` to `baseline` while the runtime is stopped; do not delete an
-artifact alone. No new selection endpoint or automatic rollback is added by Gate A.
+schema. While no job was ever approved, retiring the active `fleet.json` selects the
+baseline. After a global approval a baseline reset is unsupported: an approved job
+cannot be rejected and the ledger requires exactly the file it installed, so deleting
+the artifact makes Turns refuse. Restore the approved artifact or approve a new
+candidate. No new selection endpoint, ledger operation or automatic rollback is added by Gate A.
 An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
-Absent Session selection means baseline; successful installation and serving
-selection record `artifact`. Startup and each invocation reconcile that durable
-selection without writing baseline over a concurrent approval. A missing selected artifact fails across
-restart rather than silently reverting. Invalid replacement bytes retain the valid
-in-memory program/digest but refuse the Turn. No live interpreter state is restored.
+While no global job was ever approved, an absent `fleet.json` means baseline; once one
+was, the ledger requires exactly the file it installed and refuses Turns otherwise.
+A present one is the program every Session
+serves, picked up at the start of its next Turn, and its digest is recorded as
+`compiled_program_digest` and in the `program_selection` event. There is no per-Session
+selection setting. A present but invalid file is not replaced by baseline: invalid
+replacement bytes retain the valid in-memory program/digest but refuse the Turn. No live interpreter state is restored.
 
 Runtime and configuration digests, a digest of optimization source,
 and a versioned fingerprint of installed distribution names and versions are
@@ -604,18 +644,48 @@ the gateway. Judge nondeterminism is possible and must be measured. GEPA reflect
 uses `FLEET_REFLECTION_MODEL`; the checked-in configuration currently uses Claude
 Haiku 5.5 at temperature 1.0 with a 32,000-token output budget.
 
+### Judging on an OpenAI-compatible provider (for example Command Code)
+
+Every role is an independent LM instance, so judging can use a provider other than serving. For Command Code
+(`https://api.commandcode.ai/provider/v1`) give each model an `openai/` route, because a bare
+`deepseek/...` route is sent to the DeepSeek API instead of the configured endpoint (the symptom is
+`LMUnsupportedModelError: Model "..." is not supported on this endpoint`):
+
+```toml
+[llm.judge]            # fleet_metric's DSPy judge
+model = "openai/deepseek/deepseek-v4.1-flash"
+api_base = "https://api.commandcode.ai/provider/v1"
+api_key_env = "COMMAND_CODE_API_KEY"
+
+[evaluation]
+judge_model = "openai:/deepseek/deepseek-v4.1-flash"   # MLflow scorers
+```
+
+With an explicit `[llm.judge]` model, endpoint and key, `judge_environment()` pairs the MLflow `openai:/` scorers
+with that endpoint (`OPENAI_API_BASE`/`OPENAI_API_KEY`); `fleet eval run`, `fleet eval score`, and synthetic jobs
+all call the one `apply_judge_environment` helper. Configure `[llm.reflection]` the same way for GEPA and the
+comparison rationale. Known limit: the `execution_evidence_diagnostics` scorer asks for a structured
+`dict[str, bool]` answer, which Command Code's schema validation rejects; `evaluate_rescore` therefore applies
+Fleet's metric and the gold-value check only, and `fleet eval score` reports that diagnostic as failed on this provider.
+
+A judge failure during optimization or replay scores that example 0.0 with feedback and stops the job with
+`JudgeFailedError` at its next safe boundary; MLflow's DSPy autologging otherwise turns a raising metric into a
+`None` score. Failed jobs show their class and, for provider and Fleet contract errors only, a short message with
+credentials and paths redacted; other exceptions are named without quoting evaluated content.
+
 ## Trace contents and selected replay evidence
 
 The `fleet_turn` root span records `session_id`, `turn_id`, task, workspace
 manifest, file digests, whether replay capture was selected, and the snapshot
-digest. Capture is off by default. A selected Turn stores an immutable snapshot
-in `fleet_lite_replay_snapshots` in the same transaction as successful Turn
+digest. Capture is on by default (`record_replay: false` opts out). A selected Turn
+stores an immutable snapshot in `fleet_lite_replay_snapshots` in the same transaction as successful Turn
 completion. It contains bounded exact workspace file bytes, conversation history,
 memory (including the captured sandbox environment hint), selected dataset handle,
 Skills catalog and revision, execution mode,
 non-secret configuration, timeout, and Fleet version. Total workspace input is
-limited to 8 MB; oversized
-selected Turns fail before model execution. Snapshot bytes remain in Lakebase;
+limited to 8 MB. When replay capture is enabled, an oversized workspace skips it
+(a `replay_skipped` event, `replay_snapshot_selected` false) and the Turn proceeds;
+the size is checked from remote file sizes before any bytes are downloaded. Snapshot bytes remain in Lakebase;
 the GEPA dataset carries only the Session/Turn reference and digest.
 
 The validation ratio is inclusive `0.1–0.5`, default `0.35`, across CLI, HTTP,
@@ -654,7 +724,7 @@ The `compiled_program_digest`
 attribute names the approved program that served the Turn (empty when none is
 installed). Selected replay snapshots expire after 30 days and are pruned when
 the Store initializes; their Lakebase curation rows are deleted with them. Do
-not enable capture for data that is not approved for this use.
+not leave capture on for data that is not approved for this use.
 `fleet eval label` writes MLflow assessments and, for a selected replay, copies
 the review status, source group, answer/expected values, route, critical marker,
 reviewer, and matching replay provenance into `fleet_lite_review_labels` in
@@ -693,8 +763,8 @@ of files produced by that Turn. This diagnostic does not change scoring or gold
 approval semantics. A root rewrite or removal of promoted child output records
 `superseded_child_receipts` in the final capture; rewritten files use workspace
 provenance, while the original promotion receipt remains in execution evidence.
-Prior answers in history and unreviewed learned notes remain
-program inputs; a continuation with those inputs does not measure unseen-task
+Prior answers in history and Session memories (which can include learned-note text)
+remain program inputs; `/learned` files are not separately injected; a continuation with those inputs does not measure unseen-task
 performance.
 Fixed-size host usage counters precede artifact metadata in root outputs so
 artifact-heavy Turns retain scoring evidence under trace sanitization limits. The
@@ -795,3 +865,14 @@ No SQL migration or new wire fields are required. Historical progress snapshots
 remain readable. Deploy API and worker changes together after draining old pairs:
 an older API can otherwise continue replaying stdout. Roll back the pair together;
 do not re-enable concurrent stdout replay into worker-owned progress.
+
+
+Synthetic jobs are deferred until isolated evaluation and complete serving/judge
+usage accounting are supported. API and CLI requests are refused before a worker starts; the TUI
+shows Synthetic disabled. Historical Synthetic job records remain readable.
+Rescore judges saved historical executions and does not measure the current installed program;
+its results are excluded from program-version trends. Replay measures the installed program.
+Token caps use reported generative usage and cooperative safe-point checks, with in-flight overshoot;
+metric-call budgets are separate and do not establish a dollar ceiling.
+The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
+Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.

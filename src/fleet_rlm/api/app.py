@@ -15,7 +15,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from fleet_rlm.api.routes import experiments, sessions, setup, turns, workspace
+from fleet_rlm.api.routes import improve, sessions, setup, turns, workspace
 from fleet_rlm.api.schemas import Health
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.experiments import ExperimentManager
@@ -188,7 +188,7 @@ def create_app(
             sessions.memory_router,
             sessions.skills_router,
             turns.router,
-            experiments.router,
+            improve.router,
         )
     ):
         app.include_router(router)

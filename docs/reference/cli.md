@@ -9,8 +9,8 @@ uv run fleet serve [--host 127.0.0.1] [--port 8000] [--mlflow local|databricks]
 uv run fleet web [--host 127.0.0.1] [--port 8080] [--url API_URL]
                 [--public-url URL] [--session SESSION] [--mlflow local|databricks]
                 [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
-uv run fleet eval dataset|run|label ... [--mlflow local|databricks]
-uv run fleet optimize --session SESSION_ID ... [--mlflow local|databricks]
+uv run fleet eval dataset|run|score|label ... [--mlflow local|databricks]
+uv run fleet optimize [--check] ... [--mlflow local|databricks]
 uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
 ```
 
@@ -161,7 +161,7 @@ configured tracking destination; it is not run during serving.
 Commands include `/setup`, `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
 `/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
-`/timeout <seconds|off|default>`, `/sessions`, `/optimize`, `/config`,
+`/timeout <seconds|off|default>`, `/sessions`, `/improve` (also `/experiments`), `/optimize`, `/config`,
 `/settings`, `/models`, `/model`, and `/exit`.
 `/skills require tabular-analysis delegation` sets ordered required Skill names for
 subsequent Turns in this client; `/skills clear` removes them. At most three exact
@@ -173,22 +173,52 @@ files remain subject to host admission and do not grant tool permissions. See th
 `/memory [query]` reads this Session's saved memories, optionally
 filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
 the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
-`/optimize [args]` runs `fleet optimize --session <this session> [args]`.
-It submits an API-owned experiment and inherits the server's effective settings;
+`/improve` (and `/experiments`) opens the Improve screen, a pure client of the `/improve/*`
+API, with four tabs:
+
+- **Review** pages through replay-captured Turns from every Session, 50 at a time, using Newer/Older.
+  Selecting one shows its task and
+  answer and the answer's figures as pre-checked boxes, plus inputs for the expected answer
+  (prefilled with the answer; blank when the preview was truncated), extra values, a critical
+  toggle, and a group. `✓ Approve` saves the checked figures and extras as the approved gold.
+  `✗ Reject` rejects the Turn; if you first edit the expected answer, it saves the correction
+  as approved gold (with the correction's own figures) instead.
+- **Readiness** shows the counts, groups, critical cases, split sizes, each missing
+  requirement in plain words, and the new labels since the last run.
+- **Runs** lists jobs with status. The selected job shows its stage stepper
+  (preparing, search, validation, finalization), metric-call and token bars, best score with a
+  score-trajectory sparkline, and elapsed time. `Run optimize` asks for confirmation (budget and
+  token cap) before it submits; `Cancel` requests a cooperative stop.
+- **Results** shows the selected completed job: dev and holdout baseline-to-candidate means,
+  the promotion gate and its reasons, component before/after diffs, a per-example table
+  (baseline, candidate, delta; largest gain first), and the installed holdout trend from
+  `/improve/history`. `Approve` and `Reject` follow the review rules below.
+
+After a Turn whose replay snapshot was captured, the composer shows `label: ctrl+l ✓ / ctrl+n ✗`
+until you type. `ctrl+l` approves that Turn with its answer and figures; `ctrl+n` opens Review at
+it. The status bar shows `ready to optimize` when `/improve/readiness` is green.
+
+In the fullscreen TUI, `/optimize` without arguments opens the Runs tab, where `Run optimize` asks
+for confirmation. In the non-TTY fallback, `/optimize` without arguments only prints guidance;
+with explicit arguments it submits a job using server defaults for controls not supplied.
+`/optimize [args]` runs `fleet optimize [args]` over the curated labels from every Session.
+It submits an API-owned job and inherits the server's effective settings;
 the CLI uses the same controls but remains a standalone synchronous workflow.
-Client disconnect does not cancel API-owned work. Use the Experiments screen's
+Client disconnect does not cancel API-owned work. Use the Improve screen's
 explicit cancel action for cooperative stopping. The API allows one active
-optimization or review globally and rejects concurrent requests without queueing.
+job or review and rejects concurrent requests without queueing.
 It compiles and gates a GEPA candidate from self-contained, explicitly selected
 Turn snapshots with approved gold labels; it does not automatically score
 historical traces. Traces without a matching immutable Lakebase snapshot are
 skipped. It requires at least 8 examples from 3 source groups, as well as the
 corresponding model, Daytona, database, and tracking services. It never installs
 a candidate.
-`/optimize --approve <version>` (or `fleet optimize --approve <version>`) installs one only when
+`/optimize --approve <version>` (or `fleet optimize --approve <version>`) installs one, as the
+single `fleet.json` every Session serves, only when
 the current incumbent, configuration, code, and dependencies match the
-candidate's recorded identities. Old manifests require reevaluation. The engine
-loads an approved candidate at the start of the next Turn.
+candidate's recorded identities. Old manifests, and candidates from the per-Session
+era, require reevaluation. Each Session loads the installed program at the start of
+its next Turn; without `fleet.json` they run the baseline.
 
 `fleet eval label <trace-id> --answer "..." [--value V ...] [--route R] [--critical]`
 writes gold labels onto a trace; partial updates preserve existing expectations.
@@ -198,11 +228,23 @@ each of three paired validation passes. Search fails during preparation, before 
 holdout case is labeled. `--status` defaults to
 `approved` for a new label; updates preserve status and source group unless supplied.
 A new source group defaults to the trace's session id. The trace ID is printed after
-each Turn and by `/trace`.
+each Turn and by `/trace`. The HTTP `POST /improve/labels` runs the same labelling by
+`turn_id`.
+
+`fleet eval score <trace-id>...` scores already collected, labelled traces with the
+configured judge in the evaluation experiment, without running their Turns again.
+
+`fleet optimize --check` prints readiness as JSON (`ready`, `examples`, `groups`,
+`critical`, `split_sizes`, `missing`) and exits non-zero when dataset readiness fails
+or the installed `fleet.json` contradicts the approval ledger. It reads PostgreSQL,
+MLflow and the local program file only; it does not check model or Daytona availability.
 
 `fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
 `--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
-`--validation-ratio` (inclusive 0.1–0.5, default 0.35), and `--approve VERSION`. Reflection calls and the three paired
+`--validation-ratio` (inclusive 0.1–0.5, default 0.35), `--max-total-tokens N` (stop
+with `budget_exhausted` after N generative LM tokens; `0` is unlimited; default
+`FLEET_JOB_MAX_TOKENS`), `--evaluate rescore|replay|synthetic` (measure the installed program
+instead of optimizing; no candidate is created), and `--approve VERSION`. Reflection calls and the three paired
 final validation passes are additional work, not covered by the search budget.
 Native GEPA checks the metric-call budget between batches, so it may overshoot.
 `--reflection-minibatch-size N` (default 3) sets the native reflection batch size;
@@ -211,8 +253,9 @@ three-example dev set with minibatch size 1 and one proposal needs at most eight
 search metric calls, including seed scoring and full candidate validation.
 `--trace-search` opts into search-rollout traces; it is off by default. Final
 paired validation per-case traces are recorded in the optimization MLflow run.
-Optimization lifecycle state is stored in PostgreSQL. Existing JSON history is
-imported idempotently on read and retained unchanged as a legacy source.
+Optimization lifecycle state is stored in PostgreSQL. Runs recorded before the
+program became global keep their Session as `legacy_session_id`; they stay readable
+but cannot be approved.
 
 ## Interactive tasks, settings, and model selection
 
@@ -350,3 +393,14 @@ Configuration fields and defaults are listed in the
 [configuration reference](configuration.md). Live Daytona execution requires
 valid API key, org ID, and Volume ID. No Daytona connectivity is asserted by
 this reference.
+
+
+Synthetic jobs are deferred until isolated evaluation and complete serving/judge
+usage accounting are supported. API and CLI requests are refused before a worker starts; the TUI
+shows Synthetic disabled. Historical Synthetic job records remain readable.
+Rescore judges saved historical executions and does not measure the current installed program;
+its results are excluded from program-version trends. Replay measures the installed program.
+Token caps use reported generative usage and cooperative safe-point checks, with in-flight overshoot;
+metric-call budgets are separate and do not establish a dollar ceiling.
+The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
+Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.

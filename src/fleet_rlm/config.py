@@ -29,6 +29,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from fleet_rlm.models import Endpoint, EnvReference, ModelRoute, ResolvedModel, Role
 from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
+# Dev and holdout each need this many labelled examples before a run can tell a gain from noise.
+MIN_SPLIT_EXAMPLES = 5
 _SECRET_FIELDS = {
     "fleet_database_url",
     "fleet_database_migration_url",
@@ -46,6 +48,7 @@ _TOML_FIELDS = {
         "max_child_sandboxes": "max_child_sandboxes",
         "max_active_children": "max_active_children",
         "max_active_sessions": "max_active_sessions",
+        "job_max_tokens": "job_max_tokens",
         "linked_children": "linked_children",
     },
     "gateway": {"host": "databricks_host"},
@@ -581,6 +584,35 @@ class FleetSettings(BaseSettings):
         le=1024,
         validation_alias=AliasChoices("FLEET_MAX_ACTIVE_SESSIONS", "MAX_ACTIVE_SESSIONS"),
     )
+    job_max_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="Generative LM tokens one optimization job may spend; 0 means unlimited.",
+        validation_alias="FLEET_JOB_MAX_TOKENS",
+    )
+    auto_optimize: bool = Field(
+        default=False,
+        description="Start an optimize job after enough new labels; candidates still wait for human approval.",
+        validation_alias="FLEET_AUTO_OPTIMIZE",
+    )
+    auto_optimize_min_new_labels: int = Field(
+        default=5,
+        ge=1,
+        description="New approved labels since the last finished optimize job that trigger an automatic one.",
+        validation_alias="FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS",
+    )
+    auto_optimize_max_metric_calls: int | None = Field(
+        default=None,
+        ge=1,
+        description="Search metric calls for automatic jobs; unset keeps the light automatic budget.",
+        validation_alias="FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS",
+    )
+    min_split_examples: int = Field(
+        default=MIN_SPLIT_EXAMPLES,
+        ge=1,
+        description="Labelled examples the dev and holdout splits each need before an optimize job may start.",
+        validation_alias="FLEET_MIN_SPLIT_EXAMPLES",
+    )
     max_upload_bytes: int = Field(
         default=MAX_WORKSPACE_FILE_BYTES,
         ge=1,
@@ -910,8 +942,19 @@ class FleetSettings(BaseSettings):
         return target
 
     def judge_environment(self) -> dict[str, str]:
-        """MLflow diagnostic providers use their own native environment configuration."""
-        return {}
+        """Environment that points MLflow's `openai:/` scorers at the judge role's own endpoint and key.
+
+        Only an explicitly configured judge (`[llm.judge].model` with its endpoint and credential) is
+        paired, so the DSPy correctness judge and the MLflow scorers use the same provider. Other
+        providers, and judges that merely inherit the shared connection, use MLflow's native environment.
+        """
+        resolved = self.resolved_model("judge")
+        key = resolved.api_key.get_secret_value()
+        if not (self.fleet_judge_model.startswith("openai:/") and self.fleet_correctness_model):
+            return {}
+        if not (resolved.api_base and key):
+            return {}
+        return {"OPENAI_API_BASE": resolved.api_base, "OPENAI_API_KEY": key}
 
     def build_jev_lm(self) -> Any | None:
         """The TypeSafe System One client, or None when no credential is configured.

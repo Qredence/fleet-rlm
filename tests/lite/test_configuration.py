@@ -552,3 +552,23 @@ def test_shared_discovery_uses_default_connection_when_root_has_an_override(monk
 
     monkeypatch.setattr(httpx, "stream", stream)
     assert settings.list_models(role="shared") == ["openai/shared"]
+
+
+def test_an_explicit_judge_pairs_the_mlflow_openai_scorers_with_its_own_endpoint_and_key(monkeypatch):
+    monkeypatch.setenv("COMMAND_CODE_API_KEY", "judge-key")
+    judge = {
+        "fleet_correctness_model": "openai/deepseek/deepseek-v4.1-flash",
+        "fleet_judge_api_base": "https://api.commandcode.ai/provider/v1",
+        "fleet_judge_api_key_env": "COMMAND_CODE_API_KEY",
+    }
+    settings = FleetSettings(_env_file=None, fleet_judge_model="openai:/deepseek/deepseek-v4.1-flash", **judge)
+    assert settings.judge_environment() == {
+        "OPENAI_API_BASE": "https://api.commandcode.ai/provider/v1",
+        "OPENAI_API_KEY": "judge-key",
+    }
+    # The DSPy judge keeps its own connection, separate from serving.
+    assert settings.resolved_model("judge").api_base == "https://api.commandcode.ai/provider/v1"
+    assert settings.resolved_model("judge").api_key.get_secret_value() == "judge-key"
+    # Other providers use their native environment even when the judge role is explicit.
+    other = FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint", **judge)
+    assert other.judge_environment() == {}

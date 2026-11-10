@@ -54,21 +54,21 @@ def test_worker_snapshot_ignores_unrelated_dotenv_keys(tmp_path):
 
 @pytest.mark.parametrize("ratio", [0.1, 0.5])
 def test_ratio_bounds_agree_across_entry_points(ratio, monkeypatch):
-    from fleet_rlm.api.schemas import StartExperiment
+    from fleet_rlm.api.schemas import StartJob
     from fleet_rlm.optimize import dataset
     from fleet_rlm.tui.commands import Context, SessionState, _parse_optimizer_arguments
 
     parser = argparse.ArgumentParser()
     add_optimization_arguments(parser)
-    options = ExperimentOptions.from_namespace(parser.parse_args(["--session", "s1", "--validation-ratio", str(ratio)]))
+    options = ExperimentOptions.from_namespace(parser.parse_args(["--validation-ratio", str(ratio)]))
     assert options.validation_ratio == ratio
-    assert StartExperiment(request_id="request", validation_ratio=ratio).validation_ratio == ratio
+    assert StartJob(request_id="request", validation_ratio=ratio).validation_ratio == ratio
     payload, review = _parse_optimizer_arguments(Context(None, "s1", SessionState()), f"--validation-ratio {ratio}")
     assert payload["validation_ratio"] == ratio and review is None
     monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
     monkeypatch.setattr(dataset, "load_examples_from_mlflow", lambda *_args, **_kwargs: [])
-    with pytest.raises(ValueError, match="approved examples"):
-        dataset.curate_dataset(None, "offline", "s1", validation_ratio=ratio)
+    with pytest.raises(ValueError, match="approved gold-labeled examples"):
+        dataset.curate_dataset(None, "offline", validation_ratio=ratio)
 
 
 @pytest.mark.parametrize("ratio", [0, 0.09, 0.51, 1, float("nan"), float("inf")])
@@ -78,20 +78,24 @@ def test_invalid_ratio_rejected_by_shared_and_direct_contract(ratio):
     with pytest.raises(ValidationError):
         ExperimentOptions(validation_ratio=ratio)
     with pytest.raises(ValueError, match="validation_ratio"):
-        curate_dataset(None, "offline", "s1", validation_ratio=ratio)
+        curate_dataset(None, "offline", validation_ratio=ratio)
 
 
 def test_cli_and_http_search_controls_have_one_validated_contract():
     parser = argparse.ArgumentParser()
     add_optimization_arguments(parser)
-    args = parser.parse_args(["--session", "s1", "--max-metric-calls", "10", "--trace-search"])
+    args = parser.parse_args(["--max-metric-calls", "10", "--trace-search", "--max-total-tokens", "5000"])
     options = ExperimentOptions.from_namespace(args)
     assert options.gepa_budget is None and options.max_metric_calls == 10
-    assert options.trace_search
+    assert options.trace_search and options.max_total_tokens == 5000
+    assert "--max-total-tokens" in options.cli_arguments() and "--check" not in options.cli_arguments()
+    assert ExperimentOptions().max_total_tokens is None and ExperimentOptions(max_total_tokens=0).max_total_tokens == 0
     assert ExperimentOptions.model_validate(options.model_dump()) == options
     assert "--max-metric-calls" in options.cli_arguments() and "--gepa-budget" not in options.cli_arguments()
     with pytest.raises(ValidationError):
         ExperimentOptions(max_metric_calls=10, gepa_budget="light")
+    with pytest.raises(ValidationError):
+        ExperimentOptions(max_total_tokens=-1)
     with pytest.raises(ValidationError):
         ExperimentOptions(threads=True)
     with pytest.raises(ValidationError):

@@ -45,8 +45,11 @@ class TurnRequest(_Request):
         return names
 
     record_replay: bool = Field(
-        default=False,
-        description="Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data.",
+        default=True,
+        description=(
+            "Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed GEPA data. "
+            "A workspace over the snapshot limit skips capture instead of failing the Turn."
+        ),
     )
     timeout_seconds: DeadlineValue = Field(
         default=None,
@@ -110,17 +113,29 @@ class ModelRequest(_Request):
     model: str = Field(min_length=1, max_length=300, pattern=r"^\S(?:.*\S)?$")
 
 
-class StartExperiment(ExperimentOptions):
-    """Validated search controls and a retry-safe caller identity."""
+class StartJob(ExperimentOptions):
+    """A job kind, its validated controls, and a retry-safe caller identity."""
 
+    kind: Literal["optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic"] = "optimize"
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class ReviewExperiment(_Request):
+class ReviewJob(_Request):
     """An explicit human decision, never an implicit promotion after optimization."""
 
     decision: Literal["approved", "rejected"]
     request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class LabelRequest(_Request):
+    """A gold label for one replay-captured Turn; unset fields keep the Turn's existing label."""
+
+    turn_id: str = Field(min_length=1, max_length=128)
+    status: Literal["approved", "benchmark", "synthetic", "rejected"] | None = None
+    expected_answer: str | None = Field(default=None, max_length=100_000)
+    expected_values: list[Annotated[str, Field(max_length=100_000)]] | None = Field(default=None, max_length=100)
+    critical: bool | None = None
+    group: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 # Responses
@@ -311,13 +326,14 @@ class ApiError(BaseModel):
     detail: str | list[dict[str, Any]]
 
 
-class ExperimentRun(BaseModel):
-    """Public view of a persisted optimization run, including additive public fields."""
+class Job(BaseModel):
+    """Public view of a persisted job, including additive public fields."""
 
     model_config = ConfigDict(extra="allow")
 
     run_id: str
-    session_id: str
+    kind: str = "optimize"
+    legacy_session_id: str | None = None
     status: str
     stage: str | None = None
     options: dict[str, Any] | None = None
@@ -327,6 +343,7 @@ class ExperimentRun(BaseModel):
     finished_at: str | None = None
     candidate_version: str | None = None
     gate: dict[str, Any] | None = None
+    scores: dict[str, Any] | None = None
     dataset_sizes: dict[str, Any] | None = None
     mlflow_run_id: str | None = None
     progress: dict[str, Any] | None = None
@@ -334,27 +351,118 @@ class ExperimentRun(BaseModel):
     decision: str | None = None
     decision_at: str | None = None
     stop_requested: bool | None = None
+    evaluation: dict[str, Any] | None = None
+    trigger: str | None = None
 
 
-class ExperimentList(BaseModel):
-    """History snapshot and admission state for one Session's experiments."""
+class JobList(BaseModel):
+    """History snapshot and admission state for every job."""
 
-    experiments: list[ExperimentRun]
+    jobs: list[Job]
     active_run_id: str | None
     accepting: bool
 
 
-class ExperimentEnvelope(BaseModel):
-    """One public run returned by start, cancel, or review."""
+class JobEnvelope(BaseModel):
+    """One public job returned by start, cancel, or review."""
 
-    experiment: ExperimentRun
+    job: Job
 
 
-class ExperimentDetail(BaseModel):
-    """One public run and its optional saved comparison evidence."""
+class JobDetail(BaseModel):
+    """One public job, its optional saved comparison evidence, and that comparison's computed summary."""
 
-    experiment: ExperimentRun
+    job: Job
     comparison: dict[str, Any] | None
+    summary: dict[str, Any] | None = None
+
+
+class TunableComponent(BaseModel):
+    """One part of the program GEPA can rewrite, in plain words."""
+
+    name: str
+    description: str
+
+
+class ImproveReadiness(BaseModel):
+    """What the labelled examples support today, what a run still needs, and what could improve."""
+
+    ready: bool
+    examples: int
+    groups: int
+    critical: int
+    split_sizes: dict[str, int]
+    missing: list[str]
+    min_split_examples: int
+    new_labels_since_last_run: int
+    components: list[TunableComponent]
+    # Labelled examples whose latest evaluation scored below 1.0; None while nothing was ever evaluated.
+    improvable_examples: int | None = None
+    note: str | None = None
+
+
+class ImproveSettings(BaseModel):
+    """Auto-run switch and budgets; saved values override the FLEET_AUTO_OPTIMIZE* and FLEET_JOB_MAX_TOKENS defaults."""
+
+    auto_run: bool
+    min_new_labels: int = Field(ge=1)
+    max_metric_calls: int | None = Field(default=None, ge=1)
+    max_total_tokens: int = Field(ge=0)
+    auto_run_blocked: str | None = None
+
+
+class ImproveSettingsUpdate(_Request):
+    """A partial settings update; omitted fields keep their current value."""
+
+    auto_run: bool | None = None
+    min_new_labels: int | None = Field(default=None, ge=1, le=10_000)
+    max_metric_calls: int | None = Field(default=None, ge=1, le=100_000)
+    max_total_tokens: int | None = Field(default=None, ge=0)
+
+
+class QueueItem(BaseModel):
+    """A replay-captured Turn awaiting or carrying a gold label."""
+
+    turn_id: str
+    session_id: str
+    task: str
+    answer: str
+    figures: list[str]
+    label: str
+    expected_answer: str | None = None
+    expected_values: list[str] = Field(default_factory=list)
+    critical: bool = False
+    group: str | None = None
+    updated_at: str | None = None
+    # Why this Turn is worth labelling or relabelling; flagged Turns teach GEPA the most.
+    flags: list[str] = Field(default_factory=list)
+    evaluation_score: float | None = None
+
+
+class ImproveQueue(BaseModel):
+    """Replay-captured Turns across every Session, newest first."""
+
+    items: list[QueueItem]
+    next_offset: int | None = None
+
+
+class LabelSaved(BaseModel):
+    """The label now stored for a Turn."""
+
+    turn_id: str
+    trace_id: str
+    status: str
+    expected_answer: str | None = None
+    expected_values: list[str]
+    critical: bool
+    group: str
+
+
+class ImproveHistory(BaseModel):
+    """Approved versions and evaluation results, newest first, for the quality trend."""
+
+    versions: list[Job]
+    evaluations: list[Job]
 
 
 class ExperimentManagerStatus(BaseModel):
@@ -362,4 +470,4 @@ class ExperimentManagerStatus(BaseModel):
 
     accepting: bool
     busy: bool
-    experiments: list[ExperimentRun]
+    experiments: list[Job]

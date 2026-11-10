@@ -671,7 +671,9 @@ def test_artifact_heavy_span_keeps_route_usage_and_cleanup_after_sanitization(tr
     paths = sorted(files)
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: paths, read_workspace_file=lambda _path: payload),
-        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], paths),
+        commit_turn=lambda **kwargs: completion_for(
+            kwargs["turn_record"], paths, replay_snapshot=kwargs["replay_snapshot"]
+        ),
         engine=lambda **_kwargs: SimpleNamespace(
             answer="Done",
             route="rlm",
@@ -788,8 +790,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     written: list[tuple] = []
     traced["span_trace_id"] = "trace-test-id"
 
-    def run_engine(**kwargs):
-        assert "- older.md: prior hint" in kwargs["memory_summary"]
+    def run_engine(**_kwargs):
         files["files/input.txt"] = b"modified during execution"
         return SimpleNamespace(
             answer="processed locally",
@@ -804,7 +805,9 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     def persist(**kwargs):
         records.append(kwargs["turn_record"])
         order.append("sync")
-        return completion_for(kwargs["turn_record"], ["artifacts/result.csv"])
+        return completion_for(
+            kwargs["turn_record"], ["artifacts/result.csv"], replay_snapshot=kwargs["replay_snapshot"]
+        )
 
     def write_note(turn_id, note, trace_id=None):
         order.append("write")
@@ -829,7 +832,6 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
                 "children": [],
                 "children_complete": True,
             },
-            notes=[{"file": "older.md", "summary": "prior hint"}],
             write_learned_note=write_note,
         ),
         load_context=lambda _session: ("summary", "prior history"),
@@ -854,6 +856,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     assert outcome == "completed"
     assert duration_seconds >= 0
     assert payload == {
+        "replay_snapshot_selected": True,
         "answer": "processed locally",
         "route": "flex",
         "learned_skill_note": "Reuse the digit window check.",
@@ -929,7 +932,8 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
         commit_turn=lambda **kwargs: (
-            records.append(kwargs["turn_record"]) or completion_for(kwargs["turn_record"], [path])
+            records.append(kwargs["turn_record"])
+            or completion_for(kwargs["turn_record"], [path], replay_snapshot=kwargs["replay_snapshot"])
         ),
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", execution_evidence=evidence),
     )
@@ -984,7 +988,9 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
             list_workspace_files=lambda: paths,
             read_workspace_file=lambda _path: raw,
         ),
-        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], paths),
+        commit_turn=lambda **kwargs: completion_for(
+            kwargs["turn_record"], paths, replay_snapshot=kwargs["replay_snapshot"]
+        ),
         engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
     )
     with opened_client(runtime) as (client, _app):
@@ -1137,7 +1143,6 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
             read_workspace_file=lambda path: files[path],
             turn_inputs=lambda: {
                 "digests": {path: hashlib.sha256(data).hexdigest() for path, data in files.items()},
-                "notes": [],
                 "environment": environment,
             },
         ),
@@ -1179,6 +1184,28 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
     assert snapshot["context_files"] == {"files/input.csv": hashlib.sha256(content).hexdigest()}
     assert traced["inputs"]["turn_id"] == turn_record["turn_id"]
     assert traced["inputs"]["replay_snapshot_sha256"] == digest
+
+
+def test_oversized_replay_workspace_completes_without_a_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(turn_module, "MAX_REPLAY_FILE_BYTES", 4)
+    files = {"files/input.csv": b"too large for replay"}
+    persisted: list[dict[str, Any]] = []
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(list_workspace_files=lambda: list(files), read_workspace_file=lambda path: files[path]),
+        commit_turn=lambda **kwargs: (
+            persisted.append(kwargs) or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
+        ),
+        engine=lambda **_kwargs: SimpleNamespace(answer="ok", route="flex", lm_calls=1, sandbox_errors=0),
+    )
+    with opened_client(runtime) as (client, _app):
+        response = client.post("/sessions/session-a/turn", json={"task": "compute"})
+
+    events = events_of(response)
+    [skipped] = [event for event in events if event["event"] == "replay_skipped"]
+    assert (skipped["bytes"], skipped["limit"]) == (len(files["files/input.csv"]), 4)
+    assert not [event for event in events if event["event"] == "error"]
+    assert persisted[0]["replay_snapshot"] is None
+    assert persisted[0]["turn_record"]["replay_snapshot_selected"] is False
 
 
 def test_turn_provenance_matches_across_span_record_replay_and_terminal(traced) -> None:
@@ -1243,7 +1270,7 @@ def test_snapshot_provenance_survives_a_preparation_failure_after_preflight(trac
 
     def resolve() -> dict[str, Any]:
         manager.snapshot_resolved_callback(SimpleNamespace(provenance=lambda: dict(provenance)))
-        return {"digests": {}, "notes": [], "environment": ""}
+        return {"digests": {}, "environment": ""}
 
     def oversized_replay(_snapshot):
         raise ValueError("Replay snapshot exceeds the 8 MB limit")
@@ -1664,7 +1691,7 @@ def test_a_completed_turn_records_not_required_and_never_stops_the_root(traced) 
 
     def persist(**kwargs: Any) -> dict[str, Any]:
         records.append(kwargs["turn_record"])
-        return completion_for(kwargs["turn_record"])
+        return completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
 
     manager = FakeManager(cancel_turn=cancel_turn, end_turn=lambda: order.append("end_turn"))
     runtime = runtime_with(
@@ -1694,7 +1721,7 @@ def test_provider_bounds_are_reported_on_event_record_and_span_without_a_deadlin
 
     def persist(**kwargs: Any) -> dict[str, Any]:
         records.append(kwargs["turn_record"])
-        return completion_for(kwargs["turn_record"])
+        return completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(provider_bounds=lambda: bounds),
@@ -1716,7 +1743,7 @@ def test_two_successful_turns_record_the_same_live_root_sandbox_id(traced) -> No
 
     def persist(**kwargs: Any) -> dict[str, Any]:
         records.append(kwargs["turn_record"])
-        return completion_for(kwargs["turn_record"])
+        return completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(live_sandbox_id="sandbox-warm-root"),
@@ -2021,54 +2048,6 @@ def test_reusing_an_idempotency_key_for_another_task_names_the_conflict() -> Non
     assert events[1]["payload"]["error"] == "Idempotency key already belongs to another task"
 
 
-# Summaries recorded in trace tr-661be20e: seven restatements of one Pi recipe and two register-machine notes.
-_TRACE_NOTE_SUMMARIES = [
-    "Pi 1-indexed decimal digit n=1492252 is 5; recipe: sys.set_int_max_str_digits(0);"
-    " mp.mp.dps=n+500..1000; s=mp.nstr(mp.pi",
-    "Pi nth decimal digit (1-indexed, n=1492252): sys.set_int_max_str_digits(0); mp.mp.dps = n + 500; s"
-    " = mp.nstr(mp.pi, n +",
-    "Pi 1-indexed decimal digit at n=1492252 is 5. Robust recipe: sys.set_int_max_str_digits(0);"
-    " mp.dps=n+200; s=mp.nstr(mp.p",
-    "Pi nth decimal digit (1-indexed), n=1492252: call sys.set_int_max_str_digits(0); mp.dps = n + 200;"
-    " s = mp.nstr(mp.pi, n",
-    "Register-machine trace tasks: parse numbered instructions from the task text with a regex,"
-    " normalize Unicode, then simul",
-    "Register-machine trace tasks: implement the instruction semantics in a simulator (dict registers,"
-    " recursive/nested condi",
-    "Pi nth decimal digit (1-indexed): sys.set_int_max_str_digits(0); mp.dps=n+120;"
-    " s=mp.nstr(mp.pi,n+120); digit=s[n+1] with",
-    "Far-out digit of Pi at 1-indexed decimal position n=1492252: call sys.set_int_max_str_digits(0)"
-    " first. Method A: mpmath",
-    "Far-out digits of Pi: mpmath with mp.dps = n + 60 is sufficient to get decimal digit n; convert pi"
-    " to string, drop the '",
-]
-
-
-def test_shared_notes_drop_near_duplicates_but_keep_distinct_topics() -> None:
-    notes = [{"file": f"note-{index}.md", "summary": summary} for index, summary in enumerate(_TRACE_NOTE_SUMMARIES)]
-
-    kept = turn_module._distinct_notes(notes)
-
-    # Four restatements of the first Pi recipe collapse; both register-machine notes and the differently
-    # phrased Pi notes survive, in their original newest-first order.
-    assert [note["file"] for note in kept] == ["note-0.md", "note-4.md", "note-5.md", "note-7.md", "note-8.md"]
-
-
-def test_shared_notes_are_capped() -> None:
-    notes = [{"file": f"{i}.md", "summary": f"distinct topic {i} alpha{i} beta{i}"} for i in range(20)]
-
-    assert [note["file"] for note in turn_module._distinct_notes(notes, limit=8)] == [f"{i}.md" for i in range(8)]
-
-
-def test_shared_notes_header_says_hints_are_never_verification_references() -> None:
-    runtime = runtime_with(sandbox_mgr=FakeManager(notes=[{"file": "a.md", "summary": "Pi digit is 5"}]))
-
-    inputs = turn_module._prepare_inputs(runtime, "session-a", "task")
-
-    assert "never a verification reference" in inputs["memory_summary"]
-    assert "- a.md: Pi digit is 5" in inputs["memory_summary"]
-
-
 def test_prepare_inputs_hashes_remotely_without_downloading_files() -> None:
     digests = {"files/a.txt": hashlib.sha256(b"a").hexdigest(), "skills/x/SKILL.md": hashlib.sha256(b"x").hexdigest()}
 
@@ -2077,17 +2056,50 @@ def test_prepare_inputs_hashes_remotely_without_downloading_files() -> None:
 
     runtime = runtime_with(
         sandbox_mgr=FakeManager(
-            turn_inputs=lambda: {"digests": dict(digests), "notes": [], "environment": "Sandbox environment: X."},
+            turn_inputs=lambda: {"digests": dict(digests), "environment": "Sandbox environment: X."},
             read_workspace_file=no_download,
         )
     )
 
-    inputs = turn_module._prepare_inputs(runtime, "session-a", "task")
+    inputs = turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=False)
 
     assert inputs["context_files"] == digests
     assert inputs["manifest"] == "/workspace/files/a.txt, /workspace/skills/x/SKILL.md"
     assert "Sandbox environment: X." in inputs["memory_summary"]
-    assert inputs["replay_files"] == {}
+    assert inputs["replay_files"] == {} and inputs["replay_selected"] is False
+
+
+def test_prepare_inputs_skips_replay_capture_for_an_oversized_workspace(monkeypatch) -> None:
+    monkeypatch.setattr(turn_module, "MAX_REPLAY_FILE_BYTES", 8)
+    files = {"files/a.txt": b"12345", "files/b.txt": b"67890"}
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(list_workspace_files=lambda: list(files), read_workspace_file=lambda path: files[path])
+    )
+
+    inputs = turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=True)
+
+    assert inputs["replay_files"] == {} and inputs["replay_selected"] is False
+    assert inputs["replay_skipped_bytes"] == 10
+
+
+def test_prepare_inputs_decides_replay_size_from_remote_sizes_before_downloading(monkeypatch) -> None:
+    monkeypatch.setattr(turn_module, "MAX_REPLAY_FILE_BYTES", 8)
+    digests = {"files/big.bin": hashlib.sha256(b"x").hexdigest()}
+
+    def no_download(_path):
+        raise AssertionError("an oversized workspace must not be downloaded")
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            turn_inputs=lambda: {"digests": digests, "sizes": {"files/big.bin": 30_000_000}, "environment": ""},
+            read_workspace_file=no_download,
+        )
+    )
+
+    inputs = turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=True)
+
+    assert inputs["replay_files"] == {} and inputs["replay_selected"] is False
+    assert inputs["replay_skipped_bytes"] == 30_000_000
 
 
 def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> None:
@@ -2095,7 +2107,6 @@ def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> No
         sandbox_mgr=FakeManager(
             turn_inputs=lambda: {
                 "digests": {"files/a.txt": hashlib.sha256(b"before").hexdigest()},
-                "notes": [],
                 "environment": "",
             },
             read_workspace_file=lambda _path: b"after",
@@ -2799,3 +2810,12 @@ async def test_disconnect_after_observed_completion_preserves_warm_root(monkeypa
     assert calls == []
     assert not manager._cancelled.is_set()
     assert manager._sandbox is warm_root
+
+
+def test_expanded_replay_size_limit_has_a_distinct_skip_reason(monkeypatch):
+    from fleet_rlm import replay
+
+    monkeypatch.setattr(replay, "MAX_REPLAY_JSON_BYTES", 5)
+    with pytest.raises(replay.ReplaySizeError) as raised:
+        replay.encode_snapshot({"task": "large"})
+    assert raised.value.size > raised.value.limit == 5

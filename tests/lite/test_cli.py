@@ -153,7 +153,7 @@ def test_eval_label_syncs_selected_replay_labels_to_configured_lakebase(monkeypa
         ),
     )
     trace.search_assessments = lambda **_kwargs: []
-    monkeypatch.setattr("fleet_rlm.replay.selected_snapshot", lambda *_args: {"task": "immutable source"})
+    monkeypatch.setattr("fleet_rlm.optimize.evaluation.selected_snapshot", lambda *_args: {"task": "immutable source"})
     calls = {}
     store = SimpleNamespace(
         save_review_labels=lambda *args, **kwargs: calls.update(label_args=args, labels=kwargs),
@@ -447,10 +447,8 @@ def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(mo
     cli.main(
         [
             "optimize",
-            "--session",
-            "sess_worker",
             "--managed-run-id",
-            "sess_worker-run",
+            "optimize-worker-run",
             "--managed-owner-id",
             "api-owner",
         ]
@@ -459,7 +457,7 @@ def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(mo
     assert events[:2] == ["read settings", "import optimizer"]
     run = events[2]
     assert run[0] == "run"
-    assert run[1].managed_run_id == "sess_worker-run"
+    assert run[1].managed_run_id == "optimize-worker-run"
     assert run[1].managed_owner_id == "api-owner"
     assert run[2].prog == "fleet optimize"
     assert run[3].compiled_program_dir == str(tmp_path)
@@ -512,3 +510,51 @@ def test_inherited_databricks_port_is_rejected_before_onboarding(monkeypatch, ca
         cli.main([command, "--mlflow-port", "5001"])
     assert error.value.code == 2
     assert "--mlflow-port is only supported with local MLflow" in capsys.readouterr().err
+
+
+def test_eval_score_cli_scores_collected_traces_without_running_turns(monkeypatch, capsys) -> None:
+    import mlflow
+
+    from fleet_rlm.config import MlflowTarget
+    from fleet_rlm.optimize import evaluation
+
+    settings = SimpleNamespace(
+        mlflow_target=lambda: MlflowTarget("local", "file:///tmp/mlruns", "runtime", "eval", "opt"),
+        judge_environment=lambda: {},
+        fleet_judge_model="databricks:/judge",
+        build_jev_lm=lambda: "jev",
+        build_judge_lm=lambda: "judge",
+        resolved_model=lambda _role: SimpleNamespace(build_adapter=lambda: "adapter"),
+    )
+    traces = {"tr-1": object(), "tr-2": object()}
+    monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
+    monkeypatch.setattr(mlflow, "set_experiment", lambda _name: SimpleNamespace(experiment_id="eval-id"))
+    monkeypatch.setattr(mlflow, "get_trace", lambda trace_id, **_kw: traces.get(trace_id))
+    captured = {}
+
+    def score(received, **kwargs):
+        captured.update(kwargs, traces=received)
+        return SimpleNamespace(metrics={"quality/mean": 1.0})
+
+    monkeypatch.setattr(evaluation, "score_evaluation_traces", score)
+    monkeypatch.setattr(evaluation, "evaluate_cases", lambda *_a, **_k: pytest.fail("scoring must not rerun Turns"))
+    cli._eval_command(SimpleNamespace(eval_command="score", trace_ids=["tr-1", "tr-2"]), settings)
+    assert captured["traces"] == list(traces.values())
+    assert captured["experiment_id"] == "eval-id" and captured["judge_lm"] == "judge" and captured["jev_lm"] == "jev"
+    assert "quality/mean" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="tr-missing is not readable"):
+        cli._eval_command(SimpleNamespace(eval_command="score", trace_ids=["tr-missing"]), settings)
+
+
+def test_optimize_cli_takes_no_session_and_offers_check_and_a_token_cap(monkeypatch) -> None:
+    from fleet_rlm.optimize import gepa
+
+    captured = []
+    settings = FleetSettings(_env_file=None)
+    monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
+    monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: True)
+    monkeypatch.setattr(gepa, "run", lambda args, _parser, _settings: captured.append(args))
+    with pytest.raises(SystemExit):
+        cli.main(["optimize", "--session", "sess_a"])
+    cli.main(["optimize", "--check", "--max-total-tokens", "0"])
+    assert [(args.check, args.max_total_tokens) for args in captured] == [(True, 0)]

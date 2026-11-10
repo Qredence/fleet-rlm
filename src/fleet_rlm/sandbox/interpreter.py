@@ -7,7 +7,6 @@ import inspect
 import json
 import keyword
 import logging
-import re
 import threading
 import time
 import uuid
@@ -20,7 +19,7 @@ import mlflow
 from mlflow.entities import SpanType
 from pydantic_core import to_jsonable_python
 
-from fleet_rlm.contracts import decision_evidence, item_decision
+from fleet_rlm.contracts import decision_evidence, figure_grounded, figures, item_decision
 from fleet_rlm.observability import activity_preview, activity_text, evidence_span, typed_decision_scope
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
@@ -28,30 +27,8 @@ from fleet_rlm.workspace import _child_input_path
 
 _LOGGER = logging.getLogger(__name__)
 
-# A figure: an optionally signed number, with `$` and thousands separators allowed; not part of an identifier.
-_FIGURE = re.compile(r"(?<![\w.])\$?-?\d[\d,]*(?:\.\d+)?")
 _MAX_OBSERVED_FIGURES = 200_000
 _MAX_UNGROUNDED_REJECTIONS = 2
-
-
-def _figures(text: str) -> dict[str, float]:
-    """Normalized number literals in `text`; small integers carry no evidence and are ignored."""
-    found: dict[str, float] = {}
-    for match in _FIGURE.finditer(text):
-        literal = match.group().replace("$", "").replace(",", "")
-        try:
-            value = float(literal)
-        except ValueError:
-            continue
-        if "." in literal or abs(value) >= 10:
-            found[literal] = value
-    return found
-
-
-def _grounded(literal: str, value: float, observed: set[float]) -> bool:
-    """A typed figure is grounded when some observed value rounds to it at the typed precision."""
-    places = len(literal.split(".", 1)[1]) if "." in literal else 0
-    return any(round(seen, places) == round(value, places) for seen in observed)
 
 
 class StructuredResponseError(dspy.CodeExecutionError):
@@ -345,7 +322,7 @@ class DaytonaInterpreter:
 
     def _observe(self, text: str) -> None:
         if len(self._observed) < _MAX_OBSERVED_FIGURES:
-            self._observed.update(_figures(text).values())
+            self._observed.update(figures(text).values())
 
     def _check_grounded_submit(self, code: str, final: Any, span: Any, error_type: type[Exception]) -> None:
         """Reject a SUBMIT whose figures were typed into the code but never shown by an execution or input.
@@ -353,13 +330,13 @@ class DaytonaInterpreter:
         Computed values (formatted from variables) are not code literals and pass. A capped number of
         rejections keeps a legitimate answer from blocking the Turn; past the cap it is accepted and flagged.
         """
-        typed = _figures(code)
+        typed = figures(code)
 
         def unseen(value: Any) -> list[str]:
             return sorted(
                 literal
-                for literal, number in _figures(json.dumps(value, default=str)).items()
-                if literal in typed and not _grounded(literal, number, self._observed)
+                for literal, number in figures(json.dumps(value, default=str)).items()
+                if literal in typed and not figure_grounded(literal, number, self._observed)
             )
 
         substantive = final
@@ -490,6 +467,12 @@ class DaytonaInterpreter:
                             "The model returned an invalid structured response."
                         ) from failure[1]
                     raise CodeExecutionError(output[-20_000:] or "Remote Python execution failed")
+                # Sample only executions that ran; cancel, deadline, and transport paths never wait on telemetry.
+                ran = not response.get("error")
+                sample = getattr(self.manager, "resource_sample", lambda: None)() if ran else None
+                if sample is not None:
+                    span.set_attributes(sample)
+                self.manager.check_turn()
                 span.set_attribute("outcome", "completed")
                 response["outcome"] = "completed"
                 if response.get("final") is not None:

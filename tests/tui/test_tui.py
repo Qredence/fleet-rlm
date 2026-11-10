@@ -43,8 +43,8 @@ async def _running_tui(
 
 
 @pytest.mark.parametrize("size", [(100, 40), (80, 24), (60, 20)])
-def test_experiments_actions_are_visible_in_compact_terminals(size) -> None:
-    from textual.widgets import Button
+def test_improve_actions_are_visible_in_compact_terminals(size) -> None:
+    from textual.widgets import Button, TabbedContent
 
     report = {
         "manifest": {
@@ -67,24 +67,27 @@ def test_experiments_actions_are_visible_in_compact_terminals(size) -> None:
 
     async def scenario():
         async with _running_tui(transport, "layout-check", size) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             await pilot.pause()
-            panel = tui.screen.query_one("#experiments-panel")
-            for button in tui.screen.query("#experiment-actions Button"):
-                assert panel.region.contains_region(button.region), button.id
-            detail = tui.screen.query_one("#experiment-detail-scroll")
-            actions = tui.screen.query_one("#experiment-actions")
-            assert detail.region.bottom <= actions.region.y
+            panel = tui.screen.query_one("#improve-panel")
+            tabs = tui.screen.query_one("#improve-tabs", TabbedContent)
+            for tab in ("review", "readiness", "runs", "results"):
+                tabs.active = tab
+                await pilot.pause(0.1)
+                pane = tabs.get_pane(tab)
+                for button in pane.query("Button"):
+                    assert panel.region.contains_region(button.region), (tab, button.id)
+            detail = tui.screen.query_one("#results-scroll")
+            assert detail.region.bottom <= tui.screen.query_one("#job-approve").region.y
             assert detail.max_scroll_y > 0
             detail.scroll_end(animate=False)
             await pilot.pause()
             assert detail.scroll_y > 0
-            close = tui.screen.query_one("#experiment-close", Button)
-            close.focus()
-            await pilot.pause()
+            close = tui.screen.query_one("#improve-close", Button)
             assert panel.region.contains_region(close.region)
+            close.focus()
             await pilot.press("enter")
-            assert not isinstance(tui.screen, app.ExperimentsScreen)
+            assert not isinstance(tui.screen, app.ImproveScreen)
 
     asyncio.run(scenario())
 
@@ -462,20 +465,31 @@ def test_fullscreen_review_uses_typed_callback_without_launch_roundtrip():
     assert len(reviews[0][2]) == 36
 
 
-def test_default_button_and_slash_share_request_and_unresolved_id():
+def test_plain_optimize_opens_runs_tab_and_run_button_confirms_before_starting():
     from types import SimpleNamespace
 
-    launches = []
-    state = commands.SessionState(fullscreen=True, optimizer_launcher=launches.append)
+    launches, opened, pushed = [], [], []
+    state = commands.SessionState(fullscreen=True, optimizer_launcher=launches.append, improve_opener=opened.append)
     ctx = commands.Context(None, "sess_tui", state)
     commands.COMMANDS["/optimize"].run(ctx, "")
+    commands.COMMANDS["/improve"].run(ctx, "")
+    commands.COMMANDS["/experiments"].run(ctx, "")
+    assert opened == ["runs", "review", "review"] and launches == []
+
     fake = SimpleNamespace(
         client=None,
         session_id="sess_tui",
         state=state,
         _start_optimization=launches.append,
+        push_screen=lambda screen, callback: pushed.append((screen, callback)),
     )
     app.FleetTextualApp._start_default_optimization(fake)
+    screen, callback = pushed[0]
+    assert "light GEPA budget" in screen.message and "FLEET_JOB_MAX_TOKENS" in screen.message
+    callback(False)
+    assert launches == []
+    callback(True)
+    commands.COMMANDS["/optimize"].run(ctx, "--gepa-budget light")
     assert len(launches) == 2 and launches[0] == launches[1]
 
 
@@ -500,9 +514,9 @@ def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "POST":
-            return httpx.Response(202, json={"experiment": record})
+            return httpx.Response(202, json={"job": record})
         record.update(status="completed", stage="completed")
-        return httpx.Response(200, json={"experiment": record})
+        return httpx.Response(200, json={"job": record})
 
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     output, _console = _capture_console(monkeypatch, width=100)
@@ -511,7 +525,7 @@ def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
         commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
 
     assert [request.method for request in requests] == ["POST", "GET"]
-    assert requests[0].url.path == "/sessions/sess_cli/experiments"
+    assert requests[0].url.path == "/improve/jobs"
     assert json.loads(requests[0].content)["max_metric_calls"] == 10
     assert "Optimization completed" in output.getvalue()
 
@@ -525,15 +539,13 @@ def test_non_tty_optimize_deduplicates_repeated_stage_output(monkeypatch) -> Non
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal polls
         if request.method == "POST":
-            return httpx.Response(202, json={"experiment": {"run_id": run_id, "status": "running", "stage": "search"}})
+            return httpx.Response(202, json={"job": {"run_id": run_id, "status": "running", "stage": "search"}})
         polls += 1
         if polls < 3:
-            return httpx.Response(200, json={"experiment": {"run_id": run_id, "status": "running", "stage": "search"}})
+            return httpx.Response(200, json={"job": {"run_id": run_id, "status": "running", "stage": "search"}})
         if polls == 3:
-            return httpx.Response(
-                200, json={"experiment": {"run_id": run_id, "status": "running", "stage": "validation"}}
-            )
-        return httpx.Response(200, json={"experiment": {"run_id": run_id, "status": "completed", "stage": "completed"}})
+            return httpx.Response(200, json={"job": {"run_id": run_id, "status": "running", "stage": "validation"}})
+        return httpx.Response(200, json={"job": {"run_id": run_id, "status": "completed", "stage": "completed"}})
 
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     output, _console = _capture_console(monkeypatch, width=100)
@@ -1133,7 +1145,7 @@ def _experiment_transport(records: list[dict[str, Any]], *, comparison: dict[str
     def handler(request: httpx.Request) -> httpx.Response:
         state["requests"].append(request)
         parts = request.url.path.split("/")
-        if request.method == "GET" and parts[-1] == "experiments":
+        if request.method == "GET" and parts[-1] == "jobs":
             active = next(
                 (record["run_id"] for record in state["records"] if record["status"] in {"running", "approving"}),
                 None,
@@ -1141,49 +1153,65 @@ def _experiment_transport(records: list[dict[str, Any]], *, comparison: dict[str
             return httpx.Response(
                 200,
                 json={
-                    "experiments": state["records"],
+                    "jobs": state["records"],
                     "active_run_id": active,
                     "accepting": state["accepting"],
                 },
             )
-        if request.method == "GET" and parts[-2] == "experiments":
+        if request.method == "GET" and parts[-2] == "jobs":
             record = next(r for r in state["records"] if r["run_id"] == parts[-1])
-            return httpx.Response(200, json={"experiment": record, "comparison": state["comparison"]})
+            return httpx.Response(200, json={"job": record, "comparison": state["comparison"]})
         if request.method == "POST" and parts[-1] == "cancel":
             record = next(r for r in state["records"] if r["run_id"] == parts[-2])
             record.update(status="running", stage="stopping")
-            return httpx.Response(202, json={"experiment": record})
+            return httpx.Response(202, json={"job": record})
         if request.method == "POST" and parts[-1] == "review":
             record = next(r for r in state["records"] if r["run_id"] == parts[-2])
             body = json.loads(request.content)
             status = "approving" if body["decision"] == "approved" else "rejected"
             record.update(status=status, decision=body["decision"])
-            return httpx.Response(202, json={"experiment": record})
-        if request.method == "POST" and parts[-1] == "experiments":
+            return httpx.Response(202, json={"job": record})
+        if request.method == "POST" and parts[-1] == "jobs":
             record = _experiment_record("sess_api-run", "running")
             state["records"].insert(0, record)
-            return httpx.Response(202, json={"experiment": record})
+            return httpx.Response(202, json={"job": record})
+        if (
+            request.method == "GET"
+            and parts[-1] in {"queue", "readiness", "history", "settings"}
+            and parts[-1] in state
+        ):
+            return httpx.Response(200, json=state[parts[-1]])
+        if request.method == "PUT" and parts[-1] == "settings":
+            state.setdefault("saved_settings", []).append(json.loads(request.content))
+            state["settings"] = {**state.get("settings", {}), **state["saved_settings"][-1]}
+            return httpx.Response(200, json=state["settings"])
+        if request.method == "POST" and parts[-1] == "labels":
+            state.setdefault("labels", []).append(json.loads(request.content))
+            return httpx.Response(200, json={"turn_id": state["labels"][-1]["turn_id"], "status": "approved"})
         return httpx.Response(404, json={"detail": "not found"})
 
     return httpx.MockTransport(handler), state
 
 
-def test_experiments_screen_fetches_session_scoped_api_snapshot_and_detail() -> None:
+def test_experiments_screen_fetches_the_global_job_snapshot_and_detail() -> None:
     run_id = "sess_experiments-run-1"
     records = [_experiment_record(run_id), _experiment_record("sess_other-run-1", "failed")]
     report = {"manifest": {"evaluation": {"baseline": {}, "candidate": {"component_diffs": []}}}}
-    transport, _state = _experiment_transport(records, comparison=report)
+    transport, state = _experiment_transport(records, comparison=report)
 
     async def scenario() -> None:
         async with _running_tui(transport, "sess_experiments", (100, 30)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(20):
                 await pilot.pause(0.05)
                 if tui.screen.records:
                     break
-            assert run_id in str(tui.screen.query_one("#experiment-history").render())
-            assert "sess_other-run-1" in str(tui.screen.query_one("#experiment-history").render())
-            assert "3/10 metric calls" in str(tui.screen.query_one("#experiments-progress").render())
+            table = tui.screen.query_one("#runs-table")
+            assert [row.value for row in table.rows] == [run_id, "sess_other-run-1"]
+            assert "3/10 metric calls" in str(tui.screen.query_one("#improve-progress").render())
+            paths = {request.url.path for request in state["requests"] if request.method == "GET"}
+            assert {"/improve/jobs", f"/improve/jobs/{run_id}"} <= paths
+            assert not any(path.startswith("/sessions") for path in paths)
 
     asyncio.run(scenario())
 
@@ -1198,26 +1226,29 @@ def test_experiment_navigation_discards_delayed_evidence_and_guards_approval(sta
 
     def handler(request):
         run_id = request.url.path.rsplit("/", 1)[-1]
-        if run_id == "experiments":
-            return httpx.Response(200, json={"experiments": records, "active_run_id": None, "accepting": True})
+        if run_id == "jobs":
+            return httpx.Response(200, json={"jobs": records, "active_run_id": None, "accepting": True})
+        if run_id not in started:
+            return httpx.Response(404)
         started[run_id].set()
         assert release[run_id].wait(5), "test did not release detail request"
         if stale_response == "error" and run_id == "s1-run-a":
             return httpx.Response(500)
         record = next(record for record in records if record["run_id"] == run_id)
-        return httpx.Response(200, json={"experiment": record, "comparison": {"evidence_for": run_id}})
+        return httpx.Response(200, json={"job": record, "comparison": {"evidence_for": run_id}})
 
     async def scenario():
         try:
             async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
-                tui._open_experiments()
+                tui._open_improve()
                 assert await asyncio.to_thread(started["s1-run-a"].wait, 5)
                 screen = tui.screen
                 reviews = []
                 screen.on_review = lambda *args: reviews.append(args)
-                await pilot.click("#experiment-next")
+                screen.query_one("#runs-table").move_cursor(row=1)
+                await pilot.pause()
                 assert screen.selected_run_id == "s1-run-b"
-                approve = screen.query_one("#experiment-approve", Button)
+                approve = screen.query_one("#job-approve", Button)
                 assert approve.disabled
                 screen.on_button_pressed(Button.Pressed(approve))
                 assert not reviews
@@ -1226,7 +1257,7 @@ def test_experiment_navigation_discards_delayed_evidence_and_guards_approval(sta
                 assert screen.comparison is None
                 assert screen.comparison_run_id is None
                 assert approve.disabled
-                assert "s1-run-a" not in str(screen.query_one("#experiment-detail").render())
+                assert "s1-run-a" not in str(screen.query_one("#results-text").render())
                 release["s1-run-b"].set()
                 for _ in range(20):
                     await pilot.pause(0.05)
@@ -1249,13 +1280,13 @@ def test_experiment_detail_rejects_mismatched_response_identity():
     record = _experiment_record("s1-run")
 
     def handler(request):
-        if request.url.path.endswith("/experiments"):
-            return httpx.Response(200, json={"experiments": [record], "accepting": True})
-        return httpx.Response(200, json={"experiment": _experiment_record("s1-other"), "comparison": {"wrong": True}})
+        if request.url.path.endswith("/improve/jobs"):
+            return httpx.Response(200, json={"jobs": [record], "accepting": True})
+        return httpx.Response(200, json={"job": _experiment_record("s1-other"), "comparison": {"wrong": True}})
 
     async def scenario():
         async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(20):
                 await pilot.pause(0.05)
                 if tui.screen.records and not tui.screen._polling:
@@ -1263,7 +1294,7 @@ def test_experiment_detail_rejects_mismatched_response_identity():
             screen = tui.screen
             assert screen._selected()["run_id"] == "s1-run"
             assert screen.comparison is None and screen.comparison_run_id is None
-            assert screen.query_one("#experiment-approve", Button).disabled
+            assert screen.query_one("#job-approve", Button).disabled
 
     asyncio.run(scenario())
 
@@ -1274,18 +1305,18 @@ def test_experiment_detail_arriving_after_dismissal_is_ignored(late_response):
     started, release = threading.Event(), threading.Event()
 
     def handler(request):
-        if request.url.path.endswith("/experiments"):
-            return httpx.Response(200, json={"experiments": [record], "accepting": True})
+        if request.url.path.endswith("/improve/jobs"):
+            return httpx.Response(200, json={"jobs": [record], "accepting": True})
         started.set()
         assert release.wait(5)
         if late_response == "error":
             return httpx.Response(500)
-        return httpx.Response(200, json={"experiment": record, "comparison": {"late": True}})
+        return httpx.Response(200, json={"job": record, "comparison": {"late": True}})
 
     async def scenario():
         try:
             async with _running_tui(httpx.MockTransport(handler), "s1", (100, 30)) as (_client, tui, pilot):
-                tui._open_experiments()
+                tui._open_improve()
                 assert await asyncio.to_thread(started.wait, 5)
                 screen = tui.screen
                 await screen.dismiss()
@@ -1347,7 +1378,7 @@ def test_experiments_detail_renders_api_saved_diagnostics_diffs_and_failures() -
 
     async def scenario() -> None:
         async with _running_tui(transport, "sess_detail", (120, 40)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(30):
                 await pilot.pause(0.05)
                 if tui.screen.comparison:
@@ -1374,13 +1405,13 @@ def test_experiments_disconnect_keeps_observing_run_and_reopen_shows_final_recor
 
     async def scenario() -> None:
         async with _running_tui(transport, "sess_detach", (100, 30)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(20):
                 await pilot.pause(0.05)
                 if tui.screen.records:
                     break
-            await pilot.click("#experiment-close")
-            assert not isinstance(tui.screen, app.ExperimentsScreen)
+            await pilot.click("#improve-close")
+            assert not isinstance(tui.screen, app.ImproveScreen)
             assert tui._optimization_active
             assert running["status"] == "running"
 
@@ -1394,7 +1425,7 @@ def test_experiments_disconnect_keeps_observing_run_and_reopen_shows_final_recor
             assert running["status"] == "completed"
             assert not any(request.url.path.endswith("/cancel") for request in api["requests"])
 
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(20):
                 await pilot.pause(0.05)
                 if tui.screen.records:
@@ -1411,19 +1442,19 @@ def test_ambiguous_start_retry_reuses_request_id_then_definitive_results_rotate_
     posts: list[dict[str, Any]] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and request.url.path.endswith("/experiments"):
+        if request.method == "GET" and request.url.path.endswith("/improve/jobs"):
             return httpx.Response(
                 200,
-                json={"experiments": [record], "active_run_id": record["run_id"], "accepting": True},
+                json={"jobs": [record], "active_run_id": record["run_id"], "accepting": True},
             )
-        if request.method == "POST" and request.url.path.endswith("/experiments"):
+        if request.method == "POST" and request.url.path.endswith("/improve/jobs"):
             body = json.loads(request.content)
             posts.append(body)
             if state["start_result"] == "network":
                 raise httpx.ConnectError("connection lost after submit", request=request)
             if state["start_result"] == "conflict":
                 return httpx.Response(409, json={"detail": "busy"}, request=request)
-            return httpx.Response(202, json={"experiment": record}, request=request)
+            return httpx.Response(202, json={"job": record}, request=request)
         return httpx.Response(404, request=request)
 
     async def scenario() -> None:
@@ -1480,18 +1511,18 @@ def test_experiment_history_error_keeps_app_observing_after_dismissal():
     state = {"fail": False}
 
     def handler(request):
-        if request.url.path.endswith("/experiments"):
+        if request.url.path.endswith("/improve/jobs"):
             if state["fail"]:
                 return httpx.Response(503)
             active = record["run_id"] if record["status"] == "running" else None
-            return httpx.Response(200, json={"experiments": [record], "active_run_id": active, "accepting": True})
+            return httpx.Response(200, json={"jobs": [record], "active_run_id": active, "accepting": True})
         if request.url.path.endswith(record["run_id"]):
-            return httpx.Response(200, json={"experiment": record, "comparison": None})
+            return httpx.Response(200, json={"job": record, "comparison": None})
         return httpx.Response(200, json={})
 
     async def scenario():
         async with _running_tui(httpx.MockTransport(handler), "sess_history", (100, 30)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             screen = tui.screen
             for _ in range(30):
                 await pilot.pause(0.05)
@@ -1499,7 +1530,7 @@ def test_experiment_history_error_keeps_app_observing_after_dismissal():
                     break
             assert tui._optimization_active
             state["fail"] = True
-            await screen._refresh_history()
+            await screen._refresh()
             assert screen.records == []
             assert tui._optimization_run_id == record["run_id"]
             assert tui._optimization_active
@@ -1524,7 +1555,7 @@ def test_experiments_review_and_cancel_use_idempotent_api_requests() -> None:
 
     async def scenario() -> None:
         async with _running_tui(transport, "sess_actions", (120, 40)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(20):
                 await pilot.pause(0.05)
                 if len(tui.screen.records) == 2:
@@ -1556,10 +1587,10 @@ def test_review_request_retries_keep_id_until_known_outcome_then_rotate() -> Non
     state = {"review_error": "conflict"}
 
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and request.url.path.endswith("/experiments"):
-            return httpx.Response(200, json={"experiments": [record], "active_run_id": None, "accepting": True})
-        if request.method == "GET" and request.url.path.endswith(f"/experiments/{record['run_id']}"):
-            return httpx.Response(200, json={"experiment": record, "comparison": None})
+        if request.method == "GET" and request.url.path.endswith("/improve/jobs"):
+            return httpx.Response(200, json={"jobs": [record], "active_run_id": None, "accepting": True})
+        if request.method == "GET" and request.url.path.endswith(f"/improve/jobs/{record['run_id']}"):
+            return httpx.Response(200, json={"job": record, "comparison": None})
         if request.method == "POST" and request.url.path.endswith("/review"):
             if state["review_error"] == "network":
                 raise httpx.ConnectError("connection lost", request=request)
@@ -1568,10 +1599,10 @@ def test_review_request_retries_keep_id_until_known_outcome_then_rotate() -> Non
 
     async def scenario() -> None:
         async with _running_tui(httpx.MockTransport(handle), "sess_review-retry", (100, 30)) as (_client, tui, pilot):
-            tui._open_experiments()
+            tui._open_improve()
             for _ in range(20):
                 await pilot.pause(0.05)
-                if isinstance(tui.screen, app.ExperimentsScreen) and tui.screen.records:
+                if isinstance(tui.screen, app.ImproveScreen) and tui.screen.records:
                     break
             screen = tui.screen
             first = screen._review_request_id(record["run_id"], "approved")
@@ -1604,3 +1635,602 @@ def test_discovery_error_keeps_manual_native_provider_selection_available(monkey
     assert writes == [{"role": "root", "model": "anthropic/manual-route"}]
     assert "discovery is unavailable" in output.getvalue()
     assert "private provider credential" not in output.getvalue()
+
+
+_QUEUE_ITEM = {
+    "turn_id": "turn-1",
+    "session_id": "sess_label_one",
+    "task": "Total revenue for Q3?",
+    "answer": "Revenue was 1250.50 across 17 stores.",
+    "figures": ["1250.50", "17"],
+    "label": "unlabelled",
+    "expected_answer": None,
+    "expected_values": [],
+    "critical": False,
+    "group": None,
+    "updated_at": "2026-11-01T10:00:00+00:00",
+}
+
+
+async def _wait_for(pilot, condition) -> None:
+    for _ in range(60):
+        await pilot.pause(0.05)
+        if condition():
+            return
+    raise AssertionError("condition was not reached")
+
+
+def test_improve_tabs_render_from_api_snapshots() -> None:
+    from textual.widgets import Checkbox, DataTable, Input, Sparkline, TabbedContent
+
+    running = _experiment_record("sess_run-a", "running")
+    running.update(
+        stage="search",
+        started_at="2026-10-25T12:00:00+00:00",
+        progress={
+            "metric_calls_used": 3,
+            "metric_calls_remaining": 7,
+            "tokens_used": 1200,
+            "token_cap": 4800,
+            "best_score": 0.725,
+            "score_trajectory": [[0, 0.5], [1, 0.6], [2, 0.725]],
+        },
+    )
+    transport, api = _experiment_transport([running])
+    api["queue"] = {"items": [_QUEUE_ITEM]}
+    api["readiness"] = {
+        "ready": False,
+        "examples": 5,
+        "groups": 2,
+        "critical": 0,
+        "split_sizes": {"train": 3, "dev": 1, "holdout": 1},
+        "missing": ["At least 3 source groups are needed (have 2)"],
+        "new_labels_since_last_run": 4,
+    }
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_tabs", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen.queue and screen.readiness and screen.records)
+            await pilot.pause(0.1)
+            # Review: the queue row, the Turn text, figures pre-checked, answer prefilled.
+            assert screen.query_one("#review-queue", DataTable).row_count == 1
+            assert "Total revenue for Q3?" in str(screen.query_one("#review-text").render())
+            boxes = [box for _, box in screen._figure_boxes]
+            assert [str(box.label) for box in boxes] == ["1250.50", "17"] and all(box.value for box in boxes)
+            assert screen.query_one("#review-answer", Input).value == _QUEUE_ITEM["answer"]
+            assert not screen.query_one("#review-critical", Checkbox).value
+            # Readiness: counts, split sizes, each missing item, new labels.
+            readiness = str(screen.query_one("#readiness-text").render())
+            for expected in (
+                "NOT READY",
+                "Labelled examples  5",
+                "train 3",
+                "At least 3 source groups",
+                "since the last run  4",
+            ):
+                assert expected in readiness, readiness
+            # Runs: stepper, bars, best score, sparkline.
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await pilot.pause(0.1)
+            detail = str(screen.query_one("#runs-detail").render())
+            assert "✓ preparing → ▶ search → · validation → · finalization" in detail
+            assert "3/10" in detail and "1,200/4,800" in detail and "0.725" in detail and "Elapsed" in detail
+            assert screen.query_one("#runs-spark", Sparkline).data == [0.5, 0.6, 0.725]
+
+    asyncio.run(scenario())
+
+
+def test_review_buttons_post_labels_from_the_form() -> None:
+    from textual.widgets import Checkbox, Input
+
+    transport, api = _experiment_transport([])
+    second = {**_QUEUE_ITEM, "turn_id": "turn-2", "answer": "It was 99 units."}
+    api["queue"] = {"items": [_QUEUE_ITEM, second]}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_labels", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen._figure_boxes)
+            # Uncheck 17, add extra values, mark critical, name a group, then approve.
+            screen._figure_boxes[1][1].value = False
+            screen.query_one("#review-extra", Input).value = "2026, Q3"
+            screen.query_one("#review-critical", Checkbox).value = True
+            screen.query_one("#review-group", Input).value = "finance"
+            screen.query_one("#label-approve").press()
+            await _wait_for(pilot, lambda: api.get("labels"))
+            assert api["labels"][0] == {
+                "turn_id": "turn-1",
+                "status": "approved",
+                "expected_values": ["1250.50", "2026", "Q3"],
+                "critical": True,
+                "group": "finance",
+            }  # the unedited preview is not sent: the server defaults to the Turn's full stored answer
+            # The form moves on to the next Turn; rejecting the unchanged answer is a plain rejection.
+            await _wait_for(pilot, lambda: screen.query_one("#review-answer", Input).value == second["answer"])
+            screen.query_one("#label-reject").press()
+            await _wait_for(pilot, lambda: len(api["labels"]) == 2)
+            assert api["labels"][1] == {"turn_id": "turn-2", "status": "rejected"}
+            # A corrected answer is saved as approved gold with the correction's own figures.
+            screen.query_one("#review-answer", Input).value = "It was 120 units."
+            screen.query_one("#label-reject").press()
+            await _wait_for(pilot, lambda: len(api["labels"]) == 3)
+            assert api["labels"][2] == {
+                "turn_id": "turn-2",
+                "status": "approved",
+                "expected_values": ["120"],
+                "expected_answer": "It was 120 units.",
+            }
+
+    asyncio.run(scenario())
+
+
+def test_run_button_confirms_budget_and_token_cap_before_posting_the_job() -> None:
+    from textual.widgets import TabbedContent
+
+    transport, api = _experiment_transport([])
+
+    def posts() -> list[httpx.Request]:
+        return [request for request in api["requests"] if request.method == "POST"]
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_run", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await _wait_for(pilot, lambda: not screen.query_one("#job-run").disabled)
+            await pilot.click("#job-run")
+            await pilot.pause(0.1)
+            assert isinstance(tui.screen, app.ConfirmAction)
+            assert "light GEPA budget" in tui.screen.message and "Token cap" in tui.screen.message
+            await pilot.click("#cancel")
+            await pilot.pause(0.1)
+            assert not posts()
+            await pilot.click("#job-run")
+            await pilot.pause(0.1)
+            await pilot.click("#confirm")
+            await _wait_for(pilot, posts)
+            body = json.loads(posts()[0].content)
+            assert posts()[0].url.path == "/improve/jobs"
+            assert body["gepa_budget"] == "light" and body["request_id"]
+
+    asyncio.run(scenario())
+
+
+def test_results_tab_sorts_examples_by_delta_and_shows_the_installed_trend() -> None:
+    from textual.widgets import DataTable, TabbedContent
+
+    comparison = {
+        "manifest": {
+            "evaluation": {
+                "baseline": {"dev": 0.5, "holdout": 0.5, "dev_scores": [0.5, 1.0], "holdout_scores": [0.0, 0.5]},
+                "candidate": {"dev": 0.5, "holdout": 0.75, "dev_scores": [0.5, 0.25], "holdout_scores": [1.0, 0.5]},
+            }
+        }
+    }
+    done = _experiment_record("sess_done-run")
+    done["gate"] = {"passed": False, "reasons": ["dev regressed"]}
+    transport, api = _experiment_transport([done], comparison=comparison)
+    api["history"] = {
+        "versions": [
+            {"run_id": "v2", "scores": {"candidate": {"holdout": 0.8}}},
+            {"run_id": "v1", "scores": {"candidate": {"holdout": 0.6}}},
+        ],
+        "evaluations": [],
+    }
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_results", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "results"
+            await _wait_for(pilot, lambda: screen.comparison and screen.history)
+            await pilot.pause(0.1)
+            table = screen.query_one("#results-examples", DataTable)
+            rows = [table.get_row_at(i) for i in range(table.row_count)]
+            assert rows == [
+                ["holdout #1", "0.000", "1.000", "+1.000", "better"],
+                ["dev #1", "0.500", "0.500", "+0.000", "same"],
+                ["holdout #2", "0.500", "0.500", "+0.000", "same"],
+                ["dev #2", "1.000", "0.250", "-0.750", "worse"],
+            ]
+            text = str(screen.query_one("#results-text").render())
+            assert "Promotion gate  FAIL" in text and "dev regressed" in text
+            assert "0.500 → 0.750 (+0.250)" in text
+            assert "INSTALLED TREND · HOLDOUT (2 versions)  0.600 → 0.800" in text
+            assert "1 better, 1 worse, 2 unchanged" in text
+
+    asyncio.run(scenario())
+
+
+def test_evaluate_choices_start_each_kind_and_only_replay_and_synthetic_ask_to_confirm() -> None:
+    from textual.widgets import TabbedContent
+
+    transport, api = _experiment_transport([])
+
+    def posts() -> list[dict[str, Any]]:
+        return [json.loads(r.content) for r in api["requests"] if r.method == "POST" and r.url.path == "/improve/jobs"]
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_eval", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await _wait_for(pilot, lambda: not screen.query_one("#evaluate_rescore").disabled)
+            # Rescore only calls the judges, so it starts without a cost prompt.
+            await pilot.click("#evaluate_rescore")
+            await _wait_for(pilot, posts)
+            assert [post["kind"] for post in posts()] == ["evaluate_rescore"]
+            # The mock ledger now holds a running job, so the next kinds wait for it to finish.
+            api["records"][0]["status"] = "completed"
+            await _wait_for(pilot, lambda: not screen.query_one("#evaluate_replay").disabled)
+            assert screen.query_one("#evaluate_synthetic").disabled
+            for kind, words in (("evaluate_replay", "Replay"),):
+                await pilot.click(f"#{kind}")
+                await pilot.pause(0.1)
+                assert isinstance(tui.screen, app.ConfirmAction) and words in tui.screen.message
+                before = len(posts())
+                await pilot.click("#cancel")
+                await pilot.pause(0.1)
+                assert len(posts()) == before
+                await pilot.click(f"#{kind}")
+                await pilot.pause(0.1)
+                await pilot.click("#confirm")
+                await _wait_for(pilot, lambda kind=kind: kind in {post["kind"] for post in posts()})
+                api["records"][0]["status"] = "completed"
+                await _wait_for(pilot, lambda: not screen.query_one("#evaluate_replay").disabled)
+            assert len({post["request_id"] for post in posts()}) == 2
+
+    asyncio.run(scenario())
+
+
+def test_runs_and_results_show_kind_trigger_evaluation_splits_and_the_unverified_summary() -> None:
+    from textual.widgets import DataTable, TabbedContent
+
+    evaluation = {
+        "kind": "replay",
+        "program": {"digest": "a" * 64, "version": "optimize-abc"},
+        "splits": {
+            "train": {"n": 4, "mean": 0.9, "errors": 0, "critical": {"passed": 0, "n": 0}},
+            "holdout": {"n": 3, "mean": 0.667, "errors": 1, "critical": {"passed": 1, "n": 2}},
+        },
+        "headline": {"holdout": 0.667, "critical_pass_rate": 0.5},
+    }
+    evaluated = _experiment_record("evaluate-replay-1")
+    evaluated.update(kind="evaluate_replay", trigger="manual", gate=None, candidate_version=None, evaluation=evaluation)
+    auto = _experiment_record("optimize-auto-1")
+    auto.update(kind="optimize", trigger="auto")
+    transport, api = _experiment_transport(
+        [evaluated, auto], comparison={"manifest": {"evaluation": {}}, "rationale": "Holdout rose a little."}
+    )
+    api["history"] = {"versions": [], "evaluations": [evaluated]}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_eval_results", (120, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen.records and screen.evaluations)
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await pilot.pause(0.1)
+            table = screen.query_one("#runs-table", DataTable)
+            assert [table.get_row_at(i)[1:3] for i in range(table.row_count)] == [
+                ["evaluate_replay", "manual"],
+                ["optimize", "auto"],
+            ]
+            screen.query_one("#improve-tabs", TabbedContent).active = "results"
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#results-text").render())
+            assert "EVALUATED · HOLDOUT  optimize-abc 0.667" in text
+            assert "Program  optimize-abc (aaaaaaaaaaaa)" in text
+            assert "HEADLINE  holdout 0.667 · critical pass rate 50%" in text
+            assert "holdout    mean 0.667 over 3 examples · critical 1/2 · 1 errors" in text
+            table.move_cursor(row=1)
+            await _wait_for(pilot, lambda: screen.selected_run_id == "optimize-auto-1")
+            await _wait_for(pilot, lambda: screen.comparison_run_id == "optimize-auto-1")
+            await pilot.pause(0.1)
+            assert "not evidence" in str(screen.query_one("#results-text").render())
+            assert "Holdout rose a little." in str(screen.query_one("#results-text").render())
+
+    asyncio.run(scenario())
+
+
+def test_readiness_tab_shows_auto_run_state_and_saves_edited_settings() -> None:
+    from textual.widgets import Checkbox, Input, TabbedContent
+
+    transport, api = _experiment_transport([])
+    api["settings"] = {"auto_run": False, "min_new_labels": 5, "max_metric_calls": None, "max_total_tokens": 0}
+    api["readiness"] = {
+        "ready": True,
+        "examples": 8,
+        "groups": 4,
+        "critical": 1,
+        "split_sizes": {},
+        "missing": [],
+        "new_labels_since_last_run": 0,
+    }
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_settings", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "readiness"
+            await _wait_for(pilot, lambda: screen.improve_settings and screen.readiness)
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#readiness-text").render())
+            assert "AUTO-RUN  off · after 5 new labels · light budget · token cap unlimited" in text
+            assert "nothing installs without your approval" in text
+            assert screen.query_one("#auto-min-labels", Input).value == "5"
+            screen.query_one("#settings-save").press()
+            await _wait_for(pilot, lambda: api.get("saved_settings"))
+            await pilot.pause(0.1)
+            assert api["saved_settings"] == [{}]
+            api["saved_settings"].clear()
+            screen.query_one("#auto-run", Checkbox).value = True
+            screen.query_one("#auto-min-labels", Input).value = "3"
+            screen.query_one("#auto-metric-calls", Input).value = "40"
+            screen.query_one("#auto-tokens", Input).value = ""
+            screen.query_one("#settings-save").press()
+            await _wait_for(pilot, lambda: api.get("saved_settings"))
+            assert api["saved_settings"] == [
+                {"auto_run": True, "min_new_labels": 3, "max_metric_calls": 40, "max_total_tokens": None}
+            ]
+            await _wait_for(
+                pilot,
+                lambda: (
+                    "AUTO-RUN  ON · after 3 new labels · 40 metric calls"
+                    in str(screen.query_one("#readiness-text").render())
+                ),
+            )
+            screen.query_one("#auto-min-labels", Input).value = "many"
+            screen.query_one("#settings-save").press()
+            await pilot.pause(0.2)
+            assert len(api["saved_settings"]) == 1
+
+    asyncio.run(scenario())
+
+
+def _turn_transport(replay_selected: bool):
+    event = {
+        "event": "turn_complete",
+        "turn_id": "turn-9",
+        "route": "flex",
+        "answer": "Total was 1250.50 over 17 days.",
+        "trace_id": "tr-9",
+        "replay_snapshot_selected": replay_selected,
+    }
+    transport, api = _experiment_transport([])
+    base = transport.handler
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/turn"):
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, content=f"data: {json.dumps(event)}\n\n"
+            )
+        return base(request)
+
+    return httpx.MockTransport(handler), api
+
+
+def test_ctrl_l_labels_the_offered_turn_and_ctrl_n_opens_review() -> None:
+    transport, api = _turn_transport(True)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_offer", (110, 40)) as (_client, tui, pilot):
+            tui.submit_text("total?")
+            await _wait_for(pilot, lambda: tui._label_offer is not None)
+            hints = str(tui.query_one("#composer-hints").render())
+            assert "label:" in hints and "ctrl+l" in hints and "ctrl+n" in hints
+            await pilot.press("ctrl+l")
+            await _wait_for(pilot, lambda: api.get("labels"))
+            assert api["labels"] == [
+                {
+                    "turn_id": "turn-9",
+                    "status": "approved",
+                    "expected_values": ["1250.50", "17"],
+                }
+            ]
+            assert tui._label_offer is None
+            assert "ctrl+l" not in str(tui.query_one("#composer-hints").render())
+
+            # Typing anything withdraws a later offer; ctrl+n opens Review at the offered Turn.
+            tui.submit_text("again?")
+            await _wait_for(pilot, lambda: tui._label_offer is not None)
+            tui.query_one("#prompt-input", app._PromptInput).insert("x")
+            await pilot.pause(0.05)
+            assert tui._label_offer is None
+            tui.query_one("#prompt-input", app._PromptInput).clear()
+            tui.submit_text("third?")
+            await _wait_for(pilot, lambda: tui._label_offer is not None)
+            await pilot.press("ctrl+n")
+            await pilot.pause(0.1)
+            assert isinstance(tui.screen, app.ImproveScreen)
+            assert tui.screen.selected_turn_id == "turn-9"
+            assert tui.screen.query_one("#improve-tabs").active == "review"
+
+    asyncio.run(scenario())
+
+
+def test_no_label_offer_without_a_replay_snapshot() -> None:
+    transport, _api = _turn_transport(False)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_no_offer", (110, 40)) as (_client, tui, pilot):
+            tui.submit_text("total?")
+            await _wait_for(pilot, lambda: tui.state.last_tracker and tui.state.last_tracker.terminal_event)
+            await pilot.pause(0.1)
+            assert tui._label_offer is None
+            assert "label:" not in str(tui.query_one("#composer-hints").render())
+
+    asyncio.run(scenario())
+
+
+def test_status_bar_badge_follows_readiness() -> None:
+    transport, api = _experiment_transport([])
+    api["readiness"] = {"ready": True, "examples": 8, "groups": 3, "critical": 1, "split_sizes": {}, "missing": []}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_badge", (110, 40)) as (_client, tui, pilot):
+            await _wait_for(pilot, lambda: tui._readiness_ready)
+            assert "ready to optimize" in str(tui.query_one("#status-left").render())
+            api["readiness"] = {**api["readiness"], "ready": False}
+            await tui._refresh_readiness()
+            assert "ready to optimize" not in str(tui.query_one("#status-left").render())
+
+    asyncio.run(scenario())
+
+
+def test_validation_progress_readiness_sections_and_review_flags_render() -> None:
+    from textual.widgets import DataTable, TabbedContent
+
+    running = _experiment_record("sess_val-run", "running")
+    running.update(
+        stage="validation",
+        progress={"metric_calls_used": 10, "metric_calls_remaining": 6, "validation_done": 14, "validation_total": 36},
+    )
+    transport, api = _experiment_transport([running])
+    api["queue"] = {
+        "items": [
+            {**_QUEUE_ITEM, "turn_id": "turn-flag", "flags": ["2 sandbox errors"], "evaluation_score": None},
+            {**_QUEUE_ITEM, "turn_id": "turn-calm", "flags": []},
+        ]
+    }
+    api["readiness"] = {
+        "ready": False,
+        "examples": 8,
+        "groups": 4,
+        "critical": 1,
+        "split_sizes": {"train": 4, "dev": 2, "holdout": 2},
+        "missing": ["dev would have 2 examples; need 5 — label more Turns from more Sessions"],
+        "min_split_examples": 5,
+        "new_labels_since_last_run": 0,
+        "components": [{"name": "routing", "description": "Chooses direct, flex, or rlm for a task."}],
+        "improvable_examples": 0,
+        "note": "All labelled examples already pass; optimizing now is unlikely to change anything.",
+    }
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_val", (120, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen.queue and screen.readiness and screen.records)
+            await pilot.pause(0.1)
+            assert "Validation · 14/36 rollouts" in str(screen.query_one("#improve-progress").render())
+            assert "flagged Turns teach GEPA the most" in str(screen.query_one("#review-legend").render())
+            queue = screen.query_one("#review-queue", DataTable)
+            assert queue.get_row_at(0)[0].startswith("⚑") and not queue.get_row_at(1)[0].startswith("⚑")
+            assert "2 sandbox errors" in str(screen.query_one("#review-text").render())
+            screen.query_one("#improve-tabs", TabbedContent).active = "runs"
+            await pilot.pause(0.1)
+            assert "14/36" in str(screen.query_one("#runs-detail").render())
+            screen.query_one("#improve-tabs", TabbedContent).active = "readiness"
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#readiness-text").render())
+            for expected in (
+                "need 5",
+                "Each of dev and holdout needs at least 5 examples",
+                "WHAT CAN IMPROVE",
+                "routing: Chooses direct, flex, or rlm",
+                "scoring below 1.0 in the latest evaluation: 0",
+                "already pass",
+            ):
+                assert expected in text, text
+
+    asyncio.run(scenario())
+
+
+def test_results_open_with_the_outcome_headline_then_the_unverified_summary() -> None:
+    from textual.widgets import TabbedContent
+
+    comparison = {
+        "manifest": {
+            "evaluation": {
+                "baseline": {"dev_scores": [0.5, 0.5], "holdout_scores": [1.0]},
+                "candidate": {
+                    "changed_components": ["routing.predict"],
+                    "components_total": 8,
+                    "dev_scores": [1.0, 0.5],
+                    "holdout_scores": [1.0],
+                },
+            }
+        },
+        "rationale": "Routing changed and one dev example improved.",
+    }
+    transport, _api = _experiment_transport([_experiment_record("sess_head-run")], comparison=comparison)
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_head", (120, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            screen.query_one("#improve-tabs", TabbedContent).active = "results"
+            await _wait_for(pilot, lambda: screen.comparison)
+            await pilot.pause(0.1)
+            text = str(screen.query_one("#results-text").render())
+            headline = text.index("OUTCOME  Changed 1 of 8: routing.predict")
+            summary = text.index("not evidence")
+            assert "1 improved, 0 regressed of 2" in text and headline < summary < text.index("RUN  sess_head-run")
+
+    asyncio.run(scenario())
+
+
+def test_rejecting_unchanged_corrected_gold_remains_rejected():
+    from types import SimpleNamespace
+
+    from fleet_rlm.tui.improve import ImproveScreen
+
+    widgets = {"#review-answer": SimpleNamespace(value="Correct answer 42"), "#review-extra": SimpleNamespace(value="")}
+    form = SimpleNamespace(query_one=lambda selector, *_args: widgets[selector], _prefilled_answer="Correct answer 42")
+    assert ImproveScreen._label_body(form, {"turn_id": "t", "answer": "Wrong answer 41"}, approve=False) == {
+        "turn_id": "t",
+        "status": "rejected",
+    }
+
+
+def test_reject_of_a_previously_corrected_turn_stays_a_rejection_and_queue_failure_is_visible() -> None:
+    corrected = {
+        **_QUEUE_ITEM,
+        "label": "approved",
+        "expected_answer": "A corrected answer of 42.",
+        "expected_values": ["42"],
+    }
+    transport, api = _experiment_transport([_experiment_record("legacy-run")])
+    api["records"][0]["legacy_session_id"] = "sess_old"
+    api["queue"] = {"items": [corrected]}
+
+    async def scenario() -> None:
+        async with _running_tui(transport, "sess_reject", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            screen = tui.screen
+            await _wait_for(pilot, lambda: screen._figure_boxes and screen.records)
+            screen.query_one("#label-reject").press()
+            await _wait_for(pilot, lambda: api.get("labels"))
+            assert api["labels"][0] == {"turn_id": "turn-1", "status": "rejected"}
+            # A per-Session job from before jobs were global is never approvable, whatever its evidence.
+            screen.comparison, screen.comparison_run_id = {"ok": True}, "legacy-run"
+            screen._update_job_actions(screen._selected())
+            assert screen.query_one("#job-approve").disabled
+
+    asyncio.run(scenario())
+
+    transport, _api = _experiment_transport([])
+
+    async def unavailable() -> None:
+        async with _running_tui(transport, "sess_noq", (110, 40)) as (_client, tui, pilot):
+            tui._open_improve()
+            await pilot.pause()
+            await _wait_for(pilot, lambda: tui.screen.queue_error)
+            await pilot.pause(0.1)
+            assert "unavailable" in str(tui.screen.query_one("#review-text").render())
+
+    asyncio.run(unavailable())

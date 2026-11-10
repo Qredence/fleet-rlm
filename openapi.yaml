@@ -1669,115 +1669,317 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /sessions/{session_id}/experiments:
+  /improve/readiness:
     get:
       tags:
-      - experiments
-      summary: List Experiments
-      description: List persisted history and the active run for one Session.
-      operationId: list_experiments_sessions__session_id__experiments_get
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
+      - improve
+      summary: Improve Readiness
+      description: Report what the labelled examples support, what is missing, and how many labels are
+        new.
+      operationId: improve_readiness_improve_readiness_get
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentList'
+                $ref: '#/components/schemas/ImproveReadiness'
         '404':
-          description: The requested experiment does not exist.
+          description: The requested job does not exist.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: The operation conflicts with the run or current manager state.
+          description: The operation conflicts with the job or current manager state.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '422':
-          description: The request or experiment identity is invalid.
+          description: The request or job identity is invalid.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: Experiment storage or worker service is unavailable.
+          description: Improve storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /improve/settings:
+    get:
+      tags:
+      - improve
+      summary: Get Improve Settings
+      description: 'Auto-run switch and budgets in force: saved values over the environment defaults.'
+      operationId: get_improve_settings_improve_settings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveSettings'
+        '404':
+          description: The requested job does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the job or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or job identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Improve storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - improve
+      summary: Put Improve Settings
+      description: Save the supplied fields; an explicit null clears a saved value back to its environment
+        default.
+      operationId: put_improve_settings_improve_settings_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImproveSettingsUpdate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveSettings'
+        '404':
+          description: The requested job does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the job or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or job identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Improve storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /improve/queue:
+    get:
+      tags:
+      - improve
+      summary: Improve Queue
+      description: List replay-captured Turns from every Session with their label state and answer figures.
+      operationId: improve_queue_improve_queue_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveQueue'
+        '404':
+          description: The requested job does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the job or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or job identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Improve storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /improve/labels:
+    post:
+      tags:
+      - improve
+      summary: Save Label
+      description: 'Label one Turn; the server resolves its trace, so clients never handle trace or Session
+        IDs.
+
+
+        A saved label may then start an automatic optimize job when the saved settings allow it.'
+      operationId: save_label_improve_labels_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelSaved'
+        '404':
+          description: The requested job does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the job or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or job identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Improve storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /improve/jobs:
+    get:
+      tags:
+      - improve
+      summary: List Jobs
+      description: List persisted history and the active job.
+      operationId: list_jobs_improve_jobs_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobList'
+        '404':
+          description: The requested job does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the job or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or job identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Improve storage or worker service is unavailable.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
     post:
       tags:
-      - experiments
-      summary: Start Experiment
+      - improve
+      summary: Start Job
       description: Start once per request ID; a busy server rejects instead of queueing work.
-      operationId: start_experiment_sessions__session_id__experiments_post
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
+      operationId: start_job_improve_jobs_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StartExperiment'
+              $ref: '#/components/schemas/StartJob'
+        required: true
       responses:
         '202':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentEnvelope'
+                $ref: '#/components/schemas/JobEnvelope'
         '404':
-          description: The requested experiment does not exist.
+          description: The requested job does not exist.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: The operation conflicts with the run or current manager state.
+          description: The operation conflicts with the job or current manager state.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '422':
-          description: The request or experiment identity is invalid.
+          description: The request or job identity is invalid.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: Experiment storage or worker service is unavailable.
+          description: Improve storage or worker service is unavailable.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /sessions/{session_id}/experiments/{run_id}:
+  /improve/jobs/{run_id}:
     get:
       tags:
-      - experiments
-      summary: Experiment Detail
-      description: Return a snapshot and its bounded saved comparison.
-      operationId: experiment_detail_sessions__session_id__experiments__run_id__get
+      - improve
+      summary: Job Detail
+      description: Return a snapshot, its bounded saved comparison, and that comparison's computed summary.
+      operationId: job_detail_improve_jobs__run_id__get
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: run_id
         in: path
         required: true
@@ -1790,45 +1992,39 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentDetail'
+                $ref: '#/components/schemas/JobDetail'
         '404':
-          description: The requested experiment does not exist.
+          description: The requested job does not exist.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: The operation conflicts with the run or current manager state.
+          description: The operation conflicts with the job or current manager state.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '422':
-          description: The request or experiment identity is invalid.
+          description: The request or job identity is invalid.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: Experiment storage or worker service is unavailable.
+          description: Improve storage or worker service is unavailable.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /sessions/{session_id}/experiments/{run_id}/cancel:
+  /improve/jobs/{run_id}/cancel:
     post:
       tags:
-      - experiments
-      summary: Cancel Experiment
+      - improve
+      summary: Cancel Job
       description: Request a cooperative stop; terminal status follows actual worker cleanup.
-      operationId: cancel_experiment_sessions__session_id__experiments__run_id__cancel_post
+      operationId: cancel_job_improve_jobs__run_id__cancel_post
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: run_id
         in: path
         required: true
@@ -1841,45 +2037,39 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentEnvelope'
+                $ref: '#/components/schemas/JobEnvelope'
         '404':
-          description: The requested experiment does not exist.
+          description: The requested job does not exist.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: The operation conflicts with the run or current manager state.
+          description: The operation conflicts with the job or current manager state.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '422':
-          description: The request or experiment identity is invalid.
+          description: The request or job identity is invalid.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: Experiment storage or worker service is unavailable.
+          description: Improve storage or worker service is unavailable.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /sessions/{session_id}/experiments/{run_id}/review:
+  /improve/jobs/{run_id}/review:
     post:
       tags:
-      - experiments
-      summary: Review Experiment
+      - improve
+      summary: Review Job
       description: Approve through the evidence-checking worker, or persist an explicit rejection.
-      operationId: review_experiment_sessions__session_id__experiments__run_id__review_post
+      operationId: review_job_improve_jobs__run_id__review_post
       parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
       - name: run_id
         in: path
         required: true
@@ -1891,34 +2081,73 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReviewExperiment'
+              $ref: '#/components/schemas/ReviewJob'
       responses:
         '202':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentEnvelope'
+                $ref: '#/components/schemas/JobEnvelope'
         '404':
-          description: The requested experiment does not exist.
+          description: The requested job does not exist.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: The operation conflicts with the run or current manager state.
+          description: The operation conflicts with the job or current manager state.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '422':
-          description: The request or experiment identity is invalid.
+          description: The request or job identity is invalid.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: Experiment storage or worker service is unavailable.
+          description: Improve storage or worker service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /improve/history:
+    get:
+      tags:
+      - improve
+      summary: Improve History
+      description: List approved versions and completed evaluation jobs, newest first, for the quality
+        trend.
+      operationId: improve_history_improve_history_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveHistory'
+        '404':
+          description: The requested job does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The operation conflicts with the job or current manager state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: The request or job identity is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Improve storage or worker service is unavailable.
           content:
             application/json:
               schema:
@@ -2081,53 +2310,6 @@ components:
       - deleted
       title: Deleted
       description: Acknowledgement of a deleted memory entry or workspace file.
-    ExperimentDetail:
-      properties:
-        experiment:
-          $ref: '#/components/schemas/ExperimentRun'
-        comparison:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Comparison
-      type: object
-      required:
-      - experiment
-      - comparison
-      title: ExperimentDetail
-      description: One public run and its optional saved comparison evidence.
-    ExperimentEnvelope:
-      properties:
-        experiment:
-          $ref: '#/components/schemas/ExperimentRun'
-      type: object
-      required:
-      - experiment
-      title: ExperimentEnvelope
-      description: One public run returned by start, cancel, or review.
-    ExperimentList:
-      properties:
-        experiments:
-          items:
-            $ref: '#/components/schemas/ExperimentRun'
-          type: array
-          title: Experiments
-        active_run_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Active Run Id
-        accepting:
-          type: boolean
-          title: Accepting
-      type: object
-      required:
-      - experiments
-      - active_run_id
-      - accepting
-      title: ExperimentList
-      description: History snapshot and admission state for one Session's experiments.
     ExperimentManagerStatus:
       properties:
         accepting:
@@ -2138,7 +2320,7 @@ components:
           title: Busy
         experiments:
           items:
-            $ref: '#/components/schemas/ExperimentRun'
+            $ref: '#/components/schemas/Job'
           type: array
           title: Experiments
       type: object
@@ -2148,105 +2330,6 @@ components:
       - experiments
       title: ExperimentManagerStatus
       description: Admission and active-run state observed by the local launcher.
-    ExperimentRun:
-      properties:
-        run_id:
-          type: string
-          title: Run Id
-        session_id:
-          type: string
-          title: Session Id
-        status:
-          type: string
-          title: Status
-        stage:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Stage
-        options:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Options
-        started_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Started At
-        created_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Created At
-        updated_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Updated At
-        finished_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Finished At
-        candidate_version:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Candidate Version
-        gate:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Gate
-        dataset_sizes:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Dataset Sizes
-        mlflow_run_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Mlflow Run Id
-        progress:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Progress
-        failure:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Failure
-        decision:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Decision
-        decision_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Decision At
-        stop_requested:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Stop Requested
-      additionalProperties: true
-      type: object
-      required:
-      - run_id
-      - session_id
-      - status
-      title: ExperimentRun
-      description: Public view of a persisted optimization run, including additive public fields.
     Exported:
       properties:
         exported:
@@ -2366,6 +2449,424 @@ components:
       - turns
       title: History
       description: Stored Turn records for one Session.
+    ImproveHistory:
+      properties:
+        versions:
+          items:
+            $ref: '#/components/schemas/Job'
+          type: array
+          title: Versions
+        evaluations:
+          items:
+            $ref: '#/components/schemas/Job'
+          type: array
+          title: Evaluations
+      type: object
+      required:
+      - versions
+      - evaluations
+      title: ImproveHistory
+      description: Approved versions and evaluation results, newest first, for the quality trend.
+    ImproveQueue:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/QueueItem'
+          type: array
+          title: Items
+        next_offset:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Offset
+      type: object
+      required:
+      - items
+      title: ImproveQueue
+      description: Replay-captured Turns across every Session, newest first.
+    ImproveReadiness:
+      properties:
+        ready:
+          type: boolean
+          title: Ready
+        examples:
+          type: integer
+          title: Examples
+        groups:
+          type: integer
+          title: Groups
+        critical:
+          type: integer
+          title: Critical
+        split_sizes:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Split Sizes
+        missing:
+          items:
+            type: string
+          type: array
+          title: Missing
+        min_split_examples:
+          type: integer
+          title: Min Split Examples
+        new_labels_since_last_run:
+          type: integer
+          title: New Labels Since Last Run
+        components:
+          items:
+            $ref: '#/components/schemas/TunableComponent'
+          type: array
+          title: Components
+        improvable_examples:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Improvable Examples
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Note
+      type: object
+      required:
+      - ready
+      - examples
+      - groups
+      - critical
+      - split_sizes
+      - missing
+      - min_split_examples
+      - new_labels_since_last_run
+      - components
+      title: ImproveReadiness
+      description: What the labelled examples support today, what a run still needs, and what could improve.
+    ImproveSettings:
+      properties:
+        auto_run:
+          type: boolean
+          title: Auto Run
+        min_new_labels:
+          type: integer
+          minimum: 1.0
+          title: Min New Labels
+        max_metric_calls:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Metric Calls
+        max_total_tokens:
+          type: integer
+          minimum: 0.0
+          title: Max Total Tokens
+        auto_run_blocked:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Auto Run Blocked
+      type: object
+      required:
+      - auto_run
+      - min_new_labels
+      - max_total_tokens
+      title: ImproveSettings
+      description: Auto-run switch and budgets; saved values override the FLEET_AUTO_OPTIMIZE* and FLEET_JOB_MAX_TOKENS
+        defaults.
+    ImproveSettingsUpdate:
+      properties:
+        auto_run:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Auto Run
+        min_new_labels:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Min New Labels
+        max_metric_calls:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Max Metric Calls
+        max_total_tokens:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Max Total Tokens
+      additionalProperties: false
+      type: object
+      title: ImproveSettingsUpdate
+      description: A partial settings update; omitted fields keep their current value.
+    Job:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        kind:
+          type: string
+          title: Kind
+          default: optimize
+        legacy_session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Legacy Session Id
+        status:
+          type: string
+          title: Status
+        stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stage
+        options:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Options
+        started_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Started At
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        finished_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finished At
+        candidate_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Candidate Version
+        gate:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Gate
+        scores:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Scores
+        dataset_sizes:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Dataset Sizes
+        mlflow_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mlflow Run Id
+        progress:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Progress
+        failure:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Failure
+        decision:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Decision
+        decision_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Decision At
+        stop_requested:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Stop Requested
+        evaluation:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Evaluation
+        trigger:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trigger
+      additionalProperties: true
+      type: object
+      required:
+      - run_id
+      - status
+      title: Job
+      description: Public view of a persisted job, including additive public fields.
+    JobDetail:
+      properties:
+        job:
+          $ref: '#/components/schemas/Job'
+        comparison:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Comparison
+        summary:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Summary
+      type: object
+      required:
+      - job
+      - comparison
+      title: JobDetail
+      description: One public job, its optional saved comparison evidence, and that comparison's computed
+        summary.
+    JobEnvelope:
+      properties:
+        job:
+          $ref: '#/components/schemas/Job'
+      type: object
+      required:
+      - job
+      title: JobEnvelope
+      description: One public job returned by start, cancel, or review.
+    JobList:
+      properties:
+        jobs:
+          items:
+            $ref: '#/components/schemas/Job'
+          type: array
+          title: Jobs
+        active_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Run Id
+        accepting:
+          type: boolean
+          title: Accepting
+      type: object
+      required:
+      - jobs
+      - active_run_id
+      - accepting
+      title: JobList
+      description: History snapshot and admission state for every job.
+    LabelRequest:
+      properties:
+        turn_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Turn Id
+        status:
+          anyOf:
+          - type: string
+            enum:
+            - approved
+            - benchmark
+            - synthetic
+            - rejected
+          - type: 'null'
+          title: Status
+        expected_answer:
+          anyOf:
+          - type: string
+            maxLength: 100000
+          - type: 'null'
+          title: Expected Answer
+        expected_values:
+          anyOf:
+          - items:
+              type: string
+              maxLength: 100000
+            type: array
+            maxItems: 100
+          - type: 'null'
+          title: Expected Values
+        critical:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Critical
+        group:
+          anyOf:
+          - type: string
+            maxLength: 256
+            minLength: 1
+          - type: 'null'
+          title: Group
+      additionalProperties: false
+      type: object
+      required:
+      - turn_id
+      title: LabelRequest
+      description: A gold label for one replay-captured Turn; unset fields keep the Turn's existing label.
+    LabelSaved:
+      properties:
+        turn_id:
+          type: string
+          title: Turn Id
+        trace_id:
+          type: string
+          title: Trace Id
+        status:
+          type: string
+          title: Status
+        expected_answer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expected Answer
+        expected_values:
+          items:
+            type: string
+          type: array
+          title: Expected Values
+        critical:
+          type: boolean
+          title: Critical
+        group:
+          type: string
+          title: Group
+      type: object
+      required:
+      - turn_id
+      - trace_id
+      - status
+      - expected_values
+      - critical
+      - group
+      title: LabelSaved
+      description: The label now stored for a Turn.
     Limits:
       properties:
         lm_calls:
@@ -2601,7 +3102,73 @@ components:
       - pushed
       title: Pushed
       description: Count of local Skills pushed to the Session's volume.
-    ReviewExperiment:
+    QueueItem:
+      properties:
+        turn_id:
+          type: string
+          title: Turn Id
+        session_id:
+          type: string
+          title: Session Id
+        task:
+          type: string
+          title: Task
+        answer:
+          type: string
+          title: Answer
+        figures:
+          items:
+            type: string
+          type: array
+          title: Figures
+        label:
+          type: string
+          title: Label
+        expected_answer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expected Answer
+        expected_values:
+          items:
+            type: string
+          type: array
+          title: Expected Values
+        critical:
+          type: boolean
+          title: Critical
+          default: false
+        group:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Group
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        flags:
+          items:
+            type: string
+          type: array
+          title: Flags
+        evaluation_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Evaluation Score
+      type: object
+      required:
+      - turn_id
+      - session_id
+      - task
+      - answer
+      - figures
+      - label
+      title: QueueItem
+      description: A replay-captured Turn awaiting or carrying a gold label.
+    ReviewJob:
       properties:
         decision:
           type: string
@@ -2620,7 +3187,7 @@ components:
       required:
       - decision
       - request_id
-      title: ReviewExperiment
+      title: ReviewJob
       description: An explicit human decision, never an implicit promotion after optimization.
     SessionConfig:
       properties:
@@ -2781,7 +3348,7 @@ components:
       - restart_required
       title: SetupStatus
       description: Readiness and redacted configuration for the operator checklist.
-    StartExperiment:
+    StartJob:
       properties:
         gepa_budget:
           anyOf:
@@ -2826,6 +3393,21 @@ components:
           type: boolean
           title: Trace Search
           default: false
+        max_total_tokens:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Max Total Tokens
+        kind:
+          type: string
+          enum:
+          - optimize
+          - evaluate_rescore
+          - evaluate_replay
+          - evaluate_synthetic
+          title: Kind
+          default: optimize
         request_id:
           type: string
           maxLength: 128
@@ -2836,8 +3418,8 @@ components:
       type: object
       required:
       - request_id
-      title: StartExperiment
-      description: Validated search controls and a retry-safe caller identity.
+      title: StartJob
+      description: A job kind, its validated controls, and a retry-safe caller identity.
     Status:
       properties:
         status:
@@ -2848,6 +3430,20 @@ components:
       - status
       title: Status
       description: Plain status acknowledgement, such as a cleared context.
+    TunableComponent:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+      type: object
+      required:
+      - name
+      - description
+      title: TunableComponent
+      description: One part of the program GEPA can rewrite, in plain words.
     TurnRequest:
       properties:
         task:
@@ -2874,8 +3470,8 @@ components:
           type: boolean
           title: Record Replay
           description: Persist a bounded immutable snapshot of this Turn's inputs for explicitly reviewed
-            GEPA data.
-          default: false
+            GEPA data. A workspace over the snapshot limit skips capture instead of failing the Turn.
+          default: true
         timeout_seconds:
           anyOf:
           - type: integer

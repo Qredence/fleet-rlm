@@ -9,8 +9,8 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Generator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from statistics import median
@@ -301,9 +301,11 @@ class _RolloutTracker(dspy.Module):
         *,
         trace_context: Mapping[str, str] | None = None,
         trace_run_id: str | None = None,
+        on_rollout: Callable[[], None] | None = None,
     ) -> None:
         """Wrap the scored program; failures are counted per thread and re-raised for the evaluator."""
         super().__init__()
+        self.on_rollout = on_rollout
         self.program = program
         self.error_count = 0
         self.failures: list[dict[str, str]] = []
@@ -350,6 +352,9 @@ class _RolloutTracker(dspy.Module):
         finally:
             with self._lock:
                 self.seconds_per_example.append(round(time.perf_counter() - started, 6))
+            if self.on_rollout is not None:
+                with suppress(Exception):
+                    self.on_rollout()
 
 
 class _SanitizeDSPyErrorLog(logging.Filter):
@@ -373,6 +378,7 @@ def score_split(
     *,
     trace_context: Mapping[str, str] | None = None,
     trace_run_id: str | None = None,
+    on_rollout: Callable[[], None] | None = None,
 ) -> SplitScore:
     """Score every example with ``dspy.Evaluate``; a rollout that raises scores 0.0 and counts as an error.
 
@@ -386,7 +392,7 @@ def score_split(
     if not examples:
         raise ValueError("validation split must not be empty")
     started = time.perf_counter()
-    tracker = _RolloutTracker(program, trace_context=trace_context, trace_run_id=trace_run_id)
+    tracker = _RolloutTracker(program, trace_context=trace_context, trace_run_id=trace_run_id, on_rollout=on_rollout)
     dspy_error_logger = logging.getLogger("dspy.utils.parallelizer")
     sanitizer = _SanitizeDSPyErrorLog()
     dspy_error_logger.addFilter(sanitizer)
@@ -452,6 +458,7 @@ def score_stage(
     trace_run_id: str | None = None,
     stage: str | None = None,
     pass_index: int | None = None,
+    on_rollout: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Score the dev and holdout splits and return the combined metrics for one GEPA stage."""
 
@@ -472,6 +479,7 @@ def score_stage(
         threads,
         trace_context=context("dev"),
         trace_run_id=trace_run_id,
+        on_rollout=on_rollout,
     )
     held = score_split(
         program,
@@ -480,6 +488,7 @@ def score_stage(
         threads,
         trace_context=context("holdout"),
         trace_run_id=trace_run_id,
+        on_rollout=on_rollout,
     )
     result: dict[str, Any] = {"seconds": round(dev.seconds + held.seconds, 1)}
     for prefix, split in (("dev", dev), ("holdout", held)):

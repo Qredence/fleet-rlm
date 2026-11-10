@@ -50,9 +50,7 @@ class FleetTask(dspy.Signature):
 
     workspace_manifest: str = dspy.InputField(desc="Files available in this Session's /workspace")
     skills_catalog: str = dspy.InputField(desc="Stage-1 available Skills catalog")
-    memory_summary: str = dspy.InputField(
-        desc="Bounded learned notes for this Session; shared notes are unverified hints to confirm in the sandbox"
-    )
+    memory_summary: str = dspy.InputField(desc="Bounded learned notes for this Session")
     session_history: str = dspy.InputField(desc="Recent committed Turns from this Session")
     execution_route: str = dspy.InputField(desc="The triage-selected route: flex or rlm")
     task: str = dspy.InputField(desc="User request")

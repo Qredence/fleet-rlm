@@ -99,7 +99,7 @@ def test_migration_four_retires_the_file_mirror_without_deleting_rows():
 
 
 def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 10
+    assert SCHEMA_VERSION == 12
     assert _SCHEMA_MIGRATIONS[7][0] == 8
     assert "ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB" in _SCHEMA_MIGRATIONS[7][1][0]
     version, statements = _SCHEMA_MIGRATIONS[4]
@@ -107,6 +107,50 @@ def test_migration_five_records_the_environment_observation_on_the_session_row()
     assert statements == (
         "ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
     )
+
+
+def test_migration_eleven_rekeys_jobs_by_run_id_and_preserves_the_legacy_session():
+    version, statements = _SCHEMA_MIGRATIONS[10]
+    assert version == 11
+    kind, legacy, dedupe_run, dedupe_request, drop, primary, unique = statements
+    assert "ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'optimize'" in kind
+    assert "'optimize','evaluate_rescore','evaluate_replay','evaluate_synthetic'" in kind
+    assert "jsonb_build_object('legacy_session_id', session_id)" in legacy
+    assert "r.run_id || '-dup-' || r.session_id" in dedupe_run
+    assert "r.request_id || ':' || r.run_id" in dedupe_request
+    # Deduplication must run while session_id still exists, before the key is re-created.
+    assert statements.index(dedupe_run) < statements.index(drop) < statements.index(primary)
+    assert drop.endswith("DROP COLUMN session_id")
+    assert "ADD PRIMARY KEY (run_id)" in primary
+    assert "UNIQUE (request_id)" in unique
+    # The one-active-job partial index is untouched by the re-key.
+    assert not any("fleet_lite_one_active_optimization_run" in statement for statement in statements)
+
+
+def test_reviewed_examples_span_every_session():
+    store, pool = make_store([{"turn_id": "t1", "session_id": "s1"}])
+    store.reviewed_examples(10)
+    sql, params = pool.conn.statements[0]
+    assert "labels.session_id" in sql and "WHERE labels.session_id" not in sql
+    assert params == (10,)
+
+
+def test_approved_program_reports_the_latest_approved_digest_and_approvals_in_flight():
+    store, pool = make_store([("approving", "d-new"), ("approved", "d-latest"), ("approved", "d-old")])
+    assert store.approved_program() == {"approved": "d-latest", "approving": ["d-new"]}
+    sql = pool.conn.statements[0][0]
+    assert "NOT (metadata ? 'legacy_session_id')" in sql and "kind='optimize'" in sql
+    store, _pool = make_store([("approving", "d-new")])
+    assert store.approved_program() == {"approved": None, "approving": ["d-new"]}
+    store, _pool = make_store([])
+    assert store.approved_program() == {"approved": None, "approving": []}
+
+
+def test_new_review_labels_counts_only_approved_labels_after_the_cutoff():
+    store, pool = make_store([(3,)])
+    assert store.new_review_labels("2026-11-01T00:00:00+00:00") == 3
+    assert "review_status='approved'" in pool.conn.statements[0][0]
+    assert pool.conn.statements[0][1] == ("2026-11-01T00:00:00+00:00",) * 2
 
 
 def test_migration_six_adds_a_global_optimization_ledger_without_session_cascade():
@@ -755,6 +799,25 @@ def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(m
     assert all(call[0] is connection_class and call[1] == "host=lakebase" for call in calls)
 
 
+def test_migration_twelve_creates_the_global_settings_table_even_if_an_older_draft_left_one():
+    version, statements = _SCHEMA_MIGRATIONS[11]
+    assert version == 12 and len(statements) == 2
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in statements[1] and "global_settings(scope)" in statements[1]
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_global_settings" in statements[0]
+    assert "scope TEXT PRIMARY KEY" in statements[0] and "settings JSONB NOT NULL" in statements[0]
+
+
+def test_global_settings_round_trip_by_scope_and_default_to_empty():
+    store, pool = make_store([({"auto_run": True},)], [])
+    assert store.global_settings("improve") == {"auto_run": True}
+    assert store.global_settings("missing") == {}
+    store.update_global_settings("improve", {"min_new_labels": 3, "max_metric_calls": None})
+    sql, params = pool.conn.statements[-1]
+    # Merged in SQL, so concurrent updates touch only their own keys; None removes a key.
+    assert "settings=(fleet_lite_global_settings.settings - %s::text[]) || EXCLUDED.settings" in sql
+    assert params == ("improve", '{"min_new_labels": 3}', ["max_metric_calls"])
+
+
 def test_commit_turn_requires_a_turn_id_so_a_connection_retry_cannot_duplicate_the_record():
     store, pool = make_store()
     with pytest.raises(ValueError, match="turn_id"):
@@ -777,8 +840,25 @@ def test_retired_managed_memory_migrations_remain_readable_without_runtime_wirin
     assert "fleet_lite_managed_session_outbox" in migrations[9][1]
     assert "fleet_lite_managed_pipeline_runs" in migrations[9][3]
     assert "ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'serving'" in migrations[10][0]
-    store, pool = make_store([], [], [(10,)])
+    store, pool = make_store([], [], [(12,)])
     store.initialize()
     statements = [sql for sql, _params in pool.conn.statements]
     assert not any("INSERT INTO fleet_lite_schema_migrations(version)" in sql for sql in statements)
     assert not any("fleet_lite_managed_" in sql for sql in statements)
+
+
+def test_improve_queue_joins_turns_across_sessions_with_optional_labels():
+    store, pool = make_store([{"turn_id": "t1"}])
+    assert store.improve_queue(25) == [{"turn_id": "t1"}]
+    sql, params = pool.conn.statements[0]
+    assert "FROM fleet_lite_replay_snapshots AS replay" in sql and "LEFT JOIN fleet_lite_review_labels" in sql
+    assert "WHERE replay.session_id" not in sql and "turns.status='completed'" in sql
+    assert params == (25, 0)
+
+
+def test_turn_reference_resolves_a_turn_id_to_its_session_trace_and_snapshot():
+    store, pool = make_store([{"session_id": "s1", "turn_id": "t1", "trace_id": "tr-1"}])
+    assert store.turn_reference("t1")["trace_id"] == "tr-1"
+    sql, params = pool.conn.statements[0]
+    assert "turns.result->>'trace_id' AS trace_id" in sql and "replay.turn_id=%s" in sql
+    assert params == ("t1",)

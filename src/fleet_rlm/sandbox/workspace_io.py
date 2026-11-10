@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import re
 from contextlib import nullcontext
 from pathlib import Path
@@ -19,7 +18,6 @@ from fleet_rlm.sandbox.runtime.fs_ops import (
     existing_workspace_paths_code,
     list_workspace_files_code,
     turn_inputs_code,
-    valid_notes,
     verify_python_artifact_code,
     workspace_files_metadata_code,
 )
@@ -28,7 +26,6 @@ from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES, _workspace_relative_pa
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
-_LOGGER = logging.getLogger(__name__)
 _MAX_PROMOTED_FILES = 100
 _MAX_PROMOTED_BYTES = MAX_WORKSPACE_FILE_BYTES
 
@@ -70,12 +67,10 @@ class WorkspaceIOMixin:
         with_retries(lambda: sandbox.fs.upload_file("\n".join([*header, body, ""]).encode("utf-8"), path, timeout=60))
         return path
 
-    def turn_inputs(self: DaytonaSandboxManager, notes_limit: int = 20) -> dict[str, Any]:
-        """Gather a Turn's remote inputs in one exec: file digests, shared notes, and the environment.
+    def turn_inputs(self: DaytonaSandboxManager) -> dict[str, Any]:
+        """Gather a Turn's remote inputs in one exec: file digests and the environment.
 
-        Digests follow `list_workspace_files` (symbolic links skipped, never traversed) and are required;
-        notes are optional hints, so an unreadable mount yields none instead of failing the Turn.
-        `notes_limit` enables shared notes only from 1 through 50; other values omit notes.
+        Digests follow `list_workspace_files` (symbolic links skipped, never traversed) and are required.
         Missing optional modules may emit one advisory event per Session.
 
         Raises:
@@ -83,9 +78,7 @@ class WorkspaceIOMixin:
 
         Remote execution and JSON decoding errors propagate.
         """
-        with_notes = bool(self.shared_notes_subpath) and 1 <= notes_limit <= 50
-        code = turn_inputs_code(with_notes=with_notes, notes_limit=notes_limit)
-        result = json.loads(self.exec_remote_python(code))
+        result = json.loads(self.exec_remote_python(turn_inputs_code()))
         digests = result.get("digests") if isinstance(result, dict) else None
         if not isinstance(digests, dict) or not all(
             isinstance(path, str) and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
@@ -94,13 +87,17 @@ class WorkspaceIOMixin:
             raise RuntimeError("Invalid workspace digest listing")
         for path in digests:
             _workspace_relative_path(path)
-        if result.get("notes") is None:
-            _LOGGER.warning("Shared learned notes were unavailable for Session %s", self.session_id)
         self._report_incomplete_environment(result.get("missing"))
         environment = result.get("environment")
+        sizes = result.get("sizes")
         return {
             "digests": digests,
-            "notes": valid_notes(result.get("notes")),
+            # Advisory byte counts let replay capture skip an oversized workspace before downloading it.
+            "sizes": {
+                path: size
+                for path, size in (sizes if isinstance(sizes, dict) else {}).items()
+                if path in digests and isinstance(size, int) and not isinstance(size, bool) and size >= 0
+            },
             "environment": environment if isinstance(environment, str) else "",
         }
 

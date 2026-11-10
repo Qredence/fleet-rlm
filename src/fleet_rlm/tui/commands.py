@@ -38,7 +38,7 @@ class SessionState:
     root_model: str = ""
     sub_model: str = ""
     context_path: str | None = None
-    record_replay: bool = False
+    record_replay: bool = True
     requested_skills: tuple[str, ...] = ()
     # Client-local `/timeout` override: None inherits, 0 disables the Fleet deadline.
     # It is sent as `TurnRequest.timeout_seconds` and is never stored on the Session.
@@ -52,7 +52,7 @@ class SessionState:
     pending_model_choice: tuple[str, list[str]] | None = None
     optimizer_launcher: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     optimizer_reviewer: Callable[[str, str, str], None] | None = field(default=None, repr=False)
-    experiments_opener: Callable[[], None] | None = field(default=None, repr=False)
+    improve_opener: Callable[[str], None] | None = field(default=None, repr=False)
     pending_optimizer_request: dict[str, Any] | None = field(default=None, repr=False)
 
 
@@ -531,12 +531,12 @@ def _sessions(ctx: Context, _arg: str) -> None:
         )
 
 
-def _experiments(ctx: Context, _arg: str) -> None:
-    """Open the session-scoped GEPA run history in fullscreen mode."""
-    if ctx.state.experiments_opener is None:
-        _out(ctx).print("[yellow]Experiments are available in the fullscreen TUI.[/yellow]")
+def _improve(ctx: Context, _arg: str) -> None:
+    """Open the Improve screen (labels, readiness, runs, results) in fullscreen mode."""
+    if ctx.state.improve_opener is None:
+        _out(ctx).print("[yellow]Improve is available in the fullscreen TUI.[/yellow]")
         return
-    ctx.state.experiments_opener()
+    ctx.state.improve_opener("review")
 
 
 def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], str | None] | None:
@@ -545,9 +545,6 @@ def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], 
         extra = shlex.split(arg)
     except ValueError as exc:
         _out(ctx).print(f"[red]Invalid /optimize arguments:[/red] {exc}")
-        return None
-    if any(value == "--session" or value.startswith("--session=") for value in extra):
-        _out(ctx).print("[red]/optimize always uses the active Session.[/red]")
         return None
     parser = argparse.ArgumentParser(prog="/optimize", add_help=False, exit_on_error=False)
     add_search_arguments(parser)
@@ -585,7 +582,16 @@ def _finish_optimizer_request(state: SessionState, request_id: str) -> None:
 
 
 def _optimize(ctx: Context, arg: str) -> None:
-    """Start or review this Session's optimization through the Fleet API."""
+    """Start or review a global optimization job through the Fleet API.
+
+    Without arguments the fullscreen TUI only opens the Runs tab, where starting is confirmed.
+    """
+    if not arg.strip():
+        if ctx.state.fullscreen and ctx.state.improve_opener is not None:
+            ctx.state.improve_opener("runs")
+        else:
+            _out(ctx).print("Use the fullscreen TUI to review and confirm an optimization run.")
+        return
     parsed = _parse_optimizer_arguments(ctx, arg)
     if parsed is None:
         return
@@ -593,7 +599,7 @@ def _optimize(ctx: Context, arg: str) -> None:
     if ctx.state.fullscreen:
         callback = ctx.state.optimizer_reviewer if approve_run is not None else ctx.state.optimizer_launcher
         if callback is None:
-            _out(ctx).print("[red]The fullscreen experiments screen is unavailable.[/red]")
+            _out(ctx).print("[red]The fullscreen Improve screen is unavailable.[/red]")
             return
         if approve_run is not None:
             assert ctx.state.optimizer_reviewer is not None
@@ -604,29 +610,29 @@ def _optimize(ctx: Context, arg: str) -> None:
         return
     if approve_run is not None:
         response = ctx.post(
-            f"{ctx.session}/experiments/{quote(approve_run, safe='')}/review",
+            f"/improve/jobs/{quote(approve_run, safe='')}/review",
             json={"decision": "approved", "request_id": str(uuid.uuid4())},
         )
-        run = response.json().get("experiment", {})
+        run = response.json().get("job", {})
     else:
         try:
-            response = ctx.post(f"{ctx.session}/experiments", json=payload)
+            response = ctx.post("/improve/jobs", json=payload)
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 _finish_optimizer_request(ctx.state, str(payload["request_id"]))
             raise
         _finish_optimizer_request(ctx.state, str(payload["request_id"]))
-        run = response.json().get("experiment", {})
+        run = response.json().get("job", {})
     run_id = run.get("run_id")
     if not isinstance(run_id, str):
         _out(ctx).print("[red]Fleet API returned an invalid experiment record.[/red]")
         return
     _out(ctx).print(f"[cyan]Optimization {run.get('status', 'started')}:[/cyan] {run_id}")
-    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected"}
+    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected", "budget_exhausted"}
     last_stage: str | None = None
     while run.get("status") not in terminal:
         time.sleep(1)
-        run = ctx.get(f"{ctx.session}/experiments/{quote(run_id, safe='')}").json().get("experiment", {})
+        run = ctx.get(f"/improve/jobs/{quote(run_id, safe='')}").json().get("job", {})
         stage = run.get("stage")
         if stage and stage != last_stage:
             last_stage = stage
@@ -742,12 +748,13 @@ COMMANDS: dict[str, Command] = {
         category="Evaluation & Traces",
     ),
     "/sessions": Command("/sessions", "list saved Sessions", _sessions, category="Session & Models"),
-    "/experiments": Command(
-        "/experiments",
-        "review GEPA run history and candidate evidence",
-        _experiments,
+    "/improve": Command(
+        "/improve",
+        "label Turns, check readiness, and run and review GEPA jobs (also /experiments, /optimize)",
+        _improve,
         category="Evaluation & Traces",
     ),
+    "/experiments": Command("/experiments", "open the Improve screen", _improve, category="Evaluation & Traces"),
     "/optimize": Command(
         "/optimize [--max-metric-calls N | --approve VERSION]",
         "score past Turns, compile a GEPA candidate, and gate it; --approve serves it from the next Turn",

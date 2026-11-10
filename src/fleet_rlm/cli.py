@@ -8,7 +8,6 @@ import json
 import os
 import secrets
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,6 @@ from rich.console import Console
 from fleet_rlm import launcher
 from fleet_rlm.config import get_settings
 from fleet_rlm.contracts import Route
-from fleet_rlm.observability import trace_object as _trace_object
 from fleet_rlm.optimization_runs import add_optimization_arguments, read_worker_settings
 from fleet_rlm.replay import REVIEW_STATUSES
 from fleet_rlm.tui.app import run_interactive_cli
@@ -85,11 +83,6 @@ def _prepare_owned_api(plan: launcher.LaunchPlan, settings: Any, token: str) -> 
     return token
 
 
-def _trace_request(trace: Any) -> dict[str, Any]:
-    """Decode the root request for selected replay curation."""
-    return _trace_object(getattr(getattr(trace, "data", None), "request", None))
-
-
 def _uc_trace_location(location: Any) -> Any:
     """Return the Unity Catalog location across MLflow TraceLocation API shapes."""
     nested = getattr(location, "uc_table_prefix", None)
@@ -97,90 +90,79 @@ def _uc_trace_location(location: Any) -> Any:
 
 
 def _label_command(args: argparse.Namespace, settings: Any) -> None:
-    """Resolve partial updates once, preflight the replay, then synchronize both stores."""
-    import mlflow
-
-    from fleet_rlm.optimize.dataset import labels_of
-    from fleet_rlm.optimize.evaluation import label_trace
-    from fleet_rlm.replay import selected_snapshot, validate_review_labels
+    """Label one trace through the same function the HTTP route uses."""
+    from fleet_rlm.optimize.evaluation import EvaluationError, label_turn
     from fleet_rlm.store import Store
 
-    trace = None
-    for attempt in range(15):
-        trace = mlflow.get_trace(args.trace_id, silent=True, flush=True)
-        if trace is not None:
-            break
-        if attempt < 14:
-            time.sleep(1)
-    if trace is None:
-        raise SystemExit(f"Trace {args.trace_id} is not readable; retry its saved trace ID")
-    existing = labels_of(trace)
-    labels = {
-        "review_status": "approved",
-        "source_group": trace.info.trace_metadata.get("mlflow.trace.session", ""),
-        "expected_answer": None,
-        "expected_values": [],
-        "route": None,
-        "critical": False,
-        "structured_expectations": {},
-    }
-    labels.update({name: existing[name] for name in labels if name in existing})
-    for name, value in (
-        ("review_status", args.status),
-        ("source_group", args.group),
-        ("expected_answer", args.answer),
-        ("expected_values", args.value),
-        ("route", args.route),
-        ("critical", args.critical),
-    ):
-        if value is not None:
-            labels[name] = value
+    expectations = None
     if getattr(args, "expectations_file", None):
         from fleet_rlm.execution_evidence import parse_expectations_file
 
-        labels["structured_expectations"] = parse_expectations_file(args.expectations_file)
-    request = _trace_request(trace)
-    selected = request.get("replay_snapshot_selected") is True
-    store = None
-    mlflow_saved = False
-    try:
-        validate_review_labels(labels, require_gold=selected)
-        if not args.reviewer.strip():
-            raise ValueError("review labels require a reviewer")
-        if selected:
-            session_id = request.get("session_id", "")
-            turn_id = request.get("turn_id", "")
-            digest = request.get("replay_snapshot_sha256", "")
-            if session_id != trace.info.trace_metadata.get("mlflow.trace.session"):
-                raise ValueError("Trace session metadata does not match its replay reference")
-            store = Store.open(
+        expectations = parse_expectations_file(args.expectations_file)
+    opened: list[Store] = []
+
+    def open_store() -> Store:
+        opened.append(
+            Store.open(
                 settings.fleet_database_url,
                 wait=True,
                 lakebase_endpoint=settings.fleet_lakebase_endpoint,
                 schema=settings.fleet_database_schema,
             )
-            selected_snapshot(store, session_id, turn_id, digest)
-        label_trace(args.trace_id, **labels, reviewer=args.reviewer)
-        mlflow_saved = True
-        if store is not None:
-            store.save_review_labels(session_id, turn_id, digest, **labels, reviewer=args.reviewer)
-    except Exception as exc:
-        if mlflow_saved:
-            raise SystemExit(
-                f"MLflow labels were saved, but Lakebase curation failed ({type(exc).__name__}); "
-                "rerun this label command to retry"
-            ) from None
-        raise SystemExit(
-            f"Review was not synchronized ({type(exc).__name__}); check labels and replay reference, then retry"
-        ) from None
+        )
+        return opened[-1]
+
+    try:
+        labels = label_turn(
+            open_store,
+            args.trace_id,
+            status=args.status,
+            group=args.group,
+            answer=args.answer,
+            values=args.value,
+            route=args.route,
+            critical=args.critical,
+            reviewer=args.reviewer,
+            expectations=expectations,
+        )
+    except (EvaluationError, ValueError) as exc:
+        raise SystemExit(str(exc)) from None
     finally:
-        if store is not None:
+        for store in opened:
             store.close()
     _CONSOLE.print(f"Labeled {args.trace_id} as {labels['review_status']}")
 
 
+def _score_command(args: argparse.Namespace, settings: Any, experiment_id: str) -> None:
+    """Score already collected, labelled traces without running their Turns again."""
+    import mlflow
+
+    from fleet_rlm.optimize import evaluation
+
+    traces = []
+    for trace_id in args.trace_ids:
+        trace = mlflow.get_trace(trace_id, silent=True, flush=True)
+        if trace is None:
+            raise SystemExit(f"Trace {trace_id} is not readable; retry its saved trace ID")
+        traces.append(trace)
+    evaluation.apply_judge_environment(settings)
+    try:
+        result = evaluation.score_evaluation_traces(
+            traces,
+            judge_model=settings.fleet_judge_model,
+            judge_lm=settings.build_judge_lm(),
+            judge_adapter=settings.resolved_model("judge").build_adapter(),
+            jev_lm=settings.build_jev_lm(),
+            experiment_id=experiment_id,
+            report=lambda message: _CONSOLE.print(message, markup=False, soft_wrap=True),
+        )
+    except evaluation.EvaluationError as exc:
+        raise SystemExit(str(exc)) from None
+    _CONSOLE.print(result.metrics)
+
+
 def _eval_command(args: argparse.Namespace, settings: Any) -> None:
-    """Build the eval dataset, label a trace, or run the synthetic cases against a live server."""
+    """Build the eval dataset, label or score traces, or run the synthetic cases against a live server."""
     import mlflow
 
     from fleet_rlm.optimize import evaluation
@@ -199,16 +181,10 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         return
     if not target.eval_experiment_name:
         raise SystemExit(f"set FLEET_MLFLOW_{target.mode.upper()}_EVAL_EXPERIMENT_NAME to the evaluation experiment")
-    from fleet_rlm.observability import set_mlflow_trace_experiment
-
-    experiment = set_mlflow_trace_experiment(
-        target.eval_experiment_name,
-        databricks=target.mode == "databricks",
-        trace_catalog=getattr(settings, "mlflow_trace_catalog", ""),
-        trace_schema=getattr(settings, "mlflow_trace_schema", ""),
-        trace_table_prefix=getattr(settings, "mlflow_eval_trace_table_prefix", ""),
-        tracing_sql_warehouse_id=getattr(settings, "mlflow_tracing_sql_warehouse_id", ""),
-    )
+    experiment = evaluation.evaluation_experiment(settings)
+    if args.eval_command == "score":
+        _score_command(args, settings, experiment.experiment_id)
+        return
     cases = evaluation.synthetic_cases(seed=args.seed)
     if args.eval_command == "dataset":
         name = args.name or (
@@ -223,30 +199,15 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
         _CONSOLE.print(f"Dataset {dataset.name}: {len(cases)} cases")
         return
-    for name, value in settings.judge_environment().items():
-        os.environ[name] = value
     try:
-        result = evaluation.evaluate_cases(
+        result = evaluation.run_cases(
+            settings,
             cases[: args.limit] if args.limit else cases,
             base_url=args.url,
-            judge_model=settings.fleet_judge_model,
-            judge_lm=None if args.collect_only else settings.build_judge_lm(),
-            judge_adapter=None if args.collect_only else settings.resolved_model("judge").build_adapter(),
-            jev_lm=None if args.collect_only else settings.build_jev_lm(),
-            collect_only=args.collect_only,
             experiment_id=experiment.experiment_id,
-            uc_location=(
-                (
-                    settings.mlflow_trace_catalog,
-                    settings.mlflow_trace_schema,
-                    settings.mlflow_eval_trace_table_prefix,
-                )
-                if target.mode == "databricks"
-                else None
-            ),
+            collect_only=args.collect_only,
             report=lambda message: _CONSOLE.print(message, markup=False, soft_wrap=True),
         )
-
     except evaluation.EvaluationError as exc:
         raise SystemExit(str(exc)) from None
     if result is not None:
@@ -362,7 +323,7 @@ def main(argv: list[str] | None = None) -> None:
     cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
 
     optimize = commands.add_parser(
-        "optimize", help="evaluate a Session's reviewed examples and compile a GEPA candidate (live)"
+        "optimize", help="compile a GEPA candidate from every reviewed example (live), or --check readiness"
     )
     add_optimization_arguments(optimize)
 
@@ -383,6 +344,8 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="run and label the Turns, skipping the MLflow judge suite",
     )
+    score = eval_commands.add_parser("score", help="score already collected, labelled traces without rerunning them")
+    score.add_argument("trace_ids", nargs="+", metavar="trace_id")
     label = eval_commands.add_parser("label", help="write gold labels onto a trace")
     label.add_argument("trace_id")
     label.add_argument(
@@ -410,7 +373,7 @@ def main(argv: list[str] | None = None) -> None:
     verify.add_argument("trace_id", help="trace ID; use its fully qualified trace:/ reference for Unity Catalog")
     verify.add_argument("--scope", choices=("runtime", "evaluation", "optimization"), default="runtime")
 
-    for command in (serve, web, cli, optimize, dataset, run, label, verify):
+    for command in (serve, web, cli, optimize, dataset, run, score, label, verify):
         command.add_argument(
             "--mlflow",
             choices=("local", "databricks"),

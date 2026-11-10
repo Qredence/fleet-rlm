@@ -1391,7 +1391,7 @@ def _run_remote_locally(tmp_path, calls):
     return run
 
 
-def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypatch, tmp_path) -> None:
+def test_turn_inputs_gathers_digests_and_environment_in_one_call(monkeypatch, tmp_path) -> None:
     import hashlib
 
     workspace = tmp_path / "workspace"
@@ -1401,8 +1401,6 @@ def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypat
     (workspace / "outside" / "secret.txt").write_bytes(b"secret")
     (workspace / "files" / "link.txt").symlink_to(workspace / "outside" / "secret.txt")
     (workspace / "linked-dir").symlink_to(workspace / "outside")
-    (tmp_path / "learned").mkdir()
-    (tmp_path / "learned" / "s-1.md").write_text("---\nsummary: Use Chudnovsky\n---\nbody\n")
     calls: list[str] = []
     monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, calls))
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/learned-notes")
@@ -1410,9 +1408,10 @@ def test_turn_inputs_gathers_digests_notes_and_environment_in_one_call(monkeypat
     inputs = manager.turn_inputs()
 
     assert len(calls) == 1
+    # Learned notes are written for review, never read back into Turns.
+    assert "notes" not in inputs and "/learned" not in calls[0]
     # Symbolic links are skipped and never traversed.
     assert inputs["digests"] == {"files/a.txt": hashlib.sha256(b"alpha").hexdigest()}
-    assert inputs["notes"] == [{"file": "s-1.md", "summary": "Use Chudnovsky"}]
     assert inputs["environment"].startswith("Sandbox environment: Python ")
     assert "installed: " in inputs["environment"] and "not installed: " in inputs["environment"]
     assert "set_int_max_str_digits(0)" in inputs["environment"]
@@ -1482,69 +1481,11 @@ def test_workspace_digests_reject_malformed_responses(monkeypatch, response):
         manager.turn_inputs()
 
 
-def test_turn_inputs_skips_notes_without_the_shared_mount(monkeypatch, tmp_path) -> None:
-    (tmp_path / "workspace").mkdir()
-    calls: list[str] = []
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, calls))
-
-    inputs = DaytonaSandboxManager("key", "org", "volume", "session-a").turn_inputs()
-
-    assert inputs["notes"] == [] and inputs["digests"] == {}
-    assert "/learned" not in calls[0]
-
-
-def test_turn_inputs_returns_only_the_newest_bounded_shared_notes(monkeypatch, tmp_path) -> None:
-    import os
-
-    (tmp_path / "workspace").mkdir()
-    learned = tmp_path / "learned"
-    learned.mkdir()
-    for index in range(23):
-        path = learned / f"note-{index}.md"
-        path.write_text(f"---\nsummary: {'x' * 150}\n---\n")
-        os.utime(path, (index + 1, index + 1))
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
-    manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/notes")
-
-    notes = manager.turn_inputs()["notes"]
-
-    assert [row["file"] for row in notes] == [f"note-{index}.md" for index in range(22, 2, -1)]
-    assert all(row["summary"] == "x" * 120 for row in notes)
-
-
-def test_turn_inputs_preserves_required_inputs_when_optional_notes_are_unreadable(monkeypatch, tmp_path, caplog):
-    workspace = tmp_path / "workspace"
-    (workspace / "files").mkdir(parents=True)
-    (workspace / "files/data.txt").write_bytes(b"source")
-    # A directory with a note suffix cannot be opened as a note file.
-    (tmp_path / "learned/unreadable.md").mkdir(parents=True)
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, []))
-    manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/notes")
-
-    inputs = manager.turn_inputs()
-
-    assert inputs["notes"] == []
-    assert inputs["digests"] == {"files/data.txt": hashlib.sha256(b"source").hexdigest()}
-    assert inputs["environment"].startswith("Sandbox environment: Python ")
-    assert "Shared learned notes were unavailable" in caplog.text
-
-
-@pytest.mark.parametrize("notes_limit", [0, 51])
-def test_turn_inputs_skips_notes_outside_supported_limits(monkeypatch, tmp_path, notes_limit):
-    (tmp_path / "workspace").mkdir()
-    calls = []
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", _run_remote_locally(tmp_path, calls))
-    manager = DaytonaSandboxManager("key", "org", "volume", "session-a", shared_notes_subpath="shared/notes")
-
-    assert manager.turn_inputs(notes_limit=notes_limit)["notes"] == []
-    assert "/learned" not in calls[0]
-
-
 def test_turn_inputs_reject_a_malformed_digest_listing(monkeypatch) -> None:
     monkeypatch.setattr(
         DaytonaSandboxManager,
         "exec_remote_python",
-        lambda _self, _code: '{"digests": {"files/a.txt": 3}, "notes": [], "environment": ""}',
+        lambda _self, _code: '{"digests": {"files/a.txt": 3}, "environment": ""}',
     )
 
     with pytest.raises(RuntimeError, match="Invalid workspace digest"):

@@ -11,7 +11,6 @@ import binascii
 import hashlib
 import json
 import logging
-import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
@@ -48,8 +47,6 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _TRACE_PREVIEW_CHARS = 200
-_MAX_SHARED_NOTES = 8
-_NOTE_DUPLICATE_SIMILARITY = 0.5
 # The field that carries the teardown result on the stored Turn, its span, and the terminal event.
 _CLEANUP_ATTRIBUTE = "cleanup"
 # The live root provider handle id, recorded only when this Turn actually provisioned one.
@@ -103,7 +100,7 @@ def run_turn(
     mlflow_experiment_id: str | None,
     callback: Any,
     emit: Emit,
-    record_replay: bool = False,
+    record_replay: bool = True,
     requested_skills: tuple[str, ...] = (),
     timeout_seconds: int | None = None,
     completion_committed: Event | None = None,
@@ -282,6 +279,14 @@ def run_turn(
                     inputs = _prepare_inputs(
                         runtime, session_id, task, record_replay=record_replay, required_skills=required_skills
                     )
+                    if inputs["replay_skipped_bytes"] is not None:
+                        emit(
+                            {
+                                "event": "replay_skipped",
+                                "bytes": inputs["replay_skipped_bytes"],
+                                "limit": MAX_REPLAY_FILE_BYTES,
+                            }
+                        )
                     # Counts only: the prepared text is already on the root span's inputs.
                     phase.set_outputs(
                         {
@@ -299,7 +304,7 @@ def run_turn(
                 # these exact values rather than re-deriving them from the definition.
                 snapshot_provenance = manager.snapshot_provenance()
                 replay_snapshot: tuple[str, bytes] | None = None
-                if record_replay:
+                if inputs["replay_selected"]:
                     from fleet_rlm.session import runtime_configuration
 
                     with phase_span("turn.capture_replay", turn_id=turn_id) as phase:
@@ -339,11 +344,17 @@ def run_turn(
                             "configuration": runtime_configuration(settings, runtime),
                             "provenance": {"fleet_rlm_version": version("fleet-rlm")},
                         }
-                        replay_snapshot = encode_snapshot(snapshot)
+                        from fleet_rlm.replay import ReplaySizeError
+
+                        try:
+                            replay_snapshot = encode_snapshot(snapshot)
+                        except ReplaySizeError as error:
+                            inputs["replay_selected"] = False
+                            emit({"event": "replay_skipped", "bytes": error.size, "limit": error.limit})
                         phase.set_attributes(
                             {
-                                "snapshot_id": replay_snapshot[0],
-                                "snapshot_bytes": len(replay_snapshot[1]),
+                                "snapshot_id": replay_snapshot[0] if replay_snapshot else None,
+                                "snapshot_bytes": len(replay_snapshot[1]) if replay_snapshot else 0,
                                 "replay_files": len(inputs["replay_files"]),
                             }
                         )
@@ -421,7 +432,7 @@ def run_turn(
                     "context_files": inputs["context_files"],
                     "artifact_capture": artifact_capture,
                     "artifact_changes": artifact_changes,
-                    "replay_snapshot_selected": record_replay,
+                    "replay_snapshot_selected": inputs["replay_selected"],
                     "replay_snapshot_sha256": replay_snapshot[0] if replay_snapshot else None,
                     # A completed Turn keeps its warm root sandbox for the next Turn.
                     _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
@@ -776,49 +787,23 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
     }
 
 
-def _note_words(summary: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", summary.lower()))
-
-
-def _distinct_notes(
-    notes: list[dict[str, str]],
-    *,
-    limit: int = _MAX_SHARED_NOTES,
-    threshold: float = _NOTE_DUPLICATE_SIMILARITY,
-) -> list[dict[str, str]]:
-    """Newest-first shared notes without restatements, at most ``limit`` of them.
-
-    A summary whose word overlap (Jaccard) with a kept one reaches ``threshold`` is dropped, so one
-    recipe saved by many Turns does not crowd out the prompt.
-    """
-    kept: list[tuple[dict[str, str], set[str]]] = []
-    for note in notes:
-        words = _note_words(note.get("summary", ""))
-        if any(len(words & seen) >= threshold * len(words | seen) for _, seen in kept if words | seen):
-            continue
-        kept.append((note, words))
-        if len(kept) == limit:
-            break
-    return [note for note, _ in kept]
-
-
 def _prepare_inputs(
     runtime: SessionRuntime,
     session_id: str,
     task: str,
     *,
-    record_replay: bool = False,
+    record_replay: bool = True,
     required_skills: tuple[RequiredSkill, ...] = (),
 ) -> dict[str, Any]:
     """Sync Skills and assemble workspace digests, memory, history, and the Skill catalog.
 
     With record_replay, also return base64-encoded workspace bytes in replay_files;
-    otherwise that mapping is empty. Provisioning, storage, and workspace errors
-    propagate.
+    otherwise that mapping is empty. A workspace over the replay byte limit skips
+    capture: replay_selected is False and replay_skipped_bytes carries the byte count.
+    Provisioning, storage, and workspace errors propagate.
 
     Raises:
-        ValueError: A replay file changed after hashing, or total replay file bytes
-            exceed 8,000,000.
+        ValueError: A replay file changed after hashing.
     """
     with phase_span("turn.load_context", session_id=session_id) as phase:
         memory_summary, session_history = runtime.load_context(session_id)
@@ -837,19 +822,8 @@ def _prepare_inputs(
         phase.set_outputs(
             {
                 "files": len(remote["digests"]),
-                "notes": len(remote["notes"]),
                 "has_environment": bool(remote["environment"]),
             }
-        )
-    shared_notes = _distinct_notes(remote["notes"])
-    if shared_notes:
-        memory_summary = "\n".join(
-            [
-                *([memory_summary] if memory_summary else []),
-                "Shared learned notes (unreviewed hints, never a verification reference; "
-                "read /learned/<file> if relevant):",
-                *(f"- {note['file']}: {note['summary']}" for note in shared_notes),
-            ]
         )
     # Workspace files are model-writable, so they cannot approve executable programs.
     context_files = remote["digests"]
@@ -868,10 +842,17 @@ def _prepare_inputs(
     files = sorted(context_files)
     replay_files: dict[str, str] = {}
     replay_bytes = 0
+    replay_selected = record_replay
+    replay_skipped_bytes: int | None = None
     # Only a selected replay needs the bytes; other Turns record the remotely computed digests.
     if record_replay:
+        # Remote sizes decide before any download: an oversized workspace is never pulled just to be dropped.
+        remote_sizes = remote.get("sizes", {})
+        known_bytes = sum(len(required_files[p]) if p in required_files else remote_sizes.get(p, 0) for p in files)
+        if known_bytes > MAX_REPLAY_FILE_BYTES:
+            replay_selected, replay_skipped_bytes = False, known_bytes
         with phase_span("turn.replay_files") as phase:
-            for path in files:
+            for path in files if replay_selected else ():
                 content = (
                     required_files[path] if path in required_files else runtime.sandbox_mgr.read_workspace_file(path)
                 )
@@ -879,7 +860,11 @@ def _prepare_inputs(
                     raise ValueError(f"Workspace file changed while the Turn was prepared: {path}")
                 replay_bytes += len(content)
                 if replay_bytes > MAX_REPLAY_FILE_BYTES:
-                    raise ValueError("Selected replay workspace exceeds the 8 MB snapshot limit")
+                    # Capture is best-effort: an oversized workspace skips the snapshot, not the Turn.
+                    replay_files.clear()
+                    replay_selected = False
+                    replay_skipped_bytes = replay_bytes
+                    break
                 replay_files[path] = base64.b64encode(content).decode("ascii")
             phase.set_outputs({"files": len(replay_files), "bytes": replay_bytes})
     with phase_span("turn.reviewed_memories", task_chars=len(task)) as phase:
@@ -899,6 +884,8 @@ def _prepare_inputs(
         "memory_summary": memory_summary + "\n" + str(memories)[:12000],
         "session_history": session_history,
         "replay_files": replay_files,
+        "replay_selected": replay_selected,
+        "replay_skipped_bytes": replay_skipped_bytes,
     }
 
 

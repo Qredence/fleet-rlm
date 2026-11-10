@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import json
 import math
+import re
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -235,3 +236,34 @@ def item_decision(choices: list[str]) -> type[dspy.Signature]:
     it as immutable: build a new signature instead of editing this one.
     """
     return _item_decision_cached(tuple(choices))
+
+
+# A figure: an optionally signed number (the sign may precede or follow `$`), with `.5`, exponent forms and
+# properly grouped thousands separators; `10,20` is two figures. Never part of an identifier.
+_FIGURE = re.compile(r"(?<![\w.])(?:-?\$|\$?-?)(?:\d{1,3}(?:,\d{3})+|\d+|(?=\.\d))(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
+def figures(text: str, *, include_small: bool = False) -> dict[str, float]:
+    """Normalized number literals in `text`.
+
+    Small integers carry no grounding evidence and are ignored by default; `include_small` keeps every
+    literal, which is what a gold label needs.
+    """
+    found: dict[str, float] = {}
+    for match in _FIGURE.finditer(text):
+        literal = match.group().replace("$", "").replace(",", "")
+        try:
+            value = float(literal)
+        except ValueError:
+            continue
+        if include_small or "." in literal or "e" in literal.lower() or abs(value) >= 10:
+            found[literal] = value
+    return found
+
+
+def figure_grounded(literal: str, value: float, observed: set[float]) -> bool:
+    """A typed figure is grounded when some observed value rounds to it at the typed precision."""
+    mantissa, _, exponent = literal.lower().partition("e")
+    places = len(mantissa.split(".", 1)[1]) if "." in mantissa else 0
+    places = max(0, places - int(exponent or 0))
+    return any(round(seen, places) == round(value, places) for seen in observed)

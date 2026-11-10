@@ -18,13 +18,25 @@ from typing import TYPE_CHECKING, Any, Literal, TextIO
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, model_validator
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.workspace import validate_session_id
 
 if TYPE_CHECKING:
     from fleet_rlm.store import Store
 
 EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
+# One job system: `kind` selects the worker body inside the same subprocess and ledger.
+JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
+# What GEPA can rewrite, in plain words. Names match `tunable_components`.
+COMPONENT_DESCRIPTIONS = {
+    "routing": "Chooses direct, flex, or rlm for a task.",
+    "skill_selection": "Picks which Skills to load for a task (inactive without a TypeSafe/Jev credential).",
+    "reasoning.direct": "Answers simple, self-contained tasks without a sandbox.",
+    "reasoning.rlm": "Plans and writes the code the sandbox runs, and extracts the final answer.",
+    "reasoning.flex": "The generated Flex program for programmable multi-step workflows.",
+    "child_policies": "Instructions for delegated child agents (leaf and delegating).",
+}
+
+
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _MAX_REPORT_BYTES = 4_000_000
 VALIDATION_RATIO_MIN = 0.1
@@ -50,7 +62,6 @@ def reconcile_abandoned_running_runs(store: Store, *, inactive_owner_id: str | N
         ):
             continue
         store.update_optimization_run(
-            record["session_id"],
             record["run_id"],
             {
                 "status": "interrupted",
@@ -80,6 +91,8 @@ class ExperimentOptions(BaseModel):
         default=VALIDATION_RATIO_DEFAULT, ge=VALIDATION_RATIO_MIN, le=VALIDATION_RATIO_MAX, allow_inf_nan=False
     )
     trace_search: bool = False
+    # Total generative LM tokens the job may spend. None inherits FLEET_JOB_MAX_TOKENS; 0 is unlimited.
+    max_total_tokens: int | None = Field(default=None, ge=0, strict=True)
 
     @model_validator(mode="after")
     def one_budget(self) -> ExperimentOptions:
@@ -120,12 +133,24 @@ def add_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-candidate-proposals", type=int)
     parser.add_argument("--validation-ratio", type=float, default=VALIDATION_RATIO_DEFAULT)
     parser.add_argument("--trace-search", action="store_true", help="also trace search rollouts in MLflow")
+    parser.add_argument(
+        "--max-total-tokens",
+        type=int,
+        help="stop with budget_exhausted after this many LM tokens (0 = unlimited; default FLEET_JOB_MAX_TOKENS)",
+    )
 
 
 def add_optimization_arguments(parser: argparse.ArgumentParser) -> None:
     """Build the optimization parser without importing the offline optimizer."""
-    parser.add_argument("--session", required=True, help="Session whose engine serves an approved candidate")
     add_search_arguments(parser)
+    parser.add_argument(
+        "--check", action="store_true", help="print dataset readiness and exit non-zero if not ready; no live calls"
+    )
+    parser.add_argument(
+        "--evaluate",
+        choices=("rescore", "replay", "synthetic"),
+        help="measure the installed program (or baseline) instead of optimizing; creates no candidate",
+    )
     parser.add_argument("--structured-events", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--managed-run-id", help=argparse.SUPPRESS)
     parser.add_argument("--managed-owner-id", help=argparse.SUPPRESS)
@@ -151,12 +176,9 @@ def emit_event(event: Mapping[str, Any], *, stream: TextIO | None = None) -> Non
     output.flush()
 
 
-def request_run_stop(root: Path, session_id: str, run_id: str) -> bool:
+def request_run_stop(root: Path, run_id: str) -> bool:
     """Write only GEPA's stop signal; the caller serializes status acceptance in PostgreSQL."""
-    validate_session_id(session_id)
     validate_run_id(run_id)
-    if not run_id.startswith(session_id + "-"):
-        raise ValueError("run_id does not belong to the Session")
     runs = Path(root) / "runs"
     directory = runs / run_id
     for folder in (runs, directory):
@@ -173,7 +195,7 @@ def request_run_stop(root: Path, session_id: str, run_id: str) -> bool:
 def read_comparison(root: Path, record: Mapping[str, Any]) -> dict[str, Any] | None:
     """Read bounded review evidence at its derived path, without following symlinks."""
     version = record.get("candidate_version")
-    if version is None and record.get("status") in {"failed", "cancelled", "interrupted"}:
+    if version is None and record.get("status") in {"failed", "cancelled", "interrupted", "budget_exhausted"}:
         version = record.get("run_id")
     if not isinstance(version, str) or version != record.get("run_id"):
         return None
@@ -191,7 +213,8 @@ def read_comparison(root: Path, record: Mapping[str, Any]) -> dict[str, Any] | N
 _PUBLIC_FIELDS = frozenset(
     {
         "run_id",
-        "session_id",
+        "kind",
+        "legacy_session_id",
         "status",
         "stage",
         "options",
@@ -201,6 +224,7 @@ _PUBLIC_FIELDS = frozenset(
         "finished_at",
         "candidate_version",
         "gate",
+        "scores",
         "dataset_sizes",
         "mlflow_run_id",
         "progress",
@@ -208,8 +232,83 @@ _PUBLIC_FIELDS = frozenset(
         "decision",
         "decision_at",
         "stop_requested",
+        "evaluation",
+        "trigger",
     }
 )
+
+
+_EPSILON = 1e-9
+
+
+def _paired_counts(before: Any, after: Any) -> dict[str, Any] | None:
+    if not (isinstance(before, list) and isinstance(after, list) and len(before) == len(after) and before):
+        return None
+    pairs = [
+        (x, y)
+        for x, y in zip(before, after, strict=True)
+        if isinstance(x, (int, float)) and isinstance(y, (int, float))
+    ]
+    if len(pairs) != len(before):
+        return None
+    return {
+        "n": len(pairs),
+        "baseline": round(sum(x for x, _ in pairs) / len(pairs), 4),
+        "candidate": round(sum(y for _, y in pairs) / len(pairs), 4),
+        "improved": sum(y > x + _EPSILON for x, y in pairs),
+        "regressed": sum(y < x - _EPSILON for x, y in pairs),
+        "ties": sum(abs(y - x) <= _EPSILON for x, y in pairs),
+    }
+
+
+def comparison_summary(comparison: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The one-line outcome of a saved comparison: what changed, per-split improved/regressed counts, criticals.
+
+    Computed from the stored paired scores alone; no model is involved.
+    """
+    manifest = comparison.get("manifest") if comparison else None
+    evaluation = manifest.get("evaluation") if isinstance(manifest, Mapping) else None
+    if not isinstance(evaluation, Mapping):
+        return None
+    candidate = evaluation.get("candidate") if isinstance(evaluation.get("candidate"), Mapping) else {}
+    baseline = evaluation.get("baseline") if isinstance(evaluation.get("baseline"), Mapping) else {}
+    changed = list(candidate.get("changed_components") or [])
+    total = candidate.get("components_total")
+    splits = {
+        split: counts
+        for split in ("dev", "holdout")
+        if (counts := _paired_counts(baseline.get(f"{split}_scores"), candidate.get(f"{split}_scores")))
+    }
+    critical = candidate.get("holdout_critical_scores")
+    critical_summary = (
+        {"passed": sum(score >= 1.0 for score in critical), "n": len(critical)}
+        if isinstance(critical, list) and critical
+        else None
+    )
+    parts = [
+        f"Changed {len(changed)}"
+        + (f" of {total}" if isinstance(total, int) else "")
+        + ": "
+        + (", ".join(changed) or "nothing")
+    ]
+    for split, counts in splits.items():
+        parts.append(
+            f"{split} {counts['baseline']:.2f}→{counts['candidate']:.2f} "
+            f"({counts['improved']} improved, {counts['regressed']} regressed of {counts['n']})"
+        )
+    if critical_summary:
+        parts.append(f"critical {critical_summary['passed']}/{critical_summary['n']}")
+    raw_gate = manifest.get("gate") if isinstance(manifest, Mapping) else None
+    gate: Mapping[str, Any] = raw_gate if isinstance(raw_gate, Mapping) else {}
+    if gate.get("passed") is False and gate.get("reasons"):
+        parts.append("gate: " + "; ".join(str(reason) for reason in gate["reasons"]))
+    return {
+        "changed": changed,
+        "components_total": total if isinstance(total, int) else None,
+        "splits": splits,
+        "critical": critical_summary,
+        "headline": " · ".join(parts),
+    }
 
 
 def public_run(record: Mapping[str, Any]) -> dict[str, Any]:

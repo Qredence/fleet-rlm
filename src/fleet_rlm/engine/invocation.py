@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Any
 
@@ -13,7 +13,7 @@ from dspy.primitives.facade import SandboxLM
 
 from fleet_rlm.contracts import OptimizationInputs, RequiredSkill, SkillAdmissionError, turn_is_over
 from fleet_rlm.engine.children import ChildPolicies
-from fleet_rlm.engine.compiled import CompiledProgramFile
+from fleet_rlm.engine.compiled import CompiledProgramFile, installed_program_error
 from fleet_rlm.engine.decisions import Routing, SkillSelection
 from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.engine.reasoning import Reasoning
@@ -44,13 +44,13 @@ class FleetRuntime:
         sub_adapter: dspy.Adapter | None = None,
         *,
         baseline: bool = False,
-        reconcile_selection: Callable[[str], str] | None = None,
+        installed_program: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         if execution_mode not in {"direct", "flex", "rlm", "hybrid"}:
             raise ValueError("Invalid execution mode")
         self.sandbox_mgr, self.root_lm, self.sub_lm, self.jev_lm = sandbox_mgr, root_lm, sub_lm, jev_lm
         self.compiled_path, self.execution_mode = compiled_path, execution_mode
-        self.reconcile_selection = reconcile_selection
+        self.installed_program = installed_program
         self.root_adapter = root_adapter if root_adapter is not None else dspy.ChatAdapter()
         self.sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
         sandbox_mgr.sub_adapter = self.sub_adapter
@@ -92,13 +92,15 @@ class FleetRuntime:
         self.delegation.bind_policies(self.program.child_policies.snapshot())
 
     def reload_program(self) -> None:
-        """Reconcile durable selection before admission without persisting a stale baseline."""
+        """Pick up the global installed artifact before admission, refusing if the ledger contradicts it.
+
+        Absent means baseline only while no global job was ever approved.
+        """
         self.compiled.reload_if_changed(self.program)
-        source = "artifact" if self.compiled.digest else "baseline"
-        if self.reconcile_selection is not None:
-            selected = self.reconcile_selection(source)
-            if selected == "artifact" and source == "baseline":
-                self.compiled.reload_if_changed(self.program, require_artifact=True)
+        if self.installed_program is not None and (
+            problem := installed_program_error(self.compiled.digest, self.installed_program())
+        ):
+            raise ValueError(problem)
 
     def __call__(
         self,

@@ -17,12 +17,12 @@ source control.
 | `FLEET_DAYTONA_API_KEY` | empty | Daytona API credential. |
 | `FLEET_DAYTONA_ORG_ID` | empty | Daytona organization ID. |
 | `FLEET_DAYTONA_VOLUME_ID` | empty | Daytona Volume ID. |
-| `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes. Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
+| `FLEET_SHARED_NOTES_SUBPATH` | `shared/learned-notes` | Volume subpath mounted at `/learned` on root sandboxes for shared learned notes written for review (not automatically injected into Turn prompts). Relative, with no `..`, `//`, or trailing `/`. Empty disables the mount. |
 | `FLEET_DAYTONA_AUTO_STOP_MINUTES` | `30` | Sandbox idle-stop period (1–1440). `DAYTONA_AUTO_STOP_MINUTES` is also accepted. |
 | `FLEET_ROOT_MODEL` | empty; resolves to `openai/system.ai.deepseek-v4-1-flash-1017` | Root model override. Without a role override, an explicitly configured shared `FLEET_LLM_MODEL` / `[llm].model` wins; otherwise DeepSeek is used, including with the public example. Endpoint and credential inheritance are unchanged. |
 | `FLEET_SUB_MODEL` | empty; resolves to `openai/system.ai.deepseek-v4-1-flash-1017` | Sub-model override, with the same shared-model precedence as root. Reflection and judge defaults are unchanged. Configure the gateway endpoint and credentials separately; the model name alone does not select them. |
 | `FLEET_REFLECTION_MODEL` | `openai/system.ai.claude-haiku-5-5` | Code fallback for GEPA reflection. The public `config/fleet.toml.example` selects the same route, with temperature 1.0 and max tokens 32000. Relative model strength is an evaluation hypothesis, not established by configuration. |
-| `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. The public `config/fleet.toml.example` selects `openai:/system.ai.deepseek-v4-1-flash-1017`. |
+| `FLEET_JUDGE_MODEL` | `openai:/system.ai.deepseek-v4-1-flash` | MLflow judge URI (`<provider>:/<model>`). `openai:/` judges route through the AI Gateway using `DATABRICKS_TOKEN`. The public `config/fleet.toml.example` selects `openai:/system.ai.deepseek-v4-1-flash-1017`. | For another OpenAI-compatible provider, set `[llm.judge]` and `[evaluation].judge_model` together (see evaluation.md, "Judging on an OpenAI-compatible provider"). |
 | `DATABRICKS_HOST` | empty | Databricks workspace host for MLflow; does not select Fleet's inference endpoint. |
 | `DATABRICKS_TOKEN` | empty | Databricks credential for MLflow; Fleet inference can explicitly reference it with `api_key_env`. |
 | `FLEET_LLM_BASE_URL` | empty | Shared inference endpoint, equivalent to `[llm].api_base`. Unity Gateway uses `https://<workspace-host>/ai-gateway/mlflow/v1`. |
@@ -38,8 +38,13 @@ source control.
 | `FLEET_TURN_TIMEOUT_SECONDS` | `0` | Turn deadline in seconds: exactly `0` (no Fleet wall-clock deadline) or `10`–`3600`. The shipped value is `0`; provider TTL and idle bounds still apply. |
 | `FLEET_LINKED_CHILDREN` | `true` | Link child sandboxes to the session root. Their Volume subpaths remain separate. |
 | `FLEET_MAX_ACTIVE_SESSIONS` | `64` | Session runtime registry limit (1–1024). |
+| `FLEET_JOB_MAX_TOKENS` | `0` | Generative LM tokens one optimization job may spend before it ends `budget_exhausted`; `0` is unlimited. A job request's `max_total_tokens` (or `fleet optimize --max-total-tokens`) overrides it. Also settable as `[runtime].job_max_tokens`. |
+| `FLEET_AUTO_OPTIMIZE` | `false` | Start an `optimize` job after enough new labels. Candidates still wait for explicit approval. A value saved through `PUT /improve/settings` overrides it. |
+| `FLEET_AUTO_OPTIMIZE_MIN_NEW_LABELS` | `5` | New approved labels since the last finished optimize job that trigger an automatic job. Overridden by the saved setting. |
+| `FLEET_AUTO_OPTIMIZE_MAX_METRIC_CALLS` | unset | Search metric calls for automatic jobs; unset keeps the light budget. Overridden by the saved setting. |
+| `FLEET_MIN_SPLIT_EXAMPLES` | `5` | Labelled examples the dev and holdout splits each need before an optimize job may start. The total requirement is `ceil(this / validation_ratio)`, never below 8; splits are by source group. |
 | `FLEET_MAX_UPLOAD_BYTES` | `25000000` | Maximum attachment upload size (maximum 25 MB). |
-| `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory. |
+| `FLEET_COMPILED_PROGRAM_DIR` | `.fleet/compiled` | Local compiled-program directory; the installed program is `fleet.json` in it, shared by every Session. |
 | `FLEET_LOCAL_SKILLS_DIR` | `.fleet/skills` | Local user Skill directory. |
 | `FLEET_MLFLOW_LOCAL_PORT` | `5001` | Loopback MLflow port; the tracking URI is derived from it. |
 | `FLEET_MLFLOW_LOCAL_DATA_DIR` | `.fleet/mlflow` | Persistent SQLite and artifact directory for the managed local server. |

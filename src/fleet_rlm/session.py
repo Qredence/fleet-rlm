@@ -254,6 +254,7 @@ class SessionRuntime:
                     # Direct mode inlines the workspace; the caller needs that measurement too.
                     "direct_context_chars",
                     "direct_context_truncated",
+                    "replay_snapshot_selected",
                     "requested_skills",
                     "required_skills",
                 )
@@ -495,16 +496,7 @@ class SessionRuntimeRegistry:
             raise RuntimeError("Session storage is not configured")
         store = self.store
         saved = store.runtime_settings(session_id)
-        compiled_path = Path(settings.compiled_program_dir) / f"{session_id}.json"
-
-        def reconcile_selection(source: str) -> str:
-            # Absence already means baseline. Only promote here: approval has an
-            # independent lease, so persisting baseline could erase its selection.
-            selected = store.runtime_settings(session_id).get("program_selection", "baseline")
-            if source == "artifact" and selected != "artifact":
-                store.save_runtime_settings(session_id, {"program_selection": "artifact"})
-                return "artifact"
-            return selected
+        compiled_path = Path(settings.compiled_program_dir) / "fleet.json"
 
         sandbox_mgr = DaytonaSandboxManager(
             api_key=settings.fleet_daytona_api_key,
@@ -534,9 +526,8 @@ class SessionRuntimeRegistry:
                 sub_lm=self.sub_lm,
                 jev_lm=self.jev_lm,
                 compiled_path=str(compiled_path),
-                baseline=saved.get("program_selection") != "artifact"
-                and not (compiled_path.exists() or compiled_path.is_symlink()),
-                reconcile_selection=reconcile_selection,
+                baseline=not (compiled_path.exists() or compiled_path.is_symlink()),
+                installed_program=store.approved_program,
                 execution_mode=settings.execution_mode,
                 root_adapter=settings.resolved_model("root").build_adapter(),
                 sub_adapter=settings.resolved_model("sub").build_adapter(),
@@ -595,7 +586,7 @@ class SessionRuntimeRegistry:
             jev_lm=self.jev_lm,
             compiled_path=runtime.engine.compiled_path,
             baseline=not runtime.engine.compiled.digest,
-            reconcile_selection=runtime.engine.reconcile_selection,
+            installed_program=runtime.engine.installed_program,
             execution_mode=runtime.engine.execution_mode,
             root_adapter=settings.resolved_model("root").build_adapter(),
             sub_adapter=settings.resolved_model("sub").build_adapter(),

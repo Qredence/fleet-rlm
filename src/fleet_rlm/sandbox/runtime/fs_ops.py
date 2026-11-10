@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any
 
 from fleet_rlm.workspace import _ALLOWED_WORKSPACE_ROOTS
 
@@ -27,7 +26,9 @@ _WORKSPACE_FILES_CODE = (
 DIGESTS_CODE = (
     _WORKSPACE_FILES_CODE + "import hashlib\n"
     "digests={}\n"
+    "sizes={}\n"
     "for relative in items:\n"
+    " sizes[relative]=os.path.getsize(os.path.join(root,relative))\n"
     " digest=hashlib.sha256()\n"
     " with open(os.path.join(root,relative),'rb') as handle:\n"
     "  for block in iter(lambda: handle.read(1048576), b''): digest.update(block)\n"
@@ -89,38 +90,13 @@ CLEAR_WORKSPACE_CODE = (
 )
 
 
-def notes_code(limit: int) -> str:
-    """Bind `notes`: newest-first `{file, summary}` rows from the shared mount, empty when unreadable."""
-    return (
-        "import json, os\n"
-        "notes = []\n"
-        "try:\n"
-        "    if os.path.ismount('/learned'):\n"
-        "        names = [name for name in os.listdir('/learned') if name.endswith('.md')]\n"
-        "        names.sort(key=lambda name: os.stat(os.path.join('/learned', name)).st_mtime, reverse=True)\n"
-        f"        for name in names[:{limit}]:\n"
-        "            with open(os.path.join('/learned', name), encoding='utf-8', errors='replace') as handle:\n"
-        "                head = [handle.readline() for _ in range(8)]\n"
-        "            lines = [line[len('summary: '):].strip() for line in head if line.startswith('summary: ')]\n"
-        "            notes.append({'file': name, 'summary': (lines[0] if lines else '')[:120]})\n"
-        "except OSError:\n"
-        "    notes = None\n"
-    )
-
-
-def valid_notes(rows: Any) -> list[dict[str, str]]:
-    """Filter raw note rows down to valid dictionary entries."""
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-
-
-def turn_inputs_code(*, with_notes: bool, notes_limit: int) -> str:
-    """Build the single remote exec script that gathers workspace digests, shared notes, and environment info."""
+def turn_inputs_code() -> str:
+    """Build the single remote exec script that gathers workspace digests and environment info."""
     return (
         DIGESTS_CODE
         + ENVIRONMENT_CODE
-        + (notes_code(notes_limit) if with_notes else "notes = []\n")
-        + "print(json.dumps({'digests': digests, 'notes': notes, "
-        "'environment': environment, 'missing': missing}, sort_keys=True))"
+        + "print(json.dumps({'digests': digests, 'sizes': sizes, 'environment': environment, "
+        "'missing': missing}, sort_keys=True))"
     )
 
 
