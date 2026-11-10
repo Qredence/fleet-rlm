@@ -1,0 +1,31 @@
+docs/reference/http-api.md
+  s_ed74e9ba8d193d::t_786205d770ede6 491-493
+openapi.yaml
+  s_ed74e9ba8d193d::t_80fac90a41f85b 1726-1732,2392-2396
+src/fleet_rlm/api/routes/improve.py
+  s_ed74e9ba8d193d::t_c04bc066bb4ff9 101,106-108,110,125-126
+src/fleet_rlm/api/schemas.py
+  s_ed74e9ba8d193d::t_bc9feeefaf06c1 409
+src/fleet_rlm/store.py
+  s_ed74e9ba8d193d::t_f92b1f7d4b7189 985,1016-1017,1019
+tests/api/test_improve.py
+  s_ed74e9ba8d193d::t_f660514eb36f5f 1161-1162
+tests/store/test_store.py
+  s_ed74e9ba8d193d::t_3e4922d45ed3e4 837
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c231aba1787ce93a361a3383f8808ff7171d708",
+  "prompts": {},
+  "sessions": {
+    "s_ed74e9ba8d193d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c563-a642-7f92-bd87-845964894f74",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
