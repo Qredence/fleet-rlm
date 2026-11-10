@@ -1,0 +1,19 @@
+src/fleet_rlm/tui/improve.py
+  s_46f914ec7e584e::t_2346b1ad476de5 631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d6e5490fc2354584421dfa3f45c5683b3956944a",
+  "prompts": {},
+  "sessions": {
+    "s_46f914ec7e584e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad8ba7aff0a92bc80",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
