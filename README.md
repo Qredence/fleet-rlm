@@ -1,124 +1,73 @@
+<div align="center">
+
 # Fleet-RLM
 
-**A Python agent runtime for analyzing files, executing code, and delegating tasks.**
+**A recursive AI system for investigating files, executing code, and delegating work.**
 
-Fleet-RLM combines DSPy reasoning with Daytona execution, PostgreSQL persistence,
-and MLflow tracing. Its Textual terminal client streams activity while agents
-explore data, run calculations, and produce downloadable artifacts. The current
-application is also called **Fleet RLM Lite**.
+</div>
 
-Large inputs stay in workspace files. The model receives paths, metadata, and
-bounded previews, then investigates through Python. Sessions retain history,
-files, reviewed memory, and runtime selections across restarts. Python variables
-belong to the live interpreter and are not durable Session state.
+Fleet combines DSPy's native RLM and Flex with a persistent workspace: inspect files, run Python, and split complex tasks into bounded subtasks. Instead of pushing a large dataset into a prompt, Fleet keeps it in workspace files and lets the agent investigate what it needs. Work happens in a Session, with a Textual interface in a terminal or browser and live Turn updates from the Fleet server.
 
-## How it works
+<div align="center">
 
-| Session mode | Behavior |
-| --- | --- |
-| `hybrid` (default) | Routes each Turn to a direct answer, Flex, or RLM. |
-| `rlm` | Enters an iterative code-and-observation reasoning loop. |
-| `flex` | Executes a DSPy module whose source GEPA can optimize. |
+## What you can do with Fleet
 
-Strict `rlm` and `flex` modes bypass routing. A selected dataset prevents the
-context-free direct-answer route; routing errors fall back to RLM. Flex initially
-wraps an RLM when tools are supplied. Both routes can delegate to isolated child
-sandboxes, share Turn budgets, and promote successful child artifacts with
-provenance. Choosing Flex does not establish a speed or quality advantage.
+</div>
 
-See [architecture](ARCHITECTURE.md) for execution and persistence boundaries.
-[pyproject.toml](pyproject.toml) declares dependencies; [uv.lock](uv.lock) records
-resolved versions.
+- **Turn data and documents into answers.** Upload a sales report, spreadsheet, or document and ask Fleet to summarize findings, compare results, or identify trends in plain language.
+- **Explore large inputs with DSPy RLM.** The agent writes Python, inspects execution results, and chooses what to examine next. It can work through files in smaller pieces and delegate focused questions to a sub-model, keeping large inputs outside the main prompt. Generated Python runs in Daytona sandboxes and can produce downloadable artifacts.
+- **Tune execution logic with DSPy Flex.** Flex runs a DSPy module whose Python source can be optimized with GEPA alongside model instructions. With Fleet's tools, Flex initially wraps an RLM; reviewed examples can guide changes to its execution logic. Candidates require evaluation and approval before installation.
+- **Delegate complex work.** RLM and Flex can hand subtasks to isolated child sandboxes. They share the Turn's budgets; only successful child artifacts are promoted to the Session workspace.
+- **Continue where you left off.** Session history, files, saved memory, and model/mode choices persist. Download generated artifacts when you need them.
+- **Improve from reviewed work.** Label completed Turns, evaluate approved examples, and create GEPA candidates for review. Candidates are not installed automatically.
 
-## Quickstart
+The default `hybrid` mode chooses a route for each Turn: a direct answer for self-contained questions, RLM for iterative exploration, or Flex for execution through an optimizable DSPy module. You can also select a mode explicitly with `/mode`.
 
-### 1. Prepare your services
+<div align="center">
 
-Use Python **3.11–3.13** and [uv](https://docs.astral.sh/uv/). You need:
+## Get started
 
-| Resource | Configuration |
-| --- | --- |
-| Reachable PostgreSQL database | `FLEET_DATABASE_URL` |
-| Daytona organization and existing Volume | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DAYTONA_VOLUME_ID` |
-| Authorized Databricks Unity Gateway models | `DATABRICKS_TOKEN`, plus `DATABRICKS_HOST` or `FLEET_LLM_BASE_URL`, and accessible model IDs |
+</div>
 
-Fleet creates its tables in an existing database; it does not provision
-PostgreSQL. `fleet cli` manages local MLflow automatically. Selecting local
-tracking still uses your configured remote models and Daytona resources.
-Model calls, sandbox execution, and snapshot builds may incur provider charges.
-
-### 2. Install and configure
+Fleet needs Python **3.11–3.13**, [uv](https://docs.astral.sh/uv/), an existing PostgreSQL database, a Daytona organization and Volume, and access to a DSPy supported model. Databricks is optional; it can provide model access or MLflow tracking, independently of each other.
 
 ```bash
 git clone https://github.com/Qredence/fleet-rlm.git
 cd fleet-rlm
 uv sync --dev
-cp config/fleet.toml.example config/fleet.toml
 cp .env.example .env
-${EDITOR:-vi} .env
 ```
 
-Set your database DSN, Gateway token and host, Daytona API key, organization ID,
-and Volume ID, or enter missing values in the startup checklist. Replace example connection values and deployment identifiers;
-keep credentials in `.env` or your deployment's secret configuration.
+Set your database, Daytona, and model-provider values in `.env` or your secret manager:
 
-Non-secret defaults live in [config/fleet.toml](config/fleet.toml.example). Verify that
-its root and sub-model IDs are available in your Gateway workspace. Runtime
-model IDs use `openai/<service-id>` and the Gateway base URL must use HTTPS.
-Evaluation and optimization additionally need their configured judge and
-reflection models. TypeSafe Jev routing and Skill selection are optional via
-`FLEET_TYPESAFE_API_KEY`.
+```dotenv
+FLEET_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/fleet
+FLEET_DAYTONA_API_KEY=your-daytona-api-key
+FLEET_DAYTONA_ORG_ID=your-organization-id
+FLEET_DAYTONA_VOLUME_ID=your-volume-id
+FLEET_LLM_MODEL=openai/gpt-4o-mini
+FLEET_LLM_API_KEY=your-model-api-key
+# Optional OpenAI-compatible endpoint:
+# FLEET_LLM_BASE_URL=https://your-endpoint.example/v1
+```
 
-Configuration precedence is built-in defaults, TOML, `.env`, environment, then
-explicit overrides. Persisted Session selections can override process settings
-for that Session. See the [configuration reference](docs/reference/configuration.md)
-for model settings, database permissions, and tracking profiles.
-
-The versioned execution snapshot is defined in
-[sandbox/snapshots.py](src/fleet_rlm/sandbox/snapshots.py).
-`fleet cli` checks service readiness through FastAPI and opens a setup checklist
-when configuration or snapshot preparation needs attention. The checklist can
-save missing settings to `.env`, select or create a Daytona Volume, build a
-missing snapshot, or activate an inactive one. Provider mutations and the
-optional model inference test require an explicit action.
-
-### 3. Start a Session
+Then start a Session:
 
 ```bash
 uv run fleet cli --session research-1
 ```
 
-Before starting a new local API, the launcher runs a private loopback setup API.
-Healthy checks proceed to chat; incomplete checks open the Textual checklist.
-Use `/setup` between Turns to review settings and apply a controlled restart
-with the same Session ID. Existing or remote servers remain operator-managed.
+On first launch, Fleet checks setup and opens a checklist if configuration or sandbox preparation is needed. You can select or create a Daytona Volume and build or activate Fleet's execution snapshot there. Provider mutations and the optional model inference test require an explicit action.
 
-The launcher starts missing local services: the API on loopback port `8000` and
-MLflow on `5001` by default. Compatible healthy services are reused. On exit it
-stops only processes it owns; MLflow data persists under `.fleet/mlflow`.
-Logs are written under `.fleet/logs`.
+Fleet creates its tables in your existing PostgreSQL database; it does not provision a database. Model calls, Daytona execution, and snapshot builds may incur charges. Local MLflow tracking does not make model or sandbox usage local or free.
 
-Interactive terminals use the full-screen Textual client; non-TTY input uses a
-Rich fallback. Run `uv run fleet web` to serve the same Textual app in a browser
-at `http://127.0.0.1:8080`; each browser connection gets its own Session unless
-`--session` is explicitly set. The web listener is loopback-only by default and
-has no visitor authentication. External access requires a separately secured
-boundary. Browser file paths refer to the host running Fleet, not the visitor's
-computer. Use `fleet cli databricks` or `fleet web --mlflow databricks` for
-managed MLflow with Unity Catalog tracing after configuring that profile. Pass
-`--url` to connect to an existing compatible API without starting services.
-Standalone `fleet serve` starts only the API and needs its tracking destination
-available.
+<div align="center">
 
-The TUI's `/improve` screen labels Turns and starts API-owned GEPA jobs (`/optimize` opens its Runs tab) that continue if the client
-disconnects; use its explicit cancel action to request cooperative stopping.
-On normal exit, the owning `fleet cli`/`fleet web` launcher drains the job before
-it stops services it owns. `uv run fleet optimize` (labels from every Session; `--check` prints readiness) remains
-available as a standalone CLI workflow.
+## Try a file investigation
 
-### 4. Analyze a file and save an artifact
+</div>
 
-For a local CSV containing `region` and `revenue` columns:
+Attach a local CSV, select it as context, and ask Fleet to analyze it:
 
 ```text
 /attach ./sales.csv
@@ -126,73 +75,104 @@ For a local CSV containing `region` and `revenue` columns:
 Calculate revenue by region and save artifacts/revenue_by_region.csv.
 /artifacts
 /get artifacts/revenue_by_region.csv ./revenue_by_region.csv
-/trace
 ```
 
-`/attach` uploads the file to this Session; `/context` selects it as the dataset
-for subsequent tasks. Inspect the answer and downloaded artifact. Clear the
-selection with `/context clear` when moving to another task.
+`/attach` uploads the file to the Session. `/context` selects an input for subsequent Turns, and `/get` downloads the artifact back to your machine. Clear the selection with `/context clear` when switching to an unrelated task.
 
-| Action | Commands |
-| --- | --- |
-| Discover commands or exit | `/help`, `/exit` |
-| Inspect workspace and results | `/files`, `/artifacts`, `/history`, `/trace` |
-| Select execution mode | `/mode hybrid`, `/mode rlm`, `/mode flex` |
-| Set the client deadline override | `/timeout <seconds\|off\|default>` |
-| Inspect configuration and Skills | `/config`, `/models`, `/skills` |
+<div align="center">
 
-Bundled Skills and user Skills from `.fleet/skills/` synchronize into the
-workspace. `.agents/skills/` contains developer guidance. See the
-[CLI reference](docs/reference/cli.md) for commands, completion, and Skill workflows.
+## Choose how Fleet works
 
-## Evaluation and optimization
+</div>
 
-Fleet evaluates complete Turn results with `fleet_metric`; MLflow also provides
-trace diagnostics. GEPA optimizes DSPy instructions and Flex source. Serving
-models execute candidates, a separate judge scores correctness, and the reflection
-model proposes revisions.
+Set a mode with `/mode` or use the default `hybrid` mode:
 
-Optimization requires approved labels backed by selected immutable replays.
-Train/dev search is separated from holdout; correctness, critical cases, execution
-evidence, and measured usage gate promotion. A passing candidate remains inactive
-until explicit approval rechecks its artifact and deployment identities.
-Benchmark traces stay outside curated optimization data.
+| Mode     | Use it when                                                                |
+| :------: | :------------------------------------------------------------------------- |
+| `hybrid` | You want Fleet to choose between a direct answer and code-based execution. |
+| `direct` | The task is self-contained and does not need sandbox code execution.       |
+| `rlm`    | The task benefits from iterative code, observations, and reasoning.        |
+| `flex`   | You want a DSPy module execution path that can be tuned with GEPA.         |
 
-Follow the [evaluation reference](docs/reference/evaluation.md) and
-[canary runbook](docs/runbooks/evaluation-canary.md) for collection, labeling,
-search, and approval. These are live operations with additional costs; a GEPA
-metric-call budget does not cap total spending.
+A selected dataset prevents Hybrid from choosing a context-free direct answer. Routing failures fall back to RLM. RLM and Flex can delegate work to child sandboxes and create artifacts in the Session workspace.
 
-## Operational boundaries
+<div align="center">
 
-- The API has no caller authentication and defaults to loopback. Non-loopback
-  binding requires explicit opt-in and a separately secured boundary.
-- Turns default to a 900-second Fleet deadline. `/timeout off` disables that
-  deadline; Daytona TTL and auto-stop bounds still apply. Progress labels are
-  advisory and cannot control execution.
-- Generated Python runs in Daytona under provider policy. Delegation-tool limits
-  do not define Python or network isolation. Traces and artifacts may contain
-  sensitive data despite bounded redaction.
+**Useful commands**
 
-## Development and documentation
+</div>
+
+| Goal                      | Commands                                                                    |
+| :-----------------------: | :-------------------------------------------------------------------------- |
+| Get help or leave         | `/help`, `/exit`                                                            |
+| See files and outputs     | `/files`, `/artifacts`, `/tree`                                             |
+| Upload or download files  | `/attach <path>`, `/put <local-path>`, `/get <workspace-path> [local-path]` |
+| Set or clear task context | `/context <workspace-path>`, `/context clear`                               |
+| Change mode               | `/mode hybrid`, `/mode direct`, `/mode rlm`, `/mode flex`                   |
+| Review Session state      | `/history`, `/memory [query]`, `/config`, `/sessions`                       |
+| Inspect a Turn            | `/turn [turn-id]`, `/trace`                                                 |
+| Manage Skills             | `/skills`, `/skills require <names...>`, `/skills clear`                    |
+| Review and improve        | `/improve`                                                                  |
+
+Bundled Skills and user Skills in `.fleet/skills/` are available in Session workspaces. A user Skill with the same name replaces a bundled Skill.
+
+<div align="center">
+
+## Use Fleet in a browser or connect to an API
+
+</div>
+
+```bash
+# Browser interface
+uv run fleet web
+
+# API only
+uv run fleet serve
+
+# Connect a client to an existing API
+uv run fleet cli --url http://127.0.0.1:8000 --session research-1
+```
+
+The browser interface defaults to `http://127.0.0.1:8080`. Each browser connection gets its own Session unless you pass `--session`; then clients share that Session. File paths refer to the Fleet host, not the visitor's computer.
+
+The API and browser listeners default to loopback. The ordinary API has no caller authentication. External exposure requires explicit non-loopback opt-in and a separately secured boundary. Non-loopback browser access also requires `FLEET_WEB_AUTH_TOKEN` for an authenticating proxy. Do not expose either listener directly to the public internet.
+
+<div align="center">
+
+## Improve Fleet with reviewed examples
+
+</div>
+
+The `/improve` screen supports reviewing Turns, checking readiness, running evaluations, and managing GEPA candidates. Jobs are owned by the API and can continue after a client disconnects; use the explicit cancel action to request cooperative stopping.
+
+Fleet builds optimization datasets from approved, gold-labeled immutable replays and keeps examples from the same source lineage together. Holdout examples stay outside search; benchmark traces are excluded. Candidate promotion is gated by paired validation, critical holdout cases, correctness, and measured usage. Candidates remain inactive until approval rechecks their artifact and deployment identities.
+
+For a readiness check from the command line:
+
+```bash
+uv run fleet optimize --check
+```
+
+This reads the configured database and MLflow backend. It does not start local MLflow, and it is not an offline-only check. Live optimization and evaluation can incur additional model and sandbox costs; a GEPA metric-call budget does not cap total spending.
+
+<div align="center">
+
+## Development
+
+</div>
 
 ```bash
 make install-dev
+uv run pytest tests/<focused-test>.py
 make check
 ```
 
-The quality gate runs non-live tests, statement and branch coverage (minimum 80%
-statement coverage), static checks, documentation links, OpenAPI validation, and a
-package build. Coverage uses the entire Fleet package, including generated sandbox
-runtime code. The gate does not establish live provider compatibility or measured
-workload gains. Documentation-only changes use `make check-docs` and
-`git diff --check`.
+`make check` runs offline tests with coverage, Ruff, type checks, local Markdown link checks, OpenAPI validation, and a package build. Offline checks do not prove live provider compatibility or measured workload improvements. For documentation changes, run `make check-docs` and `git diff --check`.
 
-- [Documentation index](docs/index.md)
-- [HTTP API](docs/reference/http-api.md) and [OpenAPI contract](openapi.yaml)
-- [Database and persistence](docs/reference/database.md)
-- [Contributing](CONTRIBUTING.md) and [agent instructions](AGENTS.md)
+<div align="center">
 
 ## License
 
 [MIT](LICENSE).
+
+</div>
