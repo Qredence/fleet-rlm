@@ -256,9 +256,11 @@ registry snapshot with the existing check command. The following explicitly auth
 operation validates the saved greeting, saved computation and unsupported-claim control,
 then stops only the two legacy v3 schedules:
 
+Snapshot and audit paths must resolve inside the current working directory.
+
 ```bash
 uv run python scripts/reconcile_mlflow_scorers.py --retire-legacy \
-  --snapshot /path/to/review.json --audit /path/to/retirement-audit.json
+  --snapshot review.json --audit retirement-audit.json
 ```
 
 The combined registration remains inactive. On failure retain the audit and evaluation
@@ -273,7 +275,7 @@ long-running Turns are not scored while still `IN_PROGRESS`:
 
 ```bash
 uv run python scripts/reconcile_mlflow_scorers.py --filter-online \
-  --snapshot /path/to/review.json --audit /path/to/filter-audit.json
+  --snapshot review.json --audit filter-audit.json
 ```
 
 ### Explicit registered-scorer evaluation

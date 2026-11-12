@@ -334,6 +334,7 @@ def test_negative_control_adds_a_false_claim_without_altering_the_original():
 
 
 def test_retirement_refuses_review_drift_before_judge_or_write(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     review = snapshot()
     path = tmp_path / "review.json"
     path.write_text(json.dumps(review))
@@ -349,6 +350,8 @@ def test_retirement_validates_then_stops_only_legacy_and_recovers(monkeypatch, t
     from contextlib import nullcontext
 
     from fleet_rlm.optimize import scorers
+
+    monkeypatch.chdir(tmp_path)
 
     state = snapshot()
     state["judge_model"] = "openai:/offline"
@@ -417,7 +420,19 @@ def test_retirement_validates_then_stops_only_legacy_and_recovers(monkeypatch, t
     assert "pending_stop" not in recovered
 
 
+def test_operator_paths_reject_working_directory_escape(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    review = tmp_path / "review.json"
+    review.write_text("{}")
+    with pytest.raises(ValueError, match="working directory"):
+        reconcile.retire_legacy(Path("../review.json"), tmp_path / "audit.json")
+    with pytest.raises(ValueError, match="working directory"):
+        reconcile.filter_online_schedules(review, Path("../audit.json"))
+    assert not (tmp_path / "audit.json").exists()
+
+
 def test_filter_online_schedules_updates_only_active_targets_and_recovers(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     state = snapshot()
     for name, version in reconcile.ONLINE_SCHEDULE_VERSIONS.items():
         state["scorers"][name] = {

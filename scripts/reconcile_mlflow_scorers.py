@@ -320,6 +320,14 @@ def retire_legacy(review_path: Path, audit_path: Path) -> None:
     """Validate saved evidence, then retire legacy schedules with resumable readback."""
     from fleet_rlm.optimize.scorers import diagnose_execution_evidence, make_execution_evidence_judge
 
+    root = Path.cwd().resolve()
+    review_path = Path(review_path).expanduser().resolve()
+    audit_path = Path(audit_path).expanduser().resolve()
+    if not review_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+    if not audit_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+
     def is_rate(rate: Any, target: float) -> bool:
         return isinstance(rate, int | float) and not isinstance(rate, bool) and rate == target
 
@@ -427,6 +435,13 @@ def retire_legacy(review_path: Path, audit_path: Path) -> None:
 
 def filter_online_schedules(review_path: Path, audit_path: Path) -> None:
     """Require completed traces on active Experiment 1 online schedules with resumable readback."""
+    root = Path.cwd().resolve()
+    review_path = Path(review_path).expanduser().resolve()
+    audit_path = Path(audit_path).expanduser().resolve()
+    if not review_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+    if not audit_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
 
     def is_rate(rate: Any, target: float) -> bool:
         return isinstance(rate, int | float) and not isinstance(rate, bool) and rate == target
