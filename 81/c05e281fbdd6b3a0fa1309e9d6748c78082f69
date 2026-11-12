@@ -1,0 +1,55 @@
+tests/api/test_routes.py
+  s_d092b13e78e0c9::t_03d22edaaff332 671-674
+tests/optimize/test_evaluation.py
+  s_d092b13e78e0c9::t_cb1a1c2acd01c5 624,630,632
+src/fleet_rlm/observability.py
+  s_d092b13e78e0c9::t_ef55cd8b559565 116-128
+tests/lite/test_agent_versions.py
+  s_d092b13e78e0c9::t_964256b3cbeef8 124,128-134
+  s_d092b13e78e0c9::t_33b35f2df3709f 125-127
+src/fleet_rlm/optimize/dataset.py
+  s_d092b13e78e0c9::t_996ee0c2e4e90b 144-175
+src/fleet_rlm/session.py
+  s_d092b13e78e0c9::t_f17b3cbcb490a8 550-551
+tests/api/test_turns.py
+  s_d092b13e78e0c9::t_20391b477574cd 2252
+  s_d092b13e78e0c9::t_626f65dab224f5 2102
+  s_d092b13e78e0c9::t_b96cc8b5e512df 2215-2219
+  s_d092b13e78e0c9::t_169e1662190c4a 2073-2079
+scripts/reconcile_mlflow_scorers.py
+  s_d092b13e78e0c9::t_4ad6faf07059ce 355-356,358-360
+  s_d092b13e78e0c9::t_355ce93232c239 429-430,434-435
+tests/optimize/test_optimization.py
+  s_d092b13e78e0c9::t_8f7619f1d1f915 385-388,393-411
+  s_d092b13e78e0c9::t_408f110b5bac39 444
+  s_d092b13e78e0c9::t_85c4de66333550 549-551
+  s_d092b13e78e0c9::t_3f3b3a034e3e8f 412-413
+tests/optimize/test_scorer_registration.py
+  s_d092b13e78e0c9::t_32a2936892d6af 394-395
+  s_d092b13e78e0c9::t_bd6f9583ca5bef 387-391
+  s_d092b13e78e0c9::t_907a011c1c766a 401
+  s_d092b13e78e0c9::t_1612b3ca15e3ca 411,413
+  s_d092b13e78e0c9::t_73b597e53070b9 384-385
+ARCHITECTURE.md
+  s_d092b13e78e0c9::t_2069cd0021e8ff 114-117
+docs/reference/database.md
+  s_d092b13e78e0c9::t_cbe26b3ce0c4ea 186-188
+src/fleet_rlm/optimize/evaluation.py
+  s_d092b13e78e0c9::t_1ceafc4ecd3185 722-732
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81c05e281fbdd6b3a0fa1309e9d6748c78082f69",
+  "prompts": {},
+  "sessions": {
+    "s_d092b13e78e0c9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9200d842-a3a4-47a0-991c-01896d15fc9f",
+        "model": "grok-4.7"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
