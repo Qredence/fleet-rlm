@@ -1,0 +1,27 @@
+openapi.yaml
+  s_27b839ad97ed81::t_7c4dcffd3c89a8 4
+tests/api/test_routes.py
+  s_27b839ad97ed81::t_3762fb71259b59 30
+  s_27b839ad97ed81::t_c22d440f25ea5f 56
+pyproject.toml
+  s_27b839ad97ed81::t_7c4dcffd3c89a8 3
+CHANGELOG.md
+  s_27b839ad97ed81::t_7c4dcffd3c89a8 7-8
+  s_27b839ad97ed81::t_9782aa0ac9fc03 9-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a9c103d628862e0598635a6f962cc740a515b05a",
+  "prompts": {},
+  "sessions": {
+    "s_27b839ad97ed81": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "328a0e25-4f35-4b57-8655-98085a05a112",
+        "model": "grok-4.7"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
