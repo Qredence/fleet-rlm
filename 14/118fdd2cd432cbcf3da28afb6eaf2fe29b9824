@@ -1,0 +1,30 @@
+docs/runbooks/assessment-latency-rollout.md
+  s_d092b13e78e0c9::t_bb34e9a8378427 259-260,263
+  s_d092b13e78e0c9::t_3ad4e7c497ff94 278
+scripts/reconcile_mlflow_scorers.py
+  s_d092b13e78e0c9::t_c4b85e609c79fe 323-325,329
+  s_d092b13e78e0c9::t_e5c4ce310f8a0a 438-440,444
+  s_d092b13e78e0c9::t_c5f6fc9a6d7ded 441-443
+  s_d092b13e78e0c9::t_063624a3551a76 326-328
+  s_d092b13e78e0c9::t_c97fe3a77df859 330
+tests/optimize/test_scorer_registration.py
+  s_d092b13e78e0c9::t_e0ad423e4507a7 337
+  s_d092b13e78e0c9::t_950648df66ef82 354-355
+  s_d092b13e78e0c9::t_529bdb18fe5be2 423-433,435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "14118fdd2cd432cbcf3da28afb6eaf2fe29b9824",
+  "prompts": {},
+  "sessions": {
+    "s_d092b13e78e0c9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9200d842-a3a4-47a0-991c-01896d15fc9f",
+        "model": "grok-4.7"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
