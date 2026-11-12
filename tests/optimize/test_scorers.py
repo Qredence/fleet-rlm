@@ -1,5 +1,17 @@
+"""Scoring objectives, execution evidence, judge contracts, and scorer registration."""
+
+from __future__ import annotations
+
+import base64
+import copy
+import hashlib
+import importlib.util
 import json
+import os
+import subprocess
+import sys
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 
 import dspy
@@ -7,11 +19,24 @@ import pytest
 from dspy.utils import DummyLM
 from mlflow.entities import SpanType
 
+from fleet_rlm.execution_evidence import validate_structured, verification_entries
+from fleet_rlm.optimize.objectives import (
+    aggregate,
+    artifact_correctness,
+    delegation_correctness,
+    efficiency,
+    efficiency_metric,
+    expected_values_metric,
+    missing_values,
+    route_metric,
+    routing_efficiency,
+)
 from fleet_rlm.optimize.scorers import (
     JEV_ROUTE_THRESHOLD,
     TRACE_ASSESSMENT_VERSION,
     ScorerEvidenceError,
     build_mlflow_scorer_suite,
+    execution_evidence_diagnostics,
     expected_values_present,
     fleet_metric,
     fleet_scorer,
@@ -19,6 +44,8 @@ from fleet_rlm.optimize.scorers import (
     rlm_trajectory_efficiency,
     route_correctness,
 )
+
+# Judge and diagnostic contracts
 
 
 def _span(
@@ -1146,3 +1173,804 @@ def test_execution_identity_uses_explicit_worker_run_in_scorer_threads(monkeypat
     monkeypatch.setattr("mlflow.active_run", lambda: None)
     monkeypatch.setenv("FLEET_EVALUATION_RUN_ID", "worker-evaluation-run")
     assert execution_diagnostic_identity(None, "judge")["fleet.evaluation.run_id"] == "worker-evaluation-run"
+
+
+# Optimization objectives
+
+
+@pytest.mark.parametrize("used_rlm", [False, True])
+def test_routing_efficiency_never_rewards_more_budget_units(used_rlm):
+    scores = [routing_efficiency(used_rlm, calls)[0] for calls in range(0, 40)]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_routing_efficiency_keeps_its_bands():
+    assert routing_efficiency(False, 1) == (1.0, "Fast path completed in 1 budget units.")
+    assert routing_efficiency(True, 10) == (0.95, "Bounded RLM/Flex execution used 10 budget units.")
+
+
+@pytest.mark.parametrize("calls,expected", [(2, 1.0), (3, 0.98), (15, 0.74)])
+def test_direct_route_is_penalised_after_its_allowance_instead_of_scoring_one(calls, expected):
+    # The previous fall-through scored any non-RLM Turn with 3-15 units as 1.0.
+    assert routing_efficiency(False, calls)[0] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("used_rlm", [False, True])
+def test_routing_efficiency_floors_instead_of_going_negative(used_rlm):
+    assert routing_efficiency(used_rlm, 10_000)[0] == 0.2
+
+
+def test_efficiency_penalties_and_availability():
+    assert efficiency(3, 0, 0) == 1.0
+    assert efficiency(5, 1, 1) == 0.67
+    pred = type("Pred", (), {"lm_calls": 4, "sandbox_errors": 0, "submit_rejections": 1})()
+    assert efficiency_metric(pred) == (0.835, "4 budget units, 0 remote Python errors, 1 submission rejections")
+    legacy = type("Pred", (), {"lm_calls": 4, "sandbox_errors": 0})()
+    assert efficiency_metric(legacy) is None
+
+
+def test_missing_values_respects_token_boundaries():
+    assert missing_values("the total is 120 and 1.25", [12, 120, 1.25]) == [12]
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("12,34", 34),
+        ("12,34", 1234),
+        ("1,23,456", 23),
+    ],
+)
+def test_partial_group_cannot_yield_a_number(answer, expected):
+    """A comma between digits binds them, so a malformed group is not two numbers."""
+    assert missing_values(answer, [expected]) == [expected]
+
+
+@pytest.mark.parametrize(
+    "answer,present",
+    [
+        ("2024-2025", 2024),
+        ("2024-2025", 2025),
+        ("10-20", 20),
+        ("range 3-4.", 4),
+    ],
+)
+def test_hyphenated_ranges_still_yield_both_numbers(answer, present):
+    """A hyphen joins two separate numbers; each stays independently matchable."""
+    assert missing_values(answer, [present]) == []
+
+
+def test_unparseable_exponent_is_missing_instead_of_raising():
+    """Decimal() raises beyond MAX_EMAX; a number that cannot be parsed cannot match."""
+    huge = "1e" + "9" * 19
+    assert missing_values(f"the value is {huge}", [1]) == [1]
+    assert missing_values("the value is 1", [huge]) == [huge]
+
+
+@pytest.mark.parametrize(
+    "answer,expected,present",
+    [
+        ("-12", 12, False),
+        ("12.5", 12, False),
+        ("1.25", 1, False),
+        ("+12", 12, True),
+        ("-12.0", -12, True),
+        ("1.2e1", 12, True),
+        ("12e-1", 12, False),
+        ("1,200.00", 1200, True),
+        ("12,34", 1234, False),
+        ("1.000001", 1, False),
+        ("identifier12", 12, False),
+        ("12kg", 12, False),
+        ("0.5", ".5", True),
+        ("EXACT wording", "exact", True),
+    ],
+)
+def test_complete_numeric_tokens_and_text(answer, expected, present):
+    assert (missing_values(answer, [expected]) == []) is present
+
+
+def test_expected_values_and_route_metrics():
+    gold = type("Gold", (), {"expected_values": ["42"], "route": "rlm"})()
+    assert expected_values_metric(gold, "answer 42") == (1.0, "all present")
+    assert expected_values_metric(gold, "answer 41") == (0.0, "missing ['42']")
+    assert expected_values_metric(type("Gold", (), {"expected_values": []})(), "answer") is None
+    assert route_metric(gold, type("Pred", (), {"route": "rlm"})()) == (1.0, "expected rlm, took rlm")
+    assert route_metric(type("Gold", (), {"route": None})(), type("Pred", (), {"route": "rlm"})()) is None
+
+
+def test_aggregate_zero_floor_keeps_efficiency_from_offsetting_errors():
+    applied = {"answer_correctness": (0.0, "wrong"), "efficiency": (1.0, "cheap")}
+    assert aggregate(applied) == (0.0, 0.0)
+    correct = {"answer_correctness": (1.0, "right"), "efficiency": (0.5, "medium")}
+    assert aggregate(correct) == pytest.approx((0.95, 1.0))
+
+
+def test_objectives_stay_free_of_services():
+    import inspect
+
+    objectives = inspect.getmodule(aggregate)
+    assert objectives is not None
+    source = inspect.getsource(objectives)
+    assert "mlflow" not in source
+    assert "import dspy" not in source
+    assert "open(" not in source
+
+
+# Execution evidence
+
+
+def artifact(raw: bytes) -> dict:
+    return {"sha256": hashlib.sha256(raw).hexdigest(), "base64": base64.b64encode(raw).decode()}
+
+
+@pytest.mark.parametrize(
+    "kind,raw,expected,keys",
+    [
+        ("text", b"North 200", "North 200", []),
+        ("json", b'{"north":200,"south":240}', {"north": 200, "south": 240}, []),
+        (
+            "csv",
+            b"region,total\nsouth,240\nnorth,200\n",
+            [{"region": "north", "total": 200}, {"region": "south", "total": 240}],
+            ["region"],
+        ),
+    ],
+)
+def test_artifact_checks_preserve_value_associations(kind, raw, expected, keys):
+    gold = {
+        "schema_version": 1,
+        "artifacts": [{"path": "artifacts/result", "kind": kind, "expected": expected, "key_columns": keys}],
+    }
+    evidence = {"artifacts": {"complete": True, "files": {"artifacts/result": artifact(raw)}}}
+    assert artifact_correctness(gold, evidence)[0] == 1
+    evidence["artifacts"]["files"]["artifacts/result"] = artifact(raw.replace(b"200", b"240").replace(b"240", b"999"))
+    assert artifact_correctness(gold, evidence)[0] == 0
+
+
+@pytest.mark.parametrize("path", ["../bad", "files/result", "artifacts/../files/a", "artifacts//a", "/artifacts/a"])
+def test_structured_gold_rejects_unsafe_paths(path):
+    with pytest.raises(ValueError):
+        validate_structured({"artifacts": [{"path": path, "kind": "text", "expected": "a"}]})
+
+
+def test_collected_artifacts_follow_the_workspace_limits_not_the_gold_limit():
+    """A healthy Turn's output set must not be reported as incomplete evidence."""
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS, MAX_EVIDENCE_BYTES, collect_artifacts
+
+    paths = [f"artifacts/{index:03}.txt" for index in range(MAX_ARTIFACTS - 1)]
+    blobs = {**{path: b"a" for path in paths}, "artifacts/large.bin": b"b" * (MAX_EVIDENCE_BYTES * 2)}
+    observed = SimpleNamespace(
+        list_workspace_files=lambda: list(blobs),
+        read_workspace_file=lambda path, **_kwargs: blobs[path],
+    )
+
+    result = collect_artifacts(observed)
+
+    assert result["complete"] is True
+    assert len(result["files"]) == MAX_ARTIFACTS
+
+
+def test_collected_artifacts_report_incompleteness_past_the_artifact_count():
+    from fleet_rlm.execution_evidence import MAX_ARTIFACTS, collect_artifacts
+
+    blobs = {f"artifacts/{index:03}.txt": b"a" for index in range(MAX_ARTIFACTS + 1)}
+    observed = SimpleNamespace(
+        list_workspace_files=lambda: list(blobs),
+        read_workspace_file=lambda path, **_kwargs: blobs[path],
+    )
+
+    assert collect_artifacts(observed)["complete"] is False
+
+
+def test_structured_gold_keeps_its_own_smaller_size_limit():
+    """Raising the observed-artifact bound must not loosen reviewed gold validation."""
+    from fleet_rlm.execution_evidence import MAX_EVIDENCE_BYTES
+
+    gold = {"artifacts": [{"path": "artifacts/a.txt", "kind": "text", "expected": "x" * MAX_EVIDENCE_BYTES}]}
+    with pytest.raises(ValueError, match="size limit"):
+        validate_structured(gold)
+
+
+def test_python_requires_execution_receipt_matching_observed_bytes():
+    gold = {"artifacts": [{"path": "artifacts/report.py", "kind": "python", "execute": True, "stdout": "42\n"}]}
+    row = artifact(b"print(42)")
+    evidence = {
+        "artifacts": {"complete": True, "files": {"artifacts/report.py": row}},
+        "python": {
+            "artifacts/report.py": {"complete": True, "sha256": row["sha256"], "exit_code": 0, "stdout": "42\n"}
+        },
+    }
+    assert artifact_correctness(gold, evidence)[0] == 1
+    evidence["python"]["artifacts/report.py"]["sha256"] = "different"
+    assert artifact_correctness(gold, evidence)[0] == 0
+    assert verification_entries(gold) == [{"path": "artifacts/report.py", "timeout_seconds": 30}]
+    assert "expected" not in verification_entries(gold)[0]
+
+
+@pytest.mark.parametrize("failure", ["count", "failed", "inputs", "digest", "incomplete"])
+def test_delegation_checks_host_receipts(failure):
+    gold = {"children": [{"input_paths": ["files/sales.csv"], "artifacts": ["totals.json"]}]}
+    evidence = {
+        "children_complete": True,
+        "children": [
+            {
+                "status": "succeeded",
+                "inputs": {"files/sales.csv": "inputhash"},
+                "artifacts": [{"path": "artifacts/random-id/totals.json", "sha256": "abc"}],
+            }
+        ],
+        "artifacts": {"files": {"artifacts/random-id/totals.json": {"sha256": "abc"}}},
+    }
+    assert delegation_correctness(gold, evidence)[0] == 1
+    if failure == "count":
+        evidence["children"] *= 2
+    elif failure == "failed":
+        evidence["children"][0]["status"] = "failed"
+    elif failure == "inputs":
+        evidence["children"][0]["inputs"]["files/private.csv"] = "extra"
+    elif failure == "digest":
+        evidence["artifacts"]["files"]["artifacts/random-id/totals.json"]["sha256"] = "changed"
+    else:
+        evidence["children_complete"] = False
+    assert delegation_correctness(gold, evidence)[0] == 0
+
+
+def test_missing_artifact_zeroes_both_dspy_and_mlflow_quality(monkeypatch):
+    from fleet_rlm.optimize import scorers
+
+    monkeypatch.setattr(scorers, "answer_correctness", lambda *_args: (1.0, "correct"))
+    gold = dspy.Example(
+        task="produce report",
+        answer="42",
+        structured_expectations={"artifacts": [{"path": "artifacts/report.txt", "kind": "text", "expected": "42"}]},
+    )
+    prediction = dspy.Prediction(answer="42", lm_calls=1, sandbox_errors=0, execution_evidence={})
+    result = fleet_metric(gold, prediction, judge_lm=object())
+    assert result.score == 0 and result.objective_scores["artifact_correctness"] == 0
+    feedback = fleet_scorer(object())(
+        inputs={"task": gold.task},
+        outputs=prediction.toDict(),
+        expectations={"expected_answer": gold.answer, "structured_expectations": gold.structured_expectations},
+    )
+    assert next(row.value for row in feedback if row.name == "fleet_metric") == result.score
+
+
+def test_route_scorer_fails_when_a_gold_route_has_no_observed_route():
+    assert route_correctness(outputs={"route": "flex"}, expectations={"route": "flex"}).value is True
+    assert route_correctness(outputs={}, expectations={"route": "flex"}).value is False
+
+
+def test_encoded_artifacts_are_redacted_before_export():
+    from fleet_rlm.observability import trace_value
+
+    receipt = artifact(b'api_key="very-secret-value"')
+    cleaned = trace_value(receipt, nodes=[0])
+    assert "base64" not in cleaned
+    assert "very-secret-value" not in json.dumps(cleaned)
+    assert "redacted" in cleaned["text"]
+
+
+def test_python_verification_runs_only_via_daytona_transport(monkeypatch):
+    from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "verify")
+    commands = []
+    monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda *_args, **_kw: b"print(42)")
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: object())
+
+    def remote(_self, _sandbox, code, *, timeout, retry):
+        assert retry is False
+        commands.append((code, timeout))
+        return json.dumps({"complete": True, "exit_code": 0, "stdout": "42\n"})
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_remote_exec", remote)
+    manager.reset_turn_budget()
+    try:
+        result = manager.verify_python_artifact("artifacts/result.py", 30)
+    finally:
+        manager.end_turn()
+    assert result["complete"] and result["stdout"] == "42\n"
+    assert "subprocess.Popen" in commands[0][0] and "'/workspace/artifacts/result.py'" not in commands[0][0]
+    assert commands[0][1] <= 31
+
+
+def test_structured_labels_change_dataset_digest_without_entering_inputs():
+    from fleet_rlm.optimize.dataset import dataset_digest
+
+    example = dspy.Example(task="compute", structured_expectations={}).with_inputs("task")
+    original = dataset_digest({"train": [example]})
+    example.structured_expectations = {"artifacts": [{"path": "artifacts/a.txt", "kind": "text", "expected": "42"}]}
+    assert dataset_digest({"train": [example]}) != original
+    assert example.inputs().toDict() == {"task": "compute"}
+
+
+# Scorer portability and registration
+
+SPEC = importlib.util.spec_from_file_location(
+    "reconcile_mlflow_scorers", Path(__file__).parents[2] / "scripts/reconcile_mlflow_scorers.py"
+)
+reconcile = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(reconcile)
+
+
+def test_registered_source_runs_in_fresh_process_without_closure_or_provider(tmp_path):
+    definition = tmp_path / "definition.json"
+    definition.write_text(json.dumps(execution_evidence_diagnostics.model_dump()))
+    program = """
+import json,sys
+from types import SimpleNamespace as NS
+from mlflow.genai.scorers import Scorer
+import fleet_rlm.optimize.scorers as module
+from mlflow.entities import SpanType
+calls = []
+def judge(**kwargs):
+    calls.append(kwargs)
+    return NS(value=dict(verification_applicable=True, verification_pass=True, integrity_pass=True),
+        rationale="Verification and tool integrity: printed result span_id=1111111111111111.")
+module.make_execution_evidence_judge = lambda model: judge
+root = NS(name="fleet_turn", parent_id=None, inputs={"task":"Compute 17 * 23"}, outputs={"answer":"391"})
+receipt = NS(name="sandbox.exec", parent_id="root", span_id="1111111111111111", span_type=SpanType.TOOL,
+    inputs={"code":"print(17 * 23)"}, outputs={"stdout":"391"},
+    attributes={"outcome":"completed"}, status=NS(status_code=NS(name="OK")))
+trace = NS(search_spans=lambda: [root, receipt])
+scorer = Scorer.model_validate(json.load(open(sys.argv[1])))
+feedback = scorer(trace=trace)
+assert len(calls) == 1 and len(feedback) == 2
+assert {f.name for f in feedback} == {"sandbox_verification_discipline", "tool_execution_integrity"}
+assert all(f.value is True and f.metadata["fleet.diagnostic.registration_version"] == "1" for f in feedback)
+"""
+    subprocess.run(
+        [sys.executable, "-c", program, str(definition)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            **os.environ,
+            "MLFLOW_DISABLE_AGENT_HINT": "1",
+            "MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS": "true",
+            "FLEET_JUDGE_MODEL": "openai:/offline-judge",
+        },
+    )
+
+
+def snapshot():
+    return {
+        "scorers": {
+            name: {"version": 3, "sample_rate": 1.0, "filter_string": None, "definition": {"source": "old"}}
+            for name in reconcile.OLD_NAMES
+        },
+        "experiment_id": "1",
+        "tracking_uri": "offline",
+        "replacement": {"source": "new"},
+    }
+
+
+def test_only_native_required_column_set_order_is_canonicalized():
+    left = {
+        "definition": {"builtin_scorer_pydantic_data": {"required_columns": ["inputs", "outputs"]}},
+        "ordered": ["first", "second"],
+    }
+    right = copy.deepcopy(left)
+    right["definition"]["builtin_scorer_pydantic_data"]["required_columns"].reverse()
+    assert reconcile.digest(left) == reconcile.digest(right)
+    assert left["definition"]["builtin_scorer_pydantic_data"]["required_columns"] == ["inputs", "outputs"]
+    right["ordered"].reverse()
+    assert reconcile.digest(left) != reconcile.digest(right)
+
+
+@pytest.mark.parametrize(
+    "change", ["version", "sample_rate", "filter_string", "definition", "tracking_uri", "replacement"]
+)
+def test_reconciliation_refuses_changed_review_before_any_write(change):
+    review = snapshot()
+    current = copy.deepcopy(review)
+    if change in ("tracking_uri", "replacement"):
+        current[change] = "changed"
+    else:
+        current["scorers"][reconcile.OLD_NAMES[0]][change] = "changed"
+    with pytest.raises(ValueError, match="changed after review"):
+        reconcile.require_review(review, current)
+
+
+def test_reconciliation_requires_exact_v3_sampling_and_no_existing_combined_registration():
+    review = snapshot()
+    reconcile.require_review(review, review)
+    for name, field, value in [
+        (reconcile.OLD_NAMES[0], "version", 4),
+        (reconcile.OLD_NAMES[1], "sample_rate", 0.5),
+        (reconcile.OLD_NAMES[0], "filter_string", "tags.route = 'flex'"),
+    ]:
+        invalid = copy.deepcopy(review)
+        invalid["scorers"][name][field] = value
+        with pytest.raises(ValueError, match="Expected"):
+            reconcile.require_review(invalid, invalid)
+    review["scorers"][reconcile.NEW_NAME] = {}
+    with pytest.raises(ValueError, match="already exists"):
+        reconcile.require_review(review, review)
+
+
+def test_apply_conflict_does_not_register_or_create_audit(monkeypatch, tmp_path):
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: {})
+    monkeypatch.setattr(
+        reconcile, "execution_evidence_diagnostics", SimpleNamespace(register=lambda **_kw: pytest.fail("write"))
+    )
+    audit = tmp_path / "audit.json"
+    with pytest.raises(ValueError, match="changed after review"):
+        reconcile.apply_review(snapshot(), audit)
+    assert not audit.exists()
+
+
+def test_rollback_refuses_changed_registry(monkeypatch, tmp_path):
+    audit = tmp_path / "audit.json"
+    audit.write_text(json.dumps({"phase": "complete", "after": snapshot()}))
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: {})
+    with pytest.raises(ValueError, match="Rollback identity conflict"):
+        reconcile.rollback(audit)
+
+
+@pytest.mark.parametrize("validation_fails", [False, True])
+def test_reconciliation_orders_validation_readback_activation_and_stops_only_targets(
+    monkeypatch, tmp_path, validation_fails
+):
+    review = snapshot()
+    review["scorers"]["unrelated"] = {
+        "version": 9,
+        "definition": {"source": "unrelated"},
+        "sample_rate": 0.25,
+        "filter_string": "route = 'direct'",
+    }
+    state = copy.deepcopy(review)
+    operations = []
+
+    class Registered:
+        def __init__(self, name):
+            self.name = name
+
+        @property
+        def scorer_version(self):
+            return state["scorers"][self.name]["version"]
+
+        @property
+        def sample_rate(self):
+            return state["scorers"][self.name]["sample_rate"]
+
+        @property
+        def filter_string(self):
+            return state["scorers"][self.name]["filter_string"]
+
+        def model_dump(self):
+            return state["scorers"][self.name]["definition"]
+
+        def start(self, **_kw):
+            operations.append("start:" + self.name)
+            state["scorers"][self.name]["sample_rate"] = 1.0
+
+        def stop(self, **_kw):
+            operations.append("stop:" + self.name)
+            state["scorers"][self.name]["sample_rate"] = 0.0
+
+    def register(**_kw):
+        operations.append("register")
+        state["scorers"][reconcile.NEW_NAME] = {
+            "version": 1,
+            "sample_rate": None,
+            "filter_string": None,
+            "definition": review["replacement"],
+        }
+        return Registered(reconcile.NEW_NAME)
+
+    def validate(_scorer, **_kwargs):
+        operations.append("validate")
+        if validation_fails:
+            raise ValueError("negative control failed")
+        return {"evaluation_run_id": "eval-1"}
+
+    monkeypatch.setenv("FLEET_JUDGE_MODEL", "openai:/offline")
+    monkeypatch.setenv("MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS", "true")
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: copy.deepcopy(state))
+    monkeypatch.setattr(reconcile, "prove_portability", lambda _definition: operations.append("portability"))
+    monkeypatch.setattr(reconcile, "validate_saved_trace", validate)
+    monkeypatch.setattr(reconcile, "execution_evidence_diagnostics", SimpleNamespace(register=register))
+    monkeypatch.setattr(reconcile.registry, "get_scorer", lambda *, name, **_kw: Registered(name))
+    audit = tmp_path / "audit.json"
+    if validation_fails:
+        with pytest.raises(ValueError, match="negative control failed"):
+            reconcile.apply_review(review, audit)
+        assert not any(op.startswith(("start:", "stop:")) for op in operations)
+        assert json.loads(audit.read_text())["phase"] == "registered"
+    else:
+        reconcile.apply_review(review, audit)
+        assert operations == [
+            "portability",
+            "register",
+            "validate",
+            "start:" + reconcile.NEW_NAME,
+            *("stop:" + name for name in reconcile.OLD_NAMES),
+        ]
+        reconcile.rollback(audit)
+        assert json.loads(audit.read_text())["phase"] == "rolled_back"
+    assert state["scorers"]["unrelated"] == review["scorers"]["unrelated"]
+
+
+def test_owned_mlflow_explicitly_enables_custom_scorers_and_reused_server_is_untouched(tmp_path):
+    from fleet_rlm.launcher import _mlflow_process
+
+    process = _mlflow_process(5000, str(tmp_path))
+    assert process.env == {"MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS": "true"}
+
+
+@pytest.mark.parametrize("conflict", [None, "sampling", "entrypoint", "provider", "review"])
+def test_resume_checks_existing_inactive_version_without_registering_again(monkeypatch, tmp_path, conflict):
+    original = snapshot()
+    review = copy.deepcopy(original)
+    review.update(code_digest="fixed-code", rubric="execution-evidence-v2")
+    review["scorers"][reconcile.NEW_NAME] = {
+        "version": 1,
+        "sample_rate": None,
+        "filter_string": None,
+        "definition": original["replacement"],
+    }
+    if conflict == "sampling":
+        review["scorers"][reconcile.OLD_NAMES[0]]["sample_rate"] = 0.5
+    elif conflict == "entrypoint":
+        review["replacement"] = {"source": "unexpected"}
+    elif conflict == "provider":
+        review["judge_model"] = "another-judge"
+    current = {} if conflict == "review" else copy.deepcopy(review)
+    audit = tmp_path / "audit.json"
+    audit.write_text(json.dumps({"phase": "registered", "review": original, "native_registration_version": 1}))
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: current)
+    monkeypatch.setattr(reconcile, "prove_portability", lambda _definition: None)
+    monkeypatch.setattr(reconcile.registry, "get_scorer", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        reconcile,
+        "execution_evidence_diagnostics",
+        SimpleNamespace(register=lambda **_kw: pytest.fail("duplicate registration")),
+    )
+
+    def validate(_scorer, *, on_progress, saved_feedback=None):
+        assert saved_feedback is None
+        on_progress({"evaluation_run_id": "resume-run"})
+        return {"evaluation_run_id": "resume-run"}
+
+    activated = []
+    monkeypatch.setattr(reconcile, "validate_saved_trace", validate)
+    monkeypatch.setattr(reconcile, "_activate_review", lambda reviewed, *_args: activated.append(reviewed))
+    if conflict:
+        with pytest.raises(ValueError):
+            reconcile.resume_registered_review(audit, review)
+        assert not activated
+    else:
+        reconcile.resume_registered_review(audit, review)
+        saved = json.loads(audit.read_text())
+        assert saved["review"] == original and saved["resumption_review"] == review
+        assert saved["validation_progress"]["evaluation_run_id"] == "resume-run"
+        assert reconcile.NEW_NAME not in activated[0]["scorers"]
+
+
+def test_validation_persists_run_and_completed_feedback_before_a_negative_control_failure(monkeypatch):
+    from contextlib import nullcontext
+
+    from mlflow.entities import Feedback
+
+    trace = SimpleNamespace(info=SimpleNamespace(trace_metadata={}), data=SimpleNamespace(spans=[]))
+    monkeypatch.setattr(reconcile.mlflow, "get_trace", lambda _trace_id: trace)
+    monkeypatch.setattr(
+        reconcile.mlflow,
+        "start_run",
+        lambda **_kw: nullcontext(SimpleNamespace(info=SimpleNamespace(run_id="run-before-call"))),
+    )
+    progress = []
+
+    def score(**_kwargs):
+        assert progress[0]["evaluation_run_id"] == "run-before-call"
+        if len(progress) > 1:
+            raise ValueError("negative control failed")
+        return [Feedback(name=name, value=True, rationale="receipt citation") for name in reconcile.OLD_NAMES]
+
+    with pytest.raises(ValueError, match="negative control failed"):
+        reconcile.validate_saved_trace(score, on_progress=progress.append)
+    assert len(progress[1]["saved_feedback"]) == 2
+
+
+def test_negative_control_adds_a_false_claim_without_altering_the_original():
+    from mlflow.entities import Span
+    from mlflow.tracing.constant import SpanAttributeKey
+
+    def span(name, span_id, parent):
+        return Span.from_dict(
+            {
+                "trace_id": "tr-" + "a" * 32,
+                "span_id": span_id,
+                "parent_span_id": parent,
+                "name": name,
+                "start_time_unix_nano": "1",
+                "end_time_unix_nano": "2",
+                "status": {"code": "STATUS_CODE_OK"},
+                "attributes": {
+                    SpanAttributeKey.REQUEST_ID: "tr-" + "a" * 32,
+                    SpanAttributeKey.OUTPUTS: json.dumps({"answer": "5"}),
+                },
+            }
+        )
+
+    root = span("fleet_turn", "1" * 16, "")
+    execution = span("sandbox.exec", "2" * 16, "1" * 16)
+    trace = SimpleNamespace(data=SimpleNamespace(spans=[root, execution]))
+    control = reconcile._unsupported_execution_claim(trace)
+    assert len(control.data.spans) == 1
+    assert "executed Python" in control.data.spans[0].outputs["answer"]
+    assert root.outputs["answer"] == "5" and len(trace.data.spans) == 2
+
+
+def test_retirement_refuses_review_drift_before_judge_or_write(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    review = snapshot()
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(review))
+    changed = copy.deepcopy(review)
+    changed["tracking_uri"] = "changed"
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: changed)
+    with pytest.raises(ValueError, match="review changed"):
+        reconcile.retire_legacy(path, tmp_path / "audit.json")
+    assert not (tmp_path / "audit.json").exists()
+
+
+def test_retirement_validates_then_stops_only_legacy_and_recovers(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+
+    from fleet_rlm.optimize import scorers
+
+    monkeypatch.chdir(tmp_path)
+
+    state = snapshot()
+    state["judge_model"] = "openai:/offline"
+    state["scorers"][reconcile.NEW_NAME] = {"version": 1, "sample_rate": None}
+    operations = []
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: copy.deepcopy(state))
+    monkeypatch.setattr(reconcile.mlflow, "get_trace", lambda trace_id: trace_id)
+    monkeypatch.setattr(
+        reconcile.mlflow,
+        "start_run",
+        lambda **_kw: nullcontext(SimpleNamespace(info=SimpleNamespace(run_id="evaluation"))),
+    )
+    monkeypatch.setattr(scorers, "make_execution_evidence_judge", lambda _model: object())
+    monkeypatch.setattr(reconcile, "_unsupported_execution_claim", lambda _trace: "negative")
+
+    def diagnose(trace, *_args, **_kwargs):
+        operations.append(trace)
+        return [
+            SimpleNamespace(name=name, value=trace != "negative", to_dictionary=lambda: {"recorded": True})
+            for name in reconcile.OLD_NAMES
+        ]
+
+    monkeypatch.setattr(scorers, "diagnose_execution_evidence", diagnose)
+
+    def get_scorer(*, name, **_kwargs):
+        def stop(**_kw):
+            assert "negative" in operations
+            operations.append(name)
+            state["scorers"][name]["sample_rate"] = 0.0
+            if state["scorers"][name].get("filter_string") == "":
+                state["scorers"][name]["filter_string"] = None
+
+        return SimpleNamespace(
+            stop=stop,
+            sample_rate=state["scorers"][name]["sample_rate"],
+            filter_string=state["scorers"][name].get("filter_string"),
+        )
+
+    monkeypatch.setattr(reconcile.registry, "get_scorer", get_scorer)
+    for name in reconcile.OLD_NAMES:
+        state["scorers"][name]["filter_string"] = ""
+    initial = copy.deepcopy(state)
+    path, audit = tmp_path / "review.json", tmp_path / "audit.json"
+    path.write_text(json.dumps(state))
+    reconcile.retire_legacy(path, audit)
+    assert operations[-2:] == list(reconcile.OLD_NAMES)
+    assert all(state["scorers"][name]["filter_string"] is None for name in reconcile.OLD_NAMES)
+    assert state["scorers"][reconcile.NEW_NAME]["sample_rate"] is None
+    saved = json.loads(audit.read_text())
+    assert saved["phase"] == "retired"
+    before = list(operations)
+    path.write_text(json.dumps(state))
+    reconcile.retire_legacy(path, audit)
+    assert operations == before
+
+    state["scorers"][reconcile.OLD_NAMES[0]]["sample_rate"] = 0.0
+    state["scorers"][reconcile.OLD_NAMES[0]]["filter_string"] = None
+    state["scorers"][reconcile.OLD_NAMES[1]]["sample_rate"] = 1.0
+    state["scorers"][reconcile.OLD_NAMES[1]]["filter_string"] = ""
+    partial_review, partial_audit = tmp_path / "partial_review.json", tmp_path / "partial_audit.json"
+    partial_review.write_text(json.dumps(state))
+    partial_audit.write_text(
+        json.dumps(
+            {
+                "operation": "retire_legacy",
+                "review": initial,
+                "stopped": [],
+                "pending_stop": reconcile.OLD_NAMES[0],
+                "validations": saved["validations"],
+            }
+        )
+    )
+    reconcile.retire_legacy(partial_review, partial_audit)
+    assert operations == [*before, reconcile.OLD_NAMES[1]]
+    recovered = json.loads(partial_audit.read_text())
+    assert recovered["phase"] == "retired" and recovered["stopped"] == list(reconcile.OLD_NAMES)
+    assert "pending_stop" not in recovered
+
+
+def test_operator_paths_reject_working_directory_escape(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    review = tmp_path / "review.json"
+    review.write_text("{}")
+    with pytest.raises(ValueError, match="working directory"):
+        reconcile.retire_legacy(Path("../review.json"), tmp_path / "audit.json")
+    with pytest.raises(ValueError, match="working directory"):
+        reconcile.filter_online_schedules(review, Path("../audit.json"))
+    assert not (tmp_path / "audit.json").exists()
+
+
+def test_filter_online_schedules_updates_only_active_targets_and_recovers(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    state = snapshot()
+    for name, version in reconcile.ONLINE_SCHEDULE_VERSIONS.items():
+        state["scorers"][name] = {
+            "version": version,
+            "sample_rate": 1.0,
+            "filter_string": None,
+            "definition": {"source": name},
+        }
+    operations = []
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: copy.deepcopy(state))
+
+    def get_scorer(*, name, **_kwargs):
+        def update(*, sampling_config, **_kw):
+            operations.append((name, sampling_config.sample_rate, sampling_config.filter_string))
+            state["scorers"][name]["filter_string"] = sampling_config.filter_string
+
+        return SimpleNamespace(
+            update=update,
+            scorer_version=state["scorers"][name]["version"],
+            sample_rate=state["scorers"][name]["sample_rate"],
+            filter_string=state["scorers"][name]["filter_string"],
+        )
+
+    monkeypatch.setattr(reconcile.registry, "get_scorer", get_scorer)
+    initial = copy.deepcopy(state)
+    review_path, audit_path = tmp_path / "filter_review.json", tmp_path / "filter_audit.json"
+    review_path.write_text(json.dumps(state))
+    reconcile.filter_online_schedules(review_path, audit_path)
+    assert [name for name, _, _ in operations] == list(reconcile.ONLINE_SCHEDULE_VERSIONS)
+    assert all(
+        state["scorers"][name]["filter_string"] == reconcile.ONLINE_TRACE_FILTER
+        for name in reconcile.ONLINE_SCHEDULE_VERSIONS
+    )
+    saved = json.loads(audit_path.read_text())
+    assert saved["phase"] == "filtered" and saved["filtered"] == list(reconcile.ONLINE_SCHEDULE_VERSIONS)
+
+    # Recovery after a partial update of the first schedule
+    names = list(reconcile.ONLINE_SCHEDULE_VERSIONS)
+    for name in names[1:]:
+        state["scorers"][name]["filter_string"] = None
+    partial_review, partial_audit = tmp_path / "partial_filter_review.json", tmp_path / "partial_filter_audit.json"
+    partial_review.write_text(json.dumps(state))
+    partial_audit.write_text(
+        json.dumps(
+            {
+                "operation": "filter_online",
+                "review": initial,
+                "filtered": [],
+                "pending_filter": names[0],
+            }
+        )
+    )
+    operations.clear()
+    reconcile.filter_online_schedules(partial_review, partial_audit)
+    assert [name for name, _, _ in operations] == names[1:]
+    recovered = json.loads(partial_audit.read_text())
+    assert recovered["phase"] == "filtered" and recovered["filtered"] == names
+    assert "pending_filter" not in recovered

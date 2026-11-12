@@ -1,25 +1,36 @@
-"""The Store runs every SQL statement over one pool; the harness validates before anything is written."""
+"""Store migrations, history, optimization records, and explicitly opted-in database contracts."""
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
 import json
+import os
+import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import psycopg
 import pytest
+from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
+from psycopg.errors import InsufficientPrivilege
 
 from fleet_rlm.session import SessionRuntime
 from fleet_rlm.store import (
+    _OPTIMIZATION_LOCK_SCOPE,
     _SCHEMA_MIGRATIONS,
+    _SCHEMA_VERSION_TABLE,
     SCHEMA_STATEMENTS,
     SCHEMA_VERSION,
     IdempotencyConflictError,
     Store,
     lakebase_connection_class,
 )
+
+# Store persistence and migrations
 
 
 class FakeCursor:
@@ -862,3 +873,477 @@ def test_turn_reference_resolves_a_turn_id_to_its_session_trace_and_snapshot():
     sql, params = pool.conn.statements[0]
     assert "turns.result->>'trace_id' AS trace_id" in sql and "replay.turn_id=%s" in sql
     assert params == ("t1",)
+
+
+# History sanitization
+
+
+def test_history_is_bounded_and_keeps_the_newest_turns_in_order() -> None:
+    turns = [{"task": f"task-{index}", "answer": f"answer-{index}"} for index in range(10)]
+
+    history = SessionRuntime._render_history(turns)
+
+    assert "task-0" not in history
+    assert history.index("task-2") < history.index("task-9")
+    assert len(history) <= 16_000
+
+    oversized = SessionRuntime._render_history([{"task": "task-" + "x" * 50_000, "answer": "tail" * 20_000}])
+    assert len(oversized) <= 16_000
+    assert oversized.endswith("tail")
+
+
+# Optimization records and leases
+
+
+def run_row(**changes: Any) -> dict[str, Any]:
+    row = {
+        "run_id": "run-1",
+        "request_id": "request-1",
+        "kind": "optimize",
+        "options": {"max_metric_calls": 20},
+        "owner_id": "worker-1",
+        "managed": True,
+        "status": "running",
+        "stage": "search",
+        "stop_requested": False,
+        "metadata": {"candidate_version": "candidate-1"},
+        "created_at": datetime(2026, 10, 26, tzinfo=UTC),
+        "updated_at": datetime(2026, 10, 26, tzinfo=UTC),
+    }
+    return {**row, **changes}
+
+
+def test_create_optimization_run_records_active_identity_and_returns_metadata():
+    store, pool = make_store([run_row()])
+
+    record = store.create_optimization_run("run-1", "request-1", {"max_metric_calls": 20}, "worker-1", managed=True)
+
+    assert record["run_id"] == "run-1" and record["kind"] == "optimize"
+    assert record["status"] == "running" and record["stage"] == "search"
+    assert record["candidate_version"] == "candidate-1"
+    assert record["created_at"] == "2026-10-26T00:00:00+00:00"
+    sql, params = pool.conn.statements[1]
+    assert "ON CONFLICT (request_id) DO NOTHING RETURNING *" in sql
+    assert "jsonb_build_object('trigger',%s::text)" in sql  # recorded in the row's own insert
+    assert params == ("run-1", "request-1", "optimize", '{"max_metric_calls":20}', "worker-1", True, "manual")
+
+
+def test_create_optimization_run_refuses_an_unknown_kind_before_sql():
+    store, pool = make_store()
+
+    with pytest.raises(ValueError, match="job kind"):
+        store.create_optimization_run("run-1", "request-1", {}, "worker-1", kind="deploy")
+    assert pool.borrowed == 0
+
+
+def test_create_optimization_run_is_idempotent_for_the_same_request_and_details():
+    existing = run_row()
+    store, pool = make_store([], [existing])
+
+    record = store.create_optimization_run(
+        "new-generated-id", "request-1", {"max_metric_calls": 20}, "worker-1", managed=True
+    )
+
+    assert record["run_id"] == "run-1"
+    assert pool.borrowed == 1
+    assert len(pool.conn.statements) == 4
+    assert "FOR UPDATE" in pool.conn.statements[2][0]
+
+
+def test_create_optimization_run_rejects_reused_request_with_different_options():
+    store, pool = make_store([], [run_row()])
+
+    with pytest.raises(ValueError, match="different run details"):
+        store.create_optimization_run("run-2", "request-1", {"max_metric_calls": 21}, "worker-1", managed=True)
+    assert pool.borrowed == 1
+
+
+def test_create_optimization_run_maps_global_active_unique_violation_to_busy():
+    store, pool = make_store(error=psycopg.errors.UniqueViolation("active run exists"))
+
+    with pytest.raises(ValueError, match="already active"):
+        store.create_optimization_run("run-2", "request-2", {}, "worker-2")
+    assert pool.conn.statements[1][0].startswith("INSERT INTO fleet_lite_optimization_runs")
+
+
+def test_get_and_list_optimization_runs_are_global_and_canonical():
+    completed = run_row(status="completed", metadata={"candidate_version": "candidate-1", "status": "spoofed"})
+    store, pool = make_store([completed], [completed])
+
+    one = store.get_optimization_run("run-1")
+    assert one is not None and one["status"] == "completed"  # Ledger columns override metadata.
+    assert store.list_optimization_runs()[0]["candidate_version"] == "candidate-1"
+    assert pool.borrowed == 2
+    assert "WHERE run_id=%s" in pool.conn.statements[0][0]
+    assert "ORDER BY updated_at DESC" in pool.conn.statements[1][0]
+
+
+def test_a_legacy_run_keeps_its_session_only_as_metadata():
+    legacy = run_row(metadata={"legacy_session_id": "s1"})
+    store, _pool = make_store([legacy])
+
+    record = store.get_optimization_run("run-1")
+
+    assert record is not None and record["legacy_session_id"] == "s1" and "session_id" not in record
+
+
+def test_tuple_rows_follow_the_migrated_column_order():
+    row = run_row()
+    columns = (
+        "run_id", "request_id", "options", "owner_id", "managed", "status", "stage",
+        "stop_requested", "metadata", "created_at", "updated_at", "kind",
+    )  # fmt: skip
+    store, _pool = make_store([tuple(row[name] for name in columns)])
+
+    record = store.get_optimization_run("run-1")
+
+    assert record is not None and record["kind"] == "optimize" and record["run_id"] == "run-1"
+
+
+def test_update_optimization_run_fences_owner_and_expected_status():
+    store, pool = make_store([run_row(stage="validation", metadata={"candidate_version": "candidate-1", "score": 0.8})])
+
+    record = store.update_optimization_run(
+        "run-1", {"stage": "validation", "score": 0.8}, owner_id="worker-1", expected_statuses=("running",)
+    )
+
+    assert record is not None and record["stage"] == "validation" and record["score"] == 0.8
+    statement, params = pool.conn.statements[0]
+    assert "owner_id=%s" in statement and "status=ANY(%s::text[])" in statement
+    assert params[7] == "run-1" and params[-2:] == (["running"], ["running"])
+
+
+def test_completed_update_atomically_yields_to_a_previously_accepted_stop_request():
+    cancelled = run_row(
+        status="cancelled",
+        stage="cancelled",
+        stop_requested=True,
+        metadata={"candidate_version": None, "finished_at": "2026-10-26T12:00:00+00:00"},
+    )
+    store, pool = make_store([cancelled])
+
+    record = store.update_optimization_run(
+        "run-1",
+        {
+            "status": "completed",
+            "stage": "completed",
+            "candidate_version": "run-1",
+            "finished_at": "2026-10-26T12:00:00+00:00",
+        },
+        owner_id="worker-1",
+        expected_statuses=("running",),
+    )
+
+    assert record is not None
+    assert record["status"] == "cancelled" and record["stage"] == "cancelled"
+    assert record["stop_requested"] is True and record["candidate_version"] is None
+    statement, params = pool.conn.statements[0]
+    assert "status=CASE WHEN %s AND stop_requested THEN 'cancelled'" in statement
+    assert "stage=CASE WHEN %s AND stop_requested THEN 'cancelled'" in statement
+    assert "THEN '{\"candidate_version\":null}'::jsonb" in statement
+    assert params[:7] == (
+        True,
+        "completed",
+        True,
+        "completed",
+        None,
+        '{"candidate_version":"run-1","finished_at":"2026-10-26T12:00:00+00:00"}',
+        True,
+    )
+
+
+@pytest.mark.parametrize("key", ["run_id", "request_id", "kind", "options", "owner_id", "managed"])
+def test_update_optimization_run_rejects_identity_changes_before_sql(key: str):
+    store, pool = make_store()
+
+    with pytest.raises(ValueError, match="identity fields"):
+        store.update_optimization_run("run-1", {key: "changed"})
+    assert pool.borrowed == 0
+
+
+def test_update_optimization_run_returns_none_when_a_fence_does_not_match():
+    store, _pool = make_store([])
+    assert store.update_optimization_run("run-1", {"stage": "done"}, owner_id="stale-worker") is None
+
+
+def test_update_optimization_run_maps_active_status_collision_to_busy():
+    store, _pool = make_store(error=psycopg.errors.UniqueViolation("active run exists"))
+
+    with pytest.raises(ValueError, match="Another optimization run is active"):
+        store.update_optimization_run("run-1", {"status": "running"})
+
+
+def test_request_optimization_stop_is_idempotent_for_running_work():
+    store, pool = make_store([run_row(stop_requested=True)])
+
+    record = store.request_optimization_stop("run-1")
+
+    assert record["status"] == "running" and record["stop_requested"] is True
+    assert "status='running' RETURNING *" in pool.conn.statements[0][0]
+
+
+def test_request_optimization_stop_refuses_a_terminal_run():
+    store, _pool = make_store([], [run_row(status="completed")])
+
+    with pytest.raises(ValueError, match="only a running"):
+        store.request_optimization_stop("run-1")
+
+
+def test_claim_optimization_review_claims_completed_candidate_and_recovers_approving_owner():
+    store, pool = make_store([run_row(status="completed")], [run_row(status="approving", owner_id="reviewer-1")])
+    claimed = store.claim_optimization_review("run-1", "reviewer-1")
+    assert claimed["status"] == "approving" and claimed["owner_id"] == "reviewer-1"
+    assert "status IN ('completed','approving') RETURNING *" in pool.conn.statements[2][0]
+
+    store, _pool = make_store(
+        [run_row(status="approving", owner_id="dead-reviewer")],
+        [run_row(status="approving", owner_id="new-reviewer")],
+    )
+    recovered = store.claim_optimization_review("run-1", "new-reviewer")
+    assert recovered["status"] == "approving" and recovered["owner_id"] == "new-reviewer"
+
+
+def test_claim_optimization_review_maps_another_active_run_to_busy():
+    store, _pool = make_store(error=psycopg.errors.UniqueViolation("active run exists"))
+
+    with pytest.raises(ValueError, match="Another optimization run is active"):
+        store.claim_optimization_review("run-1", "reviewer-1")
+
+
+def test_reject_optimization_run_keeps_candidate_metadata_and_records_decision():
+    store, pool = make_store(
+        [run_row(status="rejected", metadata={"candidate_version": "candidate-1", "decision": "rejected"})]
+    )
+
+    rejected = store.reject_optimization_run("run-1")
+
+    assert rejected["status"] == "rejected" and rejected["candidate_version"] == "candidate-1"
+    assert "metadata=metadata || CASE WHEN status='rejected'" in pool.conn.statements[0][0]
+
+
+def test_optimization_lease_uses_a_dedicated_connection_and_distinct_lock_scope(monkeypatch):
+    connections = []
+
+    class LeaseConnection:
+        def __init__(self, locked: bool) -> None:
+            self.locked = locked
+            self.statements = []
+            self.closed = False
+
+        def execute(self, statement: str, params: tuple[Any, ...]):
+            self.statements.append((statement, params))
+            return type("Result", (), {"fetchone": lambda _self: (self.locked,)})()
+
+        def close(self) -> None:
+            self.closed = True
+
+    def connect(*_args, **_kwargs):
+        connection = LeaseConnection(not connections)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        psycopg.Connection, "connect", classmethod(lambda _cls, *args, **kwargs: connect(*args, **kwargs))
+    )
+    store, pool = make_store()
+
+    held = store.acquire_optimization_lease()
+    assert held is connections[0]
+    assert held.statements[0][1] == (_OPTIMIZATION_LOCK_SCOPE,)
+    assert pool.borrowed == 0
+
+    with pytest.raises(RuntimeError, match="already owned"):
+        store.acquire_optimization_lease()
+    assert connections[1].closed
+
+
+def test_owner_liveness_probe_uses_independent_connection_and_releases_probe_locks(monkeypatch):
+    held = set()
+    connections = []
+
+    class Connection:
+        def __init__(self):
+            self.scopes = set()
+            self.closed = False
+
+        def execute(self, _sql, params):
+            scope = params[0]
+            available = scope not in held
+            if available:
+                held.add(scope)
+                self.scopes.add(scope)
+            return type("Result", (), {"fetchone": lambda _self: (available,)})()
+
+        def close(self):
+            held.difference_update(self.scopes)
+            self.closed = True
+
+    def connect(*_args, **_kwargs):
+        connection = Connection()
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(lambda _cls, *args, **kw: connect(*args, **kw)))
+    store, pool = make_store()
+    owner = store.acquire_optimization_owner_lease("api-1")
+    worker = store.acquire_optimization_lease()
+    assert store.optimization_owner_alive("api-1") is True
+    assert connections[-1].closed
+    assert store.optimization_owner_alive("api-2") is False
+    assert connections[-1].closed
+    assert held == {"fleet:optimization-owner:api-1", _OPTIMIZATION_LOCK_SCOPE}
+    owner.close()
+    assert store.optimization_owner_alive("api-1") is False
+    worker.close()
+    assert not held and pool.borrowed == 0
+
+
+def test_owner_probe_does_not_treat_database_errors_as_owner_death(monkeypatch):
+    store, _pool = make_store()
+
+    def fail(*_args, **_kwargs):
+        raise psycopg.OperationalError("database unavailable")
+
+    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(fail))
+    with pytest.raises(psycopg.OperationalError):
+        store.optimization_owner_alive("api-1")
+
+
+@pytest.mark.skipif(
+    not os.environ.get("FLEET_TEST_POSTGRES_URL"), reason="set FLEET_TEST_POSTGRES_URL to run against a real PostgreSQL"
+)
+def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_cross_session_collisions():
+    """Opt-in: builds schema v10 in a scratch schema, seeds colliding ids, applies v11 and v12, re-initializes."""
+    url = os.environ["FLEET_TEST_POSTGRES_URL"]
+    schema = "fleet_mig_" + uuid.uuid4().hex[:8]
+    with psycopg.connect(url, autocommit=True) as admin:
+        admin.execute(f"CREATE SCHEMA {schema}")
+        try:
+            admin.execute(f"SET search_path TO {schema}")
+            admin.execute(_SCHEMA_VERSION_TABLE)
+            for version, statements in _SCHEMA_MIGRATIONS[:10]:
+                for statement in statements:
+                    admin.execute(statement)
+                admin.execute("INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s)", (version,))
+            seeds = [
+                # (session, run, request, created) -- run-a1 and req-1 collide across sessions.
+                ("s1", "run-a1", "req-1", "2026-01-01"),
+                ("s2", "run-a1", "req-1", "2026-01-02"),
+                ("s3", "run-a3", "req-3", "2026-01-03"),
+                # An existing run ID that equals the natural dedup suffix must not be clobbered.
+                ("s4", "run-a1-dup-s2", "req-4", "2026-01-04"),
+            ]
+            for session, run, request, created in seeds:
+                admin.execute(
+                    "INSERT INTO fleet_lite_optimization_runs "
+                    "(session_id,run_id,request_id,owner_id,status,stage,metadata,created_at) "
+                    "VALUES (%s,%s,%s,'owner','completed','completed','{\"candidate_version\":\"v\"}',%s)",
+                    (session, run, request, created),
+                )
+            # A schema that applied an earlier draft of v11 may already hold an empty settings table.
+            admin.execute("CREATE TABLE fleet_lite_global_settings (scope TEXT, settings JSONB)")  # no key
+            store = Store.open(url, wait=True, schema=schema)
+            try:
+                store.initialize()
+                store.initialize()  # idempotent: nothing pending the second time
+                rows = {
+                    row[0]: row
+                    for row in admin.execute(
+                        "SELECT run_id,request_id,kind,metadata->>'legacy_session_id',metadata->>'candidate_version' "
+                        "FROM fleet_lite_optimization_runs"
+                    ).fetchall()
+                }
+                assert set(rows) == {"run-a1", "run-a1-dup-s2", "run-a1-dup-s2-1", "run-a3"}
+                assert rows["run-a1"][3] == "s1" and rows["run-a1-dup-s2"][3] == "s4"
+                assert rows["run-a1-dup-s2-1"][3] == "s2" and rows["run-a3"][3] == "s3"
+                assert all(row[2] == "optimize" and row[4] == "v" for row in rows.values())
+                assert len({row[1] for row in rows.values()}) == 4 and rows["run-a1"][1] == "req-1"
+                assert not admin.execute(
+                    "SELECT 1 FROM information_schema.columns WHERE table_schema=%s "
+                    "AND table_name='fleet_lite_optimization_runs' AND column_name='session_id'",
+                    (schema,),
+                ).fetchall()
+                indexes = {
+                    row[0] for row in admin.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s", (schema,))
+                }
+                assert "fleet_lite_one_active_optimization_run" in indexes
+                assert "fleet_lite_optimization_runs_pkey" in indexes
+                assert "fleet_lite_optimization_runs_request_id_key" in indexes
+                assert admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0] == 12
+                store.update_global_settings("improve", {"auto_run": True, "min_new_labels": 3})
+                store.update_global_settings("improve", {"min_new_labels": None, "max_total_tokens": 9})
+                assert store.global_settings("improve") == {"auto_run": True, "max_total_tokens": 9}
+                # The legacy row stays readable through the Store and keeps its legacy marker.
+                assert store.get_optimization_run("run-a1-dup-s2-1")["legacy_session_id"] == "s2"
+            finally:
+                store.close()
+        finally:
+            admin.execute(f"DROP SCHEMA {schema} CASCADE")
+
+
+# Opt-in live Lakebase privileges
+
+_ENABLED = os.environ.get("FLEET_RUN_LAKEBASE_ROLE_TESTS") == "1"
+
+
+@pytest.mark.skipif(not _ENABLED, reason="explicit Lakebase role-test opt-in required")
+def test_fresh_lakebase_role_split_and_default_privileges() -> None:
+    runtime_url = os.environ.get("FLEET_ROLE_TEST_RUNTIME_URL")
+    migration_url = os.environ.get("FLEET_ROLE_TEST_MIGRATION_URL")
+    if not runtime_url or not migration_url:
+        pytest.skip("set both FLEET_ROLE_TEST_*_URL variables for live verification")
+
+    runtime_info = conninfo_to_dict(runtime_url)
+    migration_info = conninfo_to_dict(migration_url)
+    if runtime_info.get("dbname") != migration_info.get("dbname"):
+        pytest.fail("runtime and migration DSNs must target the same database")
+    if runtime_info.get("host") != migration_info.get("host"):
+        pytest.fail("runtime and migration DSNs must target the same endpoint")
+    if runtime_info.get("dbname") != "fleet_rlm_lite":
+        pytest.fail("refusing live role test outside the fresh fleet_rlm_lite database")
+
+    schema = "fleet_rlm_lite"
+    table_name = f"_fleet_role_check_{uuid.uuid4().hex}"
+    qualified_table = sql.Identifier(schema, table_name)
+
+    with psycopg.connect(migration_url, autocommit=True) as migration:
+        migration_role = migration.execute("SELECT current_user").fetchone()[0]
+        if migration_role != "fleet_migrator":
+            pytest.fail("migration DSN must authenticate as fleet_migrator")
+        migration.execute(
+            sql.SQL("CREATE TABLE {} (id integer PRIMARY KEY, value text NOT NULL)").format(qualified_table)
+        )
+        try:
+            with psycopg.connect(runtime_url, autocommit=True) as runtime:
+                runtime_role = runtime.execute("SELECT current_user").fetchone()[0]
+                if runtime_role != "fleet_app":
+                    pytest.fail("runtime DSN must authenticate as fleet_app")
+
+                usage, create = runtime.execute(
+                    "SELECT has_schema_privilege(current_user, %s, 'USAGE'), "
+                    "has_schema_privilege(current_user, %s, 'CREATE')",
+                    (schema, schema),
+                ).fetchone()
+                assert usage is True
+                assert create is False
+
+                has_dml = runtime.execute(
+                    "SELECT bool_and(has_table_privilege(current_user, %s, privilege)) "
+                    "FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS privilege",
+                    (f"{schema}.{table_name}",),
+                ).fetchone()[0]
+                assert has_dml is True
+
+                with pytest.raises(InsufficientPrivilege):
+                    runtime.execute(
+                        sql.SQL("CREATE TABLE {} (id integer)").format(sql.Identifier(schema, f"{table_name}_denied"))
+                    )
+
+                runtime.execute(sql.SQL("INSERT INTO {} (id, value) VALUES (1, 'ok')").format(qualified_table))
+                runtime.execute(sql.SQL("UPDATE {} SET value = 'updated' WHERE id = 1").format(qualified_table))
+                assert runtime.execute(sql.SQL("SELECT value FROM {}").format(qualified_table)).fetchone() == (
+                    "updated",
+                )
+                runtime.execute(sql.SQL("DELETE FROM {} WHERE id = 1").format(qualified_table))
+        finally:
+            migration.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(qualified_table))

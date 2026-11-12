@@ -1,12 +1,28 @@
+"""Session leases and history, agent identities, usage accounting, and observability."""
+
 from __future__ import annotations
 
+import asyncio
+import os
+import subprocess
+import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
+from threading import Event
 from types import SimpleNamespace
+from typing import Any
 
+import dspy
 import pytest
+from dspy.utils.usage_tracker import UsageTracker
 
+from fleet_rlm import observability as obs
+from fleet_rlm.observability import LMUsageCallback, _usage_summary, decision_usage, usage_callbacks
 from fleet_rlm.session import SessionRuntime
+
+# Session ownership and history
 
 
 def _runtime(**overrides) -> SessionRuntime:
@@ -1005,3 +1021,847 @@ def test_workspace_lock_rejects_work_before_and_after_restart_fence(race):
         pytest.fail("workspace work must not start")
     assert error.value.status_code == 503
     assert not lock.locked()
+
+
+# Agent identity
+
+
+class Span:
+    def __init__(self):
+        self.attributes = {}
+
+    def set_attributes(self, values):
+        self.attributes.update(values)
+
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+
+
+@pytest.fixture
+def registry(monkeypatch):
+    models, associations = [], []
+    monkeypatch.setattr(
+        obs, "_STARTUP_IDENTITY", {"fleet.agent.source_digest": "source", "fleet.agent.git_dirty": "true"}
+    )
+    monkeypatch.setattr(obs, "_AGENT_MODELS", {})
+    monkeypatch.setattr(obs.mlflow, "get_tracking_uri", lambda: "http://local.invalid")
+
+    def search(**kwargs):
+        return [m for m in models if m.tags["fleet.agent.fingerprint"] in kwargs["filter_string"]]
+
+    def create(**kwargs):
+        model = SimpleNamespace(model_id=f"m-{len(models)}", **kwargs)
+        models.append(model)
+        return model
+
+    monkeypatch.setattr(obs.mlflow, "search_logged_models", search)
+    monkeypatch.setattr(obs.mlflow, "create_external_model", create)
+    monkeypatch.setattr(obs.mlflow, "update_current_trace", lambda **kwargs: associations.append(kwargs))
+    monkeypatch.setattr(obs.mlflow, "set_active_model", lambda **_kw: pytest.fail("Global model context changed"))
+    return models, associations
+
+
+def engine(instruction="first", credential="private"):
+    return SimpleNamespace(dump_state=lambda: {"predict": {"signature": instruction, "lm": {"api_key": credential}}})
+
+
+def test_reuses_version_without_uploading_state_and_excludes_credentials(registry):
+    models, associations = registry
+    span = Span()
+    first = obs.associate_turn_agent(engine(), "config", "1", span)
+    assert obs.associate_turn_agent(engine(credential="rotated"), "config", "1", Span()) == first
+    assert len(models) == 1 and len(associations) == 2
+    assert "private" not in str(models[0].tags) and "signature" not in str(models[0].tags)
+    assert models[0].name.startswith("fleet-rlm-")
+    assert span.attributes["fleet.agent.model_id"] == first
+    obs._AGENT_MODELS.clear()
+    assert obs.associate_turn_agent(engine(), "config", "1", Span()) == first
+    assert len(models) == 1  # Native search reuse after the process cache is empty.
+
+
+def test_benchmark_trace_uses_requested_model_and_retains_automatic_identity(registry, monkeypatch):
+    _, associations = registry
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID", "m-benchmark")
+    monkeypatch.setenv(
+        "FLEET_MLFLOW_BENCHMARK_TAGS",
+        '{"fleet.benchmark.campaign":"cold-start-2026-11","fleet.benchmark.condition":"baseline"}',
+    )
+    span = Span()
+
+    automatic_model_id = obs.associate_turn_agent(engine(), "config", "1", span)
+
+    assert associations[-1]["model_id"] == "m-benchmark"
+    assert associations[-1]["tags"] == {
+        "fleet.benchmark.campaign": "cold-start-2026-11",
+        "fleet.benchmark.condition": "baseline",
+    }
+    assert span.attributes["fleet.agent.model_id"] == automatic_model_id
+    assert span.attributes["fleet.benchmark.model_id"] == "m-benchmark"
+
+
+def test_benchmark_tags_attach_without_benchmark_model_id(registry, monkeypatch):
+    _, associations = registry
+    tags = {"fleet.benchmark.campaign": "cold-start-2026-11"}
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", '{"fleet.benchmark.campaign":"cold-start-2026-11"}')
+    span = Span()
+    automatic_model_id = obs.associate_turn_agent(engine(), "config", "1", span)
+    assert associations[-1] == {"model_id": automatic_model_id, "tags": tags}
+    assert span.attributes["fleet.agent.model_id"] == automatic_model_id
+    assert span.attributes["fleet.benchmark.campaign"] == "cold-start-2026-11"
+    assert "fleet.benchmark.model_id" not in span.attributes
+
+    def fail(**_kw):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(obs.mlflow, "search_logged_models", fail)
+    unversioned = Span()
+    assert obs.associate_turn_agent(engine("unversioned"), "config", "1", unversioned) is None
+    assert associations[-1] == {"tags": tags}
+    assert unversioned.attributes["fleet.agent.identity_status"] == "unversioned"
+    assert unversioned.attributes["fleet.benchmark.campaign"] == "cold-start-2026-11"
+
+
+def test_benchmark_env_strips_whitespace_and_rejects_empty_tag_suffix(registry, monkeypatch):
+    _, associations = registry
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID", "   ")
+    span = Span()
+    automatic = obs.associate_turn_agent(engine(), "config", "1", span)
+    assert associations[-1] == {"model_id": automatic}
+    assert "fleet.benchmark.model_id" not in span.attributes
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID", "  m-bench  ")
+    padded = Span()
+    obs.associate_turn_agent(engine(), "config", "1", padded)
+    assert associations[-1] == {"model_id": "m-bench"}
+    assert padded.attributes["fleet.benchmark.model_id"] == "m-bench"
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", '{"fleet.benchmark.":"missing-name"}')
+    invalid = Span()
+    retained = obs.associate_turn_agent(engine(), "config", "1", invalid)
+    assert retained is not None
+    assert associations[-1]["model_id"] == "m-bench"
+    assert invalid.attributes["fleet.agent.model_id"] == retained
+    assert invalid.attributes["fleet.benchmark.model_id"] == "m-bench"
+    assert "fleet.benchmark." not in invalid.attributes
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", "{not-json")
+    malformed = Span()
+    obs.associate_turn_agent(engine(), "config", "1", malformed)
+    assert malformed.attributes["fleet.benchmark.model_id"] == "m-bench"
+
+
+def test_config_loaded_program_destination_and_source_affect_identity(registry, monkeypatch):
+    models, _ = registry
+    values = [obs.associate_turn_agent(engine(), "config", "1", Span())]
+    values.append(obs.associate_turn_agent(engine("changed"), "config", "1", Span()))
+    values.append(obs.associate_turn_agent(engine(), "changed", "1", Span()))
+    monkeypatch.setattr(obs, "_STARTUP_IDENTITY", {"fleet.agent.source_digest": "another dirty snapshot"})
+    values.append(obs.associate_turn_agent(engine(), "config", "1", Span()))
+    assert len(set(values)) == len(models) == 4
+    monkeypatch.setattr(obs.mlflow, "get_tracking_uri", lambda: "http://another.invalid")
+    obs.associate_turn_agent(engine(), "config", "1", Span())
+    assert len(obs._AGENT_MODELS) == 5
+
+
+@pytest.mark.usefixtures("registry")
+def test_parallel_sessions_associate_only_their_current_trace(monkeypatch):
+    current = ContextVar("trace")
+    recorded = {}
+    monkeypatch.setattr(obs.mlflow, "update_current_trace", lambda **kwargs: recorded.update({current.get(): kwargs}))
+
+    def run(index):
+        current.set(index)
+        model = obs.associate_turn_agent(engine(str(index)), "config", "1", Span())
+        return index, model
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        expected = dict(pool.map(run, range(8)))
+    assert {index: value["model_id"] for index, value in recorded.items()} == expected
+    assert len(set(expected.values())) == 8
+
+
+@pytest.mark.usefixtures("registry")
+def test_observation_failure_is_sanitized_and_does_not_raise(monkeypatch, caplog):
+    def fail(**_kwargs):
+        raise RuntimeError("credential-that-must-never-be-logged")
+
+    monkeypatch.setattr(obs.mlflow, "search_logged_models", fail)
+    span = Span()
+    assert obs.associate_turn_agent(engine(), "config", "1", span) is None
+    assert span.attributes["fleet.agent.identity_status"] == "unversioned"
+    assert "credential-that-must-never-be-logged" not in caplog.text
+
+
+@pytest.mark.usefixtures("registry")
+def test_slow_lookup_does_not_block_other_cached_identities(monkeypatch):
+    cached = obs.associate_turn_agent(engine("cached"), "config", "1", Span())
+    entered, release = Event(), Event()
+    original = obs.mlflow.search_logged_models
+
+    def slow_search(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(**kwargs)
+
+    monkeypatch.setattr(obs.mlflow, "search_logged_models", slow_search)
+    monkeypatch.setattr(obs, "_AGENT_LOOKUP_WAIT_SECONDS", 0.01)
+    span = Span()
+    try:
+        assert obs.associate_turn_agent(engine("slow"), "config", "1", span) is None
+        assert entered.is_set()
+        assert span.attributes["fleet.agent.identity_status"] == "unversioned"
+        assert obs.associate_turn_agent(engine("cached"), "config", "1", Span()) == cached
+    finally:
+        release.set()
+
+
+def test_startup_snapshot_is_frozen_and_wheel_needs_no_git(tmp_path, monkeypatch):
+    package = tmp_path / "wheel" / "fleet_rlm"
+    package.mkdir(parents=True)
+    (package / "engine.py").write_text("behavior = 1")
+    (package / ".env").write_text("private configuration")
+    (package / "memory.json").write_text("private memory")
+    monkeypatch.setattr(obs.subprocess, "run", lambda *_a, **_kw: (_ for _ in ()).throw(FileNotFoundError()))
+    first = obs.serving_snapshot(package)
+    (package / ".env").write_text("rotated private configuration")
+    assert obs.serving_snapshot(package) == first
+    (package / "engine.py").write_text("behavior = 2")
+    second = obs.serving_snapshot(package)
+    assert first["fleet.agent.source_digest"] != second["fleet.agent.source_digest"]
+    assert "fleet.agent.git_commit" not in first
+    monkeypatch.setattr(obs, "_STARTUP_IDENTITY", None)
+    monkeypatch.setattr(obs, "serving_snapshot", lambda: first)
+    obs.capture_serving_snapshot()
+    monkeypatch.setattr(obs, "serving_snapshot", lambda: second)
+    obs.capture_serving_snapshot()
+    assert first == obs._STARTUP_IDENTITY
+
+
+def test_bundled_resource_changes_are_included_but_optimizer_and_data_are_excluded(tmp_path):
+    (tmp_path / "engine.py").write_text("pass")
+    resource = tmp_path / "bundled_skills" / "example" / "SKILL.md"
+    resource.parent.mkdir(parents=True)
+    resource.write_text("first instruction")
+    first = obs.serving_snapshot(tmp_path)
+    resource.write_text("second instruction")
+    second = obs.serving_snapshot(tmp_path)
+    assert first["fleet.agent.source_digest"] != second["fleet.agent.source_digest"]
+    (tmp_path / "optimize").mkdir()
+    (tmp_path / "optimize" / "scorer.py").write_text("pass")
+    (tmp_path / "dataset.csv").write_text("sensitive")
+    assert obs.serving_snapshot(tmp_path) == second
+
+
+def test_native_logged_model_search_reuse_and_persisted_trace_association(tmp_path):
+    """Exercise pinned MLflow against a disposable local store in an isolated process."""
+    import os
+    import subprocess
+    import sys
+
+    program = """
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+import mlflow
+from fleet_rlm import observability as obs
+root = Path(sys.argv[1])
+mlflow.set_tracking_uri(f"sqlite:///{root / 'tracking.db'}")
+experiment = mlflow.create_experiment("agent-contract", artifact_location=(root / "artifacts").as_uri())
+mlflow.set_experiment(experiment_id=experiment)
+obs._STARTUP_IDENTITY = {"fleet.agent.source_digest": "offline-source"}
+benchmark_model = mlflow.create_external_model(name="benchmark", experiment_id=experiment, model_type="agent")
+import os
+os.environ["FLEET_MLFLOW_BENCHMARK_MODEL_ID"] = benchmark_model.model_id
+os.environ["FLEET_MLFLOW_BENCHMARK_TAGS"] = '{"fleet.benchmark.campaign":"offline"}'
+engine = SimpleNamespace(dump_state=lambda: {"predict": {"signature": "loaded-program", "lm": None}})
+with mlflow.start_span(name="fleet_turn") as span:
+    first = obs.associate_turn_agent(engine, "config", experiment, span)
+    assert first is not None
+    assert span.attributes["fleet.agent.model_id"] == first
+    trace_id = span.trace_id
+obs._AGENT_MODELS.clear()
+with mlflow.start_span(name="fleet_turn") as span:
+    assert obs.associate_turn_agent(engine, "config", experiment, span) == first
+models = mlflow.search_logged_models(experiment_ids=[experiment], output_format="list")
+assert {model.model_id for model in models} == {benchmark_model.model_id, first}
+mlflow.flush_trace_async_logging()
+trace = mlflow.get_trace(trace_id)
+assert trace.info.trace_metadata["mlflow.modelId"] == benchmark_model.model_id
+assert trace.info.tags["fleet.benchmark.campaign"] == "offline"
+assert trace.data.spans[0].attributes["fleet.agent.model_id"] == first
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path)],
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+        env={**os.environ, "MLFLOW_DISABLE_AGENT_HINT": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+
+
+# Native usage accounting
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        (
+            {"prompt_tokens": 12, "completion_tokens": 5},
+            {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17},
+        ),
+        (
+            {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 20},
+            {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 20},
+        ),
+        (
+            {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 0},
+            {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 0},
+        ),
+        ({"prompt_tokens": 0, "completion_tokens": 0}, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
+        ({"prompt_tokens": 12}, {"prompt_tokens": 12}),
+        ({"completion_tokens": 5}, {"completion_tokens": 5}),
+        ({}, {}),
+    ],
+    ids=["derive", "reported", "reported-zero", "derive-zero", "input-only", "output-only", "no-usage"],
+)
+def test_usage_summary_derives_only_from_complete_receipts(entry, expected):
+    assert _usage_summary(entry) == expected
+
+
+@pytest.fixture
+def usage_span(monkeypatch):
+    attributes = {}
+    span = SimpleNamespace(span_type="LLM", set_attribute=lambda key, value: attributes.__setitem__(key, value))
+    monkeypatch.setattr("fleet_rlm.observability.mlflow.get_current_active_span", lambda: span)
+    return attributes
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_generation_usage_normalizes_once_before_native_rollup(usage_span, fails):
+    collector = LMUsageCallback()
+    parent = UsageTracker()
+    with dspy.context(usage_tracker=parent):
+        for call_id, counts, expected_total in [("first", (12, 5), 17), ("second", (3, 4), 7)]:
+            collector.on_lm_start(call_id, SimpleNamespace(model="model"), {})
+            dspy.settings.usage_tracker.add_usage(
+                "model", {"prompt_tokens": counts[0], "completion_tokens": counts[1], "provider_detail": "preserved"}
+            )
+            collector.on_lm_end(call_id, None, RuntimeError("failed") if fails else None)
+            assert usage_span["mlflow.chat.tokenUsage"] == {
+                "input_tokens": counts[0],
+                "output_tokens": counts[1],
+                "total_tokens": expected_total,
+            }
+            assert dspy.settings.usage_tracker is parent
+            assert collector.finish_usage(call_id) == {}
+    assert parent.get_total_tokens()["model"] == {
+        "prompt_tokens": 15,
+        "completion_tokens": 9,
+        "total_tokens": 24,
+        "provider_detail": "preserved",
+    }
+    assert len(parent.usage_data["model"]) == 2
+    assert all(entry["provider_detail"] == "preserved" for entry in parent.usage_data["model"])
+    assert collector._usage_scopes == {}
+
+
+@pytest.mark.parametrize(
+    "invalid", [None, True, -1, float("nan"), float("inf")], ids=["none", "bool", "negative", "nan", "inf"]
+)
+def test_generation_invalid_counts_stay_unknown_before_rollup(usage_span, invalid):
+    collector = LMUsageCallback()
+    parent = UsageTracker()
+    with dspy.context(usage_tracker=parent):
+        collector.on_lm_start("call", SimpleNamespace(model="model"), {})
+        dspy.settings.usage_tracker.add_usage(
+            "model", {"prompt_tokens": invalid, "completion_tokens": 5, "total_tokens": invalid}
+        )
+        assert collector.finish_usage("call") == {"completion_tokens": 5}
+    assert usage_span["mlflow.chat.tokenUsage"] == {"output_tokens": 5}
+    assert parent.get_total_tokens()["model"] == {"completion_tokens": 5}
+    assert parent.usage_data["model"] == [{"completion_tokens": 5}]
+
+
+def test_generation_does_not_derive_total_from_complementary_partial_receipts(usage_span):
+    collector = LMUsageCallback()
+    parent = UsageTracker()
+    with dspy.context(usage_tracker=parent):
+        collector.on_lm_start("call", SimpleNamespace(model="model"), {})
+        dspy.settings.usage_tracker.add_usage("model", {"prompt_tokens": 12})
+        dspy.settings.usage_tracker.add_usage("model", {"completion_tokens": 5})
+        assert collector.finish_usage("call") == {"prompt_tokens": 12, "completion_tokens": 5}
+    assert usage_span["mlflow.chat.tokenUsage"] == {"input_tokens": 12, "output_tokens": 5}
+    assert parent.get_total_tokens()["model"] == {"prompt_tokens": 12, "completion_tokens": 5}
+    assert len(parent.usage_data["model"]) == 2
+
+
+def test_generation_restores_native_scope_when_span_annotation_fails(monkeypatch):
+    def reject_attribute(*_args):
+        raise RuntimeError("annotation failed")
+
+    span = SimpleNamespace(span_type="LLM", set_attribute=reject_attribute)
+    monkeypatch.setattr("fleet_rlm.observability.mlflow.get_current_active_span", lambda: span)
+    collector = LMUsageCallback()
+    parent = UsageTracker()
+    with dspy.context(usage_tracker=parent):
+        collector.on_lm_start("call", SimpleNamespace(model="model"), {})
+        dspy.settings.usage_tracker.add_usage("model", {"prompt_tokens": 12, "completion_tokens": 5})
+        with pytest.raises(RuntimeError, match="annotation failed"):
+            collector.finish_usage("call")
+        assert dspy.settings.usage_tracker is parent
+    assert parent.get_total_tokens()["model"]["total_tokens"] == 17
+    assert len(parent.usage_data["model"]) == 1
+    assert collector._usage_scopes == {}
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_should_restore_parent_usage_context_on_async_completion(fails):
+    collector = LMUsageCallback()
+    parent = UsageTracker()
+
+    async def call():
+        with dspy.context(usage_tracker=parent):
+            collector.on_lm_start("call", SimpleNamespace(model="model"), {})
+            await asyncio.sleep(0)
+            dspy.settings.usage_tracker.add_usage("model", {"prompt_tokens": 7, "total_tokens": 9})
+            collector.on_lm_end("call", None, RuntimeError("failed") if fails else None)
+            assert dspy.settings.usage_tracker is parent
+
+    asyncio.run(call())
+    assert parent.get_total_tokens()["model"]["total_tokens"] == 9
+    assert collector._usage_scopes == {}
+    assert usage_callbacks([object(), collector])[0] is collector
+
+
+def test_should_ignore_decision_usage_and_omit_missing_generation_usage():
+    collector = LMUsageCallback()
+    with dspy.context(usage_tracker=None):
+        collector.on_lm_start("decision", SimpleNamespace(supports_decision_requests=True), {})
+        assert collector.finish_usage("decision") == {}
+        collector.on_lm_start("generation", SimpleNamespace(model="model"), {})
+        assert collector.finish_usage("generation") == {}
+        assert dspy.settings.usage_tracker is None
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_typesafe_partial_usage_rolls_up_once_even_after_failure(fails):
+    parent = UsageTracker()
+    attributes = {}
+    span = SimpleNamespace(set_attribute=lambda key, value: attributes.__setitem__(key, value))
+    with dspy.context(usage_tracker=parent):
+        try:
+            with decision_usage(span):
+                dspy.settings.usage_tracker.add_usage("jev", {"prompt_tokens": 883, "completion_tokens": 39})
+                if fails:
+                    raise RuntimeError("decision failed after usage was reported")
+        except RuntimeError:
+            assert fails
+        assert dspy.settings.usage_tracker is parent
+    assert attributes["mlflow.chat.tokenUsage"] == {"input_tokens": 883, "output_tokens": 39, "total_tokens": 922}
+    assert parent.get_total_tokens()["jev"] == {"prompt_tokens": 883, "completion_tokens": 39, "total_tokens": 922}
+
+
+def test_decision_usage_keeps_unknown_counts_unknown():
+    attributes = {}
+    span = SimpleNamespace(set_attribute=lambda key, value: attributes.__setitem__(key, value))
+    with decision_usage(span):
+        dspy.settings.usage_tracker.add_usage("jev", {"prompt_tokens": 7, "completion_tokens": None})
+    assert attributes["mlflow.chat.tokenUsage"] == {"input_tokens": 7}
+    attributes.clear()
+    with decision_usage(span):
+        pass
+    assert attributes == {}
+
+
+def test_batched_decision_workers_share_one_usage_receipt():
+    from dspy.utils.callback import with_callbacks
+
+    class DecisionLM(dspy.BaseLM):
+        supports_decision_requests = True
+
+        def __init__(self):
+            super().__init__(model="typesafe:jev")
+
+        @with_callbacks
+        def __call__(self, count):
+            dspy.settings.usage_tracker.add_usage("jev", {"prompt_tokens": count, "completion_tokens": 1})
+            return dspy.Prediction(answer="relevant")
+
+    class Decision(dspy.Module):
+        def forward(self, count):
+            return DecisionLM()(count)
+
+    parent = UsageTracker()
+    attributes = {}
+    span = SimpleNamespace(set_attribute=lambda key, value: attributes.__setitem__(key, value))
+    with dspy.context(usage_tracker=parent), decision_usage(span):
+        results = Decision().batch([dspy.Example(count=n).with_inputs("count") for n in (2, 3, 4)], num_threads=3)
+    assert len(results) == 3
+    assert attributes["mlflow.chat.tokenUsage"] == {"input_tokens": 9, "output_tokens": 3, "total_tokens": 12}
+    assert parent.get_total_tokens()["jev"]["total_tokens"] == 12
+
+
+def test_should_capture_per_call_and_aggregate_tokens_through_production_tracing(tmp_path):
+    # A subprocess isolates global DSPy/MLflow callbacks. The only backend is temporary SQLite.
+    missing_totals = False
+    code = r"""
+import json
+import dspy
+import mlflow
+from dspy.lm15 import Message, Response, Usage
+from fleet_rlm.observability import configure_mlflow_observability
+import fleet_rlm.engine.decisions as decisions
+from fleet_rlm.engine.invocation import FleetRuntime
+from fleet_rlm.contracts import Route
+from fleet_rlm.observability import decision_usage, usage_callbacks
+from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+def refuse_sandbox(*_args, **_kwargs):
+    raise AssertionError("Offline tracing test must not provision a sandbox")
+DaytonaSandboxManager._ensure_sandbox = refuse_sandbox
+
+class Engine:
+    def __init__(self):
+        self.count = 0
+        self.responses = iter([
+            "<plan>checked</plan>\n<answer>5</answer>",
+            "invalid output",
+            '{"answer": "5"}',
+        ])
+    def complete(self, request):
+        self.count += 1
+        inputs, outputs = self.count * 10, self.count + 3
+        return Response(id=None, model="offline", message=Message.assistant(next(self.responses)), finish_reason="stop",
+                        usage=Usage(input_tokens=inputs, output_tokens=outputs, total_tokens=inputs+outputs))
+    def close(self):
+        pass
+
+configure_mlflow_observability("usage-regression", __import__('os').environ['MLFLOW_TRACKING_URI'])
+lm = dspy.LM("openai/offline", engine=Engine(), cache=False)
+if __import__('os').environ['MISSING_TOTALS'] == '1':
+    # The typed engine derives totals; simulate partial provider receipts at native ingestion.
+    from dspy.utils.usage_tracker import UsageTracker
+    add_usage = UsageTracker.add_usage
+    def without_total(tracker, model, entry):
+        if model == 'openai/offline':
+            entry = {key: value for key, value in entry.items() if key != 'total_tokens'}
+        return add_usage(tracker, model, entry)
+    UsageTracker.add_usage = without_total
+manager = DaytonaSandboxManager("key", "org", "volume", "offline")
+engine = FleetRuntime(manager, lm, lm)
+def choose(**_kwargs):
+    with mlflow.start_span(name="typesafe_route_selection", span_type="LLM") as span:
+        with decision_usage(span):
+            dspy.settings.usage_tracker.add_usage("jev", {"prompt_tokens":883,"completion_tokens":39})
+    return Route.DIRECT
+decisions.select_route = choose
+with mlflow.start_span(name="fleet_turn") as root:
+    with dspy.context(disable_history=True, track_usage=True):
+        result = engine(workspace_manifest="", memory_summary="", task="return five")
+    assert result.answer == "5" and result.lm_calls == 1
+    with dspy.context(lm=lm, callbacks=usage_callbacks(list(dspy.settings.callbacks)),
+                      adapter=dspy.ChatAdapter(), disable_history=True, track_usage=True):
+        repaired = dspy.Predict("task -> answer")(task="return five")
+    assert repaired.answer == "5"
+    trace_id = root.trace_id
+assert lm.history == []
+mlflow.flush_trace_async_logging()
+trace = mlflow.get_trace(trace_id)
+calls = [s for s in trace.data.spans if s.name == 'LM.__call__']
+assert len(calls) == 3, [(s.name,s.attributes) for s in trace.data.spans]
+assert [s.attributes['mlflow.chat.tokenUsage'] for s in calls] == [
+    {'input_tokens':10,'output_tokens':4,'total_tokens':14},
+    {'input_tokens':20,'output_tokens':5,'total_tokens':25},
+    {'input_tokens':30,'output_tokens':6,'total_tokens':36},
+]
+assert json.loads(trace.info.trace_metadata['mlflow.trace.tokenUsage']) == {
+    'input_tokens':943,'output_tokens':54,'total_tokens':997,
+}
+print(f"Verified offline trace {trace_id}: {len(trace.data.spans)} spans, 3 model calls, 997 tokens")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            **os.environ,
+            "MLFLOW_TRACKING_URI": f"sqlite:///{tmp_path / 'usage.db'}",
+            "MLFLOW_DISABLE_AGENT_HINT": "1",
+            "MISSING_TOTALS": str(int(missing_totals)),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "3 model calls, 997 tokens" in result.stdout
+
+
+def test_turn_callbacks_compose_ambient_callbacks_with_one_usage_collector():
+    import dspy
+
+    from fleet_rlm.observability import LMUsageCallback, ambient_callbacks, turn_callbacks
+
+    marker = object()
+    with dspy.context(callbacks=[marker]):
+        composed = turn_callbacks()
+        assert marker in ambient_callbacks()
+        assert sum(isinstance(item, LMUsageCallback) for item in composed) == 1
+        assert len(composed) == 2
+        # dspy.context replaces the callback list, so re-spreading the ambient list is mandatory.
+        assert marker in composed
+
+
+def test_typesafe_callbacks_drop_the_mlflow_dspy_hook():
+    import dspy
+    from mlflow.dspy.callback import MlflowCallback
+
+    from fleet_rlm.observability import typesafe_callbacks
+
+    marker = object()
+    with dspy.context(callbacks=[MlflowCallback(), marker]):
+        assert typesafe_callbacks() == [marker]
+
+
+def test_stream_callbacks_append_without_reordering():
+    import dspy
+
+    from fleet_rlm.observability import stream_callbacks
+
+    marker, collector = object(), object()
+    with dspy.context(callbacks=[marker]):
+        # The Turn's stream collector must stay last: it is the API's terminal-event owner.
+        assert stream_callbacks(collector) == [marker, collector]
+
+
+# Redaction and tracing
+
+
+@pytest.mark.parametrize("destination", [None, "", "catalog.schema.prefix"])
+def test_databricks_trace_experiment_preserves_native_activation(monkeypatch, destination):
+    from fleet_rlm import observability
+
+    experiment = (
+        None
+        if destination is None
+        else SimpleNamespace(tags={"mlflow.experiment.databricksTraceDestinationPath": destination})
+    )
+    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
+    calls = []
+    monkeypatch.setattr(
+        observability.mlflow, "set_experiment", lambda name, **kwargs: calls.append((name, kwargs)) or experiment
+    )
+    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
+
+    assert (
+        observability.set_mlflow_trace_experiment(
+            "/Shared/runtime",
+            databricks=True,
+            trace_catalog="catalog",
+            trace_schema="schema",
+            trace_table_prefix="prefix",
+            tracing_sql_warehouse_id="warehouse",
+        )
+        is experiment
+    )
+    assert len(calls) == 1
+    assert calls[0][0] == "/Shared/runtime"
+    assert calls[0][1]["trace_location"].full_table_prefix == "catalog.schema.prefix"
+
+
+@pytest.mark.parametrize("prefix", ["requested", ""])
+def test_databricks_trace_destination_mismatch_prevents_activation(monkeypatch, prefix):
+    from fleet_rlm import observability
+
+    experiment = SimpleNamespace(
+        experiment_id="17", tags={"mlflow.experiment.databricksTraceDestinationPath": "catalog.schema.existing"}
+    )
+    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
+    monkeypatch.setattr(
+        observability.mlflow, "set_experiment", lambda *_args, **_kwargs: pytest.fail("must not activate")
+    )
+    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
+
+    with pytest.raises(observability.MlflowTraceDestinationMismatchError, match="trace destination mismatch"):
+        observability.set_mlflow_trace_experiment(
+            "/Shared/runtime",
+            databricks=True,
+            trace_catalog="catalog",
+            trace_schema="schema",
+            trace_table_prefix=prefix,
+        )
+
+
+def test_databricks_trace_experiment_omitted_prefix_uses_native_experiment_id(monkeypatch):
+    from fleet_rlm import observability
+
+    experiment = SimpleNamespace(
+        experiment_id="17", tags={"mlflow.experiment.databricksTraceDestinationPath": "catalog.schema.17"}
+    )
+    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
+    monkeypatch.setattr(observability.mlflow, "set_experiment", lambda *_args, **_kwargs: experiment)
+    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
+
+    assert (
+        observability.set_mlflow_trace_experiment(
+            "/Shared/runtime", databricks=True, trace_catalog="catalog", trace_schema="schema"
+        )
+        is experiment
+    )
+
+
+def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.observability as memory_and_eval
+
+    calls: dict[str, Any] = {}
+    monkeypatch.setattr(memory_and_eval.mlflow, "set_tracking_uri", lambda uri: calls.setdefault("uri", uri))
+    monkeypatch.setattr(
+        memory_and_eval.mlflow.tracing,
+        "configure",
+        lambda **kwargs: calls.setdefault("processors", kwargs),
+    )
+    monkeypatch.setattr(
+        memory_and_eval.mlflow,
+        "set_experiment",
+        lambda name: calls.setdefault("experiment", name),
+    )
+    monkeypatch.setattr(
+        memory_and_eval.mlflow,
+        "dspy",
+        SimpleNamespace(autolog=lambda **kwargs: calls.setdefault("autolog", kwargs)),
+    )
+    monkeypatch.setattr(
+        memory_and_eval.mlflow,
+        "get_experiment_by_name",
+        lambda _name: SimpleNamespace(experiment_id="experiment-id"),
+    )
+
+    experiment_id = memory_and_eval.configure_mlflow_observability(
+        "fleet-rlm-test",
+        "sqlite:///mlflow-test.db",
+    )
+
+    assert experiment_id == "experiment-id"
+    assert calls == {
+        "uri": "sqlite:///mlflow-test.db",
+        "experiment": "fleet-rlm-test",
+        "processors": {"span_processors": [memory_and_eval.sanitize_trace_span]},
+        "autolog": {
+            "log_traces": True,
+            "log_traces_from_compile": False,
+            "log_traces_from_eval": False,
+        },
+    }
+
+
+def test_trace_span_sanitization_redacts_secret_fields_and_bounds_content():
+    import fleet_rlm.observability as memory_and_eval
+
+    class Span:
+        def __init__(self):
+            self.inputs = {"token": "secret-value", "task": "Bearer abcdefghijklmnopqrstuvwxyz"}
+            self.outputs = {"answer": "x" * (memory_and_eval._TRACE_STRING_LIMIT + 1)}
+
+        def set_inputs(self, value):
+            self.inputs = value
+
+        def set_outputs(self, value):
+            self.outputs = value
+
+    span = Span()
+    memory_and_eval.sanitize_trace_span(span)
+    assert span.inputs["token"] == "[redacted]"
+    assert "[redacted]" in span.inputs["task"]
+    assert len(span.outputs["answer"]) < memory_and_eval._TRACE_STRING_LIMIT + 100
+
+
+def test_native_required_skill_arguments_do_not_export_resource_bytes():
+    from fleet_rlm.observability import trace_value
+    from fleet_rlm.skills import captured_required_skill
+
+    raw = b"---\nname: source\ndescription: Source\n---\nInstructions"
+    skill = captured_required_skill("source", "workspace", (("SKILL.md", raw), ("secret.dat", b"private-resource")))
+    exported = trace_value({"required_skills": (skill,)}, nodes=[0])
+    assert exported == {"required_skills": ["[RequiredSkill omitted]"]}
+    assert "private-resource" not in str(exported)
+
+
+def test_trace_shows_reasoning_text_but_streams_still_redact_it() -> None:
+    import fleet_rlm.observability as memory_and_eval
+
+    cleaned = memory_and_eval.trace_value(
+        {"reasoning_content": "Plan: use api_key=hidden", "api_key": "value"},
+        nodes=[0],
+    )
+    assert cleaned == {"reasoning_content": "Plan: use api_key=[redacted]", "api_key": "[redacted]"}
+    assert '"reasoning_content": "[redacted]"' in memory_and_eval.activity_preview({"reasoning_content": "private"})
+
+
+def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
+    from mlflow.dspy.callback import MlflowCallback
+
+    from fleet_rlm.observability import without_mlflow_dspy_callback
+
+    sse_callback = object()
+    # Matching is by class identity, not by module/name strings, so a look-alike from elsewhere survives.
+    impostor = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
+
+    assert without_mlflow_dspy_callback([MlflowCallback(), sse_callback]) == [sse_callback]
+    assert without_mlflow_dspy_callback([impostor, sse_callback]) == [impostor, sse_callback]
+
+
+def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.engine.turn as turn_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.sandbox.snapshots import DEFAULT_DEFINITION, SNAPSHOT_NAME, clear_preflight_cache, preflight
+
+    clear_preflight_cache()
+    provider = SimpleNamespace(
+        get=lambda name: SimpleNamespace(name=name, id="snap-1", state="active", cpu=4, mem=8, disk=8)
+    )
+    identity = preflight(provider, name=SNAPSHOT_NAME, api_key="key", org_id="org")
+    expected = {
+        "snapshot_name": SNAPSHOT_NAME,
+        "snapshot_id": "snap-1",
+        "snapshot_cpu": 4,
+        "snapshot_mem": 8,
+        "snapshot_disk": 8,
+        "snapshot_definition_digest": DEFAULT_DEFINITION.digest(),
+    }
+    captured: dict[str, Any] = {}
+
+    class Span:
+        def set_inputs(self, value: dict[str, Any]) -> None:
+            captured["inputs"] = value
+
+        def set_attributes(self, value: dict[str, Any]) -> None:
+            captured["attributes"] = value
+
+    monkeypatch.setattr(turn_module.mlflow, "update_current_trace", lambda **_kwargs: None)
+    runtime = SimpleNamespace(
+        configuration_overrides={},
+        engine=SimpleNamespace(execution_mode="hybrid", root_lm=None, sub_lm=None),
+        sandbox_mgr=SimpleNamespace(
+            turn_timeout_seconds=900,
+            snapshot_provenance=identity.provenance,
+            deadline_provenance=lambda: {"deadline_source": "configuration", "effective_seconds": 900},
+        ),
+    )
+
+    turn_module._describe_turn(
+        Span(),
+        runtime,
+        FleetSettings(_env_file=None),
+        "session-a",
+        "compute a digit",
+        "turn-1",
+        None,
+        {"manifest": "/workspace/files (empty)", "context_files": {}},
+        None,
+    )
+
+    attributes = captured["attributes"]
+    assert {key: attributes[key] for key in expected} == expected
+    assert attributes["deadline_source"] == "configuration"
+    assert attributes["effective_seconds"] == 900
+    assert "definition_digest" not in attributes

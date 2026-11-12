@@ -108,9 +108,35 @@ accepts only an explicitly exported unwrapped root envelope, not arbitrary prefi
 student, not declaration files. `contracts.py` stays a leaf. Optimizer dependencies
 flow from `gepa` to dataset/validation/artifacts/scorers, never back into orchestration.
 
-The corresponding implementation areas are covered by `tests/`. Repository
-commands are defined in the root `Makefile`; CI runs the Lite quality targets
-there, including Store migration regressions.
+## Test layout
+
+`tests/` groups offline regression cases into domain suites, with descriptive
+sections inside each module:
+
+| Area | Suites |
+| --- | --- |
+| HTTP API | `api/test_routes.py` (routes, lifecycle, OpenAPI, setup), `api/test_turns.py` (outcomes, events, SSE), `api/test_improve.py` |
+| Native DSPy engine | `engine/test_programs.py` (programs, adapters, signatures, pinned integration capabilities) |
+| Configuration and models | `lite/test_configuration.py` (precedence, gateways, native runtime contracts) |
+| Local services | `lite/test_cli.py` (CLI, launcher, MLflow profiles) |
+| Skills and Sessions | `lite/test_skills.py` (validation, sync, child inputs), `lite/test_session.py` (leases, history, identities, usage, tracing) |
+| Optimization | `optimize/test_optimization.py` (worker lifecycle, gates, canary contracts), `optimize/test_artifacts.py` (native GEPA, rollout state, identity) |
+| Evaluation | `optimize/test_evaluation.py` (curation, benchmarks), `optimize/test_scorers.py` (judges, objectives, evidence, registration), `optimize/test_runtime_reports.py` (runtime and latency comparison gates) |
+| Sandbox | `sandbox/test_manager.py` (lifecycle, budgets, snapshots, paths), `sandbox/test_interpreter.py` (host bridge, native delegation), `sandbox/test_repl.py` (transport, workspace files) |
+| Persistence | `store/test_store.py` (migrations, history, optimizer records, opt-in database contracts) |
+| Terminal clients | `tui/test_tui.py` (rendering, commands, menus), `tui/test_web.py` (browser security, setup UI) |
+| CI and publication | `test_release_checks.py` (CI discovery, release automation, publication evidence, verifier contracts) |
+
+Select a domain with `uv run pytest tests/<area>/<suite>.py`, and narrow to a
+contract with `-k`. Configuration precedence, per-file child-transfer fakes, and
+rollout provider refusal use explicit fixture marks so their setup does not leak
+into unrelated cases in the same suite. Shared API fakes, the sandbox emulator,
+and recorded JSON fixtures remain separate from collected test modules. Live
+database tests retain explicit environment opt-ins and skip in ordinary CI.
+
+Repository commands are defined in the root `Makefile`; CI discovers `test_*.py`
+files dynamically and runs those same quality targets, including Store migration
+regressions.
 
 User Skills are managed from `.fleet/skills/`. `.agents/skills/` belongs to
 developer tooling and must not be treated as a user Skill source.

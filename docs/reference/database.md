@@ -56,7 +56,7 @@ every migration inside it, and uses it through `search_path`; the default schema
 and any older Fleet build keep working against their own tables. Drop the schema
 when finished. An opt-in test applies migrations 11 and 12 to a scratch schema of a real
 PostgreSQL: set `FLEET_TEST_POSTGRES_URL` and run
-`uv run pytest tests/store/test_optimization_runs.py -k real_postgres`.
+`uv run pytest tests/store/test_store.py -k real_postgres`.
 Migration 12 creates `fleet_lite_global_settings` (`scope`, `settings` JSONB), which holds settings that
 belong to no Session; the Improve auto-run switch and budgets live under the `improve` scope. It uses
 `CREATE TABLE IF NOT EXISTS`, so a schema that applied an earlier draft of migration 11 and already holds an

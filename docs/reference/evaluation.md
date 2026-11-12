@@ -609,7 +609,7 @@ recipe identity does not prove every remote environment's identity.
 See [settings and context](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/settings-and-context.md)
 and [saving and loading](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/saving-and-loading.md).
 
-`tests/optimize/test_native_gepa.py` exercises actual native compilation with
+`tests/optimize/test_artifacts.py` exercises actual native compilation with
 scripted models and a fake interpreter that rejects unknown source. For explicitly
 authorized live validation, `uv run python scripts/verify_gepa_live.py --live`
 uses synthetic addition tasks, the configured Gateway models and judge, and
@@ -629,10 +629,10 @@ constructor defaults, explicit values (including `None`), and malformed payloads
 retain native behavior. Host dataset codecs are one-way into Daytona; forwarded
 dataset views carry JSON metadata and the native host decoder rejects guest codecs.
 
-`tests/sandbox/test_native_defaults.py` executes real native Flex source through
+`tests/sandbox/test_interpreter.py` executes real native Flex source through
 an emulated Daytona transport, including aliases, expanded kwargs, multiple
 constructors, source save/load, factory isolation, and host-budget exhaustion.
-`tests/lite/test_dspy_contracts.py` covers native query metering, child lifecycle,
+`tests/lite/test_configuration.py` covers native query metering, child lifecycle,
 and success-only promotion. Semantic `llm_query` calls are not code-executing
 children. Native nested RLMs retain the Daytona backend and host cleanup;
 Fleet-managed `spawn_agent` / `spawn_agents` retain input selection, allowlisted

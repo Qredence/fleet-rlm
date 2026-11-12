@@ -1,3 +1,5 @@
+"""Sandbox lifecycle, budgets, snapshots, and safe workspace paths."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,12 +15,18 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from daytona import DaytonaNotFoundError
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.sandbox import manager as manager_module
 from fleet_rlm.sandbox import repl as repl_module
+from fleet_rlm.sandbox import snapshots as operations
 from fleet_rlm.sandbox import workspace_io
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.sandbox.snapshots import SNAPSHOT_NAME, SnapshotUnavailableError
+from fleet_rlm.workspace import _workspace_relative_path, session_volume_subpath, validate_session_id
+
+# Lifecycle and shared budgets
 
 
 def test_persisted_sandbox_ownership_reconciles_known_provider_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2695,3 +2703,156 @@ def test_turn_scope_owns_an_unowned_turn_and_is_inert_inside_one() -> None:
     finally:
         manager.end_turn()
     assert not manager.turn_active
+
+
+# Snapshot operations
+
+
+def test_existing_snapshot_is_never_replaced(monkeypatch):
+    service = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(id="existing"),
+        create=lambda *_a, **_kw: pytest.fail("must not replace existing snapshot"),
+    )
+    monkeypatch.setattr(operations, "Daytona", lambda _config: SimpleNamespace(snapshot=service))
+    with pytest.raises(SnapshotUnavailableError, match="already exists"):
+        operations.build_snapshot(api_key="key", org_id="org")
+
+
+def test_lookup_failure_does_not_turn_into_snapshot_creation(monkeypatch):
+    def unavailable(_name):
+        raise TimeoutError("private-provider-detail")
+
+    service = SimpleNamespace(get=unavailable, create=lambda *_a, **_kw: pytest.fail("unknown lookup is not missing"))
+    monkeypatch.setattr(operations, "Daytona", lambda _config: SimpleNamespace(snapshot=service))
+    with pytest.raises(SnapshotUnavailableError) as error:
+        operations.build_snapshot(api_key="key", org_id="org")
+    assert "private-provider-detail" not in str(error.value)
+    assert error.value.state == "lookup_failed"
+
+
+def test_activation_runs_once_then_verifies_provider_identity(monkeypatch):
+    state = ["inactive"]
+    calls = []
+    timeouts = []
+
+    def get_snapshot(name, *, _request_timeout):
+        timeouts.append(_request_timeout)
+        return SimpleNamespace(name=name, id="provider-id", state=state[0], cpu=4, mem=8, disk=8)
+
+    def activate(snapshot_id, *, _request_timeout):
+        calls.append(snapshot_id)
+        timeouts.append(_request_timeout)
+        state[0] = "active"
+        return SimpleNamespace(name=SNAPSHOT_NAME, id=snapshot_id, state=state[0], cpu=4, mem=8, disk=8)
+
+    service = SimpleNamespace(
+        get=lambda name: SimpleNamespace(name=name, id="provider-id", state=state[0], cpu=4, mem=8, disk=8),
+        _SnapshotService__snapshots_api=SimpleNamespace(
+            get_snapshot=get_snapshot,
+            activate_snapshot=activate,
+        ),
+    )
+    monkeypatch.setattr(operations, "Daytona", lambda _config: SimpleNamespace(snapshot=service))
+    identity = operations.activate_snapshot(api_key="key", org_id="org")
+    assert calls == ["provider-id"]
+    assert len(timeouts) == 3
+    assert timeouts[0] > timeouts[1] > timeouts[2] > 0
+    assert identity.id == "provider-id"
+    # A second explicit activation only verifies the already active snapshot.
+    assert operations.activate_snapshot(api_key="key", org_id="org").id == "provider-id"
+    assert calls == ["provider-id"]
+
+
+def test_activation_does_not_create_a_missing_snapshot(monkeypatch):
+    def missing(_name):
+        raise DaytonaNotFoundError("missing")
+
+    service = SimpleNamespace(get=missing, activate=lambda *_a: pytest.fail("missing snapshot cannot be activated"))
+    monkeypatch.setattr(operations, "Daytona", lambda _config: SimpleNamespace(snapshot=service))
+    with pytest.raises(SnapshotUnavailableError) as error:
+        operations.activate_snapshot(api_key="key", org_id="org")
+    assert error.value.state == "missing"
+
+
+# Safe workspace paths
+
+
+@pytest.mark.parametrize("session_id", ["finance-q4", "session_01", "2e8c98b5-5242-4e3b-91b4-2bf1e8c24f0b"])
+def test_session_ids_map_to_isolated_volume_subpaths(session_id: str) -> None:
+    validate_session_id(session_id)
+
+    assert session_volume_subpath(session_id) == f"sessions/{session_id}"
+
+
+@pytest.mark.parametrize("session_id", ["../other", "a/b", "/root", "", ".", "..", "bad id"])
+def test_session_ids_reject_volume_path_syntax(session_id: str) -> None:
+    with pytest.raises(ValueError):
+        validate_session_id(session_id)
+
+
+def test_workspace_paths_are_rooted_and_have_bounded_names() -> None:
+    assert _workspace_relative_path("files/quarter-1.csv") == "files/quarter-1.csv"
+    for path in ("/etc/passwd", "files/../../secret", "skills\\escape", "files/a\x00b", "files/" + "a" * 1020):
+        with pytest.raises(ValueError):
+            _workspace_relative_path(path)
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("files/a.log", "files/a.log"),
+        ("/workspace/files/a.log", "files/a.log"),
+        ("skills/x/SKILL.md", "skills/x/SKILL.md"),
+        ("/workspace/artifacts/report.json", "artifacts/report.json"),
+    ],
+)
+def test_child_input_paths_accept_the_sandbox_absolute_form(given: str, expected: str) -> None:
+    from fleet_rlm.workspace import _child_input_path
+
+    assert _child_input_path(given) == expected
+
+
+@pytest.mark.parametrize("bad", ["/workspace/memory/x", "/etc/passwd", "/workspace/files/../memory/x", "files/../x"])
+def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> None:
+    from fleet_rlm.workspace import _child_input_path
+
+    with pytest.raises(ValueError):
+        _child_input_path(bad)
+
+
+def test_generated_remote_scripts_compile_and_report_existing_paths(tmp_path):
+    """Remote script builders must emit Python, not a string that merely looks like it.
+
+    The transport base64-encodes and `compile`s these, so a literal backslash-n is a
+    SyntaxError that only shows up against a real sandbox. Compile them here instead.
+    """
+    import json
+    import subprocess
+    import sys
+
+    from fleet_rlm.sandbox.runtime.fs_ops import (
+        existing_workspace_paths_code,
+        list_workspace_files_code,
+        verify_python_artifact_code,
+        workspace_files_metadata_code,
+    )
+
+    destinations = ["artifacts/child/present.txt", "artifacts/child/missing.txt"]
+    scripts = {
+        "existing": existing_workspace_paths_code(destinations),
+        "existing_empty": existing_workspace_paths_code([]),
+        "list": list_workspace_files_code(),
+        "metadata": workspace_files_metadata_code(["files/a.txt"], create_parents=False),
+        "verify": verify_python_artifact_code("artifacts/run.py", digest="0" * 64, timeout=5),
+    }
+    for name, code in scripts.items():
+        compile(code, f"<{name}>", "exec")
+
+    # Execute the destination probe against a real directory tree, mapped to /workspace.
+    workspace = tmp_path / "workspace"
+    (workspace / "artifacts/child").mkdir(parents=True)
+    (workspace / "artifacts/child/present.txt").write_text("x")
+    probe = scripts["existing"].replace("/workspace", str(workspace))
+    completed = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+
+    assert json.loads(completed.stdout) == ["artifacts/child/present.txt"]
