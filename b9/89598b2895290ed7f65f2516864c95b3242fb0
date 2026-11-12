@@ -1,0 +1,85 @@
+tests/tui/test_web.py
+  s_dd7a112c7f91ef::t_b59a1399446c96 1-2,6,8,11-13,15,17,19-21,259-431
+tests/optimize/test_scorers.py
+  s_dd7a112c7f91ef::t_767d10c209378c 1-8,10-12,14,22-33,39,48
+  s_dd7a112c7f91ef::t_ec313eaa1097a3 1176-1976
+  s_dd7a112c7f91ef::t_0206a5d276e84f 49
+tests/test_release_checks.py
+  s_dd7a112c7f91ef::t_27246598b63d5b 1,10,13-15,18,20-22,26,42-45,550-1239,1251
+  s_dd7a112c7f91ef::t_7ef1d65b25a1be 1240-1250,1252-1510
+tests/optimize/test_artifacts.py
+  s_dd7a112c7f91ef::t_9fc55d52ab3229 1,5,8-11,13,15,19-21,23-24,27-32,34-36,260-546,548-662,720-1211
+  s_dd7a112c7f91ef::t_28cf0316ea980f 547,663
+  s_dd7a112c7f91ef::t_cbd841fc1740ef 718-719
+tests/sandbox/test_interpreter.py
+  s_dd7a112c7f91ef::t_bac398d6b7280c 35-42,199-204,206-212,214,217-223,225-237,239-240
+  s_dd7a112c7f91ef::t_a42994bb7b734f 132-154
+  s_dd7a112c7f91ef::t_92f259985340de 1303,1306-1310,1312-1325,1327-1328,1330-1363,1365-1390,1392-1393,1395-1397,1399-1432,1434-1467,1469-1503,1505-1603,1605-1620
+  s_dd7a112c7f91ef::t_877f00111b6ff0 205,213,215-216,224,238,241
+  s_dd7a112c7f91ef::t_3810a1832df043 1,11,26,30-31
+  s_dd7a112c7f91ef::t_28cf0316ea980f 1468,1604
+  s_dd7a112c7f91ef::t_d2a7b1627232fd 43-44,155-156,242-243
+tests/lite/test_cli.py
+  s_dd7a112c7f91ef::t_55dab1320d43a7 1-2,7-9,11,13,15,17,19,21-22,24-27,652-1233,1243
+  s_dd7a112c7f91ef::t_8529370304358f 1234-1242,1244-1626
+tests/api/test_turns.py
+  s_dd7a112c7f91ef::t_1c51e89aedc98a 1,19,23-25,27,36,42-44,47
+  s_dd7a112c7f91ef::t_0e3a548c70606e 3080-3679
+  s_dd7a112c7f91ef::t_7599a29bfa4418 48
+tests/sandbox/test_manager.py
+  s_dd7a112c7f91ef::t_4a565c1fb90ae4 2706-2858
+  s_dd7a112c7f91ef::t_b82e039acb61c5 1-2,18,23,26-29
+tests/lite/test_skills.py
+  s_dd7a112c7f91ef::t_bf0a38d3827993 1-2,5-7,10,14,17-18,178-615
+tests/lite/test_session.py
+  s_dd7a112c7f91ef::t_dc738db8e30172 1-2,5-8,11-13,15,17,19,21-22,25-26,1024-1255,1260
+  s_dd7a112c7f91ef::t_5935350aa37b48 1256-1259,1261-1867
+docs/reference/source-layout.md
+  s_dd7a112c7f91ef::t_88030b425af426 111-139
+tests/lite/test_configuration.py
+  s_dd7a112c7f91ef::t_5bd9dff6f452d9 1196-1201,1203-1373,1375-1545
+  s_dd7a112c7f91ef::t_28cf0316ea980f 1374
+  s_dd7a112c7f91ef::t_1792075f4e7e7a 1,5-11,15-16,18-19,22-39,42,55,72,84,110,116,126,137,145,164,173,199,204,216,227,243,259,278,298,319,341,364,386,405,412,420,432,441,449,461,484,492,500,512,521,534,540,552,559,570,581,597,622,643,656-1195,1202
+docs/reference/database.md
+  s_dd7a112c7f91ef::t_141a3277b5ee31 59
+tests/store/test_store.py
+  s_dd7a112c7f91ef::t_4daeee3158f5fb 1256-1281,1283-1349
+  s_dd7a112c7f91ef::t_43baa3c92a84ce 1,8-9,11,15,17-19,23,25,33-34,876-1255,1282
+tests/tui/test_tui.py
+  s_dd7a112c7f91ef::t_62a8d1d7c142ed 1-2,20-24
+  s_dd7a112c7f91ef::t_3264587618486f 2244-3055
+tests/optimize/test_runtime_reports.py
+  s_dd7a112c7f91ef::t_974f7f60add680 1-2,7,9,12-14,85-372
+tests/engine/test_programs.py
+  s_dd7a112c7f91ef::t_9c38ea8c81ad0c 1242-1263,1265-1683
+  s_dd7a112c7f91ef::t_d214a36ae88cf1 1-2,5,17-46,49-60,62-68,1009-1241,1264
+tests/sandbox/test_repl.py
+  s_dd7a112c7f91ef::t_230dbc203f2ec0 1,6,11-12,14,22,24-26,569-1060
+docs/reference/evaluation.md
+  s_dd7a112c7f91ef::t_265b59b5da3cb8 612,632,635
+tests/optimize/test_evaluation.py
+  s_dd7a112c7f91ef::t_0959f688339718 1208-1231,1233-1909
+  s_dd7a112c7f91ef::t_d98c73892705ec 1-5,7-8,11-15,34-35,857-1207,1232
+tests/api/test_routes.py
+  s_dd7a112c7f91ef::t_fc407ef84aa8a6 1216-1222,1224-1313
+  s_dd7a112c7f91ef::t_75672360845120 1,5-8,11,25,27,29,32-34,37-38,694-1215,1223
+tests/optimize/test_optimization.py
+  s_dd7a112c7f91ef::t_5cd93eb07e78f4 3229-3321
+  s_dd7a112c7f91ef::t_3261e66f6b5bcc 1-2,12,38-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b989598b2895290ed7f65f2516864c95b3242fb0",
+  "prompts": {},
+  "sessions": {
+    "s_dd7a112c7f91ef": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1d049-0e85-7637-bc35-5db827ec51b0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
