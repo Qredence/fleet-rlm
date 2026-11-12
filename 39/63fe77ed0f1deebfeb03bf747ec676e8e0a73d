@@ -1,0 +1,57 @@
+docs/reference/source-layout.md
+  s_f43a6c50f10102::t_c2b41fb4b38ef6 118-132,137-138,141-148
+tests/api/test_turns.py
+  s_c9a1652cf56d9a::t_a3f12cbdce4f20 1,9,11,14-15,18,31,39-40,42-43,45,47-53,57-58,63-309,332,1771-1782,1784,3956-6945
+tests/conftest.py
+  s_c9a1652cf56d9a::t_b82a7ac9069fcd 7,38-42,51-53
+tests/engine/test_runtime.py
+  s_c9a1652cf56d9a::t_2245d01f128570 1,5,7-11,13,20-22,27-3140,4390-4391,4988-5588
+tests/sandbox/test_sandbox.py
+  s_f43a6c50f10102::t_75df7223ae50ef 1,5,9-12,17-18,21-24,28-2834,2840,2870,2902,2931,2942,2966,3006,3030,3095,3233,3264,3300,3306,3313,3329,3337,3361,3372,3384,3400,3437,3460,3476,3508,3529,3546,3575,3598,3621,3647,3670,3737,3765,3796,3851,3883,3918,3947,3972,3986,4030,4040,4050,4059,4068,4098,4114,4143,4212,4259,4286,4313,4334,4346,4354,4398,4413,4422,4433,4459,4504,4528,4559,4571,4598,4622,4635,4661,4675,4706,4725,4765,4810,4826,4850,4884,4935,4945,4973,4994,5016,5037,5078,5088,5098,5105,5128,5150,5182,5205,5222,5240,5256,5273,5290,5325,5341,5349,5359,5373,5383,5406,5448,5471,5509,5525,5545,5570,5590,5604,5628,5639,5652,5686,5702,5710,5716,5733,5741,5749,5786-5794
+docs/reference/evaluation.md
+  s_ae217c662da9a5::t_6ea6513454eb3d 394,612,632,635,810
+docs/reference/turn-results.md
+  s_ae217c662da9a5::t_e7ab3f536db9c3 13
+docs/runbooks/native-dspy-integration.md
+  s_ae217c662da9a5::t_deea610f18d2fe 10-15,87
+tests/fixtures.json
+  s_ae217c662da9a5::t_e4d99f18c190f9 2-158,160-218,220-275,278-317,319-320,323-326,328-329,332-338,341-347,350-356,359-365,368-374,377-380,382-383,386-389,391-392,395-398,400-441,443-498,500-501
+tests/optimize/test_evaluation.py
+  s_ae217c662da9a5::t_fdd768d33303fc 1,6-7,13-14,19,23,28-29,33,41-67,1945-4239
+tests/optimize/test_optimization.py
+  s_ae217c662da9a5::t_61c7729e415369 1,8-10,13-14,19,23-24,28-29,31,38,45,47,50-52,3337-4516
+tests/tui/test_clients.py
+  s_ae217c662da9a5::t_512f956331dfaa 1,6,9-12,14-15,17-18,23,25,31-37,40-43,3077-5094
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3963fe77ed0f1deebfeb03bf747ec676e8e0a73d",
+  "prompts": {},
+  "sessions": {
+    "s_ae217c662da9a5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d154-47ee-7de0-94b6-5e600a392e84",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_c9a1652cf56d9a": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "6d0977a4-af52-449f-860b-64fd9f28f63c",
+        "model": "custom:Deepseek-V4.1-Flash-1017---Command-0"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_f43a6c50f10102": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "050e51f2-95c0-4899-b37e-d3384c50e630",
+        "model": "custom:Deepseek-V4.1-Flash-1017---Command-0"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
