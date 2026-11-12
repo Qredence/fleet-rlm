@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import dspy
 import mlflow
 import pytest
 from pydantic import AliasChoices
@@ -34,6 +35,11 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
     monkeypatch.setitem(FleetSettings.model_config, "env_file", None)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_test_uri)
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
+    # Persist real local traces inline: SQLite has one writer, and these tests
+    # read traces immediately rather than testing background exporter throughput.
+    monkeypatch.setenv("MLFLOW_ENABLE_ASYNC_TRACE_LOGGING", "false")
+    monkeypatch.setenv("MLFLOW_USE_BATCH_SPAN_PROCESSOR", "false")
+    callbacks = list(dspy.settings.callbacks)
     # A test that forgets its database fake fails fast instead of reaching a real local Postgres.
     monkeypatch.setenv("FLEET_DATABASE_URL", "postgresql://fleet-test@db.invalid:5432/fleet-test")
     monkeypatch.setenv("FLEET_CONFIG", str(Path(__file__).resolve().parents[1] / "config/fleet.toml.example"))
@@ -42,5 +48,8 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
     get_settings.cache_clear()
     mlflow.set_tracking_uri(mlflow_test_uri)
     yield
+    # Native autologging configures process-wide DSPy callbacks. A tracing test must
+    # not make every subsequent unit test persist prompts and spans to SQLite.
+    dspy.configure(callbacks=callbacks)
     get_settings.cache_clear()
     mlflow.set_tracking_uri(mlflow_test_uri)

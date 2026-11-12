@@ -115,24 +115,36 @@ sections inside each module:
 
 | Area | Suites |
 | --- | --- |
-| HTTP API | `api/test_routes.py` (routes, lifecycle, OpenAPI, setup), `api/test_turns.py` (outcomes, events, SSE), `api/test_improve.py` |
-| Native DSPy engine | `engine/test_programs.py` (programs, adapters, signatures, pinned integration capabilities) |
-| Configuration and models | `lite/test_configuration.py` (precedence, gateways, native runtime contracts) |
-| Local services | `lite/test_cli.py` (CLI, launcher, MLflow profiles) |
-| Skills and Sessions | `lite/test_skills.py` (validation, sync, child inputs), `lite/test_session.py` (leases, history, identities, usage, tracing) |
-| Optimization | `optimize/test_optimization.py` (worker lifecycle, gates, canary contracts), `optimize/test_artifacts.py` (native GEPA, rollout state, identity) |
-| Evaluation | `optimize/test_evaluation.py` (curation, benchmarks), `optimize/test_scorers.py` (judges, objectives, evidence, registration), `optimize/test_runtime_reports.py` (runtime and latency comparison gates) |
-| Sandbox | `sandbox/test_manager.py` (lifecycle, budgets, snapshots, paths), `sandbox/test_interpreter.py` (host bridge, native delegation), `sandbox/test_repl.py` (transport, workspace files) |
-| Persistence | `store/test_store.py` (migrations, history, optimizer records, opt-in database contracts) |
-| Terminal clients | `tui/test_tui.py` (rendering, commands, menus), `tui/test_web.py` (browser security, setup UI) |
-| CI and publication | `test_release_checks.py` (CI discovery, release automation, publication evidence, verifier contracts) |
+| HTTP API | `api/test_turns.py` (routes, setup, lifecycle, outcomes, SSE, managed experiments) |
+| Runtime | `engine/test_runtime.py` (native programs, configuration, models, Sessions, Skills, usage, tracing) |
+| Sandbox | `sandbox/test_sandbox.py` (lifecycle, budgets, snapshots, interpreter, delegation, transport, workspace) |
+| Optimization | `optimize/test_optimization.py` (workers, artifacts, native GEPA, isolated rollouts, promotion) |
+| Evaluation | `optimize/test_evaluation.py` (curation, benchmarks, reports, scorers, objectives, evidence) |
+| Clients | `tui/test_clients.py` (CLI, launcher, Textual UI, browser security, setup) |
+| Persistence | `store/test_store.py` (migrations, history, leases, opt-in database contracts) |
+| CI and publication | `test_release_checks.py` (discovery, release automation, publication evidence, verifiers) |
+
+The consolidation retains behavioral regressions while removing six legacy dynamic-schema
+comparison cases in favor of native field/type and state round-trip checks. Two
+redundant route vocabulary/instruction checks are covered by typed triage criteria
+and route-selection cases. The removed timeout source-substring check is covered
+by explicit unbounded (`None`/zero) and bounded execution tests. Live database
+opt-ins remain separate from ordinary offline validation.
 
 Select a domain with `uv run pytest tests/<area>/<suite>.py`, and narrow to a
 contract with `-k`. Configuration precedence, per-file child-transfer fakes, and
 rollout provider refusal use explicit fixture marks so their setup does not leak
-into unrelated cases in the same suite. Shared API fakes, the sandbox emulator,
-and recorded JSON fixtures remain separate from collected test modules. Live
+into unrelated cases in the same suite. API fakes and the sandbox emulator live in their consuming suites. Recorded JSON
+fixtures share `tests/fixtures.json`; the root conftest owns shared environment isolation. Live
 database tests retain explicit environment opt-ins and skip in ordinary CI.
+
+Offline tests persist native MLflow traces synchronously to their disposable SQLite
+store and restore DSPy callbacks after each case, so enabling autologging in one
+test does not add trace writes to unrelated cases. Production tracing settings are
+unchanged. Use `uv run pytest --durations=30` to inspect slow cases; deadline
+admission tests advance a local clock instead of waiting for public timeout bounds.
+The native Flex constructor matrix shares one guest program and one reload while
+checking every syntax/default variant, avoiding repeated guest interpreter startup.
 
 Repository commands are defined in the root `Makefile`; CI discovers `test_*.py`
 files dynamically and runs those same quality targets, including Store migration

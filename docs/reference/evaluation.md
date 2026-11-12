@@ -391,7 +391,7 @@ Calibrated decision fields are integrated directly into candidate artifacts
 ### Trace regression boundary
 
 Trace `tr-e60ebd3bf370e42a8d5e724925de964b` has a sanitized diagnostic fixture
-in `tests/fixtures/pi_digit_trace.json`. It returned `5`, with first supporting
+in `tests/fixtures.json`. It returned `5`, with first supporting
 checks complete at 106.999 seconds and Turn completion at 215.546 seconds.
 Six generations plus one route and three Skill decisions explain ten budget
 units. It recovered from one Python error and one submission rejection.
@@ -609,7 +609,7 @@ recipe identity does not prove every remote environment's identity.
 See [settings and context](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/settings-and-context.md)
 and [saving and loading](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/saving-and-loading.md).
 
-`tests/optimize/test_artifacts.py` exercises actual native compilation with
+`tests/optimize/test_optimization.py` exercises actual native compilation with
 scripted models and a fake interpreter that rejects unknown source. For explicitly
 authorized live validation, `uv run python scripts/verify_gepa_live.py --live`
 uses synthetic addition tasks, the configured Gateway models and judge, and
@@ -629,10 +629,10 @@ constructor defaults, explicit values (including `None`), and malformed payloads
 retain native behavior. Host dataset codecs are one-way into Daytona; forwarded
 dataset views carry JSON metadata and the native host decoder rejects guest codecs.
 
-`tests/sandbox/test_interpreter.py` executes real native Flex source through
+`tests/sandbox/test_sandbox.py` executes real native Flex source through
 an emulated Daytona transport, including aliases, expanded kwargs, multiple
 constructors, source save/load, factory isolation, and host-budget exhaustion.
-`tests/lite/test_configuration.py` covers native query metering, child lifecycle,
+`tests/engine/test_runtime.py` covers native query metering, child lifecycle,
 and success-only promotion. Semantic `llm_query` calls are not code-executing
 children. Native nested RLMs retain the Daytona backend and host cleanup;
 Fleet-managed `spawn_agent` / `spawn_agents` retain input selection, allowlisted
@@ -807,7 +807,7 @@ case to have quality 1.0 on every pass. Candidate approval fails closed when the
 The manual 30-day Unity Catalog trace cleanup procedure is documented in the
 [MLflow trace retention runbook](../runbooks/mlflow-trace-retention.md).
 
-`tests/fixtures/triage_cases.json` contains 18 developer-reviewed routing cases,
+`tests/fixtures.json` contains 18 developer-reviewed routing cases,
 six per effective route. Compare unchanged and structured criteria using the same
 backend, inputs and existing `route_correctness` scorer. Preserve probability,
 confidence and cache evidence; revised criteria must not regress aggregate accuracy.
