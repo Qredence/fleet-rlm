@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import uuid
 from typing import Any
 
@@ -50,12 +51,18 @@ RESERVED_NAMES = {
     "save_skill",
     "progress_scope",
 }
-# DSPy Flex lists these existing interpreter APIs as registered tools.
+# DSPy RLM and Flex register these built-in interpreter APIs in payload["tools"].
 REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
 SKILL_HELPERS = ("list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill")
 MAX_SKILL_RECEIPTS = 20
 
-_STATE: dict[str, Any] = {"namespace": None, "stdout": None, "host_call_timeout": None}
+_STATE: dict[str, Any] = {
+    "module": None,
+    "namespace": None,
+    "registered_tools": set(),
+    "stdout": None,
+    "host_call_timeout": None,
+}
 _WRITE_LOCK = threading.Lock()
 
 
@@ -366,19 +373,29 @@ def _typed_submit(names: list[str]) -> Any:
     return submit
 
 
+def _jev_decide_batched(items: Any, question: Any, choices: Any = None) -> Any:
+    choice_list = None if choices is None else list(choices)
+    return _bridge_call("jev_decide_batched", [list(items), question, choice_list], {})
+
+
 def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
-    """Create the persistent execution globals with workspace helpers and registered host tools."""
+    """Create the module-backed execution globals with workspace helpers and registered host tools."""
+    module = types.ModuleType("__fleet_repl__")
+    sys.modules[module.__name__] = module
+    _STATE["module"] = module
+    namespace: dict[str, Any] = module.__dict__
     context_globals = globals()
-    namespace: dict[str, Any] = {
-        "WORKSPACE": WORKSPACE,
-        "llm_query": lambda prompt: _bridge_call("llm_query", [prompt], {}),
-        "llm_query_batched": lambda prompts: _bridge_call("llm_query_batched", [list(prompts)], {}),
-        "jev_decide_batched": lambda items, question, choices: _bridge_call(
-            "jev_decide_batched", [list(items), question, list(choices)], {}
-        ),
-        "SUBMIT": _submit,
-        "progress_scope": progress_scope,
-    }
+    namespace.update(
+        {
+            "__builtins__": vars(builtins).copy(),
+            "WORKSPACE": WORKSPACE,
+            "llm_query": _make_tool("llm_query"),
+            "llm_query_batched": _make_tool("llm_query_batched"),
+            "jev_decide_batched": _jev_decide_batched,
+            "SUBMIT": _submit,
+            "progress_scope": progress_scope,
+        }
+    )
     namespace.update(
         {name: _receipt_skill_helper(name, context_globals[name]) for name in SKILL_HELPERS if name in context_globals}
     )
@@ -386,19 +403,12 @@ def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
         namespace.update(
             workspace=context_globals["workspace"], WorkspaceDatasetView=context_globals["WorkspaceDatasetView"]
         )
-
-    # DSPy's remote facade registers a process-global import; keep this namespace's import bound to its facade.
-    def namespace_import(
-        name: str, module_globals: Any = None, module_locals: Any = None, fromlist: Any = (), level: int = 0
-    ) -> Any:
-        if level == 0 and name == "dspy" and "dspy" in namespace:
-            return namespace["dspy"]
-        return builtins.__import__(name, module_globals, module_locals, fromlist, level)
-
-    namespace["__builtins__"] = dict(vars(builtins), __import__=namespace_import)
+    dynamic_tools: set[str] = set()
     for name in tool_names:
-        if name.isidentifier() and not keyword.iskeyword(name) and name not in namespace:
+        if name.isidentifier() and not keyword.iskeyword(name) and name not in RESERVED_NAMES:
             namespace[name] = _make_tool(name)
+            dynamic_tools.add(name)
+    _STATE["registered_tools"] = dynamic_tools
     return namespace
 
 
@@ -448,13 +458,25 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
     namespace = _STATE["namespace"]
     if namespace is None:
         namespace = _STATE["namespace"] = _make_namespace(tools)
+    previous_tools: set[str] = _STATE.get("registered_tools") or set()
+    current_dynamic = {name for name in tools if name not in RESERVED_NAMES}
+    for stale in previous_tools - current_dynamic:
+        namespace.pop(stale, None)
+    _STATE["registered_tools"] = current_dynamic
+    namespace["__builtins__"] = vars(builtins).copy()
+    namespace["llm_query"] = _make_tool("llm_query")
+    namespace["llm_query_batched"] = _make_tool("llm_query_batched")
+    namespace["jev_decide_batched"] = _jev_decide_batched
     namespace["SUBMIT"] = _typed_submit(outputs) if outputs else _submit
     # Reserved: a user binding from an earlier cell must not shadow the progress helper.
     namespace["progress_scope"] = progress_scope
     protected = RESERVED_NAMES | set(tools)
-    for name in tools:
-        if name not in RESERVED_NAMES:
-            namespace[name] = _make_tool(name)
+    for name in current_dynamic:
+        namespace[name] = _make_tool(name)
+    if "__dspy_guest_spec" in namespace and "__dspy_spec" not in variables:
+        guest_mod = sys.modules.get("dspy.primitives.sandbox_guest")
+        if guest_mod is not None:
+            guest_mod.bind(namespace)
     namespace.update(
         {
             key: value
@@ -539,3 +561,5 @@ if os.path.isdir(WORKSPACE):
         os.makedirs(os.path.join(WORKSPACE, _directory), exist_ok=True)
     if WORKSPACE not in sys.path:
         sys.path.insert(0, WORKSPACE)
+with contextlib.suppress(ImportError):
+    import dspy as _preloaded_dspy  # noqa: F401

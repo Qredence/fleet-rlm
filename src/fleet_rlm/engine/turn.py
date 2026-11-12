@@ -448,6 +448,8 @@ def run_turn(
                         execution_options["selected_route"] = selected_route
                     if required_skills:
                         execution_options["required_skills"] = required_skills
+                    if inputs.get("rlm_history") is not None:
+                        execution_options["rlm_history"] = inputs["rlm_history"]
                     prediction = runtime.engine(
                         workspace_manifest=inputs["manifest"],
                         skills_catalog=inputs["skills_catalog"],
@@ -511,6 +513,11 @@ def run_turn(
                     "artifact_changes": artifact_changes,
                     "replay_snapshot_selected": inputs["replay_selected"],
                     "replay_snapshot_sha256": replay_snapshot[0] if replay_snapshot else None,
+                    **(
+                        {"rlm_history": deepcopy(getattr(prediction, "rlm_history", None))}
+                        if getattr(prediction, "rlm_history", None)
+                        else {}
+                    ),
                     # A completed Turn keeps its warm root sandbox for the next Turn.
                     _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                 }
@@ -884,6 +891,7 @@ def _prepare_inputs(
     """
     with phase_span("turn.load_context", session_id=session_id) as phase:
         memory_summary, session_history = runtime.load_context(session_id)
+        rlm_history = load_rlm(session_id) if callable(load_rlm := getattr(runtime, "load_rlm_history", None)) else None
         phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
     # Sync can partially write even on failure; invalidate before touching the Volume.
     runtime.set_workspace_state("unknown")
@@ -962,6 +970,7 @@ def _prepare_inputs(
         "skills_catalog": skills_catalog,
         "memory_summary": memory_summary + "\n" + str(memories)[:12000],
         "session_history": session_history,
+        "rlm_history": rlm_history,
         "replay_files": replay_files,
         "replay_selected": replay_selected,
         "replay_skipped_bytes": replay_skipped_bytes,

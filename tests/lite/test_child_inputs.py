@@ -164,12 +164,11 @@ def test_factory_snapshots_inputs_and_omits_keyword_for_default_double(monkeypat
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_selected)
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager, native_input_paths, rlm_defaults: (
+        lambda *, manager, tools, owns_manager, native_input_paths: (
             manager,
             tools,
             owns_manager,
             native_input_paths,
-            rlm_defaults,
         ),
     )
     captured = ["files/first.txt"]
@@ -201,12 +200,11 @@ def test_factory_default_calls_allocate_child_without_keywords(monkeypatch: pyte
     monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate_default)
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager, native_input_paths, rlm_defaults: (
+        lambda *, manager, tools, owns_manager, native_input_paths: (
             manager,
             tools,
             owns_manager,
             native_input_paths,
-            rlm_defaults,
         ),
     )
     factory = root.interpreter_factory()
@@ -224,12 +222,11 @@ def test_factory_without_active_root_keeps_existing_manager(monkeypatch: pytest.
     root = _manager()
     monkeypatch.setattr(
         "fleet_rlm.sandbox.interpreter.DaytonaInterpreter",
-        lambda *, manager, tools, owns_manager, native_input_paths, rlm_defaults: (
+        lambda *, manager, tools, owns_manager, native_input_paths: (
             manager,
             tools,
             owns_manager,
             native_input_paths,
-            rlm_defaults,
         ),
     )
 

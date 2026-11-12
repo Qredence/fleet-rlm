@@ -41,6 +41,7 @@ def test_engine_forward_inputs_match_the_shared_contract():
         "execution_mode",
         "required_skills",
         "selected_route",
+        "rlm_history",
     }
 
 
@@ -64,20 +65,20 @@ def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path:
     assert engine.program.reasoning.flex.module_src == json.loads(known_good)["state"]["reasoning.flex"]["module_src"]
 
 
-@pytest.mark.parametrize("schema", ["fleet-program-a1", "fleet-program-b2", "unknown"])
+@pytest.mark.parametrize("schema", ["fleet-program-a1", "fleet-program-b1", "unknown"])
 def test_incompatible_selected_program_refuses_without_mutating_or_selecting_baseline(tmp_path, schema):
     manager = DaytonaSandboxManager("key", "org", "volume", "schema-migration")
     path = tmp_path / "selected.json"
     engine = _engine(manager, compiled_path=str(path), baseline=True)
     content = json.loads(program_envelope(engine.program))
-    assert content["program_schema"] == "fleet-program-b1"
+    assert content["program_schema"] == "fleet-program-b2"
     path.write_text(json.dumps(content))
     engine.compiled.reload_if_changed(engine.program)
     before = deepcopy(engine.program.dump_state())
     content["program_schema"] = schema
     content["state"]["routing.predict"]["signature"]["instructions"] = "Obsolete policy"
     path.write_text(json.dumps(content))
-    with pytest.raises(ValueError, match="fleet-program-b1"):
+    with pytest.raises(ValueError, match="fleet-program-b2"):
         engine.compiled.reload_if_changed(engine.program)
     assert engine.program.dump_state() == before
     path.unlink()
@@ -131,7 +132,7 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
     [
         ("hybrid", "direct", "direct"),
         ("hybrid", "rlm", "rlm"),
-        ("hybrid", "flex", "rlm"),
+        ("hybrid", "flex", "flex"),
         ("hybrid", "obsolete", "rlm"),
         ("hybrid", None, "rlm"),
         ("direct", "flex", "direct"),
@@ -139,11 +140,13 @@ def test_route_selection_logs_specific_exception_without_exposing_credentials(ca
         ("rlm", "direct", "rlm"),
     ],
 )
-def test_automatic_routes_are_two_way_but_explicit_flex_remains(monkeypatch, typed, mode, label, expected):
+def test_automatic_routes_are_three_way_and_explicit_modes_override(monkeypatch, typed, mode, label, expected):
     manager = DaytonaSandboxManager("key", "org", "volume", "route-contract")
     events, predictions = [], []
     manager.event_callback = events.append
-    engine = _engine(manager, jev_lm=SimpleNamespace(model="typed") if typed else None)
+    engine = _engine(
+        manager, jev_lm=SimpleNamespace(model="typesafe:typed", supports_decision_requests=True) if typed else None
+    )
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
 
     def predict(**_kwargs):
@@ -474,7 +477,7 @@ def _spawn_agent_with_fake_child(monkeypatch, child_call):
 
 def test_spawn_agent_promotes_artifacts_only_after_clean_completion_and_always_shuts_down(monkeypatch) -> None:
     def child_call(**_kwargs):
-        assert isinstance(dspy.settings.adapter, dspy.ChatAdapter)
+        assert isinstance(dspy.settings.adapter, dspy.XMLAdapter)
         return SimpleNamespace(findings="done")
 
     spawn_agent, interpreter, calls = _spawn_agent_with_fake_child(monkeypatch, child_call)
@@ -484,16 +487,16 @@ def test_spawn_agent_promotes_artifacts_only_after_clean_completion_and_always_s
     assert calls == ["collect", "shutdown"]
 
 
-@pytest.mark.parametrize("route", ["direct", "rlm", "flex"])
-@pytest.mark.parametrize("adapter_kind", ["chat", "json"])
+@pytest.mark.parametrize("route", ["direct", "rlm"])
+@pytest.mark.parametrize("adapter_kind", ["xml", "json"])
 def test_execution_adapter_policy_is_scoped_and_injectable(monkeypatch, route, adapter_kind):
     from fleet_rlm.contracts import Route
 
     manager = DaytonaSandboxManager("key", "org", "volume", "adapter-policy")
-    root_adapter = dspy.JSONAdapter() if adapter_kind == "json" else dspy.ChatAdapter(use_json_adapter_fallback=False)
+    root_adapter = dspy.JSONAdapter() if adapter_kind == "json" else dspy.XMLAdapter(use_native_function_calling=True)
     engine = _engine(manager, root_adapter=root_adapter)
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
-    ambient = dspy.ChatAdapter(use_json_adapter_fallback=False)
+    ambient = dspy.XMLAdapter(use_native_function_calling=True)
 
     def execute(**_kwargs):
         selected = dspy.settings.adapter
@@ -538,7 +541,10 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
         seen["batched"].extend(example.skill_name for example in examples)
         return [
             SimpleNamespace(
-                relevance=SimpleNamespace(value="relevant" if example.skill_name in relevant else "not_relevant")
+                relevance=SimpleNamespace(
+                    value=example.skill_name in relevant,
+                    probability=0.9 if example.skill_name in relevant else 0.1,
+                )
             )
             for example in examples
         ]
@@ -722,36 +728,22 @@ def test_incomplete_state_is_not_merged_with_defaults(tmp_path: Path) -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "session-budgets")
     engine = _engine(manager)
     assert engine.program.reasoning.flex.module_src == engine.program.reasoning.flex._baseline_src()
-    assert engine.program.reasoning.flex._interpreter_factory().rlm_defaults == {
-        "max_iters": 16,
-        "max_llm_calls": manager.max_llm_calls,
-    }
-    assert engine.program.reasoning.rlm._interpreter_factory().rlm_defaults == {}
+    assert engine.program.reasoning.flex._max_predictor_calls == manager.max_llm_calls
+    assert engine.program.reasoning.flex._interpreter_factory().manager is manager
+    assert engine.program.reasoning.rlm._interpreter_factory().manager is manager
 
 
 def test_signature_prompt_wording_is_not_part_of_saved_program_state():
-    """FleetTask field descriptions can change without invalidating compiled artifacts."""
+    """Predictor signature states omit FleetTask field descriptions while Flex renders its class preamble."""
     engine = _engine(DaytonaSandboxManager("key", "org", "volume", "wording"))
     state = engine.program.dump_state()
-    assert "Bounded learned notes" not in json.dumps(state)
+    predictor_states = {key: value for key, value in state.items() if key != "reasoning.flex"}
+    assert "Bounded learned notes" not in json.dumps(predictor_states)
+    assert "class FleetTask(dspy.Signature):" in state["reasoning.flex"]["module_src"]
     engine.program.load_state(deepcopy(state))
 
 
-def test_pre_consolidation_state_remains_inspectable_but_is_not_executable():
-    from pathlib import Path
-
-    manager = DaytonaSandboxManager("key", "org", "volume", "state-fixture")
-    engine = _engine(manager)
-    fixture = Path(__file__).parents[1] / "fixtures/pre_consolidation_program.json"
-    state = json.loads(fixture.read_text())
-    assert "flex_agent" in state and "max_iters=16" in state["flex_agent"]["module_src"]
-    before = deepcopy(engine.program.dump_state())
-    with pytest.raises(ValueError, match="exactly"):
-        engine.program.load_state(state)
-    assert engine.program.dump_state() == before
-
-
-@pytest.mark.parametrize("entrypoint", ["native", "compiled", "isolated"])
+@pytest.mark.parametrize("entrypoint", ["native", "compiled"])
 @pytest.mark.parametrize("invalid", ["missing_one", "missing_both", "version", "role", "model"])
 def test_child_policy_artifacts_reject_incomplete_or_unsafe_state_atomically(tmp_path, entrypoint, invalid):
     from fleet_rlm.optimize.validation import IsolatedFleetProgram

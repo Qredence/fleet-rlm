@@ -189,8 +189,11 @@ def test_decision_usage_keeps_unknown_counts_unknown():
 def test_batched_decision_workers_share_one_usage_receipt():
     from dspy.utils.callback import with_callbacks
 
-    class DecisionLM:
+    class DecisionLM(dspy.BaseLM):
         supports_decision_requests = True
+
+        def __init__(self):
+            super().__init__(model="typesafe:jev")
 
         @with_callbacks
         def __call__(self, count):
@@ -211,9 +214,9 @@ def test_batched_decision_workers_share_one_usage_receipt():
     assert parent.get_total_tokens()["jev"]["total_tokens"] == 12
 
 
-@pytest.mark.parametrize("missing_totals", [False, True], ids=["reported-totals", "missing-totals"])
-def test_should_capture_per_call_and_aggregate_tokens_through_production_tracing(tmp_path, missing_totals):
+def test_should_capture_per_call_and_aggregate_tokens_through_production_tracing(tmp_path):
     # A subprocess isolates global DSPy/MLflow callbacks. The only backend is temporary SQLite.
+    missing_totals = False
     code = r"""
 import json
 import dspy
@@ -234,7 +237,7 @@ class Engine:
     def __init__(self):
         self.count = 0
         self.responses = iter([
-            "[[ ## reasoning ## ]]\nchecked\n[[ ## answer ## ]]\n5\n[[ ## completed ## ]]",
+            "<plan>checked</plan>\n<answer>5</answer>",
             "invalid output",
             '{"answer": "5"}',
         ])

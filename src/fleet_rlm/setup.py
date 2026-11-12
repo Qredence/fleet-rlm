@@ -41,7 +41,7 @@ FIELDS: dict[str, tuple[str, str, bool]] = {
     "FLEET_DAYTONA_VOLUME_ID": ("fleet_daytona_volume_id", "daytona", False),
 }
 for _role in ("llm", "root", "sub", "reflection", "judge"):
-    for _key in ("adapter", "response_format"):
+    for _key in ("adapter", "model_type", "response_format"):
         FIELDS[f"FLEET_{_role.upper()}_{_key.upper()}"] = (f"fleet_{_role}_{_key}", "models", False)
 for _key in ("port", "data_dir", "experiment_name"):
     FIELDS[f"FLEET_MLFLOW_LOCAL_{_key.upper()}"] = (f"mlflow_local_{_key}", "mlflow", False)

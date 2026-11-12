@@ -11,10 +11,10 @@ from typing import Any
 
 from fleet_rlm.engine.programs import FleetProgram
 
-PROGRAM_SCHEMA = "fleet-program-b1"
+PROGRAM_SCHEMA = "fleet-program-b2"
 _IDENTITY = {
     "format": "fleet-program",
-    "format_version": 1,
+    "format_version": 2,
     "program_schema": PROGRAM_SCHEMA,
     "child_policy_contract": 1,
 }
@@ -41,7 +41,7 @@ def load_program_envelope(program: FleetProgram, content: bytes) -> None:
         or not isinstance(envelope["metadata"], dict)
         or any(not isinstance(key, str) or not isinstance(value, str) for key, value in envelope["metadata"].items())
     ):
-        raise ValueError("Unsupported compiled program: select fleet-program-b1 or explicit baseline")
+        raise ValueError("Unsupported compiled program: select fleet-program-b2 or explicit baseline")
     program.load_state(envelope["state"])
 
 

@@ -380,10 +380,13 @@ TypeSafe/Jev serves decisions with a finite answer space that repeat, whose corr
 be labelled, and where probability evidence is useful: route selection, Skill relevance, and
 route suitability. Plans, generated code, summaries, Skill bodies, and explanations stay on
 generative predictors, and no `RLM` or `Flex` output carries a decision type. The route
-suitability judge keeps `Noul` at `JEV_ROUTE_THRESHOLD`. Calibrating the router's `Choice`
-weights with DSPy's `ReAnchor` is deferred until a candidate artifact can carry fitted fields
-into paired validation; installing calibrated fields after the gate would ship behavior the
-gate never measured.
+suitability judge keeps `Noul` at `JEV_ROUTE_THRESHOLD`. Calibrating decision modules
+(router `Choice` weights and Skill `Noul` thresholds) is performed in stage 2
+of optimization using DSPy's native `ReAnchor` (`dspy.experimental.ReAnchor`).
+It fits only on the training split; the dev split reports before/after scores and
+permits adoption only without regression. Holdout remains outside search and calibration.
+Calibrated decision fields are integrated directly into candidate artifacts
+(`fleet-program-b2`, approval evidence version 3) and checked by paired validation before promotion.
 
 ### Trace regression boundary
 
@@ -514,17 +517,16 @@ executes cases and scores only the traces it just produced.
 
 ## DSPy integration rationale and validation
 
-The integration follows the locked DSPy 3.4.1 and GEPA 0.1.4 contracts. These
-were the latest published stable releases checked on 2026-10-25; `uv.lock` is
-authoritative for installed packages. DSPy 3.4.1 treats each
+The integration follows the locked DSPy 3.5.0 and GEPA contracts (`uv.lock` is
+authoritative for installed packages). DSPy 3.5.0 treats each
 Flex as a whole source-code component; predictors inside that Flex are owned by
 the source and are not separately tuned. Ordinary predictors remain instruction
-components. DSPy supplies native instruction reflection using its JSON adapter,
+components. DSPy supplies native instruction reflection using its reflection adapter,
 Flex code proposal, component selection, and candidate selection. Fleet sets
 bounded instruction length and task guidance, supplies the metric and isolated
 runtime, and uses DSPy's `SandboxLM` to account host-mediated calls against the
 shared Turn budget. GEPA's file stop and candidate-proposal
-callbacks are isolated version-specific integration points from GEPA 0.1.4;
+callbacks are isolated version-specific integration points;
 search metric call limits remain advisory between native batches. See the [versioned Flex
 contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
 API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
@@ -533,7 +535,7 @@ Explicit Fleet child calls expose `child_policies.leaf_action` and
 `child_policies.delegating_action` as ordinary native instruction components outside
 Flex source ownership (`program.`-prefixed in the isolated wrapper). Fresh native
 child RLMs receive independent copies of the selected policy's instructions and
-demos, not its LM or live runtime. DSPy 3.4.1's GEPA adapter attributes predictor traces by
+demos, not its LM or live runtime. DSPy 3.5.0's GEPA adapter attributes predictor traces by
 signature equality; immutable role-specific `code` field descriptions distinguish
 the policies even when their instruction strings match. Child extraction and
 arbitrary RLMs authored inside Flex remain outside this separate policy inventory.
@@ -550,12 +552,13 @@ synthetic trace injection or change in child error severity is introduced.
 
 LM and serving-adapter overrides use scoped `dspy.context` calls. DSPy's evaluator
 owns worker context propagation. Fleet uses native predictor/parameter traversal
-and native state loading. Missing RLM limits are supplied only by the outer Flex
-interpreter's constructor adapter, not by source rewriting or a second state load.
-DSPy support is pinned to the tested 3.4.1 release because this facade protocol is internal. JSON state preserves optimized instructions
-and Flex source; the host reconstructs the Daytona interpreter and current
-credentials. Installation now requires a complete host envelope with
-`format="fleet-program"`, `format_version=1`, `program_schema="fleet-program-b1"`,
+and native state loading. RLMs authored inside Flex keep native constructor defaults
+unless the source supplies explicit limits; the host independently enforces the shared
+Turn budget. No constructor adapter, source rewriting, or second state load is used.
+DSPy support is pinned to the tested 3.5.0 release because this facade protocol is internal. JSON state preserves optimized instructions,
+Flex source, and ReAnchor calibrated decision fields; the host reconstructs the Daytona interpreter and current
+credentials. Installation requires a complete host envelope with
+`format="fleet-program"`, `format_version=2`, `program_schema="fleet-program-b2"`,
 `child_policy_contract=1`, canonical unwrapped native `state`, and string-valued
 `metadata`. The exporter deliberately reads the isolated wrapper's `.program`;
 native `.save()` output is not an installation artifact. Missing/extra parameters,
@@ -563,14 +566,15 @@ incompatible field contracts, malformed Flex source and any non-null learned LM
 binding are rejected before any state changes. Native field criteria/configuration
 are preserved and validated by DSPy, not translated by Fleet.
 
-Gate A `fleet-program-a1` envelopes are incompatible with the two-way automatic
-route contract. They remain inspectable, not installable. Explicit baseline
-selection or a newly reviewed/revalidated B1 artifact is required; there is no
-automatic transplant of old instructions, demos or criteria. Native parameter
-paths and `child_policy_contract=1` are unchanged. Route assessments use
-`jev-route-v2` / `fleet-trace-assessments-v8`: bounded code, file and Skill work
-can reasonably use RLM; explicit Flex remains valid. The independent route judge
-still has three choices and the same Noul threshold and evidence requirements.
+Earlier envelopes (`fleet-program-a1`, `fleet-program-b1`) are incompatible with the
+3-way automatic route contract (`Choice` across `direct`, `flex`, `rlm`) and ReAnchor calibration.
+They remain inspectable, not installable. Explicit baseline selection or a newly
+reviewed/revalidated B2 artifact is required; there is no automatic transplant of old
+instructions, demos, or decision criteria. Native parameter paths and `child_policy_contract=1`
+are unchanged. Automatic triage uses 3-way `Choice` across `direct`, `flex`, and `rlm`.
+Route assessments use `jev-route-v3` / `fleet-trace-assessments-v9`: bounded code, file and Skill work
+can reasonably use RLM or Flex; the independent route judge evaluates `Choice` over `direct`, `flex`,
+and `rlm` with the same Noul threshold and evidence requirements.
 
 Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
@@ -592,7 +596,7 @@ replacement bytes retain the valid in-memory program/digest but refuse the Turn.
 Runtime and configuration digests, a digest of optimization source,
 and a versioned fingerprint of installed distribution names and versions are
 captured before search and rechecked before the candidate manifest is written and
-again at approval. Evidence format 2 does not depend on finding a source-tree
+again at approval. Evidence format 3 does not depend on finding a source-tree
 `uv.lock` at runtime.
 Source identity includes engine/optimizer/sandbox Python (including additions and
 removals), snapshot requirements, bundled Skill resources, and the shared
@@ -616,13 +620,14 @@ quality improvement or approve an artifact. Reports are local under
 
 ### Offline native boundary checks
 
-The locked source paths are `dspy.primitives.facade.FacadeInvocation.install`,
-`construct`, `_build_predictor`, and `call`; Flex's `BridgeRuntime` installs the
-shim and registers `__dspy_construct__` with nested `kwargs`. Native signature
-resolution, tool decoding, handles, LM scoping, and factory propagation remain
-native. Fleet copies only omitted `max_iters` / `max_llm_calls`, leaving explicit
-values (including `None`) and malformed payloads to native behavior. Propagated
-factories do not pass these defaults into deeper interpreters.
+The pinned bridge is `dspy.primitives.facade.SandboxSession`: `install` registers
+`__dspy_lm__`, `__dspy_tool_call__`, `__dspy_trace__`, and `__dspy_interpreter__`.
+Flex's `BridgeRuntime` imports the real DSPy guest and delegates nested interpreter
+creation, LM calls, provided tools, signature parsing, and wire values to that session.
+There is no `FacadeInvocation` or `__dspy_construct__` compatibility shim. Native
+constructor defaults, explicit values (including `None`), and malformed payloads
+retain native behavior. Host dataset codecs are one-way into Daytona; forwarded
+dataset views carry JSON metadata and the native host decoder rejects guest codecs.
 
 `tests/sandbox/test_native_defaults.py` executes real native Flex source through
 an emulated Daytona transport, including aliases, expanded kwargs, multiple
@@ -714,7 +719,7 @@ errors remain visible to the caller.
 
 Root, sub and Jev model roles, execution mode and Turn budgets come from the
 current deployment constructors. All non-null learned predictor/Flex LM bindings
-are rejected. Published candidates use the complete `fleet-program-b1` envelope,
+are rejected. Published candidates use the complete `fleet-program-b2` envelope,
 manifest/digest approval and the bounded serving loader described above. Historical
 bare state, `program.` wrapper keys and `fleet_child_policy_version` markers are
 not accepted for installation. This code/schema change invalidates prior approval
@@ -821,7 +826,10 @@ settings unchanged. Keep shared learned notes disabled and gold outside agent in
 Promotion requires at least 10% lower median short-task latency, no correctness or
 truncation regression, no aggregate observable generation-call increase and a successful
 Pi canary. Missing version or finish-reason evidence blocks promotion. Otherwise retain
-current defaults. ReAnchor remains deferred; native GEPA integration is covered by the offline and live canaries.
+current defaults. ReAnchor runs as stage 2 of optimization to calibrate decision modules.
+Offline tests exercise native calibration through isolated rollout copies. Historical live
+canaries do not qualify the DSPy 3.5.0 bridge or ReAnchor stage; fresh live validation
+requires explicit authorization.
 
 Stopping instructions apply within generated code blocks as well as between
 REPL actions. When multiple computation methods are used, the agent is

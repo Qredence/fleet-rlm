@@ -39,7 +39,7 @@ class AdditionProgram(dspy.Module):
         super().__init__()
         self.sandbox_mgr = manager
         self.lm = lm
-        self.adapter = adapter or dspy.ChatAdapter()
+        self.adapter = adapter or dspy.XMLAdapter(use_native_function_calling=True)
         self.optimization = None
         self.flex_agent = dspy.Flex(
             "task: str -> answer: str", interpreter_factory=manager.interpreter_factory(), max_predictor_calls=1

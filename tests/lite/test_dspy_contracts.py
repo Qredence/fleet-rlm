@@ -263,7 +263,11 @@ def test_routing_evidence_distinguishes_backend_and_override(monkeypatch, backen
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
     m.event_callback = lambda payload: events.append((payload["event"], payload))
     root = dspy.LM("openai/test-root", engine="lm15", cache=False)
-    lm = type("TypeSafe", (), {"model": "test-jev"})() if backend == "typesafe" else None
+    lm = (
+        type("TypeSafe", (), {"model": "typesafe:test-jev", "supports_decision_requests": True})()
+        if backend == "typesafe"
+        else None
+    )
     engine = FleetRuntime(m, root, root, jev_lm=lm)
     engine.program.routing.predict = lambda **_kwargs: SimpleNamespace(
         route=TRIAGE_ROUTE(
@@ -300,7 +304,7 @@ def test_routing_regression_cases_cover_each_effective_route():
 @pytest.mark.parametrize("finish", ["recovery", "extraction", "failure"])
 def test_installed_rlm_lifecycle_promotes_only_a_valid_completed_invocation(finish):
     from dspy import CodeExecutionError, FinalOutput
-    from dspy.primitives.facade import SHIM_SETUP
+    from dspy.primitives.facade import BOOTSTRAP
 
     events = []
     child_manager = SimpleNamespace(
@@ -314,9 +318,9 @@ def test_installed_rlm_lifecycle_promotes_only_a_valid_completed_invocation(fini
 
         def execute(self, code, variables=None):
             del variables
-            if code == SHIM_SETUP:
+            if code in (BOOTSTRAP, "import dspy"):
                 return None
-            if code == "SUBMIT":
+            if code.splitlines()[-1] == "SUBMIT":
                 return FinalOutput({"answer": 391})
             raise CodeExecutionError("deliberate repair probe")
 

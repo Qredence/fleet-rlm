@@ -9,7 +9,7 @@ from typing import Any
 import dspy
 import pytest
 from dspy import ChatAdapter, JSONAdapter
-from dspy.primitives.facade import SHIM_SETUP
+from dspy.primitives.facade import BOOTSTRAP
 from dspy.utils import DummyLM
 
 from fleet_rlm.optimize.artifacts import component_diffs, tunable_components
@@ -46,20 +46,20 @@ class ScriptedCodeInterpreter(DaytonaInterpreter):
         pass
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
-        if code == SHIM_SETUP:
+        if code in (BOOTSTRAP, "import dspy"):
             return None
         source = code.strip()
         if source in {BASELINE_SOURCE.strip(), REVISED_SOURCE.strip()}:
             self.source = source
             return None
-        if "__dspy_flex_instance = FleetTaskModule()" in code:
+        if "__dspy_run_forward(globals(), 'FleetTaskModule', __dspy_flex_inputs)" in code:
             if self.source is None:
                 raise AssertionError("Flex driver ran before a recognized module source was installed")
             inputs = (variables or {}).get("__dspy_flex_inputs")
             if not isinstance(inputs, dict) or not isinstance(inputs.get("task"), str):
                 raise AssertionError("Flex driver did not pass its inputs through __dspy_flex_inputs")
             answer = "wrong" if self.source == BASELINE_SOURCE.strip() else self.tools["lookup"](task=inputs["task"])
-            return json.dumps({"answer": answer})
+            return json.dumps({"fields": {"answer": answer}})
         raise AssertionError(f"Refusing to execute unrecognized interpreter source: {code[:120]!r}")
 
     def shutdown(self) -> None:

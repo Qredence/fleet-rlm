@@ -1,5 +1,42 @@
 # Native DSPy integration implementation report
 
+## Current DSPy 3.5.0 contracts
+
+The runtime and Daytona snapshot both pin `dspy==3.5.0`. The current integration
+uses native DSPy mechanisms, not the historical parser or facade described below:
+
+| Boundary | Current contract | Offline coverage |
+| --- | --- | --- |
+| LM and adapters | Native `engine="lm15"`, `Request`/`Response`, XML/Chat/JSON adapters, explicit API-family selection, and scoped role overrides | `tests/lite/test_configuration.py`, `tests/engine/test_programs.py` |
+| Typed decisions | Ordinary `dspy.LM("typesafe:...")`, native `Choice` and `Noul`, native field configuration and serialization | `tests/engine/test_programs.py`, `tests/optimize/test_artifacts.py` |
+| Code execution | Native `SandboxSession` and zero-argument Daytona factories; nested code stays in isolated child sandboxes | `tests/sandbox/test_interpreter.py`, `tests/sandbox/test_manager.py` |
+| Dataset inputs | Host-only `SandboxSerializable` setup; guest file-backed views forward as plain JSON metadata; the native host decoder rejects guest codecs | `tests/sandbox/test_interpreter.py` |
+| RLM history | Native `History`, REPL event helpers, and per-call trajectory; bounded persistence accounts for history pruning and extract fallback without restoring variables | `tests/sandbox/test_interpreter.py`, `tests/lite/test_session.py` |
+| Optimization | Native GEPA and ReAnchor; isolated-copy evidence is attributed to the candidate predictor, including parallel calibration | `tests/optimize/test_artifacts.py`, `tests/optimize/test_optimization.py` |
+
+The one-way dataset boundary follows the
+[DSPy 3.5.0 RLM contract](https://dspy.ai/3.5.0/api/modules/RLM/#custom-sandbox-serializable-inputs).
+Only trusted host setup runs in Daytona. Fleet does not replace `HostValues.decode_codec`
+or execute guest-supplied setup/assignment on the server. A forwarded view contains
+`path`, description, size, and digest; nested agents use the workspace helpers on
+that path, or construct a new guest-only view from that metadata.
+
+Native RLM constructor defaults inside generated Flex source remain DSPy's own
+20 iterations and 50 sub-LM calls unless explicitly supplied. Fleet's shared Turn
+budget and deadline still apply independently. ReAnchor fits training examples
+only; dev scores control adoption, and paired validation/holdout gates still apply.
+The native [ReAnchor API](https://dspy.ai/3.5.0/api/experimental/ReAnchor/),
+[Flex lifecycle](https://dspy.ai/3.5.0/api/modules/Flex/),
+[LM API](https://dspy.ai/3.5.0/api/models/LM/), and
+[Jev tutorial](https://dspy.ai/3.5.0/tutorials/jev_decisions/) are the versioned references.
+
+These are offline compatibility checks using scripted LMs and an emulated Daytona
+transport. They do not establish live-provider behavior, sandbox availability,
+or measured quality/cost gains. The dated canaries below predate this integration
+and must not be treated as DSPy 3.5.0 or ReAnchor acceptance evidence.
+
+## Historical DSPy 3.4.1 implementation report
+
 PRD A is implemented with a temporary, fixture-backed native-first parser.
 Baseline: `61bea5095dbbc992db2aeb8049a05e079b0bda10`; DSPy remains pinned to
 3.4.1 (GEPA 0.1.4, FastAPI 0.162.0, Pydantic 2.13.5 unchanged). The implementation

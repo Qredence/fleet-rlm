@@ -156,6 +156,7 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "claim_turn",
             "memories",
             "load_context",
+            "load_rlm_history",
             "commit_turn",
             "turn_status",
             "save_memory",
@@ -178,6 +179,7 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "claim_turn": lambda *_args: None,
             "memories": lambda *_args, **_kwargs: [],
             "load_context": lambda _session: ("", ""),
+            "load_rlm_history": lambda _session: None,
             "turn_status": lambda _turn: None,
         }
         for name, method in (defaults | policy).items():

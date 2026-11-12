@@ -30,7 +30,7 @@ src/fleet_rlm/
 │   ├── decisions.py   # Routing and optional Skill selection modules/predictors
 │   ├── reasoning.py   # Native Direct/RLM/Flex and route input/output projection
 │   ├── invocation.py  # Shared host construction, admission, invocation and evidence
-│   ├── compiled.py    # Strict fleet-program-b1 envelope and bounded atomic state loading
+│   ├── compiled.py    # Strict fleet-program-b2 envelope and bounded atomic state loading
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # ChildPolicies: two persistent native action predictors
 ├── store.py          # SQL, numbered additive migrations, one pool, Turn transactions

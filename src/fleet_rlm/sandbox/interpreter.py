@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextvars
-import inspect
 import json
 import keyword
 import logging
@@ -16,10 +15,11 @@ from typing import Any, ClassVar
 
 import dspy
 import mlflow
+from dspy.primitives.facade import BOOTSTRAP, LM_ERROR_KEY
 from mlflow.entities import SpanType
 from pydantic_core import to_jsonable_python
 
-from fleet_rlm.contracts import decision_evidence, figure_grounded, figures, item_decision
+from fleet_rlm.contracts import decision_evidence, figure_grounded, figures, item_decision, yes_no_decision
 from fleet_rlm.observability import activity_preview, activity_text, evidence_span, typed_decision_scope
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, _NATIVE_CHILDREN, DaytonaSandboxManager
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
@@ -29,6 +29,33 @@ _LOGGER = logging.getLogger(__name__)
 
 _MAX_OBSERVED_FIGURES = 200_000
 _MAX_UNGROUNDED_REJECTIONS = 2
+
+
+def _unwrap_wire(value: Any) -> Any:
+    """Strip DSPy wire envelopes when inspecting guest payloads for grounding or previews."""
+    if isinstance(value, dict) and value.keys() == {"__dspy__", "session", "value"} and value["__dspy__"] == "wire":
+        return _unwrap_wire(value["value"])
+    if isinstance(value, dict):
+        return {key: _unwrap_wire(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_unwrap_wire(item) for item in value]
+    return value
+
+
+def _is_bootstrap_code(code: str) -> bool:
+    """Classify DSPy internal session setup and wire-injection cells as bootstrap."""
+    return (
+        code == BOOTSTRAP
+        or code == "import dspy"
+        or (code.count("\n") == 0 and '__dspy_values.decode(__import__("json").loads(' in code)
+    )
+
+
+def _strip_rebind_prelude(code: str) -> str:
+    """Remove RLM's internal per-cell rebind prelude from operator/trace code views."""
+    from dspy.predict.rlm import _REBIND
+
+    return code.removeprefix(_REBIND)
 
 
 class StructuredResponseError(dspy.CodeExecutionError):
@@ -44,12 +71,10 @@ class DaytonaInterpreter:
         tools: dict[str, Callable[..., Any]] | None = None,
         owns_manager: bool = False,
         native_input_paths: tuple[str, ...] | None = None,
-        rlm_defaults: Mapping[str, int] | None = None,
     ):
         """Create an interpreter with a fresh namespace and validated bridged tool names."""
         self.manager = manager
         self.owns_manager = owns_manager
-        self.rlm_defaults = dict(rlm_defaults or {})
         self.native_input_paths = (
             tuple(_child_input_path(path) for path in native_input_paths) if native_input_paths is not None else None
         )
@@ -84,7 +109,8 @@ class DaytonaInterpreter:
         # Figures this namespace's inputs and executions have shown the model, for the SUBMIT check.
         self._observed: set[float] = set()
         self._ungrounded_rejections = 0
-        self._code_agent_handles: set[str] = set()
+        self._completed_cleanly = False
+        self._session_lm_failed = False
 
     def start(self) -> None:
         """Start the sandbox and bootstrap this namespace once; raise if already shut down."""
@@ -95,51 +121,112 @@ class DaytonaInterpreter:
             self.manager._register_interpreter(self)
             self._started = True
 
+    def _child_workspace_manifest(self) -> str:
+        """Return the subset of workspace paths accessible to an isolated child interpreter."""
+        paths = sorted(
+            path
+            for path in self.manager.list_workspace_files()
+            if path.startswith("skills/")
+            or (path.startswith("files/") if self.native_input_paths is None else path in self.native_input_paths)
+        )
+        return ", ".join(f"/workspace/{path}" for path in paths) or "/workspace/files (empty)"
+
+    def _rewrite_nested_rlm_prompt(
+        self, bound_session: Any, args: list[Any], kwargs: dict[str, Any]
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """Restrict `variables_info` workspace_manifest previews when an owned child interpreter is open."""
+        op = kwargs.get("op") if "op" in kwargs else (args[0] if args else None)
+        if op != "adapter":
+            return args, kwargs
+        nested_map = getattr(bound_session, "_nested", None)
+        if not isinstance(nested_map, dict):
+            return args, kwargs
+        active_child = next(
+            (
+                entry.interpreter
+                for entry in reversed(list(nested_map.values()))
+                if isinstance(getattr(entry, "interpreter", None), DaytonaInterpreter)
+                and entry.interpreter.owns_manager
+            ),
+            None,
+        )
+        if active_child is None:
+            return args, kwargs
+        prompt = kwargs.get("prompt") if "prompt" in kwargs else (args[1] if len(args) > 1 else None)
+        if not isinstance(prompt, dict) or "inputs" not in prompt:
+            return args, kwargs
+        raw_inputs = prompt["inputs"]
+        wrapped = (
+            isinstance(raw_inputs, dict)
+            and raw_inputs.keys() == {"__dspy__", "session", "value"}
+            and raw_inputs["__dspy__"] == "wire"
+            and isinstance(raw_inputs["value"], dict)
+        )
+        inputs_map = raw_inputs["value"] if wrapped else raw_inputs
+        if not isinstance(inputs_map, dict):
+            return args, kwargs
+        raw_info = inputs_map.get("variables_info")
+        info_wrapped = (
+            isinstance(raw_info, dict)
+            and raw_info.keys() == {"__dspy__", "session", "value"}
+            and raw_info["__dspy__"] == "wire"
+            and isinstance(raw_info["value"], list)
+        )
+        variables_info = raw_info["value"] if info_wrapped else raw_info
+        if not isinstance(variables_info, list):
+            return args, kwargs
+        prefix = "Variable: `workspace_manifest` (access it in your code)\n"
+        if not any(isinstance(item, str) and item.startswith(prefix) for item in variables_info):
+            return args, kwargs
+        from dspy.primitives.repl_types import REPLVariable
+
+        replacement = REPLVariable.from_value("workspace_manifest", active_child._child_workspace_manifest()).format()
+        updated_info = [
+            replacement if isinstance(item, str) and item.startswith(prefix) else item for item in variables_info
+        ]
+        new_info_field = {**raw_info, "value": updated_info} if info_wrapped else updated_info
+        new_inputs_map = {**inputs_map, "variables_info": new_info_field}
+        new_inputs_field = {**raw_inputs, "value": new_inputs_map} if wrapped else new_inputs_map
+        updated_prompt = {**prompt, "inputs": new_inputs_field}
+        if "prompt" in kwargs:
+            return args, {**kwargs, "prompt": updated_prompt}
+        return [args[0], updated_prompt, *args[2:]], kwargs
+
     def _invoke_tool(self, tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
         """The host invocation, not interpreter shutdown, owns child success."""
         children: list[Any] = []
         token = _NATIVE_CHILDREN.set(children)
+        bound_session = getattr(self.tools.get(tool_name), "__self__", None)
+        closing_child_interpreter: Any = None
+        if tool_name == "__dspy_lm__":
+            args, kwargs = self._rewrite_nested_rlm_prompt(bound_session, args, kwargs)
+        elif tool_name == "__dspy_interpreter__":
+            op = kwargs.get("op") if "op" in kwargs else (args[0] if args else None)
+            if op == "shutdown":
+                handle = kwargs.get("id") if "id" in kwargs else (args[1] if len(args) > 1 else None)
+                nested_map = getattr(bound_session, "_nested", None)
+                nested_entry = (
+                    nested_map.get(handle) if isinstance(nested_map, dict) and isinstance(handle, str) else None
+                )
+                closing_child_interpreter = getattr(nested_entry, "interpreter", None)
         try:
-            if tool_name == "__dspy_call__" and kwargs.get("handle") in self._code_agent_handles:
-                inputs = kwargs.get("inputs")
-                if isinstance(inputs, dict) and isinstance(inputs.get("workspace_manifest"), str):
-                    # Native code agents get fresh sandboxes with files/ and skills/, not
-                    # the root's artifact/memory inventory. Do not advertise inaccessible paths.
-                    paths = sorted(
-                        path
-                        for path in self.manager.list_workspace_files()
-                        if path.startswith("skills/")
-                        or (
-                            path.startswith("files/")
-                            if self.native_input_paths is None
-                            else path in self.native_input_paths
-                        )
-                    )
-                    kwargs = {
-                        **kwargs,
-                        "inputs": {
-                            **inputs,
-                            "workspace_manifest": ", ".join(f"/workspace/{path}" for path in paths)
-                            or "/workspace/files (empty)",
-                        },
-                    }
-            if tool_name == "__dspy_construct__" and kwargs.get("kind") == "RLM" and self.rlm_defaults:
-                native_kwargs = kwargs.get("kwargs")
-                # Leave malformed payloads and explicit field values to native validation.
-                if native_kwargs is None or isinstance(native_kwargs, dict):
-                    effective = dict(native_kwargs or {})
-                    for name, default in self.rlm_defaults.items():
-                        effective.setdefault(name, default)
-                    kwargs = {**kwargs, "kwargs": effective}
-            value = self.tools[tool_name](*args, **kwargs)
-            if tool_name == "__dspy_construct__" and isinstance(value, str):
-                self._code_agent_handles.discard(value)
-                cls = getattr(dspy, str(kwargs.get("kind", "")), None)
-                if cls is not None and "interpreter_factory" in inspect.signature(cls.__init__).parameters:
-                    self._code_agent_handles.add(value)
+            try:
+                value = self.tools[tool_name](*args, **kwargs)
+            except Exception:
+                if tool_name == "__dspy_lm__":
+                    self._session_lm_failed = True
+                raise
+            if tool_name == "__dspy_lm__" and isinstance(value, dict) and LM_ERROR_KEY in value:
+                self._session_lm_failed = True
             self.manager.check_turn()
-            for child in children:
-                child.collect_child_artifacts()
+            promote = closing_child_interpreter is None or (
+                getattr(closing_child_interpreter, "_completed_cleanly", False)
+                and not self._session_lm_failed
+                and getattr(bound_session, "lm_error", None) is None
+            )
+            if promote:
+                for child in children:
+                    child.collect_child_artifacts()
             return value
         finally:
             _NATIVE_CHILDREN.reset(token)
@@ -219,21 +306,26 @@ class DaytonaInterpreter:
 
     def _complete_sub_lm(self, prompt: str, active_lm: Any) -> Any:
         with dspy.context(lm=active_lm, disable_history=True):
-            return active_lm(prompt)[0]
+            result = active_lm(prompt)
+            if isinstance(result, dspy.lm15.Response):
+                return result.text
+            return result[0]
 
     @staticmethod
     def _valid_prompt(value: Any) -> bool:
         return isinstance(value, str) and len(value) <= 100_000
 
     def _llm_query(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        if "llm_query" in self.tools:
+            return self._invoke_tool("llm_query", args, kwargs)
         if len(args) != 1 or not self._valid_prompt(args[0]):
             raise ValueError("llm_query requires one prompt of at most 100000 characters")
-        if "llm_query" in self.tools:  # a Flex-registered override
-            return self._invoke_tool("llm_query", args, kwargs)
         self.manager.consume_budget()
         return self._complete_sub_lm(args[0], self.manager.sub_lm or dspy.settings.lm)
 
     def _llm_query_batched(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        if "llm_query_batched" in self.tools:
+            return self._invoke_tool("llm_query_batched", args, kwargs)
         if len(args) != 1:
             raise ValueError("llm_query_batched requires one prompt list")
         prompts = args[0]
@@ -244,8 +336,6 @@ class DaytonaInterpreter:
             or not all(map(self._valid_prompt, prompts))
         ):
             raise ValueError("llm_query_batched requires 1-100 bounded string prompts")
-        if "llm_query_batched" in self.tools:
-            return self._invoke_tool("llm_query_batched", args, kwargs)
         self.manager.consume_budget(len(prompts))
         active_lm = self.manager.sub_lm or dspy.settings.lm
         with ThreadPoolExecutor(max_workers=min(8, len(prompts))) as pool:
@@ -264,18 +354,22 @@ class DaytonaInterpreter:
                 raise
             return [future.result() for future in futures]
 
-    def _jev_decide_batched(self, args: list[Any], _kwargs: dict[str, Any]) -> Any:
-        if len(args) != 3:
-            raise ValueError("jev_decide_batched requires items, question, and choices")
-        items, question, choices = args
+    def _jev_decide_batched(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        if len(args) not in {2, 3}:
+            raise ValueError("jev_decide_batched requires items, question, and optional choices")
+        items, question = args[0], args[1]
+        choices = args[2] if len(args) == 3 else kwargs.get("choices")
+        invalid_choices = choices is not None and (
+            not isinstance(choices, list)
+            or any(not isinstance(choice, str) or not choice or len(choice) > 256 for choice in choices)
+            or len(set(choices)) != len(choices)
+        )
         if (
             not isinstance(items, list)
             or not all(map(self._valid_prompt, items))
             or not isinstance(question, str)
             or len(question) > 10_000
-            or not isinstance(choices, list)
-            or any(not isinstance(choice, str) or not choice or len(choice) > 256 for choice in choices)
-            or len(set(choices)) != len(choices)
+            or invalid_choices
         ):
             raise ValueError("Invalid Jev batch inputs")
         self.manager.consume_budget(len(items), category="other_decisions")
@@ -288,18 +382,18 @@ class DaytonaInterpreter:
         "jev_decide_batched": _jev_decide_batched,
     }
 
-    def _run_jev_batch(self, items: list[str], question: str, choices: list[str]) -> list[dict[str, Any]]:
-        """Classify 1-100 items against 1-20 choices, returning each item, choice, and decision evidence.
+    def _run_jev_batch(self, items: list[str], question: str, choices: list[str] | None = None) -> list[dict[str, Any]]:
+        """Classify 1-100 items via Choice (when `choices` is given) or boolean Noul (when `choices` is None).
 
         Prefer the Jev LM, then the sub LM, then the ambient DSPy LM. Invalid batch
-        counts raise ValueError; missing typed choices raise RuntimeError. Prediction
+        counts raise ValueError; missing typed decisions raise RuntimeError. Prediction
         and result shape errors propagate.
         """
-        if not items or not choices or len(items) > 100 or len(choices) > 20:
+        if not items or len(items) > 100 or (choices is not None and (not choices or len(choices) > 20)):
             raise ValueError("Jev batch inputs exceed the supported bounds")
         from pydantic import BaseModel
 
-        predictor = dspy.Predict(item_decision(choices))
+        predictor = dspy.Predict(yes_no_decision() if choices is None else item_decision(choices))
         active_lm = self.manager.jev_lm or self.manager.sub_lm or dspy.settings.lm
         examples = [dspy.Example(item=item, question=question).with_inputs("item", "question") for item in items]
         typesafe = active_lm is self.manager.jev_lm and self.manager.jev_lm is not None
@@ -313,10 +407,13 @@ class DaytonaInterpreter:
             results: list[dict[str, Any]] = []
             for item, prediction in zip(items, predictions, strict=True):
                 decision = getattr(prediction, "decision", None)
-                choice_value = getattr(decision, "value", None) if isinstance(decision, BaseModel) else None
-                if not isinstance(choice_value, str):
+                decision_value = getattr(decision, "value", None) if isinstance(decision, BaseModel) else None
+                if choices is None:
+                    if not isinstance(decision_value, bool):
+                        raise RuntimeError("Jev returned an invalid boolean decision")
+                elif not isinstance(decision_value, str):
                     raise RuntimeError("Jev returned an invalid decision")
-                results.append({"item": item, "decision": choice_value, **decision_evidence(decision, active_lm)})
+                results.append({"item": item, "decision": decision_value, **decision_evidence(decision, active_lm)})
             span.set_outputs({"decisions": [{k: v for k, v in row.items() if k != "item"} for row in results]})
             return results
 
@@ -331,6 +428,7 @@ class DaytonaInterpreter:
         rejections keeps a legitimate answer from blocking the Turn; past the cap it is accepted and flagged.
         """
         typed = figures(code)
+        unwrapped_final = _unwrap_wire(final)
 
         def unseen(value: Any) -> list[str]:
             return sorted(
@@ -339,10 +437,10 @@ class DaytonaInterpreter:
                 if literal in typed and not figure_grounded(literal, number, self._observed)
             )
 
-        substantive = final
-        if isinstance(final, dict) and "learned_skill_note" in final:
-            substantive = {key: value for key, value in final.items() if key != "learned_skill_note"}
-            note_figures = unseen(final["learned_skill_note"])
+        substantive = unwrapped_final
+        if isinstance(unwrapped_final, dict) and "learned_skill_note" in unwrapped_final:
+            substantive = {key: value for key, value in unwrapped_final.items() if key != "learned_skill_note"}
+            note_figures = unseen(unwrapped_final["learned_skill_note"])
             if note_figures:
                 span.set_attribute(
                     "learned_note_warning", {"field": "learned_skill_note", "figures": note_figures[:20]}
@@ -388,22 +486,31 @@ class DaytonaInterpreter:
             raise ValueError("Interpreter code exceeds the 1 MB size limit")
         if variables is not None and not isinstance(variables, dict):
             raise TypeError("Interpreter variables must be an object")
-        # Native Flex uses DSPy Type serializers and restores their original host
-        # objects at facade calls. Do not replace unsupported objects with str().
+        # Native Flex and RLM wire encode values into JSON-compatible structures.
         if variables is not None:
             variables = to_jsonable_python(variables)
+            if self.owns_manager and isinstance(variables.get("workspace_manifest"), str):
+                # Native child sandboxes receive copied files/ and skills/, not the parent's
+                # artifact/memory inventory. Do not advertise inaccessible paths.
+                variables = {
+                    **variables,
+                    "workspace_manifest": self._child_workspace_manifest(),
+                }
         self.start()
-        from dspy.primitives.facade import SHIM_SETUP
+        self._completed_cleanly = False
+        if code == BOOTSTRAP:
+            self._session_lm_failed = False
 
         execution_id = uuid.uuid4().hex
-        phase = "bootstrap" if code == SHIM_SETUP else "task"
+        phase = "bootstrap" if _is_bootstrap_code(code) else "task"
+        display_code = _strip_rebind_prelude(code) if phase == "task" else code
         started = time.monotonic()
         if phase == "task" and variables:
             self._observe(json.dumps(variables, default=str))
         self.manager.check_turn()
         self.manager.emit(
             "repl_code",
-            code=activity_text(code),
+            code=activity_text(display_code),
             namespace=self.ns_id,
             execution_id=execution_id,
             phase=phase,
@@ -422,7 +529,7 @@ class DaytonaInterpreter:
                     "sandbox_id": getattr(getattr(self.manager, "_sandbox", None), "id", None),
                 }
             )
-            span.set_inputs({"code": activity_text(code)})
+            span.set_inputs({"code": activity_text(display_code)})
             host_calls_before = self._host_calls
             try:
                 payload: dict[str, Any] = {
@@ -436,15 +543,16 @@ class DaytonaInterpreter:
                 with self._host_call_lock:
                     self._format_failures[execution_id] = {}
                 response = self.manager.run_namespace(self, payload)
+                preview_target = _unwrap_wire(
+                    response.get("final") if response.get("final") is not None else response.get("value")
+                )
                 span.set_outputs(
                     {
                         "skill_activity": response.get("skill_activity", []),
                         "skill_activity_truncated": response.get("skill_activity_truncated", False),
                         "stdout": activity_text(str(response.get("stdout", ""))),
                         "stderr": activity_text(str(response.get("stderr", ""))),
-                        "value": activity_preview(
-                            response.get("final") if response.get("final") is not None else response.get("value")
-                        ),
+                        "value": activity_preview(preview_target),
                         "error": bool(response.get("error")),
                     }
                 )
@@ -477,8 +585,10 @@ class DaytonaInterpreter:
                 response["outcome"] = "completed"
                 if response.get("final") is not None:
                     if phase == "task":
-                        self._check_grounded_submit(code, response["final"], span, CodeExecutionError)
+                        self._check_grounded_submit(display_code, response["final"], span, CodeExecutionError)
+                    self._completed_cleanly = True
                     return FinalOutput(response["final"])
+                self._completed_cleanly = True
                 if response.get("has_value") and response.get("value") is not None:
                     return response["value"]
                 return (str(response.get("stdout", "")) + str(response.get("stderr", "")))[-20_000:].strip() or None
@@ -517,7 +627,9 @@ class DaytonaInterpreter:
                     stdout=activity_text(str(response.get("stdout", ""))),
                     stderr=activity_text(str(response.get("stderr", ""))),
                     value=activity_preview(
-                        response.get("final") if response.get("final") is not None else response.get("value")
+                        _unwrap_wire(
+                            response.get("final") if response.get("final") is not None else response.get("value")
+                        )
                     ),
                     error=bool(response.get("error")) or not response,
                     error_type=response.get("error_type"),

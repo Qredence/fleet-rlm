@@ -26,15 +26,18 @@ class ScriptedLM(dspy.utils.DummyLM):
             raise response
         return response
 
-    def _record(self, kwargs):
-        self.calls.append(deepcopy(kwargs))
+    def _record(self, args, kwargs):
+        call = deepcopy(kwargs)
+        if args and hasattr(args[0], "messages"):
+            call["messages"] = deepcopy(args[0].messages)
+        self.calls.append(call)
 
     def __call__(self, *args, **kwargs):
-        self._record(kwargs)
+        self._record(args, kwargs)
         return super().__call__(*args, **kwargs)
 
     async def acall(self, *args, **kwargs):
-        self._record(kwargs)
+        self._record(args, kwargs)
         return await super().acall(*args, **kwargs)
 
 
@@ -81,8 +84,8 @@ def test_native_fallback_cannot_bypass_turn_limits(asynchronous, stop):
     manager = DaytonaSandboxManager("key", "org", "volume", "native-limits", max_llm_calls=1)
 
     class StoppingLM(ScriptedLM):
-        def _record(self, kwargs):
-            super()._record(kwargs)
+        def _record(self, args, kwargs):
+            super()._record(args, kwargs)
             if stop == "deadline":
                 manager._deadline = time.monotonic() - 1
             elif stop == "cancel":

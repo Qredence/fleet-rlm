@@ -54,7 +54,7 @@ Use `/mode hybrid`, then enter exactly:
 Convert 72 degrees Fahrenheit to Celsius, rounded to one decimal place.
 ```
 
-The expected value is **22.2** and the current computation rubric expects **Flex**.
+The expected value is **22.2** and 3-way triage routes this bounded single-pass calculation to **Flex** (which the current computation rubric expects).
 The historical run with a gold direct label remains recorded as a mismatch;
 new label versions do not erase that evidence. Retain the answer, reported route, trace ID,
 Session ID, persistence confirmation, and `/history` and `/trace` output. Exit

@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -70,16 +71,20 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
         return value
 
     factory = lambda: RecordingInterpreter(manager)  # noqa: E731
+    # A nested RLM receives native JSON metadata, not a guest-defined codec or its methods.
+    read_lines = "workspace.read_text(context['path']).splitlines()" if route == "flex" else "list(context.lines())"
+    remember_context = "context_metadata = dict(context)" if route == "flex" else "view_id = id(context)"
+    check_context = "assert context == context_metadata" if route == "flex" else "assert id(context) == view_id"
     lm = dspy.utils.DummyLM(
         [
             {
-                "reasoning": "Read the sandbox file",
-                "code": "assert 'view_id' not in globals()\nview_id = id(context)\n"
-                "subtotal = sum(int(line.split(',')[1]) for line in list(context.lines())[1:])\nprint(subtotal)",
+                "plan": "Read the sandbox file",
+                "code": "assert 'subtotal' not in globals()\n" + remember_context + "\n"
+                f"subtotal = sum(int(line.split(',')[1]) for line in {read_lines}[1:])\nprint(subtotal)",
             },
             {
-                "reasoning": "Reuse the computed value",
-                "code": "assert id(context) == view_id\nSUBMIT(answer=str(subtotal), learned_skill_note='')",
+                "plan": "Reuse the computed value",
+                "code": check_context + "\nSUBMIT(answer=str(subtotal), learned_skill_note='')",
             },
         ]
         * 2
@@ -104,7 +109,7 @@ def test_dataset_native_roundtrip_loads_once_and_keeps_iteration_state(sandbox, 
             assert prediction.answer == "28" and prediction.route == route
             assert not manager._contexts and not manager._interpreters and not sandbox.code_interpreter.contexts
     assert serialized == [dataset, dataset]
-    assert assignments == [(dataset, "context"), (dataset, "context")]
+    assert [item[0] for item in assignments] == [dataset, dataset]
     assert not any("__FILE_BODY_ONLY__" in payload for payload in transported)
     assert len(dataset.rlm_preview(40)) <= 40
     assert manager.turn_usage()["submit_rejections"] == manager.turn_usage()["sandbox_errors"] == 0
@@ -323,33 +328,81 @@ def test_host_tools_run_in_the_interpreters_dspy_context(sandbox):
 
 @pytest.mark.parametrize("selected", [None, ("artifacts/prior.txt",), ("/workspace/artifacts/prior.txt",)])
 def test_native_code_agent_manifest_matches_child_copy_policy(sandbox, monkeypatch, selected):
+    from dspy.primitives.facade import SandboxLM
+
     manager = manager_on(sandbox)
     paths = ["files/source.txt", "skills/check/SKILL.md", "artifacts/prior.txt", "memory/private.txt"]
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: paths)
-    received = []
-    interpreter = DaytonaInterpreter(manager, native_input_paths=selected)
-    interpreter.tools.update(
-        {
-            "__dspy_construct__": lambda **kwargs: kwargs["attr_name"],
-            "__dspy_call__": lambda **kwargs: received.append(kwargs) or {},
-        }
-    )
-    interpreter._invoke_tool("__dspy_construct__", [], {"kind": "RLM", "attr_name": "agent"})
-    inputs = {"workspace_manifest": ", ".join(f"/workspace/{p}" for p in paths), "task": "read inputs"}
-    original = dict(inputs)
-    interpreter._invoke_tool("__dspy_call__", [], {"handle": "agent", "inputs": inputs})
+    monkeypatch.setattr(DaytonaSandboxManager, "collect_child_artifacts", lambda _self: [])
+    children = []
+
+    def allocate(_self, **_kwargs):
+        child = manager_on(sandbox, name=f"child-{len(children)}")
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(DaytonaSandboxManager, "allocate_child", allocate)
     expected = (
         ["files/source.txt", "skills/check/SKILL.md"]
         if selected is None
         else ["artifacts/prior.txt", "skills/check/SKILL.md"]
     )
-    assert received[-1]["inputs"]["workspace_manifest"] == ", ".join(f"/workspace/{p}" for p in expected)
-    assert inputs == original
-    assert received[-1]["inputs"]["task"] == "read inputs"
-    # Reusing a handle for a host-only predictor must not rewrite its inputs.
-    interpreter._invoke_tool("__dspy_construct__", [], {"kind": "Predict", "attr_name": "agent"})
-    interpreter._invoke_tool("__dspy_call__", [], {"handle": "agent", "inputs": inputs})
-    assert received[-1]["inputs"] == original
+    expected_manifest = ", ".join(f"/workspace/{p}" for p in expected)
+    full_manifest = ", ".join(f"/workspace/{p}" for p in paths)
+    prompts_seen: list[str] = []
+
+    from dspy.clients.engines.dummy_engine import AsyncDummyEngine, DummyEngine
+    from dspy.lm15 import Message, Response, TextPart, Usage
+
+    class ManifestEngine(DummyEngine):
+        def _complete_messages(self, messages):
+            user_text = messages[-1]["content"]
+            prompts_seen.append(user_text)
+            if len(prompts_seen) == 1:
+                assert expected_manifest in user_text
+                assert "memory/private.txt" not in user_text
+                if selected is None:
+                    assert "artifacts/prior.txt" not in user_text
+                else:
+                    assert "files/source.txt" not in user_text
+                payload = {"plan": "inspect child manifest", "code": "SUBMIT(answer=workspace_manifest)"}
+            else:
+                assert all(p in user_text for p in paths)
+                payload = {"answer": "predict-ok"}
+            return Response(
+                id=None,
+                model="dummy",
+                message=Message.assistant([TextPart(self.owner._format_answer_fields(payload) or "")]),
+                finish_reason="stop",
+                usage=Usage(input_tokens=0, output_tokens=0, total_tokens=0),
+            )
+
+    lm = dspy.utils.DummyLM([])
+    lm._engine_spec = ManifestEngine(lm)
+    lm._async_engine_spec = AsyncDummyEngine(lm._engine_spec)
+    source = """class Program(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.rlm = dspy.RLM("workspace_manifest, task -> answer", max_iters=2)
+        self.predict = dspy.Predict("workspace_manifest, task -> answer")
+
+    def forward(self, **inputs):
+        child = self.rlm(**inputs)
+        host = self.predict(**inputs)
+        return dspy.Prediction(answer=f"{child.answer}|{host.answer}")
+"""
+    factory = manager.interpreter_factory(input_paths=list(selected) if selected is not None else None)
+    flex = dspy.Flex("workspace_manifest, task -> answer", interpreter_factory=factory)
+    flex.load_state({"module_src": source})
+    with dspy.context(lm=SandboxLM(lm, manager.consume_budget), disable_history=True):
+        prediction = flex(workspace_manifest=full_manifest, task="read inputs")
+    child_answer, host_answer = prediction.answer.split("|", 1)
+    assert host_answer == "predict-ok"
+    assert all(p in child_answer for p in expected)
+    assert "memory/private.txt" not in child_answer
+    assert ("artifacts/prior.txt" not in child_answer) if selected is None else ("files/source.txt" not in child_answer)
+    assert len(prompts_seen) == 2
+    assert children and all(not child._contexts for child in children)
 
 
 def test_exec_span_records_the_execution_and_its_host_calls(sandbox, monkeypatch):
@@ -476,7 +529,7 @@ def test_sandbox_skill_receipts_reach_the_progressive_disclosure_scorer(sandbox,
 
 
 def test_bridge_and_execution_events_show_evidence_and_hide_secrets(sandbox):
-    from dspy.primitives.facade import SHIM_SETUP
+    from dspy.primitives.facade import SandboxSession
 
     events: list[dict[str, Any]] = []
     manager = manager_on(sandbox, events, "activity-test")
@@ -484,7 +537,7 @@ def test_bridge_and_execution_events_show_evidence_and_hide_secrets(sandbox):
     interpreter.execute("lookup()")
     with pytest.raises(CodeExecutionError):
         interpreter.execute("missing_tool()")
-    interpreter.execute(SHIM_SETUP)
+    SandboxSession({}, interpreter_factory=lambda: interpreter).install(interpreter, import_dspy=False)
 
     assert "hidden" not in json.dumps(events)
     [tool_end] = [e for e in events if e["event"] == "tool_end"]
@@ -741,9 +794,9 @@ def test_should_submit_captured_results_and_note_without_a_recovery_iteration(sa
     # The scripted observation is captured evidence, not a fresh computation of pi.
     lm = dspy.utils.DummyLM(
         [
-            {"reasoning": "Use the captured execution output", "code": f"print({fixture['captured_stdout']!r})"},
+            {"plan": "Use the captured execution output", "code": f"print({fixture['captured_stdout']!r})"},
             {
-                "reasoning": "Submit the observed result",
+                "plan": "Submit the observed result",
                 "code": f"SUBMIT(answer='5', learned_skill_note={fixture['learned_note']!r})",
             },
         ]
@@ -1162,3 +1215,83 @@ def test_cancellation_during_resource_sampling_refuses_completed_result(sandbox,
     monkeypatch.setattr(type(manager), "resource_sample", lambda self: self.root._cancelled.set())
     with pytest.raises(RuntimeError, match="cancelled"):
         interpreter.execute("1 + 1")
+
+
+@pytest.mark.parametrize("payload", ["42", "'not a workspace descriptor'", "{'path': 'files/input.csv'}"])
+def test_native_host_values_refuse_guest_codec_reconstruction(payload):
+    from dspy.primitives.facade import HostValues
+    from dspy.primitives.sandbox_guest import _VALUE
+
+    node = {"__dspy__": "codec", "name": "_input", "text": "", "assign": f"{_VALUE} = {payload}"}
+    with pytest.raises(ValueError, match="Only the sandbox rebuilds"):
+        HostValues().decode(node)
+
+
+def test_dataset_view_forwarded_to_host_tool_is_plain_metadata(sandbox):
+    sandbox.fs.upload_file(b"__BODY_STAYS_IN_DAYTONA__", "/workspace/files/input.txt")
+    dataset = WorkspaceDataset("files/input.txt", description="Selected file")
+    received = []
+
+    def inspect_metadata(value: dict[str, Any]) -> str:
+        received.append(value)
+        assert type(value) is dict
+        return value["path"]
+
+    signature = dspy.Signature({"context": (Any, dspy.InputField()), "answer": (str, dspy.OutputField())})
+    flex = dspy.Flex(signature, tools=[inspect_metadata], interpreter_factory=manager_on(sandbox).interpreter_factory())
+    flex.load_state(
+        {
+            "module_src": """class Program(dspy.Module):
+    def forward(self, context):
+        return dspy.Prediction(answer=inspect_metadata(value=context))
+"""
+        }
+    )
+    assert flex(context=dataset).answer == "files/input.txt"
+    assert received == [{"path": "files/input.txt", "description": "Selected file", "size_bytes": 0, "sha256": ""}]
+    assert not sandbox.code_interpreter.contexts
+
+
+@pytest.mark.parametrize("extract_fallback", [False, True])
+def test_native_rlm_history_persists_all_new_events_after_pruning(sandbox, extract_fallback):
+    from dspy.primitives.repl_types import REPLEntry, build_repl_event
+
+    from fleet_rlm.contracts import Route
+    from fleet_rlm.engine.invocation import FleetRuntime
+    from fleet_rlm.engine.reasoning import _MAX_RLM_HISTORY_EVENTS
+
+    previous = dspy.History(
+        messages=[
+            build_repl_event({"task": "old task"}, REPLEntry(code=f"print({index})", output=str(index)))
+            for index in range(_MAX_RLM_HISTORY_EVENTS)
+        ]
+    )
+    before = deepcopy(previous.messages)
+    responses = [{"plan": "Compute", "code": "print(17 + 23)"}]
+    if extract_fallback:
+        responses.append({"plan": "Verify", "code": "print(40)"})
+    responses.append(
+        {"answer": "40", "learned_skill_note": ""}
+        if extract_fallback
+        else {"plan": "Submit", "code": "SUBMIT(answer='40', learned_skill_note='')"}
+    )
+    lm = dspy.utils.DummyLM(responses)
+    engine = FleetRuntime(manager_on(sandbox), lm, lm)
+    engine.program.reasoning.rlm.max_iters = 2
+    with dspy.context(disable_history=True):
+        result = engine.program.reasoning(
+            route=Route.RLM,
+            workspace_manifest="",
+            memory_summary="",
+            task="Add the numbers",
+            skills_catalog="",
+            session_history="",
+            context="",
+            mode="rlm",
+            rlm_history=previous,
+        )
+    assert result.answer == "40"
+    assert len(result.rlm_history) == (3 if extract_fallback else 2)
+    assert result.rlm_history[0]["repl_entry"]["code"] == "print(17 + 23)"
+    assert result.rlm_history[-1]["outputs"]["answer"] == "40"
+    assert previous.messages == before

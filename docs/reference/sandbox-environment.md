@@ -53,16 +53,25 @@ task-specific computation and verification code and executes it in the Daytona
 REPL. Shared instructions guide timing and stopping behavior across tasks.
 
 Semantic `llm_query_batched` calls delegate to injected native DSPy tools first.
-The outer Flex fallback reserves the whole prompt list once and runs at most
-eight workers, each with a separate copy of the submitting Turn's ContextVars.
+`jev_decide_batched` handles batched item decisions with discrete choices or boolean
+`Noul` classification. The outer Flex fallback reserves the whole prompt list once and
+runs at most eight workers, each with a separate copy of the submitting Turn's ContextVars.
 Results remain in input order and worker exceptions propagate. Skill relevance
-and item decision batches use native DSPy batching with `timeout=0` to disable
+batches use native DSPy boolean `Noul` classification with `timeout=0` to disable
 speculative straggler resubmission; Fleet's independent Turn deadline still applies.
 These logical budget units differ from observable model requests and token usage.
 
-Flex/RLM and explicit children use native ChatAdapter execution and JSON recovery
-with a temporary native-first parser for two recorded gateway formats. Valid
-native responses are never preprocessed, and Fleet makes no corrective request.
+Flex/RLM and explicit children use native `XMLAdapter` execution by default (with
+`ChatAdapter` and `JSONAdapter` available via configuration) and native wire serialization.
+The guest environment runs with preloaded DSPy (`dspy.primitives.sandbox_guest`).
+The host's `WorkspaceDataset` uses the native one-way `SandboxSerializable` contract
+to create a file-backed `WorkspaceDatasetView` in guest Python. Forwarding that view
+to a nested agent or host tool carries only JSON metadata (`path`, description, size,
+and digest), never reconstruction code or file contents. A nested agent can use
+`workspace.read_text(context['path'])` or `WorkspaceDatasetView(context)` to access
+its copied input. DSPy's host decoder remains unmodified and rejects guest codecs.
+`workspace.load_image(path)` loads workspace images as native `dspy.Image` objects.
+Valid native responses are never preprocessed, and Fleet makes no corrective request.
 The direct route retains its separate adapter policy. See the
 [native DSPy implementation report](../runbooks/native-dspy-integration.md)
 for offline coverage and the remaining compatibility gate.

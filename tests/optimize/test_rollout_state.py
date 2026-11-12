@@ -30,8 +30,8 @@ from tests.optimize.test_optimization import _selected_snapshot
 class FleetScriptedInterpreter(ScriptedCodeInterpreter):
     def execute(self, code, variables=None):
         result = super().execute(code, variables)
-        if "__dspy_flex_instance = FleetTaskModule()" in code:
-            return json.dumps({**json.loads(result), "learned_skill_note": ""})
+        if "__dspy_run_forward(globals(), 'FleetTaskModule', __dspy_flex_inputs)" in code:
+            return json.dumps({"fields": {**json.loads(result)["fields"], "learned_skill_note": ""}})
         return result
 
 
@@ -47,7 +47,7 @@ def _engine(mode="hybrid", jev=None):
     manager = DaytonaSandboxManager("key", "org", "volume", "state-parity", max_llm_calls=7)
     return FleetRuntime(
         manager,
-        dspy.utils.DummyLM([{"reasoning": "Fixed offline response", "answer": "right"}] * 20),
+        dspy.utils.DummyLM([{"plan": "Fixed offline response", "answer": "right"}] * 20),
         dspy.LM("openai/sub"),
         jev_lm=jev,
         execution_mode=mode,
@@ -113,15 +113,13 @@ def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tm
         assert durable_runtime.program.dump_state() == native.dump_state()
         for runtime in (native_runtime, durable_runtime):
             engine = runtime.program
-            for route in (Route.DIRECT, Route.RLM):
+            for route in Route:
                 decision_lm = dspy.utils.DummyLM(
                     [
                         {
                             "route": json.dumps(
                                 {
-                                    "probabilities": {
-                                        item.value: float(item is route) for item in (Route.DIRECT, Route.RLM)
-                                    },
+                                    "probabilities": {item.value: float(item is route) for item in Route},
                                     "confidence": 1.0,
                                 }
                             )
@@ -359,7 +357,7 @@ def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_f
         assert engine.sandbox_mgr.shutdown_calls == 1
         assert engine.compiled_path is None
         assert program.reasoning.rlm.max_llm_calls == 7
-        assert program.reasoning.flex._interpreter_factory().rlm_defaults == {"max_iters": 16, "max_llm_calls": 7}
+        assert program.reasoning.flex._max_predictor_calls == 7
         assert program.reasoning.rlm._user_tools["spawn_agent"].func.__self__ is engine.delegation
     assert engines[0].delegation is not engines[1].delegation
 

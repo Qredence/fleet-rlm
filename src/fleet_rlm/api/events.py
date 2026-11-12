@@ -13,6 +13,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
+import dspy
 from dspy.utils.callback import ACTIVE_CALL_ID
 
 from fleet_rlm.observability import LMUsageCallback, activity_preview, activity_text
@@ -198,7 +199,20 @@ class AdvisoryStatus:
 
 
 def _reasoning_text(outputs: Any) -> str:
-    """The provider's reasoning_content for the first completion, redacted and capped for streaming."""
+    """The provider's thinking or reasoning text for the completion, redacted and capped for streaming."""
+    message = getattr(outputs, "message", None)
+    if message is None and isinstance(outputs, list) and outputs:
+        message = getattr(outputs[0], "message", None)
+    if message is not None and hasattr(message, "parts_of"):
+        with contextlib.suppress(Exception):
+            parts = list(message.parts_of(dspy.lm15.ThinkingPart))
+            if parts:
+                text = "".join(getattr(p, "text", "") for p in parts if getattr(p, "text", None))
+                if text:
+                    return activity_text(text)
+    thinking = getattr(outputs, "thinking", None)
+    if isinstance(thinking, str) and thinking:
+        return activity_text(thinking)
     first = outputs[0] if isinstance(outputs, list) and outputs else None
     reasoning = first.get("reasoning_content") if isinstance(first, dict) else None
     return activity_text(reasoning) if isinstance(reasoning, str) else ""

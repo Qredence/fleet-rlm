@@ -51,13 +51,14 @@ flowchart LR
   dataset admission, native invocation, callbacks and authoritative evidence between
   serving and freshly reconstructed isolated rollouts. Outer Turn/Session owners
   retain persistence, cancellation arbitration and teardown.
-- `engine/compiled.py` accepts only complete `fleet-program-b1` envelopes. Legacy
-  native JSON remains inspectable, not installable; there is no old-root alias or
-  key conversion. There is one global installed program, `fleet.json`; an absent
-  file means baseline only while no global job was ever approved. The ledger
-  (`Store.approved_program`) is checked at runtime creation and every Turn, so a
-  missing or changed file refuses execution regardless of process age; an invalid
-  file refuses too. Every Session picks up an approval at its next Turn.
+- `engine/compiled.py` accepts only complete `fleet-program-b2` envelopes. Legacy
+  native JSON and `fleet-program-b1` envelopes remain inspectable, not installable;
+  there is no old-root alias or key conversion. There is one global installed
+  program, `fleet.json`; an absent file means baseline only while no global job
+  was ever approved. The ledger (`Store.approved_program`) is checked at runtime
+  creation and every Turn, so a missing or changed file refuses execution regardless
+  of process age; an invalid file refuses too. Every Session picks up an approval
+  at its next Turn.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
@@ -69,6 +70,8 @@ See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 - `/config` exposes safe values, sources, and a digest.
 - The selected local or Databricks MLflow profile initializes before API readiness.
 - `/health` identifies the tracking destination to prevent incompatible reuse.
+- Adapters default to `XMLAdapter` (`adapter = "xml"`, with native function calling) across all roles, with optional `"chat"` (`ChatAdapter`) and `"json"` (`JSONAdapter`).
+- `model_type` defaults to `"auto"` across all roles, automatically routing custom OpenAI-compatible gateways to `"chat"`.
 
 Local setup:
 
@@ -171,15 +174,22 @@ Deadlines:
 - Routes are `direct`, `flex`, and `rlm`.
 - Strict modes bypass triage.
 - Hybrid uses Jev when configured, otherwise generative routing.
-- Automatic Hybrid chooses Direct or RLM; Flex remains an explicit mode only.
+- Automatic Hybrid uses a 3-way `Choice` across `direct`, `flex`, and `rlm`:
+  `direct` for self-contained responses requiring no code, files, or Skills;
+  `flex` for one bounded calculation, structured file/table inspection, or single-pass workflow with known inputs and verifiable outputs;
+  `rlm` for multi-step iterative investigation, open-ended discovery, progressive Skill workflows, or multi-agent decomposition.
 - Routing errors or unknown labels fall back to RLM.
 - Selected datasets cannot use context-free direct answers.
-- RLM tunes instructions. Flex rewrites module source and initially wraps RLM when given tools.
-- Both execution routes carry the Turn's RLM budgets. The outer Flex interpreter supplies
-  omitted `max_iters` / `max_llm_calls` at native RLM construction, without editing source.
-  Explicit values are preserved; deeper factories and explicit child limits do not inherit these defaults.
+- RLM tunes instructions and supports multi-turn `dspy.History`. Flex rewrites module source and wraps RLM when given tools.
+- Both execution routes share the host-enforced Turn budget. RLMs authored inside Flex
+  retain native DSPy constructor defaults (`max_iters=20`, `max_llm_calls=50`) unless
+  explicitly set; Fleet does not patch constructors or rewrite generated source.
+- Native guest RLM executes inside Daytona with preloaded DSPy (`dspy.primitives.sandbox_guest`)
+  and native wire serialization. Host dataset codecs create file-backed `WorkspaceDatasetView`
+  handles; forwarded views carry only JSON metadata. Guest codec reconstruction never runs on the host.
+  `workspace.load_image` supplies native DSPy images.
 - Both RLM and Flex can delegate.
-- Optional Jev Skill selection preloads up to three instructions and consumes shared budget.
+- Optional Jev Skill selection preloads up to three instructions using `Noul` relevance and consumes shared budget.
 - Ordinary Skill selection failures retain the catalog.
 - DSPy overrides use scoped `dspy.context`. Pinned bridges need upgrade validation.
 
@@ -232,6 +242,12 @@ Progress events:
 - Serving, correctness judging, and reflection use separate roles; `[llm.judge]` inherits base `[llm]` credentials when omitted.
 - Route assessments identify Jev or generative backends.
 - Diagnostic scorers do not automatically become GEPA objectives; execution-evidence diagnostics (`execution-evidence-v3`) can run out-of-band via `fleet eval score` without blocking online Turn tracing.
+- Two-stage optimization runs native GEPA search followed by ReAnchor calibration:
+  Stage 1 searches instruction candidates and Flex code via `dspy.GEPA`.
+  Stage 2 executes native `dspy.experimental.ReAnchor` when a decision LM is configured,
+  fitting triage `Choice` weights and Skill `Noul` thresholds on training examples only.
+  Changed calibrated state is adopted when validation does not regress, before paired validation
+  and holdout gates (`fleet-program-b2`, approval evidence version 3).
 - Search uses approved immutable replays grouped by lineage in isolated runtimes.
   Nonempty train/dev/holdout splits and critical holdout are required before native search.
 - Gold stays outside program inputs. Host receipts support artifact and delegation scoring.

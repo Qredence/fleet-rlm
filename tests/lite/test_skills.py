@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
 
-from fleet_rlm.skills import SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
+from fleet_rlm.skills import BUNDLED_SKILLS_DIR, SANDBOX_SKILL_HELPERS_CODE, SkillManager, parse_and_validate_skill_md
 
 
 def test_skill_frontmatter_uses_yaml_and_preserves_colons_in_description() -> None:
@@ -141,3 +142,27 @@ def test_stage_local_skills_returns_catalog_and_files_in_one_scan(tmp_path: Path
     assert scans == 1
     assert 'name="audit-skill"' in catalog
     assert staged_files == {"skills/audit-skill/SKILL.md": skill_md}
+
+
+def test_bundled_skill_discovery_and_activation_do_not_install_packages(tmp_path: Path, monkeypatch) -> None:
+    bundled_skills = (
+        "delegation",
+        "long-context-search",
+        "repository-inspection",
+        "skill-creator",
+        "tabular-analysis",
+    )
+    root = tmp_path / "skills"
+    shutil.copytree(BUNDLED_SKILLS_DIR, root)
+    helpers: dict = {}
+    exec(SANDBOX_SKILL_HELPERS_CODE.replace('Path("/workspace/skills")', f"Path({str(root)!r})"), helpers)
+
+    def unexpected_process(*_args, **_kwargs):
+        pytest.fail("Discovering or activating a Skill must not launch a process")
+
+    monkeypatch.setattr(helpers["subprocess"], "run", unexpected_process)
+    catalog = {item["name"] for item in helpers["list_skills"]()}
+    assert catalog == set(bundled_skills)
+    for name in bundled_skills:
+        activated = helpers["use_skill"](name)
+        assert f"# Skill: {name}" in activated

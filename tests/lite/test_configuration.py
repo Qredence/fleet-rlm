@@ -162,19 +162,15 @@ def test_build_jev_lm_returns_none_without_typesafe_key():
     assert FleetSettings(_env_file=None, typesafe_api_key="").build_jev_lm() is None
 
 
-def test_build_jev_lm_builds_the_configured_typesafe_model(monkeypatch):
-    import dspy.experimental
+def test_build_jev_lm_builds_the_configured_typesafe_model():
+    import dspy
 
-    built = []
-
-    class StubTypeSafe:
-        def __init__(self, model, *, api_key):
-            built.append((model, api_key))
-
-    monkeypatch.setattr(dspy.experimental, "TypeSafe", StubTypeSafe)
     lm = FleetSettings(_env_file=None, typesafe_api_key="credential-marker", typesafe_model="jev-1.14.0").build_jev_lm()
-    assert isinstance(lm, StubTypeSafe)
-    assert built == [("jev-1.14.0", "credential-marker")]
+    assert isinstance(lm, dspy.LM)
+    assert lm.model == "typesafe:jev-1.14.0"
+    assert lm.supports_decision_requests is True
+    assert lm.cache is False and lm.engine == "lm15"
+    assert lm.kwargs["api_key"] == "credential-marker"
 
 
 def test_shipped_defaults_cap_root_output_but_not_sub(monkeypatch):

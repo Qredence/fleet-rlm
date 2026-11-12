@@ -6,7 +6,7 @@ import hashlib
 import logging
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import dspy
 from dspy.primitives.facade import SandboxLM
@@ -59,8 +59,10 @@ class FleetRuntime:
         self.sandbox_mgr, self.root_lm, self.sub_lm, self.jev_lm = sandbox_mgr, root_lm, sub_lm, jev_lm
         self.compiled_path, self.execution_mode = compiled_path, execution_mode
         self.installed_program = installed_program
-        self.root_adapter = root_adapter if root_adapter is not None else dspy.ChatAdapter()
-        self.sub_adapter = sub_adapter if sub_adapter is not None else dspy.ChatAdapter()
+        self.root_adapter = (
+            root_adapter if root_adapter is not None else dspy.XMLAdapter(use_native_function_calling=True)
+        )
+        self.sub_adapter = sub_adapter if sub_adapter is not None else dspy.XMLAdapter(use_native_function_calling=True)
         sandbox_mgr.sub_adapter = self.sub_adapter
         self._metered_root = SandboxLM(root_lm, sandbox_mgr.consume_budget)
         self._metered_sub = SandboxLM(sub_lm, sandbox_mgr.consume_budget)
@@ -83,9 +85,7 @@ class FleetRuntime:
                 adapter=self.root_adapter,
                 tools=tools,
                 rlm_factory=sandbox_mgr.interpreter_factory(tools=toolset),
-                flex_factory=sandbox_mgr.interpreter_factory(
-                    tools=toolset, rlm_defaults={"max_iters": 16, "max_llm_calls": sandbox_mgr.max_llm_calls}
-                ),
+                flex_factory=sandbox_mgr.interpreter_factory(tools=toolset),
                 max_llm_calls=sandbox_mgr.max_llm_calls,
                 inline_context=self.workspace.inline_context,
                 emit=sandbox_mgr.emit,
@@ -122,6 +122,7 @@ class FleetRuntime:
         execution_mode: str | None = None,
         required_skills: tuple[RequiredSkill, ...] = (),
         selected_route: Route | None = None,
+        rlm_history: dspy.History | None = None,
     ) -> dspy.Prediction:
         """Use the same host path for ordinary Turns and reconstructed evaluation rollouts."""
         return invoke_program(
@@ -135,6 +136,7 @@ class FleetRuntime:
             execution_mode=execution_mode or self.execution_mode,
             required_skills=required_skills,
             selected_route=selected_route,
+            rlm_history=rlm_history,
         )
 
     def preview_route(self, *, task: str, workspace_manifest: str, skills_catalog: str) -> Route:
@@ -153,7 +155,7 @@ class FleetRuntime:
                 has_required_skills=False,
             )
         self._preview_turn_generation = generation
-        return route
+        return cast(Route, route)
 
     def execution_evidence(self) -> dict[str, Any]:
         """Only host receipts certify usage and artifacts; ordinary collection failures score incomplete."""

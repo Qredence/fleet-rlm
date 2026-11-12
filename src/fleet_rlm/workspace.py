@@ -5,11 +5,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
 
-from dspy import SandboxSerializable, Type
-from pydantic import ConfigDict, GetCoreSchemaHandler
-from pydantic_core import CoreSchema
+from dspy import SandboxSerializable
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
@@ -143,10 +140,29 @@ class Workspace:
     def remember(self,name,content): return self.write('memory/'+name,content)
     def diff(self,path,proposed):
         return ''.join(difflib.unified_diff(self.read_text(path).splitlines(True),proposed.splitlines(True)))
+    def load_image(self,path,max_bytes=10000000):
+        import base64, mimetypes
+        import dspy
+        if not 0<=max_bytes<=__FLEET_MAX_FILE_BYTES__: raise ValueError('invalid read bounds')
+        p = self.resolve(path)
+        size = p.stat().st_size
+        if size>max_bytes: raise ValueError('image exceeds max_bytes')
+        raw = p.read_bytes()
+        mime, _ = mimetypes.guess_type(p.name)
+        if not mime or not mime.startswith('image/'):
+            if raw.startswith(b'\x89PNG\r\n\x1a\n'): mime = 'image/png'
+            elif raw.startswith(b'\xff\xd8\xff'): mime = 'image/jpeg'
+            elif raw.startswith((b'GIF87a', b'GIF89a')): mime = 'image/gif'
+            elif raw.startswith(b'RIFF') and raw[8:12]==b'WEBP': mime = 'image/webp'
+            else: raise ValueError('unsupported image format')
+        return dspy.Image(url=f'data:{mime};base64,{base64.b64encode(raw).decode("ascii")}')
 
-class WorkspaceDatasetView:
+class WorkspaceDatasetView(dict):
     def __init__(self, metadata):
-        self.metadata = metadata
+        # The host's one-way SandboxSerializable hook creates this guest-only view.
+        # When forwarded to a nested agent or host tool, only JSON metadata crosses.
+        super().__init__(metadata)
+        self.metadata = self
         self.path = str(workspace.resolve(metadata['path']))
         actual = workspace.stat(metadata['path'])
         if metadata.get('sha256') and actual['sha256']!=metadata['sha256']:
@@ -169,6 +185,12 @@ class WorkspaceDatasetView:
                 out.append((n,line[:2000]))
                 if len(out)>=limit: break
         return out
+    def rlm_preview(self,max_chars=500):
+        return (
+            f"WorkspaceDataset({self.metadata['path']!r}, {self.metadata.get('size_bytes', 0)} bytes): "
+            f"{self.metadata.get('description', '')}. Use .path, .preview(), .chunks(), .lines(), .search()."
+        )[:max_chars]
+    def __str__(self): return self.rlm_preview()
 
 workspace = Workspace()
 """.replace("__FLEET_WORKSPACE_ROOTS__", repr(tuple(sorted(_ALLOWED_WORKSPACE_ROOTS)))).replace(
@@ -178,7 +200,7 @@ workspace = Workspace()
 
 @dataclass(frozen=True)
 class WorkspaceDataset(SandboxSerializable):
-    """A content-addressed file handle injected once per native RLM invocation."""
+    """A content-addressed file handle injected once per native RLM or Flex invocation."""
 
     workspace_path: str
     description: str = ""
@@ -200,10 +222,6 @@ class WorkspaceDataset(SandboxSerializable):
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
         }
-
-    def flex_input(self) -> SandboxSerializable:
-        """Use native Flex custom-type restoration without changing this dataclass's public contract."""
-        return _FlexDatasetInput(dataset=self)
 
     def sandbox_setup(self) -> str:
         """Import JSON; Fleet's interpreter preamble already installs WorkspaceDatasetView."""
@@ -234,35 +252,3 @@ class WorkspaceDataset(SandboxSerializable):
     def __str__(self) -> str:
         """Return the same summary as rlm_preview."""
         return self.rlm_preview()
-
-
-class _FlexDatasetInput(Type, SandboxSerializable):
-    """Flex restores this host object before an inner RLM invokes the dataset's four native hooks.
-
-    The wrapper keeps DSPy's Type.description() separate from the existing
-    WorkspaceDataset.description field. Only the metadata marker crosses Flex;
-    the file-backed view is constructed by the RLM in its own interpreter.
-    """
-
-    model_config = ConfigDict(frozen=True)
-    dataset: WorkspaceDataset
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
-        """Use Type's model schema, rather than SandboxSerializable's pass-through field schema."""
-        return handler(source_type)
-
-    def format(self) -> str:
-        return "WorkspaceDataset:" + json.dumps(self.dataset.to_descriptor(), sort_keys=True, separators=(",", ":"))
-
-    def sandbox_setup(self) -> str:
-        return self.dataset.sandbox_setup()
-
-    def to_sandbox(self) -> bytes:
-        return self.dataset.to_sandbox()
-
-    def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
-        return self.dataset.sandbox_assignment(var_name, data_expr)
-
-    def rlm_preview(self, max_chars: int = 500) -> str:
-        return self.dataset.rlm_preview(max_chars)

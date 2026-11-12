@@ -198,7 +198,7 @@ def test_discovery_transport_and_size_failures(monkeypatch, failure):
 )
 def test_explicit_json_mode_reaches_native_request(model, wire_format):
     from dspy._vendor.lm15.providers.openai_chat import _response_format_to_chat
-    from dspy.clients.execution import _canonical, prepare
+    from dspy.clients.execution import prepare
 
     settings = FleetSettings(
         _env_file=None,
@@ -212,8 +212,8 @@ def test_explicit_json_mode_reaches_native_request(model, wire_format):
     settings.resolved_model("root").build_adapter()._prepare_response_format(
         lm, kwargs, dspy.Signature("task -> reasoning, code")
     )
-    call = prepare(lm, prompt="Return JSON", messages=None, kwargs=kwargs)
-    request = _canonical(call)
+    call = prepare(lm, "Return JSON", kwargs)
+    request = call.request
     wire = _response_format_to_chat(request.config.response_format)
     assert wire["type"] == wire_format
     if wire_format == "json_object":

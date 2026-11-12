@@ -28,6 +28,8 @@ source control.
 | `FLEET_LLM_BASE_URL` | empty | Shared inference endpoint, equivalent to `[llm].api_base`. Unity Gateway uses `https://<workspace-host>/ai-gateway/mlflow/v1`. |
 | `FLEET_LLM_API_KEY` | empty | Shared inference credential. Keep it in `.env` or a secret manager. |
 | `FLEET_LLM_API_KEY_ENV` | empty | Name of the environment variable containing the shared inference credential, equivalent to `[llm].api_key_env`. Role-specific `FLEET_ROOT_API_KEY_ENV`, SUB, REFLECTION and JUDGE references override it. |
+| `FLEET_LLM_ADAPTER` | `xml` | Shared model adapter: `xml` (default, with native function calling), `chat`, or `json`. Role-specific `FLEET_ROOT_ADAPTER`, SUB, REFLECTION, and JUDGE overrides apply. |
+| `FLEET_LLM_MODEL_TYPE` | `auto` | Shared model type: `auto` (default), `chat`, or `responses`. Custom OpenAI-compatible endpoints auto-route to `chat`. Role-specific overrides apply. |
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
@@ -181,7 +183,7 @@ compiled programs. A standalone consumer loading native LM JSON outside
 Fleet must first construct a Fleet LM for that endpoint to register its
 native declaration, then provide its credential separately. Historical native LM
 JSON remains inspectable, but Fleet installation requires the complete
-`fleet-program-b1` envelope described in [evaluation](evaluation.md). Learned state
+`fleet-program-b2` envelope described in [evaluation](evaluation.md). Learned state
 must not contain non-null LM bindings: current role models, credentials, adapters
 and budget accounting are supplied by the runtime. Legacy compiled predictor paths
 are not translated or partially loaded.
@@ -199,14 +201,28 @@ reconciled when the owning session next provisions a root. Provider TTL remains
 the fallback if local state is lost. This is not a distributed global reaper.
 
 
-## Native model response format
+## Native model response format and adapters
 
 Shared `[llm]` and role tables `[llm.root]`, `[llm.sub]`, `[llm.reflection]`, and
-`[llm.judge]` accept `adapter = "chat" | "json"` and
-`response_format = "auto" | "json_object"`. Response format defaults to `auto`;
-roles inherit the shared setting unless explicitly overridden, including an
-explicit role `auto`. The environment equivalents are `FLEET_LLM_RESPONSE_FORMAT`
-and `FLEET_ROOT_RESPONSE_FORMAT`, with SUB/REFLECTION/JUDGE counterparts.
+`[llm.judge]` accept `adapter = "xml" | "chat" | "json"`,
+`model_type = "auto" | "chat" | "responses"`, and
+`response_format = "auto" | "json_object"`.
+
+Adapters default to `xml` across all roles (`dspy.XMLAdapter(use_native_function_calling=True)`),
+which provides native structured tag formatting and tool-calling support. Selecting `"chat"`
+instantiates `dspy.ChatAdapter()`, and `"json"` instantiates `dspy.JSONAdapter()`.
+The environment equivalents are `FLEET_LLM_ADAPTER`, `FLEET_ROOT_ADAPTER`, `FLEET_SUB_ADAPTER`,
+`FLEET_REFLECTION_ADAPTER`, and `FLEET_JUDGE_ADAPTER`.
+
+`model_type` defaults to `auto`. For OpenAI routes (`openai/...`) targeting custom
+gateways (a configured `api_base` where the hostname is not `api.openai.com`), `model_type`
+automatically resolves to `"chat"` unless explicitly overridden to `"responses"`.
+The environment equivalents are `FLEET_LLM_MODEL_TYPE`, `FLEET_ROOT_MODEL_TYPE`,
+`FLEET_SUB_MODEL_TYPE`, `FLEET_REFLECTION_MODEL_TYPE`, and `FLEET_JUDGE_MODEL_TYPE`.
+
+Response format defaults to `auto`; roles inherit the shared setting unless explicitly
+overridden, including an explicit role `auto`. The environment equivalents are
+`FLEET_LLM_RESPONSE_FORMAT` and `FLEET_ROOT_RESPONSE_FORMAT`, with SUB/REFLECTION/JUDGE counterparts.
 
 `json_object` requires the effective `json` adapter. Fleet passes
 `response_format={"type": "json_object"}` directly to native DSPy's LM and uses

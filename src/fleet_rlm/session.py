@@ -18,6 +18,7 @@ import psycopg
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import RequiredSkill, SkillAdmissionError
 from fleet_rlm.engine.invocation import FleetRuntime
+from fleet_rlm.engine.reasoning import deserialize_rlm_history
 from fleet_rlm.models import build_lm
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.skills import SkillManager
@@ -64,6 +65,7 @@ class SessionRuntime:
     _lease_monitor_stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _lease_monitor: threading.Thread | None = field(default=None, repr=False)
     _lease_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _prepared_rlm_history: tuple[str, Any] | None = field(default=None, repr=False)
 
     @property
     def session_id(self) -> str:
@@ -164,8 +166,23 @@ class SessionRuntime:
 
     def load_context(self, session_id: str) -> tuple[str, str]:
         """The Session's memory summary and bounded rendered history."""
-        summary, turns = self.store.load_session(validate_session_id(session_id))
+        session_id = validate_session_id(session_id)
+        summary, turns = self.store.load_session(session_id)
+        self._prepared_rlm_history = (session_id, deserialize_rlm_history(turns))
         return summary, self._render_history(turns)
+
+    def load_rlm_history(self, session_id: str) -> Any:
+        """Bounded read-only `dspy.History` reconstructed from recent RLM Turns, or None."""
+        session_id = validate_session_id(session_id)
+        cached = self._prepared_rlm_history
+        self._prepared_rlm_history = None
+        if cached is not None and cached[0] == session_id:
+            return cached[1]
+        load_session = getattr(self.store, "load_session", None)
+        if not callable(load_session):
+            return None
+        _, turns = load_session(session_id)
+        return deserialize_rlm_history(turns)
 
     @staticmethod
     def _render_history(turns: list[dict[str, Any]]) -> str:

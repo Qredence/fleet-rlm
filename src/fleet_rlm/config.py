@@ -26,7 +26,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from fleet_rlm.models import Endpoint, EnvReference, ModelRoute, ResolvedModel, Role
+from fleet_rlm.models import AdapterName, Endpoint, EnvReference, ModelRoute, ModelType, ResolvedModel, Role
 from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
 
 # Dev and holdout each need this many labelled examples before a run can tell a gain from noise.
@@ -57,6 +57,7 @@ _TOML_FIELDS = {
         "api_base": "fleet_llm_api_base",
         "api_key_env": "fleet_llm_api_key_env",
         "adapter": "fleet_llm_adapter",
+        "model_type": "fleet_llm_model_type",
         "response_format": "fleet_llm_response_format",
     },
     "decision": {"model": "typesafe_model"},
@@ -107,7 +108,10 @@ _TOML_FIELDS["llm.judge"] = {
 }
 for _role in ("root", "sub", "reflection", "judge"):
     _TOML_FIELDS[f"llm.{_role}"].update(
-        {name: f"fleet_{_role}_{name}" for name in ("api_base", "api_key_env", "adapter", "response_format")}
+        {
+            name: f"fleet_{_role}_{name}"
+            for name in ("api_base", "api_key_env", "adapter", "model_type", "response_format")
+        }
     )
 _TOML_FIELDS["llm"].update(
     {name: f"fleet_llm_{name}" for name in ("max_tokens", "temperature", "num_retries", "cache")}
@@ -263,13 +267,15 @@ class FleetSettings(BaseSettings):
     fleet_llm_model: ModelRoute = Field(default="openai/gpt-4o-mini", validation_alias="FLEET_LLM_MODEL")
     fleet_llm_api_base: Endpoint = Field(default="", validation_alias="FLEET_LLM_BASE_URL")
     fleet_llm_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="FLEET_LLM_API_KEY")
-    fleet_llm_adapter: Literal["chat", "json"] = "chat"
+    fleet_llm_adapter: AdapterName = "xml"
+    fleet_llm_model_type: ModelType = "auto"
     fleet_llm_response_format: Literal["auto", "json_object"] = "auto"
     fleet_llm_api_key_env: EnvReference = ""
     fleet_correctness_model: ModelRoute | Literal[""] = ""
     fleet_judge_api_base: Endpoint | None = None
     fleet_judge_api_key_env: EnvReference | None = None
-    fleet_judge_adapter: Literal["chat", "json"] | None = None
+    fleet_judge_adapter: AdapterName | None = None
+    fleet_judge_model_type: ModelType | None = None
     fleet_judge_response_format: Literal["auto", "json_object"] | None = None
 
     fleet_judge_max_tokens: int | None = Field(default=None, gt=0)
@@ -332,6 +338,7 @@ class FleetSettings(BaseSettings):
             api_base=self.fleet_llm_api_base,
             api_key=default_key,
             adapter=self.fleet_llm_adapter,
+            model_type=self.fleet_llm_model_type,
             response_format=self.fleet_llm_response_format,
         )
         for role in ("root", "sub", "reflection", "judge"):
@@ -340,6 +347,7 @@ class FleetSettings(BaseSettings):
             base = getattr(self, f"fleet_{role}_api_base")
             reference = getattr(self, f"fleet_{role}_api_key_env")
             adapter = getattr(self, f"fleet_{role}_adapter")
+            model_type = getattr(self, f"fleet_{role}_model_type")
             options = {}
             for name in ("max_tokens", "temperature", "num_retries", "cache"):
                 field = f"fleet_{role}_{name}"
@@ -358,6 +366,7 @@ class FleetSettings(BaseSettings):
                 api_base=base if base is not None else ("" if independent else self.fleet_llm_api_base),
                 api_key=credential(reference or "", SecretStr("") if independent else default_key),
                 adapter=adapter or self.fleet_llm_adapter,
+                model_type=model_type or self.fleet_llm_model_type,
                 response_format=getattr(self, f"fleet_{role}_response_format") or self.fleet_llm_response_format,
                 **options,
             )
@@ -525,19 +534,22 @@ class FleetSettings(BaseSettings):
     fleet_root_model: ModelRoute | Literal[""] = ""
     fleet_root_api_base: Endpoint | None = None
     fleet_root_api_key_env: EnvReference | None = None
-    fleet_root_adapter: Literal["chat", "json"] | None = None
+    fleet_root_adapter: AdapterName | None = None
+    fleet_root_model_type: ModelType | None = None
     fleet_root_response_format: Literal["auto", "json_object"] | None = None
 
     fleet_sub_model: ModelRoute | Literal[""] = ""
     fleet_sub_api_base: Endpoint | None = None
     fleet_sub_api_key_env: EnvReference | None = None
-    fleet_sub_adapter: Literal["chat", "json"] | None = None
+    fleet_sub_adapter: AdapterName | None = None
+    fleet_sub_model_type: ModelType | None = None
     fleet_sub_response_format: Literal["auto", "json_object"] | None = None
 
     fleet_reflection_model: ModelRoute | Literal[""] = ""
     fleet_reflection_api_base: Endpoint | None = None
     fleet_reflection_api_key_env: EnvReference | None = None
-    fleet_reflection_adapter: Literal["chat", "json"] | None = None
+    fleet_reflection_adapter: AdapterName | None = None
+    fleet_reflection_model_type: ModelType | None = None
     fleet_reflection_response_format: Literal["auto", "json_object"] | None = None
 
     fleet_root_max_tokens: int | None = Field(default=16384, ge=1)
@@ -955,21 +967,12 @@ class FleetSettings(BaseSettings):
             return {}
         return {"OPENAI_API_BASE": resolved.api_base, "OPENAI_API_KEY": key}
 
-    def build_jev_lm(self) -> Any | None:
-        """The TypeSafe System One client, or None when no credential is configured.
-
-        Raises:
-            RuntimeError: A credential is configured but the DSPy TypeSafe import fails.
-
-        TypeSafe client construction errors propagate.
-        """
+    def build_jev_lm(self) -> dspy.LM | None:
+        """The TypeSafe System One LM, or None when no credential is configured."""
         if not self.typesafe_api_key:
             return None
-        try:
-            from dspy.experimental import TypeSafe
-        except ImportError as exc:
-            raise RuntimeError("TypeSafe routing requires the DSPy 'typesafe' extra") from exc
-        return TypeSafe(self.typesafe_model, api_key=self.typesafe_api_key)
+        model = self.typesafe_model.removeprefix("typesafe:")
+        return dspy.LM(f"typesafe:{model}", api_key=self.typesafe_api_key, cache=False, engine="lm15")
 
     def build_judge_lm(self) -> dspy.LM:
         """Build the independently configured DSPy correctness judge."""

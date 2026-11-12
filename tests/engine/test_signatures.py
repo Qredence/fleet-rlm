@@ -1,18 +1,28 @@
 """Signatures live in one module with stable field names; the stopping rules exist once."""
 
+from types import SimpleNamespace
+
 import dspy
 import pytest
 
 from fleet_rlm.contracts import (
+    ENGINE_INPUT_FIELDS,
+    JUDGE_ROUTE_CHOICES,
+    LINEAGE_INPUT_FIELDS,
+    ROUTE_DESCRIPTIONS,
+    ROUTE_SUMMARIES,
     STOPPING_RULES,
     TRIAGE_CRITERIA,
     TRIAGE_INSTRUCTION,
     TRIAGE_ROUTE,
+    Route,
+    catalog_entries,
     item_decision,
-    make_choice_type,
+    parse_route,
 )
 from fleet_rlm.engine import signatures
 from fleet_rlm.engine.signatures import FleetTask, TurnTriage
+from fleet_rlm.optimize.dataset import _INPUTS
 
 
 def test_triage_signature_keeps_the_typed_choice_and_criteria():
@@ -22,8 +32,7 @@ def test_triage_signature_keeps_the_typed_choice_and_criteria():
     assert "direct" in route_field.json_schema_extra["desc"]
     assert decision.value == "rlm"
     assert TRIAGE_ROUTE.criteria() == {
-        "direct": "Simple response requiring no code, files, or Skills",
-        "rlm": "A task needing code, files, Skills, or iterative investigation",
+        route.value: ROUTE_DESCRIPTIONS[route]["triage"] for route in (Route.DIRECT, Route.FLEX, Route.RLM)
     }
 
 
@@ -60,20 +69,14 @@ def test_child_and_judge_signatures_are_named():
 
 
 def _legacy_skill_relevance():
-    relevance = make_choice_type(
-        (
-            ("relevant", "Following this Skill's instructions would help complete the task"),
-            ("not_relevant", "The Skill does not apply to this task"),
-        )
-    )
     return dspy.make_signature(
         {
             "task": (str, dspy.InputField(desc="User request.")),
             "skill_name": (str, dspy.InputField(desc="Skill name.")),
             "skill_description": (str, dspy.InputField(desc="When the Skill applies.")),
             "relevance": (
-                relevance,
-                dspy.OutputField(desc="relevant only when the Skill's described use matches what the task needs."),
+                signatures.SKILL_RELEVANCE,
+                dspy.OutputField(desc="True only when the Skill's described use matches what the task needs."),
             ),
         },
         "Decide whether this Skill's instructions would help complete the task.",
@@ -154,3 +157,55 @@ def test_item_decision_is_cached_per_choice_vocabulary():
     assert item_decision(["a", "b", "c"]) is not first
     reordered = item_decision(["b", "a"])
     assert first.output_fields["decision"].annotation is not reordered.output_fields["decision"].annotation
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("direct", Route.DIRECT),
+        ("flex", Route.FLEX),
+        ("rlm", Route.RLM),
+        (" rlm ", Route.RLM),
+        (SimpleNamespace(value="flex"), Route.FLEX),
+        (None, None),
+        ("unknown", None),
+        ("direct_cot", None),
+        ("deep_rlm", None),
+    ],
+)
+def test_parse_route_reads_only_current_names(raw, expected):
+    assert parse_route(raw) is expected
+
+
+def test_automatic_choices_include_all_three_routes():
+    assert set(TRIAGE_ROUTE.criteria()) == {"direct", "flex", "rlm"}
+    assert set(TRIAGE_CRITERIA) == {"direct", "flex", "rlm"}
+
+
+def test_route_wording_has_one_source():
+    assert set(ROUTE_DESCRIPTIONS) == set(Route)
+    assert dict(JUDGE_ROUTE_CHOICES) == {route.value: item["judge"] for route, item in ROUTE_DESCRIPTIONS.items()}
+    assert {route.value: item["summary"] for route, item in ROUTE_DESCRIPTIONS.items()} == ROUTE_SUMMARIES
+    for route, item in ROUTE_DESCRIPTIONS.items():
+        assert {"triage", "judge", "definition", "examples", "not", "summary"} <= set(item), route
+
+
+def test_triage_instruction_matches_automatic_policy():
+    assert TRIAGE_INSTRUCTION == (
+        "Choose direct for a self-contained response requiring no code, files, or Skills; "
+        "choose flex for one bounded calculation, structured file/table inspection, or single-pass workflow with known "
+        "inputs and verifiable outputs; choose rlm for multi-step iterative investigation, open-ended discovery, "
+        "progressive Skill workflows, or multi-agent decomposition."
+    )
+    assert TurnTriage.model_fields["route"].json_schema_extra["desc"] == TRIAGE_INSTRUCTION
+
+
+def test_catalog_parser_is_shared_and_reports_malformed_xml():
+    catalog = '<available_skills>\n  <skill name="alpha">Use for A</skill>\n</available_skills>'
+    assert catalog_entries(catalog) == [("alpha", "Use for A")]
+    assert catalog_entries("<available_skills>No Skills installed.</available_skills>") == []
+    assert catalog_entries("not xml") is None
+
+
+def test_curated_examples_share_the_engine_input_contract():
+    assert (*ENGINE_INPUT_FIELDS, *LINEAGE_INPUT_FIELDS) == _INPUTS

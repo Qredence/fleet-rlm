@@ -25,6 +25,8 @@ from dspy.utils import BaseCallback
 from dspy.utils.usage_tracker import UsageTracker
 from mlflow.entities import SpanType
 
+from fleet_rlm.contracts import supports_decision_requests
+
 AGENT_IDENTITY_SCHEME = "fleet-agent-v1"
 _AGENT_LOCK = threading.Lock()
 _STARTUP_IDENTITY: dict[str, str] | None = None
@@ -249,7 +251,7 @@ class _DecisionWorkerUsage(BaseCallback):
         self.lock = threading.Lock()
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
-        if not getattr(instance, "supports_decision_requests", False):
+        if not supports_decision_requests(instance):
             return
         parent = dspy.settings.usage_tracker
         scope = track_usage()
@@ -288,9 +290,8 @@ def _to_mlflow_token_usage(usage: dict[str, int | float]) -> dict[str, int | flo
 def decision_usage(span: Any) -> Generator[None, None, None]:
     """Receipt TypeSafe usage on its manual span and roll it into DSPy exactly once.
 
-    DSPy 3.4.1 TypeSafe reports prompt/completion counts without total_tokens.
-    A detached native tracker also collects batched worker usage without allowing
-    the generation collector to attribute these calls to the surrounding module.
+    A detached native tracker collects batched worker usage without allowing the
+    generation collector to attribute these decision calls to the surrounding module.
     """
     parent = dspy.settings.usage_tracker
     tracker = UsageTracker()
@@ -325,7 +326,7 @@ class LMUsageCallback(BaseCallback):
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
         """Capture numeric generation usage, excluding TypeSafe decision calls."""
-        if getattr(instance, "supports_decision_requests", False):
+        if supports_decision_requests(instance):
             return
         scope = track_usage()
         tracker = scope.__enter__()
@@ -404,7 +405,7 @@ def typed_decision_scope(
     TypeSafe clients emit their own usage, so only they are metered here; a generative backend
     already reports usage through the LM callback and must keep the MLflow hook off.
     """
-    adapter_options = {} if typesafe else {"adapter": adapter or dspy.ChatAdapter()}
+    adapter_options = {} if typesafe else {"adapter": adapter or dspy.XMLAdapter(use_native_function_calling=True)}
     with (
         dspy.context(
             lm=lm,

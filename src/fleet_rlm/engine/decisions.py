@@ -95,11 +95,29 @@ def select_skills(
             decisions = []
             for (name, _), prediction in zip(skills, predictions, strict=True):
                 decision = getattr(prediction, "relevance", None)
-                decisions.append(
-                    {"skill": name, "decision": getattr(decision, "value", None)} | decision_evidence(decision, jev_lm)
+                raw_value = getattr(decision, "value", decision)
+                is_relevant = raw_value if isinstance(raw_value, bool) else raw_value == "relevant"
+                decisions.append({"skill": name, "decision": is_relevant} | decision_evidence(decision, jev_lm))
+            ranked = [
+                (
+                    -(
+                        float(row["probability"])
+                        if isinstance(row.get("probability"), (int, float)) and not isinstance(row["probability"], bool)
+                        else (
+                            float(row["confidence"])
+                            if isinstance(row.get("confidence"), (int, float))
+                            and not isinstance(row["confidence"], bool)
+                            else 0.0
+                        )
+                    ),
+                    idx,
+                    name,
                 )
-            selected = [name for (name, _), row in zip(skills, decisions, strict=True) if row["decision"] == "relevant"]
-            selected = selected[:_MAX_PRELOADED_SKILLS]
+                for idx, ((name, _), row) in enumerate(zip(skills, decisions, strict=True))
+                if row["decision"] is True
+            ]
+            ranked.sort()
+            selected = [name for _, _, name in ranked[:_MAX_PRELOADED_SKILLS]]
             span.set_outputs({"selected": selected, "decisions": decisions})
     except Exception as exc:
         if turn_is_over(exc):
@@ -158,12 +176,13 @@ def select_route(
                 with typed_decision_scope(lm=route_lm, span=span, typesafe=jev_lm is not None, adapter=sub_adapter):
                     decision = triage(**triage_inputs).route
                 evidence = decision_evidence(decision, route_lm)
-                # Unknown, missing and obsolete automatic Flex labels take bounded RLM.
-                route = parse_route(decision) or Route.RLM
-                if route not in (Route.DIRECT, Route.RLM):
+                parsed_route = parse_route(decision)
+                if parsed_route is None:
                     route = Route.RLM
                     reason = "invalid_automatic_route"
-                    summary = "Obsolete automatic route; falling back to bounded RLM execution."
+                    summary = "Unrecognized automatic route; falling back to bounded RLM execution."
+                else:
+                    route = parsed_route
                 span.set_outputs({"route": route.value, **evidence})
     except Exception as exc:
         if turn_is_over(exc):

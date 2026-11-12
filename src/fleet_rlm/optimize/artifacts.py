@@ -27,7 +27,7 @@ from fleet_rlm.engine.programs import FleetProgram
 _FLEX_TYPE = cast(type[dspy.Module], dspy.Flex)
 
 APPROVAL_POLICY_VERSION = 6
-APPROVAL_EVIDENCE_VERSION = 2
+APPROVAL_EVIDENCE_VERSION = 3
 VALIDATION_PASSES = 3
 
 
@@ -184,9 +184,29 @@ def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _calibrated_decision_fields(predictor: Any) -> dict[str, dict[str, Any]]:
+    raw_fields = getattr(predictor, "fields", None)
+    if not isinstance(raw_fields, Mapping):
+        return {}
+    calibrated: dict[str, dict[str, Any]] = {}
+    for field_name, cfg in sorted(raw_fields.items()):
+        if not isinstance(cfg, Mapping):
+            continue
+        params = {key: value for key, value in sorted(cfg.items()) if key in {"threshold", "weights", "cuts"}}
+        if params:
+            calibrated[str(field_name)] = params
+    return calibrated
+
+
 def tunable_components(program: dspy.Module) -> dict[str, str]:
-    """Inspect native GEPA instruction and Flex code components through public DSPy traversal."""
-    components = {name: predictor.signature.instructions for name, predictor in program.named_predictors()}
+    """Inspect native GEPA instruction, Flex code, and ReAnchor decision components."""
+    components: dict[str, str] = {}
+    for name, predictor in program.named_predictors():
+        text = predictor.signature.instructions
+        calibrated = _calibrated_decision_fields(predictor)
+        if calibrated:
+            text = f"{text}\n\n[decision_calibration]\n{json.dumps(calibrated, sort_keys=True)}"
+        components[name] = text
     for name, parameter in program.named_parameters():
         if isinstance(parameter, _FLEX_TYPE):
             components[name] = parameter.module_src or ""

@@ -8,13 +8,11 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.contracts import STOPPING_RULES, TRIAGE_INSTRUCTION, TRIAGE_ROUTE, make_choice_type
+from fleet_rlm.contracts import STOPPING_RULES, TRIAGE_INSTRUCTION, TRIAGE_ROUTE, make_noul_type
 
-SKILL_RELEVANCE = make_choice_type(
-    (
-        ("relevant", "Following this Skill's instructions would help complete the task"),
-        ("not_relevant", "The Skill does not apply to this task"),
-    )
+SKILL_RELEVANCE = make_noul_type(
+    "Following this Skill's instructions would help complete the task",
+    "The Skill does not apply to this task",
 )
 
 
@@ -25,7 +23,7 @@ class SkillRelevance(dspy.Signature):
     skill_name: str = dspy.InputField(desc="Skill name.")
     skill_description: str = dspy.InputField(desc="When the Skill applies.")
     relevance: SKILL_RELEVANCE = dspy.OutputField(  # ty: ignore[invalid-type-form]
-        desc="relevant only when the Skill's described use matches what the task needs."
+        desc="True only when the Skill's described use matches what the task needs."
     )
 
 

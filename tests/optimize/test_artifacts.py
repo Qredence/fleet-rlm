@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from copy import deepcopy
+from types import SimpleNamespace
 
 import dspy
 import pytest
@@ -234,3 +235,59 @@ def test_approval_refuses_incompatible_state_even_with_matching_digest_and_evide
     with pytest.raises(ValueError):
         approve_candidate(candidate, manifest, destination, evidence=evidence, program=program)
     assert not destination.exists() and program.dump_state() == before
+
+
+@pytest.mark.parametrize("threads", [1, 2])
+@pytest.mark.parametrize("decision_kind", ["noul", "choice"])
+def test_native_reanchor_calibrates_isolated_copies_with_attributed_evidence(threads, decision_kind):
+    from dspy.experimental import Choice, Noul, ReAnchor
+
+    is_noul = decision_kind == "noul"
+    kind = Noul if is_noul else Choice[("keep", "Keep the eligible task"), ("skip", "Skip the ineligible task")]
+    initial_fields = {"threshold": 0.5} if is_noul else {"weights": {"keep": 1.0, "skip": 1.0}}
+    expected = True if is_noul else "keep"
+    evidence = {"noul": 0.4} if is_noul else {"probabilities": {"keep": 0.4, "skip": 0.6}, "confidence": 0.6}
+    signature = dspy.Signature(
+        {
+            "task": (str, dspy.InputField()),
+            "eligible": (kind, dspy.OutputField(desc="Does this task meet the eligibility criteria?")),
+        }
+    )
+
+    class DecisionProgram(dspy.Module):
+        def __init__(self):
+            super().__init__()
+            self.predict = dspy.Predict(signature)
+            self.predict.fields["eligible"] = deepcopy(initial_fields)
+
+        def forward(self, **inputs):
+            return self.predict(**inputs)
+
+    class Engine:
+        optimization = None
+
+        def __init__(self, candidate):
+            self.program = candidate.deepcopy()
+            self.sandbox_mgr = SimpleNamespace(shutdown=lambda: True)
+
+        def __call__(self, **inputs):
+            return self.program(**inputs)
+
+    student = IsolatedFleetProgram(DecisionProgram(), lambda _example, candidate: Engine(candidate))
+    examples = [
+        dspy.Example(task=f"eligible task {index}", expected=expected).with_inputs("task") for index in range(5)
+    ]
+    validation_examples = [
+        dspy.Example(task=f"validation task {index}", expected=expected).with_inputs("task") for index in range(5)
+    ]
+    optimizer = ReAnchor(
+        lambda gold, pred: float(pred.eligible.value == gold.expected), num_threads=threads, require_cache=False
+    )
+    lm = dspy.utils.DummyLM([{"eligible": evidence}] * 1000)
+    with dspy.context(lm=lm, adapter=dspy.JSONAdapter(), disable_history=True):
+        calibrated = optimizer.compile(student, trainset=examples, valset=validation_examples)
+    assert optimizer.report["train_score_before"] == optimizer.report["val_score_before"] == 0.0
+    assert optimizer.report["train_score"] == optimizer.report["val_score"] == 1.0
+    assert optimizer.report["fitted"][0]["observed"]["calls"] == len(examples)
+    assert calibrated.program.predict.fields["eligible"] != initial_fields
+    assert student.program.predict.fields["eligible"] == initial_fields

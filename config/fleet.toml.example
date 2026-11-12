@@ -25,7 +25,8 @@ linked_children = true
 # model = "openai/gpt-4o-mini"
 # api_base = "https://your-compatible-endpoint.example/v1"
 # api_key_env = "MY_PROVIDER_KEY"
-adapter = "chat"
+adapter = "xml"
+model_type = "auto"
 # Set adapter = "json" together with response_format = "json_object" to request JSON mode.
 response_format = "auto"
 

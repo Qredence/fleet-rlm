@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Any, cast
 
 import dspy
-from dspy.experimental import Choice
+from dspy.experimental import Choice, Noul
 from pydantic import BaseModel
 
 # The five model inputs every Turn program and every isolated rollout accepts.
@@ -147,7 +147,9 @@ ROUTE_DESCRIPTIONS: dict[Route, dict[str, Any]] = {
         "summary": "Answer directly without code execution.",
     },
     Route.FLEX: {
-        "triage": "A task needing one bounded Python or Skill workflow",
+        "triage": (
+            "One bounded calculation, structured file/table inspection, or single-pass workflow with known inputs"
+        ),
         "judge": "One bounded calculation, file operation, or short analysis that benefits from code",
         "definition": "A programmable Flex workflow with known inputs and verifiable outputs",
         "examples": ["Compute a specified digit", "Summarize an attached table"],
@@ -155,7 +157,10 @@ ROUTE_DESCRIPTIONS: dict[Route, dict[str, Any]] = {
         "summary": "Execute a DSPy Flex pipeline with Daytona Python and bounded delegation.",
     },
     Route.RLM: {
-        "triage": "A task needing code, files, Skills, or iterative investigation",
+        "triage": (
+            "Multi-step iterative investigation, open-ended discovery, progressive Skill workflows, or multi-agent "
+            "decomposition"
+        ),
         "judge": "Code, file or Skill work, including bounded calculations and iterative investigation",
         "definition": "Bounded RLM for code, file or Skill work, exploration or decomposition",
         "examples": ["Compute a specified digit", "Summarize an attached table", "Investigate conflicting evidence"],
@@ -166,7 +171,9 @@ ROUTE_DESCRIPTIONS: dict[Route, dict[str, Any]] = {
 
 TRIAGE_INSTRUCTION = (
     "Choose direct for a self-contained response requiring no code, files, or Skills; "
-    "choose rlm for code, file or Skill work, including bounded calculations and iterative investigation."
+    "choose flex for one bounded calculation, structured file/table inspection, or single-pass workflow with known "
+    "inputs and verifiable outputs; choose rlm for multi-step iterative investigation, open-ended discovery, "
+    "progressive Skill workflows, or multi-agent decomposition."
 )
 
 
@@ -178,39 +185,65 @@ def make_choice_type(options: tuple[tuple[str, str], ...]) -> type[BaseModel]:
     return result
 
 
+def make_noul_type(yes_description: str, no_description: str) -> type[BaseModel]:
+    """Build a validated DSPy Noul model from True/False criteria descriptions."""
+    result = cast("Any", Noul)[(True, yes_description), (False, no_description)]
+    if not isinstance(result, type) or not issubclass(result, BaseModel):
+        raise RuntimeError("DSPy returned an invalid typed Noul model")
+    return result
+
+
 TRIAGE_ROUTE = make_choice_type(
-    tuple((route.value, ROUTE_DESCRIPTIONS[route]["triage"]) for route in (Route.DIRECT, Route.RLM))
+    tuple((route.value, ROUTE_DESCRIPTIONS[route]["triage"]) for route in (Route.DIRECT, Route.FLEX, Route.RLM))
 )
 TRIAGE_CRITERIA = {
     route.value: {"definition": item["definition"], "examples": item["examples"], "not": item["not"]}
     for route, item in ROUTE_DESCRIPTIONS.items()
-    if route in (Route.DIRECT, Route.RLM)
+    if route in (Route.DIRECT, Route.FLEX, Route.RLM)
 }
 JUDGE_ROUTE_CHOICES = tuple((route.value, item["judge"]) for route, item in ROUTE_DESCRIPTIONS.items())
 ROUTE_SUMMARIES = {route.value: item["summary"] for route, item in ROUTE_DESCRIPTIONS.items()}
 
 
+def supports_decision_requests(lm: Any) -> bool:
+    """Return True when `lm` (or a SandboxLM wrapping it) uses DSPy's native decision protocol."""
+    return bool(
+        getattr(lm, "supports_decision_requests", False) is True
+        or getattr(getattr(lm, "_lm", None), "supports_decision_requests", False) is True
+    )
+
+
 def decision_evidence(decision: Any, lm: Any) -> dict[str, Any]:
     """Retain decision evidence without synthesizing absent confidence."""
     probabilities = getattr(decision, "probabilities", None)
+    probability = getattr(decision, "probability", None)
+    if isinstance(probability, bool) or not isinstance(probability, (int, float)) or not math.isfinite(probability):
+        probability = None
+    else:
+        probability = float(probability)
     confidence = getattr(decision, "confidence", None)
-    if not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
         confidence = None
     if isinstance(probabilities, dict):
         probabilities = {
             str(key): value
             for key, value in probabilities.items()
-            if isinstance(value, (int, float)) and math.isfinite(value)
+            if not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
         }
+    elif probability is not None:
+        probabilities = {"true": probability, "false": round(1.0 - probability, 12)}
     else:
         probabilities = None
-    return {
-        "raw_choice": getattr(decision, "value", decision if isinstance(decision, str) else None),
+    evidence: dict[str, Any] = {
+        "raw_choice": getattr(decision, "value", decision if isinstance(decision, (str, bool)) else None),
         "probabilities": probabilities,
         "confidence": confidence,
-        "backend": "typesafe" if lm.__class__.__name__ == "TypeSafe" else "generative",
+        "backend": "typesafe" if supports_decision_requests(lm) else "generative",
         "model": str(getattr(lm, "model", "unknown")),
     }
+    if isinstance(decision, Noul) or probability is not None:
+        evidence["probability"] = probability
+    return evidence
 
 
 @functools.lru_cache(maxsize=64)
@@ -236,6 +269,22 @@ def item_decision(choices: list[str]) -> type[dspy.Signature]:
     it as immutable: build a new signature instead of editing this one.
     """
     return _item_decision_cached(tuple(choices))
+
+
+@functools.lru_cache(maxsize=1)
+def yes_no_decision() -> type[dspy.Signature]:
+    """Per-item boolean Noul classification used by jev_decide_batched when choices=None."""
+    return dspy.make_signature(
+        {
+            "item": (str, dspy.InputField()),
+            "question": (str, dspy.InputField()),
+            "decision": (
+                Noul,
+                dspy.OutputField(desc="Decide whether the question applies to this item."),
+            ),
+        },
+        signature_name="YesNoItemDecision",
+    )
 
 
 # A figure: an optionally signed number (the sign may precede or follow `$`), with `.5`, exponent forms and

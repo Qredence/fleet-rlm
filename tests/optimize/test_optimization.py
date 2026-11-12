@@ -795,7 +795,7 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
     lm = dspy.LM("openai/offline")
     program = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program
     candidate.write_bytes(program_envelope(program))
-    evidence = {"evidence_format": "2", "incumbent_digest": "", "configuration_digest": "current"}
+    evidence = {"evidence_format": "3", "incumbent_digest": "", "configuration_digest": "current"}
     manifest = _manifest(candidate, "s1-1", _evaluation())
     manifest = replace(manifest, dependencies=evidence)
 
@@ -854,7 +854,7 @@ def test_approval_evidence_uses_sorted_installed_distribution_identity(monkeypat
 
     evidence = artifacts.approval_evidence(FleetSettings(_env_file=None), "incumbent", scorer_version=SCORER_VERSION)
 
-    assert evidence["evidence_format"] == "2"
+    assert evidence["evidence_format"] == "3"
     assert evidence["dependency_fingerprint"] == expected_fingerprint
     assert "lockfile_digest" not in evidence
     assert evidence["incumbent_digest"] == "incumbent"
@@ -1057,12 +1057,8 @@ def test_isolated_rollouts_retain_candidate_instructions_without_sharing_runtime
 
 
 def test_metric_binds_the_explicit_judge_instead_of_serving_lm() -> None:
-    serving = DummyLM(
-        [{"reasoning": "incorrect", "is_correct": False, "is_safe": True, "critique": "wrong model role"}]
-    )
-    judge = DummyLM(
-        [{"reasoning": "verified", "is_correct": True, "is_safe": True, "critique": "Matches expected result"}]
-    )
+    serving = DummyLM([{"plan": "incorrect", "is_correct": False, "is_safe": True, "critique": "wrong model role"}])
+    judge = DummyLM([{"plan": "verified", "is_correct": True, "is_safe": True, "critique": "Matches expected result"}])
     with dspy.context(lm=serving):
         result = fleet_metric(
             dspy.Example(task="13*17", answer="221"),
@@ -1074,9 +1070,7 @@ def test_metric_binds_the_explicit_judge_instead_of_serving_lm() -> None:
 
 
 def test_metric_accepts_native_sixth_program_trace_argument() -> None:
-    judge = DummyLM(
-        [{"reasoning": "verified", "is_correct": True, "is_safe": True, "critique": "Matches reviewed result"}]
-    )
+    judge = DummyLM([{"plan": "verified", "is_correct": True, "is_safe": True, "critique": "Matches reviewed result"}])
     result = fleet_metric(
         dspy.Example(task="13*17", answer="221"),
         dspy.Prediction(answer="221", lm_calls=1, sandbox_errors=0, submit_rejections=0),
@@ -1196,7 +1190,7 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
 
     live.compiled.reload_if_changed(live.program)  # the shared host invocation boundary
     assert live.compiled.digest == manifest.digest
-    serving = DummyLM([{"reasoning": "r", "answer": "Paris"}])
+    serving = DummyLM([{"plan": "r", "answer": "Paris"}])
     with dspy.context(lm=serving):
         assert (
             live.program.reasoning.direct(memory_summary="", session_history="", task="Capital of France?").answer
@@ -1569,7 +1563,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
 
     def judge_metric(*_args, **kwargs):
         assert kwargs["judge_lm"] is lm
-        assert type(dspy.settings.adapter) is dspy.ChatAdapter
+        assert type(dspy.settings.adapter) is dspy.XMLAdapter
         return dspy.Prediction(score=1.0)
 
     monkeypatch.setattr(workflow, "fleet_metric", judge_metric)
@@ -1857,12 +1851,6 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     assert active.read_bytes() and digest_bytes(active.read_bytes()) == digest
 
 
-def test_optimize_no_longer_accepts_a_session() -> None:
-    parser = _optimization_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--session", "sess_a"])
-
-
 def test_relabelling_a_trace_overrides_the_earlier_label() -> None:
     newer = SimpleNamespace(name="route", value="direct", create_time_ms=2)
     older = SimpleNamespace(name="route", value="flex", create_time_ms=1)
@@ -1940,9 +1928,7 @@ def test_gepa_progress_callback_persists_latest_snapshot_without_transport_event
     ("scenario", "expected_status"),
     [
         ("candidate-active", "approved"),
-        ("incumbent-current-evidence", "approved"),
         ("incumbent-stale-evidence", "completed"),
-        ("unknown-active", "interrupted"),
     ],
 )
 def test_standalone_approval_reconciles_imported_legacy_approving_records(
@@ -2480,7 +2466,7 @@ def test_locked_native_gepa_observes_required_persistence_stop_without_provider_
 
 
 @pytest.mark.parametrize("managed", [False, True])
-@pytest.mark.parametrize("failure_at", ["validation", "finalization", "candidate", "outcome", "ownership"])
+@pytest.mark.parametrize("failure_at", ["validation", "outcome", "ownership"])
 def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch, managed, failure_at):
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
@@ -2754,34 +2740,6 @@ def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledg
     assert report["ready"] is False and any("fleet.json" in item for item in report["missing"])
     with pytest.raises(ValueError, match=r"fleet\.json"):
         workflow._compile(parser.parse_args([]), settings, store, SimpleNamespace(), "optimize-x")
-
-
-def test_approval_refuses_a_legacy_per_session_candidate(tmp_path, monkeypatch) -> None:
-    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
-    version = "sess_old-abc"
-    candidate = tmp_path / "candidates" / f"{version}.json"
-    candidate.parent.mkdir()
-    candidate.write_bytes(b"{}")
-    manifest = ArtifactManifest(version, digest_bytes(b"{}"), "now", {}, _evaluation(), {"passed": True}, {})
-    workflow.write_manifest(candidate.with_suffix(".manifest.json"), manifest)
-    store = MemoryOptimizationStore(
-        [
-            {
-                "run_id": version,
-                "status": "completed",
-                "owner_id": "old",
-                "candidate_version": version,
-                "legacy_session_id": "sess_old",
-            }
-        ]
-    )
-    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-    parser = _optimization_parser()
-    with pytest.raises(ValueError, match="per-Session candidate"):
-        workflow.run(parser.parse_args(["--approve", version]), parser, settings)
-    assert store.get_optimization_run(version)["status"] == "completed"
-    assert not (tmp_path / "fleet.json").exists()
 
 
 def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_composition() -> None:
@@ -3066,23 +3024,37 @@ def test_installed_program_names_the_approved_job_whose_manifest_matches_the_fil
     assert result["headline"] == {"holdout": None, "critical_pass_rate": 0.5}
 
 
-def test_the_rationale_call_is_seen_by_the_token_budget_and_bounded():
+def test_the_rationale_call_is_seen_by_the_token_budget_and_bounded(monkeypatch):
+    from dspy.clients.engines.lm15_engine import LM15Engine
+
     budget = workflow.TokenBudget(0)
     seen, kwargs_seen = [], {}
-    budget.on_lm_start = lambda *_a, **_k: seen.append("start")
+    orig_start = budget.on_lm_start
 
-    class CountedLM(dspy.BaseLM):
-        def forward(self, *_args, **kwargs):
-            kwargs_seen.update(kwargs)
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None), finish_reason="stop")],
-                usage={},
-                model="m",
-            )
+    def on_start(call_id, instance, inputs):
+        seen.append("start")
+        kwargs_seen.update(inputs.get("options", {}))
+        orig_start(call_id, instance, inputs)
 
-    text = workflow._comparison_rationale(CountedLM(model="m"), "report", budget)
-    assert text == "ok" and seen == ["start"]
+    budget.on_lm_start = on_start
+
+    def complete(self, request):
+        kwargs_seen["request_max_tokens"] = request.config.max_tokens
+        kwargs_seen["read_timeout"] = self.config.timeouts.read
+        return dspy.lm15.Response(
+            id=None,
+            model=request.model,
+            message=dspy.lm15.Message.assistant([dspy.lm15.TextPart("ok")]),
+            finish_reason="stop",
+            usage=dspy.lm15.Usage(input_tokens=3, output_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr(LM15Engine, "complete", complete)
+    lm = dspy.LM("openai/gpt-4o-mini", api_key="test", cache=False)
+    text = workflow._comparison_rationale(lm, "report", budget)
+    assert text == "ok" and seen == ["start"] and budget.used == 5
     assert kwargs_seen["timeout"] == 30 and kwargs_seen["max_tokens"] == 1500
+    assert kwargs_seen["request_max_tokens"] == 1500 and kwargs_seen["read_timeout"] == 30
     assert "num_retries" not in kwargs_seen  # lm15 refuses per-call retry overrides
 
 

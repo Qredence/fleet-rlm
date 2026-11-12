@@ -135,7 +135,7 @@ approval returns `409` because their incumbent was a per-Session program.
 
 **Progress and fail-fast.** During paired validation the worker persists `validation_done` and
 `validation_total` in `progress` (rollouts finished of 2 stages x 3 passes x dev+holdout examples). When the search
-returns a candidate that changes no instruction or Flex code, validation is skipped and the job completes with the
+returns a candidate that changes no instruction, Flex code, or calibrated decision fields, validation is skipped and the job completes with the
 gate's own reason, `candidate changes no instructions or Flex code`. Job detail adds `summary`, computed from the saved
 comparison: `changed` components (of `components_total`), per-split baseline and candidate means with `improved`,
 `regressed` and `ties` counts over the paired per-example scores, the critical count, and a one-line `headline`.
@@ -277,8 +277,9 @@ The response uses `text/event-stream`. Each data event is JSON prefixed by
 `turn_status` preparation event, then DSPy callback events such as
 `module_start`, `lm_end`, `tool_start`, and `tool_end`. An `lm_end` event carries a `usage` object with
 numeric `prompt_tokens`, `completion_tokens`, `total_tokens`, and, when the provider reports them,
-`reasoning_tokens`; it is omitted when the provider reports no usage. Completion is reported as
-`turn_complete` with `answer`, `route`, optional `learned_skill_note`, and an
+`reasoning_tokens`; it is omitted when the provider reports no usage. Provider thinking and reasoning
+text (extracted from DSPy `ThinkingPart` or `reasoning_content`) is streamed in activity updates.
+Completion is reported as `turn_complete` with `answer`, `route` (`direct`, `flex`, or `rlm`), optional `learned_skill_note`, and an
 `artifacts` list. When MLflow tracing is configured, the completion event also
 includes the recorded `trace_id`. A Turn that provisioned its sandbox also reports
 the preflight-resolved environment identity as `snapshot_name`, `snapshot_id`,

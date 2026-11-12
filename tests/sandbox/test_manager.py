@@ -1652,15 +1652,16 @@ def _provision(
 def test_manager_snapshot_defaults_to_repo_owned_name() -> None:
     from fleet_rlm.sandbox.snapshots import BUILD_COMMAND, DEFAULT_DEFINITION, SNAPSHOT_NAME
 
-    assert SNAPSHOT_NAME == "fleet-rlm-python313-v14"
+    assert SNAPSHOT_NAME == "fleet-rlm-python313-v15"
     resources = DEFAULT_DEFINITION.resources()
     assert (resources.cpu, resources.memory, resources.disk) == (4, 8, 8)
     assert DEFAULT_DEFINITION.python_version == "3.13"
     packages = dict(DEFAULT_DEFINITION.packages)
+    assert packages["dspy"] == "3.5.0"
     assert packages["numpy"] == "2.5.1"
     assert packages["pandas"] == "3.0.5"
     assert {"matplotlib", "pillow", "openpyxl", "pypdf", "uv", "pytest", "ruff"} <= packages.keys()
-    assert not {"dspy", "gepa", "markitdown", "scipy", "scikit-learn", "pyarrow"} & packages.keys()
+    assert not {"markitdown", "scipy", "scikit-learn", "pyarrow"} & packages.keys()
     assert "/setup" in BUILD_COMMAND
     root = DaytonaSandboxManager("key", "org", "volume", "session-a")
     assert root.snapshot == SNAPSHOT_NAME
