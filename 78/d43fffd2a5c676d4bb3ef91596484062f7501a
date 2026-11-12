@@ -1,0 +1,142 @@
+tests/optimize/test_optimization.py
+  s_dd7a112c7f91ef::t_5cd93eb07e78f4 1193,1566,2469,3027-3029,3032-3050,3052-3055,3057
+  s_dd7a112c7f91ef::t_b0c582b91fbb2e 798,857,1060-1061,1073
+src/fleet_rlm/sandbox/manager.py
+  s_dd7a112c7f91ef::t_75b8d9b7ec3323 1304-1305
+  s_cf0b7f74e56c68::t_9b6b3105b5840b 1280,1306-1307
+src/fleet_rlm/engine/reasoning.py
+  s_dd7a112c7f91ef::t_6ea6da93117268 241-247,251-252
+  s_dd7a112c7f91ef::t_d0c75ad7861eb8 142,248-250
+  s_cf0b7f74e56c68::t_500fae84999184 6-13,17-141,143-149,178-184,199,220-235,237,239-240,257
+tests/optimize/test_artifacts.py
+  s_dd7a112c7f91ef::t_e855c8ca9b21a0 284
+  s_dd7a112c7f91ef::t_933cbd43451d92 246
+  s_dd7a112c7f91ef::t_64180844717882 274-276
+  s_dd7a112c7f91ef::t_15e99c541aabf2 277,279,285
+  s_dd7a112c7f91ef::t_cbd841fc1740ef 241,247-249,251-257,259-273,280,282,286-288
+  s_dd7a112c7f91ef::t_30ff21222c7443 238-240,242-245,250,258,278,281,283,289-290
+  s_dd7a112c7f91ef::t_0e340c4682e6e1 8,291-293
+src/fleet_rlm/workspace.py
+  s_dd7a112c7f91ef::t_55778e548b4038 160,162-165
+  s_dd7a112c7f91ef::t_29c3f5eb309f37 9,143-159,188-193,203
+docs/reference/sandbox-environment.md
+  s_dd7a112c7f91ef::t_7bd7233624ff1c 66-73
+  s_cf0b7f74e56c68::t_442ec79bc9b86d 56-58,60,64-65,74
+tests/optimize/test_scorers.py
+  s_dd7a112c7f91ef::t_ec313eaa1097a3 1122
+  s_dd7a112c7f91ef::t_71e72cc76aaa90 194-195,197,536,567,703,798,890,913,1028
+tests/sandbox/test_manager.py
+  s_dd7a112c7f91ef::t_4a565c1fb90ae4 1655,1660,1664
+tests/sandbox/test_interpreter.py
+  s_dd7a112c7f91ef::t_b41d27b77c4ec4 74-77,81,356,1285,1296
+  s_dd7a112c7f91ef::t_92f259985340de 83,1218-1228
+  s_dd7a112c7f91ef::t_e2d57f5efd7af2 14,82,86-87,112,331-332,336-344,350-355,357-405,532,540,797,799,1229-1284,1286-1295,1297
+ARCHITECTURE.md
+  s_dd7a112c7f91ef::t_b399adedf96cdb 184-190,192,245-250
+  s_cf0b7f74e56c68::t_343c943232aedf 54-61,73-74,177-180,183
+docs/reference/evaluation.md
+  s_dd7a112c7f91ef::t_a6042795619972 623
+  s_dd7a112c7f91ef::t_56b1005cf82970 384-389,520-521,524,529,538,555-561,569-577,599,624-630,722,829
+  s_dd7a112c7f91ef::t_4b409d2c63123d 383,830-832
+docs/runbooks/native-dspy-integration.md
+  s_dd7a112c7f91ef::t_c0b0f4e99d0c41 3-39
+src/fleet_rlm/sandbox/interpreter.py
+  s_dd7a112c7f91ef::t_e72c787903bd01 18
+  s_cf0b7f74e56c68::t_707de0688bc68b 22,34-60,112-113,124-194,199-211,213-220,222-229,309-312,319-320,327-328,357-366,372,385-386,389,392,396,410-414,416,431,440-443,489,492-498,500-502,505-506,513,532,546-548,555,588-589,591,630-632
+config/daytona-snapshot-requirements.in
+  s_cf0b7f74e56c68::t_59eef32692f918 6
+config/fleet.toml.example
+  s_cf0b7f74e56c68::t_3c2abefc13b4f0 28-29
+docs/reference/configuration.md
+  s_cf0b7f74e56c68::t_a0661caf03943c 31-32,186,204,207-225
+docs/reference/http-api.md
+  s_cf0b7f74e56c68::t_a04dd37982c9a2 138,280-282
+docs/reference/source-layout.md
+  s_dd7a112c7f91ef::t_4953c954f7eb69 33
+docs/runbooks/evaluation-canary.md
+  s_cf0b7f74e56c68::t_8068b0a39ac2ea 57
+pyproject.toml
+  s_cf0b7f74e56c68::t_db90c5d765ed76 34-35,105
+scripts/verify_gepa_live.py
+  s_cf0b7f74e56c68::t_f93f80e709176b 42
+scripts/verify_runtime_live.py
+  s_cf0b7f74e56c68::t_d2bf87d216af9d 21,236-244,264-266,270,281
+src/fleet_rlm/api/events.py
+  s_cf0b7f74e56c68::t_0f64e5f8a7f9f9 16,202-215
+src/fleet_rlm/config.py
+  s_cf0b7f74e56c68::t_e3ecb534243ba6 29,60,111-114,270-271,277-278,341,350,369,537-538,544-545,551-552,970-971,974-975
+src/fleet_rlm/contracts.py
+  s_cf0b7f74e56c68::t_0d26531c40851a 19,150-152,160-163,174-176,188-195,197,202,208-215,219-223,225,231,233-234,237-238,241,244-246,274-289
+src/fleet_rlm/engine/children.py
+  s_cf0b7f74e56c68::t_1f8a391324c0d1 19-22,24-26
+src/fleet_rlm/engine/compiled.py
+  s_cf0b7f74e56c68::t_a898e72c8f25de 14,17,44
+src/fleet_rlm/engine/decisions.py
+  s_cf0b7f74e56c68::t_6df4e5947c64b3 98-114,116-120,179-180,183-185
+src/fleet_rlm/engine/invocation.py
+  s_cf0b7f74e56c68::t_ff260c2a203ae5 9,62-65,88,125,139,158
+src/fleet_rlm/engine/programs.py
+  s_cf0b7f74e56c68::t_dba0f4492e3ff5 76,99
+src/fleet_rlm/engine/signatures.py
+  s_cf0b7f74e56c68::t_2397e09b154303 11,13-15,26
+src/fleet_rlm/engine/turn.py
+  s_cf0b7f74e56c68::t_4fde9d39fbe51f 451-452,516-520,894,973
+src/fleet_rlm/models.py
+  s_cf0b7f74e56c68::t_009ba53bc834dc 22-23,62-63,79-83,104-115,122,146-147
+src/fleet_rlm/observability.py
+  s_cf0b7f74e56c68::t_14441c68bc2dce 28-29,254,293-294,329,408
+src/fleet_rlm/optimize/artifacts.py
+  s_cf0b7f74e56c68::t_63219e8e5c049f 30,187-200,202-209
+src/fleet_rlm/optimize/gepa.py
+  s_cf0b7f74e56c68::t_bc7c7f042b19c3 25,375-401,404,406-408,412,414,487-489,1105-1110,1119,1121-1125,1402-1405,1417-1454,1465,1516-1517,1526
+src/fleet_rlm/optimize/scorers.py
+  s_cf0b7f74e56c68::t_567db6243e6d00 33-34,242-243,335-337,443,681-683,872,916-918
+src/fleet_rlm/optimize/validation.py
+  s_cf0b7f74e56c68::t_95427cbb0b5814 164,169-183,192-197,225-226
+src/fleet_rlm/sandbox/runtime/repl.py
+  s_cf0b7f74e56c68::t_debe1751d3cea5 26,54,59-65,376-380,382-386,388-398,406,408,410-411,461-469,474-479,564-565
+src/fleet_rlm/sandbox/snapshot-requirements.txt
+  s_cf0b7f74e56c68::t_fb0d78f11403e3 1-9,13-15,192-194,389-394,457-459,466-474,722-781,918-1061,1080-1271,1275-1403,1429-1431,1435-1437
+src/fleet_rlm/sandbox/snapshots.py
+  s_cf0b7f74e56c68::t_df7aaede829f01 28
+src/fleet_rlm/session.py
+  s_cf0b7f74e56c68::t_807b182e9d8d77 21,68,169-171,174-186
+src/fleet_rlm/setup.py
+  s_cf0b7f74e56c68::t_2d1c4309dc3ea3 44
+tests/api/fakes.py
+  s_cf0b7f74e56c68::t_ceb9046330681c 159,182
+tests/engine/test_programs.py
+  s_dd7a112c7f91ef::t_9c19144b551d47 44,68,74,81,135,143,147-149,480,490-491,496,499,544-547,731-733,737,740-742,746
+tests/lite/test_configuration.py
+  s_dd7a112c7f91ef::t_0831cb9132bfa8 165-166,169-173
+tests/lite/test_session.py
+  s_dd7a112c7f91ef::t_efc98ffc9cc106 964-1007
+tests/lite/test_skills.py
+  s_dd7a112c7f91ef::t_1274a0d60ef85f 3,8,145-168
+uv.lock
+  s_cf0b7f74e56c68::t_72bbaefa15f974 1072,1077,1090,1092,1297,1339
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "78d43fffd2a5c676d4bb3ef91596484062f7501a",
+  "prompts": {},
+  "sessions": {
+    "s_cf0b7f74e56c68": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "d79af88e-967b-4a2d-9c05-2ce24c83440d",
+        "model": "custom:Deepseek-V4.1-Flash-1017---Command-0"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_dd7a112c7f91ef": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1d049-0e85-7637-bc35-5db827ec51b0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
