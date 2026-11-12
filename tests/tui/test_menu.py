@@ -474,6 +474,8 @@ async def test_attachment_failures_keep_the_draft_and_never_start_a_turn(monkeyp
     requested = []
 
     def respond(request):
+        if request.url.path == "/improve/readiness":
+            return httpx.Response(200, json={"ready": False})
         requested.append(request.url.path)
         assert request.url.path.endswith("/attach")
         return httpx.Response(413, json={"detail": "Attachment exceeds the configured size limit"})

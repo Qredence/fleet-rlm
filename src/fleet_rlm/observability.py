@@ -109,6 +109,20 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
     if not experiment_id:
         return None
     try:
+        benchmark_model_id = (os.getenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID") or "").strip() or None
+        benchmark_tags: dict[str, str] = {}
+        raw_benchmark_tags = (os.getenv("FLEET_MLFLOW_BENCHMARK_TAGS") or "").strip()
+        if raw_benchmark_tags:
+            parsed_tags = json.loads(raw_benchmark_tags)
+            if not isinstance(parsed_tags, dict) or any(
+                not isinstance(key, str)
+                or not key.startswith("fleet.benchmark.")
+                or len(key) <= len("fleet.benchmark.")
+                or not isinstance(value, str)
+                for key, value in parsed_tags.items()
+            ):
+                raise ValueError("Invalid benchmark trace tags")
+            benchmark_tags = parsed_tags
         startup_identity = _STARTUP_IDENTITY
         if startup_identity is None:
             raise ValueError("No startup identity")
@@ -173,12 +187,26 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
             pending.wait(_AGENT_LOOKUP_WAIT_SECONDS)
             with _AGENT_LOCK:
                 model_id = _AGENT_MODELS.get(key)
-        if model_id is None:
+        if model_id is None and not benchmark_model_id:
             span.set_attribute("fleet.agent.identity_status", "unversioned")
+            if benchmark_tags:
+                mlflow.update_current_trace(tags=benchmark_tags)
+                span.set_attributes(benchmark_tags)
             return None
-        mlflow.update_current_trace(model_id=model_id)
+        trace_model_id = benchmark_model_id or model_id
+        if benchmark_tags:
+            mlflow.update_current_trace(model_id=trace_model_id, tags=benchmark_tags)
+        else:
+            mlflow.update_current_trace(model_id=trace_model_id)
         span.set_attributes(
-            {**startup_identity, **identity, "fleet.agent.fingerprint": fingerprint, "fleet.agent.model_id": model_id}
+            {
+                **startup_identity,
+                **identity,
+                "fleet.agent.fingerprint": fingerprint,
+                **({"fleet.agent.model_id": model_id} if model_id else {}),
+                **({"fleet.benchmark.model_id": benchmark_model_id} if benchmark_model_id else {}),
+                **benchmark_tags,
+            }
         )
         return model_id
     except Exception as exc:

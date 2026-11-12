@@ -146,13 +146,40 @@ def _score_command(args: argparse.Namespace, settings: Any, experiment_id: str) 
             raise SystemExit(f"Trace {trace_id} is not readable; retry its saved trace ID")
         traces.append(trace)
     evaluation.apply_judge_environment(settings)
+    diagnostic_options: dict[str, Any] = {}
+    registered_names = getattr(args, "registered_scorer", None) or []
+    scorer_experiment = getattr(args, "scorer_experiment_id", None)
+    if bool(registered_names) != bool(scorer_experiment):
+        raise SystemExit("--scorer-experiment-id and --registered-scorer must be supplied together")
+    if registered_names and getattr(args, "execution_diagnostics_only", False):
+        raise SystemExit("Registered selection cannot be combined with --execution-diagnostics-only")
+    if registered_names:
+        diagnostic_options["scorers"], diagnostic_options["registered_provenance"] = evaluation.load_registered_scorers(
+            str(scorer_experiment), registered_names
+        )
+    elif getattr(args, "execution_diagnostics_only", False):
+        from mlflow.genai.scorers import scorer
+
+        from fleet_rlm.optimize.scorers import diagnose_execution_evidence, make_execution_evidence_judge
+
+        judge = make_execution_evidence_judge(settings.fleet_judge_model)
+
+        @scorer(name="execution_evidence_diagnostics")
+        def diagnostics(trace):
+            return diagnose_execution_evidence(trace, judge, judge_model=settings.fleet_judge_model)
+
+        diagnostic_options["scorers"] = [diagnostics]
+    else:
+        diagnostic_options.update(
+            judge_lm=settings.build_judge_lm(),
+            judge_adapter=settings.resolved_model("judge").build_adapter(),
+            jev_lm=settings.build_jev_lm(),
+        )
     try:
         result = evaluation.score_evaluation_traces(
             traces,
             judge_model=settings.fleet_judge_model,
-            judge_lm=settings.build_judge_lm(),
-            judge_adapter=settings.resolved_model("judge").build_adapter(),
-            jev_lm=settings.build_jev_lm(),
+            **diagnostic_options,
             experiment_id=experiment_id,
             report=lambda message: _CONSOLE.print(message, markup=False, soft_wrap=True),
         )
@@ -346,6 +373,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     score = eval_commands.add_parser("score", help="score already collected, labelled traces without rerunning them")
     score.add_argument("trace_ids", nargs="+", metavar="trace_id")
+    score.add_argument("--scorer-experiment-id", help="source experiment for registered scorers")
+    score.add_argument("--registered-scorer", action="append", help="registered scorer name (repeatable)")
+    score.add_argument(
+        "--execution-diagnostics-only", action="store_true", help="run only validated execution diagnostics"
+    )
     label = eval_commands.add_parser("label", help="write gold labels onto a trace")
     label.add_argument("trace_id")
     label.add_argument(

@@ -372,8 +372,19 @@ def test_turn_traces_skip_pytest_traces_in_the_runtime_experiment(monkeypatch) -
     user_turn = _trace("t1", "sess-a", request, {})
     pytest_turn = _trace("t2", "sess-b", request, {})
     pytest_turn.info.trace_metadata["mlflow.source.name"] = "/repo/.venv/bin/pytest"
+    tagged_benchmark = _trace("t3", "sess-c", request, {})
+    tagged_benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
+    span_benchmark = _trace("t4", "sess-d", request, {})
+    span_benchmark.data.spans = [
+        SimpleNamespace(parent_id="root", attributes={}),
+        SimpleNamespace(parent_id=None, attributes={"fleet.benchmark.model_id": "m-bench"}),
+    ]
     monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "search_traces", lambda **_kwargs: [user_turn, pytest_turn])
+    monkeypatch.setattr(
+        dataset.mlflow,
+        "search_traces",
+        lambda **_kwargs: [user_turn, pytest_turn, tagged_benchmark, span_benchmark],
+    )
     assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev")] == ["t1"]
 
 

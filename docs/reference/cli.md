@@ -231,8 +231,13 @@ A new source group defaults to the trace's session id. The trace ID is printed a
 each Turn and by `/trace`. The HTTP `POST /improve/labels` runs the same labelling by
 `turn_id`.
 
-`fleet eval score <trace-id>...` scores already collected, labelled traces with the
-configured judge in the evaluation experiment, without running their Turns again.
+`fleet eval score [--execution-diagnostics-only | --scorer-experiment-id ID --registered-scorer NAME ...] <trace-id>...`
+scores already collected, labelled traces with the configured judge in the evaluation
+experiment, without running their Turns again. `--execution-diagnostics-only` runs only
+the validated `execution_evidence_diagnostics` scorer; `--scorer-experiment-id` and
+repeatable `--registered-scorer` must be supplied together (and cannot be combined with
+`--execution-diagnostics-only`) to load trusted registered scorers from that source
+experiment while recording the run in the configured evaluation experiment.
 
 `fleet optimize --check` prints readiness as JSON (`ready`, `examples`, `groups`,
 `critical`, `split_sizes`, `missing`) and exits non-zero when dataset readiness fails

@@ -28,6 +28,7 @@ import fleet_rlm.engine.turn as turn_module
 import fleet_rlm.observability as observability
 from fleet_rlm.api.events import SSERuntimeCallback
 from fleet_rlm.api.schemas import TurnRequest
+from fleet_rlm.contracts import Route
 from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
@@ -2048,6 +2049,198 @@ def test_reusing_an_idempotency_key_for_another_task_names_the_conflict() -> Non
     assert events[1]["payload"]["error"] == "Idempotency key already belongs to another task"
 
 
+@pytest.mark.usefixtures("traced")
+def test_known_empty_session_routes_before_preparing_workspace(monkeypatch) -> None:
+    runtime = runtime_with()
+    monkeypatch.setattr(type(runtime), "workspace_state", property(lambda _self: "known_empty"), raising=False)
+    routes = []
+    calls = []
+
+    class Engine:
+        execution_mode = "hybrid"
+        root_lm = SimpleNamespace(model="test.root")
+        sub_lm = SimpleNamespace(model="test.sub")
+        compiled = SimpleNamespace(digest="")
+        compiled_path = None
+
+        def preview_route(self, **kwargs):
+            routes.append(kwargs)
+            return Route.DIRECT
+
+        def __call__(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                answer="Hi!", route="direct", execution_evidence={"artifacts": {"complete": True, "files": {}}}
+            )
+
+    runtime.engine = Engine()
+    runtime.skill_mgr = SimpleNamespace(build_local_catalog_xml=lambda: "<available_skills />")
+    monkeypatch.setattr(
+        turn_module,
+        "_prepare_inputs",
+        lambda *_args, **_kwargs: pytest.fail("known-empty direct route should not prepare Daytona"),
+    )
+    events = []
+    turn_module.run_turn(
+        runtime,
+        api_settings(),
+        session_id="session-a",
+        turn_id="empty-direct",
+        task="hi",
+        idempotency_key="empty-direct",
+        mlflow_experiment_id=None,
+        callback=object(),
+        emit=events.append,
+    )
+    assert routes and calls[0]["selected_route"] is Route.DIRECT
+    assert events[-1]["event"] == "done"
+
+
+def test_known_empty_direct_turn_captures_local_skill_digests_replay_and_manifest(tmp_path: Path, monkeypatch, traced):
+    from fleet_rlm.skills import SkillManager
+
+    skill_dir = tmp_path / "skills" / "ledger-audit"
+    (skill_dir / "references").mkdir(parents=True)
+    skill_md = b"---\nname: ledger-audit\ndescription: Audit ledgers.\n---\n\nVerify totals.\n"
+    guide_md = b"Use exact decimal arithmetic.\n"
+    (skill_dir / "SKILL.md").write_bytes(skill_md)
+    (skill_dir / "references" / "guide.md").write_bytes(guide_md)
+
+    persisted: list[dict[str, Any]] = []
+    routes: list[dict[str, Any]] = []
+    callback = object()
+
+    class Engine:
+        execution_mode = "hybrid"
+        root_lm = SimpleNamespace(model="test.root")
+        sub_lm = SimpleNamespace(model="test.sub")
+        compiled = SimpleNamespace(digest="")
+        compiled_path = None
+        program = SimpleNamespace()
+
+        def preview_route(self, **kwargs):
+            assert callback in traced["callbacks"]
+            routes.append(kwargs)
+            return Route.DIRECT
+
+        def __call__(self, **_kwargs):
+            return SimpleNamespace(
+                answer="Hi!",
+                route="direct",
+                execution_evidence={
+                    "artifacts": {"complete": True, "files": {}},
+                    "children": [],
+                    "children_complete": True,
+                },
+            )
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(session_id="session-a"),
+        commit_turn=lambda **kwargs: (
+            persisted.append(kwargs) or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
+        ),
+        workspace_state="known_empty",
+    )
+    runtime.engine = Engine()
+    runtime.skill_mgr = SkillManager(runtime.sandbox_mgr, tmp_path / "skills", None)
+    monkeypatch.setattr(
+        turn_module,
+        "_prepare_inputs",
+        lambda *_args, **_kwargs: pytest.fail("known-empty direct route should not prepare Daytona"),
+    )
+
+    events: list[dict[str, Any]] = []
+    turn_module.run_turn(
+        runtime,
+        api_settings(),
+        session_id="session-a",
+        turn_id="empty-direct-skills",
+        task="hi",
+        idempotency_key="empty-direct-skills",
+        mlflow_experiment_id=None,
+        callback=callback,
+        emit=events.append,
+        record_replay=True,
+    )
+
+    expected_files = {
+        "skills/ledger-audit/SKILL.md": skill_md,
+        "skills/ledger-audit/references/guide.md": guide_md,
+    }
+    expected_manifest = "/workspace/skills/ledger-audit/SKILL.md, /workspace/skills/ledger-audit/references/guide.md"
+    expected_digests = {path: hashlib.sha256(raw).hexdigest() for path, raw in expected_files.items()}
+    assert routes[0]["workspace_manifest"] == expected_manifest
+    record = persisted[0]["turn_record"]
+    digest, compressed = persisted[0]["replay_snapshot"]
+    snapshot = decode_snapshot(digest, compressed)
+    assert record["workspace_manifest"] == snapshot["workspace_manifest"] == expected_manifest
+    assert record["context_files"] == snapshot["context_files"] == expected_digests
+    assert snapshot["replay_files"] == {
+        path: base64.b64encode(raw).decode("ascii") for path, raw in expected_files.items()
+    }
+    assert events[-1]["event"] == "done"
+
+
+@pytest.mark.usefixtures("traced")
+def test_known_empty_execution_route_invalidates_state_before_preparation(monkeypatch) -> None:
+    runtime = runtime_with()
+    runtime.sandbox_mgr.session_id = "session-a"
+    runtime.workspace_state = "known_empty"
+    calls = []
+    routes = []
+
+    class Engine:
+        execution_mode = "hybrid"
+        root_lm = SimpleNamespace(model="test.root")
+        sub_lm = SimpleNamespace(model="test.sub")
+        compiled = SimpleNamespace(digest="")
+        compiled_path = None
+
+        def preview_route(self, **_kwargs):
+            routes.append(True)
+            return Route.RLM
+
+        def __call__(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                answer="computed",
+                route="rlm",
+                execution_evidence={"artifacts": {"complete": True, "files": {}}},
+            )
+
+    runtime.engine = Engine()
+    runtime.skill_mgr = SimpleNamespace(build_local_catalog_xml=lambda: "<available_skills />")
+    runtime.load_context = lambda _session_id: pytest.fail("known-empty RLM preview should not pre-load context")
+    runtime.memories = lambda *_args, **_kwargs: pytest.fail("known-empty RLM preview should not pre-load memories")
+    prepared = {
+        "manifest": "/workspace/files (empty)",
+        "context_files": {},
+        "skills_catalog": "<available_skills />",
+        "memory_summary": "",
+        "session_history": "",
+        "replay_files": {},
+        "replay_selected": False,
+        "replay_skipped_bytes": None,
+    }
+    monkeypatch.setattr(turn_module, "_prepare_inputs", lambda *_args, **_kwargs: deepcopy(prepared))
+    events = []
+    turn_module.run_turn(
+        runtime,
+        api_settings(),
+        session_id="session-a",
+        turn_id="empty-execution",
+        task="compute something",
+        idempotency_key="empty-execution",
+        mlflow_experiment_id=None,
+        callback=object(),
+        emit=events.append,
+        record_replay=False,
+    )
+    assert runtime.workspace_state == "unknown", (events, routes, calls)
+    assert calls[0]["selected_route"] is Route.RLM
+    assert events[-1]["event"] == "done"
+
+
 def test_prepare_inputs_hashes_remotely_without_downloading_files() -> None:
     digests = {"files/a.txt": hashlib.sha256(b"a").hexdigest(), "skills/x/SKILL.md": hashlib.sha256(b"x").hexdigest()}
 
@@ -2061,8 +2254,11 @@ def test_prepare_inputs_hashes_remotely_without_downloading_files() -> None:
         )
     )
 
+    runtime.sandbox_mgr.session_id = "session-a"
+    runtime.workspace_state = "known_empty"
     inputs = turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=False)
 
+    assert runtime.workspace_state == "unknown"
     assert inputs["context_files"] == digests
     assert inputs["manifest"] == "/workspace/files/a.txt, /workspace/skills/x/SKILL.md"
     assert "Sandbox environment: X." in inputs["memory_summary"]
@@ -2819,3 +3015,42 @@ def test_expanded_replay_size_limit_has_a_distinct_skip_reason(monkeypatch):
     with pytest.raises(replay.ReplaySizeError) as raised:
         replay.encode_snapshot({"task": "large"})
     assert raised.value.size > raised.value.limit == 5
+
+
+def test_prepare_inputs_reads_replay_files_in_one_batch():
+    files = {"files/a.txt": b"a", "files/b.txt": b"b"}
+    calls = []
+
+    def batch(paths):
+        calls.append(paths)
+        return {path: files[path] for path in paths}
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            turn_inputs=lambda: {
+                "digests": {p: hashlib.sha256(b).hexdigest() for p, b in files.items()},
+                "sizes": {p: len(b) for p, b in files.items()},
+                "environment": "",
+            },
+            read_workspace_files=batch,
+        )
+    )
+    inputs = turn_module._prepare_inputs(runtime, "session-a", "task")
+    assert calls == [list(files)]
+    assert inputs["replay_files"] == {p: base64.b64encode(b).decode("ascii") for p, b in files.items()}
+
+
+@pytest.mark.parametrize("downloaded", [{}, {"files/a.txt": b"changed"}])
+def test_prepare_inputs_refuses_invalid_batch_replay(downloaded):
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            turn_inputs=lambda: {
+                "digests": {"files/a.txt": hashlib.sha256(b"original").hexdigest()},
+                "sizes": {"files/a.txt": 8},
+                "environment": "",
+            },
+            read_workspace_files=lambda _paths: downloaded,
+        )
+    )
+    with pytest.raises((KeyError, ValueError)):
+        turn_module._prepare_inputs(runtime, "session-a", "task")

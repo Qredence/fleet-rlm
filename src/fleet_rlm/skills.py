@@ -417,29 +417,30 @@ class SkillManager:
             ) from exc
         return tuple(resolved)
 
-    def sync_local_skills_to_volume(self, *, required_skills: tuple[RequiredSkill, ...] = ()) -> int:
-        """Upload validated bundled and local Skills; developer-only `.agents/skills` is never read."""
-        count = 0
-        total_bytes = 0
+    def _stage_local_skills(
+        self, *, skip: frozenset[str] | set[str] = frozenset()
+    ) -> tuple[list[dict[str, str]], list[tuple[str, bytes]], set[str]]:
+        """Validate and stage bundled and local Skills without touching the sandbox."""
+        catalog_entries: list[dict[str, str]] = []
         staged_files: list[tuple[str, bytes]] = []
         bundled_paths: set[str] = set()
-        required_names = {skill.name for skill in required_skills}
-        for skill in required_skills:
-            for path, content in skill.files:
-                relative = f"skills/{skill.name}/{path}"
-                staged_files.append((relative, content))
-                total_bytes += len(content)
-                if skill.source == "bundled":
-                    bundled_paths.add(relative)
-            count += 1
-        for name, skill_dir in self._skill_dirs().items():
-            if name in required_names:
+        total_bytes = 0
+        for name, skill_dir in sorted(self._skill_dirs().items()):
+            if name in skip:
                 continue
             bundled = self.bundled_skills_dir is not None and skill_dir.parent == self.bundled_skills_dir
             skill_md = skill_dir / "SKILL.md"
-            if skill_dir.is_symlink() or skill_md.is_symlink() or skill_md.stat().st_size > MAX_SKILL_FILE_BYTES:
+            if (
+                skill_dir.is_symlink()
+                or skill_md.is_symlink()
+                or not skill_md.is_file()
+                or skill_md.stat().st_size > MAX_SKILL_FILE_BYTES
+            ):
                 raise ValueError("Local Skills and their instructions may not be symbolic links or oversized")
-            parse_and_validate_skill_md(skill_dir.name, skill_md.read_text(encoding="utf-8"))
+            metadata, _ = parse_and_validate_skill_md(name, skill_md.read_text(encoding="utf-8"))
+            catalog_entries.append({"name": name, "description": metadata["description"]})
+            if len(catalog_entries) > MAX_SKILL_FILES:
+                raise ValueError("Too many local Skills to synchronize")
             file_count = 0
             for file_path in sorted(skill_dir.rglob("*")):
                 if file_path.is_symlink():
@@ -458,10 +459,25 @@ class SkillManager:
                 staged_files.append((f"skills/{relative}", content))
                 if bundled:
                     bundled_paths.add(f"skills/{relative}")
-            count += 1
-            if count > MAX_SKILL_FILES:
-                raise ValueError("Too many local Skills to synchronize")
+        return catalog_entries, staged_files, bundled_paths
 
+    def sync_local_skills_to_volume(self, *, required_skills: tuple[RequiredSkill, ...] = ()) -> int:
+        """Upload validated bundled and local Skills; developer-only `.agents/skills` is never read."""
+        required_names = {skill.name for skill in required_skills}
+        catalog_entries, local_staged, bundled_paths = self._stage_local_skills(skip=required_names)
+        count = len(required_skills) + len(catalog_entries)
+        if count > MAX_SKILL_FILES:
+            raise ValueError("Too many local Skills to synchronize")
+        staged_files: list[tuple[str, bytes]] = []
+        total_bytes = sum(len(content) for _, content in local_staged)
+        for skill in required_skills:
+            for path, content in skill.files:
+                relative = f"skills/{skill.name}/{path}"
+                staged_files.append((relative, content))
+                total_bytes += len(content)
+                if skill.source == "bundled":
+                    bundled_paths.add(relative)
+        staged_files.extend(local_staged)
         if total_bytes > MAX_SKILL_TOTAL_BYTES:
             raise ValueError("Local Skills exceed the synchronization bounds")
         inspection_code = inspect_skills_code([relative for relative, _ in staged_files])
@@ -570,6 +586,21 @@ class SkillManager:
             or "[]"
         )
         return catalog_xml(skills)
+
+    def stage_local_skills(self) -> tuple[str, dict[str, bytes]]:
+        """Stage both the Stage-1 catalog XML and validated workspace-relative bytes in one pass."""
+        skills, staged_files, _ = self._stage_local_skills()
+        return catalog_xml(skills), dict(staged_files)
+
+    def build_local_catalog_xml(self) -> str:
+        """Build the synchronized Stage-1 catalog from trusted local Skill sources."""
+        catalog, _ = self.stage_local_skills()
+        return catalog
+
+    def local_skill_files(self) -> dict[str, bytes]:
+        """Return validated workspace-relative bytes (`skills/...`) for bundled and local Skills."""
+        _, staged_files = self.stage_local_skills()
+        return staged_files
 
 
 def catalog_xml(skills: list[dict[str, Any]]) -> str:

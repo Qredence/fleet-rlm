@@ -303,7 +303,7 @@ outside that measurement, so the two agree within two seconds. A Turn or replay 
 with incomplete snapshot fields and no `deadline_source` remains readable as
 `provenance_state: "pre-provenance"`, without backfilling absent values. A newer Turn with `deadline_source` but
 incomplete required snapshot fields reports `provenance_state: "unresolved"`, for example
-when snapshot preflight refused the Turn. All six snapshot fields must be present
+when snapshot preflight refused the Turn or a sandbox-free `known_empty` `Direct` Turn completed without provisioning Daytona. All six snapshot fields must be present
 for `provenance_state: "recorded"`; the optional provider build digest is
 present only when Daytona returns build metadata.
 The identity is recorded the

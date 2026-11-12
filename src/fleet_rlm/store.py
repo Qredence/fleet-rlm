@@ -456,14 +456,15 @@ class Store:
             )
 
     @_retry_once
-    def ensure_session(self, session_id: str) -> None:
-        """Create a new Session with known-empty ownership; legacy rows remain unknown."""
+    def ensure_session(self, session_id: str) -> bool:
+        """Create a Session with known-empty ownership and report whether the row was new."""
         with self.pool.connection() as connection:
-            connection.execute(
+            created = connection.execute(
                 "INSERT INTO fleet_lite_sessions (session_id,sandbox_ownership) "
-                "VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING",
+                "VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING RETURNING session_id",
                 (session_id, json.dumps({"epoch": 0, "resources": []})),
-            )
+            ).fetchone()
+        return created is not None
 
     @_retry_once
     def advance_sandbox_ownership_epoch(self, session_id: str) -> int | None:
