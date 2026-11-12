@@ -4,6 +4,80 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
+### Features
+
+- Answer Direct turns for an empty session without provisioning Daytona while
+  lease-fenced `workspace_state` is `known_empty`. Hybrid can preview the route
+  from the local Skill catalog. Workspace writes, uploads, deletions, Skill
+  sync, context selection, and any non-Direct route invalidate the state to
+  `unknown` before the Volume is mutated. `provenance_state` stays `unresolved`
+  because no sandbox ran. See [PR #692](https://github.com/Qredence/fleet-rlm/pull/692).
+- Score saved traces with `fleet eval score`, including
+  `--execution-diagnostics-only` under rubric `execution-evidence-v3`. The
+  rubric returns a JSON object string and validates booleans, rationales, and
+  `span_id=` citations in Python. Repeatable `--registered-scorer` with
+  `--scorer-experiment-id` loads trusted registered scorers and cannot be
+  combined with diagnostics-only scoring. Benchmark traces tagged
+  `fleet.benchmark.*` stay out of curation. See
+  [PR #692](https://github.com/Qredence/fleet-rlm/pull/692).
+- Add Improve rescore and replay jobs, per-split results, optional comparison
+  narration, an Improve screen, a global program, and the `/improve` API.
+  Rescore judges historical executions without attributing them to the
+  installed program. Replay measures the installed program in isolated
+  rollouts. Opt-in automatic optimization records `trigger=auto` and still
+  requires explicit human approval before installation. Synthetic jobs are
+  refused before startup. See [PR #690](https://github.com/Qredence/fleet-rlm/pull/690).
+- Route automatically through Direct or RLM while preserving explicit Flex.
+  Required Skills are admitted with bounded full preloads and replay-v2 source
+  identities. Completed intent receipts replay before source capture, and new
+  admission is serialized with cancellation (`3a93130e4`).
+- Persist native leaf and delegating action policies in root DSPy state and
+  materialize isolated child RLMs from that learned state. Policy schema and
+  runtime model ownership are validated across serving and isolated
+  reconstruction, with additive legacy migration (`caaa9e45f`).
+
+### Changed
+
+- Default unset root and sub models to DeepSeek Flash. Explicit shared and role
+  model overrides remain in force, and reflection, judge, endpoint, and
+  credential inheritance are unchanged (`997915491`).
+- Use Daytona SDK `0.231.0`, with the matching API clients and required
+  Pydantic dependencies. Settings alias validation stays restricted to string
+  keys (`b1b06cd42`). This release does not move that pin again.
+- Declare native Unity Gateway token compatibility through public DSPy provider
+  declarations for `max_tokens` requests, while retaining ordinary OpenAI wire
+  behavior. Endpoint bindings stay isolated and credentials stay LM-owned
+  (`c0af81f08`).
+- Apply Store migrations 11 and 12 on startup: global optimization runs, then
+  global settings. See [`src/fleet_rlm/store.py`](src/fleet_rlm/store.py).
+
+### Fixed
+
+- Drain a disconnected turn before releasing the session lock. Nonterminal
+  activity handoff stays bounded and does not block execution or cleanup;
+  terminal delivery keeps its backpressure (`2dfda9427`).
+- Require confirmed isolated rollout cleanup before publication. Cleanup
+  uncertainty is latched outside native scoring, admitted attempts drain before
+  publication, and the primary error is preserved across SIGINT during
+  teardown (`d355b841d`).
+- Inherit omitted `[llm.judge]` credentials from the base `[llm]` connection
+  for `openai:/` judges. Online scorer reconciliation can retire legacy v3
+  schedules and require completed root spans. See
+  [PR #692](https://github.com/Qredence/fleet-rlm/pull/692).
+
+### Migration
+
+- Existing databases apply schema 12 on startup. No manual SQL is required.
+- Do not attach a new schema to a Daytona Volume that already holds Session
+  subtrees. A new Session is recorded `known_empty` without listing that
+  Volume. See [PR #692](https://github.com/Qredence/fleet-rlm/pull/692).
+- Configurations that omit root and sub models now resolve to DeepSeek Flash.
+  Explicit model settings are unchanged.
+- No live-provider runs or measured performance gains are claimed by this
+  release. Offline checks only.
+
 ## [0.11.0] - 2026-11-06
 
 ### Features
