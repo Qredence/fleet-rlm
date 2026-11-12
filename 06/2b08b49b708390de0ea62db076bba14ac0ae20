@@ -1,0 +1,89 @@
+.gitignore
+  s_d092b13e78e0c9::t_9d95316a3d11eb 45
+AGENTS.md
+  s_d092b13e78e0c9::t_6045816fd389b0 24,36-37
+ARCHITECTURE.md
+  s_d092b13e78e0c9::t_e27a673c984abd 106-113,215,228,230
+docs/reference/cli.md
+  s_d092b13e78e0c9::t_772ed5737272ad 234-240
+docs/reference/evaluation.md
+  s_d092b13e78e0c9::t_0d79b5f6181c05 4,68-74,79-84,668-676
+docs/reference/http-api.md
+  s_d092b13e78e0c9::t_cb4fcee52e8b04 306
+docs/reference/source-layout.md
+  s_d092b13e78e0c9::t_95211cbcdd95dd 9,12-14,37,43,53-54,64-66,75-78
+docs/reference/turn-results.md
+  s_d092b13e78e0c9::t_f1a3d2c6b410ce 34
+docs/runbooks/assessment-latency-rollout.md
+  s_d092b13e78e0c9::t_d105631a14ddc5 239-326
+scripts/reconcile_mlflow_scorers.py
+  s_d092b13e78e0c9::t_b567abbed0be00 33,37-42,83,319-501,507-512,518-526
+src/fleet_rlm/api/routes/sessions.py
+  s_d092b13e78e0c9::t_6a139afabf7c5d 183-188,190,234,243-246,253
+src/fleet_rlm/api/routes/workspace.py
+  s_d092b13e78e0c9::t_85df498af35cbb 20,26-32,41-42,67-68,82-86,117-118,137-138,169-170
+src/fleet_rlm/cli.py
+  s_d092b13e78e0c9::t_e0007deea216c0 149-177,182,376-380
+src/fleet_rlm/engine/invocation.py
+  s_d092b13e78e0c9::t_eaf64bfc7dd1ab 14,32-39,99,124,137,140-157,239-243
+src/fleet_rlm/engine/programs.py
+  s_d092b13e78e0c9::t_98c01b142b8d3c 7,75,78
+src/fleet_rlm/engine/turn.py
+  s_d092b13e78e0c9::t_ff692a690ef8cc 278,280-285,287-353,446-450,459,888-889,934-935,937
+src/fleet_rlm/observability.py
+  s_d092b13e78e0c9::t_0386d4056f1625 112-125,190,192-194,196-200,202-209
+src/fleet_rlm/optimize/dataset.py
+  s_d092b13e78e0c9::t_46ac9b30c88a4d 161-172,174-178
+src/fleet_rlm/optimize/evaluation.py
+  s_d092b13e78e0c9::t_6b98af1b09e3e3 11,13,32,269,271,291-292,569-597,639,668-684,693-708,715-718
+src/fleet_rlm/optimize/scorers.py
+  s_d092b13e78e0c9::t_744c5c2a4f1c19 459,465-466,476-478,512,526-532
+src/fleet_rlm/session.py
+  s_d092b13e78e0c9::t_cfde642c8c067b 58,73-84,547-554,567-568
+src/fleet_rlm/skills.py
+  s_d092b13e78e0c9::t_ebddc33fb0d0d1 420-424,427-429,433-438,440-443,462,464-480,590-604
+src/fleet_rlm/store.py
+  s_d092b13e78e0c9::t_118793501e7cc1 459-460,462,464,466-467
+tests/api/fakes.py
+  s_d092b13e78e0c9::t_28ac6afdfb37e1 24-26,29,40,75
+tests/api/test_turns.py
+  s_d092b13e78e0c9::t_3447eb7fff8c2e 31,2052-2243,2257-2258,2261,3018-3056
+tests/engine/test_programs.py
+  s_d092b13e78e0c9::t_466db2a74255d3 38-44,920-968
+tests/lite/test_agent_versions.py
+  s_d092b13e78e0c9::t_2b029dd4b287d7 66-127,247-250,255,260-261,263-266,268,270,276
+tests/lite/test_cli.py
+  s_d092b13e78e0c9::t_78886ecb3230f9 561-636
+tests/lite/test_configuration.py
+  s_d092b13e78e0c9::t_9127ade9712074 575-588
+tests/lite/test_session.py
+  s_d092b13e78e0c9::t_37175bcd74c8aa 883-963
+tests/lite/test_skills.py
+  s_d092b13e78e0c9::t_8b6939fa333662 85-143
+tests/optimize/test_evaluation.py
+  s_d092b13e78e0c9::t_34b759db1ec41e 552,608-612,752-845
+tests/optimize/test_optimization.py
+  s_d092b13e78e0c9::t_4c223da69418c9 375-381,383-387
+tests/optimize/test_scorer_registration.py
+  s_d092b13e78e0c9::t_01e1a1fb25443d 334-478
+tests/optimize/test_scorers.py
+  s_d092b13e78e0c9::t_9adfa5b479e64d 1141-1148
+tests/tui/test_menu.py
+  s_d092b13e78e0c9::t_3ac17965d2238d 477-478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "062b08b49b708390de0ea62db076bba14ac0ae20",
+  "prompts": {},
+  "sessions": {
+    "s_d092b13e78e0c9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9200d842-a3a4-47a0-991c-01896d15fc9f",
+        "model": "grok-4.7"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
