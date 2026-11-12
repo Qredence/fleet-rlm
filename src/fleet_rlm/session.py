@@ -55,6 +55,7 @@ class SessionRuntime:
     engine: FleetRuntime
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
     context: WorkspaceDataset | None = None
+    workspace_state: str = "unknown"
     lease: psycopg.Connection | None = None
     ownership_epoch: int | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
@@ -69,9 +70,18 @@ class SessionRuntime:
         """Return the Session ID owned by the sandbox manager."""
         return self.sandbox_mgr.session_id
 
-    def ensure_session(self, session_id: str) -> None:
-        """Create the Session row after validating its ID."""
-        self.store.ensure_session(validate_session_id(session_id))
+    def ensure_session(self, session_id: str) -> bool:
+        """Create the Session row after validating its ID and report whether it was new."""
+        return self.store.ensure_session(validate_session_id(session_id))
+
+    def set_workspace_state(self, value: str) -> None:
+        """Persist whether this Session's workspace is still known to be empty."""
+        if value not in {"known_empty", "unknown"}:
+            raise ValueError("Invalid workspace state")
+        self.assert_lease_held()
+        if self.workspace_state != value:
+            self.store.save_runtime_settings(self.session_id, {"workspace_state": value})
+            self.workspace_state = value
 
     def save_memory(
         self,
@@ -495,7 +505,6 @@ class SessionRuntimeRegistry:
         if self.store is None:
             raise RuntimeError("Session storage is not configured")
         store = self.store
-        saved = store.runtime_settings(session_id)
         compiled_path = Path(settings.compiled_program_dir) / "fleet.json"
 
         sandbox_mgr = DaytonaSandboxManager(
@@ -533,9 +542,18 @@ class SessionRuntimeRegistry:
                 sub_adapter=settings.resolved_model("sub").build_adapter(),
             ),
         )
-        runtime.ensure_session(session_id)
         runtime.lease = store.acquire_session_lease(session_id)
         try:
+            created = runtime.ensure_session(session_id)
+            saved = store.runtime_settings(session_id)
+            if created:
+                # The insert does not list the Volume. A new schema must not reuse a Volume
+                # that already holds this Session's subtree; see ARCHITECTURE.md.
+                saved["workspace_state"] = "known_empty"
+                store.save_runtime_settings(session_id, {"workspace_state": "known_empty"})
+            runtime.workspace_state = saved.get("workspace_state", "unknown")
+            if runtime.workspace_state not in {"known_empty", "unknown"}:
+                runtime.workspace_state = "unknown"
             ownership_epoch = store.advance_sandbox_ownership_epoch(session_id)
             if ownership_epoch is None:
                 raise RuntimeError(
@@ -548,6 +566,8 @@ class SessionRuntimeRegistry:
                     "Prior sandbox cleanup is unresolved; reconcile recorded provider resources before admission"
                 )
             sandbox_mgr.ownership_epoch = runtime.ownership_epoch
+            if ownership["resources"] and runtime.workspace_state == "known_empty":
+                runtime.set_workspace_state("unknown")
 
             # Resolve the epoch at call time: a manager that outlives a newer owner must fence,
             # not write under the identity it captured at admission.
@@ -561,7 +581,6 @@ class SessionRuntimeRegistry:
             sandbox_mgr.reconcile_sandbox_ownership(ownership["resources"])
             store.fail_interrupted_turns(session_id, ownership_epoch)
             runtime.engine.reload_program()
-            saved = store.runtime_settings(session_id)
             if "mode" in saved:
                 runtime.set_mode(settings.for_session(saved).execution_mode)
             if saved.get("models"):

@@ -456,12 +456,14 @@ def _jev_route_feedback(jev_lm: Any, payload: dict[str, Any]) -> Feedback:
     )
 
 
-EXECUTION_DIAGNOSTIC_RUBRIC = "execution-evidence-v2"
+EXECUTION_DIAGNOSTIC_RUBRIC = "execution-evidence-v3"
 _EXECUTION_SCORER_CODE_DIGEST = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
 def execution_diagnostic_identity(trace: Any, judge_model: str) -> dict[str, str]:
     """Keep original target and evaluation identities separate; never relabel old traces."""
+    import os
+
     import mlflow
 
     run = mlflow.active_run()
@@ -471,7 +473,9 @@ def execution_diagnostic_identity(trace: Any, judge_model: str) -> dict[str, str
         "fleet.diagnostic.code_digest": _EXECUTION_SCORER_CODE_DIGEST,
         "fleet.diagnostic.judge_model": judge_model,
         "fleet.target_agent_model_id": (getattr(info, "trace_metadata", {}) or {}).get("mlflow.modelId", "unversioned"),
-        "fleet.evaluation.run_id": run.info.run_id if run is not None else "unavailable",
+        "fleet.evaluation.run_id": run.info.run_id
+        if run is not None
+        else os.environ.get("FLEET_EVALUATION_RUN_ID", "unavailable"),
     }
 
 
@@ -505,7 +509,7 @@ def make_execution_evidence_judge(judge_model: str) -> Any:
     return make_judge(
         name="execution_evidence_diagnostics",
         model=judge_model,
-        feedback_value_type=dict[str, bool],
+        feedback_value_type=str,
         generate_rationale_first=True,
         instructions=(
             "Evaluate both sandbox verification discipline and tool execution integrity. Task and bounded actual "
@@ -519,10 +523,13 @@ def make_execution_evidence_judge(judge_model: str) -> Any:
             "execution span relied on in each rationale using the exact form span_id=<16 lowercase hex digits>; cite "
             "only IDs present in the supplied span records. A repeated run of the same method, including the same "
             "library at different precision, is a consistency check and must not be called independent verification. "
-            "Return the native result object with exactly three boolean fields: verification_applicable, "
-            "verification_pass, integrity_pass. Do not encode JSON inside a string. In the separate rationale, "
-            "explain both verification discipline and tool integrity, naming concrete evidence for each check "
-            "or explicitly saying why it is not applicable. The same rationale accompanies both assessments."
+            "Return value as a JSON-encoded string with exactly these keys: verification_applicable, "
+            "verification_pass, integrity_pass (JSON booleans), verification_rationale and integrity_rationale "
+            "(strings). Explain both verification discipline and tool integrity, naming concrete evidence "
+            "for each check or explicitly saying why it is not applicable."
+            " When execution is required, BOTH JSON rationale strings must themselves contain exact "
+            "span_id= citations from the supplied records. Citations only in MLflow's separate rationale "
+            "do not satisfy this requirement."
         ),
     )
 

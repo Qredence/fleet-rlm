@@ -1138,3 +1138,11 @@ def test_metric_degrades_on_an_unexpected_program_trace_shape():
     pred = dspy.Prediction(answer="a", route="rlm", lm_calls=5, sandbox_errors=0, submit_rejections=0)
     result = fleet_metric(gold, pred, program_trace=["not-a-step"], judge_lm=_judge(True))
     assert "Program trace: unavailable" in result.feedback
+
+
+def test_execution_identity_uses_explicit_worker_run_in_scorer_threads(monkeypatch):
+    from fleet_rlm.optimize.scorers import execution_diagnostic_identity
+
+    monkeypatch.setattr("mlflow.active_run", lambda: None)
+    monkeypatch.setenv("FLEET_EVALUATION_RUN_ID", "worker-evaluation-run")
+    assert execution_diagnostic_identity(None, "judge")["fleet.evaluation.run_id"] == "worker-evaluation-run"

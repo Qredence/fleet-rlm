@@ -63,6 +63,77 @@ def test_reuses_version_without_uploading_state_and_excludes_credentials(registr
     assert len(models) == 1  # Native search reuse after the process cache is empty.
 
 
+def test_benchmark_trace_uses_requested_model_and_retains_automatic_identity(registry, monkeypatch):
+    _, associations = registry
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID", "m-benchmark")
+    monkeypatch.setenv(
+        "FLEET_MLFLOW_BENCHMARK_TAGS",
+        '{"fleet.benchmark.campaign":"cold-start-2026-11","fleet.benchmark.condition":"baseline"}',
+    )
+    span = Span()
+
+    automatic_model_id = obs.associate_turn_agent(engine(), "config", "1", span)
+
+    assert associations[-1]["model_id"] == "m-benchmark"
+    assert associations[-1]["tags"] == {
+        "fleet.benchmark.campaign": "cold-start-2026-11",
+        "fleet.benchmark.condition": "baseline",
+    }
+    assert span.attributes["fleet.agent.model_id"] == automatic_model_id
+    assert span.attributes["fleet.benchmark.model_id"] == "m-benchmark"
+
+
+def test_benchmark_tags_attach_without_benchmark_model_id(registry, monkeypatch):
+    _, associations = registry
+    tags = {"fleet.benchmark.campaign": "cold-start-2026-11"}
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", '{"fleet.benchmark.campaign":"cold-start-2026-11"}')
+    span = Span()
+    automatic_model_id = obs.associate_turn_agent(engine(), "config", "1", span)
+    assert associations[-1] == {"model_id": automatic_model_id, "tags": tags}
+    assert span.attributes["fleet.agent.model_id"] == automatic_model_id
+    assert span.attributes["fleet.benchmark.campaign"] == "cold-start-2026-11"
+    assert "fleet.benchmark.model_id" not in span.attributes
+
+    def fail(**_kw):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(obs.mlflow, "search_logged_models", fail)
+    unversioned = Span()
+    assert obs.associate_turn_agent(engine("unversioned"), "config", "1", unversioned) is None
+    assert associations[-1] == {"tags": tags}
+    assert unversioned.attributes["fleet.agent.identity_status"] == "unversioned"
+    assert unversioned.attributes["fleet.benchmark.campaign"] == "cold-start-2026-11"
+
+
+def test_benchmark_env_strips_whitespace_and_rejects_empty_tag_suffix(registry, monkeypatch):
+    _, associations = registry
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID", "   ")
+    span = Span()
+    automatic = obs.associate_turn_agent(engine(), "config", "1", span)
+    assert associations[-1] == {"model_id": automatic}
+    assert "fleet.benchmark.model_id" not in span.attributes
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_MODEL_ID", "  m-bench  ")
+    padded = Span()
+    obs.associate_turn_agent(engine(), "config", "1", padded)
+    assert associations[-1] == {"model_id": "m-bench"}
+    assert padded.attributes["fleet.benchmark.model_id"] == "m-bench"
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", '{"fleet.benchmark.":"missing-name"}')
+    invalid = Span()
+    retained = obs.associate_turn_agent(engine(), "config", "1", invalid)
+    assert retained is not None
+    assert associations[-1]["model_id"] == "m-bench"
+    assert invalid.attributes["fleet.agent.model_id"] == retained
+    assert invalid.attributes["fleet.benchmark.model_id"] == "m-bench"
+    assert "fleet.benchmark." not in invalid.attributes
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", "{not-json")
+    malformed = Span()
+    obs.associate_turn_agent(engine(), "config", "1", malformed)
+    assert malformed.attributes["fleet.benchmark.model_id"] == "m-bench"
+
+
 def test_config_loaded_program_destination_and_source_affect_identity(registry, monkeypatch):
     models, _ = registry
     values = [obs.associate_turn_agent(engine(), "config", "1", Span())]
@@ -182,23 +253,33 @@ mlflow.set_tracking_uri(f"sqlite:///{root / 'tracking.db'}")
 experiment = mlflow.create_experiment("agent-contract", artifact_location=(root / "artifacts").as_uri())
 mlflow.set_experiment(experiment_id=experiment)
 obs._STARTUP_IDENTITY = {"fleet.agent.source_digest": "offline-source"}
+benchmark_model = mlflow.create_external_model(name="benchmark", experiment_id=experiment, model_type="agent")
+import os
+os.environ["FLEET_MLFLOW_BENCHMARK_MODEL_ID"] = benchmark_model.model_id
+os.environ["FLEET_MLFLOW_BENCHMARK_TAGS"] = '{"fleet.benchmark.campaign":"offline"}'
 engine = SimpleNamespace(dump_state=lambda: {"predict": {"signature": "loaded-program", "lm": None}})
 with mlflow.start_span(name="fleet_turn") as span:
     first = obs.associate_turn_agent(engine, "config", experiment, span)
     assert first is not None
+    assert span.attributes["fleet.agent.model_id"] == first
     trace_id = span.trace_id
 obs._AGENT_MODELS.clear()
 with mlflow.start_span(name="fleet_turn") as span:
     assert obs.associate_turn_agent(engine, "config", experiment, span) == first
-assert len(mlflow.search_logged_models(experiment_ids=[experiment], output_format="list")) == 1
+models = mlflow.search_logged_models(experiment_ids=[experiment], output_format="list")
+assert {model.model_id for model in models} == {benchmark_model.model_id, first}
 mlflow.flush_trace_async_logging()
-assert mlflow.get_trace(trace_id).info.trace_metadata["mlflow.modelId"] == first
+trace = mlflow.get_trace(trace_id)
+assert trace.info.trace_metadata["mlflow.modelId"] == benchmark_model.model_id
+assert trace.info.tags["fleet.benchmark.campaign"] == "offline"
+assert trace.data.spans[0].attributes["fleet.agent.model_id"] == first
 """
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-c", program, str(tmp_path)],
-        check=True,
+        check=False,
         text=True,
         capture_output=True,
         timeout=60,
         env={**os.environ, "MLFLOW_DISABLE_AGENT_HINT": "1"},
     )
+    assert result.returncode == 0, result.stderr

@@ -1,7 +1,7 @@
 # Evaluation
 
 Evaluation scorers live in `src/fleet_rlm/optimize/scorers.py`. This page describes
-the explicit evaluation workflows. `fleet eval` exposes dataset/run/label commands;
+the explicit evaluation workflows. `fleet eval` exposes dataset/run/score/label commands;
 GEPA remains a deliberate isolated optimization workflow.
 
 The default installation includes `databricks-agents`, which MLflow needs to
@@ -65,19 +65,23 @@ Turn outcome intact. Historical traces
 remain unversioned unless their original model identity was recorded; evaluating an
 old trace never assigns the current serving version to it.
 
-Execution diagnostic rubric `execution-evidence-v2` uses MLflow's native boolean-map
-result and its separate rationale, avoiding nested JSON encoded inside a string.
-The rationale covers both assessments; strict boolean, receipt and citation validation
-still applies. Recorded five-field JSON responses retain their original strict parser.
+Execution diagnostic rubric `execution-evidence-v3` requests a single JSON-encoded string
+(`verification_applicable`, `verification_pass`, `integrity_pass` booleans plus
+`verification_rationale` and `integrity_rationale` strings) and validates booleans, receipts,
+and exact `span_id=` citations in Python before emitting `sandbox_verification_discipline`
+and `tool_execution_integrity`. Avoiding `dict[str, bool]` (`execution-evidence-v2`) keeps
+strict OpenAI-compatible `response_format` schemas (such as Command Code) compatible;
+recorded native boolean-map responses remain readable.
 
 The portable `execution_evidence_diagnostics` registration imports the same validator
 as the suite and reads the worker's `FLEET_JUDGE_MODEL` and provider environment.
 Its two assessments retain the original target model ID and record executing code,
-rubric, judge, evaluation run, and native registration identities separately.
-See [assessment and latency rollout](../runbooks/assessment-latency-rollout.md) for
-the read-only reconciliation review, saved-evidence validation, rollback, and opt-in
-39-Turn comparison. These tools do not activate schedules or change generation defaults
-merely by being installed.
+rubric, judge, evaluation run, and native registration identities separately. Run
+out-of-band worker scoring with `fleet eval score --execution-diagnostics-only <trace-id>...`
+(or `--scorer-experiment-id` with `--registered-scorer`) and retire legacy online schedules
+with `uv run python scripts/reconcile_mlflow_scorers.py --retire-legacy`; see
+[assessment and latency rollout](../runbooks/assessment-latency-rollout.md). These tools do
+not activate schedules or change generation defaults merely by being installed.
 
 ## Scorers
 
@@ -661,12 +665,15 @@ api_key_env = "COMMAND_CODE_API_KEY"
 judge_model = "openai:/deepseek/deepseek-v4.1-flash"   # MLflow scorers
 ```
 
-With an explicit `[llm.judge]` model, endpoint and key, `judge_environment()` pairs the MLflow `openai:/` scorers
-with that endpoint (`OPENAI_API_BASE`/`OPENAI_API_KEY`); `fleet eval run`, `fleet eval score`, and synthetic jobs
-all call the one `apply_judge_environment` helper. Configure `[llm.reflection]` the same way for GEPA and the
-comparison rationale. Known limit: the `execution_evidence_diagnostics` scorer asks for a structured
-`dict[str, bool]` answer, which Command Code's schema validation rejects; `evaluate_rescore` therefore applies
-Fleet's metric and the gold-value check only, and `fleet eval score` reports that diagnostic as failed on this provider.
+For any `openai:/` `FLEET_JUDGE_MODEL` (`[evaluation].judge_model`), `judge_environment()` pairs MLflow's scorers
+(`OPENAI_API_BASE`/`OPENAI_API_KEY`) with the judge role's resolved endpoint and credential: an explicit `[llm.judge]`
+(`model` with its `api_base`/`api_key_env`) uses its own connection, while omitting `[llm.judge]` inherits `api_base`
+and `api_key` from `[llm]` (falling back to ambient provider env vars only when `[llm]` also omits them). `fleet eval run`,
+`fleet eval score`, and synthetic jobs all call `apply_judge_environment` (which also exports `FLEET_JUDGE_MODEL`).
+Configure `[llm.reflection]` the same way for GEPA and the comparison rationale. `execution_evidence_diagnostics`
+(`execution-evidence-v3`) returns a single JSON-encoded string validated in Python rather than `dict[str, bool]`, so
+strict OpenAI/Command Code `response_format` validation succeeds in `fleet eval score` (including
+`--execution-diagnostics-only`); `evaluate_rescore` still runs `fleet_scorer` and `expected_values_present` only.
 
 A judge failure during optimization or replay scores that example 0.0 with feedback and stops the job with
 `JudgeFailedError` at its next safe boundary; MLflow's DSPy autologging otherwise turns a raising metric into a

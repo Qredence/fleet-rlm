@@ -944,13 +944,12 @@ class FleetSettings(BaseSettings):
     def judge_environment(self) -> dict[str, str]:
         """Environment that points MLflow's `openai:/` scorers at the judge role's own endpoint and key.
 
-        Only an explicitly configured judge (`[llm.judge].model` with its endpoint and credential) is
-        paired, so the DSPy correctness judge and the MLflow scorers use the same provider. Other
-        providers, and judges that merely inherit the shared connection, use MLflow's native environment.
+        Resolve inherited connections as well as explicit judge overrides, so DSPy and MLflow
+        use the same endpoint and credential. Other providers use MLflow's native environment.
         """
         resolved = self.resolved_model("judge")
         key = resolved.api_key.get_secret_value()
-        if not (self.fleet_judge_model.startswith("openai:/") and self.fleet_correctness_model):
+        if not self.fleet_judge_model.startswith("openai:/"):
             return {}
         if not (resolved.api_base and key):
             return {}

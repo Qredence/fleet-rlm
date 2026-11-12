@@ -21,8 +21,12 @@ from fleet_rlm.workspace import validate_session_id
 
 
 class FakeManager(SimpleNamespace):
+    def read_workspace_files(self, paths):
+        return {path: self.read_workspace_file(path) for path in paths}
+
     def __init__(self, **overrides: Any) -> None:
         defaults: dict[str, Any] = {
+            "session_id": "session-a",
             "event_callback": None,
             "_cancelled": threading.Event(),
             "_sandbox": None,
@@ -33,6 +37,7 @@ class FakeManager(SimpleNamespace):
             "max_active_children": 4,
             "turn_timeout_seconds": 900,
             "turn_active": False,
+            "_turn_generation": 0,
             "snapshot_provenance": lambda: {},
             "deadline_provenance": lambda: {"deadline_source": "default", "effective_seconds": 900},
             "list_workspace_files": lambda: [],
@@ -67,6 +72,7 @@ class FakeManager(SimpleNamespace):
             ) -> None:
                 self._cancellation_claimed = False
                 self._teardown_done.clear()
+                self._turn_generation += 1
                 self.turn_active = True
                 self.deadline_provenance = lambda: {
                     "deadline_source": deadline_source,

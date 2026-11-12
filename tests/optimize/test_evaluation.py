@@ -549,7 +549,7 @@ def test_scoring_saved_traces_can_select_scorers_and_experiment(monkeypatch):
 
     def start_run(**kwargs):
         calls["start_run"] = kwargs
-        return nullcontext()
+        return nullcontext(SimpleNamespace(info=SimpleNamespace(run_id="run-1")))
 
     monkeypatch.setattr(evaluation.mlflow, "start_run", start_run)
 
@@ -605,7 +605,11 @@ def test_scoring_saved_traces_starts_distinct_nested_run_when_a_run_is_active(mo
         lambda: SimpleNamespace(info=SimpleNamespace(experiment_id="123")),
     )
     monkeypatch.setattr(evaluation.mlflow, "set_experiment", lambda **_kwargs: None)
-    monkeypatch.setattr(evaluation.mlflow, "start_run", lambda **kwargs: calls.append(kwargs) or nullcontext())
+    monkeypatch.setattr(
+        evaluation.mlflow,
+        "start_run",
+        lambda **kwargs: calls.append(kwargs) or nullcontext(SimpleNamespace(info=SimpleNamespace(run_id="run-1"))),
+    )
     monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
 
     evaluation.score_evaluation_traces(
@@ -617,16 +621,15 @@ def test_scoring_saved_traces_starts_distinct_nested_run_when_a_run_is_active(mo
 
 @pytest.mark.parametrize("error", [None, "judge failed"])
 def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch, error):
+    feedback = {"error": {"error_message": error}} if error else {"value": True}
     result = SimpleNamespace(
         run_id="run-1",
         metrics={},
         result_df=pd.DataFrame(
             {
-                "scorer/error_message": [error],
+                "scorer/error_message": ["historical failure"],
                 "scorer/value": [True],
-                "assessments": [
-                    [{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}]
-                ],
+                "assessments": [[{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": feedback}]],
             }
         ),
     )
@@ -745,3 +748,97 @@ def test_label_turn_keeps_a_given_or_existing_answer_over_the_default(monkeypatc
     saved = _label_trace_fixture(monkeypatch)
     evaluation.label_turn(SimpleNamespace(), "tr-1", status="rejected", default_answer="stored")
     assert saved["expected_answer"] is None
+
+
+def test_registered_scorer_drift_prevents_evaluation(monkeypatch):
+    identity = {"experiment_id": "1", "name": "diagnostics", "version": 1, "digest": "before"}
+    monkeypatch.setattr(
+        evaluation, "load_registered_scorers", lambda *_a: ([object()], [{**identity, "digest": "after"}])
+    )
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kw: pytest.fail("must not evaluate"))
+    with pytest.raises(evaluation.EvaluationError, match="Scoring failed"):
+        evaluation.score_evaluation_traces(
+            [], judge_model="judge", scorers=[object()], registered_provenance=[identity]
+        )
+
+
+def test_label_turn_defaults_benchmark_traces_to_benchmark_and_refuses_approval(monkeypatch) -> None:
+    import hashlib
+
+    from fleet_rlm.replay import encode_snapshot
+
+    snapshot = {
+        "schema_version": 1,
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "task": "How many days in a leap year?",
+        "workspace_manifest": "/workspace/files (empty)",
+        "skills_catalog": "<available_skills/>",
+        "memory_summary": "",
+        "session_history": "",
+        "context_files": {},
+        "replay_files": {},
+        "skill_revision_sha256": hashlib.sha256(b"{}").hexdigest(),
+        "execution_mode": "hybrid",
+        "turn_timeout_seconds": 900,
+        "sandbox_transport": "daytona_code_interpreter",
+    }
+    digest, compressed = encode_snapshot(snapshot)
+    trace = SimpleNamespace(
+        info=SimpleNamespace(trace_metadata={"mlflow.trace.session": "session-1"}, tags={}),
+        data=SimpleNamespace(
+            request={
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "replay_snapshot_selected": True,
+                "replay_snapshot_sha256": digest,
+            },
+            spans=[
+                SimpleNamespace(parent_id="root", attributes={}),
+                SimpleNamespace(parent_id=None, attributes={"fleet.benchmark.model_id": "m-bench"}),
+            ],
+        ),
+        search_assessments=lambda **_kwargs: [],
+    )
+    mlflow_writes: list[dict] = []
+    db_writes: list[dict] = []
+    store = SimpleNamespace(
+        replay_snapshot=lambda *_args: (digest, compressed),
+        save_review_labels=lambda *_args, **kwargs: db_writes.append(kwargs),
+    )
+    monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *_a, **_k: trace)
+    monkeypatch.setattr(evaluation, "label_trace", lambda _id, **labels: mlflow_writes.append(labels))
+
+    with pytest.raises(ValueError, match="Benchmark traces cannot be approved"):
+        evaluation.label_turn(store, "tr-bench", status="approved", answer="366")
+    assert mlflow_writes == [] and db_writes == []
+
+    labels = evaluation.label_turn(store, "tr-bench", answer="366", default_answer="ignored")
+    assert labels["review_status"] == "benchmark"
+    assert labels["expected_answer"] == "366"
+    assert mlflow_writes[-1]["review_status"] == db_writes[-1]["review_status"] == "benchmark"
+
+
+def test_score_evaluation_traces_tolerates_null_metadata_and_feedback_entries(monkeypatch) -> None:
+    result = SimpleNamespace(
+        run_id="run-1",
+        metrics={"gold/mean": 1.0},
+        result_df=pd.DataFrame(
+            {
+                "gold/value": [True],
+                "assessments": [
+                    [
+                        {"metadata": None, "feedback": None},
+                        {
+                            "metadata": {"mlflow.assessment.sourceRunId": "run-1"},
+                            "feedback": {"value": True, "error": None},
+                        },
+                    ]
+                ],
+            }
+        ),
+    )
+    monkeypatch.setattr(evaluation.mlflow.genai, "evaluate", lambda **_kwargs: result)
+
+    scored = evaluation.score_evaluation_traces([object()], judge_model="m", scorers=[object()])
+    assert len(scored.result_df["assessments"].iloc[0]) == 1

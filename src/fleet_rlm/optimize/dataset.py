@@ -141,27 +141,59 @@ def turn_traces(experiment_name: str, max_results: int = _MAX_EXAMPLES) -> list[
     experiment = mlflow.get_experiment_by_name(experiment_name)
     if experiment is None:
         return []
-    traces = mlflow.search_traces(
-        locations=[experiment.experiment_id],
-        filter_string="status = 'OK'",
-        max_results=max_results,
-        order_by=["timestamp_ms DESC"],
-        return_type="list",
-    )
-    selected = []
-    for trace in traces:
-        request = trace_object(trace.data.request)
-        if (
-            isinstance(request.get("workspace_manifest"), str) or request.get("replay_snapshot_selected") is True
-        ) and not _is_test_trace(trace):
-            selected.append(trace)
+    selected: list[Any] = []
+    seen: set[str] = set()
+    token: str | None = None
+    client = mlflow.MlflowClient()
+    while len(selected) < max_results:
+        page = client.search_traces(
+            locations=[experiment.experiment_id],
+            filter_string="status = 'OK'",
+            max_results=max_results,
+            order_by=["timestamp_ms DESC"],
+            page_token=token,
+        )
+        batch = list(page)
+        next_token = getattr(page, "token", None)
+        added = False
+        for trace in batch:
+            trace_id = str(getattr(getattr(trace, "info", None), "trace_id", "") or "")
+            if trace_id and trace_id in seen:
+                continue
+            if trace_id:
+                seen.add(trace_id)
+            added = True
+            request = trace_object(trace.data.request)
+            if (
+                isinstance(request.get("workspace_manifest"), str) or request.get("replay_snapshot_selected") is True
+            ) and not _is_test_trace(trace):
+                selected.append(trace)
+                if len(selected) == max_results:
+                    break
+        if not added or not next_token or next_token == token:
+            break
+        token = next_token
     return selected
 
 
+def is_benchmark_trace(trace: Any) -> bool:
+    """True when `fleet.benchmark.*` tags or root-span attributes mark a trace outside curation."""
+    tags = getattr(getattr(trace, "info", None), "tags", None) or {}
+    if any(str(key).startswith("fleet.benchmark.") for key in tags):
+        return True
+    spans = getattr(getattr(trace, "data", None), "spans", None) or ()
+    roots = [span for span in spans if not getattr(span, "parent_id", None)] or list(spans[:1])
+    return any(
+        str(key).startswith("fleet.benchmark.") for root in roots for key in (getattr(root, "attributes", None) or {})
+    )
+
+
 def _is_test_trace(trace: Any) -> bool:
-    """Traces emitted by the pytest suite share the runtime experiment; they are not user Turns."""
-    source = str(trace.info.trace_metadata.get("mlflow.source.name", ""))
-    return "pytest" in source
+    """Pytest and benchmark traces share the runtime experiment; they are not curatable user Turns."""
+    source = str((getattr(trace.info, "trace_metadata", None) or {}).get("mlflow.source.name", ""))
+    if "pytest" in source:
+        return True
+    return is_benchmark_trace(trace)
 
 
 def labels_of(trace: Any) -> dict[str, Any]:

@@ -180,8 +180,14 @@ def select_context(session_id: str, body: ContextRequest, runtime: LockedRuntime
             sha256=metadata["sha256"],
         )
         runtime.store.save_runtime_settings(
-            session_id, {"mode": runtime.engine.execution_mode, "context": context.to_descriptor()}
+            session_id,
+            {
+                "mode": runtime.engine.execution_mode,
+                "context": context.to_descriptor(),
+                "workspace_state": "unknown",
+            },
         )
+        runtime.workspace_state = "unknown"
         runtime.context = context
     return ContextSelected(path=body.path, size_bytes=context.size_bytes, sha256=context.sha256)
 
@@ -225,6 +231,7 @@ def remove_memory(memory_id: str, runtime: LockedRuntime) -> Deleted:
 def get_skills_catalog(runtime: LockedRuntime) -> Catalog:
     """Sync local Skills to the Session's volume and return the catalog XML."""
     with translate("Session Skill catalog is unavailable"):
+        runtime.set_workspace_state("unknown")
         runtime.skill_mgr.sync_local_skills_to_volume()
         return Catalog(catalog_xml=runtime.skill_mgr.build_catalog_xml())
 
@@ -233,11 +240,15 @@ def get_skills_catalog(runtime: LockedRuntime) -> Catalog:
 def pull_skills_to_local(runtime: LockedRuntime) -> Exported:
     """Export the Session's volume Skills to local storage."""
     with translate("Skill export is unavailable"):
-        return Exported(exported=runtime.skill_mgr.export_volume_skills_to_local())
+        exported = runtime.skill_mgr.export_volume_skills_to_local()
+        if exported:
+            runtime.set_workspace_state("unknown")
+        return Exported(exported=exported)
 
 
 @skills_router.post("/skills/push", responses=LOCKED)
 def push_skills(runtime: LockedRuntime) -> Pushed:
     """Push local Skills to the Session's volume and return the count."""
     with translate("Skill push is unavailable"):
+        runtime.set_workspace_state("unknown")
         return Pushed(pushed=int(runtime.skill_mgr.sync_local_skills_to_volume()))

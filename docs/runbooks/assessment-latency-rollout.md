@@ -236,3 +236,93 @@ is stored under `assessment-rollout` in run `f5c5c2bbf6c24bfcb257faaabb6a7784`.
 Native automatic activation is blocked by MLflow 3.17.2's gateway-model eligibility rule.
 The two old version-3 schedules remain active at 100% without filters, and all other
 registrations are preserved. A replacement worker or platform change is deferred.
+
+## Explicit diagnostic worker (MLflow 3.18)
+
+MLflow 3.18 supports custom scorer scheduling in Docker job containers, but those
+containers have no network access or provider credentials. Fleet's provider-backed
+execution diagnostic therefore runs in an explicit CLI worker, using the configured
+judging role and native evaluation run provenance:
+
+```bash
+uv run fleet eval score --execution-diagnostics-only tr-70c56de2155024af745c1317d8eda284
+```
+
+This reads saved traces without executing Turns. It leaves historical assessments and
+original agent identities intact. It requires authorization for live judge calls.
+
+After configuring the same judge destination in the review client, create a fresh
+registry snapshot with the existing check command. The following explicitly authorized
+operation validates the saved greeting, saved computation and unsupported-claim control,
+then stops only the two legacy v3 schedules:
+
+Snapshot and audit paths must resolve inside the current working directory.
+
+```bash
+uv run python scripts/reconcile_mlflow_scorers.py --retire-legacy \
+  --snapshot review.json --audit retirement-audit.json
+```
+
+The combined registration remains inactive. On failure retain the audit and evaluation
+run IDs; take a fresh snapshot and repeat the retirement command with the same audit.
+Recovery checks original identities and completed stop readbacks before proceeding.
+Do not use the automatic activation or rollback commands for retirement audits.
+
+To require completed root spans (`trace.status = 'OK'`) on Experiment 1's active
+online schedules (`agent_skills_progressive_disclosure` v2, `jev_routing_efficiency_judge`
+v5, and `output_instruction_compliance` v2) so incremental child-span exports from
+long-running Turns are not scored while still `IN_PROGRESS`:
+
+```bash
+uv run python scripts/reconcile_mlflow_scorers.py --filter-online \
+  --snapshot review.json --audit filter-audit.json
+```
+
+### Explicit registered-scorer evaluation
+
+The scorer registry and evaluation-run destination are separate. For local saved
+traces, select experiment 1's trusted registered definition while retaining the
+configured evaluation experiment (`fleet-rlm-eval`, currently 49):
+
+```sh
+uv run fleet eval score --mlflow local --scorer-experiment-id 1 \
+  --registered-scorer execution_evidence_diagnostics TRACE_ID [TRACE_ID ...]
+```
+
+Repeat `--registered-scorer` for additional explicit selections. Both registry
+options are required together and cannot be combined with
+`--execution-diagnostics-only`. The worker temporarily enables trusted custom
+scorer deserialization, records native versions and definition digests on the
+run, and rechecks them before invocation. Registry schedules are unaffected.
+Only assessments carrying the current evaluation run's sourceRunId appear in
+its returned assessment report; historical online feedback remains persisted.
+
+The configured judge role must resolve a supported model, endpoint, and credential.
+Inherited OpenAI-compatible connections now populate the same judge environment
+as explicit judge overrides. Never print credentials while diagnosing configuration.
+The November 10 recovery found missing OPENAI_API_KEY in runs
+`283e942c6241488fbc91a37f913abe62` and `2ccb767f9a1d41139baf9146b8cf6b83`.
+After credential mapping was repaired, registered-scorer run
+`486c50917dc64f51b24242d44505c50d` failed because the resolved endpoint rejected
+model `system.ai.deepseek-v4-1-flash-1017`. These are infrastructure errors, not
+negative quality verdicts. Resolve the judge configuration and pass the full
+three-record pilot before retiring either legacy schedule.
+
+For this deployment, the validated Command Code judge URI is
+`openai:/deepseek/deepseek-v4.1-flash`; the configured judge connection supplies
+its endpoint and credential. Command Code rejects the homogeneous-map JSON
+schema emitted by MLflow 3.18, so execution rubric v3 requests JSON in a string
+and validates the three boolean verdicts and both evidence rationales locally.
+Both rationale strings must contain actual receipt citations when execution is
+required; citations in the judge's separate explanation are insufficient.
+
+The final November 10 retirement audit is stored at
+`.fleet/evaluation/registered-judge-repair-20261110/final-retirement.json`.
+Greeting run `1f64b5faea70436f9c284d17f2cac670` passed both diagnostics as
+execution unnecessary. Computation/control run `c2641de615ba4bf9b3a88a3749dbe11d`
+passed both supported-computation diagnostics and failed both unsupported-claim
+diagnostics. Readback confirmed both legacy v3 schedules at `0.0` and combined
+v1 diagnostics inactive (`None`). Original reviews, partial audits, and failed
+evaluation runs remain available. In-memory negative controls are evaluated
+locally and retained in the audit; MLflow evaluation resolves trace IDs through
+the tracking store, so a fabricated unpersisted ID is not a saved trace input.

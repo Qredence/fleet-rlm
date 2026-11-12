@@ -35,7 +35,13 @@ def test_engine_forward_inputs_match_the_shared_contract():
 
     parameters = set(inspect.signature(FleetProgram.forward).parameters)
     assert set(ENGINE_INPUT_FIELDS) <= parameters
-    assert parameters - set(ENGINE_INPUT_FIELDS) == {"self", "context", "execution_mode", "required_skills"}
+    assert parameters - set(ENGINE_INPUT_FIELDS) == {
+        "self",
+        "context",
+        "execution_mode",
+        "required_skills",
+        "selected_route",
+    }
 
 
 def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path: Path) -> None:
@@ -911,3 +917,52 @@ def test_hybrid_direct_does_not_inline_workspace_files(monkeypatch):
     assert prediction.direct_context_chars == 0
     assert prediction.direct_context_truncated is False
     assert "direct_context" not in events
+
+
+def test_preview_route_and_invoke_program_share_one_program_reload_per_active_turn(tmp_path: Path, monkeypatch) -> None:
+    import hashlib
+
+    compiled_path = tmp_path / "fleet.json"
+    approved: dict[str, Any] = {"approved": None, "approving": []}
+    checks = 0
+
+    def installed() -> dict[str, Any]:
+        nonlocal checks
+        checks += 1
+        return dict(approved)
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-preview")
+    engine = _engine(manager, compiled_path=str(compiled_path), baseline=True, installed_program=installed)
+    candidate_state = json.loads(program_envelope(engine.program))
+    candidate_state["state"]["routing.predict"]["signature"]["instructions"] = "Next Turn Policy"
+    candidate_bytes = json.dumps(candidate_state).encode()
+    candidate_digest = hashlib.sha256(candidate_bytes).hexdigest()
+
+    monkeypatch.setattr(engine.program.routing, "forward", lambda **_kwargs: Route.DIRECT)
+    seen_instructions: list[str] = []
+
+    def record_forward(**_kwargs: Any):
+        seen_instructions.append(engine.program.routing.predict.signature.instructions)
+        return dspy.Prediction(answer="ok", route="direct")
+
+    monkeypatch.setattr(engine.program, "forward", record_forward)
+
+    with manager.turn_scope():
+        route = engine.preview_route(
+            task="2+2?", workspace_manifest="/workspace/files (empty)", skills_catalog="<available_skills/>"
+        )
+        assert checks == 1
+        compiled_path.write_bytes(candidate_bytes)
+        approved["approved"] = candidate_digest
+        first = engine("/workspace/files (empty)", "", "2+2?", "<available_skills/>", "", selected_route=route)
+    assert first.route == "direct"
+    assert checks == 1
+    assert seen_instructions[-1] != "Next Turn Policy"
+
+    with manager.turn_scope():
+        route = engine.preview_route(
+            task="2+2?", workspace_manifest="/workspace/files (empty)", skills_catalog="<available_skills/>"
+        )
+        engine("/workspace/files (empty)", "", "2+2?", "<available_skills/>", "", selected_route=route)
+    assert checks == 2
+    assert seen_instructions[-1] == "Next Turn Policy"

@@ -277,6 +277,27 @@ def test_workspace_write_requires_exactly_one_content_field():
     assert empty_text.status_code == empty_base64.status_code == 200
 
 
+def test_workspace_write_invalidates_known_empty_before_provider_call_but_not_on_invalid_path():
+    saved: dict[str, str] = {}
+
+    def fail_write(_rel_path: str, _content: bytes) -> str:
+        raise RuntimeError("Daytona FUSE partial write")
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(session_id="s1", write_workspace_file=fail_write),
+        store=store_with(save_runtime_settings=lambda _session, data: saved.update(data)),
+        workspace_state="known_empty",
+    )
+    with opened_client(runtime) as (client, _):
+        invalid = client.put("/sessions/s1/workspace/files/%2E%2E/escape", json={"content": "x"})
+        assert invalid.status_code == 422
+        assert runtime.workspace_state == "known_empty" and saved == {}
+
+        failed = client.put("/sessions/s1/workspace/files/files/out.txt", json={"content": "x"})
+        assert failed.status_code == 503
+        assert runtime.workspace_state == saved["workspace_state"] == "unknown"
+
+
 @pytest.mark.parametrize(
     ("body", "valid"),
     [
@@ -432,9 +453,14 @@ def test_skills_use_the_default_session_and_report_counts():
     runtime = runtime_with(
         skill_mgr=SimpleNamespace(sync_local_skills_to_volume=lambda: 3, build_catalog_xml=lambda: "<skills />")
     )
+    runtime.sandbox_mgr.session_id = "default"
     with opened_client(runtime) as (client, _):
+        runtime.workspace_state = "known_empty"
         assert client.post("/skills/push").json() == {"pushed": 3}
+        assert runtime.workspace_state == "unknown"
+        runtime.workspace_state = "known_empty"
         assert client.get("/skills").json() == {"catalog_xml": "<skills />"}
+        assert runtime.workspace_state == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -589,3 +615,66 @@ def test_models_discovery_errors_are_sanitized_and_manual_selection_still_works(
         assert discovered.status_code == (503 if failure == "timeout" else 422)
         assert "private credential body" not in discovered.text
         assert client.put("/sessions/s1/model", json={"role": "root", "model": "anthropic/manual"}).status_code == 200
+
+
+def test_workspace_reads_context_selection_and_skill_pull_invalidate_known_empty():
+    saved: list[dict] = []
+    files: list[str] = []
+    exported: list[str] = []
+
+    def download(_rel_path: str, local_path: str, *, max_bytes: int) -> int:  # noqa: ARG001
+        if not files:
+            raise FileNotFoundError("missing")
+        Path(local_path).write_bytes(b"data")
+        return 4
+
+    def stat(path: str) -> dict:
+        if not files:
+            raise FileNotFoundError("missing")
+        return {"path": path, "size_bytes": 4, "sha256": "a" * 64}
+
+    runtime = runtime_with(
+        sandbox_mgr=FakeManager(
+            session_id="s1",
+            list_workspace_files=lambda: list(files),
+            stat_workspace_file=stat,
+            read_workspace_file_to_path=download,
+        ),
+        skill_mgr=SimpleNamespace(
+            sync_local_skills_to_volume=lambda: 0,
+            build_catalog_xml=lambda: "<skills />",
+            export_volume_skills_to_local=lambda: list(exported),
+        ),
+        store=store_with(save_runtime_settings=lambda _sid, data: saved.append(dict(data))),
+        workspace_state="known_empty",
+    )
+    with opened_client(runtime) as (client, _):
+        assert client.get("/sessions/s1/files").status_code == 200
+        assert client.get("/sessions/s1/workspace/stat/files/a.csv").status_code == 404
+        assert client.get("/sessions/s1/workspace/files/files/a.csv").status_code == 404
+        assert client.post("/skills/pull?session_id=s1").json() == {"exported": []}
+        assert runtime.workspace_state == "known_empty" and saved == []
+
+        files.append("files/a.csv")
+        assert client.get("/sessions/s1/files").status_code == 200
+        assert runtime.workspace_state == "unknown"
+
+        runtime.workspace_state = "known_empty"
+        assert client.get("/sessions/s1/workspace/stat/files/a.csv").status_code == 200
+        assert runtime.workspace_state == "unknown"
+
+        runtime.workspace_state = "known_empty"
+        assert client.get("/sessions/s1/workspace/files/files/a.csv").status_code == 200
+        assert runtime.workspace_state == "unknown"
+
+        runtime.workspace_state = "known_empty"
+        selected = client.put("/sessions/s1/context", json={"path": "files/a.csv"})
+        removed = client.delete("/sessions/s1/context")
+        assert selected.status_code == 200
+        assert removed.status_code == 200
+        assert runtime.context is None and runtime.workspace_state == "unknown"
+
+        runtime.workspace_state = "known_empty"
+        exported.append("custom-skill")
+        assert client.post("/skills/pull?session_id=s1").json() == {"exported": ["custom-skill"]}
+        assert runtime.workspace_state == "unknown"

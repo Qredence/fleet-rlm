@@ -183,7 +183,9 @@ are deployment choices; keep both DSNs in ignored secret configuration.
 
 Daytona Volume bytes are not part of a database transaction. Restarting
 recovers Turns and settings from PostgreSQL and files from the Volume; it does
-not restore Python process memory.
+not restore Python process memory. A new schema must not reuse a Volume that
+already holds Session subtrees: a newly inserted Session is recorded
+`known_empty` without listing that Volume.
 
 New optimization status is stored in PostgreSQL; candidate manifests, reports,
 and GEPA working files remain in the configured artifact directory, while MLflow

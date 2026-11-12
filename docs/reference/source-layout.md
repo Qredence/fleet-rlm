@@ -6,10 +6,12 @@ The active runtime is deliberately compact:
 src/fleet_rlm/
 ├── config.py          # FleetSettings and model construction
 ├── contracts.py       # Route vocabulary, stopping rules, runtime input names, decision evidence
-├── adapters.py        # Native ChatAdapter recovery with recorded gateway parse compatibility
+├── models.py          # Direct native DSPy model configuration and endpoint browsing
 ├── observability.py   # Redaction, native usage receipts, callbacks, MLflow instrumentation
 ├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
-├── skills.py          # User Skill validation, sync, and catalog
+├── replay.py          # Encoding and integrity checks for bounded immutable replay snapshots
+├── skills.py          # Bundled/user Skill validation, sync, and catalog
+├── bundled_skills/    # Packaged default Skills (delegation, long-context-search, repository-inspection, skill-creator, tabular-analysis)
 ├── sandbox/
 │   ├── manager.py     # Daytona root/child sandboxes, lifecycle, and budgets
 │   ├── workspace_io.py # Session workspace files, context datasets, and learned notes mixin
@@ -32,12 +34,13 @@ src/fleet_rlm/
 │   ├── turn.py        # One Turn end to end: claim, prepare, run, persist, report
 │   └── children.py    # ChildPolicies: two persistent native action predictors
 ├── store.py          # SQL, numbered additive migrations, one pool, Turn transactions
-├── optimize/          # GEPA/evaluation worker modules; imported by CLI subprocesses only
+├── optimize/          # GEPA/evaluation modules; never imported by engine/runtime
 │   ├── objectives.py  # Pure scoring objectives: no MLflow, LM, or filesystem
 │   ├── artifacts.py   # Identity, manifests, reports, promotion gate, approval
 │   ├── validation.py  # Isolated replay engines, paired validation, trace evidence
 │   ├── dataset.py     # Reviewed examples, grouped splits, canonical dataset identity
 │   ├── scorers.py     # MLflow scorer sinks, judge suite, and the GEPA metric
+│   ├── jobs.py        # Evaluate-job split summaries, headlines, and installed program identity
 │   ├── gepa.py        # `fleet optimize`
 │   └── evaluation.py  # Eval cases, synthetic generators, gold labels, `fleet eval` runs
 ├── optimization_runs.py # CLI/API-neutral options, events, import, and artifact reads
@@ -47,7 +50,8 @@ src/fleet_rlm/
 │   ├── deps.py        # Dependencies and route-boundary error translation
 │   ├── schemas.py     # Request and response models
 │   ├── events.py      # DSPy activity callback and SSE envelope
-│   └── routes/        # sessions (+ memory, skills), workspace, turns, improve
+│   ├── stream_contracts.py # Version-1 JSON envelope validation inside FastAPI SSE frames
+│   └── routes/        # sessions (+ memory, skills), setup, workspace, turns, improve
 ├── setup.py           # Configuration draft, readiness probes, serialized setup operations
 ├── session.py         # Runtime, registry, leases, memory/history/Turn-record policies
 ├── launcher.py        # starts/stops the API server and local MLflow for `fleet cli` and `fleet web`
@@ -57,7 +61,9 @@ src/fleet_rlm/
 │   ├── stream.py      # Turn SSE request and event stream parser
 │   ├── setup.py       # FastAPI-backed startup checklist
 │   ├── commands.py    # Slash-command table (dispatch, /help, completion)
-│   ├── experiments.py # API-backed optimization lifecycle and review screen
+│   ├── improve.py     # Improve screen: label Turns, check readiness, run/review global GEPA jobs
+│   ├── local_paths.py # Git-aware local path discovery for mention search and directory uploads
+│   ├── mentions.py    # Local and cached workspace @mentions for the Textual composer
 │   ├── render.py      # Event rendering
 │   ├── web.py         # Textual Serve launcher and safely quoted client command
 │   └── web_client.py  # Per-browser Textual app process
@@ -66,8 +72,10 @@ src/fleet_rlm/
 
 The FastAPI app (`api/app.py`) is the primary application: a Turn enters through
 `api/routes/turns.py`, runs on a worker thread, and ends with one terminal outcome.
-TUI experiment routes delegate optimization to a CLI subprocess managed by
-`experiments.py`; the serving process does not import `fleet_rlm.optimize`.
+`/improve` job routes delegate GEPA/evaluate execution to a CLI worker subprocess
+managed by `experiments.py`: the engine/runtime never imports `fleet_rlm.optimize`
+and the API never imports GEPA, while `/improve` review/status routes lazily read
+`optimize.dataset` and `optimize.evaluation`.
 PostgreSQL stores API-owned and standalone CLI run lifecycle. `fleet optimize`
 remains an independently callable synchronous CLI workflow. `optimization_runs.py`
 is neutral to the serving boundary and holds shared options, worker events, and

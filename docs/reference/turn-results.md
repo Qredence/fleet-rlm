@@ -31,7 +31,7 @@ enclosing row. New successful results include it in their JSON as well.
 | `ttl_minutes`, `auto_stop_interval`, `maximum_lifespan_minutes`, `provider_owned` | Copied when present, preserving null and false | Provider lifecycle bounds, independent of Fleet deadlines; same fields on new failures |
 | `request_id`, `error` | Absent | New failures include the request ID and sanitized message; snapshot refusals and idempotency conflicts retain their bounded caller-safe details |
 | Unknown historical result keys | Preserved, including nested data, by replay and status reads | No strict schema or history rewrite introduced |
-| `provenance_state` | Derived only by `GET /sessions/{session_id}/turns/{turn_id}` | Existing normalization: `pre-provenance` before deadline/provenance recording; `unresolved` when required snapshot fields are incomplete; otherwise `recorded` |
+| `provenance_state` | Derived only by `GET /sessions/{session_id}/turns/{turn_id}` | Existing normalization: `pre-provenance` before deadline/provenance recording; `unresolved` when required snapshot fields are incomplete (including sandbox-free `known_empty` `Direct` Turns completed without provisioning Daytona); otherwise `recorded` |
 | Envelope fields | `version`, `session_id`, `agent_id`, `parent_agent_id`, `sandbox_id`, `seq`, `timestamp`, and nested `payload` are transport data | Envelope also mirrors payload fields at top level; compare canonical event plus payload, excluding envelope timing/sequence |
 
 Record-only fields remain on history/tracing/replay inputs: `task`,

@@ -558,3 +558,79 @@ def test_optimize_cli_takes_no_session_and_offers_check_and_a_token_cap(monkeypa
         cli.main(["optimize", "--session", "sess_a"])
     cli.main(["optimize", "--check", "--max-total-tokens", "0"])
     assert [(args.check, args.max_total_tokens) for args in captured] == [(True, 0)]
+
+
+def test_score_diagnostics_only_skips_unrelated_judges(monkeypatch):
+    import mlflow
+
+    from fleet_rlm.optimize import evaluation, scorers
+
+    calls = {}
+    trace = object()
+    monkeypatch.setattr(mlflow, "get_trace", lambda *_a, **_k: trace)
+    monkeypatch.setattr(evaluation, "apply_judge_environment", lambda settings: calls.update(environment=settings))
+    monkeypatch.setattr(scorers, "make_execution_evidence_judge", lambda model: calls.update(model=model))
+    monkeypatch.setattr(
+        evaluation,
+        "score_evaluation_traces",
+        lambda traces, **kwargs: calls.update(traces=traces, options=kwargs) or SimpleNamespace(metrics={}),
+    )
+    settings = SimpleNamespace(fleet_judge_model="openai:/configured-judge")
+    cli._score_command(SimpleNamespace(trace_ids=["saved"], execution_diagnostics_only=True), settings, "1")
+    assert calls["environment"] is settings
+    assert calls["traces"] == [trace]
+    assert calls["model"] == settings.fleet_judge_model
+    assert [s.name for s in calls["options"]["scorers"]] == ["execution_evidence_diagnostics"]
+    assert "judge_lm" not in calls["options"]
+
+
+def test_registered_score_uses_source_registry_and_evaluation_destination(monkeypatch):
+    import mlflow
+
+    from fleet_rlm.optimize import evaluation
+
+    calls = {}
+    trace, registered = object(), object()
+    identities = [{"experiment_id": "1", "name": "diagnostics", "version": 1, "digest": "digest"}]
+    monkeypatch.setattr(mlflow, "get_trace", lambda *_a, **_k: trace)
+    monkeypatch.setattr(evaluation, "apply_judge_environment", lambda _settings: None)
+    monkeypatch.setattr(
+        evaluation,
+        "load_registered_scorers",
+        lambda source, names: (calls.update(source=source, names=names) or [registered], identities),
+    )
+    monkeypatch.setattr(
+        evaluation,
+        "score_evaluation_traces",
+        lambda traces, **kwargs: calls.update(traces=traces, options=kwargs) or SimpleNamespace(metrics={}),
+    )
+    cli._score_command(
+        SimpleNamespace(trace_ids=["saved"], scorer_experiment_id="1", registered_scorer=["diagnostics"]),
+        SimpleNamespace(fleet_judge_model="configured"),
+        "49",
+    )
+    assert calls["source"] == "1"
+    assert calls["options"]["experiment_id"] == "49"
+    assert calls["options"]["scorers"] == [registered]
+    assert calls["options"]["registered_provenance"] == identities
+    assert calls["traces"] == [trace]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"scorer_experiment_id": "1"},
+        {"registered_scorer": ["diagnostics"]},
+        {"scorer_experiment_id": "1", "registered_scorer": ["diagnostics"], "execution_diagnostics_only": True},
+    ],
+)
+def test_registered_score_rejects_incomplete_or_conflicting_selection(monkeypatch, options):
+    import mlflow
+
+    from fleet_rlm.optimize import evaluation
+
+    monkeypatch.setattr(mlflow, "get_trace", lambda *_a, **_k: object())
+    monkeypatch.setattr(evaluation, "apply_judge_environment", lambda _settings: None)
+    monkeypatch.setattr(evaluation, "score_evaluation_traces", lambda *_a, **_k: pytest.fail("must not score"))
+    with pytest.raises(SystemExit):
+        cli._score_command(SimpleNamespace(trace_ids=["saved"], **options), object(), "49")

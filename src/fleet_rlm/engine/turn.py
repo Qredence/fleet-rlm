@@ -275,10 +275,82 @@ def run_turn(
                 resolved_identity = getattr(manager, "snapshot_identity", None)
                 if resolved_identity is not None:
                     record_snapshot_identity(resolved_identity)
+                selected_route: Route | None = None
                 with phase_span("turn.prepare_inputs", session_id=session_id, record_replay=record_replay) as phase:
-                    inputs = _prepare_inputs(
-                        runtime, session_id, task, record_replay=record_replay, required_skills=required_skills
+                    inputs: dict[str, Any] | None = None
+                    can_route_empty = (
+                        runtime.workspace_state == "known_empty"
+                        and runtime.context is None
+                        and not required_skills
+                        and callable(getattr(runtime.engine, "preview_route", None))
                     )
+                    if can_route_empty:
+                        local_files: dict[str, bytes] = {}
+                        try:
+                            if callable(stage_local := getattr(runtime.skill_mgr, "stage_local_skills", None)):
+                                local_catalog, local_files = stage_local()
+                            else:
+                                local_catalog = runtime.skill_mgr.build_local_catalog_xml()
+                                local_files = (
+                                    local_files_fn()
+                                    if callable(local_files_fn := getattr(runtime.skill_mgr, "local_skill_files", None))
+                                    else {}
+                                )
+                        except (OSError, UnicodeError, ValueError):
+                            local_catalog = None
+                        if local_catalog is not None:
+                            with phase_span("turn.skill_catalog", source="local") as skill_phase:
+                                skill_phase.set_outputs({"chars": len(local_catalog)})
+                            empty_manifest = (
+                                ", ".join(f"/workspace/{path}" for path in sorted(local_files))
+                                or "/workspace/files (empty)"
+                            )
+                            with dspy.context(callbacks=stream_callbacks(callback), disable_history=True):
+                                selected_route = runtime.engine.preview_route(
+                                    task=task, workspace_manifest=empty_manifest, skills_catalog=local_catalog
+                                )
+                            if selected_route is Route.DIRECT:
+                                with phase_span("turn.load_context", session_id=session_id) as context_phase:
+                                    memory_summary, session_history = runtime.load_context(session_id)
+                                    context_phase.set_outputs(
+                                        {"memory_chars": len(memory_summary), "history_chars": len(session_history)}
+                                    )
+                                with phase_span("turn.reviewed_memories", task_chars=len(task)) as memory_phase:
+                                    memories = runtime.memories(task, reviewed_only=True)
+                                    memory_phase.set_outputs({"memories": len(memories)})
+                                replay_files: dict[str, str] = {}
+                                replay_selected = False
+                                replay_skipped_bytes: int | None = None
+                                if record_replay:
+                                    total_bytes = sum(map(len, local_files.values()))
+                                    if total_bytes <= MAX_REPLAY_FILE_BYTES:
+                                        replay_files = {
+                                            path: base64.b64encode(content).decode("ascii")
+                                            for path, content in sorted(local_files.items())
+                                        }
+                                        replay_selected = True
+                                    else:
+                                        replay_skipped_bytes = total_bytes
+                                inputs = {
+                                    "manifest": empty_manifest,
+                                    "context_files": {
+                                        path: hashlib.sha256(content).hexdigest()
+                                        for path, content in sorted(local_files.items())
+                                    },
+                                    "skills_catalog": local_catalog,
+                                    "memory_summary": memory_summary + "\n" + str(memories)[:12000],
+                                    "session_history": session_history,
+                                    "replay_files": replay_files,
+                                    "replay_selected": replay_selected,
+                                    "replay_skipped_bytes": replay_skipped_bytes,
+                                }
+                            else:
+                                # Any execution route may write files, so future Turns must inspect the Volume.
+                                runtime.set_workspace_state("unknown")
+                    if inputs is None:
+                        inputs = _prepare_inputs(
+                            runtime, session_id, task, record_replay=record_replay, required_skills=required_skills
+                        )
                     if inputs["replay_skipped_bytes"] is not None:
                         emit(
                             {
@@ -371,6 +443,11 @@ def run_turn(
                     skill_intent=skill_intent,
                 )
                 with dspy.context(callbacks=stream_callbacks(callback), disable_history=True):
+                    execution_options: dict[str, Any] = {}
+                    if selected_route is not None:
+                        execution_options["selected_route"] = selected_route
+                    if required_skills:
+                        execution_options["required_skills"] = required_skills
                     prediction = runtime.engine(
                         workspace_manifest=inputs["manifest"],
                         skills_catalog=inputs["skills_catalog"],
@@ -379,7 +456,7 @@ def run_turn(
                         task=task,
                         execution_mode=runtime.engine.execution_mode,
                         context=runtime.context,
-                        **({"required_skills": required_skills} if required_skills else {}),
+                        **execution_options,
                     )
                 answer = str(prediction.answer)
                 usage = {
@@ -808,6 +885,8 @@ def _prepare_inputs(
     with phase_span("turn.load_context", session_id=session_id) as phase:
         memory_summary, session_history = runtime.load_context(session_id)
         phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
+    # Sync can partially write even on failure; invalidate before touching the Volume.
+    runtime.set_workspace_state("unknown")
     # Skills land first so their files are hashed; everything else remote arrives in one exec.
     with phase_span("turn.sync_skills") as phase:
         phase.set_outputs(
@@ -852,10 +931,10 @@ def _prepare_inputs(
         if known_bytes > MAX_REPLAY_FILE_BYTES:
             replay_selected, replay_skipped_bytes = False, known_bytes
         with phase_span("turn.replay_files") as phase:
+            remote_paths = [path for path in files if path not in required_files] if replay_selected else []
+            downloaded = runtime.sandbox_mgr.read_workspace_files(remote_paths) if remote_paths else {}
             for path in files if replay_selected else ():
-                content = (
-                    required_files[path] if path in required_files else runtime.sandbox_mgr.read_workspace_file(path)
-                )
+                content = required_files[path] if path in required_files else downloaded[path]
                 if hashlib.sha256(content).hexdigest() != context_files[path]:
                     raise ValueError(f"Workspace file changed while the Turn was prepared: {path}")
                 replay_bytes += len(content)

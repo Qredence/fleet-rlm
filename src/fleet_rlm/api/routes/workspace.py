@@ -17,10 +17,17 @@ from starlette.background import BackgroundTask
 
 from fleet_rlm.api.deps import LOCKED, LockedRuntime, Runtime, Settings, session_lock, translate
 from fleet_rlm.api.schemas import Attached, Deleted, Files, FileStat, FileWritten, WorkspaceWriteRequest
-from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES
+from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES, _workspace_relative_path
 
 router = APIRouter(tags=["workspace"])
 _MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES
+
+
+def _mark_workspace_unknown(runtime: Runtime) -> None:
+    """Prevent the empty-workspace route shortcut after a workspace mutation."""
+    mark_unknown = getattr(runtime, "set_workspace_state", None)
+    if callable(mark_unknown):
+        mark_unknown("unknown")
 
 
 def _list_files(session_id: str, runtime: Runtime) -> Files:
@@ -31,6 +38,8 @@ def _list_files(session_id: str, runtime: Runtime) -> Files:
     """
     with translate("Session workspace is unavailable"):
         files = runtime.sandbox_mgr.list_workspace_files()
+        if files:
+            _mark_workspace_unknown(runtime)
     return Files(
         session_id=session_id,
         files=files,
@@ -55,6 +64,8 @@ def workspace_stat(rel_path: str, runtime: LockedRuntime) -> FileStat:
     """Return the size and SHA-256 digest of one workspace file."""
     with translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404):
         metadata = runtime.sandbox_mgr.stat_workspace_file(rel_path)
+    with translate("Session workspace is unavailable"):
+        _mark_workspace_unknown(runtime)
     return FileStat(path=rel_path, size_bytes=metadata["size_bytes"], sha256=metadata["sha256"])
 
 
@@ -68,8 +79,11 @@ def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
     os.close(descriptor)
     try:
         unavailable = "Workspace file is unavailable"
-        with translate(unavailable, invalid="Invalid workspace path", status=404), session_lock(runtime):
-            runtime.sandbox_mgr.read_workspace_file_to_path(rel_path, temporary, max_bytes=_MAX_FILE_BYTES)
+        with session_lock(runtime):
+            with translate(unavailable, invalid="Invalid workspace path", status=404):
+                runtime.sandbox_mgr.read_workspace_file_to_path(rel_path, temporary, max_bytes=_MAX_FILE_BYTES)
+            with translate("Session workspace is unavailable"):
+                _mark_workspace_unknown(runtime)
     except BaseException:
         with suppress(FileNotFoundError):
             os.unlink(temporary)
@@ -100,6 +114,8 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
         if len(content) > _MAX_FILE_BYTES:
             raise HTTPException(status_code=413, detail="Workspace file exceeds the 25 MB limit")
         with session_lock(runtime):
+            _workspace_relative_path(rel_path)
+            _mark_workspace_unknown(runtime)
             mounted_path = runtime.sandbox_mgr.write_workspace_file(rel_path, content)
     return FileWritten(
         path=rel_path,
@@ -118,6 +134,8 @@ def delete_workspace_file(rel_path: str, runtime: LockedRuntime) -> Deleted:
     """
     unavailable = "Workspace file could not be deleted"
     with translate(unavailable, invalid="Invalid workspace path", status=404):
+        _workspace_relative_path(rel_path)
+        _mark_workspace_unknown(runtime)
         runtime.sandbox_mgr.delete_workspace_file(rel_path)
     return Deleted(deleted=rel_path)
 
@@ -148,6 +166,8 @@ def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile
                         output.write(chunk)
                 relative_path = f"files/{name}"
                 with session_lock(runtime):
+                    _workspace_relative_path(relative_path)
+                    _mark_workspace_unknown(runtime)
                     mounted_path = runtime.sandbox_mgr.write_workspace_file_from_path(relative_path, temporary)
             finally:
                 with suppress(FileNotFoundError):

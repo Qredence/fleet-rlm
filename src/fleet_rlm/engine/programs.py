@@ -4,7 +4,7 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.contracts import RequiredSkill
+from fleet_rlm.contracts import RequiredSkill, Route
 from fleet_rlm.engine.children import ChildPolicies
 from fleet_rlm.engine.decisions import Routing, SkillSelection
 from fleet_rlm.engine.reasoning import Reasoning
@@ -72,9 +72,10 @@ class FleetProgram(dspy.Module):
         context: Any = None,
         execution_mode: str = "hybrid",
         required_skills: tuple[RequiredSkill, ...] = (),
+        selected_route: Route | None = None,
     ) -> dspy.Prediction:
         """Compose effective-route policy, optional Skill selection and native reasoning."""
-        route = self.routing(
+        route = selected_route or self.routing(
             task=task,
             workspace_manifest=workspace_manifest,
             skills_catalog=skills_catalog,

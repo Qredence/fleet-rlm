@@ -572,3 +572,17 @@ def test_an_explicit_judge_pairs_the_mlflow_openai_scorers_with_its_own_endpoint
     # Other providers use their native environment even when the judge role is explicit.
     other = FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint", **judge)
     assert other.judge_environment() == {}
+
+
+def test_inherited_judge_connection_exports_resolved_credential(monkeypatch):
+    monkeypatch.setenv("INHERITED_JUDGE_KEY", "test-only-key")
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_llm_api_base="https://provider.example/v1",
+        fleet_llm_api_key_env="INHERITED_JUDGE_KEY",
+        fleet_judge_model="openai:/configured-model",
+    )
+    assert settings.judge_environment() == {
+        "OPENAI_API_BASE": "https://provider.example/v1",
+        "OPENAI_API_KEY": "test-only-key",
+    }

@@ -11,7 +11,7 @@ from typing import Any
 import dspy
 from dspy.primitives.facade import SandboxLM
 
-from fleet_rlm.contracts import OptimizationInputs, RequiredSkill, SkillAdmissionError, turn_is_over
+from fleet_rlm.contracts import OptimizationInputs, RequiredSkill, Route, SkillAdmissionError, turn_is_over
 from fleet_rlm.engine.children import ChildPolicies
 from fleet_rlm.engine.compiled import CompiledProgramFile, installed_program_error
 from fleet_rlm.engine.decisions import Routing, SkillSelection
@@ -27,6 +27,14 @@ from fleet_rlm.workspace import WorkspaceDataset
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_DIRECT_CONTEXT_CHARS = 1_000_000
+
+
+def _active_turn_generation(manager: Any) -> int | None:
+    if not getattr(manager, "turn_active", False):
+        return None
+    root = getattr(manager, "root", manager)
+    generation = getattr(root, "_turn_generation", None)
+    return generation if isinstance(generation, int) and generation > 0 else None
 
 
 class FleetRuntime:
@@ -88,6 +96,7 @@ class FleetRuntime:
         )
         self.compiled = CompiledProgramFile(compiled_path, baseline=baseline)
         self.optimization: OptimizationInputs | None = None
+        self._preview_turn_generation: int | None = None
         self.compiled.load_initial(self.program)
         self.delegation.bind_policies(self.program.child_policies.snapshot())
 
@@ -112,6 +121,7 @@ class FleetRuntime:
         context: Any = None,
         execution_mode: str | None = None,
         required_skills: tuple[RequiredSkill, ...] = (),
+        selected_route: Route | None = None,
     ) -> dspy.Prediction:
         """Use the same host path for ordinary Turns and reconstructed evaluation rollouts."""
         return invoke_program(
@@ -124,7 +134,26 @@ class FleetRuntime:
             context=context,
             execution_mode=execution_mode or self.execution_mode,
             required_skills=required_skills,
+            selected_route=selected_route,
         )
+
+    def preview_route(self, *, task: str, workspace_manifest: str, skills_catalog: str) -> Route:
+        """Run the existing native router once when authoritative state proves the workspace empty."""
+        self._preview_turn_generation = None
+        self.reload_program()
+        self.sandbox_mgr.check_turn()
+        generation = _active_turn_generation(self.sandbox_mgr)
+        with dspy.context(callbacks=turn_callbacks()):
+            route = self.program.routing(
+                task=task,
+                workspace_manifest=workspace_manifest,
+                skills_catalog=skills_catalog,
+                mode=self.execution_mode,
+                has_context=False,
+                has_required_skills=False,
+            )
+        self._preview_turn_generation = generation
+        return route
 
     def execution_evidence(self) -> dict[str, Any]:
         """Only host receipts certify usage and artifacts; ordinary collection failures score incomplete."""
@@ -207,7 +236,11 @@ class WorkspaceInputs:
 
 def invoke_program(runtime: FleetRuntime, **inputs: Any) -> dspy.Prediction:
     """Admit, invoke natively and certify once; outer owners retain persistence and teardown."""
-    runtime.reload_program()
+    preview_generation = runtime._preview_turn_generation
+    runtime._preview_turn_generation = None
+    active_generation = _active_turn_generation(runtime.sandbox_mgr)
+    if inputs.get("selected_route") is None or active_generation is None or preview_generation != active_generation:
+        runtime.reload_program()
     source = "artifact" if runtime.compiled.digest else "baseline"
     manager = runtime.sandbox_mgr
     mode = inputs["execution_mode"]

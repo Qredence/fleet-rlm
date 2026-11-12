@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import csv
 import functools
+import hashlib
 import io
+import json
 import os
 import random
 import threading
@@ -27,7 +29,7 @@ from mlflow.exceptions import MlflowException
 
 from fleet_rlm.contracts import Route, parse_sse
 from fleet_rlm.observability import trace_object
-from fleet_rlm.optimize.dataset import labels_of
+from fleet_rlm.optimize.dataset import is_benchmark_trace, labels_of
 from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite, expected_values_present
 from fleet_rlm.replay import selected_snapshot, validate_review_labels
 from fleet_rlm.store import Store
@@ -264,8 +266,9 @@ def label_turn(
     if trace is None:
         raise EvaluationError(f"Trace {trace_id} is not readable; retry its saved trace ID")
     existing = labels_of(trace)
+    benchmark = is_benchmark_trace(trace)
     labels: dict[str, Any] = {
-        "review_status": "approved",
+        "review_status": "benchmark" if benchmark else "approved",
         "source_group": trace.info.trace_metadata.get("mlflow.trace.session", ""),
         "expected_answer": None,
         "expected_values": [],
@@ -285,6 +288,8 @@ def label_turn(
     ):
         if value is not None:
             labels[name] = value
+    if benchmark and labels["review_status"] == "approved":
+        raise ValueError("Benchmark traces cannot be approved for optimization curation")
     # The stored full answer is the gold when nothing else was given; previews are lossy.
     if labels["expected_answer"] is None and labels["review_status"] == "approved" and default_answer:
         labels["expected_answer"] = default_answer
@@ -561,6 +566,35 @@ def apply_judge_environment(settings: Any) -> None:
     """Pair the MLflow judges with their provider credential; `eval run`, `eval score`, and jobs all use this."""
     for name, value in settings.judge_environment().items():
         os.environ[name] = value
+    os.environ["FLEET_JUDGE_MODEL"] = settings.fleet_judge_model
+
+
+def load_registered_scorers(experiment_id: str, names: list[str]) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Load explicitly selected trusted registry definitions in this worker process."""
+    from mlflow.genai.scorers import registry
+
+    selected, identities = [], []
+    previous = os.environ.get("MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS")
+    try:
+        os.environ["MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS"] = "true"
+        for name in dict.fromkeys(names):
+            item = registry.get_scorer(name=name, experiment_id=experiment_id)
+            definition = json.dumps(item.model_dump(), sort_keys=True, default=str)
+            selected.append(item)
+            identities.append(
+                {
+                    "experiment_id": experiment_id,
+                    "name": name,
+                    "version": item.scorer_version,
+                    "digest": hashlib.sha256(definition.encode()).hexdigest(),
+                }
+            )
+    finally:
+        if previous is None:
+            os.environ.pop("MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS", None)
+        else:
+            os.environ["MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS"] = previous
+    return selected, identities
 
 
 def run_cases(
@@ -602,6 +636,7 @@ def score_evaluation_traces(
     jev_lm: Any = None,
     experiment_id: str | None = None,
     scorers: list[Any] | None = None,
+    registered_provenance: list[dict[str, Any]] | None = None,
     report: Callable[[str], None] = print,
 ) -> Any:
     """Score already verified, labelled traces without executing their Turns again.
@@ -630,11 +665,23 @@ def score_evaluation_traces(
             selected_scorers = [*suite, expected_values_present]
         if not selected_scorers:
             raise ValueError("At least one scorer is required")
-        with mlflow.start_run(experiment_id=experiment_id, nested=active_run is not None):
-            result = mlflow.genai.evaluate(
-                data=traces,
-                scorers=selected_scorers,
-            )
+        with mlflow.start_run(experiment_id=experiment_id, nested=active_run is not None) as evaluation_run:
+            if registered_provenance:
+                source = registered_provenance[0]["experiment_id"]
+                _, current = load_registered_scorers(source, [item["name"] for item in registered_provenance])
+                if current != registered_provenance:
+                    raise ValueError("Registered scorer identity changed before invocation")
+                mlflow.set_tag("fleet.evaluation.registered_scorers", json.dumps(registered_provenance))
+                mlflow.set_tag("fleet.evaluation.source_traces", json.dumps([t.info.trace_id for t in traces]))
+            previous_run = os.environ.get("FLEET_EVALUATION_RUN_ID")
+            try:
+                os.environ["FLEET_EVALUATION_RUN_ID"] = evaluation_run.info.run_id
+                result = mlflow.genai.evaluate(data=traces, scorers=selected_scorers)
+            finally:
+                if previous_run is None:
+                    os.environ.pop("FLEET_EVALUATION_RUN_ID", None)
+                else:
+                    os.environ["FLEET_EVALUATION_RUN_ID"] = previous_run
     except Exception as exc:
         raise EvaluationError(
             f"Scoring failed ({type(exc).__name__}); score the saved traces without rerunning Turns"
@@ -643,25 +690,46 @@ def score_evaluation_traces(
     frame = result.result_df
     if frame is None:
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
-    error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
+    if "assessments" in frame:
+        historical = 0
+        selected = []
+        for assessments in frame["assessments"]:
+            items = assessments if isinstance(assessments, list) else []
+            current = [
+                a
+                for a in items
+                if isinstance(a, dict)
+                and (a.get("metadata") or {}).get("mlflow.assessment.sourceRunId") == result.run_id
+            ]
+            historical += len(items) - len(current)
+            selected.append(current)
+        frame["assessments"] = selected
+        if historical:
+            report(f"Historical assessments excluded from this run's report: {historical}")
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
     assessments_by_trace = frame["assessments"] if "assessments" in frame else [None] * len(frame)
     has_feedback = len(frame) == len(traces) and any(
         isinstance(assessments, list)
         and any(
-            assessment.get("metadata", {}).get("mlflow.assessment.sourceRunId") == result.run_id
-            and assessment.get("feedback", {}).get("value") is not None
-            and not assessment.get("feedback", {}).get("error")
+            isinstance(assessment, dict)
+            and (assessment.get("metadata") or {}).get("mlflow.assessment.sourceRunId") == result.run_id
+            and (assessment.get("feedback") or {}).get("value") is not None
+            and not (assessment.get("feedback") or {}).get("error")
             for assessment in assessments
         )
         for assessments in assessments_by_trace
     )
-    if (
-        frame.empty
-        or not has_feedback
-        or not expected_columns.issubset(frame.columns)
-        or any(frame[name].notna().any() for name in error_columns)
-    ):
+    has_error = any(
+        isinstance(assessments, list)
+        and any(
+            isinstance(assessment, dict)
+            and (assessment.get("metadata") or {}).get("mlflow.assessment.sourceRunId") == result.run_id
+            and ((assessment.get("feedback") or {}).get("error") or {}).get("error_message")
+            for assessment in assessments
+        )
+        for assessments in assessments_by_trace
+    )
+    if frame.empty or not has_feedback or not expected_columns.issubset(frame.columns) or has_error:
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     return result
 

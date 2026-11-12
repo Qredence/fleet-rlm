@@ -331,3 +331,174 @@ def test_negative_control_adds_a_false_claim_without_altering_the_original():
     assert len(control.data.spans) == 1
     assert "executed Python" in control.data.spans[0].outputs["answer"]
     assert root.outputs["answer"] == "5" and len(trace.data.spans) == 2
+
+
+def test_retirement_refuses_review_drift_before_judge_or_write(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    review = snapshot()
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(review))
+    changed = copy.deepcopy(review)
+    changed["tracking_uri"] = "changed"
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: changed)
+    with pytest.raises(ValueError, match="review changed"):
+        reconcile.retire_legacy(path, tmp_path / "audit.json")
+    assert not (tmp_path / "audit.json").exists()
+
+
+def test_retirement_validates_then_stops_only_legacy_and_recovers(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+
+    from fleet_rlm.optimize import scorers
+
+    monkeypatch.chdir(tmp_path)
+
+    state = snapshot()
+    state["judge_model"] = "openai:/offline"
+    state["scorers"][reconcile.NEW_NAME] = {"version": 1, "sample_rate": None}
+    operations = []
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: copy.deepcopy(state))
+    monkeypatch.setattr(reconcile.mlflow, "get_trace", lambda trace_id: trace_id)
+    monkeypatch.setattr(
+        reconcile.mlflow,
+        "start_run",
+        lambda **_kw: nullcontext(SimpleNamespace(info=SimpleNamespace(run_id="evaluation"))),
+    )
+    monkeypatch.setattr(scorers, "make_execution_evidence_judge", lambda _model: object())
+    monkeypatch.setattr(reconcile, "_unsupported_execution_claim", lambda _trace: "negative")
+
+    def diagnose(trace, *_args, **_kwargs):
+        operations.append(trace)
+        return [
+            SimpleNamespace(name=name, value=trace != "negative", to_dictionary=lambda: {"recorded": True})
+            for name in reconcile.OLD_NAMES
+        ]
+
+    monkeypatch.setattr(scorers, "diagnose_execution_evidence", diagnose)
+
+    def get_scorer(*, name, **_kwargs):
+        def stop(**_kw):
+            assert "negative" in operations
+            operations.append(name)
+            state["scorers"][name]["sample_rate"] = 0.0
+            if state["scorers"][name].get("filter_string") == "":
+                state["scorers"][name]["filter_string"] = None
+
+        return SimpleNamespace(
+            stop=stop,
+            sample_rate=state["scorers"][name]["sample_rate"],
+            filter_string=state["scorers"][name].get("filter_string"),
+        )
+
+    monkeypatch.setattr(reconcile.registry, "get_scorer", get_scorer)
+    for name in reconcile.OLD_NAMES:
+        state["scorers"][name]["filter_string"] = ""
+    initial = copy.deepcopy(state)
+    path, audit = tmp_path / "review.json", tmp_path / "audit.json"
+    path.write_text(json.dumps(state))
+    reconcile.retire_legacy(path, audit)
+    assert operations[-2:] == list(reconcile.OLD_NAMES)
+    assert all(state["scorers"][name]["filter_string"] is None for name in reconcile.OLD_NAMES)
+    assert state["scorers"][reconcile.NEW_NAME]["sample_rate"] is None
+    saved = json.loads(audit.read_text())
+    assert saved["phase"] == "retired"
+    before = list(operations)
+    path.write_text(json.dumps(state))
+    reconcile.retire_legacy(path, audit)
+    assert operations == before
+
+    state["scorers"][reconcile.OLD_NAMES[0]]["sample_rate"] = 0.0
+    state["scorers"][reconcile.OLD_NAMES[0]]["filter_string"] = None
+    state["scorers"][reconcile.OLD_NAMES[1]]["sample_rate"] = 1.0
+    state["scorers"][reconcile.OLD_NAMES[1]]["filter_string"] = ""
+    partial_review, partial_audit = tmp_path / "partial_review.json", tmp_path / "partial_audit.json"
+    partial_review.write_text(json.dumps(state))
+    partial_audit.write_text(
+        json.dumps(
+            {
+                "operation": "retire_legacy",
+                "review": initial,
+                "stopped": [],
+                "pending_stop": reconcile.OLD_NAMES[0],
+                "validations": saved["validations"],
+            }
+        )
+    )
+    reconcile.retire_legacy(partial_review, partial_audit)
+    assert operations == [*before, reconcile.OLD_NAMES[1]]
+    recovered = json.loads(partial_audit.read_text())
+    assert recovered["phase"] == "retired" and recovered["stopped"] == list(reconcile.OLD_NAMES)
+    assert "pending_stop" not in recovered
+
+
+def test_operator_paths_reject_working_directory_escape(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    review = tmp_path / "review.json"
+    review.write_text("{}")
+    with pytest.raises(ValueError, match="working directory"):
+        reconcile.retire_legacy(Path("../review.json"), tmp_path / "audit.json")
+    with pytest.raises(ValueError, match="working directory"):
+        reconcile.filter_online_schedules(review, Path("../audit.json"))
+    assert not (tmp_path / "audit.json").exists()
+
+
+def test_filter_online_schedules_updates_only_active_targets_and_recovers(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    state = snapshot()
+    for name, version in reconcile.ONLINE_SCHEDULE_VERSIONS.items():
+        state["scorers"][name] = {
+            "version": version,
+            "sample_rate": 1.0,
+            "filter_string": None,
+            "definition": {"source": name},
+        }
+    operations = []
+    monkeypatch.setattr(reconcile, "registry_snapshot", lambda: copy.deepcopy(state))
+
+    def get_scorer(*, name, **_kwargs):
+        def update(*, sampling_config, **_kw):
+            operations.append((name, sampling_config.sample_rate, sampling_config.filter_string))
+            state["scorers"][name]["filter_string"] = sampling_config.filter_string
+
+        return SimpleNamespace(
+            update=update,
+            scorer_version=state["scorers"][name]["version"],
+            sample_rate=state["scorers"][name]["sample_rate"],
+            filter_string=state["scorers"][name]["filter_string"],
+        )
+
+    monkeypatch.setattr(reconcile.registry, "get_scorer", get_scorer)
+    initial = copy.deepcopy(state)
+    review_path, audit_path = tmp_path / "filter_review.json", tmp_path / "filter_audit.json"
+    review_path.write_text(json.dumps(state))
+    reconcile.filter_online_schedules(review_path, audit_path)
+    assert [name for name, _, _ in operations] == list(reconcile.ONLINE_SCHEDULE_VERSIONS)
+    assert all(
+        state["scorers"][name]["filter_string"] == reconcile.ONLINE_TRACE_FILTER
+        for name in reconcile.ONLINE_SCHEDULE_VERSIONS
+    )
+    saved = json.loads(audit_path.read_text())
+    assert saved["phase"] == "filtered" and saved["filtered"] == list(reconcile.ONLINE_SCHEDULE_VERSIONS)
+
+    # Recovery after a partial update of the first schedule
+    names = list(reconcile.ONLINE_SCHEDULE_VERSIONS)
+    for name in names[1:]:
+        state["scorers"][name]["filter_string"] = None
+    partial_review, partial_audit = tmp_path / "partial_filter_review.json", tmp_path / "partial_filter_audit.json"
+    partial_review.write_text(json.dumps(state))
+    partial_audit.write_text(
+        json.dumps(
+            {
+                "operation": "filter_online",
+                "review": initial,
+                "filtered": [],
+                "pending_filter": names[0],
+            }
+        )
+    )
+    operations.clear()
+    reconcile.filter_online_schedules(partial_review, partial_audit)
+    assert [name for name, _, _ in operations] == names[1:]
+    recovered = json.loads(partial_audit.read_text())
+    assert recovered["phase"] == "filtered" and recovered["filtered"] == names
+    assert "pending_filter" not in recovered

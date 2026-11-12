@@ -82,3 +82,62 @@ def test_local_skill_sync_prevalidates_all_skills_before_writing(tmp_path: Path)
     with pytest.raises(ValueError, match="frontmatter"):
         manager.sync_local_skills_to_volume()
     assert sandbox.writes == []
+
+
+def test_local_catalog_matches_the_synced_skill_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    skill = root / "ledger-audit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        '---\nname: ledger-audit\ndescription: "Audits ledger totals: on request."\n---\n\nCheck totals.\n',
+        encoding="utf-8",
+    )
+    manager = SkillManager(object(), root, None)  # type: ignore[arg-type]
+
+    assert manager.build_local_catalog_xml() == (
+        "<available_skills>\n"
+        '  <skill name="ledger-audit">Audits ledger totals: on request.</skill>\n'
+        "</available_skills>"
+    )
+
+
+def test_local_skill_files_stage_bundled_and_local_resources_with_workspace_paths(tmp_path: Path) -> None:
+    bundled = tmp_path / "bundled"
+    local = tmp_path / "local"
+    (bundled / "shared-skill").mkdir(parents=True)
+    (bundled / "shared-skill" / "SKILL.md").write_text(
+        "---\nname: shared-skill\ndescription: Bundled copy.\n---\n\nBundled.\n", encoding="utf-8"
+    )
+    (local / "shared-skill" / "references").mkdir(parents=True)
+    skill_md = b"---\nname: shared-skill\ndescription: Local override.\n---\n\nLocal.\n"
+    ref_md = b"Reference policy.\n"
+    (local / "shared-skill" / "SKILL.md").write_bytes(skill_md)
+    (local / "shared-skill" / "references" / "policy.md").write_bytes(ref_md)
+
+    manager = SkillManager(object(), local, bundled)  # type: ignore[arg-type]
+    assert manager.local_skill_files() == {
+        "skills/shared-skill/SKILL.md": skill_md,
+        "skills/shared-skill/references/policy.md": ref_md,
+    }
+
+
+def test_stage_local_skills_returns_catalog_and_files_in_one_scan(tmp_path: Path, monkeypatch) -> None:
+    local = tmp_path / "local"
+    (local / "audit-skill").mkdir(parents=True)
+    skill_md = b"---\nname: audit-skill\ndescription: Single-pass stage.\n---\n\nCheck.\n"
+    (local / "audit-skill" / "SKILL.md").write_bytes(skill_md)
+    manager = SkillManager(object(), local, None)  # type: ignore[arg-type]
+    scans = 0
+    original = SkillManager._stage_local_skills
+
+    def counted(self, **kwargs):
+        nonlocal scans
+        scans += 1
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(SkillManager, "_stage_local_skills", counted)
+    catalog, staged_files = manager.stage_local_skills()
+
+    assert scans == 1
+    assert 'name="audit-skill"' in catalog
+    assert staged_files == {"skills/audit-skill/SKILL.md": skill_md}

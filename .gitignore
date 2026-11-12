@@ -42,6 +42,7 @@ inspector.json
 tmp/
 **/tmp/
 **/.tmp*/
+.sites/
 
 # Plans and notes
 

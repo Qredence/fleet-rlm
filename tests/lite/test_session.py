@@ -880,3 +880,84 @@ def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
         registry._build("s1")
 
     assert calls == ["lease-close"]
+
+
+@pytest.mark.parametrize(
+    ("created", "prior_state", "handoff_state", "resources", "expected"),
+    [
+        (False, "known_empty", "unknown", [], "unknown"),
+        (True, None, None, [], "known_empty"),
+        (True, None, None, [{"action": "stop"}], "unknown"),
+    ],
+)
+def test_build_initializes_and_refreshes_workspace_state_after_acquiring_the_lease(
+    monkeypatch,
+    created: bool,
+    prior_state: str | None,
+    handoff_state: str | None,
+    resources: list[dict],
+    expected: str,
+) -> None:
+    from fleet_rlm import session as session_module
+    from fleet_rlm.config import FleetSettings
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    events: list[str] = []
+    saved = {"workspace_state": prior_state} if prior_state is not None else {}
+
+    def acquire(_session_id: str):
+        events.append("acquire_lease")
+        if handoff_state is not None:
+            saved["workspace_state"] = handoff_state
+        return SimpleNamespace(execute=lambda _statement: None, close=lambda: events.append("lease-close"))
+
+    store = SimpleNamespace(
+        acquire_session_lease=acquire,
+        ensure_session=lambda _session_id: events.append("ensure_session") or created,
+        runtime_settings=lambda _session_id: events.append("runtime_settings") or dict(saved),
+        save_runtime_settings=lambda _session_id, value: (
+            events.append(f"save:{value['workspace_state']}") or saved.update(value)
+        ),
+        advance_sandbox_ownership_epoch=lambda _session_id: 1,
+        sandbox_ownership=lambda _session_id: {"epoch": 1, "resources": resources},
+        fail_interrupted_turns=lambda *_args: [],
+        claim_environment_report=lambda _session_id: True,
+        approved_program=lambda: {"approved": None, "approving": []},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "DaytonaSandboxManager",
+        lambda *_args, **kwargs: SimpleNamespace(
+            session_id=kwargs["session_id"], reconcile_sandbox_ownership=lambda _resources: None
+        ),
+    )
+    monkeypatch.setattr(session_module, "SkillManager", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(session_module, "FleetRuntime", lambda **_kwargs: SimpleNamespace(reload_program=lambda: None))
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
+
+    runtime = registry._build("s1")
+    try:
+        assert events[:3] == ["acquire_lease", "ensure_session", "runtime_settings"]
+        assert events.count("runtime_settings") == 1
+        assert runtime.workspace_state == saved["workspace_state"] == expected
+    finally:
+        runtime.close_lease()
+
+
+def test_set_workspace_state_fences_when_session_lease_is_lost() -> None:
+    from fleet_rlm.session import SessionRuntime
+
+    writes: list[dict] = []
+    runtime = SessionRuntime(
+        sandbox_mgr=SimpleNamespace(session_id="s1"),  # type: ignore[arg-type]
+        store=SimpleNamespace(save_runtime_settings=lambda _sid, data: writes.append(data)),  # type: ignore[arg-type]
+        skill_mgr=SimpleNamespace(),  # type: ignore[arg-type]
+        engine=SimpleNamespace(),  # type: ignore[arg-type]
+        workspace_state="known_empty",
+    )
+    runtime.lease_lost.set()
+
+    with pytest.raises(RuntimeError, match="ownership lease was lost"):
+        runtime.set_workspace_state("unknown")
+
+    assert runtime.workspace_state == "known_empty" and writes == []

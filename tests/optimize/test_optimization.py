@@ -372,9 +372,43 @@ def test_turn_traces_skip_pytest_traces_in_the_runtime_experiment(monkeypatch) -
     user_turn = _trace("t1", "sess-a", request, {})
     pytest_turn = _trace("t2", "sess-b", request, {})
     pytest_turn.info.trace_metadata["mlflow.source.name"] = "/repo/.venv/bin/pytest"
+    tagged_benchmark = _trace("t3", "sess-c", request, {})
+    tagged_benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
+    span_benchmark = _trace("t4", "sess-d", request, {})
+    span_benchmark.data.spans = [
+        SimpleNamespace(parent_id="root", attributes={}),
+        SimpleNamespace(parent_id=None, attributes={"fleet.benchmark.model_id": "m-bench"}),
+    ]
     monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "search_traces", lambda **_kwargs: [user_turn, pytest_turn])
+    monkeypatch.setattr(
+        dataset.mlflow,
+        "MlflowClient",
+        lambda: SimpleNamespace(
+            search_traces=lambda **_kwargs: [user_turn, pytest_turn, tagged_benchmark, span_benchmark]
+        ),
+    )
     assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev")] == ["t1"]
+
+
+def test_turn_traces_page_past_benchmark_traces(monkeypatch) -> None:
+    request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)", "context_files": {}}
+    benchmark = _trace("bench", "sess-b", request, {})
+    benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
+    user_turn = _trace("user", "sess-a", request, {})
+
+    class Page(list):
+        def __init__(self, items, token):
+            super().__init__(items)
+            self.token = token
+
+    def search_traces(**kwargs):
+        if kwargs.get("page_token") is None:
+            return Page([benchmark], "next")
+        return Page([user_turn], None)
+
+    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
+    monkeypatch.setattr(dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=search_traces))
+    assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev", max_results=1)] == ["user"]
 
 
 def test_mlflow_loader_requires_approved_gold_and_skips_rejected_or_legacy_traces(monkeypatch) -> None:
@@ -407,7 +441,7 @@ def test_mlflow_loader_requires_approved_gold_and_skips_rejected_or_legacy_trace
         _trace("t5", "sess-e", request_for("sess-e", "turn-5", "unlabelled"), {}),
     ]
     monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "search_traces", lambda **_kwargs: traces)
+    monkeypatch.setattr(dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=lambda **_kwargs: traces))
     store = SimpleNamespace(replay_snapshot=lambda session, turn: snapshots.get((session, turn)))
     examples = dataset.load_examples_from_mlflow("fleet-rlm-dev", store=store)
     assert [(example.source_session, example.task) for example in examples] == [
@@ -512,7 +546,9 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         }
         trace = _trace("reviewed-trace", "s1", request, labels)
         monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-        monkeypatch.setattr(dataset.mlflow, "search_traces", lambda **_kwargs: [trace])
+        monkeypatch.setattr(
+            dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=lambda **_kwargs: [trace])
+        )
         store = SimpleNamespace(replay_snapshot=lambda *_args: (digest, compressed))
         examples = dataset.load_examples_from_mlflow("unused", store=store)
     if snapshot in {"complete", "empty"}:

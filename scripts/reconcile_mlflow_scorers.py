@@ -30,9 +30,16 @@ from fleet_rlm.optimize.scorers import (
 )
 
 EXPERIMENT = "1"
+EVALUATION_EXPERIMENT = "49"
 TARGET_TRACE = "tr-6935d04dc15442cfb7a7dd11597cecee"
 OLD_NAMES = ("sandbox_verification_discipline", "tool_execution_integrity")
 NEW_NAME = "execution_evidence_diagnostics"
+ONLINE_TRACE_FILTER = "trace.status = 'OK'"
+ONLINE_SCHEDULE_VERSIONS = {
+    "agent_skills_progressive_disclosure": 2,
+    "jev_routing_efficiency_judge": 5,
+    "output_instruction_compliance": 2,
+}
 
 
 def digest(value: Any) -> str:
@@ -73,6 +80,7 @@ def registry_snapshot() -> dict[str, Any]:
     return {
         "tracking_uri": mlflow.get_tracking_uri(),
         "experiment_id": EXPERIMENT,
+        "evaluation_experiment_id": EVALUATION_EXPERIMENT,
         "scorers": scorers,
         "replacement": execution_evidence_diagnostics.model_dump(),
         "rubric": EXECUTION_DIAGNOSTIC_RUBRIC,
@@ -308,17 +316,234 @@ def rollback(audit_path: Path) -> None:
     audit_path.write_text(json.dumps(audit, indent=2) + "\n")
 
 
+def retire_legacy(review_path: Path, audit_path: Path) -> None:
+    """Validate saved evidence, then retire legacy schedules with resumable readback."""
+    from fleet_rlm.optimize.scorers import diagnose_execution_evidence, make_execution_evidence_judge
+
+    root = Path.cwd().resolve()
+    review_path = Path(review_path).expanduser().resolve()
+    audit_path = Path(audit_path).expanduser().resolve()
+    if not review_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+    if not audit_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+
+    def is_rate(rate: Any, target: float) -> bool:
+        return isinstance(rate, int | float) and not isinstance(rate, bool) and rate == target
+
+    review = json.loads(review_path.read_text())
+    current = registry_snapshot()
+    if digest(current) != digest(review):
+        raise ValueError("Retirement review changed")
+    if not review.get("judge_model"):
+        raise ValueError("Configure FLEET_JUDGE_MODEL before review")
+    replacement = review["scorers"].get(NEW_NAME, {})
+    replacement_rate = replacement.get("sample_rate")
+    if replacement.get("version") != 1 or (replacement_rate is not None and not is_rate(replacement_rate, 0)):
+        raise ValueError("Replacement must remain inactive v1")
+    if audit_path.exists():
+        audit = json.loads(audit_path.read_text())
+        if audit.get("operation") != "retire_legacy":
+            raise ValueError("Not a retirement audit")
+        expected = copy.deepcopy(audit["review"])
+        pending = audit.get("pending_stop")
+        if pending and is_rate(current["scorers"].get(pending, {}).get("sample_rate"), 0):
+            if pending not in audit["stopped"]:
+                audit["stopped"].append(pending)
+            audit.pop("pending_stop")
+        for name in audit.get("stopped", []):
+            current_item = current["scorers"].get(name, {})
+            current_rate = current_item.get("sample_rate")
+            expected["scorers"][name]["sample_rate"] = current_rate if is_rate(current_rate, 0) else 0
+            # stop() rewrites the schedule and drops an empty filter to None.
+            if is_rate(current_rate, 0):
+                expected["scorers"][name]["filter_string"] = current_item.get("filter_string")
+        if digest(expected) != digest(review):
+            raise ValueError("Retirement recovery identity conflict")
+    else:
+        for name in OLD_NAMES:
+            item = review["scorers"].get(name, {})
+            rate = item.get("sample_rate")
+            if (
+                item.get("version") != 3
+                or not (is_rate(rate, 0) or is_rate(rate, 1.0))
+                or item.get("filter_string") not in (None, "")
+            ):
+                raise ValueError("Unexpected legacy schedule")
+        audit = {
+            "operation": "retire_legacy",
+            "review": copy.deepcopy(review),
+            "stopped": [name for name in OLD_NAMES if is_rate(review["scorers"][name]["sample_rate"], 0)],
+            "validations": {},
+        }
+        with audit_path.open("x") as stream:
+            json.dump(audit, stream, indent=2)
+
+    def save():
+        audit_path.write_text(json.dumps(audit, indent=2) + "\n")
+
+    judge = make_execution_evidence_judge(review["judge_model"])
+    for name, trace_id in (("greeting", "tr-70c56de2155024af745c1317d8eda284"), ("computation", TARGET_TRACE)):
+        if name in audit["validations"] and (name != "computation" or "negative" in audit["validations"]):
+            continue
+        trace = mlflow.get_trace(trace_id)
+        if trace is None:
+            raise ValueError("Saved validation trace unavailable")
+        with mlflow.start_run(experiment_id=EVALUATION_EXPERIMENT, run_name="legacy-scorer-retirement") as run:
+            audit["evaluation_run_id"] = run.info.run_id
+            save()
+            if name not in audit["validations"]:
+                feedback = diagnose_execution_evidence(trace, judge, judge_model=review["judge_model"])
+                if {item.name for item in feedback or []} != set(OLD_NAMES) or any(
+                    item.value is not True for item in feedback
+                ):
+                    raise ValueError("Saved trace diagnostics must pass before retirement")
+                audit["validations"][name] = {
+                    "trace_id": trace_id,
+                    "run_id": run.info.run_id,
+                    "feedback": [f.to_dictionary() for f in feedback],
+                }
+                save()
+            if name == "computation":
+                negative = diagnose_execution_evidence(
+                    _unsupported_execution_claim(trace), judge, judge_model=review["judge_model"]
+                )
+                if len(negative or []) != 2 or any(item.value is not False for item in negative):
+                    raise ValueError("Unsupported claim control must fail both diagnostics")
+                audit["validations"]["negative"] = {
+                    "source_trace_id": trace_id,
+                    "run_id": run.info.run_id,
+                    "feedback": [f.to_dictionary() for f in negative],
+                }
+                save()
+    if "negative" not in audit["validations"]:
+        raise ValueError("Negative validation incomplete; preserve audit for recovery")
+    for name in OLD_NAMES:
+        if name in audit["stopped"]:
+            continue
+        if digest(registry_snapshot()) != digest(review):
+            raise ValueError("Registry changed before retirement")
+        audit["pending_stop"] = name
+        save()
+        registry.get_scorer(name=name, experiment_id=EXPERIMENT).stop(experiment_id=EXPERIMENT)
+        stopped = registry.get_scorer(name=name, experiment_id=EXPERIMENT)
+        if not is_rate(stopped.sample_rate, 0):
+            raise ValueError("Legacy stop readback failed")
+        audit["stopped"].append(name)
+        audit.pop("pending_stop", None)
+        review["scorers"][name]["sample_rate"] = stopped.sample_rate
+        review["scorers"][name]["filter_string"] = stopped.filter_string
+        save()
+    audit["phase"] = "retired"
+    save()
+
+
+def filter_online_schedules(review_path: Path, audit_path: Path) -> None:
+    """Require completed traces on active Experiment 1 online schedules with resumable readback."""
+    root = Path.cwd().resolve()
+    review_path = Path(review_path).expanduser().resolve()
+    audit_path = Path(audit_path).expanduser().resolve()
+    if not review_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+    if not audit_path.is_relative_to(root):
+        raise ValueError("Path must stay inside the working directory")
+
+    def is_rate(rate: Any, target: float) -> bool:
+        return isinstance(rate, int | float) and not isinstance(rate, bool) and rate == target
+
+    review = json.loads(review_path.read_text())
+    current = registry_snapshot()
+    if digest(current) != digest(review):
+        raise ValueError("Online filter review changed")
+    if audit_path.exists():
+        audit = json.loads(audit_path.read_text())
+        if audit.get("operation") != "filter_online":
+            raise ValueError("Not an online filter audit")
+        expected = copy.deepcopy(audit["review"])
+        pending = audit.get("pending_filter")
+        if pending and current["scorers"].get(pending, {}).get("filter_string") == ONLINE_TRACE_FILTER:
+            if pending not in audit["filtered"]:
+                audit["filtered"].append(pending)
+            audit.pop("pending_filter")
+        for name in audit.get("filtered", []):
+            expected["scorers"][name]["filter_string"] = ONLINE_TRACE_FILTER
+        if digest(expected) != digest(review):
+            raise ValueError("Online filter recovery identity conflict")
+    else:
+        for name, version in ONLINE_SCHEDULE_VERSIONS.items():
+            item = review["scorers"].get(name, {})
+            if (
+                item.get("version") != version
+                or not is_rate(item.get("sample_rate"), 1.0)
+                or item.get("filter_string") not in (None, "", ONLINE_TRACE_FILTER)
+            ):
+                raise ValueError("Unexpected online schedule")
+        audit = {
+            "operation": "filter_online",
+            "review": copy.deepcopy(review),
+            "filtered": [
+                name
+                for name in ONLINE_SCHEDULE_VERSIONS
+                if review["scorers"][name].get("filter_string") == ONLINE_TRACE_FILTER
+            ],
+        }
+        with audit_path.open("x") as stream:
+            json.dump(audit, stream, indent=2)
+
+    def save() -> None:
+        audit_path.write_text(json.dumps(audit, indent=2) + "\n")
+
+    for name, version in ONLINE_SCHEDULE_VERSIONS.items():
+        if name in audit["filtered"]:
+            continue
+        if digest(registry_snapshot()) != digest(review):
+            raise ValueError("Registry changed before online filter update")
+        audit["pending_filter"] = name
+        save()
+        registry.get_scorer(name=name, experiment_id=EXPERIMENT).update(
+            experiment_id=EXPERIMENT,
+            sampling_config=ScorerSamplingConfig(sample_rate=1.0, filter_string=ONLINE_TRACE_FILTER),
+        )
+        updated = registry.get_scorer(name=name, experiment_id=EXPERIMENT)
+        if (
+            updated.scorer_version != version
+            or not is_rate(updated.sample_rate, 1.0)
+            or updated.filter_string != ONLINE_TRACE_FILTER
+        ):
+            raise ValueError("Online filter readback failed")
+        audit["filtered"].append(name)
+        audit.pop("pending_filter", None)
+        review["scorers"][name]["filter_string"] = ONLINE_TRACE_FILTER
+        save()
+    audit["phase"] = "filtered"
+    save()
+
+
 def main() -> None:
     """Default to a read-only registry snapshot; apply needs an already reviewed snapshot."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot", type=Path)
     action = parser.add_mutually_exclusive_group()
+    action.add_argument(
+        "--retire-legacy", action="store_true", help="validate explicit worker and stop legacy schedules"
+    )
+    action.add_argument(
+        "--filter-online", action="store_true", help="require trace.status = 'OK' on active online schedules"
+    )
     action.add_argument("--apply", action="store_true", help="Authorize registry writes and saved-evidence judge calls")
     action.add_argument("--resume", action="store_true", help="Resume inactive v1 using a fresh recovery snapshot")
     action.add_argument("--rollback", action="store_true", help="Restore only identity-checked prior schedules")
     parser.add_argument("--audit", type=Path)
     args = parser.parse_args()
-    if args.resume:
+    if args.retire_legacy:
+        if args.snapshot is None or args.audit is None:
+            parser.error("--retire-legacy requires --snapshot and --audit")
+        retire_legacy(args.snapshot, args.audit)
+    elif args.filter_online:
+        if args.snapshot is None or args.audit is None:
+            parser.error("--filter-online requires --snapshot and --audit")
+        filter_online_schedules(args.snapshot, args.audit)
+    elif args.resume:
         if args.audit is None or args.snapshot is None:
             parser.error("--resume requires the registered --audit and a fresh reviewed --snapshot")
         resume_registered_review(args.audit, json.loads(args.snapshot.read_text()))

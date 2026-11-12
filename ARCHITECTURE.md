@@ -103,6 +103,18 @@ Workspace inputs:
 - Optional `/learned` files are written for human review and are not separately read into Turn prompts; their notes may also be persisted as Session memories, separate from executable Skills.
 - Datasets stay in Daytona as file-backed `WorkspaceDataset` handles.
 - Handles expose bounded previews and digests through the DSPy sandbox serialization contract.
+- Initial `known_empty` workspace state is recorded under the Session advisory lease and
+  refreshed after lease acquisition. While `known_empty`, Hybrid previews the route with
+  the locally staged Skill manifest/catalog; a `Direct` result reuses local history/memory
+  and captures local Skill files in selected replays without starting Daytona (leaving Turn
+  snapshot `provenance_state` `"unresolved"` because no sandbox ran). Dataset-backed,
+  required-Skill, existing, or uncertain Sessions still prepare fully.
+- Workspace writes, attachment uploads, deletions, Skill sync, and execution Turns invalidate
+  `known_empty` to `unknown` before mutating the non-transactional Daytona Volume.
+- A new Session row is marked `known_empty` from the database insert alone. That does not
+  list the Daytona Volume. A new database schema must not reuse a Volume that already holds
+  Session subtrees; a sandbox-free Direct turn would miss those files. Keep the previous
+  database with that Volume, or do not point the new schema at it.
 
 See [database](docs/reference/database.md).
 
@@ -204,6 +216,7 @@ See the [delegation Skill](src/fleet_rlm/bundled_skills/delegation/SKILL.md).
 - Execution errors and submission rejections have separate counters.
 - Host receipts distinguish artifact changes from the Session inventory.
 - Skill activity and numeric evidence checks do not prove correctness.
+- Optional `FLEET_MLFLOW_BENCHMARK_MODEL_ID` and `FLEET_MLFLOW_BENCHMARK_TAGS` associate benchmark traces while retaining automatic `fleet.agent.model_id` on the root span.
 
 Progress events:
 
@@ -216,9 +229,9 @@ Progress events:
 ## Evaluation
 
 - Evaluation and GEPA share `fleet_metric`.
-- Serving, correctness judging, and reflection use separate roles.
+- Serving, correctness judging, and reflection use separate roles; `[llm.judge]` inherits base `[llm]` credentials when omitted.
 - Route assessments identify Jev or generative backends.
-- Diagnostic scorers do not automatically become GEPA objectives.
+- Diagnostic scorers do not automatically become GEPA objectives; execution-evidence diagnostics (`execution-evidence-v3`) can run out-of-band via `fleet eval score` without blocking online Turn tracing.
 - Search uses approved immutable replays grouped by lineage in isolated runtimes.
   Nonempty train/dev/holdout splits and critical holdout are required before native search.
 - Gold stays outside program inputs. Host receipts support artifact and delegation scoring.
