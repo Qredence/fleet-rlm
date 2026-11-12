@@ -121,8 +121,17 @@ def test_benchmark_env_strips_whitespace_and_rejects_empty_tag_suffix(registry, 
 
     monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", '{"fleet.benchmark.":"missing-name"}')
     invalid = Span()
-    assert obs.associate_turn_agent(engine(), "config", "1", invalid) is None
-    assert invalid.attributes["fleet.agent.identity_status"] == "unversioned"
+    retained = obs.associate_turn_agent(engine(), "config", "1", invalid)
+    assert retained is not None
+    assert associations[-1]["model_id"] == "m-bench"
+    assert invalid.attributes["fleet.agent.model_id"] == retained
+    assert invalid.attributes["fleet.benchmark.model_id"] == "m-bench"
+    assert "fleet.benchmark." not in invalid.attributes
+
+    monkeypatch.setenv("FLEET_MLFLOW_BENCHMARK_TAGS", "{not-json")
+    malformed = Span()
+    obs.associate_turn_agent(engine(), "config", "1", malformed)
+    assert malformed.attributes["fleet.benchmark.model_id"] == "m-bench"
 
 
 def test_config_loaded_program_destination_and_source_affect_identity(registry, monkeypatch):

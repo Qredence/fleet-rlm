@@ -706,7 +706,6 @@ def score_evaluation_traces(
         frame["assessments"] = selected
         if historical:
             report(f"Historical assessments excluded from this run's report: {historical}")
-    error_columns = [name for name in frame.columns if name == "error_message" or name.endswith("/error_message")]
     expected_columns = {f"{name.rsplit('/', 1)[0]}/value" for name in result.metrics}
     assessments_by_trace = frame["assessments"] if "assessments" in frame else [None] * len(frame)
     has_feedback = len(frame) == len(traces) and any(
@@ -720,12 +719,17 @@ def score_evaluation_traces(
         )
         for assessments in assessments_by_trace
     )
-    if (
-        frame.empty
-        or not has_feedback
-        or not expected_columns.issubset(frame.columns)
-        or any(frame[name].notna().any() for name in error_columns)
-    ):
+    has_error = any(
+        isinstance(assessments, list)
+        and any(
+            isinstance(assessment, dict)
+            and (assessment.get("metadata") or {}).get("mlflow.assessment.sourceRunId") == result.run_id
+            and ((assessment.get("feedback") or {}).get("error") or {}).get("error_message")
+            for assessment in assessments
+        )
+        for assessments in assessments_by_trace
+    )
+    if frame.empty or not has_feedback or not expected_columns.issubset(frame.columns) or has_error:
         raise EvaluationError(f"Scoring incomplete; inspect evaluation run {result.run_id} and the saved traces")
     return result
 

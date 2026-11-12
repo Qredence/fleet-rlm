@@ -621,16 +621,15 @@ def test_scoring_saved_traces_starts_distinct_nested_run_when_a_run_is_active(mo
 
 @pytest.mark.parametrize("error", [None, "judge failed"])
 def test_scoring_saved_traces_reports_run_and_rejects_scorer_errors(monkeypatch, error):
+    feedback = {"error": {"error_message": error}} if error else {"value": True}
     result = SimpleNamespace(
         run_id="run-1",
         metrics={},
         result_df=pd.DataFrame(
             {
-                "scorer/error_message": [error],
+                "scorer/error_message": ["historical failure"],
                 "scorer/value": [True],
-                "assessments": [
-                    [{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": {"value": True}}]
-                ],
+                "assessments": [[{"metadata": {"mlflow.assessment.sourceRunId": "run-1"}, "feedback": feedback}]],
             }
         ),
     )

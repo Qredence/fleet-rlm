@@ -352,8 +352,12 @@ def retire_legacy(review_path: Path, audit_path: Path) -> None:
                 audit["stopped"].append(pending)
             audit.pop("pending_stop")
         for name in audit.get("stopped", []):
-            current_rate = current["scorers"].get(name, {}).get("sample_rate")
+            current_item = current["scorers"].get(name, {})
+            current_rate = current_item.get("sample_rate")
             expected["scorers"][name]["sample_rate"] = current_rate if is_rate(current_rate, 0) else 0
+            # stop() rewrites the schedule and drops an empty filter to None.
+            if is_rate(current_rate, 0):
+                expected["scorers"][name]["filter_string"] = current_item.get("filter_string")
         if digest(expected) != digest(review):
             raise ValueError("Retirement recovery identity conflict")
     else:
@@ -422,12 +426,13 @@ def retire_legacy(review_path: Path, audit_path: Path) -> None:
         audit["pending_stop"] = name
         save()
         registry.get_scorer(name=name, experiment_id=EXPERIMENT).stop(experiment_id=EXPERIMENT)
-        stopped_rate = registry.get_scorer(name=name, experiment_id=EXPERIMENT).sample_rate
-        if not is_rate(stopped_rate, 0):
+        stopped = registry.get_scorer(name=name, experiment_id=EXPERIMENT)
+        if not is_rate(stopped.sample_rate, 0):
             raise ValueError("Legacy stop readback failed")
         audit["stopped"].append(name)
         audit.pop("pending_stop", None)
-        review["scorers"][name]["sample_rate"] = stopped_rate
+        review["scorers"][name]["sample_rate"] = stopped.sample_rate
+        review["scorers"][name]["filter_string"] = stopped.filter_string
         save()
     audit["phase"] = "retired"
     save()

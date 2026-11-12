@@ -113,16 +113,19 @@ def associate_turn_agent(engine: Any, configuration_digest: str, experiment_id: 
         benchmark_tags: dict[str, str] = {}
         raw_benchmark_tags = (os.getenv("FLEET_MLFLOW_BENCHMARK_TAGS") or "").strip()
         if raw_benchmark_tags:
-            parsed_tags = json.loads(raw_benchmark_tags)
-            if not isinstance(parsed_tags, dict) or any(
-                not isinstance(key, str)
-                or not key.startswith("fleet.benchmark.")
-                or len(key) <= len("fleet.benchmark.")
-                or not isinstance(value, str)
-                for key, value in parsed_tags.items()
-            ):
-                raise ValueError("Invalid benchmark trace tags")
-            benchmark_tags = parsed_tags
+            try:
+                parsed_tags = json.loads(raw_benchmark_tags)
+                if not isinstance(parsed_tags, dict) or any(
+                    not isinstance(key, str)
+                    or not key.startswith("fleet.benchmark.")
+                    or len(key) <= len("fleet.benchmark.")
+                    or not isinstance(value, str)
+                    for key, value in parsed_tags.items()
+                ):
+                    raise ValueError("Invalid benchmark trace tags")
+                benchmark_tags = parsed_tags
+            except ValueError:
+                logging.getLogger(__name__).warning("Benchmark trace tags ignored")
         startup_identity = _STARTUP_IDENTITY
         if startup_identity is None:
             raise ValueError("No startup identity")

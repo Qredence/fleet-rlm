@@ -668,8 +668,10 @@ def test_workspace_reads_context_selection_and_skill_pull_invalidate_known_empty
         assert runtime.workspace_state == "unknown"
 
         runtime.workspace_state = "known_empty"
-        assert client.put("/sessions/s1/context", json={"path": "files/a.csv"}).status_code == 200
-        assert client.delete("/sessions/s1/context").status_code == 200
+        selected = client.put("/sessions/s1/context", json={"path": "files/a.csv"})
+        removed = client.delete("/sessions/s1/context")
+        assert selected.status_code == 200
+        assert removed.status_code == 200
         assert runtime.context is None and runtime.workspace_state == "unknown"
 
         runtime.workspace_state = "known_empty"

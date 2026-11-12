@@ -381,15 +381,24 @@ def test_retirement_validates_then_stops_only_legacy_and_recovers(monkeypatch, t
             assert "negative" in operations
             operations.append(name)
             state["scorers"][name]["sample_rate"] = 0.0
+            if state["scorers"][name].get("filter_string") == "":
+                state["scorers"][name]["filter_string"] = None
 
-        return SimpleNamespace(stop=stop, sample_rate=state["scorers"][name]["sample_rate"])
+        return SimpleNamespace(
+            stop=stop,
+            sample_rate=state["scorers"][name]["sample_rate"],
+            filter_string=state["scorers"][name].get("filter_string"),
+        )
 
     monkeypatch.setattr(reconcile.registry, "get_scorer", get_scorer)
+    for name in reconcile.OLD_NAMES:
+        state["scorers"][name]["filter_string"] = ""
     initial = copy.deepcopy(state)
     path, audit = tmp_path / "review.json", tmp_path / "audit.json"
     path.write_text(json.dumps(state))
     reconcile.retire_legacy(path, audit)
     assert operations[-2:] == list(reconcile.OLD_NAMES)
+    assert all(state["scorers"][name]["filter_string"] is None for name in reconcile.OLD_NAMES)
     assert state["scorers"][reconcile.NEW_NAME]["sample_rate"] is None
     saved = json.loads(audit.read_text())
     assert saved["phase"] == "retired"
@@ -399,7 +408,9 @@ def test_retirement_validates_then_stops_only_legacy_and_recovers(monkeypatch, t
     assert operations == before
 
     state["scorers"][reconcile.OLD_NAMES[0]]["sample_rate"] = 0.0
+    state["scorers"][reconcile.OLD_NAMES[0]]["filter_string"] = None
     state["scorers"][reconcile.OLD_NAMES[1]]["sample_rate"] = 1.0
+    state["scorers"][reconcile.OLD_NAMES[1]]["filter_string"] = ""
     partial_review, partial_audit = tmp_path / "partial_review.json", tmp_path / "partial_audit.json"
     partial_review.write_text(json.dumps(state))
     partial_audit.write_text(

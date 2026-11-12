@@ -2070,7 +2070,13 @@ def test_known_empty_session_routes_before_preparing_workspace(monkeypatch) -> N
         def __call__(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(
-                answer="Hi!", route="direct", execution_evidence={"artifacts": {"complete": True, "files": {}}}
+                answer="Hi!",
+                route="direct",
+                execution_evidence={
+                    "artifacts": {"complete": True, "files": {}},
+                    "children": [],
+                    "children_complete": True,
+                },
             )
 
     runtime.engine = Engine()
@@ -2093,6 +2099,7 @@ def test_known_empty_session_routes_before_preparing_workspace(monkeypatch) -> N
         emit=events.append,
     )
     assert routes and calls[0]["selected_route"] is Route.DIRECT
+    assert events[-2]["event"] == "turn_complete"
     assert events[-1]["event"] == "done"
 
 
@@ -2205,7 +2212,11 @@ def test_known_empty_execution_route_invalidates_state_before_preparation(monkey
             return SimpleNamespace(
                 answer="computed",
                 route="rlm",
-                execution_evidence={"artifacts": {"complete": True, "files": {}}},
+                execution_evidence={
+                    "artifacts": {"complete": True, "files": {}},
+                    "children": [],
+                    "children_complete": True,
+                },
             )
 
     runtime.engine = Engine()
@@ -2238,6 +2249,7 @@ def test_known_empty_execution_route_invalidates_state_before_preparation(monkey
     )
     assert runtime.workspace_state == "unknown", (events, routes, calls)
     assert calls[0]["selected_route"] is Route.RLM
+    assert events[-2]["event"] == "turn_complete"
     assert events[-1]["event"] == "done"
 
 

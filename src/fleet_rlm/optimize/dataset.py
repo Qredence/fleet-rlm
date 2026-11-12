@@ -141,20 +141,38 @@ def turn_traces(experiment_name: str, max_results: int = _MAX_EXAMPLES) -> list[
     experiment = mlflow.get_experiment_by_name(experiment_name)
     if experiment is None:
         return []
-    traces = mlflow.search_traces(
-        locations=[experiment.experiment_id],
-        filter_string="status = 'OK'",
-        max_results=max_results,
-        order_by=["timestamp_ms DESC"],
-        return_type="list",
-    )
-    selected = []
-    for trace in traces:
-        request = trace_object(trace.data.request)
-        if (
-            isinstance(request.get("workspace_manifest"), str) or request.get("replay_snapshot_selected") is True
-        ) and not _is_test_trace(trace):
-            selected.append(trace)
+    selected: list[Any] = []
+    seen: set[str] = set()
+    token: str | None = None
+    client = mlflow.MlflowClient()
+    while len(selected) < max_results:
+        page = client.search_traces(
+            locations=[experiment.experiment_id],
+            filter_string="status = 'OK'",
+            max_results=max_results,
+            order_by=["timestamp_ms DESC"],
+            page_token=token,
+        )
+        batch = list(page)
+        next_token = getattr(page, "token", None)
+        added = False
+        for trace in batch:
+            trace_id = str(getattr(getattr(trace, "info", None), "trace_id", "") or "")
+            if trace_id and trace_id in seen:
+                continue
+            if trace_id:
+                seen.add(trace_id)
+            added = True
+            request = trace_object(trace.data.request)
+            if (
+                isinstance(request.get("workspace_manifest"), str) or request.get("replay_snapshot_selected") is True
+            ) and not _is_test_trace(trace):
+                selected.append(trace)
+                if len(selected) == max_results:
+                    break
+        if not added or not next_token or next_token == token:
+            break
+        token = next_token
     return selected
 
 

@@ -547,6 +547,8 @@ class SessionRuntimeRegistry:
             created = runtime.ensure_session(session_id)
             saved = store.runtime_settings(session_id)
             if created:
+                # The insert does not list the Volume. A new schema must not reuse a Volume
+                # that already holds this Session's subtree; see ARCHITECTURE.md.
                 saved["workspace_state"] = "known_empty"
                 store.save_runtime_settings(session_id, {"workspace_state": "known_empty"})
             runtime.workspace_state = saved.get("workspace_state", "unknown")

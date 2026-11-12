@@ -111,6 +111,10 @@ Workspace inputs:
   required-Skill, existing, or uncertain Sessions still prepare fully.
 - Workspace writes, attachment uploads, deletions, Skill sync, and execution Turns invalidate
   `known_empty` to `unknown` before mutating the non-transactional Daytona Volume.
+- A new Session row is marked `known_empty` from the database insert alone. That does not
+  list the Daytona Volume. A new database schema must not reuse a Volume that already holds
+  Session subtrees; a sandbox-free Direct turn would miss those files. Keep the previous
+  database with that Volume, or do not point the new schema at it.
 
 See [database](docs/reference/database.md).
 
