@@ -1,0 +1,63 @@
+docs/reference/http-api.md
+  s_3b95650d2eff5e::t_8ffc3ecf92b541 445-450
+src/fleet_rlm/bundled_skills/delegation/SKILL.md
+  s_741d1412c858f7::t_1421fa6566c7cf 35-37
+src/fleet_rlm/engine/signatures.py
+  s_741d1412c858f7::t_17a28c28fc2875 31-34,47-51,76-83
+src/fleet_rlm/sandbox/interpreter.py
+  s_3b95650d2eff5e::t_5be1aaffbe7f1b 118,211-212,220-221,234-235,237-238,502-503,660-661
+src/fleet_rlm/sandbox/manager.py
+  s_6b1a635e889bfd::t_345234d584e2f8 352-354
+src/fleet_rlm/sandbox/repl.py
+  s_6b1a635e889bfd::t_bb31cd1197fef7 308-309
+src/fleet_rlm/tui/app.py
+  s_3b95650d2eff5e::t_93d8d46a37a8d2 59,480-483,544-545,1215-1225,1227-1230,1259-1263,1276-1278,1286-1305,1337,1343,1353,1355-1356,1361
+src/fleet_rlm/tui/stream.py
+  s_3b95650d2eff5e::t_4cfb91e2116130 6-7,10,62-77
+tests/engine/test_runtime.py
+  s_3b95650d2eff5e::t_80cec6ae43ae62 5626-5656
+src/fleet_rlm/sandbox/runtime/repl.py
+  s_6dc4b595acac82::t_f06dd52805ccd8 16,21,23,55,63-64,124-263,289-315,326-386,395,445-446,533-540,580,589
+tests/sandbox/test_sandbox.py
+  s_6dc4b595acac82::t_f2016442e403fa 5567-6111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "917d66b438f89bae272b8947b2bdff1e5e672a76",
+  "prompts": {},
+  "sessions": {
+    "s_3b95650d2eff5e": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "e1626966-eaa6-44ee-b7a0-75d02d9ead19",
+        "model": "custom:Deepseek-V4.1-Flash-1017---Command-0"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_6b1a635e889bfd": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "21a2d81d-bd8b-4fd2-b95b-c178a80ef8a5",
+        "model": "custom:Deepseek-V4.1-Flash-1017---Command-0"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_6dc4b595acac82": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d6d5-8881-7c11-b2a4-a3070baab469",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_741d1412c858f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f1df313-3049-474a-9d9d-66123b1bb06b",
+        "model": "deepseek/deepseek-v4.1-flash"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
