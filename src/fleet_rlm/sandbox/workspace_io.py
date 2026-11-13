@@ -14,14 +14,14 @@ from daytona import FileDownloadRequest, FileUpload
 
 from fleet_rlm.observability import activity_text, phase_span
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
-from fleet_rlm.sandbox.runtime.fs_ops import (
-    existing_workspace_paths_code,
+from fleet_rlm.workspace import (
+    MAX_WORKSPACE_FILE_BYTES,
+    _workspace_relative_path,
     list_workspace_files_code,
     turn_inputs_code,
     verify_python_artifact_code,
     workspace_files_metadata_code,
 )
-from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES, _workspace_relative_path
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -320,12 +320,24 @@ class WorkspaceIOMixin:
         total = 0
         with self.root._budget_lock:
             inputs = dict(self.root._child_receipts.get(self.agent_id, {}).get("inputs", {}))
-        for path in self.list_workspace_files():
-            if not path.startswith("artifacts/"):
-                continue
+        artifact_paths = [path for path in self.list_workspace_files() if path.startswith("artifacts/")]
+        batched: dict[str, bytes] | None = None
+        read_batch = getattr(self, "read_workspace_files", None)
+        if artifact_paths and callable(read_batch):
+            unchanged_count = sum(1 for path in artifact_paths if path in inputs)
+            if len(artifact_paths) - unchanged_count > _MAX_PROMOTED_FILES:
+                raise ValueError("Child output promotion quota exceeded")
+            quota = _MAX_PROMOTED_BYTES + sum(MAX_WORKSPACE_FILE_BYTES for path in artifact_paths if path in inputs)
+            try:
+                batched = read_batch(artifact_paths, max_total_bytes=quota)
+            except ValueError as exc:
+                if "transfer quota" in str(exc):
+                    raise ValueError("Child output promotion quota exceeded") from exc
+                raise
+        for path in artifact_paths:
             if len(selected) >= _MAX_PROMOTED_FILES and path not in inputs:
                 raise ValueError("Child output promotion quota exceeded")
-            raw = self.read_workspace_file(path)
+            raw = batched[path] if batched is not None else self.read_workspace_file(path)
             if inputs.get(path) == hashlib.sha256(raw).hexdigest():
                 continue  # an unchanged copied-in artifact is the parent's, not this child's output
             total += len(raw)
@@ -353,10 +365,6 @@ class WorkspaceIOMixin:
         if destinations:
             own_paths = set(self.parent.list_workspace_files())
             collisions = own_paths.intersection(destinations)
-            occupied = json.loads(self.parent.exec_remote_python(existing_workspace_paths_code(destinations)))
-            if not isinstance(occupied, list) or not all(isinstance(path, str) for path in occupied):
-                raise RuntimeError("Invalid child output destination check")
-            collisions.update(occupied)
         # A destination already holding identical bytes is a completed publication, so a retried
         # promotion stays idempotent instead of failing on its own earlier work.
         by_destination = {target: raw for _, target, raw in selected}

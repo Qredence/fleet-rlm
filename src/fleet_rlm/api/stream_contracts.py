@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any, Literal
 
 from fastapi.sse import ServerSentEvent
@@ -123,26 +122,12 @@ _TERMINAL_PAYLOADS: dict[str, TypeAdapter[Any]] = {
     "turn_cancelled": TypeAdapter(TurnCancelledPayload),
     "done": TypeAdapter(DonePayload),
 }
-_ENVELOPE_KEYS = frozenset(
-    {
-        "version",
-        "event",
-        "session_id",
-        "turn_id",
-        "agent_id",
-        "parent_agent_id",
-        "sandbox_id",
-        "seq",
-        "timestamp",
-        "payload",
-    }
-)
 
 
 class FleetEnvelope(BaseModel):
     """Complete version-1 JSON envelope validated before native SSE framing."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     version: Literal[1]
     event: StrictStr = Field(min_length=1, max_length=80)
@@ -166,28 +151,10 @@ class FleetEnvelope(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_event_payload_and_flattening(self) -> FleetEnvelope:
-        """Validate reserved event data and the Envelope.wrap mirror exactly."""
-        # Envelope.wrap spreads the application payload at the top level as well as
-        # nesting it. Requiring that exact relationship catches malformed wire data
-        # without filtering any supported historical or additive payload field.
-        extra = self.model_extra or {}
-        flattened: dict[str, Any] = {}
-        for key, value in self.payload.items():
-            if key in _ENVELOPE_KEYS:
-                # Envelope.wrap spreads the payload after its identity fields, so
-                # activity callbacks can legitimately mirror agent/sandbox identity
-                # in both positions. The wrapper itself and the event discriminator
-                # cannot be application payload fields.
-                if key in {"event", "payload"} or not _same_json_value(getattr(self, key), value):
-                    raise ValueError("SSE payload overwrites an envelope field")
-                flattened[key] = getattr(self, key)
-            elif key not in extra or not _same_json_value(extra[key], value):
-                raise ValueError("SSE envelope fields do not match the nested payload")
-            else:
-                flattened[key] = extra[key]
-        if not _same_json_value(flattened, self.payload):
-            raise ValueError("SSE envelope fields do not match the nested payload")
+    def validate_event_payload(self) -> FleetEnvelope:
+        """Validate reserved event data and forbid top-level discriminator overrides in payload."""
+        if "event" in self.payload or "payload" in self.payload:
+            raise ValueError("SSE payload overwrites an envelope field")
 
         reserved = _TERMINAL_PAYLOADS.get(self.event)
         candidate = {"event": self.event, **self.payload}
@@ -198,21 +165,6 @@ class FleetEnvelope(BaseModel):
         else:
             DynamicPayload.model_validate(candidate)
         return self
-
-
-def _same_json_value(left: Any, right: Any) -> bool:
-    """Compare mirrored data while treating duplicated non-finite floats alike."""
-    if left is right:
-        return True
-    if isinstance(left, float) and isinstance(right, float):
-        if math.isnan(left) and math.isnan(right):
-            return True
-        return left == right
-    if isinstance(left, dict) and isinstance(right, dict):
-        return left.keys() == right.keys() and all(_same_json_value(left[key], right[key]) for key in left)
-    if isinstance(left, list) and isinstance(right, list):
-        return len(left) == len(right) and all(_same_json_value(a, b) for a, b in zip(left, right, strict=True))
-    return left == right
 
 
 def frame_envelope(wire: dict[str, Any]) -> ServerSentEvent:

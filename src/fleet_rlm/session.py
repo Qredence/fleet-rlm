@@ -6,14 +6,13 @@ import hashlib
 import json
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import psycopg
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import RequiredSkill, SkillAdmissionError
@@ -22,12 +21,21 @@ from fleet_rlm.engine.reasoning import deserialize_rlm_history
 from fleet_rlm.models import build_lm
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 from fleet_rlm.skills import SkillManager
-from fleet_rlm.store import IdempotencyConflictError, Store
+from fleet_rlm.store import IdempotencyConflictError, PooledLease, Store
 from fleet_rlm.workspace import WorkspaceDataset, _workspace_relative_path, validate_session_id
 
 _LOGGER = logging.getLogger("fleet_rlm.session")
 _EVICT_WAIT_SECONDS = 2.0
-_LEASE_MONITOR_JOIN_SECONDS = 5.0
+_IDLE_EVICT_SECONDS = 600.0
+
+
+@dataclass(frozen=True, slots=True)
+class SessionContext:
+    """Loaded Session context passed into Turn input preparation."""
+
+    memory_summary: str
+    session_history: str
+    rlm_history: Any = None
 
 
 _MAX_TURN_RECORD_BYTES = 1_000_000
@@ -57,15 +65,16 @@ class SessionRuntime:
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
     context: WorkspaceDataset | None = None
     workspace_state: str = "unknown"
-    lease: psycopg.Connection | None = None
+    lease: PooledLease | Any | None = None
     ownership_epoch: int | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
-    restart_requested: threading.Event = field(default_factory=threading.Event, repr=False)
-    _lease_monitor_stop: threading.Event = field(default_factory=threading.Event, repr=False)
-    _lease_monitor: threading.Thread | None = field(default=None, repr=False)
+    last_active_at: float = field(default_factory=time.monotonic, repr=False)
     _lease_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-    _prepared_rlm_history: tuple[str, Any] | None = field(default=None, repr=False)
+
+    def touch(self) -> None:
+        """Record recent Session runtime activity for idle eviction."""
+        self.last_active_at = time.monotonic()
 
     @property
     def session_id(self) -> str:
@@ -164,25 +173,15 @@ class SessionRuntime:
         """Return one Turn's status after validating its ID."""
         return self.store.turn_status(self.session_id, validate_session_id(turn_id))
 
-    def load_context(self, session_id: str) -> tuple[str, str]:
-        """The Session's memory summary and bounded rendered history."""
+    def load_context(self, session_id: str) -> SessionContext:
+        """Load the Session's memory summary, bounded rendered history, and deserialized RLM history."""
         session_id = validate_session_id(session_id)
         summary, turns = self.store.load_session(session_id)
-        self._prepared_rlm_history = (session_id, deserialize_rlm_history(turns))
-        return summary, self._render_history(turns)
-
-    def load_rlm_history(self, session_id: str) -> Any:
-        """Bounded read-only `dspy.History` reconstructed from recent RLM Turns, or None."""
-        session_id = validate_session_id(session_id)
-        cached = self._prepared_rlm_history
-        self._prepared_rlm_history = None
-        if cached is not None and cached[0] == session_id:
-            return cached[1]
-        load_session = getattr(self.store, "load_session", None)
-        if not callable(load_session):
-            return None
-        _, turns = load_session(session_id)
-        return deserialize_rlm_history(turns)
+        return SessionContext(
+            memory_summary=summary,
+            session_history=self._render_history(turns),
+            rlm_history=deserialize_rlm_history(turns),
+        )
 
     @staticmethod
     def _render_history(turns: list[dict[str, Any]]) -> str:
@@ -336,71 +335,47 @@ class SessionRuntime:
         return True
 
     def assert_lease_held(self) -> None:
-        """Fail closed after the dedicated connection holding this Session lock is lost."""
+        """Fail closed after the pooled Session ownership lease is lost or expired."""
         if self.lease_lost.is_set():
             raise RuntimeError("Session ownership lease was lost; runtime must be rebuilt")
 
-    def start_lease_monitor(self, *, interval_seconds: float = 10.0) -> None:
-        """Start periodic lease probes, renewing a dropped connection before declaring ownership lost.
+    def start_lease_monitor(self) -> None:
+        """Register this Session's pooled lease with Store's shared heartbeat daemon.
 
-        `interval_seconds` is the delay between probes. A failed reacquisition marks the lease
-        lost and requests Turn cancellation; cancellation failures are suppressed. Calls are
-        no-ops when no lease exists or a monitor has already been created.
+        Calls are no-ops when the lease is a simple mock without epoch/owner metadata or when
+        the Store does not provide a `heartbeat` service.
         """
         lease = self.lease
-        if lease is None or self._lease_monitor is not None:
+        heartbeat = getattr(self.store, "heartbeat", None)
+        if lease is None or heartbeat is None:
+            return
+        epoch = getattr(lease, "epoch", None)
+        owner_id = getattr(lease, "owner_id", None)
+        if epoch is None or owner_id is None:
             return
 
-        def monitor() -> None:
-            """Renew a dropped Session lease or mark it lost and request cancellation if renewal fails."""
-            current = lease
-            while not self._lease_monitor_stop.wait(interval_seconds):
-                try:
-                    current.execute("SELECT 1")
-                    continue
-                except Exception:
-                    pass
-                # The connection dropped (Lakebase closes idle ones). Re-take the advisory lock on a fresh
-                # connection, which also carries a fresh credential; another worker holding it means we lost.
-                try:
-                    renewed = self.store.acquire_session_lease(self.sandbox_mgr.session_id)
-                except Exception:
-                    if self._lease_monitor_stop.is_set():
-                        return
-                    self.lease_lost.set()
-                    with suppress(Exception):
-                        self.sandbox_mgr.request_cancellation()
-                    return
-                with self._lease_lock:
-                    if self._lease_monitor_stop.is_set():
-                        with suppress(Exception):
-                            renewed.close()
-                        return
-                    self.lease = renewed
-                with suppress(Exception):
-                    current.close()
-                current = renewed
+        def on_lost() -> None:
+            self.lease_lost.set()
+            with suppress(Exception):
+                self.sandbox_mgr.request_cancellation()
 
-        self._lease_monitor = threading.Thread(
-            target=monitor,
-            name="fleet-session-lease",
-            daemon=True,
+        heartbeat.register_session(
+            self.sandbox_mgr.session_id,
+            epoch,
+            owner_id=owner_id,
+            on_lost=on_lost,
         )
-        self._lease_monitor.start()
 
     def close_lease(self) -> None:
-        """Stop the lease monitor and close the dedicated lease connection."""
+        """Unregister heartbeat renewal and release the pooled Session lease."""
         with self._lease_lock:
-            self._lease_monitor_stop.set()
             self.lease_lost.set()
             lease = self.lease
-        if self._lease_monitor is not None:
-            self._lease_monitor.join(timeout=_LEASE_MONITOR_JOIN_SECONDS)
-            self._lease_monitor = None
         if lease is not None:
             lease.close()
             with self._lease_lock:
-                self.lease = None
+                if self.lease is lease:
+                    self.lease = None
 
     def set_mode(self, mode: str) -> None:
         """Set the execution mode on the engine and record its Session-level provenance."""
@@ -419,8 +394,24 @@ class SessionRuntime:
         )
 
 
-def runtime_configuration(settings: FleetSettings, runtime: Any) -> dict[str, Any]:
+def runtime_configuration(
+    settings: FleetSettings,
+    runtime: Any | None = None,
+    *,
+    saved_settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """The resolved configuration with this Session's model and mode overrides applied."""
+    if runtime is None:
+        saved = saved_settings or {}
+        effective = settings.for_session(saved) if ("mode" in saved or saved.get("models")) else settings
+        overrides: dict[str, Any] = {}
+        for role in ("root", "sub"):
+            model = effective.resolved_model(role).model
+            if model != settings.resolved_model(role).model:
+                overrides[f"fleet_{role}_model"] = model
+        if effective.execution_mode != settings.execution_mode:
+            overrides["execution_mode"] = effective.execution_mode
+        return settings.configuration(overrides)
     overrides = dict(getattr(runtime, "configuration_overrides", {}))
     for role in ("root", "sub"):
         model = getattr(getattr(runtime.engine, f"{role}_lm", None), "model", None)
@@ -443,39 +434,41 @@ class SessionRuntimeRegistry:
         self.sub_lm: Any = None
         self.jev_lm: Any = None
         self._sessions: dict[str, SessionRuntime] = {}
+        self._session_gates: dict[str, threading.RLock] = {}
         self._lock = threading.Lock()
-        # Serializes first use, eviction, and lease-loss recovery. The fast path only takes `_lock`.
-        self._rebuild_lock = threading.RLock()
-        self._restart_requested = threading.Event()
 
-    def request_restart(self) -> bool:
-        """Fence all runtime admission, reopening it if existing work prevents restart."""
+    def _session_gate(self, session_id: str) -> threading.RLock:
+        """Return the per-Session lock serializing build, lease recovery, and eviction."""
         with self._lock:
-            self._restart_requested.set()
-            if any(runtime.turn_lock.locked() for runtime in self._sessions.values()):
-                self._restart_requested.clear()
-                return False
-            return True
+            return self._session_gates.setdefault(session_id, threading.RLock())
+
+    def peek(self, session_id: str) -> SessionRuntime | None:
+        """Return an active cached SessionRuntime without acquiring or building a new one."""
+        session_id = validate_session_id(session_id)
+        with self._lock:
+            runtime = self._sessions.get(session_id)
+            if runtime is not None and not runtime.lease_lost.is_set():
+                return runtime
+            return None
 
     def get(self, session_id: str) -> SessionRuntime:
         """Return the Session's runtime, rebuilding it after a lost ownership lease."""
         session_id = validate_session_id(session_id)
         with self._lock:
-            if self._restart_requested.is_set():
-                raise RuntimeError("Fleet is restarting after setup")
             runtime = self._sessions.get(session_id)
             if runtime is not None and not runtime.lease_lost.is_set():
+                runtime.touch()
                 return runtime
             if runtime is None:
                 self._check_capacity_locked()
 
-        # Only first use and recovery take this path. `_build` runs outside `_lock` so unrelated
-        # Sessions keep using their cached runtimes while a new sandbox starts or a stale one shuts
-        # down; `_rebuild_lock` serializes every slow path, `evict`, and `close`.
-        with self._rebuild_lock:
+        # Only first use and recovery take this path. Per-Session gates let independent
+        # Sessions initialize and shut down in parallel without holding `_lock`.
+        with self._session_gate(session_id):
             with self._lock:
                 runtime = self._sessions.get(session_id)
                 if runtime is not None and not runtime.lease_lost.is_set():
+                    runtime.touch()
                     return runtime
                 if runtime is None:
                     self._check_capacity_locked()
@@ -502,6 +495,7 @@ class SessionRuntimeRegistry:
                     self.sub_lm = build_lm(self.settings, self.settings.fleet_sub_model, "sub")
                     self.jev_lm = self.settings.build_jev_lm()
             runtime = self._build(session_id)
+            runtime.touch()
             with self._lock:
                 self._sessions[session_id] = runtime
             return runtime
@@ -542,7 +536,6 @@ class SessionRuntimeRegistry:
             environment_report_claim=store.claim_environment_report,
         )
         runtime = SessionRuntime(
-            restart_requested=self._restart_requested,
             sandbox_mgr=sandbox_mgr,
             store=store,
             skill_mgr=SkillManager(sandbox_mgr, Path(settings.local_skills_dir)),
@@ -559,10 +552,19 @@ class SessionRuntimeRegistry:
                 sub_adapter=settings.resolved_model("sub").build_adapter(),
             ),
         )
-        runtime.lease = store.acquire_session_lease(session_id)
+        lease = store.acquire_session_lease(session_id)
+        runtime.lease = lease
         try:
-            created = runtime.ensure_session(session_id)
-            saved = store.runtime_settings(session_id)
+            lease_created = getattr(lease, "created", None)
+            lease_epoch = getattr(lease, "epoch", None)
+            if lease_created is not None and lease_epoch is not None:
+                created = bool(lease_created)
+                ownership_epoch: int | None = int(lease_epoch)
+                saved = store.runtime_settings(session_id)
+            else:
+                created = runtime.ensure_session(session_id)
+                saved = store.runtime_settings(session_id)
+                ownership_epoch = store.advance_sandbox_ownership_epoch(session_id)
             if created:
                 # The insert does not list the Volume. A new schema must not reuse a Volume
                 # that already holds this Session's subtree; see ARCHITECTURE.md.
@@ -571,7 +573,6 @@ class SessionRuntimeRegistry:
             runtime.workspace_state = saved.get("workspace_state", "unknown")
             if runtime.workspace_state not in {"known_empty", "unknown"}:
                 runtime.workspace_state = "unknown"
-            ownership_epoch = store.advance_sandbox_ownership_epoch(session_id)
             if ownership_epoch is None:
                 raise RuntimeError(
                     "Session sandbox ownership is unknown; reconcile legacy resources before writable admission"
@@ -635,11 +636,42 @@ class SessionRuntimeRegistry:
         and raises RuntimeError; retry eviction to reconcile before rebuilding.
         """
         session_id = validate_session_id(session_id)
-        with self._rebuild_lock:
+        with self._session_gate(session_id):
             return self._evict_locked(session_id)
 
+    def evict_idle(self, *, max_idle_seconds: float = _IDLE_EVICT_SECONDS) -> int:
+        """Evict cached runtimes whose idle time meets `max_idle_seconds` and hold no active Turn."""
+        now = time.monotonic()
+        with self._lock:
+            candidates = [
+                session_id
+                for session_id, runtime in self._sessions.items()
+                if now - runtime.last_active_at >= max_idle_seconds and not runtime.turn_lock.locked()
+            ]
+        evicted = 0
+        for session_id in candidates:
+            gate = self._session_gate(session_id)
+            if not gate.acquire(blocking=False):
+                continue
+            try:
+                with self._lock:
+                    runtime = self._sessions.get(session_id)
+                    if (
+                        runtime is None
+                        or time.monotonic() - runtime.last_active_at < max_idle_seconds
+                        or runtime.turn_lock.locked()
+                    ):
+                        continue
+                if self._evict_locked(session_id):
+                    evicted += 1
+            except (TimeoutError, RuntimeError):
+                _LOGGER.warning("Idle eviction skipped for Session %s", session_id)
+            finally:
+                gate.release()
+        return evicted
+
     def _evict_locked(self, session_id: str) -> bool:
-        """Evict one runtime. The caller must hold `_rebuild_lock`."""
+        """Evict one runtime. The caller must hold `_session_gate(session_id)`."""
         with self._lock:
             runtime = self._sessions.get(session_id)
         if runtime is None:
@@ -662,34 +694,37 @@ class SessionRuntimeRegistry:
 
     def close(self) -> None:
         """Attempt all shutdowns, retaining fenced runtimes/leases whose cleanup is unconfirmed."""
-        with self._rebuild_lock:
-            with self._lock:
-                runtimes = tuple(self._sessions.values())
-                for runtime in runtimes:
-                    runtime.lease_lost.set()
+        with self._lock:
+            items = tuple(self._sessions.items())
+            for _sid, runtime in items:
+                runtime.lease_lost.set()
 
-            def shutdown(runtime: SessionRuntime) -> bool:
+        def shutdown(item: tuple[str, SessionRuntime]) -> bool:
+            session_id, runtime = item
+            with self._session_gate(session_id):
                 try:
                     return runtime.sandbox_mgr.shutdown() is True
                 except Exception:
                     _LOGGER.warning("Session shutdown failed; retaining unresolved runtime")
                     return False
 
-            unresolved = False
-            if runtimes:
-                with ThreadPoolExecutor(max_workers=min(8, len(runtimes))) as pool:
-                    confirmations = list(pool.map(shutdown, runtimes))
-                for runtime, confirmed in zip(runtimes, confirmations, strict=True):
-                    if confirmed:
-                        try:
+        unresolved = False
+        if items:
+            with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
+                confirmations = list(pool.map(shutdown, items))
+            for (session_id, runtime), confirmed in zip(items, confirmations, strict=True):
+                if confirmed:
+                    try:
+                        with self._session_gate(session_id):
                             runtime.close_lease()
-                        except Exception:
-                            unresolved = True
-                            _LOGGER.warning("Session lease release failed; retaining fenced runtime")
-                            continue
-                        with self._lock:
-                            self._sessions.pop(runtime.sandbox_mgr.session_id, None)
-                    else:
+                    except Exception:
                         unresolved = True
-            if unresolved:
-                raise RuntimeError("Session sandbox cleanup is unconfirmed; runtimes retained for cleanup retry")
+                        _LOGGER.warning("Session lease release failed; retaining fenced runtime")
+                        continue
+                    with self._lock:
+                        if self._sessions.get(session_id) is runtime:
+                            self._sessions.pop(session_id, None)
+                else:
+                    unresolved = True
+        if unresolved:
+            raise RuntimeError("Session sandbox cleanup is unconfirmed; runtimes retained for cleanup retry")

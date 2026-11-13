@@ -8,7 +8,6 @@ import contextvars
 import hashlib
 import importlib
 import json
-import stat
 import threading
 import time
 import weakref
@@ -48,14 +47,13 @@ from fleet_rlm.experiments import (
     _RECOVERY_INTERVAL_SECONDS,
     ExperimentBusyError,
     ExperimentManager,
-    _require_worker_pipes,
+    _open_worker_log,
 )
 from fleet_rlm.optimization_runs import ExperimentOptions
 from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
 from fleet_rlm.session import SessionRuntime, SessionRuntimeRegistry
-from fleet_rlm.setup import SECTIONS, Operation, SetupConflictError, SetupService
 from fleet_rlm.store import IdempotencyConflictError
 from fleet_rlm.tui.commands import SessionState
 from fleet_rlm.tui.render import TurnTracker
@@ -748,7 +746,7 @@ async def test_disconnect_during_postcommit_observation_preserves_success(monkey
                 asyncio.get_running_loop().call_later(0.05, release.set)
                 await stream.aclose()
             else:
-                assert all(event.data["event"] == "status" for event in [event async for event in stream])
+                assert [event async for event in stream] == []
         finally:
             release.set()
             await stream.aclose()
@@ -1383,7 +1381,7 @@ def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
             assert "answer" not in traced["outputs"]
         else:
             assert terminal[0]["event"] == "turn_complete"
-            assert terminal[0]["artifacts"] == ["artifacts/result.txt"]
+            assert terminal[0]["payload"]["artifacts"] == ["artifacts/result.txt"]
             assert order == ["persist"]
             first = records[0]
             saved = json.loads(first["turn_record_json"])
@@ -1478,7 +1476,7 @@ def test_oversized_replay_workspace_completes_without_a_snapshot(monkeypatch) ->
 
     events = events_of(response)
     [skipped] = [event for event in events if event["event"] == "replay_skipped"]
-    assert (skipped["bytes"], skipped["limit"]) == (len(files["files/input.csv"]), 4)
+    assert (skipped["payload"]["bytes"], skipped["payload"]["limit"]) == (len(files["files/input.csv"]), 4)
     assert not [event for event in events if event["event"] == "error"]
     assert persisted[0]["replay_snapshot"] is None
     assert persisted[0]["turn_record"]["replay_snapshot_selected"] is False
@@ -1519,12 +1517,12 @@ def test_turn_provenance_matches_across_span_record_replay_and_terminal(traced) 
         "cleanup",
         *provenance,
     )
-    assert {key: terminal[key] for key in joined} == {key: turn_record[key] for key in joined}
+    assert {key: terminal["payload"][key] for key in joined} == {key: turn_record[key] for key in joined}
     span_joined = {key: traced["attributes"][key] for key in joined if key != "cleanup"}
     assert span_joined == {key: turn_record[key] for key in joined if key != "cleanup"}
     assert traced["cleanup"] == turn_record["cleanup"]
     assert traced["outputs"]["turn_id"] == terminal["turn_id"] == turn_record["turn_id"]
-    assert traced["outputs"]["answer"] == terminal["answer"] == turn_record["answer"]
+    assert traced["outputs"]["answer"] == terminal["payload"]["answer"] == turn_record["answer"]
     assert {key: decode_snapshot(digest, compressed)[key] for key in provenance} == provenance
     # Stored record and span duration are one measurement; MLflow's own span duration differs
     # only at the span boundary, within the documented tolerance.
@@ -2249,7 +2247,7 @@ def test_snapshot_preflight_refusal_reaches_the_client_and_the_stored_failure(st
     assert f"cpu>={snapshot_module.CPU_FLOOR}" in message
     assert f"mem>={snapshot_module.MEMORY_FLOOR}" in message
     if state == "inactive":
-        assert "Activate snapshot" in message
+        assert "fleet snapshot activate" in message
     else:
         assert snapshot_module.BUILD_COMMAND in message
     # The stored failure carries the same bounded text, and no sandbox was provisioned.
@@ -2307,7 +2305,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
         recovered = client.get("/sessions/s1/turns/original-turn")
     assert recovered.status_code == 200 and recovered.json()["status"] == status
     if status == "completed":
-        assert outcomes[0]["answer"] == recovered.json()["result"]["answer"]
+        assert outcomes[0]["payload"]["answer"] == recovered.json()["result"]["answer"]
     else:
         assert outcomes[0]["event"] == "error"
     assert traced["destinations"] == []
@@ -2610,6 +2608,21 @@ def test_prepare_inputs_replay_rejects_a_file_that_changed_after_hashing() -> No
 
     with pytest.raises(ValueError, match="changed"):
         turn_module._prepare_inputs(runtime, "session-a", "task", record_replay=True)
+
+
+def test_format_reviewed_memories_renders_bounded_markdown_bullets(monkeypatch):
+    monkeypatch.setattr(turn_module, "_MAX_MEMORIES_CHARS", 115)
+    items = [
+        {"kind": "fact", "content": "Workspace dataset uses UTF-8 CSV."},
+        {"kind": "preference", "content": "Report percentages to 2 decimal places."},
+        {"kind": "note", "content": "x" * 200},
+    ]
+    rendered = turn_module._format_reviewed_memories(items)
+    lines = rendered.splitlines()
+    assert lines[0] == "- [fact] Workspace dataset uses UTF-8 CSV."
+    assert lines[1] == "- [preference] Report percentages to 2 decimal places."
+    assert len(rendered) <= 115
+    assert "x" * 50 not in rendered
 
 
 def test_should_trace_preparation_and_persistence_under_the_turn(traced):
@@ -3027,10 +3040,10 @@ def test_a_turn_on_the_pool_sees_the_request_context_and_streams_usage_and_tool_
         "done",
     ]
     lm_end = events[2]
-    assert lm_end["usage"] == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
-    assert events[4]["tool"] == "lookup" and events[4]["ok"] is True
+    assert lm_end["payload"]["usage"] == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+    assert events[4]["payload"]["tool"] == "lookup" and events[4]["payload"]["ok"] is True
     assert events[4]["payload"]["agent_id"] == "root-agent"
-    assert "found invoice" in json.dumps(events[4]["output"])
+    assert "found invoice" in json.dumps(events[4]["payload"]["output"])
     assert not runtime.turn_lock.locked()
 
 
@@ -3069,8 +3082,8 @@ def test_non_finite_floats_in_activity_stream_as_valid_json_and_the_turn_still_c
     events = [_strict_json(line) for line in data]
     assert [event["event"] for event in events] == ["turn_status", "tool_end", "turn_complete", "done"]
     # FastAPI >= 0.143.3 serializes non-finite floats as null instead of the invalid NaN/Infinity tokens.
-    assert events[1]["score"] is None and events[1]["payload"]["score"] is None
-    assert events[1]["bounds"] == [None, None]
+    assert events[1]["payload"]["score"] is None
+    assert events[1]["payload"]["bounds"] == [None, None]
     assert not runtime.turn_lock.locked()
 
 
@@ -3231,7 +3244,7 @@ def test_deadline_provenance_matches_across_span_turn_record_and_replay(
     assert (turn_record["deadline_source"], turn_record["effective_seconds"]) == expected
     assert (traced["attributes"]["deadline_source"], traced["attributes"]["effective_seconds"]) == expected
     assert (snapshot["deadline_source"], snapshot["effective_seconds"]) == expected
-    assert (terminal["deadline_source"], terminal["effective_seconds"]) == expected
+    assert (terminal["payload"]["deadline_source"], terminal["payload"]["effective_seconds"]) == expected
 
 
 @pytest.mark.asyncio
@@ -3510,118 +3523,6 @@ class _FakeClock:
         return self.now
 
 
-def test_waiting_on_host_is_bounded_by_matching_tool_events_and_absent_after_done() -> None:
-    from fleet_rlm.api.events import AdvisoryStatus
-
-    tracker = AdvisoryStatus()
-    assert tracker.label(0) == "progress_unknown"
-    tracker.ingest({"event": "tool_start", "call_id": "A", "tool": "lookup", "source": "dspy"}, 0)
-    assert tracker.label(0) == "waiting_on_host"
-    tracker.ingest({"event": "module_start", "call_id": "M"}, 0.1)
-    assert tracker.label(0.1) == "waiting_on_host", "unmatched activity does not clear host waiting"
-    tracker.ingest({"event": "tool_end", "call_id": "A"}, 0.2)
-    assert tracker.label(0.2) == "progress_unknown"
-    tracker.ingest({"event": "tool_end", "call_id": "B"}, 0.3)
-    assert tracker.label(0.3) == "progress_unknown", "an unmatched tool_end never creates the label"
-    tracker.ingest({"event": "done"}, 0.4)
-    assert tracker.label(1_000) is None
-
-
-def test_sse_envelopes_carry_waiting_on_host_only_between_tool_events() -> None:
-    import asyncio
-
-    from fleet_rlm.api.events import SSERuntimeCallback
-
-    async def scenario() -> list[dict[str, Any]]:
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
-        callback = SSERuntimeCallback(asyncio.get_running_loop(), queue)
-
-        def produce() -> None:
-            callback.emit({"event": "tool_start", "call_id": "A", "tool": "lookup", "source": "dspy"})
-            callback.emit({"event": "module_start", "call_id": "M"})
-            callback.emit({"event": "tool_end", "call_id": "A"})
-            callback.emit({"event": "done"})
-
-        await asyncio.to_thread(produce)
-        callback.close()
-        return [queue.get_nowait() for _ in range(queue.qsize())]
-
-    events = asyncio.run(scenario())
-    statuses = [event.get("status") for event in events]
-    assert statuses[:3] == ["waiting_on_host", "waiting_on_host", "progress_unknown"]
-    assert "status" not in events[-1], "the label is absent after done"
-
-
-def test_a_silent_uninstrumented_cell_is_progress_unknown_and_never_stalled() -> None:
-    from fleet_rlm.api.events import AdvisoryStatus
-
-    clock = _FakeClock()
-    tracker = AdvisoryStatus()
-    tracker.ingest({"event": "repl_code", "namespace": "ns-1"}, clock())
-    for elapsed in (0.0, 45.0, 3_600.0):
-        clock.now = elapsed
-        assert tracker.label(clock()) == "progress_unknown"
-    assert tracker.status_event(0) == {"event": "status", "status": "progress_unknown"}
-    assert tracker.status_event(3_600) is None, "a static label is not re-emitted"
-
-
-def test_stalled_requires_a_declared_expectation_and_clears_only_on_an_advancing_checkpoint() -> None:
-    from fleet_rlm.api.events import AdvisoryStatus
-
-    tracker = AdvisoryStatus()
-    tracker.ingest({"event": "progress", "phase": "start", "scope": "scan", "expect_seconds": 2}, 0)
-    assert tracker.label(1.9) == "progressing"
-    assert tracker.label(2.0) == "stalled"
-    tracker.ingest({"event": "progress", "phase": "checkpoint", "scope": "scan", "checkpoint": 1}, 2.5)
-    assert tracker.label(2.5) == "progressing"
-    assert tracker.label(4.4) == "progressing"
-    assert tracker.label(4.5) == "stalled"
-    # A repeated value does not renew the expectation window.
-    tracker.ingest({"event": "progress", "phase": "checkpoint", "scope": "scan", "checkpoint": 1}, 6.5)
-    assert tracker.label(6.5) == "stalled"
-    tracker.ingest({"event": "progress", "phase": "checkpoint", "scope": "scan", "checkpoint": 2}, 7.0)
-    assert tracker.label(7.0) == "progressing"
-
-
-def test_waiting_on_host_shifts_active_progress_scope_clock() -> None:
-    from fleet_rlm.api.events import AdvisoryStatus
-
-    tracker = AdvisoryStatus()
-    tracker.ingest({"event": "progress", "phase": "start", "scope": "batch", "expect_seconds": 5}, 0.0)
-    assert tracker.label(1.0) == "progressing"
-    tracker.ingest({"event": "tool_start", "call_id": "llm-1", "tool": "llm_query", "source": "repl"}, 1.0)
-    assert tracker.label(10.0) == "waiting_on_host"
-    tracker.ingest({"event": "tool_end", "call_id": "llm-1"}, 11.0)
-    assert tracker.label(11.0) == "progressing", "host wait time must not count toward scope stall"
-    assert tracker.label(14.9) == "progressing"
-    assert tracker.label(15.0) == "stalled"
-
-
-def test_nested_scopes_keep_independent_expectations_in_the_status_tracker() -> None:
-    from fleet_rlm.api.events import AdvisoryStatus
-
-    tracker = AdvisoryStatus()
-    tracker.ingest({"event": "progress", "phase": "start", "scope": "outer", "expect_seconds": 10}, 0)
-    tracker.ingest({"event": "progress", "phase": "start", "scope": "inner", "expect_seconds": 1}, 0)
-    assert tracker.label(1.5) == "stalled"
-    assert tracker.detail(1.5)["scope"] == "inner"
-    tracker.ingest({"event": "progress", "phase": "exit", "scope": "inner"}, 1.6)
-    assert tracker.label(1.6) == "progressing", "the inner exit does not remove the outer scope"
-    tracker.ingest({"event": "progress", "phase": "exit", "scope": "outer"}, 2)
-    assert tracker.label(2) == "progress_unknown"
-
-
-def test_interrupted_and_fenced_are_distinguishable_labels() -> None:
-    from fleet_rlm.api.events import AdvisoryStatus
-
-    interrupted = AdvisoryStatus()
-    interrupted.ingest({"event": "repl_output", "outcome": "transport_uncertain"}, 0)
-    assert interrupted.label(0) == "interrupted"
-    fenced = AdvisoryStatus()
-    fenced.ingest({"event": "fenced", "namespace": "ns-1"}, 0)
-    assert fenced.label(0) == "fenced"
-
-
 def test_a_checkpoint_flood_is_coalesced_and_never_delays_cancellation_or_done() -> None:
     import asyncio
 
@@ -3678,44 +3579,6 @@ def test_a_checkpoint_flood_is_coalesced_and_never_delays_cancellation_or_done()
         assert names.index("cancellation_requested") > names.index("progress")
     serialized = json.dumps(events)
     assert not any(token in serialized for token in ("%", "percent", "complete", "remaining", "ETA"))
-
-
-def test_status_sampling_cannot_race_worker_event_ingestion() -> None:
-    import asyncio
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-
-    from fleet_rlm.api.events import AdvisoryStatus, SSERuntimeCallback
-
-    entered = threading.Event()
-    release = threading.Event()
-
-    class BlockingStatus(AdvisoryStatus):
-        def ingest(self, event: dict[str, Any], now: float) -> None:
-            entered.set()
-            assert release.wait(5)
-            super().ingest(event, now)
-
-    loop = asyncio.new_event_loop()
-    callback = SSERuntimeCallback(loop, asyncio.Queue())
-    callback.status = BlockingStatus()
-    try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            producer = pool.submit(
-                callback.emit, {"event": "progress", "phase": "start", "scope": "scan", "expect_seconds": 5}
-            )
-            try:
-                assert entered.wait(5)
-                sampler = pool.submit(callback.status_event)
-                with pytest.raises(TimeoutError):
-                    sampler.result(timeout=0.05)
-            finally:
-                release.set()
-            producer.result(timeout=5)
-            assert sampler.result(timeout=5)["status"] == "progressing"
-    finally:
-        callback.close()
-        loop.close()
 
 
 def test_terminal_outcome_discards_withheld_and_late_progress() -> None:
@@ -3826,7 +3689,7 @@ def test_full_activity_queue_cannot_interrupt_budget_tools_or_cancellation() -> 
 
 
 def wire(event: str, **payload: object) -> dict[str, object]:
-    """Build the exact nested-and-flattened shape produced by Envelope.wrap."""
+    """Build the exact nested shape produced by Envelope.wrap."""
     return {
         "version": 1,
         "event": event,
@@ -3838,7 +3701,6 @@ def wire(event: str, **payload: object) -> dict[str, object]:
         "seq": 9,
         "timestamp": 1_798_000_000.25,
         "payload": payload,
-        **payload,
     }
 
 
@@ -3848,11 +3710,17 @@ def test_terminal_contract_accepts_integer_deadline_provenance(event: str) -> No
     assert framed.data["payload"]["effective_seconds"] == 900
 
 
-def test_progress_mirrors_nan_values() -> None:
-    # Distinct NaN objects exercise the JSON mirror comparison, not identity.
-    event = wire("progress", nested={"value": float("nan")})
-    event["nested"] = {"value": float("nan")}
-    assert FleetEnvelope.model_validate(event).event == "progress"
+def test_envelope_forbids_flattened_top_level_and_reserved_payload_keys() -> None:
+    flattened = wire("progress", nested={"value": 1})
+    flattened["nested"] = {"value": 1}
+    with pytest.raises(ValidationError):
+        FleetEnvelope.model_validate(flattened)
+
+    for forbidden_key in ("event", "payload"):
+        overwriting = wire("progress")
+        overwriting["payload"][forbidden_key] = "override"
+        with pytest.raises(ValidationError, match="overwrites an envelope field"):
+            FleetEnvelope.model_validate(overwriting)
 
 
 def test_malformed_completion_is_rejected_by_its_terminal_contract() -> None:
@@ -3883,9 +3751,11 @@ def test_terminal_history_preserves_null_absence_and_unknown_values() -> None:
     dumped = validated.model_dump(mode="json", exclude_unset=True)
 
     assert dumped["payload"] == legacy["payload"]
-    assert dumped["answer"] is None
-    assert "artifacts" not in dumped
-    assert dumped["historical_extension"] == {"keep": [1, None]}
+    assert dumped["payload"]["answer"] is None
+    assert "artifacts" not in dumped["payload"]
+    assert dumped["payload"]["historical_extension"] == {"keep": [1, None]}
+    assert "answer" not in dumped
+    assert "historical_extension" not in dumped
 
 
 def test_native_sse_consumer_receives_existing_id_and_json_data_framing() -> None:
@@ -4047,6 +3917,38 @@ def test_context_selection_and_workspace_stat_use_remote_metadata_without_downlo
 def test_an_invalid_session_id_is_a_422_before_any_runtime_is_built():
     with opened_client(runtime_with()) as (client, _):
         assert client.get("/sessions/bad id/mode").status_code == 422
+
+
+def test_readonly_session_endpoints_read_store_without_materializing_cold_runtimes():
+    saved_settings = {
+        "mode": "rlm",
+        "models": {"root": "openai/system.ai.custom-root", "sub": "openai/system.ai.custom-sub"},
+        "context": {"workspace_path": "files/cold.csv", "description": "cold context"},
+    }
+    saved_memories = [{"memory_id": "m1", "kind": "note", "content": "persisted memory", "source": "api"}]
+    store = store_with(
+        runtime_settings=lambda session_id: dict(saved_settings) if session_id == "cold-s1" else {},
+        memories=lambda session_id, _search="", **_kw: list(saved_memories) if session_id == "cold-s1" else [],
+    )
+    app = create_app(
+        settings=api_settings(),
+        initialize_db=False,
+        configure_observability=False,
+        store=store,
+    )
+    cold_registry = SessionRuntimeRegistry(api_settings(), store)  # type: ignore[arg-type]
+    cold_registry.get = lambda _session_id: pytest.fail("read-only endpoints must not materialize a cold runtime")  # type: ignore[method-assign]
+    app.dependency_overrides[get_registry] = lambda: cold_registry
+    with TestClient(app, raise_server_exceptions=False) as client:
+        config = client.get("/sessions/cold-s1/config")
+        mode = client.get("/sessions/cold-s1/mode")
+        memory = client.get("/sessions/cold-s1/memory")
+    assert config.status_code == 200
+    assert config.json()["mode"] == "rlm"
+    assert config.json()["models"] == saved_settings["models"]
+    assert config.json()["context"] == {**saved_settings["context"], "size_bytes": 0, "sha256": ""}
+    assert mode.status_code == 200 and mode.json()["mode"] == "rlm"
+    assert memory.status_code == 200 and memory.json() == {"memories": saved_memories}
 
 
 @pytest.mark.parametrize("operation", ["mode", "select", "clear"])
@@ -4716,101 +4618,17 @@ def test_openapi_is_version_valid_and_deterministic():
                     streams.append(media)
                     assert media["schema"] == {"type": "string"}
                     assert "itemSchema" not in media
-    assert len(streams) == 2
+    assert len(streams) == 1
 
 
-# Authenticated local setup
-
-TOKEN = "local-test-operator-token"
-
-
-def setup_client_for(tmp_path, **kwargs):
-    app = create_app(setup_mode=True, setup_token=TOKEN, project_dir=tmp_path, **kwargs)
-    client = TestClient(
-        app, base_url="http://127.0.0.1", client=("127.0.0.1", 32100), headers={"Authorization": f"Bearer {TOKEN}"}
-    )
-    return client, app
-
-
-@contextmanager
-def opened_setup_client(tmp_path, **kwargs):
-    client, app = setup_client_for(tmp_path, **kwargs)
-    with client:
-        yield client, app
-
-
-def finish(client, response):
-    assert response.status_code == 200, response.text
-    operation_id = response.json()["operation_id"]
-    stream = client.get(f"/setup/operations/{operation_id}/events")
-    assert stream.status_code == 200
-    return [json.loads(line[5:]) for line in stream.text.splitlines() if line.startswith("data:")]
-
-
-def ready_checks(monkeypatch):
-    for section in SECTIONS:
-        monkeypatch.setattr(
-            SetupService, "check_" + section, lambda _self, _settings: {"status": "ready", "message": "Verified"}
-        )
-
-
-def test_private_experiment_drain_is_authenticated_and_apply_refuses_active_work(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    ready_checks(monkeypatch)
-    active = [{"run_id": "s1-run", "session_id": "s1", "stage": "search", "status": "running"}]
-
-    class Manager:
-        def __init__(self):
-            self._lock = asyncio.Lock()
-            self.accepting = True
-            self.busy = True
-            self.store = SimpleNamespace(list_optimization_runs=lambda: active)
-
-        async def begin_drain(self):
-            self.accepting = False
-            return await self.status()
-
-        async def status(self):
-            return {"accepting": self.accepting, "busy": self.busy, "experiments": active}
-
-    with opened_setup_client(tmp_path) as (client, app):
-        schema = app.openapi()
-        for path, method in (
-            ("/setup/experiments/drain", "post"),
-            ("/setup/experiments/status", "get"),
-        ):
-            response = schema["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"]
-            assert response == {"$ref": "#/components/schemas/ExperimentManagerStatus"}
-        finish(client, client.post("/setup/verify", json={"request_id": "ready"}))
-        manager = Manager()
-        app.state.experiments = manager
-        denied = client.post("/setup/experiments/drain", headers={"Authorization": "Bearer wrong"})
-        assert denied.status_code == 401 and manager.accepting
-        assert client.post("/setup/apply").status_code == 409
-        assert manager.accepting and not app.state.setup_applying
-        drained = client.post("/setup/experiments/drain")
-        assert drained.status_code == 200
-        assert drained.json() == {"accepting": False, "busy": True, "experiments": active}
-        assert client.get("/setup/experiments/status").json()["busy"]
-        manager.busy = False
-        active.clear()
-        assert not client.get("/setup/experiments/status").json()["busy"]
-
-
-def test_experiment_status_without_manager_has_same_named_contract(tmp_path):
-    with opened_setup_client(tmp_path) as (client, app):
-        status = client.get("/setup/experiments/status")
-        drain = client.post("/setup/experiments/drain")
-
-    expected = {"accepting": False, "busy": False, "experiments": []}
-    assert status.status_code == drain.status_code == 200
-    assert status.json() == drain.json() == expected
-    assert "ExperimentManagerStatus" in app.openapi()["components"]["schemas"]
+# Doctor probes and configuration checks
 
 
 @pytest.mark.parametrize("sub_scope", ["team.models", "other.serving"])
 @pytest.mark.parametrize("missing", [False, True])
-def test_model_readiness_checks_configured_allowlist_without_discovery(tmp_path, monkeypatch, sub_scope, missing):
+def test_model_readiness_checks_configured_allowlist_without_discovery(monkeypatch, sub_scope, missing):
+    from fleet_rlm.doctor import check_models
+
     settings = FleetSettings(_env_file=None, fleet_llm_model=f"openai/{sub_scope}.model")
 
     def discover(_settings, *, role):
@@ -4820,20 +4638,18 @@ def test_model_readiness_checks_configured_allowlist_without_discovery(tmp_path,
         return ["openai/discovered"]
 
     monkeypatch.setattr(FleetSettings, "list_models", discover)
-    service = SetupService(tmp_path)
-    try:
-        result = service.check_models(settings)
-        assert result["status"] == "ready"
-        assert result["models"] == ([] if missing else ["openai/discovered"])
-        assert "private provider error" not in result["message"]
-    finally:
-        service.close()
+    result = check_models(settings)
+    assert result["status"] == "ready"
+    assert result["models"] == ([] if missing else ["openai/discovered"])
+    assert "private provider error" not in result["message"]
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
-def test_model_probe_uses_normalized_request_and_response(tmp_path, monkeypatch, json_mode):
+def test_model_probe_uses_normalized_request_and_response(monkeypatch, json_mode):
     import dspy
     from dspy.lm15 import Request
+
+    from fleet_rlm.doctor import check_models
 
     calls = []
 
@@ -4867,320 +4683,28 @@ def test_model_probe_uses_normalized_request_and_response(tmp_path, monkeypatch,
         fleet_root_adapter="json" if json_mode else "chat",
         fleet_root_response_format="json_object" if json_mode else "auto",
     )
-    service = SetupService(tmp_path)
-    monkeypatch.setattr(service, "settings", lambda: settings)
-    try:
-        result = service.test_model(object())
-        request = next(value for kind, value in calls if kind == "request")
-        assert request.model == "openai/test-root"
-        expected = 'Return exactly this JSON object: {"status":"OK"}' if json_mode else "Reply with exactly OK"
-        assert request.messages[0].text == expected
-        assert request.config.response_format == ({"type": "json_object"} if json_mode else None)
-        assert request.config.max_tokens == 16
-        assert calls[0] == ("copy", {"num_retries": 0, "max_tokens": 16, "cache": False, "callbacks": []})
-        assert calls[-1] == ("close", None)
-        assert "response was received" in result["message"]
-    finally:
-        service.close()
+    result = check_models(settings, probe_models=True)
+    request = next(value for kind, value in calls if kind == "request")
+    assert request.model == "openai/test-root"
+    expected = 'Return exactly this JSON object: {"status":"OK"}' if json_mode else "Reply with exactly OK"
+    assert request.messages[0].text == expected
+    assert request.config.response_format == ({"type": "json_object"} if json_mode else None)
+    assert request.config.max_tokens == 16
+    assert calls[0] == ("copy", {"num_retries": 0, "max_tokens": 16, "cache": False, "callbacks": []})
+    assert calls[-1] == ("close", None)
+    assert result["status"] == "ready"
+    assert result["inference_tested"] is True
+    assert "probe succeeded" in result["message"]
 
 
-def test_completed_worker_cannot_clear_next_operations_busy_state(tmp_path, monkeypatch):
-    service = SetupService(tmp_path)
-    entered, release = threading.Event(), threading.Event()
-    emit = Operation.emit
-
-    def next_action(_operation):
-        entered.set()
-        assert release.wait(5)
-
-    def submit_on_completion(operation, message, **values):
-        emit(operation, message, **values)
-        if operation.id == "first" and values.get("event") == "complete":
-            # Submit at the completion boundary, before the first worker returns.
-            service.start("verify", "second", next_action)
-
-    monkeypatch.setattr(Operation, "emit", submit_on_completion)
-    try:
-        service.start("verify", "first", lambda _operation: None)
-        assert entered.wait(5)
-        assert service.status()["busy"]
-        for edit in (lambda: service.stage({}), service.save, service.discard):
-            with pytest.raises(SetupConflictError):
-                edit()
-        with pytest.raises(SetupConflictError):
-            service.start("verify", "third", lambda _operation: None)
-    finally:
-        release.set()
-        service.close()
-        service._pool.shutdown(wait=True)
-    assert not service.status()["busy"]
-
-
-def test_setup_boots_with_invalid_configuration_without_runtime_services(tmp_path, monkeypatch):
-    monkeypatch.setenv("FLEET_LLM_MODEL", "")
-    monkeypatch.setattr("fleet_rlm.api.app.Store.open", lambda *_a, **_kw: pytest.fail("setup must not open Store"))
-    monkeypatch.setattr(
-        "fleet_rlm.api.app._configure_tracing", lambda *_a: pytest.fail("setup must not configure tracing")
-    )
-    with opened_setup_client(tmp_path) as (client, app):
-        assert client.get("/health").json()["status"] == "setup"
-        assert app.state.session_registry is None
-        assert client.post("/sessions/a/turn", json={"task": "hello"}).status_code == 404
-        status = client.get("/setup/status").json()
-        assert status["errors"] and not status["ready"]
-        assert client.post("/setup/apply").status_code == 409
-
-
-def test_setup_requires_private_token_and_loopback_and_is_disabled_by_default(tmp_path):
-    with opened_setup_client(tmp_path) as (client, _app):
-        assert client.get("/setup/status", headers={"Authorization": "Bearer wrong"}).status_code == 401
-    remote = TestClient(
-        create_app(setup_mode=True, setup_token=TOKEN, project_dir=tmp_path),
-        client=("203.0.113.1", 32100),
-        headers={"Authorization": f"Bearer {TOKEN}"},
-    )
-    with remote:
-        assert remote.get("/setup/status").status_code == 403
-    app = create_app(settings=FleetSettings(_env_file=None), initialize_db=False, configure_observability=False)
-    with TestClient(app) as unconfigured:
-        assert unconfigured.get("/setup/status").status_code == 404
-
-
-def test_secret_edits_are_masked_saved_atomically_and_preserve_unrelated_entries(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    env = tmp_path / ".env"
-    env.write_text("# keep this comment\nUNRELATED='original'\n")
-    with opened_setup_client(tmp_path) as (client, _app):
-        response = client.patch(
-            "/setup/config",
-            json={"values": {"DATABRICKS_TOKEN": "private-value", "DATABRICKS_HOST": "https://example.test"}},
-        )
-        assert response.status_code == 200
-        assert "private-value" not in response.text
-        assert env.read_text() == "# keep this comment\nUNRELATED='original'\n"
-        saved = client.post("/setup/save")
-        assert saved.status_code == 200
-        assert "private-value" not in saved.text
-        assert "private-value" in env.read_text()
-        assert "# keep this comment" in env.read_text() and "UNRELATED='original'" in env.read_text()
-        assert stat.S_IMODE(env.stat().st_mode) == 0o600
-        assert not list(tmp_path.glob(".fleet-env-*"))
-
-
-@pytest.mark.parametrize(
-    "name,value",
-    [("FLEET_LLM_MODEL", ""), ("FLEET_LLM_BASE_URL", "http://bad.test"), ("FLEET_DATABASE_SCHEMA", "bad;schema")],
-)
-def test_save_runs_fleet_validators_and_never_replaces_valid_file(tmp_path, monkeypatch, name, value):
-    monkeypatch.chdir(tmp_path)
-    env = tmp_path / ".env"
-    env.write_text("UNRELATED=preserved\n")
-    with opened_setup_client(tmp_path) as (client, _app):
-        assert client.patch("/setup/config", json={"values": {name: value}}).status_code == 200
-        response = client.post("/setup/save")
-        assert response.status_code == 422
-        assert env.read_text() == "UNRELATED=preserved\n"
-
-
-def test_env_authority_conflicts_and_invalid_url_secrets_are_not_exposed(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABRICKS_TOKEN", "environment-secret")
-    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://user:private-password@host.test/?token=secret")
-    with opened_setup_client(tmp_path) as (client, _app):
-        status = client.get("/setup/status")
-        assert "environment-secret" not in status.text and "private-password" not in status.text
-        assert client.patch("/setup/config", json={"values": {"DATABRICKS_TOKEN": "another-secret"}}).status_code == 409
-        malformed = client.patch("/setup/config", json={"values": {"DATABRICKS_TOKEN": {"key": "never-echo-this"}}})
-        assert malformed.status_code == 422 and "never-echo-this" not in malformed.text
-
-
-def test_save_rejects_concurrent_edits(tmp_path):
-    with opened_setup_client(tmp_path) as (client, _app):
-        client.patch("/setup/config", json={"values": {"DATABRICKS_TOKEN": "draft"}})
-        (tmp_path / ".env").write_text("DATABRICKS_TOKEN=external\n")
-        assert client.post("/setup/save").status_code == 409
-        assert "external" in (tmp_path / ".env").read_text()
-
-
-def test_verify_apply_and_restart_fence_are_consistent(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    ready_checks(monkeypatch)
-    with opened_setup_client(tmp_path) as (client, app):
-        events = finish(client, client.post("/setup/verify", json={"request_id": "verify-1"}))
-        assert events[-1]["event"] == "complete"
-        assert client.get("/setup/status").json()["ready"]
-        app.state.session_registry = SimpleNamespace(request_restart=lambda: False)
-        assert client.post("/setup/apply").status_code == 409
-        assert not app.state.setup_applying
-        app.state.session_registry = None
-        assert client.post("/setup/apply").json() == {"restart_required": True}
-        assert client.post("/setup/apply").json() == {"restart_required": True}
-        assert client.get("/setup/status").json()["restart_required"]
-        assert app.state.setup_applying
-        assert (
-            client.patch("/setup/config", json={"values": {"DATABRICKS_HOST": "https://new.test"}}).status_code == 409
-        )
-        assert client.post("/setup/verify", json={"request_id": "after-apply"}).status_code == 409
-
-
-def test_concurrent_apply_cannot_undo_an_accepted_restart(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    ready_checks(monkeypatch)
-    client, app = setup_client_for(tmp_path)
-    rejected, release, second_started, second_admitted = (threading.Event() for _ in range(4))
-    runtime = SimpleNamespace(turn_lock=threading.Lock())
-    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), None)
-    registry._sessions["session-a"] = runtime
-    request_restart = registry.request_restart
-
-    def pause_rejected_restart():
-        result = request_restart()
-        if not result:
-            rejected.set()
-            assert release.wait(5)
-        return result
-
-    monkeypatch.setattr(registry, "request_restart", pause_rejected_restart)
-    with client, ThreadPoolExecutor(max_workers=2) as pool:
-        finish(client, client.post("/setup/verify", json={"request_id": "ready"}))
-        app.state.session_registry = registry
-        can_apply = app.state.setup_service.can_apply
-        calls = []
-
-        def track_admission():
-            calls.append(1)
-            if len(calls) == 2:
-                second_admitted.set()
-            can_apply()
-
-        monkeypatch.setattr(app.state.setup_service, "can_apply", track_admission)
-        runtime.turn_lock.acquire()
-        first = pool.submit(client.post, "/setup/apply")
-        try:
-            assert rejected.wait(5)
-        finally:
-            runtime.turn_lock.release()
-
-        def retry():
-            second_started.set()
-            return client.post("/setup/apply")
-
-        try:
-            second = pool.submit(retry)
-            assert second_started.wait(5)
-            # The rejected attempt still owns cleanup, so the retry must wait.
-            assert not second_admitted.wait(0.2)
-        finally:
-            release.set()
-        assert first.result(timeout=5).status_code == 409
-        assert second.result(timeout=5).json() == {"restart_required": True}
-        assert second_admitted.is_set()
-        assert app.state.setup_applying
-        assert client.get("/setup/status").json()["restart_required"]
-        assert registry._restart_requested.is_set()
-
-
-def test_operation_reconnect_and_duplicate_request_do_not_repeat_mutation(tmp_path, monkeypatch):
-    calls = []
-    entered, release = threading.Event(), threading.Event()
-
-    def build(_self, operation):
-        calls.append(1)
-        entered.set()
-        assert release.wait(5)
-        operation.emit("Provider work complete")
-        return {"name": "safe-snapshot"}
-
-    monkeypatch.setattr(SetupService, "build", build)
-    with opened_setup_client(tmp_path) as (client, _app):
-        first = client.post("/setup/daytona/snapshot/build", json={"request_id": "build-1"})
-        try:
-            assert entered.wait(5)
-            assert client.post("/setup/daytona/snapshot/build", json={"request_id": "build-1"}).json() == first.json()
-            assert client.post("/setup/daytona/snapshot/build", json={"request_id": "build-2"}).status_code == 409
-        finally:
-            release.set()
-        events = finish(client, first)
-        assert events[-1]["event"] == "complete"
-        replay = finish(client, first)
-        assert replay == events and calls == [1]
-
-
-def test_provider_exception_body_is_never_streamed(tmp_path, monkeypatch):
-    def fail(_self, _operation):
-        raise RuntimeError("provider-key-and-dsn-must-stay-private")
-
-    monkeypatch.setattr(SetupService, "build", fail)
-    with opened_setup_client(tmp_path) as (client, _app):
-        events = finish(client, client.post("/setup/daytona/snapshot/build", json={"request_id": "failure"}))
-        assert events[-1]["event"] == "error"
-        assert "must-stay-private" not in str(events)
-        assert not client.get("/setup/status").json()["busy"]
-
-
-def test_launcher_profile_environment_does_not_lock_saved_settings(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text("FLEET_MLFLOW_LOCAL_PORT=5002\n")
-    monkeypatch.setenv("FLEET_MLFLOW_LOCAL_PORT", "5001")
-    monkeypatch.setenv("FLEET_SETUP_DERIVED_ENV", '["FLEET_MLFLOW_LOCAL_PORT"]')
-    with opened_setup_client(tmp_path) as (client, app):
-        field = next(f for f in client.get("/setup/status").json()["fields"] if f["name"] == "FLEET_MLFLOW_LOCAL_PORT")
-        assert field["editable"] and field["source"] == "dotenv" and field["value"] == "5002"
-        assert app.state.setup_service.settings().mlflow_local_port == 5002
-        client.patch("/setup/config", json={"values": {"FLEET_MLFLOW_LOCAL_PORT": "5003"}})
-        assert client.post("/setup/save").status_code == 200
-        assert app.state.setup_service.settings().mlflow_local_port == 5003
-        import os
-
-        assert os.environ["FLEET_MLFLOW_LOCAL_PORT"] == "5001"
-
-
-def test_discard_recovers_from_external_configuration_conflicts(tmp_path):
-    with opened_setup_client(tmp_path) as (client, _app):
-        client.patch("/setup/config", json={"values": {"DATABRICKS_HOST": "https://draft.test"}})
-        (tmp_path / ".env").write_text("DATABRICKS_HOST=https://external.test\n")
-        assert client.post("/setup/save").status_code == 409
-        reset = client.delete("/setup/config").json()
-        assert not reset["dirty"]
-        field = next(f for f in reset["fields"] if f["name"] == "DATABRICKS_HOST")
-        assert field["value"] == "https://external.test"
-
-
-def test_unknown_operation_returns_404_before_streaming(tmp_path):
-    with opened_setup_client(tmp_path) as (client, _app):
-        response = client.get("/setup/operations/not-found/events")
-        assert response.status_code == 404
-        assert response.headers["content-type"].startswith("application/json")
-
-
-def test_selected_checks_reuse_only_results_for_the_same_configuration(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    calls = []
-    for section in SECTIONS:
-
-        def check(_self, _settings, section=section):
-            calls.append(section)
-            return {"status": "ready", "message": "Verified"}
-
-        monkeypatch.setattr(SetupService, "check_" + section, check)
-    with opened_setup_client(tmp_path) as (client, _app):
-        finish(client, client.post("/setup/verify", json={"request_id": "all"}))
-        assert client.get("/setup/status").json()["ready"]
-        calls.clear()
-        finish(client, client.post("/setup/verify", json={"request_id": "one", "sections": ["daytona"]}))
-        assert calls == ["daytona"] and client.get("/setup/status").json()["ready"]
-        client.patch("/setup/config", json={"values": {"DATABRICKS_HOST": "https://new.test"}})
-        client.post("/setup/save")
-        finish(client, client.post("/setup/verify", json={"request_id": "new-config", "sections": ["daytona"]}))
-        assert not client.get("/setup/status").json()["ready"]
-
-
-def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environment(tmp_path, monkeypatch):
+def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environment(monkeypatch):
     import os
 
     import databricks.sdk
     import databricks.sdk.core
 
     import fleet_rlm.store as db
+    from fleet_rlm.doctor import check_database
 
     observed = []
 
@@ -5208,41 +4732,48 @@ def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environmen
         fleet_database_url="postgresql://reader@db.invalid/fleet?sslmode=require",
         fleet_lakebase_endpoint="projects/a/branches/b/endpoints/c",
     )
-    service = SetupService(tmp_path, backend="databricks")
-    try:
-        with pytest.raises(RuntimeError, match="probe reached connection"):
-            service.check_database(settings)
-        assert observed[0].host == "https://candidate.test"
-        assert observed[0].token == "candidate-token"
-        assert "DATABRICKS_TOKEN" not in os.environ
-    finally:
-        service.close()
+    result = check_database(settings)
+    assert result["status"] == "blocked"
+    assert "RuntimeError" in result["message"]
+    assert observed[0].host == "https://candidate.test"
+    assert observed[0].token == "candidate-token"
+    assert "DATABRICKS_TOKEN" not in os.environ
 
 
-def test_setup_validates_and_persists_json_mode(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    service = SetupService(tmp_path)
-    try:
-        service.stage({"FLEET_ROOT_RESPONSE_FORMAT": "json_object"})
-        with pytest.raises(ValueError, match="JSON adapter"):
-            service.settings()
-        service.stage({"FLEET_ROOT_ADAPTER": "json"})
-        settings = service.settings()
-        assert settings.resolved_model("root").response_format == "json_object"
-        assert "FLEET_ROOT_RESPONSE_FORMAT" in {field["name"] for field in service.status()["fields"]}
-        service.save()
-        assert "FLEET_ROOT_RESPONSE_FORMAT='json_object'" in (tmp_path / ".env").read_text()
-    finally:
-        service.close()
+def test_settings_validates_json_mode():
+    with pytest.raises(ValueError, match="JSON adapter"):
+        FleetSettings(_env_file=None, fleet_root_response_format="json_object")
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_root_adapter="json",
+        fleet_root_response_format="json_object",
+    )
+    assert settings.resolved_model("root").response_format == "json_object"
 
 
 # Consolidated from api/test_improve.py
 
 
-def test_worker_pipe_validation_is_always_on():
-    process = SimpleNamespace(stdin=None, stdout=object(), stderr=object())
-    with pytest.raises(RuntimeError, match="pipes were not created"):
-        _require_worker_pipes(process)
+def test_worker_log_fd_uses_private_regular_file_and_rejects_symlinks(tmp_path: Path):
+    import os
+    import stat
+
+    fd = _open_worker_log(tmp_path, "optimize-run1")
+    try:
+        log_path = tmp_path / "runs" / "optimize-run1" / "worker.log"
+        assert log_path.is_file()
+        assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
+    finally:
+        os.close(fd)
+
+    evil = tmp_path / "outside.log"
+    evil.write_text("do not clobber\n")
+    symlink_run_dir = tmp_path / "runs" / "optimize-sym"
+    symlink_run_dir.mkdir(parents=True)
+    (symlink_run_dir / "worker.log").symlink_to(evil)
+    with pytest.raises(RuntimeError, match="symlink"):
+        _open_worker_log(tmp_path, "optimize-sym")
+    assert evil.read_text() == "do not clobber\n"
 
 
 def test_failed_approval_exposes_sanitized_failure_and_success_clears_it(tmp_path):
@@ -5293,22 +4824,50 @@ def test_invalid_approval_manifest_becomes_interrupted_without_install(tmp_path,
     asyncio.run(scenario())
 
 
-def test_output_drain_never_writes_progress_even_when_storage_is_unavailable(tmp_path):
-    async def scenario():
+def test_worker_log_redirection_never_writes_progress_even_when_storage_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    async def scenario() -> None:
         store = MemoryStore()
         manager = ExperimentManager(FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path)), store)
         store.create_optimization_run("s1-run", "request", {}, manager.owner_id, managed=True)
 
-        def unavailable(*_args, **_kwargs):
-            raise RuntimeError("private database failure")
+        class FakeStdin:
+            def write(self, _data: bytes) -> None:
+                return None
 
-        store.update_optimization_run = unavailable
-        stream = asyncio.StreamReader()
-        stream.feed_data(b'FLEET_EVENT {"type":"progress","run_id":"s1-run","metric_calls_used":1}\n')
-        stream.feed_data(b"x" * 90_000 + b"\nordinary output\n")
-        stream.feed_eof()
-        await asyncio.wait_for(manager._discard_output(stream), timeout=2)
-        assert stream.at_eof()
+            async def drain(self) -> None:
+                return None
+
+            def close(self) -> None:
+                return None
+
+        class FakeProcess:
+            stdin = FakeStdin()
+            returncode = 0
+
+            async def wait(self) -> int:
+                return 0
+
+        captured: dict[str, Any] = {}
+
+        async def fake_spawn(*_args: str, **kwargs: Any) -> FakeProcess:
+            captured.update(kwargs)
+            os.write(
+                kwargs["stdout"],
+                b'FLEET_EVENT {"type":"progress","run_id":"s1-run","metric_calls_used":1}\n',
+            )
+            return FakeProcess()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+        await manager._execute("s1-run", "optimize", ExperimentOptions(), approval=False)
+        assert isinstance(captured["stdout"], int)
+        assert captured["stderr"] is asyncio.subprocess.STDOUT
+        with pytest.raises(OSError):
+            os.fstat(captured["stdout"])
+        assert (tmp_path / "runs" / "s1-run" / "worker.log").is_file()
         assert not (tmp_path / "runs" / "s1-run" / "gepa.stop").exists()
 
     asyncio.run(scenario())
@@ -5948,6 +5507,8 @@ def test_managed_subprocess_drains_noisy_output_without_replaying_progress(
         assert "secret-token" not in command
         assert "--managed-owner-id" in command
         assert captured["spawn_kwargs"]["stdin"] is asyncio.subprocess.PIPE
+        assert isinstance(captured["spawn_kwargs"]["stdout"], int)
+        assert captured["spawn_kwargs"]["stderr"] is asyncio.subprocess.STDOUT
         assert captured["spawn_kwargs"]["start_new_session"] is True
 
     asyncio.run(scenario())

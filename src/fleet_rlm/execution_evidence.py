@@ -147,6 +147,39 @@ def collect_artifacts(manager: Any) -> dict[str, Any]:
     total = 0
     complete = True
     paths = sorted({path for path in manager.list_workspace_files() if path.startswith("artifacts/")})
+    batch_reader = getattr(manager, "read_workspace_files", None)
+    use_batch = (
+        callable(batch_reader)
+        and len(paths) > 1
+        and (not hasattr(manager, "_sandbox") or getattr(manager._sandbox, "fs", None) is not None)
+    )
+    if use_batch and batch_reader is not None:
+        batch_paths: list[str] = []
+        for path in paths:
+            if len(batch_paths) >= MAX_ARTIFACTS:
+                complete = False
+                break
+            try:
+                artifact_path(path)
+                batch_paths.append(path)
+            except ValueError:
+                complete = False
+        if batch_paths:
+            try:
+                downloaded = batch_reader(batch_paths, max_total_bytes=MAX_ARTIFACT_EVIDENCE_BYTES)
+                for path in batch_paths:
+                    raw = downloaded[path]
+                    if len(raw) > MAX_ARTIFACT_BYTES:
+                        complete = False
+                        continue
+                    total += len(raw)
+                    files[path] = {"sha256": hashlib.sha256(raw).hexdigest(), "base64": base64.b64encode(raw).decode()}
+                return {"complete": complete, "files": files, "paths": paths}
+            except (ValueError, OSError):
+                complete = False
+                files.clear()
+                total = 0
+
     for path in paths:
         if len(files) >= MAX_ARTIFACTS:
             complete = False

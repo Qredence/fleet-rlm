@@ -31,7 +31,10 @@ from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.optimization_runs import add_optimization_arguments
 from fleet_rlm.optimize import artifacts, dataset, validation
+from fleet_rlm.optimize import cli_commands as cli_mod
 from fleet_rlm.optimize import gepa as workflow
+from fleet_rlm.optimize import progress as progress_mod
+from fleet_rlm.optimize import runner as runner_mod
 from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
     approve_candidate,
@@ -200,7 +203,8 @@ def _selected_snapshot(session: str, turn_id: str, task: str, files: dict[str, b
 @pytest.mark.parametrize("case", ["sensitive_filename", "large_workspace", "long_task"])
 def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypatch, case):
     from fleet_rlm import cli
-    from fleet_rlm.observability import sanitize_trace_span
+    from fleet_rlm.observability import sanitize_trace_span, trace_object
+    from fleet_rlm.optimize import evaluation as evaluation_module
     from fleet_rlm.store import Store
 
     files = {"files/token_counts.csv": b"4"}
@@ -237,16 +241,31 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
     saved = []
     store = SimpleNamespace(
         replay_snapshot=lambda *_args: (digest, compressed),
+        reviewed_examples=lambda *_args: [
+            {
+                "session_id": "s1",
+                "turn_id": "t1",
+                "answer": labels["expected_answer"],
+                "expected_values": labels["expected_values"],
+                "route": labels["route"],
+                "critical": labels["critical"],
+                "source_group": labels["source_group"],
+                "replay_snapshot_sha256": digest,
+                "replay_snapshot": compressed,
+            }
+        ],
         save_review_labels=lambda *args, **kwargs: saved.append((args, kwargs)),
         close=lambda: None,
     )
-    monkeypatch.setattr(dataset, "turn_traces", lambda *_args: [trace])
-    examples = dataset.load_examples_from_mlflow("exp", store=store)
+    assert trace_object(json.dumps(json.dumps({"task": task}))) == {"task": task}
+    examples = dataset.load_examples(store, "exp")
     assert len(examples) == 1 and examples[0].task == task
     assert examples[0].inputs()["session_history"] == "prior conversation"
     monkeypatch.setattr(Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(dataset.mlflow, "get_trace", lambda *_args, **_kw: trace)
-    monkeypatch.setattr(dataset.mlflow, "log_expectation", lambda **kw: labels.update({kw["name"]: kw["value"]}))
+    monkeypatch.setattr(evaluation_module.mlflow, "get_trace", lambda *_args, **_kw: trace)
+    monkeypatch.setattr(
+        evaluation_module.mlflow, "log_expectation", lambda **kw: labels.update({kw["name"]: kw["value"]})
+    )
     settings = SimpleNamespace(
         fleet_database_url="postgresql://fake", fleet_database_schema="fleet", fleet_lakebase_endpoint=""
     )
@@ -272,6 +291,7 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
 @pytest.mark.parametrize("failure", ["missing_snapshot", "invalid_labels", "partial_sync"])
 def test_label_preflight_and_retry_never_clear_omitted_expectations(monkeypatch, failure):
     from fleet_rlm import cli
+    from fleet_rlm.optimize import evaluation as evaluation_module
     from fleet_rlm.store import Store
 
     _snapshot, digest, compressed = _selected_snapshot("s1", "t1", "add", {})
@@ -300,13 +320,13 @@ def test_label_preflight_and_retry_never_clear_omitted_expectations(monkeypatch,
         close=lambda: None,
     )
     monkeypatch.setattr(Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(dataset.mlflow, "get_trace", lambda *_args, **_kw: trace)
+    monkeypatch.setattr(evaluation_module.mlflow, "get_trace", lambda *_args, **_kw: trace)
 
     def log(**kwargs):
         writes.append(kwargs)
         labels[kwargs["name"]] = kwargs["value"]
 
-    monkeypatch.setattr(dataset.mlflow, "log_expectation", log)
+    monkeypatch.setattr(evaluation_module.mlflow, "log_expectation", log)
     args = SimpleNamespace(
         trace_id="tr1", status=None, group=None, answer=None, value=None, route=None, critical=False, reviewer="human"
     )
@@ -380,18 +400,18 @@ def test_required_replay_v2_reconstructs_exact_bytes_and_rejects_mismatched_orig
 
 
 def test_mapping_reads_a_request_that_unity_catalog_double_encoded() -> None:
+    from fleet_rlm.observability import trace_object
+
     request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)"}
-    assert dataset.trace_object(json.dumps(request)) == request
-    assert dataset.trace_object(json.dumps(json.dumps(request))) == request
-    assert dataset.trace_object("not json") == {}
-    assert dataset.trace_object(json.dumps("just a string")) == {}
+    assert trace_object(json.dumps(request)) == request
+    assert trace_object(json.dumps(json.dumps(request))) == request
+    assert trace_object("not json") == {}
+    assert trace_object(json.dumps("just a string")) == {}
 
 
-def test_turn_traces_skip_pytest_traces_in_the_runtime_experiment(monkeypatch) -> None:
+def test_is_benchmark_trace_detects_tags_and_root_span_attributes() -> None:
     request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)", "context_files": {}}
     user_turn = _trace("t1", "sess-a", request, {})
-    pytest_turn = _trace("t2", "sess-b", request, {})
-    pytest_turn.info.trace_metadata["mlflow.source.name"] = "/repo/.venv/bin/pytest"
     tagged_benchmark = _trace("t3", "sess-c", request, {})
     tagged_benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
     span_benchmark = _trace("t4", "sess-d", request, {})
@@ -399,79 +419,9 @@ def test_turn_traces_skip_pytest_traces_in_the_runtime_experiment(monkeypatch) -
         SimpleNamespace(parent_id="root", attributes={}),
         SimpleNamespace(parent_id=None, attributes={"fleet.benchmark.model_id": "m-bench"}),
     ]
-    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(
-        dataset.mlflow,
-        "MlflowClient",
-        lambda: SimpleNamespace(
-            search_traces=lambda **_kwargs: [user_turn, pytest_turn, tagged_benchmark, span_benchmark]
-        ),
-    )
-    assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev")] == ["t1"]
-
-
-def test_turn_traces_page_past_benchmark_traces(monkeypatch) -> None:
-    request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)", "context_files": {}}
-    benchmark = _trace("bench", "sess-b", request, {})
-    benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
-    user_turn = _trace("user", "sess-a", request, {})
-
-    class Page(list):
-        def __init__(self, items, token):
-            super().__init__(items)
-            self.token = token
-
-    def search_traces(**kwargs):
-        if kwargs.get("page_token") is None:
-            return Page([benchmark], "next")
-        return Page([user_turn], None)
-
-    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=search_traces))
-    assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev", max_results=1)] == ["user"]
-
-
-def test_mlflow_loader_requires_approved_gold_and_skips_rejected_or_legacy_traces(monkeypatch) -> None:
-    labels = {"expected_answer": "4", "review_status": "approved", "source_group": "g"}
-    snapshots = {}
-
-    def request_for(session: str, turn_id: str, task: str) -> dict:
-        snapshot, digest, compressed = _selected_snapshot(session, turn_id, task, {})
-        snapshots[(session, turn_id)] = (digest, compressed)
-        return {
-            "task": task,
-            "turn_id": turn_id,
-            "workspace_manifest": snapshot["workspace_manifest"],
-            "context_files": snapshot["context_files"],
-            "replay_snapshot_selected": True,
-            "replay_snapshot_sha256": digest,
-        }
-
-    request = request_for("sess-a", "turn-1", "2+2")
-    traces = [
-        _trace("t1", "sess-a", request, labels),
-        _trace(
-            "t2",
-            "sess-b",
-            request_for("sess-b", "turn-2", "3+1"),
-            {**labels, "expected_values": ["4"], "route": "direct"},
-        ),
-        _trace("t3", "sess-c", {"task": "legacy", "session_id": "sess-c"}, labels),  # no manifest: not self-contained
-        _trace("t4", "sess-d", request, {**labels, "review_status": "rejected"}),
-        _trace("t5", "sess-e", request_for("sess-e", "turn-5", "unlabelled"), {}),
-    ]
-    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=lambda **_kwargs: traces))
-    store = SimpleNamespace(replay_snapshot=lambda session, turn: snapshots.get((session, turn)))
-    examples = dataset.load_examples_from_mlflow("fleet-rlm-dev", store=store)
-    assert [(example.source_session, example.task) for example in examples] == [
-        ("sess-a", "2+2"),
-        ("sess-b", "3+1"),
-    ]
-    assert examples[1].expected_values == ["4"] and examples[1].route == "direct"
-    assert examples[0].memory_summary == "reviewed memory" and examples[0].session_history == "prior conversation"
-    assert examples[0].replay_turn_id == "turn-1"
-    assert examples[0].inputs()["session_history"] == "prior conversation"
+    assert not dataset.is_benchmark_trace(user_turn)
+    assert dataset.is_benchmark_trace(tagged_benchmark)
+    assert dataset.is_benchmark_trace(span_benchmark)
 
 
 def test_dataset_digest_changes_when_gold_or_context_changes() -> None:
@@ -503,15 +453,13 @@ def test_curation_refuses_too_few_examples_and_names_the_label_command(monkeypat
         )
         for index in range(9)
     ]
-    monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
-    monkeypatch.setattr(dataset, "load_examples_from_mlflow", lambda *_args, **_kwargs: examples)
+    monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: examples)
     with pytest.raises(ValueError, match=r"3 source groups are needed; found 2.*fleet eval label"):
         dataset.curate_dataset(SimpleNamespace(), "exp")
 
 
-@pytest.mark.parametrize("source", ["postgres", "mlflow"])
 @pytest.mark.parametrize("snapshot", ["complete", "missing", "extra", "invalid", "empty"])
-def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source, snapshot) -> None:
+def test_curation_only_accepts_complete_workspace_revisions(snapshot) -> None:
     # A comma in a filename must not be treated as a manifest separator.
     files = {"files/rates.csv": b"rate\n3\n", "files/input, old.csv": b"id,value\n1,17\n"}
     session, turn_id, task = "s1", "turn-1", "Apply the rates to the input"
@@ -529,6 +477,7 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         contexts = {}
     digest, compressed = encode_snapshot(replay)
     row = {
+        "session_id": "s1",
         "turn_id": turn_id,
         "task": task,
         "answer": "",
@@ -543,34 +492,8 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         "replay_snapshot_sha256": digest,
         "replay_snapshot": compressed,
     }
-    if source == "postgres":
-        row["session_id"] = "s1"
-        store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
-        examples = dataset.load_examples_from_postgres(store)
-    else:
-        labels = {
-            "expected_answer": "",
-            "expected_values": ["17"],
-            "route": "rlm",
-            "critical": True,
-            "review_status": "approved",
-            "source_group": "reviewed-source",
-        }
-        request = {
-            "task": task,
-            "turn_id": turn_id,
-            "workspace_manifest": replay["workspace_manifest"],
-            "context_files": contexts,
-            "replay_snapshot_selected": True,
-            "replay_snapshot_sha256": digest,
-        }
-        trace = _trace("reviewed-trace", "s1", request, labels)
-        monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-        monkeypatch.setattr(
-            dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=lambda **_kwargs: [trace])
-        )
-        store = SimpleNamespace(replay_snapshot=lambda *_args: (digest, compressed))
-        examples = dataset.load_examples_from_mlflow("unused", store=store)
+    store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
+    examples = dataset.load_examples(store, "unused")
     if snapshot in {"complete", "empty"}:
         assert len(examples) == 1
         assert examples[0].context_files == contexts
@@ -1327,14 +1250,14 @@ def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_pat
         fleet_database_migration_url="postgresql://migrator:secret@db.example:5432/fleet",
         compiled_program_dir=str(tmp_path),
     )
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(
         workflow.Store,
         "open",
         lambda dsn, **kwargs: captured.update(dsn=dsn, **kwargs) or store,
     )
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
     parser = _optimization_parser()
 
     workflow.run(parser.parse_args(["--structured-events"]), parser, settings)
@@ -1358,9 +1281,9 @@ def test_autolog_trace_configuration(monkeypatch, tmp_path, phase, trace_search)
         settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
         store = MemoryOptimizationStore()
         monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-        monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-        monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
         parser = _optimization_parser()
         argv = []
         if trace_search:
@@ -1396,7 +1319,7 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
 
     store.close = fail_close
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -1404,7 +1327,7 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
         if outcome == "budget_exhausted":
             raise workflow.BudgetExhaustedError("Optimization token budget exhausted")
 
-    monkeypatch.setattr(workflow, "_compile", compile_outcome)
+    monkeypatch.setattr(cli_mod, "_compile", compile_outcome)
     parser = _optimization_parser()
 
     with pytest.raises(RuntimeError, match="pool close failed"):
@@ -1542,7 +1465,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     active.write_bytes(program_envelope(incumbent))
     digest = digest_bytes(active.read_bytes())
     store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
-    monkeypatch.setattr(workflow, "build_lm", lambda _settings, _model_id, _role: lm)
+    monkeypatch.setattr(runner_mod, "build_lm", lambda _settings, _model_id, _role: lm)
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
 
     def unavailable_reflection(*_args, **_kwargs):
@@ -1553,7 +1476,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     train, dev, holdout = [
         [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
     ]
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
     factories = []
     late_entered = threading.Event()
     release_late = threading.Event()
@@ -1577,7 +1500,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         factories.append(config)
         return lambda *_args: Runtime()
 
-    monkeypatch.setattr(workflow, "build_isolated_engine_factory", factory)
+    monkeypatch.setattr(runner_mod, "build_isolated_engine_factory", factory)
     searched = []
     optimizer_kwargs = {}
 
@@ -1586,7 +1509,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         assert type(dspy.settings.adapter) is dspy.XMLAdapter
         return dspy.Prediction(score=1.0)
 
-    monkeypatch.setattr(workflow, "fleet_metric", judge_metric)
+    monkeypatch.setattr(runner_mod, "fleet_metric", judge_metric)
 
     class Optimizer:
         def __init__(self, **kwargs):
@@ -1675,7 +1598,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             assert late_entered.wait(timeout=10)
         return _evaluation()["candidate" if changed else "baseline"]["passes"][0]
 
-    monkeypatch.setattr(workflow, "score_stage", score)
+    monkeypatch.setattr(runner_mod, "score_stage", score)
     narration_budgets = []
     if cancel_after_validation == "optional_narration":
 
@@ -1685,7 +1608,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             narration_budgets.append(budget)
             return "Optional summary."
 
-        monkeypatch.setattr(workflow, "_comparison_rationale", narration)
+        monkeypatch.setattr(runner_mod, "_comparison_rationale", narration)
     if cancel_after_validation == "evidence_change":
         digest_calls = 0
 
@@ -1707,7 +1630,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             write_manifest(*args)
             (Path(optimizer_kwargs["log_dir"]) / "gepa.stop").touch()
 
-        monkeypatch.setattr(workflow, "write_manifest", write_then_cancel)
+        monkeypatch.setattr(runner_mod, "write_manifest", write_then_cancel)
     if cancel_after_validation == "validation_write_failure":
         original = store.update_optimization_run
 
@@ -1723,7 +1646,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             raise RuntimeError("private telemetry credential")
 
         if cancel_after_validation == "optional_stdout":
-            monkeypatch.setattr(workflow, "print", unavailable, raising=False)
+            monkeypatch.setattr(runner_mod, "print", unavailable, raising=False)
         elif cancel_after_validation == "optional_tracking_setup":
             monkeypatch.setattr(workflow.mlflow, "start_run", unavailable)
         else:
@@ -1790,7 +1713,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     if cancel_after_validation in {"interrupt_search", "interrupt_validation"}:
         store.records.clear()
         monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-        monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+        monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
         monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
         parser = _optimization_parser()
@@ -1890,16 +1813,10 @@ def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
         "optimization_runs.py",
         "observability.py",
         "session.py",
-        "store.py",
     } <= set(DIGEST_SOURCES)
-    # Docs, the API layer, the TUI, and the Store cannot change Turn behavior or scoring.
+    # Docs and presentation layers (api/, tui/) do not change Turn behavior or scoring.
     for excluded in ("api/", "tui/", "dspy_support.py"):
         assert not any(name.startswith(excluded) for name in DIGEST_SOURCES)
-
-
-def test_mlflow_example_loading_requires_a_store() -> None:
-    with pytest.raises(ValueError, match="store is required"):
-        dataset.load_examples_from_mlflow("experiment", store=None)
 
 
 def test_gepa_progress_callback_emits_only_observed_metric_call_counts(capsys) -> None:
@@ -2056,12 +1973,12 @@ def test_database_stop_fence_is_checked_at_safe_boundaries(tmp_path) -> None:
 
 def test_run_persists_cancellation_without_candidate(tmp_path, monkeypatch) -> None:
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     store = MemoryOptimizationStore()
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
     monkeypatch.setattr(
-        workflow,
+        cli_mod,
         "_compile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(workflow.OptimizationCancelledError("stop requested")),
     )
@@ -2107,7 +2024,7 @@ def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypa
     store.acquire_optimization_lease = acquire
     store.update_optimization_run = guarded_update
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -2115,7 +2032,7 @@ def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypa
         assert lease_held
         assert store.get_optimization_run(old["run_id"])["status"] == "interrupted"
 
-    monkeypatch.setattr(workflow, "_compile", fake_compile)
+    monkeypatch.setattr(cli_mod, "_compile", fake_compile)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     workflow.run(parser.parse_args([]), parser, settings)
@@ -2133,9 +2050,9 @@ def test_standalone_preserves_live_api_pending_launch(tmp_path, monkeypatch):
     store.optimization_owner_alive = lambda _owner_id: True
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kw: pytest.fail("must not start paid work"))
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kw: pytest.fail("must not start paid work"))
     monkeypatch.setattr(
-        workflow,
+        cli_mod,
         "configure_mlflow_observability",
         lambda *_args, **_kw: pytest.fail("must reject before tracing setup"),
     )
@@ -2161,14 +2078,14 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
         ]
     )
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
     def interrupt(*_args, **_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(workflow, "_compile", interrupt)
+    monkeypatch.setattr(cli_mod, "_compile", interrupt)
     parser = _optimization_parser()
     args = parser.parse_args(["--managed-run-id", run_id, "--managed-owner-id", "api-owner", "--structured-events"])
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
@@ -2197,11 +2114,11 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
             }
         ]
     )
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
     parser = _optimization_parser()
     workflow.run(
         parser.parse_args(
@@ -2232,13 +2149,13 @@ def test_run_records_failed_lifecycle_with_sanitized_details(tmp_path, monkeypat
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     monkeypatch.setattr(
-        workflow,
+        cli_mod,
         "_compile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("Authorization: Bearer secret-token; task payload: private-test-vector-917")
         ),
     )
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     parser = _optimization_parser()
 
@@ -2418,7 +2335,7 @@ def test_lifecycle_events_preserve_standalone_pipe_output(monkeypatch, managed):
     try:
         with monkeypatch.context() as patch:
             patch.setattr(sys, "stdout", SimpleNamespace(fileno=lambda: writer))
-            patch.setattr(workflow, "emit_event", events.append)
+            patch.setattr(progress_mod, "emit_event", events.append)
             for kind in ("started", "terminal"):
                 workflow._optional_event({"type": kind}, managed=managed)
     finally:
@@ -2431,7 +2348,7 @@ def test_optional_callback_emission_failure_is_bounded_and_does_not_stop(monkeyp
     def fail(_event):
         raise RuntimeError("private diagnostic credential")
 
-    monkeypatch.setattr(workflow, "emit_event", fail)
+    monkeypatch.setattr(progress_mod, "emit_event", fail)
     reporter = workflow.GEPAProgressReporter()
     for _ in range(3):
         reporter.on_budget_updated({"metric_calls_used": 1})
@@ -2498,7 +2415,7 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
         store.create_optimization_run("s1-run", "request", ExperimentOptions().model_dump(), "owner", managed=True)
         argv += ["--managed-run-id", "s1-run", "--managed-owner-id", "owner", "--structured-events"]
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     original = store.update_optimization_run
@@ -2524,7 +2441,7 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
         reporter.update(stage="finalization")
         reporter.update(candidate_path="candidate.json")
 
-    monkeypatch.setattr(workflow, "_compile", compile_stub)
+    monkeypatch.setattr(cli_mod, "_compile", compile_stub)
     with pytest.raises((workflow.OptimizationPersistenceError, RuntimeError)):
         workflow.run(parser.parse_args(argv), parser, settings)
     record = store.list_optimization_runs()[0]
@@ -2539,8 +2456,8 @@ def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch,
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -2548,7 +2465,7 @@ def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch,
         raise RuntimeError("private telemetry credential")
 
     if operation == "setup":
-        monkeypatch.setattr(workflow, "configure_mlflow_observability", fail)
+        monkeypatch.setattr(cli_mod, "configure_mlflow_observability", fail)
     else:
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", fail)
     parser = _optimization_parser()
@@ -2598,9 +2515,9 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
     lm = SimpleNamespace()
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
     monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
-    monkeypatch.setattr(workflow, "build_lm", lambda *_args: lm)
+    monkeypatch.setattr(runner_mod, "build_lm", lambda *_args: lm)
     splits = tuple([Example(name, name, critical=name == "holdout")] for name in ("train", "dev", "holdout"))
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kwargs: splits)
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_args, **_kwargs: splits)
 
     class ReachedTemplateError(Exception):
         pass
@@ -2608,7 +2525,7 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
     def stop_before_runtime(*_args, **_kwargs):
         raise ReachedTemplateError
 
-    monkeypatch.setattr(workflow, "DaytonaSandboxManager", stop_before_runtime)
+    monkeypatch.setattr(runner_mod, "DaytonaSandboxManager", stop_before_runtime)
     with pytest.raises(ReachedTemplateError):
         workflow._compile(
             SimpleNamespace(validation_ratio=0.2),
@@ -2681,14 +2598,14 @@ def test_token_budget_ignores_typesafe_decision_calls() -> None:
 def test_run_records_budget_exhausted_without_a_candidate_or_a_failure(tmp_path, monkeypatch, capsys) -> None:
     store = MemoryOptimizationStore()
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
     def exhausted(*_args, **_kwargs):
         raise workflow.BudgetExhaustedError("Optimization token budget exhausted")
 
-    monkeypatch.setattr(workflow, "_compile", exhausted)
+    monkeypatch.setattr(cli_mod, "_compile", exhausted)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     workflow.run(parser.parse_args(["--structured-events", "--max-total-tokens", "500"]), parser, settings)
@@ -2706,11 +2623,13 @@ def test_check_prints_readiness_and_exits_nonzero_without_any_live_call(tmp_path
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(
-        workflow, "load_examples", lambda *_args: [Example(f"t{index}", f"g{index % 2}") for index in range(3)]
+        cli_mod, "load_examples", lambda *_args: [Example(f"t{index}", f"g{index % 2}") for index in range(3)]
     )
     forbidden = pytest.fail
-    monkeypatch.setattr(workflow, "build_lm", forbidden)
-    monkeypatch.setattr(workflow, "DaytonaSandboxManager", forbidden)
+    monkeypatch.setattr(cli_mod, "build_lm", forbidden)
+    monkeypatch.setattr(cli_mod, "DaytonaSandboxManager", forbidden)
+    monkeypatch.setattr(runner_mod, "build_lm", forbidden)
+    monkeypatch.setattr(runner_mod, "DaytonaSandboxManager", forbidden)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     with pytest.raises(SystemExit) as exit_info:
@@ -2727,7 +2646,7 @@ def test_check_exits_zero_when_ready(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
     examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
-    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
+    monkeypatch.setattr(cli_mod, "load_examples", lambda *_args: examples)
     parser = _optimization_parser()
     workflow.run(
         parser.parse_args(["--check"]),
@@ -2750,8 +2669,9 @@ def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledg
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
     examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
-    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
-    monkeypatch.setattr(workflow, "build_lm", pytest.fail)
+    monkeypatch.setattr(cli_mod, "load_examples", lambda *_args: examples)
+    monkeypatch.setattr(cli_mod, "build_lm", pytest.fail)
+    monkeypatch.setattr(runner_mod, "build_lm", pytest.fail)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     with pytest.raises(SystemExit):
@@ -2780,7 +2700,7 @@ def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_compos
 
 def _patched_worker(monkeypatch, store) -> None:
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -2801,9 +2721,9 @@ def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tm
     _patched_worker(monkeypatch, store)
     splits = _split_results()
     for body in ("_replay", "_synthetic"):
-        monkeypatch.setattr(workflow, body, lambda *_args, **_kw: splits)
-    monkeypatch.setattr(workflow, "_rescore", lambda *_args, **_kw: (splits, 2))
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
+        monkeypatch.setattr(runner_mod, body, lambda *_args, **_kw: splits)
+    monkeypatch.setattr(runner_mod, "_rescore", lambda *_args, **_kw: (splits, 2))
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     workflow.run(parser.parse_args(["--evaluate", kind, "--structured-events"]), parser, settings)
@@ -2840,7 +2760,7 @@ def _guarded(tmp_path, monkeypatch, *, cap=None):
     args = SimpleNamespace(validation_ratio=0.35, threads=1, max_total_tokens=cap, evaluate="replay")
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: object())
     monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
-    return settings, store, args, workflow._JobGuard(args, settings, store, "run-1", "owner")
+    return settings, store, args, workflow.OptimizationStopPolicy(args, settings, store, "run-1", "owner")
 
 
 def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path, monkeypatch):
@@ -2852,12 +2772,12 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
         ]
         for name in ("train", "dev", "holdout")
     )
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
     template = object()
-    monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=template))
+    monkeypatch.setattr(runner_mod, "_serving_runtime", lambda _settings: SimpleNamespace(program=template))
     factories = []
     monkeypatch.setattr(
-        workflow, "build_isolated_engine_factory", lambda config, *_a, **_k: factories.append(config) or object()
+        runner_mod, "build_isolated_engine_factory", lambda config, *_a, **_k: factories.append(config) or object()
     )
     scored = []
 
@@ -2867,7 +2787,7 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
         critical = [1.0, 0.0] if examples[0] is holdout[0] else []
         return SimpleNamespace(scores=[1.0, 0.5], critical_scores=critical, errors=1)
 
-    monkeypatch.setattr(workflow, "score_split", score)
+    monkeypatch.setattr(runner_mod, "score_split", score)
     splits = workflow._replay(args, settings, store, settings.mlflow_target(), guard)
     assert scored == [train, dev, holdout]
     assert not factories[0].fleet_root_cache and not factories[0].fleet_sub_cache
@@ -2892,14 +2812,14 @@ def test_rescore_uses_the_optimization_split_and_counts_examples_without_a_label
         for index in range(8)
     ]
     train, dev, holdout = examples[:3], examples[3:6], examples[6:]
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
     synced_gold = {"tr-0", "tr-1", "tr-3", "tr-4", "tr-7"}  # tr-5: a PostgreSQL-only label (no MLflow gold yet)
     references = {f"turn-{index}": {"trace_id": f"tr-{index}"} for index in range(4, 8)} | {"turn-6": None}
     store = SimpleNamespace(turn_reference=lambda turn_id: references.get(turn_id))
     traces = {f"tr-{index}": SimpleNamespace(info=SimpleNamespace(trace_id=f"tr-{index}")) for index in range(8)}
     monkeypatch.setattr(workflow.mlflow, "get_trace", lambda trace_id, **_k: traces.get(trace_id))
     monkeypatch.setattr(
-        workflow,
+        runner_mod,
         "labels_of",
         lambda trace: {"review_status": "approved"} if trace.info.trace_id in synced_gold else {},
     )
@@ -2933,10 +2853,10 @@ def test_a_postgres_label_whose_trace_carries_gold_is_rescored_in_its_split(tmp_
 
     settings, _store, args, guard = _guarded(tmp_path, monkeypatch)
     example = dspy.Example(task="t", source_group="g", replay_turn_id="turn-1", provenance="postgres-session:s:turn-1")
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([example], [], []))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: ([example], [], []))
     trace = SimpleNamespace(info=SimpleNamespace(trace_id="tr-1"))
     monkeypatch.setattr(workflow.mlflow, "get_trace", lambda *_a, **_k: trace)
-    monkeypatch.setattr(workflow, "labels_of", lambda _trace: {"review_status": "approved"})
+    monkeypatch.setattr(runner_mod, "labels_of", lambda _trace: {"review_status": "approved"})
     frame = pd.DataFrame({"fleet_metric/value": [0.25], "expectations": [{}]})
     monkeypatch.setattr(evaluation, "score_evaluation_traces", lambda *_a, **_k: SimpleNamespace(result_df=frame))
     store = SimpleNamespace(turn_reference=lambda turn_id: {"trace_id": "tr-1"} if turn_id == "turn-1" else None)
@@ -2950,9 +2870,9 @@ def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_m
         dspy.Example(task=f"h{index}", source_group="h", critical=False, replay_turn_id=f"h{index}")
         for index in range(20)
     ]
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([], [], holdout))
-    monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=object()))
-    monkeypatch.setattr(workflow, "build_isolated_engine_factory", lambda *_a, **_k: object())
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: ([], [], holdout))
+    monkeypatch.setattr(runner_mod, "_serving_runtime", lambda _settings: SimpleNamespace(program=object()))
+    monkeypatch.setattr(runner_mod, "build_isolated_engine_factory", lambda *_a, **_k: object())
     sizes = []
 
     def score(_program, chunk, _metric, _threads):
@@ -2960,7 +2880,7 @@ def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_m
         guard.tokens.used += 60  # the second chunk crosses the cap
         return SimpleNamespace(scores=[1.0] * len(chunk), critical_scores=[], errors=0)
 
-    monkeypatch.setattr(workflow, "score_split", score)
+    monkeypatch.setattr(runner_mod, "score_split", score)
     with pytest.raises(workflow.BudgetExhaustedError):
         workflow._replay(args, settings, store, settings.mlflow_target(), guard)
     assert sizes == [8, 8]  # stopped before the third chunk of 4; never a whole split
@@ -2983,9 +2903,9 @@ def test_the_token_cap_applies_to_evaluate_jobs_and_keeps_the_partial_result_out
         guard.check_boundary()
         return _split_results()
 
-    monkeypatch.setattr(workflow, "_replay", body)
+    monkeypatch.setattr(runner_mod, "_replay", body)
     before = list(dspy.settings.callbacks)
-    monkeypatch.setattr(workflow, "_JobGuard", lambda *_a, **_k: guard)
+    monkeypatch.setattr(runner_mod, "OptimizationStopPolicy", lambda *_a, **_k: guard)
     with pytest.raises(workflow.BudgetExhaustedError):
         workflow._evaluate(args, settings, store, settings.mlflow_target(), "run-1", owner_id="owner")
     assert seen == {"calls": 1} and dspy.settings.callbacks == before
@@ -3098,7 +3018,7 @@ def test_a_failing_judge_scores_zero_never_none_and_fails_the_job_with_its_reaso
     def judge_down(*_args, **_kwargs):
         raise LMUnsupportedModelError('[deepseek/deepseek-v4.1-flash] Model "x" is not supported on this endpoint.')
 
-    monkeypatch.setattr(workflow, "fleet_metric", judge_down)
+    monkeypatch.setattr(runner_mod, "fleet_metric", judge_down)
     metric = workflow._judged_metric(settings, object(), guard.judge)
 
     def exception_safe(wrapped):  # the behaviour of mlflow.dspy.autolog._patch_metric
@@ -3135,6 +3055,25 @@ def test_failure_detail_names_provider_errors_but_never_quotes_evaluated_content
         "Optimization failed; exception details omitted."
     )
     assert len(workflow.failure_detail(LMUnsupportedModelError("m" * 5000))) < 400
+
+
+def test_optimization_stop_policy_callbacks_order_and_judge_reason(tmp_path, monkeypatch):
+    from dspy.utils.exceptions import LMUnsupportedModelError
+
+    settings, _store, _args, policy = _guarded(tmp_path, monkeypatch, cap=50)
+    assert settings.compiled_program_dir == str(tmp_path)
+    callbacks = policy.stop_callbacks(max_candidate_proposals=3)
+    assert len(callbacks) == 7
+    assert type(callbacks[0]).__name__ == "FileStopper"
+    assert type(callbacks[1]).__name__ == "_DatabaseStopper"
+    assert callbacks[2] == policy.reporter.should_stop
+    assert callbacks[3] == policy.cleanup.should_stop
+    assert callbacks[4] == policy.tokens.should_stop
+    assert callbacks[5] == policy.judge.should_stop
+    assert type(callbacks[6]).__name__ == "MaxCandidateProposalsStopper"
+    policy.judge.record(LMUnsupportedModelError('[deepseek/x] Model "x" is not supported'))
+    assert policy.judge.should_stop() is True
+    assert policy.judge.reason == "LMUnsupportedModelError: model is not supported on this endpoint"
 
 
 def test_the_gate_alone_rejects_a_skipped_validation_and_cannot_be_forged_into_passing():
@@ -3527,14 +3466,27 @@ def test_missing_selected_file_refuses_without_replacing_incumbent(tmp_path):
     assert engine(compiled_path=None).compiled.digest == ""  # explicit baseline, no silent fallback
 
 
-def test_loader_checks_bytes_even_when_size_and_mtime_match(tmp_path):
+def test_loader_skips_unchanged_stat_and_reloads_on_change(tmp_path, monkeypatch):
     path = tmp_path / "selected.json"
     path.write_bytes(program_envelope(tuned().program))
     runtime = engine(compiled_path=str(path))
-    original = path.stat()
-    path.write_bytes(path.read_bytes().replace(b"TUNED triage", b"OTHER triage"))
-    os.utime(path, ns=(original.st_atime_ns, original.st_mtime_ns))
+    reads = 0
+    original_read = runtime.compiled.read
+
+    def counting_read() -> bytes:
+        nonlocal reads
+        reads += 1
+        return original_read()
+
+    monkeypatch.setattr(runtime.compiled, "read", counting_read)
     runtime.compiled.reload_if_changed(runtime.program)
+    assert reads == 0
+
+    staged = tmp_path / "staged.json"
+    staged.write_bytes(original_read().replace(b"TUNED triage", b"OTHER triage"))
+    staged.replace(path)
+    runtime.compiled.reload_if_changed(runtime.program)
+    assert reads == 1
     assert runtime.program.routing.predict.signature.instructions == "OTHER triage"
 
 
@@ -4472,7 +4424,8 @@ def test_sigint_during_drain_waits_for_attempt_and_preserves_primary(monkeypatch
         "bundled_skills/example/SKILL.md",
         "bundled_skills/example/references/policy.txt",
         "models.py",
-        "config.py",
+        "config/settings.py",
+        "config/new_config.py",
         "contracts.py",
         "observability.py",
         "execution_evidence.py",
@@ -4480,7 +4433,8 @@ def test_sigint_during_drain_waits_for_attempt_and_preserves_primary(monkeypatch
         "workspace.py",
         "skills.py",
         "session.py",
-        "store.py",
+        "store/schema.py",
+        "store/new_store.py",
         "optimization_runs.py",
     ],
 )

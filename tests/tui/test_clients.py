@@ -22,7 +22,6 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from rich.console import Console
-from textual.widgets import Button, Input
 
 import fleet_rlm.tui.app as app
 import fleet_rlm.tui.commands as commands
@@ -30,14 +29,11 @@ import fleet_rlm.tui.render as render
 import fleet_rlm.tui.widgets as widgets
 from fleet_rlm import cli, launcher
 from fleet_rlm.api import app as api
-from fleet_rlm.api.app import create_app
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.launcher import LaunchError, LaunchPlan, ManagedProcess, plan_launch
-from fleet_rlm.setup import SECTIONS, SetupService
 from fleet_rlm.tui import local_paths, mentions, web, web_client
 from fleet_rlm.tui.app import FleetTextualApp, _PromptInput
 from fleet_rlm.tui.commands import COMMANDS, SessionState
-from fleet_rlm.tui.setup import SetupApp, run_setup
 
 # Consolidated from tui/test_tui.py
 
@@ -3316,179 +3312,6 @@ def test_web_client_session_and_mlflow_configuration(monkeypatch, arguments, exp
     assert state.mlflow_settings is settings
 
 
-# Local setup UI
-
-
-@pytest.fixture
-def setup_client(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    for section in SECTIONS:
-        monkeypatch.setattr(
-            SetupService, "check_" + section, lambda _self, _settings: {"status": "ready", "message": "Verified"}
-        )
-    app = create_app(setup_mode=True, setup_token="test-token", project_dir=tmp_path)
-    with TestClient(app, client=("127.0.0.1", 32100), headers={"Authorization": "Bearer test-token"}) as client:
-        yield client
-
-
-async def idle(app, pilot):
-    for _ in range(100):
-        await pilot.pause(0.03)
-        if not app._working:
-            return
-    pytest.fail("Setup operation did not finish")
-
-
-def _block_daytona(monkeypatch):
-    monkeypatch.setattr(
-        SetupService,
-        "check_daytona",
-        lambda _self, _settings: {
-            "status": "blocked",
-            "message": "Snapshot missing",
-            "state": "missing",
-        },
-    )
-
-
-def running_setup(app, size):
-    return app.run_test(size=size)
-
-
-@pytest.mark.asyncio
-async def test_checklist_masks_secrets_and_saves_through_fastapi(setup_client, tmp_path):
-    status = setup_client.get("/setup/status").json()
-    app = SetupApp(setup_client, status)
-    async with running_setup(app, (140, 55)) as pilot:
-        await idle(app, pilot)
-        field = app.query_one("#DATABRICKS_TOKEN", Input)
-        assert field.password
-        field.value = "user-entered-secret"
-        app.query_one("#save", Button).press()
-        await idle(app, pilot)
-        assert "user-entered-secret" in (tmp_path / ".env").read_text()
-        assert "user-entered-secret" not in str(app.query_one("#progress").lines)
-        assert not (tmp_path / ".fleet/history").exists()
-        assert not app.status["dirty"]
-
-
-@pytest.mark.asyncio
-async def test_automatic_healthy_launch_requests_apply_and_returns_true(setup_client):
-    app = SetupApp(setup_client, setup_client.get("/setup/status").json(), automatic=True)
-    async with running_setup(app, (140, 55)) as pilot:
-        for _ in range(100):
-            await pilot.pause(0.03)
-            if app.return_value is True:
-                break
-        assert app.return_value is True
-        assert setup_client.app.state.setup_applying
-
-
-@pytest.mark.asyncio
-async def test_provider_mutation_requires_the_explicit_confirmation(setup_client, monkeypatch):
-    called = []
-    _block_daytona(monkeypatch)
-
-    def built(_self, _operation):
-        called.append(True)
-        return {"id": "snapshot-id", "name": "versioned-snapshot"}
-
-    monkeypatch.setattr(SetupService, "build", built)
-    app = SetupApp(setup_client, setup_client.get("/setup/status").json())
-    async with running_setup(app, (140, 55)) as pilot:
-        await idle(app, pilot)
-        assert called == []
-        app.query_one("#build", Button).press()
-        await pilot.pause()
-        app.screen.query_one("#cancel", Button).press()
-        await pilot.pause()
-        assert called == []
-        app.query_one("#build", Button).press()
-        await pilot.pause()
-        app.screen.query_one("#confirm", Button).press()
-        await idle(app, pilot)
-        assert called == [True]
-        assert "FLEET_DAYTONA_VOLUME_ID" not in setup_client.app.state.setup_service.draft
-
-
-def test_noninteractive_setup_reports_blockers_without_consuming_stdin(setup_client, monkeypatch):
-    monkeypatch.setattr(
-        SetupService, "check_daytona", lambda _self, _settings: {"status": "blocked", "message": "Snapshot missing"}
-    )
-    monkeypatch.setattr("fleet_rlm.tui.setup.sys.stdin", SimpleNamespace(isatty=lambda: False))
-    stream = io.StringIO()
-    assert not run_setup(setup_client, console=Console(file=stream, force_terminal=False))
-    assert "Snapshot missing" in stream.getvalue()
-
-
-def test_noninteractive_setup_applies_when_only_model_discovery_warns(setup_client, monkeypatch):
-    monkeypatch.setattr(
-        SetupService,
-        "check_models",
-        lambda _self, _settings: {"status": "warning", "message": "Model discovery is unavailable."},
-    )
-    monkeypatch.setattr("fleet_rlm.tui.setup.sys.stdin", SimpleNamespace(isatty=lambda: False))
-    stream = io.StringIO()
-
-    assert run_setup(setup_client, console=Console(file=stream, force_terminal=False))
-    assert "models: Model discovery is unavailable." in stream.getvalue()
-    assert setup_client.app.state.setup_applying
-
-
-@pytest.mark.asyncio
-async def test_small_terminal_controls_and_keyboard_build_action(setup_client, monkeypatch):
-    _block_daytona(monkeypatch)
-    app = SetupApp(setup_client, setup_client.get("/setup/status").json())
-    async with running_setup(app, (80, 24)) as pilot:
-        await idle(app, pilot)
-        for name in ("save", "verify", "reconnect", "apply", "leave", "discard"):
-            region = app.query_one("#" + name, Button).region
-            assert region.right <= 80 and region.bottom <= 24
-        app.query_one("#DATABRICKS_HOST", Input).focus()
-        await pilot.press("alt+b")
-        await pilot.pause()
-        assert app.screen.query_one("#confirm", Button)
-        app.screen.query_one("#cancel", Button).press()
-
-
-def test_normal_chat_client_does_not_carry_the_setup_capability(monkeypatch):
-    import httpx
-
-    from fleet_rlm.tui import app as chat
-
-    captured = []
-    client_class = httpx.Client
-
-    def client(**kwargs):
-        captured.append(kwargs)
-        return client_class(**kwargs, transport=httpx.MockTransport(lambda _request: httpx.Response(200)))
-
-    monkeypatch.setattr(chat.httpx, "Client", client)
-    monkeypatch.setattr(chat.sys, "stdin", SimpleNamespace(isatty=lambda: False))
-    monkeypatch.setattr(chat.CONSOLE, "input", lambda *_a, **_kw: "/exit")
-    chat.run_interactive_cli("http://server.test", "setup-session", setup_token="private-capability")
-    assert "private-capability" not in repr(captured)
-
-
-@pytest.mark.asyncio
-async def test_unsaved_inputs_cannot_build_in_the_previous_organization(setup_client, monkeypatch):
-    _block_daytona(monkeypatch)
-    app = SetupApp(setup_client, setup_client.get("/setup/status").json())
-    async with running_setup(app, (100, 40)) as pilot:
-        await idle(app, pilot)
-        assert not app.query_one("#build", Button).disabled
-        field = app.query_one("#FLEET_DAYTONA_ORG_ID", Input)
-        original = field.value
-        field.value = "new-organization"
-        await pilot.pause()
-        for name in ("build", "activate", "model-test", "list-volumes", "verify"):
-            assert app.query_one("#" + name, Button).disabled
-        assert not app.query_one("#save", Button).disabled
-        field.value = original
-        await pilot.pause()
-        assert not app.query_one("#build", Button).disabled
-
-
 # Consolidated from lite/test_cli.py
 
 
@@ -3847,33 +3670,21 @@ def test_web_cli_serves_textual_client_after_verifying_api_destination(monkeypat
     assert calls["web"]["host"] == "127.0.0.1"
     assert calls["web"]["port"] == 8765
     assert calls["web"]["session_id"] == "browser-session"
-    assert "FLEET_SETUP_TOKEN" not in plan.api_env
 
 
-def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypatch) -> None:
+def test_web_starts_owned_services_when_no_external_url_is_given(monkeypatch) -> None:
     from contextlib import nullcontext
 
     settings = FleetSettings(_env_file=None)
-    calls = {}
+    calls: dict[str, Any] = {}
     plan = cli.launcher.LaunchPlan(
         api_url="http://127.0.0.1:8000",
         start_api=True,
         start_mlflow=True,
         mlflow_url="http://127.0.0.1:5001",
-        api_env={"FLEET_MLFLOW_LOCAL_PORT": "5001"},
     )
-    monkeypatch.delenv("FLEET_SETUP_TOKEN", raising=False)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
-    monkeypatch.setattr(cli.get_settings, "cache_clear", lambda: None, raising=False)
     monkeypatch.setattr(cli.launcher, "plan_launch", lambda **_kwargs: plan)
-    monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda *_args: False)
-
-    def complete_setup(_args, _backend, token):
-        calls["setup_token"] = token
-        return True
-
-    monkeypatch.setattr(cli, "_onboard", complete_setup)
-    monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
 
     def running_services(selected_plan, **kwargs):
         calls["serving_plan"] = selected_plan
@@ -3886,12 +3697,8 @@ def test_web_owned_api_uses_private_operator_capability_only_for_setup(monkeypat
 
     cli.main(["web", "--host", "127.0.0.1", "--port", "8765"])
 
-    token = plan.api_env["FLEET_SETUP_TOKEN"]
-    assert token and calls["setup_token"] == token
-    assert calls["serving_plan"].api_env["FLEET_SETUP_TOKEN"] == token
-    assert plan.api_env["FLEET_SETUP_PROJECT_DIR"]
-    assert "FLEET_SETUP_DERIVED_ENV" in plan.api_env
-    assert "setup_token" not in calls["web"]
+    assert calls["serving_plan"] is plan
+    assert calls["web"]["api_url"] == "http://127.0.0.1:8000"
 
 
 def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(monkeypatch, tmp_path) -> None:
@@ -3984,11 +3791,11 @@ def test_web_cli_requires_authentication_before_starting_services(monkeypatch, c
 
 
 @pytest.mark.parametrize("command", ["cli", "web"])
-def test_inherited_databricks_port_is_rejected_before_onboarding(monkeypatch, capsys, command):
+def test_inherited_databricks_port_is_rejected_before_launch(monkeypatch, capsys, command):
     settings = FleetSettings(_env_file=None, mlflow_mode="databricks")
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
-    monkeypatch.setattr(cli, "_onboard", lambda *_args: pytest.fail("invalid port must not apply onboarding"))
+    monkeypatch.setattr(cli.launcher, "plan_launch", lambda **_kwargs: pytest.fail("invalid port must not launch"))
     with pytest.raises(SystemExit) as error:
         cli.main([command, "--mlflow-port", "5001"])
     assert error.value.code == 2
@@ -4347,7 +4154,6 @@ def test_a_failed_api_start_still_stops_mlflow(monkeypatch: pytest.MonkeyPatch) 
 
 def _stub_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(cli, "_onboard", lambda *_args: True)
     monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)
 
     class Services:
@@ -4375,18 +4181,12 @@ def test_fleet_cli_starts_services_then_runs_the_client_against_the_api(monkeypa
     assert seen["ran"]["base_url"] == plan.api_url
     assert seen["ran"]["session_id"] == "s1"
     assert seen["ran"]["settings"].mlflow_mode == "local"
-    assert seen["ran"]["setup_token"] == plan.api_env["FLEET_SETUP_TOKEN"]
-    assert seen["ran"]["setup_token"]
-    assert plan.api_env["FLEET_SETUP_PROJECT_DIR"]
-    assert "FLEET_SETUP_DERIVED_ENV" in plan.api_env
 
 
 def test_fleet_cli_with_an_explicit_url_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _stub_cli(monkeypatch)
     cli.main(["cli", "--session", "s1", "--url", "http://remote.test:9000"])
     assert not seen["plan"].start_api and seen["ran"]["base_url"] == "http://remote.test:9000"
-    assert seen["ran"]["setup_token"] == ""
-    assert "FLEET_SETUP_TOKEN" not in seen["plan"].api_env
 
 
 @pytest.mark.parametrize("during_startup", [False, True])
@@ -4421,7 +4221,6 @@ def test_fleet_cli_reports_a_startup_failure_and_exits_nonzero(monkeypatch: pyte
         def __exit__(self, *_exc: Any) -> None:
             return None
 
-    monkeypatch.setattr(cli, "_onboard", lambda *_args: True)
     monkeypatch.setattr(cli.launcher, "running_services", Failing)
     monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
     monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: False)
@@ -4431,161 +4230,30 @@ def test_fleet_cli_reports_a_startup_failure_and_exits_nonzero(monkeypatch: pyte
     assert exit_info.value.code == 1
 
 
-def test_setup_restart_preserves_session_and_explicit_startup_timeout(monkeypatch):
-    _stub_cli(monkeypatch)
-    services = launcher.running_services
-    timeouts, sessions = [], []
-    results = iter(["setup", None])
-
-    def start(plan, **kwargs):
-        timeouts.append(kwargs["startup_timeout"])
-        return services(plan, **kwargs)
-
-    def run(**kwargs):
-        sessions.append(kwargs["session_id"])
-        return next(results)
-
-    monkeypatch.setattr(launcher, "running_services", start)
-    monkeypatch.setattr(cli, "run_interactive_cli", run)
-    monkeypatch.setattr("fleet_rlm.tui.setup.run_setup", lambda *_args, **_kw: True)
-    cli.main(["cli", "--session", "same-session", "--startup-timeout", "360"])
-    assert sessions == ["same-session", "same-session"]
-    assert timeouts == [360.0, 360.0]
-
-
-def _fake_drain_client(monkeypatch: pytest.MonkeyPatch, events: list[str], states: list[dict[str, Any]]):
-    class FakeClient:
-        def __init__(self, *, base_url: str, headers: dict[str, str], timeout: Any) -> None:
-            self.base_url = base_url
-            events.append(f"client {base_url}")
-            events.append(f"auth {headers.get('Authorization')}")
-            events.append(f"timeout {timeout.connect}")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_exc: Any) -> None:
-            return None
-
-        def post(self, path: str):
-            events.append(f"POST {path}")
-            return httpx.Response(
-                200,
-                json=states.pop(0),
-                request=httpx.Request("POST", self.base_url + path),
-            )
-
-        def get(self, path: str):
-            events.append(f"GET {path}")
-            value = states.pop(0)
-            if isinstance(value, Exception):
-                raise value
-            return httpx.Response(200, json=value, request=httpx.Request("GET", self.base_url + path))
-
-    monkeypatch.setattr(launcher.httpx, "Client", FakeClient)
-
-
-def test_drain_fences_admission_before_polling_and_waits_until_idle(monkeypatch) -> None:
-    events: list[str] = []
-    states = [
-        {
-            "accepting": False,
-            "busy": True,
-            "experiments": [{"run_id": "sess_run", "status": "running", "stage": "search"}],
-        },
-        {
-            "accepting": False,
-            "busy": True,
-            "experiments": [{"run_id": "sess_run", "status": "running", "stage": "validation"}],
-        },
-        {"accepting": False, "busy": False, "experiments": []},
-    ]
-    _fake_drain_client(monkeypatch, events, states)
-    monkeypatch.setattr(launcher.time, "sleep", lambda seconds: events.append(f"sleep {seconds}"))
-    plan = LaunchPlan(api_url="http://127.0.0.1:8000", api_env={"FLEET_SETUP_TOKEN": "operator-token"})
-    messages: list[str] = []
-
-    launcher._drain_experiments(plan, messages.append)
-
-    assert events == [
-        "client http://127.0.0.1:8000",
-        "auth Bearer operator-token",
-        "timeout 2.0",
-        "POST /setup/experiments/drain",
-        "sleep 1.0",
-        "GET /setup/experiments/status",
-        "sleep 1.0",
-        "GET /setup/experiments/status",
-    ]
-    assert any("sess_run: search" in message for message in messages)
-    assert any("sess_run: validation" in message for message in messages)
-    assert not any("idle" in message.lower() or "done" in message.lower() for message in messages)
-
-
-def test_owned_service_shutdown_drains_before_api_then_mlflow(monkeypatch) -> None:
+def test_owned_service_shutdown_stops_api_before_mlflow(monkeypatch) -> None:
     events = _patch_fake_processes(monkeypatch)
-    states = [
-        {"accepting": False, "busy": True, "experiments": [{"run_id": "sess_wait", "status": "running"}]},
-        {"accepting": False, "busy": False, "experiments": []},
-    ]
-    _fake_drain_client(monkeypatch, events, states)
-    monkeypatch.setattr(launcher.time, "sleep", lambda seconds: events.append(f"sleep {seconds}"))
     plan = LaunchPlan(
         api_url="http://127.0.0.1:8000",
         start_api=True,
         start_mlflow=True,
         mlflow_url="http://127.0.0.1:5001",
-        api_env={"FLEET_SETUP_TOKEN": "private-operator"},
     )
 
     _run_services(plan)
 
-    drain_index = events.index("POST /setup/experiments/drain")
     api_stop_index = events.index("stop api")
     mlflow_stop_index = events.index("stop mlflow")
-    assert drain_index < api_stop_index < mlflow_stop_index
+    assert api_stop_index < mlflow_stop_index
     assert events[api_stop_index + 1] == "grace api None"
     assert events[mlflow_stop_index + 1] == "grace mlflow 10.0"
 
 
-def test_reused_api_shutdown_does_not_drain_or_stop_remote_services(monkeypatch) -> None:
-    monkeypatch.setattr(
-        launcher.httpx,
-        "Client",
-        lambda **_kwargs: pytest.fail("reused remote API must not be drained"),
-    )
+def test_reused_api_shutdown_does_not_stop_remote_services(monkeypatch) -> None:
     events = _patch_fake_processes(monkeypatch)
 
     _run_services(LaunchPlan(api_url="http://remote.test:8000"))
 
     assert events == []
-
-
-def test_drain_status_failure_logs_graceful_wait_without_claiming_idle(monkeypatch) -> None:
-    events = _patch_fake_processes(monkeypatch)
-    request = httpx.Request("GET", "http://127.0.0.1:8000/setup/experiments/status")
-    states = [
-        {"accepting": False, "busy": True, "experiments": [{"run_id": "sess_unknown", "status": "running"}]},
-        httpx.ConnectError("server unavailable", request=request),
-    ]
-    _fake_drain_client(monkeypatch, events, states)
-    monkeypatch.setattr(launcher.time, "sleep", lambda seconds: events.append(f"sleep {seconds}"))
-    messages = _run_services(
-        LaunchPlan(
-            api_url="http://127.0.0.1:8000",
-            start_api=True,
-            start_mlflow=True,
-            mlflow_url="http://127.0.0.1:5001",
-            api_env={"FLEET_SETUP_TOKEN": "private-operator"},
-        )
-    )
-
-    assert any(
-        "Could not observe experiment drain; waiting for API graceful shutdown." in message for message in messages
-    )
-    assert events.index("POST /setup/experiments/drain") < events.index("stop api") < events.index("stop mlflow")
-    assert events[events.index("stop api") + 1] == "grace api None"
-    assert events[events.index("stop mlflow") + 1] == "grace mlflow 10.0"
 
 
 def test_managed_process_stop_accepts_unbounded_grace_without_force_kill(monkeypatch, tmp_path: Path) -> None:
@@ -4715,7 +4383,6 @@ def test_cli_selects_databricks_and_propagates_the_profile(monkeypatch, argument
     from contextlib import nullcontext
 
     seen = {}
-    monkeypatch.setattr(cli, "_onboard", lambda *_args: True)
     monkeypatch.setenv("DATABRICKS_HOST", "https://workspace.invalid")
     monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACKING_URI", "databricks")
     monkeypatch.setattr(launcher, "api_is_healthy", lambda _url: False)
@@ -5068,17 +4735,106 @@ def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination
 
 
 @pytest.mark.parametrize("command", ["cli", "web"])
-def test_invalid_configured_backend_still_opens_interactive_setup(tmp_path, monkeypatch, command):
+def test_invalid_configured_backend_exits_with_doctor_hint(tmp_path, monkeypatch, capsys, command):
     monkeypatch.chdir(tmp_path)
     config = tmp_path / "fleet.toml"
     config.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
     monkeypatch.setenv("FLEET_CONFIG", str(config))
     monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", "")
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
-    seen = []
-    monkeypatch.setattr(cli, "_onboard", lambda args, backend, _token: seen.append((args.command, backend)) or False)
-    cli.main([command])
-    assert seen == [(command, "local")]
+    with pytest.raises(SystemExit) as error:
+        cli.main([command])
+    assert error.value.code == 2
+    assert "fleet doctor" in capsys.readouterr().err
+
+
+def test_doctor_command_reports_config_and_check_status(tmp_path, monkeypatch):
+    import fleet_rlm.doctor as doctor
+
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "fleet.toml"
+    config.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
+    monkeypatch.setenv("FLEET_CONFIG", str(config))
+    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", "")
+    monkeypatch.setattr(doctor, "CONSOLE", Console(file=io.StringIO(), force_terminal=False), raising=False)
+
+    stream = io.StringIO()
+    monkeypatch.setattr(cli, "_CONSOLE", Console(file=stream, force_terminal=False))
+    with pytest.raises(SystemExit) as bad_cfg:
+        cli.main(["doctor"])
+    assert bad_cfg.value.code == 1
+    assert "blocked" in stream.getvalue()
+
+    monkeypatch.delenv("FLEET_CONFIG", raising=False)
+    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", raising=False)
+    seen_probes: list[bool] = []
+    monkeypatch.setattr(
+        doctor,
+        "check_models",
+        lambda _s, *, probe_models=False: seen_probes.append(probe_models) or {"status": "ready", "message": "ok"},
+    )
+    monkeypatch.setattr(doctor, "check_database", lambda _s: {"status": "ready", "message": "ok"})
+    monkeypatch.setattr(doctor, "check_mlflow", lambda _s: {"status": "ready", "message": "ok"})
+    monkeypatch.setattr(doctor, "check_daytona", lambda _s: {"status": "ready", "message": "ok"})
+
+    ready_stream = io.StringIO()
+    monkeypatch.setattr(cli, "_CONSOLE", Console(file=ready_stream, force_terminal=False))
+    with pytest.raises(SystemExit) as ok:
+        cli.main(["doctor", "--probe-models"])
+    assert ok.value.code == 0
+    assert seen_probes == [True]
+
+    monkeypatch.setattr(doctor, "check_daytona", lambda _s: {"status": "blocked", "message": "Snapshot missing"})
+    with pytest.raises(SystemExit) as blocked:
+        cli.main(["doctor"])
+    assert blocked.value.code == 1
+
+
+def test_snapshot_cli_commands_redact_secrets_and_route_actions(monkeypatch):
+    import fleet_rlm.doctor as doctor
+
+    settings = FleetSettings(
+        _env_file=None,
+        fleet_daytona_api_key="daytona-secret-xyz",
+        fleet_daytona_org_id="org-1",
+    )
+    monkeypatch.setattr(cli, "get_settings", lambda *_a: settings)
+    stream = io.StringIO()
+    monkeypatch.setattr(cli, "_CONSOLE", Console(file=stream, force_terminal=False))
+
+    monkeypatch.setattr(doctor, "_daytona_client", lambda _s: SimpleNamespace(snapshot=object()))
+    monkeypatch.setattr(
+        doctor,
+        "preflight",
+        lambda *_a, **_kw: SimpleNamespace(name="fleet-rlm-python313-v15", id="snap-1"),
+    )
+    with pytest.raises(SystemExit) as check_exit:
+        cli.main(["snapshot", "check"])
+    assert check_exit.value.code == 0
+    assert "Snapshot ready: fleet-rlm-python313-v15 (snap-1)" in stream.getvalue()
+
+    def fake_build(*, api_key, org_id, on_logs):
+        assert api_key == "daytona-secret-xyz" and org_id == "org-1"
+        on_logs("building with key daytona-secret-xyz\n")
+        return SimpleNamespace(name="fleet-rlm-python313-v15", id="snap-2")
+
+    monkeypatch.setattr(doctor, "build_snapshot", fake_build)
+    with pytest.raises(SystemExit) as build_exit:
+        cli.main(["snapshot", "build"])
+    assert build_exit.value.code == 0
+    out = stream.getvalue()
+    assert "daytona-secret-xyz" not in out
+    assert "[redacted]" in out
+    assert "Snapshot built: fleet-rlm-python313-v15 (snap-2)" in out
+
+    monkeypatch.setattr(
+        doctor,
+        "activate_snapshot",
+        lambda **_kw: SimpleNamespace(name="fleet-rlm-python313-v15", id="snap-2"),
+    )
+    with pytest.raises(SystemExit) as activate_exit:
+        cli.main(["snapshot", "activate"])
+    assert activate_exit.value.code == 0
+    assert "Snapshot activated: fleet-rlm-python313-v15 (snap-2)" in stream.getvalue()
 
 
 def test_toml_backend_is_used_by_standalone_commands_and_explicit_flag_wins(tmp_path, monkeypatch):

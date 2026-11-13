@@ -34,7 +34,6 @@ VALIDATION_PASSES = 3
 # Execution, review selection, and scoring affect approval; presentation-only code does not.
 DIGEST_SOURCES = (
     "models.py",
-    "config.py",
     "contracts.py",
     "execution_evidence.py",
     "optimization_runs.py",
@@ -43,7 +42,6 @@ DIGEST_SOURCES = (
     "workspace.py",
     "skills.py",
     "session.py",
-    "store.py",
 )
 
 
@@ -51,6 +49,8 @@ def optimization_code_digest() -> str:
     """Hash the runtime/evaluation source that determines candidate behavior and scoring."""
     package = Path(__file__).parents[1]
     paths = {package / name for name in DIGEST_SOURCES}
+    paths |= set((package / "config").rglob("*.py"))
+    paths |= set((package / "store").rglob("*.py"))
     paths |= set((package / "engine").rglob("*.py"))
     paths |= set((package / "optimize").rglob("*.py"))
     paths |= set((package / "sandbox").rglob("*.py"))

@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from fleet_rlm.api.deps import LOCKED, LockedRuntime, Registry, Runtime, Settings, StoreDep, session_lock, translate
+from fleet_rlm.api.deps import (
+    LOCKED,
+    LockedRuntime,
+    Registry,
+    Runtime,
+    Settings,
+    StoreDep,
+    get_runtime,
+    session_lock,
+    translate,
+)
 from fleet_rlm.api.schemas import (
     Catalog,
     ContextRequest,
@@ -33,8 +43,8 @@ from fleet_rlm.session import runtime_configuration
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 router = APIRouter(tags=["sessions"])
-memory_router = APIRouter(tags=["memory"])
-skills_router = APIRouter(tags=["skills"])
+memory_router = APIRouter(prefix="/sessions/{session_id}/memory", tags=["memory"])
+skills_router = APIRouter(prefix="/skills", tags=["skills"])
 
 
 @router.get("/sessions")
@@ -74,25 +84,52 @@ def evict_session(session_id: str, registry: Registry) -> Deleted:
 
 
 @router.get("/sessions/{session_id}/config")
-def session_config(runtime: Runtime, settings: Settings) -> SessionConfig:
-    """Describe a Session's mode, models, context, configuration, and limits."""
-    manager = runtime.sandbox_mgr
-    return SessionConfig(
-        mode=runtime.engine.execution_mode,
-        models={
-            "root": runtime.engine.root_lm.model,
-            "sub": runtime.engine.sub_lm.model,
-        },
-        context=runtime.context.to_descriptor() if runtime.context else None,
-        configuration=runtime_configuration(settings, runtime),
-        limits=Limits(
-            lm_calls=manager.max_llm_calls,
-            depth=manager.max_depth,
-            children=manager.max_children,
-            active_children=manager.max_active_children,
-            timeout_seconds=manager.turn_timeout_seconds,
-        ),
-    )
+def session_config(request: Request, session_id: str, settings: Settings, registry: Registry) -> SessionConfig:
+    """Describe a Session's mode, models, context, configuration, and limits without claiming a runtime."""
+    with translate("Session configuration is unavailable", invalid="Invalid Session ID"):
+        session_id = validate_session_id(session_id)
+        peek = getattr(registry, "peek", None)
+        runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
+        if runtime is None and request.app.state.store is None:
+            runtime = get_runtime(registry, session_id)
+        if runtime is not None:
+            manager = runtime.sandbox_mgr
+            return SessionConfig(
+                mode=runtime.engine.execution_mode,
+                models={
+                    "root": runtime.engine.root_lm.model,
+                    "sub": runtime.engine.sub_lm.model,
+                },
+                context=runtime.context.to_descriptor() if runtime.context else None,
+                configuration=runtime_configuration(settings, runtime),
+                limits=Limits(
+                    lm_calls=manager.max_llm_calls,
+                    depth=manager.max_depth,
+                    children=manager.max_children,
+                    active_children=manager.max_active_children,
+                    timeout_seconds=manager.turn_timeout_seconds,
+                ),
+            )
+        saved = request.app.state.store.runtime_settings(session_id)
+        effective = settings.for_session(saved) if ("mode" in saved or saved.get("models")) else settings
+        raw_context = saved.get("context")
+        context = WorkspaceDataset(**raw_context).to_descriptor() if isinstance(raw_context, dict) else None
+        return SessionConfig(
+            mode=effective.execution_mode,
+            models={
+                "root": effective.resolved_model("root").model,
+                "sub": effective.resolved_model("sub").model,
+            },
+            context=context,
+            configuration=runtime_configuration(settings, saved_settings=saved),
+            limits=Limits(
+                lm_calls=settings.max_llm_calls_per_turn,
+                depth=settings.max_agent_depth,
+                children=settings.max_child_sandboxes,
+                active_children=settings.max_active_children,
+                timeout_seconds=settings.turn_timeout_seconds,
+            ),
+        )
 
 
 @router.put("/sessions/{session_id}/model", responses=LOCKED)
@@ -115,9 +152,19 @@ def select_model(session_id: str, body: ModelRequest, runtime: Runtime, registry
 
 
 @router.get("/sessions/{session_id}/mode")
-def get_mode(runtime: Runtime) -> Mode:
-    """Return a Session's current execution mode."""
-    return Mode(mode=runtime.engine.execution_mode)
+def get_mode(request: Request, session_id: str, settings: Settings, registry: Registry) -> Mode:
+    """Return a Session's current execution mode without claiming a runtime."""
+    with translate("Session mode is unavailable", invalid="Invalid Session ID"):
+        session_id = validate_session_id(session_id)
+        peek = getattr(registry, "peek", None)
+        runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
+        if runtime is None and request.app.state.store is None:
+            runtime = get_runtime(registry, session_id)
+        if runtime is not None:
+            return Mode(mode=runtime.engine.execution_mode)
+        saved = request.app.state.store.runtime_settings(session_id)
+        effective = settings.for_session(saved) if ("mode" in saved or saved.get("models")) else settings
+        return Mode(mode=effective.execution_mode)
 
 
 @router.put("/sessions/{session_id}/mode", responses=LOCKED)
@@ -201,17 +248,27 @@ def clear_context(session_id: str, runtime: LockedRuntime) -> Status:
     return Status(status="cleared")
 
 
-@memory_router.get("/sessions/{session_id}/memory")
+@memory_router.get("")
 def list_memory(
-    runtime: Runtime,
+    request: Request,
+    session_id: str,
+    registry: Registry,
     q: Annotated[str, Query(description="Optional search query to filter memories")] = "",
 ) -> Memories:
-    """List a Session's memory entries that match an optional query."""
-    with translate("Session memory is unavailable"):
-        return Memories(memories=runtime.memories(q))
+    """List a Session's memory entries that match an optional query without claiming a runtime."""
+    with translate("Session memory is unavailable", invalid="Invalid Session ID"):
+        session_id = validate_session_id(session_id)
+        peek = getattr(registry, "peek", None)
+        runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
+        if runtime is None and request.app.state.store is None:
+            runtime = get_runtime(registry, session_id)
+        if runtime is not None:
+            return Memories(memories=runtime.memories(q))
+        search = " OR ".join(q[:2000].split()[:32])
+        return Memories(memories=request.app.state.store.memories(session_id, search, reviewed_only=False))
 
 
-@memory_router.put("/sessions/{session_id}/memory/{memory_id}", responses=LOCKED)
+@memory_router.put("/{memory_id}", responses=LOCKED)
 def put_memory(memory_id: str, body: MemoryRequest, runtime: LockedRuntime) -> MemorySaved:
     """Save one memory entry under the given ID."""
     with translate("Session memory is unavailable", invalid="Invalid memory"):
@@ -219,7 +276,7 @@ def put_memory(memory_id: str, body: MemoryRequest, runtime: LockedRuntime) -> M
     return MemorySaved(memory_id=memory_id)
 
 
-@memory_router.delete("/sessions/{session_id}/memory/{memory_id}", responses=LOCKED)
+@memory_router.delete("/{memory_id}", responses=LOCKED)
 def remove_memory(memory_id: str, runtime: LockedRuntime) -> Deleted:
     """Delete one memory entry by ID."""
     with translate("Session memory is unavailable", invalid="Invalid memory ID"):
@@ -227,7 +284,7 @@ def remove_memory(memory_id: str, runtime: LockedRuntime) -> Deleted:
     return Deleted(deleted=memory_id)
 
 
-@skills_router.get("/skills", responses=LOCKED)
+@skills_router.get("", responses=LOCKED)
 def get_skills_catalog(runtime: LockedRuntime) -> Catalog:
     """Sync local Skills to the Session's volume and return the catalog XML."""
     with translate("Session Skill catalog is unavailable"):
@@ -236,7 +293,7 @@ def get_skills_catalog(runtime: LockedRuntime) -> Catalog:
         return Catalog(catalog_xml=runtime.skill_mgr.build_catalog_xml())
 
 
-@skills_router.post("/skills/pull", responses=LOCKED)
+@skills_router.post("/pull", responses=LOCKED)
 def pull_skills_to_local(runtime: LockedRuntime) -> Exported:
     """Export the Session's volume Skills to local storage."""
     with translate("Skill export is unavailable"):
@@ -246,7 +303,7 @@ def pull_skills_to_local(runtime: LockedRuntime) -> Exported:
         return Exported(exported=exported)
 
 
-@skills_router.post("/skills/push", responses=LOCKED)
+@skills_router.post("/push", responses=LOCKED)
 def push_skills(runtime: LockedRuntime) -> Pushed:
     """Push local Skills to the Session's volume and return the count."""
     with translate("Skill push is unavailable"):

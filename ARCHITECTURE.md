@@ -26,9 +26,11 @@ flowchart LR
     Worker --> MLflow
 ```
 
-- FastAPI (`fleet_rlm.api.app`) is the primary application; `cli.py` provides the
+- FastAPI (`fleet_rlm.api.app`) is the primary single-mode application; `cli.py` provides the
   `fleet` entry point, where `serve` starts the API, `web` serves the Textual client,
-  `optimize` is also available as a standalone CLI command, and `eval` is offline tooling.
+  `doctor` validates Models/Database/MLflow/Daytona configuration read-only, `snapshot`
+  manages Daytona execution snapshots, `optimize` runs standalone GEPA/eval workflows,
+  `eval` manages datasets/labels/scoring, and `trace` verifies recorded traces.
 - `launcher.py` owns the local API and optional local MLflow.
 - Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
@@ -73,18 +75,19 @@ See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 - Adapters default to `XMLAdapter` (`adapter = "xml"`, with native function calling) across all roles, with optional `"chat"` (`ChatAdapter`) and `"json"` (`JSONAdapter`).
 - `model_type` defaults to `"auto"` across all roles, automatically routing custom OpenAI-compatible gateways to `"chat"`.
 
-Local setup:
+Local readiness and snapshots:
 
-- `fleet cli` starts a private loopback setup API before opening runtime resources.
-- A per-launch bearer token protects setup routes.
-- The TUI stages edits, saves `.env` atomically, and probes readiness.
-- Provider operations run serially with bounded, reconnectable progress.
-- Secrets are masked. Ambiguous provider outcomes require readback before retrying.
-- Apply fences new Turns and refuses to restart while work is active.
-- The launcher restarts owned services with fresh settings and preserves the Session ID.
-- Reused and remote servers expose no client-managed setup actions.
+- `fleet doctor` (`doctor.py`) validates configured model routes, PostgreSQL/Lakebase
+  connections and schema version, MLflow destination, and Daytona snapshot readiness in
+  read-only checks (adding `--probe-models` only when an explicit inference probe is
+  requested).
+- `fleet snapshot preflight|build|activate` manages Daytona's execution snapshot
+  through `sandbox/snapshots.py`.
+- `fleet cli` and `fleet web` open the ordinary FastAPI server directly without a
+  separate setup-mode server; configuration and `.env` / `config/fleet.toml` edits
+  remain operator-managed on the host and apply on restart.
 
-See [configuration](docs/reference/configuration.md) and [setup API](docs/reference/http-api.md#private-local-setup-api).
+See [configuration](docs/reference/configuration.md) and [CLI](docs/reference/cli.md).
 
 ## Durable state and workspace
 

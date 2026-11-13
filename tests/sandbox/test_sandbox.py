@@ -747,9 +747,8 @@ def test_provisioning_is_traced_only_when_it_creates_the_sandbox(sandbox, monkey
     assert provision["outputs"] == {"completed": True}
 
 
-def test_sandbox_skill_receipts_reach_the_progressive_disclosure_scorer(sandbox, monkeypatch):
-    from fleet_rlm.observability import sanitize_trace_span
-    from fleet_rlm.optimize.scorers import _skill_feedback_scorer
+def test_sandbox_skill_receipts_survive_later_cell_failure(sandbox, monkeypatch):
+    from fleet_rlm.observability import sanitize_trace_span, trace_object
 
     recorded = []
     monkeypatch.setattr(
@@ -768,21 +767,9 @@ def test_sandbox_skill_receipts_reach_the_progressive_disclosure_scorer(sandbox,
     for span in spans:
         span.set_outputs = lambda value, target=span: setattr(target, "outputs", value)
         sanitize_trace_span(span)
-    spans.insert(
-        0,
-        SimpleNamespace(name="fleet_turn", parent_id=None, inputs={"task": "Use a Skill"}, outputs={"answer": "Done"}),
-    )
-    trace = SimpleNamespace(search_spans=lambda: spans)
-    contexts = []
-
-    def judge(**kwargs):
-        contexts.append(kwargs)
-        return SimpleNamespace(value=True, rationale="Actual helper executions were reviewed.")
-
-    assert _skill_feedback_scorer(judge)(trace=trace).value is True
-    activity = contexts[0]["inputs"]["skill_activity"]
-    assert [item["helper_receipts"][0]["helper"] for item in activity] == ["save_skill", "use_skill"]
-    assert all(item["helper_receipts"][0]["completed"] for item in activity)
+    activity = [trace_object(span.outputs)["skill_activity"] for span in spans]
+    assert [receipts[0]["helper"] for receipts in activity] == ["save_skill", "use_skill"]
+    assert all(receipts[0]["completed"] is True for receipts in activity)
 
 
 def test_bridge_and_execution_events_show_evidence_and_hide_secrets(sandbox):
@@ -1201,152 +1188,6 @@ def test_environment_incomplete_event_emits_nothing_when_the_durable_marker_is_a
     manager_on(sandbox, events, claim=claims).turn_inputs()
 
     assert [event for event in events if event["event"] == "sandbox_environment_incomplete"] == []
-
-
-def test_progress_scope_reports_bounded_checkpoints_through_the_existing_protocol(sandbox):
-    events: list[dict[str, Any]] = []
-    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
-
-    assert (
-        interpreter.execute(
-            "with progress_scope('scan workspace', expect_seconds=5) as progress:\n"
-            "    progress.checkpoint(1)\n"
-            "    progress.checkpoint(1)\n"
-            "    progress.checkpoint(9)\n"
-            "    total = 9\n"
-            "print(total)"
-        )
-        == "9"
-    )
-
-    progress = [event for event in events if event["event"] == "progress"]
-    assert [(event["scope"], event["phase"]) for event in progress] == [
-        ("scan workspace", "start"),
-        ("scan workspace", "checkpoint"),
-        ("scan workspace", "checkpoint"),
-        ("scan workspace", "exit"),
-    ]
-    assert [event["checkpoint"] for event in progress if event["phase"] == "checkpoint"] == [1, 9]
-    assert all(event["execution_id"] for event in progress)
-    allowed = {
-        "event",
-        "phase",
-        "scope",
-        "expect_seconds",
-        "checkpoint",
-        "namespace",
-        "execution_id",
-        "agent_id",
-        "parent_agent_id",
-        "sandbox_id",
-        "status",
-    }
-    assert all(set(event) <= allowed for event in progress), "no source, stdout, or arbitrary object leaks"
-    assert not any(token in json.dumps(progress) for token in ("total = 9", "%", "percent", "complete"))
-
-
-@pytest.mark.parametrize(
-    ("code", "scope_started"),
-    [
-        ("progress_scope('', 5)", False),
-        ("progress_scope('x' * 65, 5)", False),
-        ("progress_scope('ok', 0)", False),
-        ("progress_scope('ok', -1)", False),
-        ("progress_scope('ok', float('nan'))", False),
-        ("progress_scope('ok', float('inf'))", False),
-        ("progress_scope('ok', '5')", False),
-        ("progress_scope('ok', True)", False),
-        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint(-1)", True),
-        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint(1.5)", True),
-        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint('3')", True),
-        ("with progress_scope('ok', 5) as scope:\n    scope.checkpoint(True)", True),
-    ],
-)
-def test_progress_scope_rejects_invalid_input_without_emitting_a_scope(sandbox, code, scope_started):
-    events: list[dict[str, Any]] = []
-    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
-
-    with pytest.raises(CodeExecutionError):
-        interpreter.execute(code)
-
-    progress = [event for event in events if event["event"] == "progress"]
-    if not scope_started:
-        assert progress == [], "an invalid argument never creates a usable scope"
-    assert [event for event in progress if event["phase"] == "checkpoint"] == []
-    assert [event for event in progress if event["phase"] == "stalled"] == []
-
-
-def test_progress_scope_expectation_is_immutable_and_use_is_main_thread_only(sandbox):
-    events: list[dict[str, Any]] = []
-    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
-
-    result = interpreter.execute(
-        "scope = progress_scope('scan', 2)\n"
-        "try:\n"
-        "    scope.expect_seconds = 1\n"
-        "except AttributeError:\n"
-        "    pass\n"
-        "else:\n"
-        "    raise AssertionError('expectation was mutable')\n"
-        "try:\n"
-        "    scope.label = 'renamed'\n"
-        "except AttributeError:\n"
-        "    pass\n"
-        "else:\n"
-        "    raise AssertionError('label was mutable')\n"
-        "import threading\n"
-        "errors = []\n"
-        "def worker():\n"
-        "    try:\n"
-        "        progress_scope('threaded', 1)\n"
-        "    except RuntimeError as exc:\n"
-        "        errors.append(str(exc))\n"
-        "thread = threading.Thread(target=worker)\n"
-        "thread.start()\n"
-        "thread.join()\n"
-        "assert errors and 'main thread' in errors[0]\n"
-        "print(scope.expect_seconds)"
-    )
-
-    assert result == "2.0"
-    assert [event for event in events if event["event"] == "progress"] == []
-
-
-def test_nested_progress_scopes_are_independent_and_never_survive_the_cell(sandbox):
-    events: list[dict[str, Any]] = []
-    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
-
-    interpreter.execute(
-        "with progress_scope('outer', 10) as outer:\n"
-        "    with progress_scope('inner', 1) as inner:\n"
-        "        inner.checkpoint(1)\n"
-        "    outer.checkpoint(1)\n"
-        "print('done')"
-    )
-
-    timeline = [(event["scope"], event["phase"]) for event in events if event["event"] == "progress"]
-    assert timeline == [
-        ("outer", "start"),
-        ("inner", "start"),
-        ("inner", "checkpoint"),
-        ("inner", "exit"),
-        ("outer", "checkpoint"),
-        ("outer", "exit"),
-    ]
-    emitted = len([event for event in events if event["event"] == "progress"])
-
-    # The retained handle belongs to the previous cell: it cannot renew or emit in this one.
-    with pytest.raises(CodeExecutionError, match="ended"):
-        interpreter.execute("outer.checkpoint(2)")
-    assert [event for event in events if event["event"] == "progress"][emitted:] == []
-
-
-def test_progress_scope_cannot_be_shadowed_by_a_variable_or_earlier_cell(sandbox):
-    events: list[dict[str, Any]] = []
-    interpreter = DaytonaInterpreter(manager_on(sandbox, events))
-
-    interpreter.execute("progress_scope = 'shadowed'")
-    assert interpreter.execute("callable(progress_scope)") is True
 
 
 @pytest.mark.parametrize("scenario", ["escaped", "caught", "unrelated", "next_execution", "forged"])
@@ -2364,13 +2205,13 @@ def test_empty_child_promotion_preserves_success_without_parent_io(monkeypatch, 
         assert case == "new_empty_file", "empty promotion must not inspect the parent workspace"
         return []
 
-    def destinations(_manager, _code):
-        assert case == "new_empty_file", "empty promotion must not probe parent destinations"
-        return "[]"
-
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", list_files)
     monkeypatch.setattr(DaytonaSandboxManager, "read_workspace_file", lambda _self, _path: raw)
-    monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", destinations)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_files",
+        lambda _self, paths, **_kwargs: {item: raw for item in paths},
+    )
     monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_files", lambda _self, files: published.update(files))
 
     result = child.collect_child_artifacts()
@@ -2402,7 +2243,6 @@ def test_child_promotion_quota_preflight_performs_no_public_writes() -> None:
     )
     parent = SimpleNamespace(
         list_workspace_files=lambda: [],
-        exec_remote_python=lambda _code: "[]",
         write_workspace_files=lambda files: writes.append(files),
     )
     child = SimpleNamespace(
@@ -2423,22 +2263,20 @@ def test_child_promotion_quota_preflight_performs_no_public_writes() -> None:
 
 
 @pytest.mark.parametrize(
-    ("child_files", "content_size", "existing", "occupied", "reason"),
+    ("child_files", "content_size", "existing", "reason"),
     [
-        (["artifacts/a.txt"], 1, ["artifacts/child/a.txt"], [], "already exists"),
-        (["artifacts/a.txt"], 1, [], ["artifacts/child/a.txt"], "already exists"),
-        (["artifacts/a.txt", "artifacts/b.txt"], 13_000_001, [], [], "quota"),
-        (["artifacts/a.txt", "artifacts/b.txt"], 12_500_001, [], [], "quota"),
+        (["artifacts/a.txt"], 1, ["artifacts/child/a.txt"], "already exists"),
+        (["artifacts/a.txt", "artifacts/b.txt"], 13_000_001, [], "quota"),
+        (["artifacts/a.txt", "artifacts/b.txt"], 12_500_001, [], "quota"),
     ],
 )
 def test_child_promotion_collision_and_byte_quota_preflight_have_zero_writes(
-    child_files: list[str], content_size: int, existing: list[str], occupied: list[str], reason: str
+    child_files: list[str], content_size: int, existing: list[str], reason: str
 ) -> None:
     writes = []
     root = SimpleNamespace(_budget_lock=Lock(), _child_receipts={"child": {"inputs": {}}}, _children={})
     parent = SimpleNamespace(
         list_workspace_files=lambda: existing,
-        exec_remote_python=lambda _code: json.dumps(occupied),
         # An occupied destination whose bytes differ is incompatible, never a completed retry.
         stat_workspace_file=lambda _path: {"sha256": hashlib.sha256(b"someone else's bytes").hexdigest()},
         write_workspace_files=lambda files: writes.append(files),
@@ -2468,7 +2306,6 @@ def test_child_promotion_retry_skips_an_already_published_identical_destination(
     parent = SimpleNamespace(
         parent=None,
         list_workspace_files=lambda: ["artifacts/child/a.txt", "artifacts/child/b.txt"],
-        exec_remote_python=lambda _code: json.dumps(["artifacts/child/a.txt", "artifacts/child/b.txt"]),
         stat_workspace_file=lambda _path: {"sha256": hashlib.sha256(raw).hexdigest()},
         write_workspace_files=lambda files: writes.append(files),
     )
@@ -2501,7 +2338,6 @@ def test_child_promotion_allows_exact_quota_followed_by_unchanged_input() -> Non
     parent = SimpleNamespace(
         parent=None,
         list_workspace_files=lambda: [],
-        exec_remote_python=lambda _code: "[]",
         write_workspace_files=writes.append,
     )
     child = SimpleNamespace(
@@ -2525,7 +2361,6 @@ def test_child_promotion_stops_reading_once_the_file_quota_is_exceeded() -> None
     root = SimpleNamespace(_budget_lock=Lock(), _child_receipts={"child": {"inputs": {}}}, _children={})
     parent = SimpleNamespace(
         list_workspace_files=lambda: [],
-        exec_remote_python=lambda _code: "[]",
         stat_workspace_file=lambda _path: {},
         write_workspace_files=lambda _files: pytest.fail("no write may happen after a quota refusal"),
     )
@@ -3014,8 +2849,6 @@ def test_ownership_lease_loss_prevents_remote_create(monkeypatch: pytest.MonkeyP
             events.append("create")
 
     monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(DaytonaSandboxManager, "_record_allocation", lambda _self, *_args: None)
-    monkeypatch.setattr(DaytonaSandboxManager, "reconcile_allocations", lambda _self: None)
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     manager.ownership_epoch = 4
     manager.ownership_resource_mutate = lambda *_args: events.append("lease_lost") or False
@@ -3057,8 +2890,6 @@ def test_stale_create_response_cannot_replace_new_owner_intent(monkeypatch: pyte
             events.append(f"stopped:{observed.id}")
 
     monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(DaytonaSandboxManager, "_record_allocation", lambda _self, *_args: None)
-    monkeypatch.setattr(DaytonaSandboxManager, "reconcile_allocations", lambda _self: None)
     provider = Provider()
     old_owner = DaytonaSandboxManager("key", "org", "volume", "session-a", agent_id="root-agent")
     old_owner.ownership_epoch = 1
@@ -3147,8 +2978,6 @@ class Provider:
         os._exit(74)
 
 manager_module.preflight = lambda *_args, **_kwargs: object()
-DaytonaSandboxManager._record_allocation = lambda self, *_args: None
-DaytonaSandboxManager.reconcile_allocations = lambda self: None
 manager = DaytonaSandboxManager("key", "org", "volume", "session-a", agent_id="root-agent")
 manager.ownership_epoch = 1
 manager.ownership_resource_mutate = persist
@@ -3625,9 +3454,6 @@ def test_create_rejection_clears_only_definitive_allocation_intent(monkeypatch, 
     error = DaytonaError("rejected", status_code=status)
     writes = []
     monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(DaytonaSandboxManager, "_record_allocation", lambda *_args: None)
-    monkeypatch.setattr(DaytonaSandboxManager, "_discard_allocation_journal", lambda *_args: None)
-    monkeypatch.setattr(DaytonaSandboxManager, "reconcile_allocations", lambda *_args: None)
 
     def reject(_params):
         raise error
@@ -3846,38 +3672,6 @@ def test_cancellation_observes_an_unconfirmed_join_rather_than_an_early_success(
     # The normal completion failed and restored the handle, so the joining cancellation makes its
     # own provider attempt rather than reusing the failed result. Both attempts failed.
     assert attempts == ["child-failing", "child-failing"]
-
-
-@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
-def test_a_local_journal_unlink_failure_keeps_provider_confirmation(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    import pathlib
-
-    monkeypatch.setattr(manager_module, "with_retries", lambda call, **_kwargs: call())
-    root = DaytonaSandboxManager("key", "org", "volume", "state-test")
-    deleted: list[str] = []
-    child = _child_with_provider(root, 1, deleted)
-    original_unlink = pathlib.Path.unlink
-
-    def refuse_journal_unlink(self: pathlib.Path, *args: Any, **kwargs: Any) -> None:
-        if ".fleet/allocations" in str(self) and self.suffix == ".json":
-            raise OSError("journal is busy")
-        return original_unlink(self, *args, **kwargs)
-
-    monkeypatch.setattr(pathlib.Path, "unlink", refuse_journal_unlink)
-
-    with caplog.at_level("WARNING", logger="fleet_rlm.sandbox.manager"):
-        confirmed = child.shutdown()
-
-    assert confirmed is True, "a local bookkeeping failure never reverses provider confirmation"
-    assert deleted == ["child-1"]
-    assert child._sandbox is None, "an already-deleted handle is never restored"
-    assert root._children == {}
-    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
-    assert len(warnings) == 1
-    assert "Local allocation journal unlink failed" in warnings[0].getMessage()
-    assert "journal is busy" not in caplog.text, "the warning stays bounded; no local error text leaks"
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
@@ -4539,7 +4333,7 @@ def test_manager_snapshot_defaults_to_repo_owned_name() -> None:
     assert packages["pandas"] == "3.0.5"
     assert {"matplotlib", "pillow", "openpyxl", "pypdf", "uv", "pytest", "ruff"} <= packages.keys()
     assert not {"markitdown", "scipy", "scikit-learn", "pyarrow"} & packages.keys()
-    assert "/setup" in BUILD_COMMAND
+    assert "fleet snapshot" in BUILD_COMMAND
     root = DaytonaSandboxManager("key", "org", "volume", "session-a")
     assert root.snapshot == SNAPSHOT_NAME
     explicit = DaytonaSandboxManager("key", "org", "volume", "session-a", snapshot="fleet-rlm-python313-v12")
@@ -4609,7 +4403,7 @@ def test_preflight_unusable_snapshot_refuses_before_creation(monkeypatch, tmp_pa
     assert SNAPSHOT_NAME in message
     assert f"state={state}" in message
     if state == "inactive":
-        assert "Activate snapshot" in message
+        assert "fleet snapshot activate" in message
     elif state in {"pending", "building"}:
         assert "wait for it to become active" in message
     else:
@@ -5747,42 +5541,27 @@ def test_child_input_paths_still_reject_escapes_and_other_roots(bad: str) -> Non
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
-def test_generated_remote_scripts_compile_and_report_existing_paths(tmp_path):
+def test_generated_remote_scripts_compile():
     """Remote script builders must emit Python, not a string that merely looks like it.
 
     The transport base64-encodes and `compile`s these, so a literal backslash-n is a
     SyntaxError that only shows up against a real sandbox. Compile them here instead.
     """
-    import json
-    import subprocess
-    import sys
-
-    from fleet_rlm.sandbox.runtime.fs_ops import (
-        existing_workspace_paths_code,
+    from fleet_rlm.sandbox.lifecycle import CLEAR_WORKSPACE_CODE
+    from fleet_rlm.workspace import (
         list_workspace_files_code,
         verify_python_artifact_code,
         workspace_files_metadata_code,
     )
 
-    destinations = ["artifacts/child/present.txt", "artifacts/child/missing.txt"]
     scripts = {
-        "existing": existing_workspace_paths_code(destinations),
-        "existing_empty": existing_workspace_paths_code([]),
+        "clear": CLEAR_WORKSPACE_CODE,
         "list": list_workspace_files_code(),
         "metadata": workspace_files_metadata_code(["files/a.txt"], create_parents=False),
         "verify": verify_python_artifact_code("artifacts/run.py", digest="0" * 64, timeout=5),
     }
     for name, code in scripts.items():
         compile(code, f"<{name}>", "exec")
-
-    # Execute the destination probe against a real directory tree, mapped to /workspace.
-    workspace = tmp_path / "workspace"
-    (workspace / "artifacts/child").mkdir(parents=True)
-    (workspace / "artifacts/child/present.txt").write_text("x")
-    probe = scripts["existing"].replace("/workspace", str(workspace))
-    completed = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
-
-    assert json.loads(completed.stdout) == ["artifacts/child/present.txt"]
 
 
 @pytest.fixture

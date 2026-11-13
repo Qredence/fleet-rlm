@@ -43,14 +43,9 @@ def translate(unavailable: str, *, invalid: str | None = None, status: int = 503
 @contextmanager
 def session_lock(runtime: SessionRuntime) -> Generator[None, None, None]:
     """Hold the Session's `turn_lock` for the block, or raise 409 when a Turn keeps it busy."""
-    restarting = getattr(runtime, "restart_requested", None)
-    if restarting is not None and restarting.is_set():
-        raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
     if not runtime.turn_lock.acquire(timeout=_LOCK_WAIT_SECONDS):
         raise HTTPException(status_code=409, detail="A Turn is running on this Session; retry when it completes")
     try:
-        if restarting is not None and restarting.is_set():
-            raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
         with translate("Session runtime is unavailable"):
             runtime.assert_lease_held()
         yield
@@ -62,7 +57,7 @@ def get_settings(request: Request) -> FleetSettings:
     """Return the FleetSettings stored on the app state."""
     settings = request.app.state.settings
     if settings is None:
-        raise HTTPException(status_code=503, detail="Complete Fleet setup first")
+        raise HTTPException(status_code=503, detail="Fleet settings are unavailable")
     return settings
 
 
@@ -76,8 +71,6 @@ def get_store(request: Request) -> Store:
 
 def get_registry(request: Request) -> SessionRuntimeRegistry:
     """Return the Session runtime registry, or raise 503 when the runtime is not ready."""
-    if getattr(request.app.state, "setup_applying", False):
-        raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
     registry = request.app.state.session_registry
     if registry is None:
         raise HTTPException(status_code=503, detail="Fleet runtime is not ready")

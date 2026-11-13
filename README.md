@@ -57,7 +57,7 @@ Then start a Session:
 uv run fleet cli --session research-1
 ```
 
-On first launch, Fleet checks setup and opens a checklist if configuration or sandbox preparation is needed. You can select or create a Daytona Volume and build or activate Fleet's execution snapshot there. Provider mutations and the optional model inference test require an explicit action.
+Run `uv run fleet doctor` to verify database, Daytona, MLflow, and model configuration read-only, and use `uv run fleet snapshot build` / `uv run fleet snapshot activate` when preparing Daytona's execution snapshot. Model inference probes (`--probe-models`), snapshot builds, and Volume mutations require an explicit command.
 
 Fleet creates its tables in your existing PostgreSQL database; it does not provision a database. Model calls, Daytona execution, and snapshot builds may incur charges. Local MLflow tracking does not make model or sandbox usage local or free.
 

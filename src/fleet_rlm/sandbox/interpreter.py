@@ -29,6 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _MAX_OBSERVED_FIGURES = 200_000
 _MAX_UNGROUNDED_REJECTIONS = 2
+_OPEN_CHILD_RECORD: contextvars.ContextVar[list[DaytonaInterpreter] | None] = contextvars.ContextVar(
+    "fleet_open_child_record", default=None
+)
 
 
 def _unwrap_wire(value: Any) -> Any:
@@ -53,9 +56,10 @@ def _is_bootstrap_code(code: str) -> bool:
 
 def _strip_rebind_prelude(code: str) -> str:
     """Remove RLM's internal per-cell rebind prelude from operator/trace code views."""
-    from dspy.predict.rlm import _REBIND
-
-    return code.removeprefix(_REBIND)
+    first, sep, rest = code.partition("\n")
+    if first.startswith('if "__dspy_guest_spec" in globals():') and "sandbox_guest" in first:
+        return rest if sep else ""
+    return code
 
 
 class StructuredResponseError(dspy.CodeExecutionError):
@@ -90,7 +94,6 @@ class DaytonaInterpreter:
             "read_skill_reference",
             "run_skill_script",
             "save_skill",
-            "progress_scope",
         }
         if any(
             not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name) or name in reserved
@@ -111,6 +114,9 @@ class DaytonaInterpreter:
         self._ungrounded_rejections = 0
         self._completed_cleanly = False
         self._session_lm_failed = False
+        self._nested_children: dict[str, DaytonaInterpreter] = {}
+        if self.owns_manager and (recorded := _OPEN_CHILD_RECORD.get()) is not None:
+            recorded.append(self)
 
     def start(self) -> None:
         """Start the sandbox and bootstrap this namespace once; raise if already shut down."""
@@ -131,38 +137,27 @@ class DaytonaInterpreter:
         )
         return ", ".join(f"/workspace/{path}" for path in paths) or "/workspace/files (empty)"
 
-    def _rewrite_nested_rlm_prompt(
-        self, bound_session: Any, args: list[Any], kwargs: dict[str, Any]
+    def _rewrite_nested_prompt_manifest(
+        self, args: list[Any], kwargs: dict[str, Any]
     ) -> tuple[list[Any], dict[str, Any]]:
-        """Restrict `variables_info` workspace_manifest previews when an owned child interpreter is open."""
+        """Scope `workspace_manifest` variable previews to the active owned child sandbox."""
         op = kwargs.get("op") if "op" in kwargs else (args[0] if args else None)
-        if op != "adapter":
+        if op != "adapter" or not self._nested_children:
             return args, kwargs
-        nested_map = getattr(bound_session, "_nested", None)
-        if not isinstance(nested_map, dict):
-            return args, kwargs
-        active_child = next(
-            (
-                entry.interpreter
-                for entry in reversed(list(nested_map.values()))
-                if isinstance(getattr(entry, "interpreter", None), DaytonaInterpreter)
-                and entry.interpreter.owns_manager
-            ),
-            None,
-        )
+        active_child = next((child for child in reversed(self._nested_children.values()) if child.owns_manager), None)
         if active_child is None:
             return args, kwargs
         prompt = kwargs.get("prompt") if "prompt" in kwargs else (args[1] if len(args) > 1 else None)
         if not isinstance(prompt, dict) or "inputs" not in prompt:
             return args, kwargs
         raw_inputs = prompt["inputs"]
-        wrapped = (
+        inputs_wrapped = (
             isinstance(raw_inputs, dict)
             and raw_inputs.keys() == {"__dspy__", "session", "value"}
             and raw_inputs["__dspy__"] == "wire"
             and isinstance(raw_inputs["value"], dict)
         )
-        inputs_map = raw_inputs["value"] if wrapped else raw_inputs
+        inputs_map = raw_inputs["value"] if inputs_wrapped else raw_inputs
         if not isinstance(inputs_map, dict):
             return args, kwargs
         raw_info = inputs_map.get("variables_info")
@@ -186,7 +181,7 @@ class DaytonaInterpreter:
         ]
         new_info_field = {**raw_info, "value": updated_info} if info_wrapped else updated_info
         new_inputs_map = {**inputs_map, "variables_info": new_info_field}
-        new_inputs_field = {**raw_inputs, "value": new_inputs_map} if wrapped else new_inputs_map
+        new_inputs_field = {**raw_inputs, "value": new_inputs_map} if inputs_wrapped else new_inputs_map
         updated_prompt = {**prompt, "inputs": new_inputs_field}
         if "prompt" in kwargs:
             return args, {**kwargs, "prompt": updated_prompt}
@@ -198,17 +193,19 @@ class DaytonaInterpreter:
         token = _NATIVE_CHILDREN.set(children)
         bound_session = getattr(self.tools.get(tool_name), "__self__", None)
         closing_child_interpreter: Any = None
+        child_record: list[DaytonaInterpreter] | None = None
+        child_token: contextvars.Token[list[DaytonaInterpreter] | None] | None = None
         if tool_name == "__dspy_lm__":
-            args, kwargs = self._rewrite_nested_rlm_prompt(bound_session, args, kwargs)
+            args, kwargs = self._rewrite_nested_prompt_manifest(args, kwargs)
         elif tool_name == "__dspy_interpreter__":
             op = kwargs.get("op") if "op" in kwargs else (args[0] if args else None)
-            if op == "shutdown":
+            if op == "create":
+                child_record = []
+                child_token = _OPEN_CHILD_RECORD.set(child_record)
+            elif op == "shutdown":
                 handle = kwargs.get("id") if "id" in kwargs else (args[1] if len(args) > 1 else None)
-                nested_map = getattr(bound_session, "_nested", None)
-                nested_entry = (
-                    nested_map.get(handle) if isinstance(nested_map, dict) and isinstance(handle, str) else None
-                )
-                closing_child_interpreter = getattr(nested_entry, "interpreter", None)
+                if isinstance(handle, str):
+                    closing_child_interpreter = self._nested_children.pop(handle, None)
         try:
             try:
                 value = self.tools[tool_name](*args, **kwargs)
@@ -216,6 +213,11 @@ class DaytonaInterpreter:
                 if tool_name == "__dspy_lm__":
                     self._session_lm_failed = True
                 raise
+            finally:
+                if child_token is not None:
+                    _OPEN_CHILD_RECORD.reset(child_token)
+            if child_record and isinstance(value, str):
+                self._nested_children[value] = child_record[-1]
             if tool_name == "__dspy_lm__" and isinstance(value, dict) and LM_ERROR_KEY in value:
                 self._session_lm_failed = True
             self.manager.check_turn()

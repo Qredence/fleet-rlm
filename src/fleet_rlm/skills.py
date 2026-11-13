@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import html
 import json
@@ -19,7 +18,6 @@ import yaml
 from mlflow.entities import SpanType
 
 from fleet_rlm.contracts import RequiredSkill, SkillAdmissionError
-from fleet_rlm.sandbox.runtime.fs_ops import export_skills_code, inspect_skills_code
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -480,16 +478,19 @@ class SkillManager:
         staged_files.extend(local_staged)
         if total_bytes > MAX_SKILL_TOTAL_BYTES:
             raise ValueError("Local Skills exceed the synchronization bounds")
-        inspection_code = inspect_skills_code([relative for relative, _ in staged_files])
         with mlflow.start_span(name="skills.inspect_remote", span_type=SpanType.TOOL) as span:
             span.set_inputs({"file_count": len(staged_files)})
-            try:
-                existing = json.loads(self.sandbox_mgr.exec_remote_python(inspection_code) or "{}")
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise ValueError("Could not inspect existing session Skills before synchronization") from exc
-            span.set_outputs({"existing": len(existing) if isinstance(existing, dict) else None})
-        if not isinstance(existing, dict):
-            raise ValueError("Existing session Skill manifest is invalid")
+            remote_files = set(self.sandbox_mgr.list_workspace_files())
+            existing_paths = [relative for relative, _ in staged_files if relative in remote_files]
+            if existing_paths:
+                existing_contents = self.sandbox_mgr.read_workspace_files(
+                    existing_paths,
+                    max_total_bytes=MAX_SKILL_TOTAL_BYTES,
+                )
+                existing = {relative: hashlib.sha256(raw).hexdigest() for relative, raw in existing_contents.items()}
+            else:
+                existing = {}
+            span.set_outputs({"existing": len(existing)})
         changed = {
             relative
             for relative, content in staged_files
@@ -514,30 +515,29 @@ class SkillManager:
 
     def export_volume_skills_to_local(self) -> list[str]:
         """Pull runtime-authored Skills into the separate local Fleet Skills folder."""
-        files = json.loads(
-            self.sandbox_mgr.exec_remote_python(
-                export_skills_code(MAX_SKILL_FILE_BYTES, MAX_SKILL_FILES, MAX_SKILL_TOTAL_BYTES)
+        skill_paths = sorted(path for path in self.sandbox_mgr.list_workspace_files() if path.startswith("skills/"))
+        if len(skill_paths) >= MAX_SKILL_FILES:
+            raise ValueError("Exported Skills exceed the synchronization bounds")
+        try:
+            downloaded = (
+                self.sandbox_mgr.read_workspace_files(skill_paths, max_total_bytes=MAX_SKILL_TOTAL_BYTES)
+                if skill_paths
+                else {}
             )
-            or "[]"
-        )
-        if not isinstance(files, list):
-            raise ValueError("Exported Skill manifest is invalid")
+        except ValueError as exc:
+            if "transfer quota" in str(exc):
+                raise ValueError("Exported Skills exceed the synchronization bounds") from exc
+            raise
         validated: list[tuple[PurePosixPath, bytes]] = []
         skills: dict[str, str] = {}
         total_bytes = 0
-        for item in files:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("rel"), str)
-                or not isinstance(item.get("b64"), str)
-            ):
-                raise ValueError("Exported Skill manifest entry is invalid")
-            relative = _validated_relative_file_path(item["rel"])
-            if "\\" in item["rel"] or len(relative.parts) < 2 or not SKILL_NAME_RE.fullmatch(relative.parts[0]):
+        for raw_path, content in downloaded.items():
+            rel_str = raw_path.removeprefix("skills/")
+            relative = _validated_relative_file_path(rel_str)
+            if "\\" in rel_str or len(relative.parts) < 2 or not SKILL_NAME_RE.fullmatch(relative.parts[0]):
                 raise ValueError("Exported Skill path is invalid")
             if any(existing == relative for existing, _ in validated):
                 raise ValueError("Exported Skill manifest contains duplicate paths")
-            content = base64.b64decode(item["b64"], validate=True)
             if len(content) > MAX_SKILL_FILE_BYTES:
                 raise ValueError("Exported Skill file exceeds the size limit")
             total_bytes += len(content)

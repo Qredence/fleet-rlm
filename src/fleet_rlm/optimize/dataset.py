@@ -9,13 +9,11 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 import dspy
-import mlflow
 
 from fleet_rlm.config import MIN_SPLIT_EXAMPLES
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, LINEAGE_INPUT_FIELDS
-from fleet_rlm.observability import trace_object
 from fleet_rlm.optimization_runs import VALIDATION_RATIO_DEFAULT, VALIDATION_RATIO_MAX, VALIDATION_RATIO_MIN
-from fleet_rlm.replay import decode_snapshot, selected_snapshot, validate_review_labels
+from fleet_rlm.replay import decode_snapshot, validate_review_labels
 from fleet_rlm.store import Store
 
 _MAX_EXAMPLES = 500
@@ -134,48 +132,6 @@ def _example(snapshot: dict[str, Any], labels: dict[str, Any], digest: str, prov
     ).with_inputs(*_INPUTS)
 
 
-def turn_traces(experiment_name: str, max_results: int = _MAX_EXAMPLES) -> list[Any]:
-    """Successful Fleet Turn traces, including those with lossy workspace previews."""
-    if not 1 <= max_results <= _MAX_EXAMPLES:
-        raise ValueError(f"max_results must be between 1 and {_MAX_EXAMPLES}")
-    experiment = mlflow.get_experiment_by_name(experiment_name)
-    if experiment is None:
-        return []
-    selected: list[Any] = []
-    seen: set[str] = set()
-    token: str | None = None
-    client = mlflow.MlflowClient()
-    while len(selected) < max_results:
-        page = client.search_traces(
-            locations=[experiment.experiment_id],
-            filter_string="status = 'OK'",
-            max_results=max_results,
-            order_by=["timestamp_ms DESC"],
-            page_token=token,
-        )
-        batch = list(page)
-        next_token = getattr(page, "token", None)
-        added = False
-        for trace in batch:
-            trace_id = str(getattr(getattr(trace, "info", None), "trace_id", "") or "")
-            if trace_id and trace_id in seen:
-                continue
-            if trace_id:
-                seen.add(trace_id)
-            added = True
-            request = trace_object(trace.data.request)
-            if (
-                isinstance(request.get("workspace_manifest"), str) or request.get("replay_snapshot_selected") is True
-            ) and not _is_test_trace(trace):
-                selected.append(trace)
-                if len(selected) == max_results:
-                    break
-        if not added or not next_token or next_token == token:
-            break
-        token = next_token
-    return selected
-
-
 def is_benchmark_trace(trace: Any) -> bool:
     """True when `fleet.benchmark.*` tags or root-span attributes mark a trace outside curation."""
     tags = getattr(getattr(trace, "info", None), "tags", None) or {}
@@ -188,14 +144,6 @@ def is_benchmark_trace(trace: Any) -> bool:
     )
 
 
-def _is_test_trace(trace: Any) -> bool:
-    """Pytest and benchmark traces share the runtime experiment; they are not curatable user Turns."""
-    source = str((getattr(trace.info, "trace_metadata", None) or {}).get("mlflow.source.name", ""))
-    if "pytest" in source:
-        return True
-    return is_benchmark_trace(trace)
-
-
 def labels_of(trace: Any) -> dict[str, Any]:
     """A trace's expectations by name; relabelling wins because the newest assessment is applied last."""
     items = sorted(
@@ -204,56 +152,14 @@ def labels_of(trace: Any) -> dict[str, Any]:
     return {item.name: item.value for item in items}
 
 
-def load_examples_from_mlflow(
-    experiment_name: str,
-    max_results: int = _MAX_EXAMPLES,
-    *,
-    store: Store | None = None,
-) -> list[dspy.Example]:
-    """Load approved traces only when their immutable selected snapshot is available and matches.
-
-    Raises:
-        ValueError: `store` is missing; approved traces cannot be verified against a snapshot without it.
-    """
-    if store is None:
-        raise ValueError("store is required to verify reviewed replay snapshots")
-    examples: list[dspy.Example] = []
-    for trace in turn_traces(experiment_name, max_results):
-        labels = labels_of(trace)
-        request = trace_object(trace.data.request)
-        if labels.get("review_status") != "approved" or request.get("replay_snapshot_selected") is not True:
-            continue
-        session = trace.info.trace_metadata.get("mlflow.trace.session", "")
-        try:
-            snapshot = selected_snapshot(
-                store, session, request.get("turn_id", ""), request.get("replay_snapshot_sha256", "")
-            )
-            labels = {**labels, "source_group": labels.get("source_group") or session}
-            examples.append(
-                _example(
-                    snapshot,
-                    labels,
-                    request["replay_snapshot_sha256"],
-                    f"mlflow-trace:{trace.info.trace_id}:{snapshot['turn_id']}",
-                )
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
-    return examples
-
-
 def load_examples(
-    store: Store, experiment_name: str, evaluation_experiment_name: str | None = None
+    store: Store,
+    experiment_name: str = "",  # noqa: ARG001 - retained for signature compatibility
+    evaluation_experiment_name: str | None = None,  # noqa: ARG001 - retained for signature compatibility
 ) -> list[dspy.Example]:
-    """Every approved gold-labeled replay from PostgreSQL and MLflow, one example per replay."""
-    examples = load_examples_from_postgres(store)
-    examples.extend(load_examples_from_mlflow(experiment_name, store=store))
-    if evaluation_experiment_name and evaluation_experiment_name != experiment_name:
-        examples.extend(load_examples_from_mlflow(evaluation_experiment_name, store=store))
+    """Every approved gold-labeled replay from PostgreSQL, deduplicated per immutable replay."""
     deduplicated: dict[tuple[str, str, str], dspy.Example] = {}
-    for example in examples:
-        # PostgreSQL is loaded first and owns durable reviews. A partial MLflow sync must not
-        # introduce a second, conflicting gold label for the very same replay.
+    for example in load_examples_from_postgres(store):
         identity = (example.source_session, example.replay_turn_id, example.replay_snapshot_sha256)
         deduplicated.setdefault(identity, example)
     return list(deduplicated.values())

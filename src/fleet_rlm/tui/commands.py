@@ -48,7 +48,6 @@ class SessionState:
     workspace_files: list[str] = field(default_factory=list)
     last_tracker: TurnTracker | None = None
     fullscreen: bool = False
-    setup_available: bool = False
     pending_model_choice: tuple[str, list[str]] | None = None
     optimizer_launcher: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     optimizer_reviewer: Callable[[str, str, str], None] | None = field(default=None, repr=False)
@@ -761,13 +760,6 @@ COMMANDS: dict[str, Command] = {
         _optimize,
         {"--max-metric-calls": None, "--approve": None},
         category="Evaluation & Traces",
-    ),
-    "/setup": Command(
-        "/setup",
-        "open the setup checklist for this CLI-owned server",
-        lambda ctx, _args: _out(ctx).print(
-            "Setup is managed by the server operator. Run fleet cli on the server host to configure it."
-        ),
     ),
 }
 EXIT_COMMANDS = {"/exit", "/quit"}

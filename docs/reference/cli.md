@@ -9,6 +9,8 @@ uv run fleet serve [--host 127.0.0.1] [--port 8000] [--mlflow local|databricks]
 uv run fleet web [--host 127.0.0.1] [--port 8080] [--url API_URL]
                 [--public-url URL] [--session SESSION] [--mlflow local|databricks]
                 [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
+uv run fleet doctor [--probe-models] [--mlflow local|databricks]
+uv run fleet snapshot preflight|build|activate
 uv run fleet eval dataset|run|score|label ... [--mlflow local|databricks]
 uv run fleet optimize [--check] ... [--mlflow local|databricks]
 uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
@@ -58,9 +60,9 @@ uv run fleet web
 # Then open http://127.0.0.1:8080
 ```
 
-Like `cli`, `web` runs the terminal startup checklist when the local setup is
-incomplete. After setup, the browser app connects to the primary FastAPI API;
-Textual Serve is only a client transport and does not own runtime Turns.
+Both `cli` and `web` launch directly into the single-mode FastAPI server (and local
+MLflow when selected); Textual Serve is only a client transport and does not own
+runtime Turns.
 
 Managed service behavior for `cli` and `web`:
 
@@ -87,35 +89,25 @@ Managed service behavior for `cli` and `web`:
   presses cannot interrupt service cleanup. An uncaught Ctrl-C during startup
   or client operation exits with status 130 without a traceback after cleanup.
 
-## Startup setup
+## Diagnostics and snapshot management
 
-For a new local server, `fleet cli` or `fleet web` first starts a private setup-mode FastAPI app.
-The Textual readiness checklist covers serving models, an existing PostgreSQL or
-Lakebase database, the selected local/Databricks MLflow profile, and Daytona.
-It opens automatically when checks require attention. A healthy configuration
-proceeds directly to the normal client. Checks do not run model inference, build
-snapshots, create Volumes, apply migrations, or provision experiments.
+Before starting a Session or deploying a configuration change, run:
 
-Expand a section to edit missing values. Secret fields are masked; **Save .env**
-explicitly merges edits into the launch project's `.env` with mode `0600`, keeping
-unrelated entries. Process environment values stay authoritative and are shown as
-read-only. Use **Discard edits** to abandon a draft or reload externally changed values.
-Verify after saving; individual sections can also be rechecked. Select an existing Daytona Volume or explicitly
-create one; build a missing snapshot or activate an inactive one. These provider
-actions and the optional root-model inference test show a confirmation before
-starting. Long operations stream progress through FastAPI; reconnecting reads the
-existing operation rather than starting it again.
+- `uv run fleet doctor`: performs read-only checks for Models, PostgreSQL/Lakebase
+  connections and schema initialization, the selected local/Databricks MLflow profile,
+  and Daytona snapshot readiness. It does not run model inference, build snapshots,
+  create Volumes, apply migrations, or provision experiments. Pass `--probe-models` to
+  execute an optional root-model inference probe.
+- `uv run fleet snapshot preflight`: inspects the active Daytona snapshot state and
+  resource floors.
+- `uv run fleet snapshot build`: builds the repository-packaged Python 3.13 snapshot in
+  Daytona.
+- `uv run fleet snapshot activate`: explicitly activates an existing inactive snapshot.
 
-**Start / Restart** shuts down the bootstrap app and starts the normal
-API/MLflow services. Normal startup applies Fleet's existing additive migrations
-and initializes tracking destinations. The checklist does not provision PostgreSQL.
-Use `/setup` from chat between Turns to edit settings and request a controlled
-restart with the same Session ID. No active Turn is interrupted by setup apply.
-For an existing API or `--url`, setup belongs to the server operator; stop the
-operator-managed server or use a different port to launch a new owned instance.
+Configuration and `.env` / `config/fleet.toml` edits belong to the host operator and take
+effect when services restart.
 
-Non-TTY input never prompts for setup credentials or consumes task input as setup
-answers. It reports unmet prerequisites; complete setup interactively first.
+Non-TTY input never prompts for credentials or consumes task input as setup answers.
 
 Standalone `serve`, `eval`, `optimize`, and `trace` commands connect to an
 existing tracking server. For local operation, keep `fleet cli` running or
@@ -158,7 +150,7 @@ Catalog schema and table prefix; pass the fully qualified `trace:/...` ID for a
 Unity Catalog trace. This explicit operator check may issue a read to the
 configured tracking destination; it is not run during serving.
 
-Commands include `/setup`, `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
+Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
 `/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
 `/timeout <seconds|off|default>`, `/sessions`, `/improve` (also `/experiments`), `/optimize`, `/config`,

@@ -19,7 +19,7 @@ from fleet_rlm.api.deps import LOCKED, LockedRuntime, Runtime, Settings, session
 from fleet_rlm.api.schemas import Attached, Deleted, Files, FileStat, FileWritten, WorkspaceWriteRequest
 from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES, _workspace_relative_path
 
-router = APIRouter(tags=["workspace"])
+router = APIRouter(prefix="/sessions/{session_id}", tags=["workspace"])
 _MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES
 
 
@@ -47,19 +47,19 @@ def _list_files(session_id: str, runtime: Runtime) -> Files:
     )
 
 
-@router.get("/sessions/{session_id}/files", response_model=Files, responses=LOCKED)
+@router.get("/files", response_model=Files, responses=LOCKED)
 def list_files(session_id: str, runtime: LockedRuntime) -> Files:
     """List a Session's workspace files and the artifacts among them."""
     return _list_files(session_id, runtime)
 
 
-@router.get("/sessions/{session_id}/workspace/tree", response_model=Files, responses=LOCKED)
+@router.get("/workspace/tree", response_model=Files, responses=LOCKED)
 def list_workspace_tree(session_id: str, runtime: LockedRuntime) -> Files:
     """List a Session's workspace files and the artifacts among them (workspace/tree alias)."""
     return _list_files(session_id, runtime)
 
 
-@router.get("/sessions/{session_id}/workspace/stat/{rel_path:path}", response_model=FileStat, responses=LOCKED)
+@router.get("/workspace/stat/{rel_path:path}", response_model=FileStat, responses=LOCKED)
 def workspace_stat(rel_path: str, runtime: LockedRuntime) -> FileStat:
     """Return the size and SHA-256 digest of one workspace file."""
     with translate("Workspace file is unavailable", invalid="Invalid workspace path", status=404):
@@ -69,7 +69,7 @@ def workspace_stat(rel_path: str, runtime: LockedRuntime) -> FileStat:
     return FileStat(path=rel_path, size_bytes=metadata["size_bytes"], sha256=metadata["sha256"])
 
 
-@router.get("/sessions/{session_id}/workspace/files/{rel_path:path}", response_class=FileResponse, responses=LOCKED)
+@router.get("/workspace/files/{rel_path:path}", response_class=FileResponse, responses=LOCKED)
 def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
     """Return one workspace file as a download, capped at 25 MB.
 
@@ -96,7 +96,7 @@ def read_workspace_file(rel_path: str, runtime: Runtime) -> FileResponse:
     )
 
 
-@router.put("/sessions/{session_id}/workspace/files/{rel_path:path}", response_model=FileWritten, responses=LOCKED)
+@router.put("/workspace/files/{rel_path:path}", response_model=FileWritten, responses=LOCKED)
 def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Runtime) -> FileWritten:
     """Write one workspace file from text or base64 content, capped at 25 MB.
 
@@ -125,7 +125,7 @@ def write_workspace_file(rel_path: str, body: WorkspaceWriteRequest, runtime: Ru
     )
 
 
-@router.delete("/sessions/{session_id}/workspace/files/{rel_path:path}", responses=LOCKED)
+@router.delete("/workspace/files/{rel_path:path}", responses=LOCKED)
 def delete_workspace_file(rel_path: str, runtime: LockedRuntime) -> Deleted:
     """Delete one workspace file.
 
@@ -140,7 +140,7 @@ def delete_workspace_file(rel_path: str, runtime: LockedRuntime) -> Deleted:
     return Deleted(deleted=rel_path)
 
 
-@router.post("/sessions/{session_id}/attach", responses=LOCKED)
+@router.post("/attach", responses=LOCKED)
 def attach_file(runtime: Runtime, settings: Settings, file: Annotated[UploadFile, File()]) -> Attached:
     """Store an uploaded attachment under files/ in the workspace.
 

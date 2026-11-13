@@ -22,6 +22,7 @@ from fleet_rlm.api.schemas import (
     ImproveReadiness,
     ImproveSettings,
     ImproveSettingsUpdate,
+    Job,
     JobDetail,
     JobEnvelope,
     JobList,
@@ -154,10 +155,10 @@ def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], s
 
 
 @router.get("/readiness", response_model=ImproveReadiness, responses=_ERROR_RESPONSES)
-def improve_readiness(store: StoreDep, settings: Settings) -> dict[str, Any]:
+def improve_readiness(store: StoreDep, settings: Settings) -> ImproveReadiness:
     """Report what the labelled examples support, what is missing, and how many labels are new."""
     with translate("Readiness is unavailable"):
-        return _readiness(store, settings)[0]
+        return ImproveReadiness.model_validate(_readiness(store, settings)[0])
 
 
 _NEEDS_TOKEN_CAP = "Auto-run needs a token cap: set max_total_tokens above 0 (0 is unlimited)."
@@ -181,14 +182,14 @@ def _improve_settings(store: Store, settings: FleetSettings) -> dict[str, Any]:
 
 
 @router.get("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
-def get_improve_settings(store: StoreDep, settings: Settings) -> dict[str, Any]:
+def get_improve_settings(store: StoreDep, settings: Settings) -> ImproveSettings:
     """Auto-run switch and budgets in force: saved values over the environment defaults."""
     with translate("Improve settings are unavailable"):
-        return _improve_settings(store, settings)
+        return ImproveSettings.model_validate(_improve_settings(store, settings))
 
 
 @router.put("/settings", response_model=ImproveSettings, responses=_ERROR_RESPONSES)
-def put_improve_settings(body: ImproveSettingsUpdate, store: StoreDep, settings: Settings) -> dict[str, Any]:
+def put_improve_settings(body: ImproveSettingsUpdate, store: StoreDep, settings: Settings) -> ImproveSettings:
     """Save the supplied fields; an explicit null clears a saved value back to its environment default."""
     with translate("Improve settings could not be saved"):
         changes = body.model_dump(exclude_unset=True)
@@ -201,7 +202,7 @@ def put_improve_settings(body: ImproveSettingsUpdate, store: StoreDep, settings:
         if _effective_settings(proposed, settings)["auto_run_blocked"]:
             raise ValueError(_NEEDS_TOKEN_CAP)
         store.update_global_settings(_SETTINGS_SCOPE, changes)
-        return _improve_settings(store, settings)
+        return ImproveSettings.model_validate(_improve_settings(store, settings))
 
 
 @router.get("/queue", response_model=ImproveQueue, responses=_ERROR_RESPONSES)
@@ -313,10 +314,15 @@ async def save_label(body: LabelRequest, store: StoreDep, settings: Settings, ma
 
 
 @router.get("/jobs", response_model=JobList, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
-async def list_jobs(manager: Experiments) -> dict[str, Any]:
+async def list_jobs(manager: Experiments) -> JobList:
     """List persisted history and the active job."""
     with _job_errors():
-        return await manager.list()
+        listing = await manager.list()
+        return JobList(
+            jobs=[Job.model_validate(item) for item in listing["jobs"]],
+            active_run_id=listing["active_run_id"],
+            accepting=listing["accepting"],
+        )
 
 
 @router.post(
@@ -326,7 +332,7 @@ async def list_jobs(manager: Experiments) -> dict[str, Any]:
     response_model_exclude_unset=True,
     responses=_ERROR_RESPONSES,
 )
-async def start_job(body: StartJob, manager: Experiments, store: StoreDep, settings: Settings) -> dict[str, Any]:
+async def start_job(body: StartJob, manager: Experiments, store: StoreDep, settings: Settings) -> JobEnvelope:
     """Start once per request ID; a busy server rejects instead of queueing work."""
     with _job_errors():
         values = body.model_dump(exclude={"request_id", "kind"}, exclude_unset=True)
@@ -335,15 +341,19 @@ async def start_job(body: StartJob, manager: Experiments, store: StoreDep, setti
             "max_total_tokens", (await asyncio.to_thread(_improve_settings, store, settings))["max_total_tokens"]
         )
         options = ExperimentOptions.model_validate(values)
-        return {"job": public_run(await manager.start(body.request_id, options, body.kind))}
+        return JobEnvelope(job=Job.model_validate(public_run(await manager.start(body.request_id, options, body.kind))))
 
 
 @router.get("/jobs/{run_id}", response_model=JobDetail, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
-async def job_detail(run_id: str, manager: Experiments) -> dict[str, Any]:
+async def job_detail(run_id: str, manager: Experiments) -> JobDetail:
     """Return a snapshot, its bounded saved comparison, and that comparison's computed summary."""
     with _job_errors():
         detail = await manager.detail(run_id)
-        return {**detail, "summary": comparison_summary(detail["comparison"])}
+        return JobDetail(
+            job=Job.model_validate(detail["job"]),
+            comparison=detail["comparison"],
+            summary=comparison_summary(detail["comparison"]),
+        )
 
 
 @router.post(
@@ -353,10 +363,10 @@ async def job_detail(run_id: str, manager: Experiments) -> dict[str, Any]:
     response_model_exclude_unset=True,
     responses=_ERROR_RESPONSES,
 )
-async def cancel_job(run_id: str, manager: Experiments) -> dict[str, Any]:
+async def cancel_job(run_id: str, manager: Experiments) -> JobEnvelope:
     """Request a cooperative stop; terminal status follows actual worker cleanup."""
     with _job_errors():
-        return {"job": public_run(await manager.cancel(run_id))}
+        return JobEnvelope(job=Job.model_validate(public_run(await manager.cancel(run_id))))
 
 
 @router.post(
@@ -366,24 +376,27 @@ async def cancel_job(run_id: str, manager: Experiments) -> dict[str, Any]:
     response_model_exclude_unset=True,
     responses=_ERROR_RESPONSES,
 )
-async def review_job(run_id: str, body: ReviewJob, manager: Experiments) -> dict[str, Any]:
+async def review_job(run_id: str, body: ReviewJob, manager: Experiments) -> JobEnvelope:
     """Approve through the evidence-checking worker, or persist an explicit rejection."""
     with _job_errors():
-        return {"job": public_run(await manager.review(run_id, body.decision, body.request_id))}
+        run = await manager.review(run_id, body.decision, body.request_id)
+        return JobEnvelope(job=Job.model_validate(public_run(run)))
 
 
 @router.get("/history", response_model=ImproveHistory, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
-def improve_history(store: StoreDep) -> dict[str, Any]:
+def improve_history(store: StoreDep) -> ImproveHistory:
     """List approved versions and completed evaluation jobs, newest first, for the quality trend."""
     with translate("Improve history is unavailable"):
         jobs = store.list_optimization_runs()
-        return {
-            "versions": [
-                public_run(job)
+        return ImproveHistory(
+            versions=[
+                Job.model_validate(public_run(job))
                 for job in jobs
                 if job["kind"] == "optimize" and job["status"] == "approved" and not job.get("legacy_session_id")
             ],
-            "evaluations": [
-                public_run(job) for job in jobs if job["kind"] != "optimize" and job["status"] == "completed"
+            evaluations=[
+                Job.model_validate(public_run(job))
+                for job in jobs
+                if job["kind"] != "optimize" and job["status"] == "completed"
             ],
-        }
+        )

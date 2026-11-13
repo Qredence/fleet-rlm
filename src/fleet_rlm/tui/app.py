@@ -33,7 +33,8 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import OptionList, Static, TextArea
+from textual.screen import ModalScreen
+from textual.widgets import Button, OptionList, Static, TextArea
 
 import fleet_rlm.tui.commands as commands_mod
 from fleet_rlm.config import FleetSettings
@@ -55,7 +56,6 @@ from fleet_rlm.tui.render import (
     print_http_error,
     render_event,
 )
-from fleet_rlm.tui.setup import ConfirmAction
 from fleet_rlm.tui.stream import _request_turn, _turn_events
 from fleet_rlm.tui.widgets import (
     _CommandMenu,
@@ -68,6 +68,32 @@ from fleet_rlm.workspace import validate_session_id
 
 _LOCAL_PATH_COMMANDS = frozenset({"/attach", "/put"})
 _WORKSPACE_PATH_COMMANDS = frozenset({"/cat", "/stat", "/get", "/rm", "/context"})
+
+
+class ConfirmAction(ModalScreen[bool]):
+    """Confirm an explicit provider mutation or potentially billed test."""
+
+    DEFAULT_CSS = """
+    ConfirmAction { align: center middle; background: $background 75%; }
+    #confirmation { width: 65; height: auto; padding: 2; border: round $accent; }
+    #confirmation Horizontal { height: auto; }
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        """Render the operation description and explicit continue/cancel buttons."""
+        with VerticalScroll(id="confirmation"):
+            yield Static(self.message, markup=False)
+            with Horizontal():
+                yield Button("Continue", variant="primary", id="confirm")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Return the user's explicit action selection."""
+        self.dismiss(event.button.id == "confirm")
 
 
 class _SessionCompleter(Completer):
@@ -1085,10 +1111,6 @@ class FleetTextualApp(App[str | None]):
             )
             return
 
-        if user_input.strip() == "/setup" and self.state.setup_available:
-            self.exit("setup")
-            return
-
         self._mount_to_chat(_UserPromptCard(user_input))
 
         if user_input.startswith("/"):
@@ -1317,12 +1339,10 @@ class FleetTextualApp(App[str | None]):
         threading.Thread(target=worker, name="fleet-textual-turn", daemon=True).start()
 
 
-def run_interactive_cli(
-    base_url: str, session_id: str, *, settings: FleetSettings | None = None, setup_token: str = ""
-) -> str | None:
+def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettings | None = None) -> str | None:
     """Connect to the API and run the Textual full-screen chat TUI (or non-TTY fallback) until exit."""
     validate_session_id(session_id)
-    state = SessionState(mlflow_settings=settings, setup_available=bool(setup_token))
+    state = SessionState(mlflow_settings=settings)
     # FastAPI's SSE routing emits a `: ping` keepalive every 15 seconds while the Turn
     # generator is idle, so the 300-second read timeout is only a safety net.
     with httpx.Client(
@@ -1349,8 +1369,6 @@ def run_interactive_cli(
                 break
             if not user_input:
                 continue
-            if user_input == "/setup" and state.setup_available:
-                return "setup"
             if user_input.startswith("/"):
                 if not handle_command(client, user_input, session_id, state=state):
                     break

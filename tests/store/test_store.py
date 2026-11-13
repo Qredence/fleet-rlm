@@ -22,7 +22,6 @@ from fleet_rlm.session import SessionRuntime
 from fleet_rlm.store import (
     _OPTIMIZATION_LOCK_SCOPE,
     _SCHEMA_MIGRATIONS,
-    _SCHEMA_VERSION_TABLE,
     SCHEMA_STATEMENTS,
     SCHEMA_VERSION,
     IdempotencyConflictError,
@@ -94,48 +93,26 @@ def make_store(*replies: list[Any], error: Exception | None = None) -> tuple[Sto
 
 
 def test_schema_keeps_the_lite_tables_separate_from_the_legacy_schema():
-    session_schema, vfs_schema = SCHEMA_STATEMENTS[:2]
-    assert "CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in session_schema
-    assert "CREATE TABLE IF NOT EXISTS fleet_lite_vfs_files" in vfs_schema
-    assert "REFERENCES fleet_lite_sessions(session_id)" in vfs_schema
-    assert "CREATE TABLE IF NOT EXISTS fleet_sessions" not in session_schema
+    joined = "\n".join(SCHEMA_STATEMENTS)
+    assert SCHEMA_VERSION == 1
+    assert len(_SCHEMA_MIGRATIONS) == 1
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_sandbox_resources" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_turns" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_memories" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_replay_blobs" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_replay_snapshots" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_review_labels" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_leases" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_global_settings" in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_lite_optimization_runs" in joined
+    assert "fleet_lite_vfs_files" not in joined
+    assert "fleet_lite_managed_" not in joined
+    assert "CREATE TABLE IF NOT EXISTS fleet_sessions" not in joined
     replay_schema = next(statement for statement in SCHEMA_STATEMENTS if "fleet_lite_replay_snapshots" in statement)
     assert "REFERENCES fleet_lite_turns(session_id, turn_id) ON DELETE CASCADE" in replay_schema
-
-
-def test_migration_four_retires_the_file_mirror_without_deleting_rows():
-    assert dict(_SCHEMA_MIGRATIONS)[4] == (
-        "ALTER TABLE IF EXISTS fleet_lite_vfs_files RENAME TO fleet_lite_vfs_files_retired",
-    )
-
-
-def test_migration_five_records_the_environment_observation_on_the_session_row():
-    assert SCHEMA_VERSION == 12
-    assert _SCHEMA_MIGRATIONS[7][0] == 8
-    assert "ADD COLUMN IF NOT EXISTS sandbox_ownership JSONB" in _SCHEMA_MIGRATIONS[7][1][0]
-    version, statements = _SCHEMA_MIGRATIONS[4]
-    assert version == 5
-    assert statements == (
-        "ALTER TABLE fleet_lite_sessions ADD COLUMN IF NOT EXISTS environment_reported BOOLEAN NOT NULL DEFAULT FALSE",
-    )
-
-
-def test_migration_eleven_rekeys_jobs_by_run_id_and_preserves_the_legacy_session():
-    version, statements = _SCHEMA_MIGRATIONS[10]
-    assert version == 11
-    kind, legacy, dedupe_run, dedupe_request, drop, primary, unique = statements
-    assert "ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'optimize'" in kind
-    assert "'optimize','evaluate_rescore','evaluate_replay','evaluate_synthetic'" in kind
-    assert "jsonb_build_object('legacy_session_id', session_id)" in legacy
-    assert "r.run_id || '-dup-' || r.session_id" in dedupe_run
-    assert "r.request_id || ':' || r.run_id" in dedupe_request
-    # Deduplication must run while session_id still exists, before the key is re-created.
-    assert statements.index(dedupe_run) < statements.index(drop) < statements.index(primary)
-    assert drop.endswith("DROP COLUMN session_id")
-    assert "ADD PRIMARY KEY (run_id)" in primary
-    assert "UNIQUE (request_id)" in unique
-    # The one-active-job partial index is untouched by the re-key.
-    assert not any("fleet_lite_one_active_optimization_run" in statement for statement in statements)
+    assert "fleet_lite_memories_content_fts" in joined
+    assert "fleet_lite_one_active_optimization_run" in joined
 
 
 def test_reviewed_examples_span_every_session():
@@ -143,6 +120,7 @@ def test_reviewed_examples_span_every_session():
     store.reviewed_examples(10)
     sql, params = pool.conn.statements[0]
     assert "labels.session_id" in sql and "WHERE labels.session_id" not in sql
+    assert "fleet_lite_replay_snapshots AS replay" in sql
     assert params == (10,)
 
 
@@ -150,7 +128,7 @@ def test_approved_program_reports_the_latest_approved_digest_and_approvals_in_fl
     store, pool = make_store([("approving", "d-new"), ("approved", "d-latest"), ("approved", "d-old")])
     assert store.approved_program() == {"approved": "d-latest", "approving": ["d-new"]}
     sql = pool.conn.statements[0][0]
-    assert "NOT (metadata ? 'legacy_session_id')" in sql and "kind='optimize'" in sql
+    assert "NOT (metadata ? 'legacy_session_id')" in sql and "kind = 'optimize'" in sql
     store, _pool = make_store([("approving", "d-new")])
     assert store.approved_program() == {"approved": None, "approving": ["d-new"]}
     store, _pool = make_store([])
@@ -160,40 +138,8 @@ def test_approved_program_reports_the_latest_approved_digest_and_approvals_in_fl
 def test_new_review_labels_counts_only_approved_labels_after_the_cutoff():
     store, pool = make_store([(3,)])
     assert store.new_review_labels("2026-11-01T00:00:00+00:00") == 3
-    assert "review_status='approved'" in pool.conn.statements[0][0]
+    assert "review_status = 'approved'" in pool.conn.statements[0][0]
     assert pool.conn.statements[0][1] == ("2026-11-01T00:00:00+00:00",) * 2
-
-
-def test_migration_six_adds_a_global_optimization_ledger_without_session_cascade():
-    version, statements = _SCHEMA_MIGRATIONS[5]
-    assert version == 6
-    create_table, active_index = statements
-    assert "fleet_lite_optimization_runs" in create_table
-    assert "PRIMARY KEY (session_id, run_id)" in create_table
-    assert "UNIQUE (session_id, request_id)" in create_table
-    assert "REFERENCES fleet_lite_sessions" not in create_table
-    assert "owner_id TEXT NOT NULL" in create_table
-    assert "metadata JSONB NOT NULL" in create_table
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS fleet_lite_one_active_optimization_run" in active_index
-    assert "WHERE status IN ('running', 'approving')" in active_index
-
-
-def test_migration_seven_indexes_the_memory_search_expression_and_upgrades_version_six():
-    statements = dict(_SCHEMA_MIGRATIONS)[7]
-    assert statements == (
-        "CREATE INDEX IF NOT EXISTS fleet_lite_memories_content_fts "
-        "ON fleet_lite_memories USING GIN (to_tsvector('english', content))",
-    )
-    store, pool = make_store([], [], [(6,)])
-    store.initialize()
-    sql = [statement for statement, _ in pool.conn.statements]
-    assert statements[0] in sql
-    assert not any("CREATE TABLE IF NOT EXISTS fleet_lite_sessions" in statement for statement in sql)
-    assert (
-        "INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s) ON CONFLICT DO NOTHING",
-        (7,),
-    ) in pool.conn.statements
-    assert sql[-1] == "COMMIT"
 
 
 def test_claim_environment_report_is_one_atomic_update_per_session():
@@ -214,47 +160,44 @@ def test_claim_environment_report_is_one_atomic_update_per_session():
 
 
 def test_sandbox_resource_mutation_locks_session_and_rejects_stale_owner_epoch():
-    store, pool = make_store([{"sandbox_ownership": {"epoch": 9, "resources": []}}])
+    store, pool = make_store([{"ownership_epoch": 9}])
 
-    assert store.mutate_sandbox_resource("s1", 8, "agent-a", {"action": "create"}) is False
+    assert store.mutate_sandbox_resource("s1", 8, "agent-a", {"action": "create", "intended_action": "stop"}) is False
 
     sql = [statement for statement, _parameters in pool.conn.statements]
-    assert "SELECT sandbox_ownership FROM fleet_lite_sessions WHERE session_id=%s FOR UPDATE" in sql
-    assert not any(statement.startswith("UPDATE fleet_lite_sessions SET sandbox_ownership=") for statement in sql)
+    assert "SELECT ownership_epoch FROM fleet_lite_sessions WHERE session_id = %s FOR SHARE" in sql
+    assert not any("fleet_lite_sandbox_resources" in statement for statement in sql)
     assert "COMMIT" in sql
 
 
 def test_sandbox_resource_mutation_replaces_one_identity_under_the_current_epoch():
-    store, pool = make_store([{"sandbox_ownership": {"epoch": 9, "resources": []}}], [])
+    store, pool = make_store([{"ownership_epoch": 9}], [])
 
     assert (
         store.mutate_sandbox_resource(
             "s1",
             9,
             "agent-a",
-            {"allocation_nonce": "agent-a", "provider_id": "sandbox-a", "action": "stop"},
+            {
+                "allocation_nonce": "agent-a",
+                "provider_id": "sandbox-a",
+                "action": "stop",
+                "intended_action": "stop",
+            },
         )
         is True
     )
 
-    update, parameters = pool.conn.statements[-2]
-    assert update == (
-        "UPDATE fleet_lite_sessions SET sandbox_ownership=%s::jsonb WHERE session_id=%s "
-        "AND sandbox_ownership->>'epoch'=%s"
-    )
-    ownership = json.loads(parameters[0])
-    assert ownership == {
-        "epoch": 9,
-        "resources": [
-            {
-                "agent_id": "agent-a",
-                "allocation_nonce": "agent-a",
-                "provider_id": "sandbox-a",
-                "action": "stop",
-            }
-        ],
+    upsert, parameters = pool.conn.statements[-2]
+    assert upsert.startswith("INSERT INTO fleet_lite_sandbox_resources")
+    assert "ON CONFLICT (session_id, agent_id) DO UPDATE SET" in upsert
+    assert parameters == ("s1", "agent-a", 9, "agent-a", "sandbox-a", None, "stop", "stop", False)
+
+    store_del, pool_del = make_store([{"ownership_epoch": 9}])
+    assert store_del.mutate_sandbox_resource("s1", 9, "agent-a", None) is True
+    assert "DELETE FROM fleet_lite_sandbox_resources WHERE session_id = %s AND agent_id = %s" in {
+        sql for sql, _ in pool_del.conn.statements
     }
-    assert parameters[1:] == ("s1", "9")
 
 
 def test_review_labels_require_the_selected_immutable_replay_before_writing():
@@ -333,12 +276,13 @@ def test_schema_bootstrap_records_an_additive_versioned_baseline():
     assert ledger_index < version_index
     assert "SELECT MAX(version) FROM fleet_lite_schema_migrations" in statements
     assert any("INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s)" in sql for sql in statements)
-    assert any("DELETE FROM fleet_lite_replay_snapshots WHERE created_at < NOW()" in sql for sql in statements)
-    assert statements[-1] == "COMMIT"
+    assert any("DELETE FROM fleet_lite_replay_snapshots" in sql for sql in statements)
+    assert any("DELETE FROM fleet_lite_replay_blobs" in sql for sql in statements)
+    assert "COMMIT" in statements
 
 
 def test_custom_schema_is_created_by_migration_pool_and_runtime_uses_runtime_pool():
-    runtime_pool = FakePool([({"turns": []},)])
+    runtime_pool = FakePool([], [], [({"turn_id": "t1"},)])
     migration_pool = FakePool()
     store = Store(
         runtime_pool,  # ty: ignore[invalid-argument-type]
@@ -348,14 +292,15 @@ def test_custom_schema_is_created_by_migration_pool_and_runtime_uses_runtime_poo
     )
 
     store.initialize()
-    store.history("s1")
+    assert store.history("s1") == [{"turn_id": "t1"}]
 
     migration_sql = [sql for sql, _ in migration_pool.conn.statements]
     assert 'CREATE SCHEMA IF NOT EXISTS "fleet_rlm_lite"' in migration_sql
     assert 'SET LOCAL search_path TO "fleet_rlm_lite"' in migration_sql
     assert any("fleet_lite_sessions" in sql for sql in migration_sql)
-    assert runtime_pool.borrowed == 1
+    # 1 borrow on migration_pool (schema bootstrap), 2 on runtime_pool (replay cleanup + history).
     assert migration_pool.borrowed == 1
+    assert runtime_pool.borrowed == 2
 
 
 def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(monkeypatch):
@@ -433,37 +378,40 @@ def test_memories_return_iso_timestamps_without_reading_workspace_files():
 
 def test_load_session_reads_history_without_recreating_the_runtime_session():
     turns = [{"turn_id": "t1", "task": "question", "answer": "answer"}]
-    store, pool = make_store([{"memory_summary": "known", "turns": turns}])
+    store, pool = make_store(
+        [{"memory_summary": "known"}],
+        [({"turn_id": "t1", "task": "question", "answer": "answer"},)],
+    )
 
     assert store.load_session("s1") == ("known", turns)
     assert pool.borrowed == 1
-    assert len(pool.conn.statements) == 1
-    assert pool.conn.statements[0][0] == ("SELECT memory_summary, turns FROM fleet_lite_sessions WHERE session_id = %s")
-    assert pool.conn.statements[0][1] == ("s1",)
+    assert len(pool.conn.statements) == 2
+    assert pool.conn.statements[0] == ("SELECT memory_summary FROM fleet_lite_sessions WHERE session_id = %s", ("s1",))
+    sql_turns, params_turns = pool.conn.statements[1]
+    assert (
+        "FROM fleet_lite_turns WHERE session_id = %s AND status = 'completed' ORDER BY seq DESC LIMIT %s" in sql_turns
+    )
+    assert params_turns == ("s1", 8)
 
 
 def test_committing_a_turn_is_one_transaction_with_the_completion():
-    store, pool = make_store()
+    # Replies for: INSERT session, SELECT FOR UPDATE, SELECT status, UPDATE RETURNING, UPDATE session.
+    store, pool = make_store([], [], [], [("turn-1",)], [])
     store.commit_turn(
         "s1",
-        turn_record_json='{"turn_id":"turn-1"}',
+        turn_record_json='{"turn_id":"turn-1","task":"summarize"}',
         memory_note="note",
-        completion=("t1", {"event": "turn_complete"}),
+        completion=("turn-1", {"event": "turn_complete"}),
     )
     sql = [statement for statement, _ in pool.conn.statements]
     assert pool.borrowed == 1
     assert sql[0] == "BEGIN" and sql[-1] == "COMMIT"
     assert sql[2].endswith("FOR UPDATE")
     assert not any("fleet_lite_vfs_files" in statement for statement in sql)
-    assert any(statement.startswith("UPDATE fleet_lite_sessions SET turns") for statement in sql)
-    append_sql, append_params = next(
-        (statement, params)
-        for statement, params in pool.conn.statements
-        if statement.startswith("UPDATE fleet_lite_sessions SET turns")
-    )
-    assert "%s::text IS NULL" in append_sql
-    assert "NOT EXISTS" in append_sql and append_params[-2:] == ("turn-1", "turn-1")
-    assert sql[-2].startswith("UPDATE fleet_lite_turns SET status='completed'")
+    update_turn = next(statement for statement in sql if statement.startswith("UPDATE fleet_lite_turns"))
+    assert "status = %s" in update_turn and "record = %s::jsonb" in update_turn
+    update_session = next(statement for statement in sql if statement.startswith("UPDATE fleet_lite_sessions"))
+    assert "memory_summary = CASE" in update_session and "turn_count = turn_count +" in update_session
 
 
 def test_interrupted_running_turns_are_failed_only_under_the_current_ownership_epoch():
@@ -473,8 +421,8 @@ def test_interrupted_running_turns_are_failed_only_under_the_current_ownership_e
 
     sql = [statement for statement, _ in pool.conn.statements]
     assert sql[0] == "BEGIN"
-    assert "sandbox_ownership->>'epoch'" in sql[1] and sql[1].endswith("FOR UPDATE")
-    assert "WHERE session_id=%s AND status='running' RETURNING turn_id" in sql[2]
+    assert "ownership_epoch" in sql[1] and sql[1].endswith("FOR UPDATE")
+    assert "WHERE session_id = %s AND status = 'running' RETURNING turn_id" in sql[2]
     payload = json.loads(pool.conn.statements[2][1][0])
     assert payload["outcome"] == "failed" and "not replayed" in payload["error"]
     assert sql[-1] == "COMMIT"
@@ -505,7 +453,8 @@ def test_existing_turn_receipt_lookup_is_session_scoped_and_read_only(found):
     assert store.turn_by_key("s1", "key") == (receipt if found else None)
     assert pool.conn.statements == [
         (
-            "SELECT turn_id,task_sha256,status,result FROM fleet_lite_turns WHERE session_id=%s AND idempotency_key=%s",
+            "SELECT turn_id, task_sha256, status, result "
+            "FROM fleet_lite_turns WHERE session_id = %s AND idempotency_key = %s",
             ("s1", "key"),
         )
     ]
@@ -518,15 +467,21 @@ def test_stale_ownership_epoch_cannot_commit_a_turn_record():
         store.commit_turn("s1", turn_record_json='{"turn_id":"turn-old"}', ownership_epoch=8)
 
     assert not any(
-        statement.startswith("UPDATE fleet_lite_sessions SET turns") for statement, _ in pool.conn.statements
+        statement.startswith("UPDATE fleet_lite_turns") or statement.startswith("INSERT INTO fleet_lite_turns")
+        for statement, _ in pool.conn.statements
     )
 
 
 def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
+    from fleet_rlm.replay import split_snapshot_for_storage
+
     content = b"immutable input"
     digest = hashlib.sha256(content).hexdigest()
+    _, blobs = split_snapshot_for_storage(digest, content)
     snapshot = (digest, content)
-    store, pool = make_store([], [], [], [], [(digest,)], [])
+    # Replies: INSERT session, SELECT FOR UPDATE, SELECT status, UPDATE turn RETURNING,
+    # UPDATE session, N blob inserts, INSERT replay_snapshot, SELECT sha256.
+    store, pool = make_store([], [], [], [("t1",)], [], *([] for _ in blobs), [], [(digest,)])
     store.commit_turn(
         "s1",
         turn_record_json='{"turn_id":"t1","replay_snapshot_selected":true}',
@@ -535,10 +490,11 @@ def test_selected_replay_snapshot_commits_atomically_with_turn_completion():
     )
     sql = [statement for statement, _ in pool.conn.statements]
     assert sql[0] == "BEGIN" and sql[-1] == "COMMIT"
+    assert any(statement.startswith("INSERT INTO fleet_lite_replay_blobs") for statement in sql)
     assert any(statement.startswith("INSERT INTO fleet_lite_replay_snapshots") for statement in sql)
-    assert any(statement.startswith("UPDATE fleet_lite_turns SET status='completed'") for statement in sql)
-    assert sql.index(next(s for s in sql if s.startswith("INSERT INTO fleet_lite_replay_snapshots"))) < sql.index(
-        next(s for s in sql if s.startswith("UPDATE fleet_lite_turns SET status='completed'"))
+    assert any(statement.startswith("UPDATE fleet_lite_turns") for statement in sql)
+    assert sql.index(next(s for s in sql if s.startswith("UPDATE fleet_lite_turns"))) < sql.index(
+        next(s for s in sql if s.startswith("INSERT INTO fleet_lite_replay_snapshots"))
     )
 
 
@@ -635,21 +591,32 @@ def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():
 
 
 def test_snapshot_provenance_round_trips_through_the_immutable_replay():
-    from fleet_rlm.replay import decode_snapshot, encode_snapshot
+    import base64
 
+    from fleet_rlm.replay import (
+        decode_snapshot,
+        encode_snapshot,
+        rehydrate_snapshot_from_storage,
+        split_snapshot_for_storage,
+    )
+
+    payload = b"hello world"
+    payload_sha = hashlib.sha256(payload).hexdigest()
+    encoded_payload = base64.b64encode(payload).decode("ascii")
     snapshot = {
         "schema_version": 1,
         "session_id": "s1",
         "turn_id": "t1",
         "task": "immutable task",
-        "workspace_manifest": "/workspace/files (empty)",
-        "context_files": {},
-        "replay_files": {},
+        "workspace_manifest": "/workspace/files/data.txt",
+        "context_files": {"files/data.txt": payload_sha},
+        "replay_files": {"files/data.txt": encoded_payload},
         "skill_revision_sha256": hashlib.sha256(b"{}").hexdigest(),
         **SNAPSHOT_PROVENANCE,
     }
     digest, compressed = encode_snapshot(snapshot)
-    store, pool = make_store([], [], [], [], [(digest,)], [])
+    _, blobs = split_snapshot_for_storage(digest, compressed)
+    store, pool = make_store([], [], [], [("t1",)], [], *([] for _ in blobs), [], [(digest,)])
     store.commit_turn(
         "s1",
         turn_record_json=json.dumps(
@@ -663,13 +630,21 @@ def test_snapshot_provenance_round_trips_through_the_immutable_replay():
         completion=("t1", {"event": "turn_complete", **SNAPSHOT_PROVENANCE}),
         replay_snapshot=(digest, compressed),
     )
-    insert_params = next(
+    blob_map = {
+        params[0]: params[2]
+        for statement, params in pool.conn.statements
+        if statement.startswith("INSERT INTO fleet_lite_replay_blobs")
+    }
+    snapshot_params = next(
         params
         for statement, params in pool.conn.statements
         if statement.startswith("INSERT INTO fleet_lite_replay_snapshots")
     )
-    decoded = decode_snapshot(insert_params[2], insert_params[3])
+    manifest = json.loads(snapshot_params[3])
+    rehydrated_digest, rehydrated_compressed = rehydrate_snapshot_from_storage(snapshot_params[2], manifest, blob_map)
+    decoded = decode_snapshot(rehydrated_digest, rehydrated_compressed)
     assert {key: decoded[key] for key in SNAPSHOT_PROVENANCE} == SNAPSHOT_PROVENANCE
+    assert decoded["replay_files"] == {"files/data.txt": encoded_payload}
 
 
 @pytest.mark.parametrize(
@@ -786,16 +761,28 @@ def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
     assert len(calls) == 2 and paused == [0.25]
 
 
-def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(monkeypatch):
+def test_lakebase_connection_class_caches_oauth_token_until_near_expiry(monkeypatch):
+
     import psycopg
 
-    credentials = iter(("token-one", "token-two"))
-    calls = []
-    client = SimpleNamespace(
-        postgres=SimpleNamespace(
-            generate_database_credential=lambda *, endpoint: SimpleNamespace(token=next(credentials), endpoint=endpoint)
+    now = 1_000_000.0
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: now)
+    monkeypatch.setattr("fleet_rlm.store.leases.time.time", lambda: now)
+
+    credentials = iter(
+        (
+            SimpleNamespace(token="token-one", expiration_time=now + 3_600.0),
+            SimpleNamespace(token="token-two", expiration_time=now + 3_600.0),
         )
     )
+    gen_calls: list[str] = []
+    calls = []
+
+    def generate(*, endpoint: str):
+        gen_calls.append(endpoint)
+        return next(credentials)
+
+    client = SimpleNamespace(postgres=SimpleNamespace(generate_database_credential=generate))
 
     def connect(connection_class, conninfo="", **kwargs):
         calls.append((connection_class, conninfo, kwargs))
@@ -805,17 +792,16 @@ def test_lakebase_connection_class_requests_a_fresh_oauth_token_per_connection(m
     connection_class = lakebase_connection_class(client, "projects/p/branches/b/endpoints/e")
     first = connection_class.connect("host=lakebase", user="fleet_app")
     second = connection_class.connect("host=lakebase", user="fleet_app")
-    assert first["password"] == "token-one" and second["password"] == "token-two"
-    assert len(calls) == 2
+    assert first["password"] == "token-one" and second["password"] == "token-one"
+    assert len(gen_calls) == 1
+
+    # Advance within the 300s refresh margin to force credential refresh.
+    now = 1_000_000.0 + 3_350.0
+    third = connection_class.connect("host=lakebase", user="fleet_app")
+    assert third["password"] == "token-two"
+    assert len(gen_calls) == 2
+    assert len(calls) == 3
     assert all(call[0] is connection_class and call[1] == "host=lakebase" for call in calls)
-
-
-def test_migration_twelve_creates_the_global_settings_table_even_if_an_older_draft_left_one():
-    version, statements = _SCHEMA_MIGRATIONS[11]
-    assert version == 12 and len(statements) == 2
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in statements[1] and "global_settings(scope)" in statements[1]
-    assert "CREATE TABLE IF NOT EXISTS fleet_lite_global_settings" in statements[0]
-    assert "scope TEXT PRIMARY KEY" in statements[0] and "settings JSONB NOT NULL" in statements[0]
 
 
 def test_global_settings_round_trip_by_scope_and_default_to_empty():
@@ -825,7 +811,7 @@ def test_global_settings_round_trip_by_scope_and_default_to_empty():
     store.update_global_settings("improve", {"min_new_labels": 3, "max_metric_calls": None})
     sql, params = pool.conn.statements[-1]
     # Merged in SQL, so concurrent updates touch only their own keys; None removes a key.
-    assert "settings=(fleet_lite_global_settings.settings - %s::text[]) || EXCLUDED.settings" in sql
+    assert "settings = (fleet_lite_global_settings.settings - %s::text[]) || EXCLUDED.settings" in sql
     assert params == ("improve", '{"min_new_labels": 3}', ["max_metric_calls"])
 
 
@@ -844,26 +830,12 @@ def test_runtime_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
     assert calls == []
 
 
-def test_retired_managed_memory_migrations_remain_readable_without_runtime_wiring():
-    migrations = dict(_SCHEMA_MIGRATIONS)
-    assert len(migrations[9]) == 4
-    assert "fleet_lite_managed_session_bindings" in migrations[9][0]
-    assert "fleet_lite_managed_session_outbox" in migrations[9][1]
-    assert "fleet_lite_managed_pipeline_runs" in migrations[9][3]
-    assert "ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'serving'" in migrations[10][0]
-    store, pool = make_store([], [], [(12,)])
-    store.initialize()
-    statements = [sql for sql, _params in pool.conn.statements]
-    assert not any("INSERT INTO fleet_lite_schema_migrations(version)" in sql for sql in statements)
-    assert not any("fleet_lite_managed_" in sql for sql in statements)
-
-
 def test_improve_queue_joins_turns_across_sessions_with_optional_labels():
     store, pool = make_store([{"turn_id": "t1"}])
     assert store.improve_queue(25) == [{"turn_id": "t1"}]
     sql, params = pool.conn.statements[0]
     assert "FROM fleet_lite_replay_snapshots AS replay" in sql and "LEFT JOIN fleet_lite_review_labels" in sql
-    assert "WHERE replay.session_id" not in sql and "turns.status='completed'" in sql
+    assert "WHERE replay.session_id" not in sql and "turns.status = 'completed'" in sql
     assert params == (25, 0)
 
 
@@ -871,7 +843,7 @@ def test_turn_reference_resolves_a_turn_id_to_its_session_trace_and_snapshot():
     store, pool = make_store([{"session_id": "s1", "turn_id": "t1", "trace_id": "tr-1"}])
     assert store.turn_reference("t1")["trace_id"] == "tr-1"
     sql, params = pool.conn.statements[0]
-    assert "turns.result->>'trace_id' AS trace_id" in sql and "replay.turn_id=%s" in sql
+    assert "turns.result->>'trace_id' AS trace_id" in sql and "replay.turn_id = %s" in sql
     assert params == ("t1",)
 
 
@@ -924,7 +896,7 @@ def test_create_optimization_run_records_active_identity_and_returns_metadata():
     assert record["created_at"] == "2026-10-26T00:00:00+00:00"
     sql, params = pool.conn.statements[1]
     assert "ON CONFLICT (request_id) DO NOTHING RETURNING *" in sql
-    assert "jsonb_build_object('trigger',%s::text)" in sql  # recorded in the row's own insert
+    assert "jsonb_build_object('trigger', %s::text)" in sql  # recorded in the row's own insert
     assert params == ("run-1", "request-1", "optimize", '{"max_metric_calls":20}', "worker-1", True, "manual")
 
 
@@ -974,7 +946,7 @@ def test_get_and_list_optimization_runs_are_global_and_canonical():
     assert one is not None and one["status"] == "completed"  # Ledger columns override metadata.
     assert store.list_optimization_runs()[0]["candidate_version"] == "candidate-1"
     assert pool.borrowed == 2
-    assert "WHERE run_id=%s" in pool.conn.statements[0][0]
+    assert "WHERE run_id = %s" in pool.conn.statements[0][0]
     assert "ORDER BY updated_at DESC" in pool.conn.statements[1][0]
 
 
@@ -990,8 +962,8 @@ def test_a_legacy_run_keeps_its_session_only_as_metadata():
 def test_tuple_rows_follow_the_migrated_column_order():
     row = run_row()
     columns = (
-        "run_id", "request_id", "options", "owner_id", "managed", "status", "stage",
-        "stop_requested", "metadata", "created_at", "updated_at", "kind",
+        "run_id", "request_id", "kind", "options", "owner_id", "managed", "status", "stage",
+        "stop_requested", "metadata", "created_at", "updated_at",
     )  # fmt: skip
     store, _pool = make_store([tuple(row[name] for name in columns)])
 
@@ -1079,7 +1051,7 @@ def test_request_optimization_stop_is_idempotent_for_running_work():
     record = store.request_optimization_stop("run-1")
 
     assert record["status"] == "running" and record["stop_requested"] is True
-    assert "status='running' RETURNING *" in pool.conn.statements[0][0]
+    assert "status = 'running' RETURNING *" in pool.conn.statements[0][0]
 
 
 def test_request_optimization_stop_refuses_a_terminal_run():
@@ -1093,7 +1065,7 @@ def test_claim_optimization_review_claims_completed_candidate_and_recovers_appro
     store, pool = make_store([run_row(status="completed")], [run_row(status="approving", owner_id="reviewer-1")])
     claimed = store.claim_optimization_review("run-1", "reviewer-1")
     assert claimed["status"] == "approving" and claimed["owner_id"] == "reviewer-1"
-    assert "status IN ('completed','approving') RETURNING *" in pool.conn.statements[2][0]
+    assert "status IN ('completed', 'approving') RETURNING *" in pool.conn.statements[2][0]
 
     store, _pool = make_store(
         [run_row(status="approving", owner_id="dead-reviewer")],
@@ -1118,163 +1090,139 @@ def test_reject_optimization_run_keeps_candidate_metadata_and_records_decision()
     rejected = store.reject_optimization_run("run-1")
 
     assert rejected["status"] == "rejected" and rejected["candidate_version"] == "candidate-1"
-    assert "metadata=metadata || CASE WHEN status='rejected'" in pool.conn.statements[0][0]
+    assert "metadata = metadata || CASE WHEN status = 'rejected'" in pool.conn.statements[0][0]
 
 
-def test_optimization_lease_uses_a_dedicated_connection_and_distinct_lock_scope(monkeypatch):
-    connections = []
+def test_optimization_lease_uses_pooled_leases_table_and_distinct_lock_scope():
+    store, pool = make_store([(1,)], [])
+    try:
+        held = store.acquire_optimization_lease(owner_id="worker-1")
+        assert held.scope == _OPTIMIZATION_LOCK_SCOPE
+        assert held.kind == "global"
+        assert held.owner_id == "worker-1"
+        assert held.epoch == 1
+        sql_stmt, params = pool.conn.statements[0]
+        assert "INSERT INTO fleet_lite_leases" in sql_stmt
+        assert params[0] == _OPTIMIZATION_LOCK_SCOPE
+        assert params[1] == "worker-1"
 
-    class LeaseConnection:
-        def __init__(self, locked: bool) -> None:
-            self.locked = locked
-            self.statements = []
-            self.closed = False
+        with pytest.raises(RuntimeError, match="already owned"):
+            store.acquire_optimization_lease(owner_id="worker-2")
 
-        def execute(self, statement: str, params: tuple[Any, ...]):
-            self.statements.append((statement, params))
-            return type("Result", (), {"fetchone": lambda _self: (self.locked,)})()
-
-        def close(self) -> None:
-            self.closed = True
-
-    def connect(*_args, **_kwargs):
-        connection = LeaseConnection(not connections)
-        connections.append(connection)
-        return connection
-
-    monkeypatch.setattr(
-        psycopg.Connection, "connect", classmethod(lambda _cls, *args, **kwargs: connect(*args, **kwargs))
-    )
-    store, pool = make_store()
-
-    held = store.acquire_optimization_lease()
-    assert held is connections[0]
-    assert held.statements[0][1] == (_OPTIMIZATION_LOCK_SCOPE,)
-    assert pool.borrowed == 0
-
-    with pytest.raises(RuntimeError, match="already owned"):
-        store.acquire_optimization_lease()
-    assert connections[1].closed
+        held.close()
+        assert held.closed is True
+        delete_sql, delete_params = pool.conn.statements[-1]
+        assert "DELETE FROM fleet_lite_leases" in delete_sql
+        assert delete_params == (_OPTIMIZATION_LOCK_SCOPE, "worker-1", 1)
+    finally:
+        store.heartbeat.stop()
 
 
-def test_owner_liveness_probe_uses_independent_connection_and_releases_probe_locks(monkeypatch):
-    held = set()
-    connections = []
-
-    class Connection:
-        def __init__(self):
-            self.scopes = set()
-            self.closed = False
-
-        def execute(self, _sql, params):
-            scope = params[0]
-            available = scope not in held
-            if available:
-                held.add(scope)
-                self.scopes.add(scope)
-            return type("Result", (), {"fetchone": lambda _self: (available,)})()
-
-        def close(self):
-            held.difference_update(self.scopes)
-            self.closed = True
-
-    def connect(*_args, **_kwargs):
-        connection = Connection()
-        connections.append(connection)
-        return connection
-
-    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(lambda _cls, *args, **kw: connect(*args, **kw)))
-    store, pool = make_store()
-    owner = store.acquire_optimization_owner_lease("api-1")
-    worker = store.acquire_optimization_lease()
-    assert store.optimization_owner_alive("api-1") is True
-    assert connections[-1].closed
-    assert store.optimization_owner_alive("api-2") is False
-    assert connections[-1].closed
-    assert held == {"fleet:optimization-owner:api-1", _OPTIMIZATION_LOCK_SCOPE}
-    owner.close()
-    assert store.optimization_owner_alive("api-1") is False
-    worker.close()
-    assert not held and pool.borrowed == 0
+def test_owner_liveness_probe_uses_pooled_lease_table_and_releases_on_close():
+    store, pool = make_store([(1,)], [(1,)], [(1,)], [], [], [])
+    try:
+        owner = store.acquire_optimization_owner_lease("api-1")
+        worker = store.acquire_optimization_lease()
+        assert owner.scope == "fleet:optimization-owner:api-1"
+        assert worker.scope == _OPTIMIZATION_LOCK_SCOPE
+        assert store.optimization_owner_alive("api-1") is True
+        assert store.optimization_owner_alive("api-2") is False
+        owner.close()
+        assert owner.closed is True
+        assert store.optimization_owner_alive("api-1") is False
+        worker.close()
+        assert worker.closed is True
+        assert pool.borrowed == 7
+    finally:
+        store.heartbeat.stop()
 
 
-def test_owner_probe_does_not_treat_database_errors_as_owner_death(monkeypatch):
-    store, _pool = make_store()
-
-    def fail(*_args, **_kwargs):
-        raise psycopg.OperationalError("database unavailable")
-
-    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(fail))
-    with pytest.raises(psycopg.OperationalError):
+def test_owner_probe_does_not_treat_database_errors_as_owner_death():
+    store, _pool = make_store(error=psycopg.errors.OperationalError("database unavailable"))
+    with pytest.raises(psycopg.errors.OperationalError):
         store.optimization_owner_alive("api-1")
+
+
+def test_heartbeat_batches_session_and_global_lease_renewals_and_handles_transient_errors(monkeypatch):
+    store, pool = make_store(
+        [("s1",)],
+        [(_OPTIMIZATION_LOCK_SCOPE,)],
+        [(_OPTIMIZATION_LOCK_SCOPE,)],
+        [(_OPTIMIZATION_LOCK_SCOPE,)],
+    )
+    now = {"value": 100.0}
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: now["value"])
+    lost_events: list[str] = []
+    idle_calls: list[int] = []
+
+    store.heartbeat.register_idle_callback(lambda: idle_calls.append(1))
+    with store.heartbeat._lock:
+        store.heartbeat._sessions["s1"] = (1, "w1", lambda: lost_events.append("s1"), 100.0)
+        store.heartbeat._sessions["s2"] = (2, "w1", lambda: lost_events.append("s2"), 100.0)
+        store.heartbeat._leases[_OPTIMIZATION_LOCK_SCOPE] = (3, "w1", lambda: lost_events.append("opt"), 100.0)
+
+    store.heartbeat.tick()
+    assert lost_events == ["s2"]
+    assert idle_calls == [1]
+    assert "UPDATE fleet_lite_sessions AS s" in pool.conn.statements[0][0]
+    assert "UPDATE fleet_lite_leases AS l" in pool.conn.statements[1][0]
+
+    # Transient operational error keeps lease alive before TTL expires, then expires after TTL.
+    pool.conn.error = psycopg.errors.OperationalError("brief glitch")
+    now["value"] = 120.0
+    store.heartbeat.tick()
+    assert lost_events == ["s2"]
+
+    pool.conn.error = psycopg.errors.OperationalError("still disconnected")
+    now["value"] = 165.0
+    store.heartbeat.tick()
+    assert lost_events == ["s2", "s1"]
+
+
+def test_cleanup_expired_replays_preserves_gold_labeled_snapshots_and_prunes_orphan_blobs():
+    store, pool = make_store([("s1",), ("s2",)], [("b1",)])
+
+    deleted_snapshots, deleted_blobs = store.cleanup_expired_replays(retention_days=14, batch_limit=25)
+
+    assert (deleted_snapshots, deleted_blobs) == (2, 1)
+    snap_sql, snap_params = pool.conn.statements[1]
+    blob_sql, blob_params = pool.conn.statements[2]
+    assert "DELETE FROM fleet_lite_replay_snapshots" in snap_sql
+    assert "NOT EXISTS ( SELECT 1 FROM fleet_lite_review_labels AS l" in snap_sql
+    assert snap_params == (14, 25)
+    assert "DELETE FROM fleet_lite_replay_blobs AS b" in blob_sql
+    assert blob_params == (25,)
 
 
 @pytest.mark.skipif(
     not os.environ.get("FLEET_TEST_POSTGRES_URL"), reason="set FLEET_TEST_POSTGRES_URL to run against a real PostgreSQL"
 )
-def test_migrations_eleven_and_twelve_on_real_postgres_preserve_history_despite_cross_session_collisions():
-    """Opt-in: builds schema v10 in a scratch schema, seeds colliding ids, applies v11 and v12, re-initializes."""
+def test_schema_v1_on_real_postgres_bootstraps_and_round_trips():
+    """Opt-in: initializes schema v1 in a scratch schema and verifies idempotent re-initialization."""
     url = os.environ["FLEET_TEST_POSTGRES_URL"]
     schema = "fleet_mig_" + uuid.uuid4().hex[:8]
     with psycopg.connect(url, autocommit=True) as admin:
         admin.execute(f"CREATE SCHEMA {schema}")
         try:
-            admin.execute(f"SET search_path TO {schema}")
-            admin.execute(_SCHEMA_VERSION_TABLE)
-            for version, statements in _SCHEMA_MIGRATIONS[:10]:
-                for statement in statements:
-                    admin.execute(statement)
-                admin.execute("INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s)", (version,))
-            seeds = [
-                # (session, run, request, created) -- run-a1 and req-1 collide across sessions.
-                ("s1", "run-a1", "req-1", "2026-01-01"),
-                ("s2", "run-a1", "req-1", "2026-01-02"),
-                ("s3", "run-a3", "req-3", "2026-01-03"),
-                # An existing run ID that equals the natural dedup suffix must not be clobbered.
-                ("s4", "run-a1-dup-s2", "req-4", "2026-01-04"),
-            ]
-            for session, run, request, created in seeds:
-                admin.execute(
-                    "INSERT INTO fleet_lite_optimization_runs "
-                    "(session_id,run_id,request_id,owner_id,status,stage,metadata,created_at) "
-                    "VALUES (%s,%s,%s,'owner','completed','completed','{\"candidate_version\":\"v\"}',%s)",
-                    (session, run, request, created),
-                )
-            # A schema that applied an earlier draft of v11 may already hold an empty settings table.
-            admin.execute("CREATE TABLE fleet_lite_global_settings (scope TEXT, settings JSONB)")  # no key
             store = Store.open(url, wait=True, schema=schema)
             try:
                 store.initialize()
                 store.initialize()  # idempotent: nothing pending the second time
-                rows = {
-                    row[0]: row
-                    for row in admin.execute(
-                        "SELECT run_id,request_id,kind,metadata->>'legacy_session_id',metadata->>'candidate_version' "
-                        "FROM fleet_lite_optimization_runs"
-                    ).fetchall()
-                }
-                assert set(rows) == {"run-a1", "run-a1-dup-s2", "run-a1-dup-s2-1", "run-a3"}
-                assert rows["run-a1"][3] == "s1" and rows["run-a1-dup-s2"][3] == "s4"
-                assert rows["run-a1-dup-s2-1"][3] == "s2" and rows["run-a3"][3] == "s3"
-                assert all(row[2] == "optimize" and row[4] == "v" for row in rows.values())
-                assert len({row[1] for row in rows.values()}) == 4 and rows["run-a1"][1] == "req-1"
-                assert not admin.execute(
-                    "SELECT 1 FROM information_schema.columns WHERE table_schema=%s "
-                    "AND table_name='fleet_lite_optimization_runs' AND column_name='session_id'",
-                    (schema,),
-                ).fetchall()
+                admin.execute(f"SET search_path TO {schema}")
                 indexes = {
                     row[0] for row in admin.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s", (schema,))
                 }
                 assert "fleet_lite_one_active_optimization_run" in indexes
                 assert "fleet_lite_optimization_runs_pkey" in indexes
                 assert "fleet_lite_optimization_runs_request_id_key" in indexes
-                assert admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0] == 12
+                assert "fleet_lite_memories_content_fts" in indexes
+                latest_version = admin.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()[0]
+                assert latest_version == SCHEMA_VERSION
                 store.update_global_settings("improve", {"auto_run": True, "min_new_labels": 3})
                 store.update_global_settings("improve", {"min_new_labels": None, "max_total_tokens": 9})
                 assert store.global_settings("improve") == {"auto_run": True, "max_total_tokens": 9}
-                # The legacy row stays readable through the Store and keeps its legacy marker.
-                assert store.get_optimization_run("run-a1-dup-s2-1")["legacy_session_id"] == "s2"
+                created = store.create_optimization_run("run-v1", "req-v1", {"max_metric_calls": 10}, "owner-1")
+                assert created["run_id"] == "run-v1" and created["kind"] == "optimize"
             finally:
                 store.close()
         finally:

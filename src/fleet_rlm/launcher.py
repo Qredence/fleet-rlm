@@ -6,7 +6,6 @@ import atexit
 import contextlib
 import os
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -186,35 +185,6 @@ class ManagedProcess:
                 process.send_signal(sig)
 
 
-def _drain_experiments(plan: LaunchPlan, log: Callable[[str], None]) -> None:
-    """Fence admission and retain owned services until accepted experiments finish."""
-    token = plan.api_env.get("FLEET_SETUP_TOKEN")
-    if not token:
-        log("Waiting for API graceful shutdown; active experiments finish before owned services stop.")
-        return
-    with httpx.Client(
-        base_url=plan.api_url,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=httpx.Timeout(10.0, connect=2.0),
-    ) as client:
-        response = client.post("/setup/experiments/drain")
-        response.raise_for_status()
-        state = response.json()
-        previous = None
-        while state["busy"]:
-            summary = (
-                ", ".join(f"{run['run_id']}: {run.get('stage', run['status'])}" for run in state["experiments"])
-                or "worker cleanup"
-            )
-            if summary != previous:
-                log(f"Waiting for experiments before stopping owned services: {summary}")
-                previous = summary
-            time.sleep(1.0)
-            response = client.get("/setup/experiments/status")
-            response.raise_for_status()
-            state = response.json()
-
-
 def _api_process(plan: LaunchPlan, host: str, port: int) -> ManagedProcess:
     return ManagedProcess(
         "API server",
@@ -260,55 +230,6 @@ def _mlflow_process(mlflow_port: int, data_dir: str) -> ManagedProcess:
 
 
 @contextlib.contextmanager
-def running_setup(
-    *,
-    backend: str,
-    token: str,
-    startup_timeout: float,
-    log: Callable[[str], None],
-    overrides: dict[str, str] | None = None,
-) -> Generator[str, None, None]:
-    """Run the same FastAPI app on a private loopback port before runtime prerequisites exist."""
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-    url = f"http://127.0.0.1:{port}"
-    process = ManagedProcess(
-        "Setup API",
-        [
-            sys.executable,
-            "-m",
-            "fleet_rlm.cli",
-            "serve",
-            "--setup",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--mlflow",
-            backend,
-        ],
-        STATE_DIR / "logs" / "setup.log",
-        env={"FLEET_SETUP_TOKEN": token, "FLEET_SETUP_PROJECT_DIR": str(Path.cwd()), **(overrides or {})},
-    )
-
-    def ready() -> bool:
-        try:
-            response = httpx.get(url + "/health", timeout=1.5)
-            return response.status_code == 200 and response.json().get("status") == "setup"
-        except (httpx.HTTPError, ValueError):
-            return False
-
-    try:
-        log("Checking Fleet setup…")
-        process.start()
-        process.wait_ready(ready, startup_timeout)
-        yield url
-    finally:
-        process.stop()
-
-
-@contextlib.contextmanager
 def running_services(
     plan: LaunchPlan,
     *,
@@ -324,10 +245,11 @@ def running_services(
     api_ready = False
 
     def cleanup() -> None:
-        """Drain experiments and stop owned services in reverse startup order.
+        """Stop owned services in reverse startup order.
 
-        Wait for API shutdown without a kill deadline, keeping owned MLflow available
-        until then. Temporarily ignore termination signals on the main thread.
+        Wait for API shutdown without a kill deadline so active experiments and
+        traces drain before stopping local MLflow. Temporarily ignore termination
+        signals on the main thread.
         """
         nonlocal api_ready
         # A second Ctrl-C must not interrupt wait() and abandon owned services.
@@ -338,10 +260,7 @@ def running_services(
         try:
             if api_ready and owned_api is not None and owned_api in started:
                 api_ready = False
-                try:
-                    _drain_experiments(plan, log)
-                except (httpx.HTTPError, ValueError, KeyError):
-                    log("Could not observe experiment drain; waiting for API graceful shutdown.")
+                log("Waiting for API graceful shutdown; active experiments finish before owned services stop.")
             while started:
                 process = started.pop()
                 if process is owned_api:

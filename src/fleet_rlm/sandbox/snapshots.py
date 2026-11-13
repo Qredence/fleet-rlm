@@ -114,7 +114,7 @@ DEFAULT_DEFINITION = SnapshotDefinition(
 PREFLIGHT_CACHE_TTL_SECONDS = 60
 SNAPSHOT_BUILD_TIMEOUT_SECONDS = 20 * 60
 MAX_REFUSAL_CHARS = 1000
-BUILD_COMMAND = "Open /setup in fleet cli and choose Build snapshot"
+BUILD_COMMAND = "Run: fleet snapshot build"
 PROVENANCE_KEYS = (
     "snapshot_name",
     "snapshot_id",
@@ -247,7 +247,7 @@ def _resolve_snapshot(service: Any, name: str) -> SnapshotIdentity:
         or disk < DISK_FLOOR
     ):
         recovery = (
-            " Open /setup and choose Activate snapshot, then retry."
+            " Run: fleet snapshot activate, then retry."
             if state == "inactive"
             else (
                 " The snapshot may still be building; wait for it to become active and retry."

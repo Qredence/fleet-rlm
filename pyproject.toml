@@ -181,8 +181,10 @@ convention = "google"
 "scripts/**/*.py" = ["T201", "D"]
 "notebooks/**/*.ipynb" = ["T201"]
 "tests/**/*.py" = ["D"]
-"src/fleet_rlm/optimize/gepa.py" = ["T201"]
+"src/fleet_rlm/optimize/cli_commands.py" = ["T201"]
 "src/fleet_rlm/optimize/dataset.py" = ["T201"]
+"src/fleet_rlm/optimize/gepa.py" = ["T201"]
+"src/fleet_rlm/optimize/runner.py" = ["T201"]
 
 [tool.ruff.format]
 docstring-code-format = true

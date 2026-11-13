@@ -1,7 +1,7 @@
 # Configuration reference
 
 Fleet configuration is provided by `FleetSettings` in
-`src/fleet_rlm/config.py`. Non-secret defaults are loaded from
+`src/fleet_rlm/config/` (`config/settings.py`). Non-secret defaults are loaded from
 `config/fleet.toml` schema 4; process environment and `.env` override them.
 Unknown TOML keys fail startup; unrelated environment variables are ignored. Prefer the `FLEET_`-prefixed
 names below. A few common unprefixed aliases are accepted as noted in the
@@ -344,10 +344,10 @@ identifiers are not credentials and may be configured in `[daytona]`.
 
 `/config` retains its existing mode/models/context/limits and adds `configuration`:
 safe effective values, source per field, schema, SHA256 digest, and restart
-requirement. Session mode/model overrides have source `session`. File edits affect
-the next process startup. The CLI-owned `/setup` checklist can edit supported
-`.env` overrides and explicitly restart owned services. Ordinary serving
-configuration remains frozen.
+requirement. Session mode/model overrides have source `session`. Edit `.env` or
+`config/fleet.toml` on the host and run `fleet doctor` to verify configuration
+read-only (`fleet doctor --probe-models` for an explicit model inference probe).
+Ordinary serving configuration remains frozen until process restart.
 
 ## Generation options and value audit
 

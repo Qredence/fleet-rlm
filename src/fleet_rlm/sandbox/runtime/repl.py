@@ -17,7 +17,6 @@ import functools
 import io
 import json
 import keyword
-import math
 import os
 import sys
 import threading
@@ -29,15 +28,11 @@ from typing import Any
 
 CALL_MARK = "\x1eFLEET_CALL "
 RESULT_MARK = "\x1eFLEET_RESULT "
-PROGRESS_MARK = "\x1eFLEET_PROGRESS "
 REPLY_DIR = "/tmp/fleet/replies"
 WORKSPACE = "/workspace"
 MAX_BODY = 2_000_000
 MAX_CODE = 1_000_000
 MAX_CAPTURE_CHARS = 100_000
-MAX_PROGRESS_LABEL = 64
-MAX_PROGRESS_EXPECT_SECONDS = 86_400
-MAX_PROGRESS_CHECKPOINT = 2**63 - 1
 RESERVED_NAMES = {
     "__builtins__",
     "llm_query",
@@ -49,7 +44,6 @@ RESERVED_NAMES = {
     "read_skill_reference",
     "run_skill_script",
     "save_skill",
-    "progress_scope",
 }
 # DSPy RLM and Flex register these built-in interpreter APIs in payload["tools"].
 REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
@@ -109,159 +103,6 @@ def _emit(mark: str, payload: dict[str, Any]) -> None:
         stream: Any = _STATE["stdout"] or sys.__stdout__
         stream.write(line)
         stream.flush()
-
-
-def _progress_label(value: Any) -> str:
-    """Return a bounded, non-empty progress label or refuse the value with its rule."""
-    if not isinstance(value, str):
-        raise TypeError(f"progress_scope label must be a string, not {type(value).__name__}")
-    label = value.strip()
-    if not label:
-        raise ValueError("progress_scope label must be a non-empty string")
-    if len(label) > MAX_PROGRESS_LABEL:
-        raise ValueError(f"progress_scope label must be at most {MAX_PROGRESS_LABEL} characters")
-    return label
-
-
-def _progress_expectation(value: Any) -> float:
-    """Return a finite positive expectation in seconds; booleans and text never coerce."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"progress_scope expect_seconds must be a number, not {type(value).__name__}")
-    expectation = float(value)
-    if not math.isfinite(expectation) or expectation <= 0:
-        raise ValueError("progress_scope expect_seconds must be a finite positive number")
-    if expectation > MAX_PROGRESS_EXPECT_SECONDS:
-        raise ValueError(f"progress_scope expect_seconds must be at most {MAX_PROGRESS_EXPECT_SECONDS}")
-    return expectation
-
-
-def _emit_progress(scope: "_ProgressScope", phase: str, checkpoint: Any = None) -> None:
-    """Write one progress observation to the execution stdout; stream errors propagate."""
-    _emit(
-        PROGRESS_MARK,
-        {
-            "phase": phase,
-            "scope": scope.label,
-            "expect_seconds": scope.expect_seconds,
-            "checkpoint": checkpoint,
-        },
-    )
-
-
-class _ProgressScope:
-    """Checkpoint-only observation window: it reports, and it never acts on the cell.
-
-    The expectation is immutable, values must advance past the high-water mark to renew,
-    and a handle from an earlier cell is closed, so it can never renew a later label.
-    """
-
-    __slots__ = ("_closed", "_entered", "_expect_seconds", "_high_water", "_label")
-
-    def __init__(self, label: Any, expect_seconds: Any) -> None:
-        self._label = _progress_label(label)
-        self._expect_seconds = _progress_expectation(expect_seconds)
-        self._high_water = -1
-        self._entered = False
-        self._closed = False
-        self._require_main_thread()
-
-    @property
-    def label(self) -> str:
-        """The bounded scope label."""
-        return self._label
-
-    @property
-    def expect_seconds(self) -> float:
-        """The immutable expectation that only labels `stalled`; it changes nothing."""
-        return self._expect_seconds
-
-    def _require_main_thread(self) -> None:
-        # The interpreter worker's execution thread is this cell's main thread; a user thread never is.
-        """Raise RuntimeError when called outside the recorded execution thread."""
-        expected = _STATE.get("execution_thread")
-        if expected is not None and threading.get_ident() != expected:
-            raise RuntimeError("progress_scope is only available on the interpreter's main thread")
-
-    def _close(self) -> None:
-        """Close this scope once and emit an exit observation if it was entered."""
-        if self._closed:
-            return
-        self._closed = True
-        stack = _STATE.get("progress_stack")
-        if stack is not None and self in stack:
-            stack.remove(self)
-        if self._entered:
-            _emit_progress(self, "exit")
-
-    def __enter__(self) -> "_ProgressScope":
-        self._require_main_thread()
-        if self._closed:
-            raise RuntimeError("progress_scope has already ended")
-        if self._entered:
-            raise RuntimeError("progress_scope cannot be entered twice")
-        stack = _STATE.get("progress_stack")
-        if stack is None:
-            stack = _STATE["progress_stack"] = []
-        self._entered = True
-        stack.append(self)
-        _emit_progress(self, "start")
-        return self
-
-    def __exit__(self, *_exc: Any) -> bool:
-        self._close()
-        return False
-
-    def checkpoint(self, value: Any) -> int:
-        """Report an advancing checkpoint and return the highest accepted value.
-
-        Repeated or lower values return the existing high-water mark without renewing the
-        expectation. Values must be integers from 0 through 2**63 - 1; booleans are rejected.
-
-        Raises:
-            TypeError: The value is not an integer or is a boolean.
-            ValueError: The value is outside the allowed range.
-            RuntimeError: Called outside the execution thread, before entry, or after closure.
-        """
-        self._require_main_thread()
-        if self._closed:
-            raise RuntimeError("progress_scope has ended; checkpoints from a previous cell do not renew")
-        if not self._entered:
-            raise RuntimeError("progress_scope must be entered with 'with' before checkpoints")
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError(f"progress checkpoint must be an integer, not {type(value).__name__}")
-        if value < 0:
-            raise ValueError("progress checkpoint must be a non-negative integer")
-        if value > MAX_PROGRESS_CHECKPOINT:
-            raise ValueError(f"progress checkpoint must be at most {MAX_PROGRESS_CHECKPOINT}")
-        if value <= self._high_water:
-            # A repeated or lower value is evidence, not a fresh expectation window.
-            return self._high_water
-        self._high_water = value
-        _emit_progress(self, "checkpoint", checkpoint=value)
-        return value
-
-
-def progress_scope(label: Any, expect_seconds: Any) -> _ProgressScope:
-    """Return a context manager for advisory checkpoints; it never controls cell execution.
-
-    Enter it with `with` before calling `checkpoint`. The stripped label must contain
-    1..64 characters. `expect_seconds` must be a finite number greater than zero and
-    at most 86,400 seconds; it controls only when the host may label progress stalled.
-
-    Raises:
-        TypeError: The label is not text or the expectation is not numeric; booleans
-            are not accepted as expectations.
-        ValueError: The label or expectation is outside its allowed bounds.
-        RuntimeError: Called outside the interpreter's recorded execution thread.
-    """
-    return _ProgressScope(label, expect_seconds)
-
-
-def _close_progress_scopes() -> None:
-    """End every scope this cell opened, so no handle survives into the next cell."""
-    stack = _STATE.pop("progress_stack", None)
-    for scope in list(stack or []):
-        scope._close()
 
 
 def _host_call_limit(value: Any) -> float | None:
@@ -393,7 +234,6 @@ def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
             "llm_query_batched": _make_tool("llm_query_batched"),
             "jev_decide_batched": _jev_decide_batched,
             "SUBMIT": _submit,
-            "progress_scope": progress_scope,
         }
     )
     namespace.update(
@@ -437,14 +277,11 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
     Valid variables update unreserved bindings; `outputs` names constrain SUBMIT fields.
     Returns validation and user-code errors as result dictionaries, including the remote
     error type when available. SUBMIT supplies `final`; otherwise the last expression
-    supplies `has_value` and a JSON-compatible `value`. Output is bounded, Skill activity
-    is recorded, and execution progress scopes are closed before returning.
+    supplies `has_value` and a JSON-compatible `value`. Output is bounded and Skill activity
+    is recorded.
     """
     _STATE["skill_activity"] = []
     _STATE["skill_activity_truncated"] = False
-    # Scopes are execution-local: the new cell starts with none, whatever the previous cell opened.
-    _close_progress_scopes()
-    _STATE["progress_stack"] = []
     if not isinstance(code, str) or len(code.encode("utf-8")) > MAX_CODE:
         return {"error": True, "error_type": "ValueError", "stderr": "invalid or oversized code"}
     if _invalid_bindings(variables, tools):
@@ -468,8 +305,6 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
     namespace["llm_query_batched"] = _make_tool("llm_query_batched")
     namespace["jev_decide_batched"] = _jev_decide_batched
     namespace["SUBMIT"] = _typed_submit(outputs) if outputs else _submit
-    # Reserved: a user binding from an earlier cell must not shadow the progress helper.
-    namespace["progress_scope"] = progress_scope
     protected = RESERVED_NAMES | set(tools)
     for name in current_dynamic:
         namespace[name] = _make_tool(name)
@@ -529,9 +364,6 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
         result["truncated"] = True
     result["skill_activity"] = _STATE["skill_activity"]
     result["skill_activity_truncated"] = _STATE["skill_activity_truncated"]
-    # Closing here covers a cell that raised or returned while a scope was still open: the handle
-    # remains in the namespace but belongs to this execution, and the next cell starts unknown.
-    _close_progress_scopes()
     return result
 
 

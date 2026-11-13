@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
-import hashlib
 import io
 import json
 import logging
@@ -1910,6 +1908,8 @@ def test_digest_ignores_source_only_changes_and_model_credentials():
 
 @pytest.mark.usefixtures("isolated_settings")
 def test_session_digest_uses_route_overrides_without_resolving_connections_again(monkeypatch):
+    import fleet_rlm.config.settings as config_settings
+
     settings = FleetSettings(
         _env_file=None,
         fleet_llm_api_base="https://models.example/v1",
@@ -1919,7 +1919,7 @@ def test_session_digest_uses_route_overrides_without_resolving_connections_again
     saved = {"mode": "rlm", "models": {"root": "openai/new-root", "sub": "openai/new-sub"}}
     session = settings.for_session(saved)
     overrides = {"execution_mode": "rlm", "fleet_root_model": "openai/new-root", "fleet_sub_model": "openai/new-sub"}
-    monkeypatch.setattr(FleetSettings, "_resolve_models", lambda _self: pytest.fail("must retain snapshots"))
+    monkeypatch.setattr(config_settings, "resolve_models", lambda _self: pytest.fail("must retain snapshots"))
 
     assert settings.configuration(overrides)["digest"] == session.configuration()["digest"]
     assert settings.configuration(overrides)["digest"] != settings.configuration()["digest"]
@@ -3081,7 +3081,6 @@ def test_ratio_bounds_agree_across_entry_points(ratio, monkeypatch):
     payload, review = _parse_optimizer_arguments(Context(None, "s1", SessionState()), f"--validation-ratio {ratio}")
     assert payload["validation_ratio"] == ratio and review is None
     monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
-    monkeypatch.setattr(dataset, "load_examples_from_mlflow", lambda *_args, **_kwargs: [])
     with pytest.raises(ValueError, match="approved gold-labeled examples"):
         dataset.curate_dataset(None, "offline", validation_ratio=ratio)
 
@@ -3286,65 +3285,88 @@ def test_captured_artifact_view_uses_existing_path_validation_without_relisting(
 
 
 def test_lost_session_lease_cancels_remote_work_and_fences_runtime() -> None:
+    from fleet_rlm.store import LeaseHeartbeatService, PooledLease
+
+    cancelled = threading.Event()
     probed = threading.Event()
-    cancelled = threading.Event()
 
-    class LostLease:
-        def execute(self, _statement: str) -> None:
+    class StolenLeaseStore:
+        def __init__(self) -> None:
+            self.heartbeat = LeaseHeartbeatService(self, interval_seconds=0.005)
+            self.released: list[tuple[str, str, str, int]] = []
+
+        def _batch_renew_session_leases(
+            self, _session_ids: list[str], _epochs: list[int], _owner_id: str, _ttl: int
+        ) -> set[str]:
             probed.set()
-            raise ConnectionError("lease connection dropped")
+            return set()
 
-        def close(self) -> None:
-            return None
+        def _release_lease(self, scope: str, *, kind: str, owner_id: str, epoch: int) -> None:
+            self.released.append((scope, kind, owner_id, epoch))
 
-    runtime = _runtime(
-        sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set),
-        lease=LostLease(),  # type: ignore[arg-type]
-    )
-    runtime.start_lease_monitor(interval_seconds=0.001)
-
-    assert probed.wait(timeout=1)
-    assert cancelled.wait(timeout=1)
-    deadline = time.monotonic() + 1
-    while not runtime.lease_lost.is_set() and time.monotonic() < deadline:
-        time.sleep(0.001)
-
-    with pytest.raises(RuntimeError, match="ownership lease was lost"):
-        runtime.assert_lease_held()
-
-    runtime.close_lease()
-
-
-def test_a_dropped_lease_is_renewed_on_a_fresh_connection_when_the_lock_is_still_free() -> None:
-    renewed_probe = threading.Event()
-    cancelled = threading.Event()
-
-    class DroppedLease:
-        def execute(self, _statement: str) -> None:
-            raise ConnectionError("lease connection dropped")
-
-        def close(self) -> None:
-            return None
-
-    class RenewedLease:
-        def execute(self, _statement: str) -> None:
-            renewed_probe.set()
-
-        def close(self) -> None:
-            return None
-
-    renewed = RenewedLease()
-    store = SimpleNamespace(acquire_session_lease=lambda session_id: renewed if session_id == "s1" else None)
+    store = StolenLeaseStore()
+    lease = PooledLease(store, "s1", kind="session", owner_id="worker-1", epoch=1)
     runtime = _runtime(
         sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set, session_id="s1"),
         store=store,
-        lease=DroppedLease(),  # type: ignore[arg-type]
+        lease=lease,
     )
-    runtime.start_lease_monitor(interval_seconds=0.001)
-    assert renewed_probe.wait(timeout=1)
-    assert runtime.lease is renewed and not runtime.lease_lost.is_set() and not cancelled.is_set()
-    runtime.assert_lease_held()
-    runtime.close_lease()
+    runtime.start_lease_monitor()
+    try:
+        assert probed.wait(timeout=1)
+        assert cancelled.wait(timeout=1)
+        deadline = time.monotonic() + 1
+        while not runtime.lease_lost.is_set() and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+        with pytest.raises(RuntimeError, match="ownership lease was lost"):
+            runtime.assert_lease_held()
+    finally:
+        store.heartbeat.stop()
+        runtime.close_lease()
+
+
+def test_a_dropped_lease_is_renewed_on_a_fresh_connection_when_the_lock_is_still_free() -> None:
+    import psycopg
+
+    from fleet_rlm.store import LeaseHeartbeatService, PooledLease
+
+    cancelled = threading.Event()
+    renewed_probe = threading.Event()
+    attempts = 0
+
+    class RecoveringStore:
+        def __init__(self) -> None:
+            self.heartbeat = LeaseHeartbeatService(self, interval_seconds=0.005)
+
+        def _batch_renew_session_leases(
+            self, session_ids: list[str], _epochs: list[int], _owner_id: str, _ttl: int
+        ) -> set[str]:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise psycopg.OperationalError("transient pool drop")
+            renewed_probe.set()
+            return set(session_ids)
+
+        def _release_lease(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    store = RecoveringStore()
+    lease = PooledLease(store, "s1", kind="session", owner_id="worker-1", epoch=1)
+    runtime = _runtime(
+        sandbox_mgr=SimpleNamespace(request_cancellation=cancelled.set, session_id="s1"),
+        store=store,
+        lease=lease,
+    )
+    runtime.start_lease_monitor()
+    try:
+        assert renewed_probe.wait(timeout=1)
+        assert runtime.lease is lease and not runtime.lease_lost.is_set() and not cancelled.is_set()
+        runtime.assert_lease_held()
+    finally:
+        store.heartbeat.stop()
+        runtime.close_lease()
 
 
 def _registry_with(runtime, *, max_active_sessions: int = 64):
@@ -3664,41 +3686,45 @@ def test_eviction_fences_a_resolved_runtime_before_releasing_its_turn_lock() -> 
     assert not stale.turn_lock.locked()
 
 
-def test_lease_acquired_after_close_times_out_is_closed_without_publication(monkeypatch) -> None:
-    from fleet_rlm import session as session_module
+def test_lease_acquired_after_close_times_out_is_closed_without_publication() -> None:
+    from fleet_rlm.store import LeaseHeartbeatService, PooledLease
 
-    monkeypatch.setattr(session_module, "_LEASE_MONITOR_JOIN_SECONDS", 0.01)
-    acquiring = threading.Event()
-    finish_acquiring = threading.Event()
-    old_closed = threading.Event()
-    renewed_closed = threading.Event()
-    renewed = SimpleNamespace(close=renewed_closed.set)
+    tick_started = threading.Event()
+    finish_tick = threading.Event()
+    released = threading.Event()
 
-    def probe(_statement: str) -> None:
-        raise ConnectionError("lease dropped")
+    class ClosingStore:
+        def __init__(self) -> None:
+            self.heartbeat = LeaseHeartbeatService(self, interval_seconds=60.0)
 
-    def acquire(_session_id: str):
-        acquiring.set()
-        assert finish_acquiring.wait(timeout=2)
-        return renewed
+        def _batch_renew_session_leases(
+            self, _session_ids: list[str], _epochs: list[int], _owner_id: str, _ttl: int
+        ) -> set[str]:
+            tick_started.set()
+            assert finish_tick.wait(timeout=2)
+            return set()
 
+        def _release_lease(self, *_args: Any, **_kwargs: Any) -> None:
+            released.set()
+
+    store = ClosingStore()
+    lease = PooledLease(store, "s1", kind="session", owner_id="worker-1", epoch=1)
     runtime = _runtime(
         sandbox_mgr=SimpleNamespace(session_id="s1"),
-        store=SimpleNamespace(acquire_session_lease=acquire),
-        lease=SimpleNamespace(execute=probe, close=old_closed.set),  # type: ignore[arg-type]
+        store=store,
+        lease=lease,
     )
-    runtime.start_lease_monitor(interval_seconds=0.001)
-    monitor = runtime._lease_monitor
+    runtime.start_lease_monitor()
+    tick_thread = threading.Thread(target=store.heartbeat.tick)
+    tick_thread.start()
     try:
-        assert acquiring.wait(timeout=1)
+        assert tick_started.wait(timeout=1)
         runtime.close_lease()
-        assert old_closed.is_set() and runtime.lease is None
-        assert monitor is not None and monitor.is_alive()
+        assert released.is_set() and runtime.lease is None
     finally:
-        finish_acquiring.set()
-        if monitor is not None:
-            monitor.join(timeout=2)
-    assert renewed_closed.is_set() and runtime.lease is None
+        finish_tick.set()
+        tick_thread.join(timeout=2)
+        store.heartbeat.stop()
     with pytest.raises(RuntimeError, match="ownership lease was lost"):
         runtime.assert_lease_held()
 
@@ -4095,50 +4121,6 @@ def test_set_workspace_state_fences_when_session_lease_is_lost() -> None:
         runtime.set_workspace_state("unknown")
 
     assert runtime.workspace_state == "known_empty" and writes == []
-
-
-def test_registry_fences_admission_and_preserves_active_work():
-    from fleet_rlm.config import FleetSettings
-    from fleet_rlm.session import SessionRuntimeRegistry
-
-    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), None)
-    lock = threading.Lock()
-    registry._sessions["one"] = SimpleNamespace(turn_lock=lock)
-    lock.acquire()
-    assert not registry.request_restart()
-    assert not registry._restart_requested.is_set()
-    lock.release()
-    assert registry.request_restart()
-    with pytest.raises(RuntimeError, match="restarting"):
-        registry.get("two")
-
-
-@pytest.mark.parametrize("race", [False, True])
-def test_workspace_lock_rejects_work_before_and_after_restart_fence(race):
-    from fastapi import HTTPException
-
-    from fleet_rlm.api.deps import session_lock
-
-    restarting = threading.Event()
-    lock = threading.Lock()
-
-    class Lock:
-        def acquire(self, **_kwargs):
-            lock.acquire()
-            if race:
-                restarting.set()
-            return True
-
-        def release(self):
-            lock.release()
-
-    if not race:
-        restarting.set()
-    runtime = SimpleNamespace(turn_lock=Lock(), restart_requested=restarting, assert_lease_held=lambda: None)
-    with pytest.raises(HTTPException) as error, session_lock(runtime):
-        pytest.fail("workspace work must not start")
-    assert error.value.status_code == 503
-    assert not lock.locked()
 
 
 # Agent identity
@@ -4734,13 +4716,14 @@ def test_turn_callbacks_compose_ambient_callbacks_with_one_usage_collector():
 
 def test_typesafe_callbacks_drop_the_mlflow_dspy_hook():
     import dspy
-    from mlflow.dspy.callback import MlflowCallback
 
-    from fleet_rlm.observability import typesafe_callbacks
+    from fleet_rlm.observability import FleetCallbackBase, LMUsageCallback, typesafe_callbacks
 
-    marker = object()
-    with dspy.context(callbacks=[MlflowCallback(), marker]):
-        assert typesafe_callbacks() == [marker]
+    usage = LMUsageCallback()
+    external = type("ExternalCallback", (dspy.utils.callback.BaseCallback,), {})()
+    with dspy.context(callbacks=[external, usage]):
+        assert typesafe_callbacks() == [usage]
+    assert isinstance(usage, FleetCallbackBase)
 
 
 def test_stream_callbacks_append_without_reordering():
@@ -4918,16 +4901,17 @@ def test_trace_shows_reasoning_text_but_streams_still_redact_it() -> None:
 
 
 def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
-    from mlflow.dspy.callback import MlflowCallback
+    from fleet_rlm.observability import FleetCallbackBase, LMUsageCallback, without_mlflow_dspy_callback
 
-    from fleet_rlm.observability import without_mlflow_dspy_callback
+    class CustomFleetCallback(FleetCallbackBase):
+        pass
 
-    sse_callback = object()
-    # Matching is by class identity, not by module/name strings, so a look-alike from elsewhere survives.
+    fleet_cb = CustomFleetCallback()
+    usage_cb = LMUsageCallback()
+    third_party = object()
     impostor = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
 
-    assert without_mlflow_dspy_callback([MlflowCallback(), sse_callback]) == [sse_callback]
-    assert without_mlflow_dspy_callback([impostor, sse_callback]) == [impostor, sse_callback]
+    assert without_mlflow_dspy_callback([third_party, fleet_cb, impostor, usage_cb]) == [fleet_cb, usage_cb]
 
 
 def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -5229,14 +5213,16 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
     class RecordingSandbox:
         def __init__(self) -> None:
             self.writes: list[tuple[str, bytes]] = []
-            self.existing = {
-                "skills/ledger-audit/SKILL.md": hashlib.sha256(skill_md).hexdigest(),
-                "skills/ledger-audit/existing.txt": hashlib.sha256(b"remote version").hexdigest(),
+            self.existing: dict[str, bytes] = {
+                "skills/ledger-audit/SKILL.md": skill_md,
+                "skills/ledger-audit/existing.txt": b"remote version",
             }
 
-        def exec_remote_python(self, code: str) -> str:
-            assert "paths=json.loads" in code
-            return json.dumps(self.existing)
+        def list_workspace_files(self) -> list[str]:
+            return sorted(self.existing)
+
+        def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
+            return {path: self.existing[path] for path in paths if path in self.existing}
 
         def write_workspace_files(self, files: dict[str, bytes]) -> None:
             self.writes.extend(files.items())
@@ -5246,7 +5232,7 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
         SkillManager(sandbox, skills, None).sync_local_skills_to_volume()  # type: ignore[arg-type]
 
     assert sandbox.writes == []
-    sandbox.existing["skills/ledger-audit/existing.txt"] = hashlib.sha256(b"local version").hexdigest()
+    sandbox.existing["skills/ledger-audit/existing.txt"] = b"local version"
     assert SkillManager(sandbox, skills, None).sync_local_skills_to_volume() == 1  # type: ignore[arg-type]
     assert sandbox.writes == [("skills/ledger-audit/new.txt", b"new file")]
 
@@ -5257,17 +5243,21 @@ def test_export_conflicts_are_reported_before_any_local_write(tmp_path: Path) ->
     local.mkdir(parents=True)
     (local / "SKILL.md").write_bytes(_skill("local-skill"))
     (local / "existing.txt").write_bytes(b"local version")
-    remote_files = [
-        ("local-skill/SKILL.md", _skill("local-skill")),
-        ("local-skill/existing.txt", b"remote version"),
-        ("new-skill/SKILL.md", _skill("new-skill")),
-    ]
-    manifest = json.dumps([{"rel": path, "b64": base64.b64encode(content).decode()} for path, content in remote_files])
+    remote_files = {
+        f"skills/{path}": content
+        for path, content in [
+            ("local-skill/SKILL.md", _skill("local-skill")),
+            ("local-skill/existing.txt", b"remote version"),
+            ("new-skill/SKILL.md", _skill("new-skill")),
+        ]
+    }
 
     class RecordingSandbox:
-        def exec_remote_python(self, code: str) -> str:
-            del code
-            return manifest
+        def list_workspace_files(self) -> list[str]:
+            return sorted(remote_files)
+
+        def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
+            return {path: remote_files[path] for path in paths if path in remote_files}
 
     with pytest.raises(ValueError, match=r"local-skill/existing.txt"):
         SkillManager(RecordingSandbox(), skills).export_volume_skills_to_local()  # type: ignore[arg-type]
@@ -5281,12 +5271,15 @@ def test_export_conflicts_are_reported_before_any_local_write(tmp_path: Path) ->
 
 
 class _VolumeDouble:
-    def __init__(self, existing: dict[str, str] | None = None) -> None:
+    def __init__(self, existing: dict[str, bytes] | None = None) -> None:
         self.existing = existing or {}
         self.writes: dict[str, bytes] = {}
 
-    def exec_remote_python(self, _code: str) -> str:
-        return json.dumps(self.existing)
+    def list_workspace_files(self) -> list[str]:
+        return sorted(self.existing)
+
+    def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
+        return {path: self.existing[path] for path in paths if path in self.existing}
 
     def write_workspace_files(self, files: dict[str, bytes]) -> None:
         self.batches = getattr(self, "batches", 0) + 1
@@ -5326,7 +5319,7 @@ def test_a_changed_bundled_skill_replaces_the_session_copy_but_user_edits_still_
     local = tmp_path / "local"
     (local / "mine").mkdir(parents=True)
     (local / "mine" / "SKILL.md").write_bytes(_skill("mine"))
-    stale = hashlib.sha256(b"old").hexdigest()
+    stale = b"old"
 
     sandbox = _VolumeDouble({"skills/tabular-analysis/SKILL.md": stale})
     assert SkillManager(sandbox, local, bundled).sync_local_skills_to_volume() == 2  # type: ignore[arg-type]
@@ -5586,3 +5579,47 @@ def test_factory_without_active_root_keeps_existing_manager(monkeypatch: pytest.
 
     assert result[0] is root
     assert result[2] is False
+
+
+def test_registry_peek_and_evict_idle_and_per_session_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    s1_started = threading.Event()
+    s1_finish = threading.Event()
+    s2_built = threading.Event()
+
+    runtime_1 = _runtime(sandbox_mgr=SimpleNamespace(session_id="s1", shutdown=lambda: True))
+    runtime_1.last_active_at = 0.0
+    runtime_2 = _runtime(sandbox_mgr=SimpleNamespace(session_id="s2", shutdown=lambda: True))
+    runtime_2.last_active_at = time.monotonic()
+
+    registry = _buildable_registry(runtime_1)
+    assert registry.peek("s1") is runtime_1
+    assert registry.peek("missing") is None
+
+    # Idle eviction reclaims idle sessions while keeping recently active ones.
+    registry._sessions["s2"] = runtime_2
+    assert registry.evict_idle(max_idle_seconds=60.0) == 1
+    assert registry.peek("s1") is None
+    assert registry.peek("s2") is runtime_2
+
+    runtime_a = _runtime(sandbox_mgr=SimpleNamespace(session_id="a", shutdown=lambda: True))
+
+    # Per-session gates allow concurrent builds of distinct sessions.
+    def fake_build(_self: Any, session_id: str) -> Any:
+        if session_id == "a":
+            s1_started.set()
+            assert s1_finish.wait(timeout=2)
+            return runtime_a
+        s2_built.set()
+        return runtime_2
+
+    monkeypatch.setattr(type(registry), "_build", fake_build)
+    build_a = threading.Thread(target=registry.get, args=("a",))
+    build_a.start()
+    try:
+        assert s1_started.wait(timeout=1)
+        assert registry.get("b") is runtime_2
+        assert s2_built.is_set()
+    finally:
+        s1_finish.set()
+        build_a.join(timeout=2)
+    assert registry.peek("a") is runtime_a
