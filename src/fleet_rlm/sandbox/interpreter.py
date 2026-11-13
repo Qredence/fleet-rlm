@@ -115,6 +115,7 @@ class DaytonaInterpreter:
         self._completed_cleanly = False
         self._session_lm_failed = False
         self._nested_children: dict[str, DaytonaInterpreter] = {}
+        self._closing_children: list[Any] | None = None
         if self.owns_manager and (recorded := _OPEN_CHILD_RECORD.get()) is not None:
             recorded.append(self)
 
@@ -207,6 +208,8 @@ class DaytonaInterpreter:
                 if isinstance(handle, str):
                     closing_child_interpreter = self._nested_children.pop(handle, None)
         try:
+            if isinstance(closing_child_interpreter, DaytonaInterpreter):
+                closing_child_interpreter._closing_children = children
             try:
                 value = self.tools[tool_name](*args, **kwargs)
             except Exception:
@@ -214,6 +217,8 @@ class DaytonaInterpreter:
                     self._session_lm_failed = True
                 raise
             finally:
+                if isinstance(closing_child_interpreter, DaytonaInterpreter):
+                    closing_child_interpreter._closing_children = None
                 if child_token is not None:
                     _OPEN_CHILD_RECORD.reset(child_token)
             if child_record and isinstance(value, str):
@@ -226,9 +231,11 @@ class DaytonaInterpreter:
                 and not self._session_lm_failed
                 and getattr(bound_session, "lm_error", None) is None
             )
-            if promote:
-                for child in children:
+            for child in children:
+                if promote:
                     child.collect_child_artifacts()
+                if hasattr(child, "record_child_outcome"):
+                    child.record_child_outcome(promote)
             return value
         finally:
             _NATIVE_CHILDREN.reset(token)
@@ -492,8 +499,8 @@ class DaytonaInterpreter:
         if variables is not None:
             variables = to_jsonable_python(variables)
             if self.owns_manager and isinstance(variables.get("workspace_manifest"), str):
-                # Native child sandboxes receive copied files/ and skills/, not the parent's
-                # artifact/memory inventory. Do not advertise inaccessible paths.
+                # Native child sandboxes receive copied files/ and skills/; artifacts/ starts empty
+                # unless specific artifacts/... paths are requested in input_paths. Do not advertise inaccessible paths.
                 variables = {
                     **variables,
                     "workspace_manifest": self._child_workspace_manifest(),
@@ -650,6 +657,8 @@ class DaytonaInterpreter:
                 self.manager._unregister_interpreter(self)
         if self.owns_manager:
             children = _NATIVE_CHILDREN.get()
+            if children is None:
+                children = self._closing_children
             if children is not None:
                 children.append(self.manager)
             else:

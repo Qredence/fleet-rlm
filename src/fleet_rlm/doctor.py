@@ -144,6 +144,16 @@ def check_mlflow(settings: FleetSettings) -> dict[str, Any]:
     target = settings.mlflow_target()
     if target.mode == "local":
         reachable = launcher.mlflow_is_healthy(target.tracking_uri)
+        issue = launcher.local_mlflow_kek_issue(
+            settings,
+            mlflow_url=target.tracking_uri,
+            reachable=reachable,
+        )
+        if issue:
+            return {
+                "status": "blocked",
+                "message": issue,
+            }
         detail = "reachable" if reachable else "not currently running (managed automatically by fleet cli/web)"
         return {
             "status": "ready",

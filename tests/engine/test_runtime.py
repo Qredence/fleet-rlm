@@ -5623,3 +5623,34 @@ def test_registry_peek_and_evict_idle_and_per_session_gates(monkeypatch: pytest.
         s1_finish.set()
         build_a.join(timeout=2)
     assert registry.peek("a") is runtime_a
+
+
+def test_delegation_signatures_document_bounds_child_isolation_and_workspace_scope() -> None:
+    from fleet_rlm.contracts import STOPPING_RULES
+    from fleet_rlm.engine import signatures
+
+    fleet_doc = signatures.FleetTask.instructions
+    assert "1..8 subtasks" in fleet_doc
+    assert "max_iters in 1..8" in fleet_doc
+    assert "max_llm_calls in 1..25" in fleet_doc
+    assert "Child artifacts/ start empty unless explicitly passed via input_paths" in fleet_doc
+    assert "/workspace/..." in fleet_doc and "recursive globs from `/`" in fleet_doc
+    assert fleet_doc.count(STOPPING_RULES) == 1
+    assert len(fleet_doc) < 4000
+
+    child_doc = signatures.ChildTask.instructions
+    assert "/workspace/..." in child_doc and "recursive globs from `/`" in child_doc
+    assert "Child `artifacts/` starts empty unless inputs were explicitly passed via input_paths" in child_doc
+    assert "1..8" in child_doc and "1..25" in child_doc
+
+
+def test_turn_triage_prefers_flex_for_bounded_checks_without_drifting_route_fields() -> None:
+    from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, ROUTE_DESCRIPTIONS, TRIAGE_CRITERIA, TRIAGE_INSTRUCTION
+    from fleet_rlm.engine.signatures import TurnTriage
+
+    assert "Prefer flex" in TurnTriage.instructions
+    assert TurnTriage.model_fields["route"].json_schema_extra["desc"] == TRIAGE_INSTRUCTION
+    assert dict(JUDGE_ROUTE_CHOICES) == {route.value: item["judge"] for route, item in ROUTE_DESCRIPTIONS.items()}
+    assert {key: value["definition"] for key, value in TRIAGE_CRITERIA.items()} == {
+        route.value: item["definition"] for route, item in ROUTE_DESCRIPTIONS.items()
+    }

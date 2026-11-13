@@ -5564,6 +5564,551 @@ def test_generated_remote_scripts_compile():
         compile(code, f"<{name}>", "exec")
 
 
+def _install_emulated_daytona(monkeypatch, tmp_path: Path):
+    """Stub Daytona client and workspace I/O over isolated per-agent emulated sandboxes."""
+    from fleet_rlm.sandbox import manager as manager_module
+
+    sandboxes = []
+
+    def create_sandbox(params, **_kwargs):
+        agent_id = (params.labels or {}).get("fleet_agent", f"sb-{len(sandboxes)}")
+        sb = emulated_sandbox(tmp_path / agent_id)
+        sb.id = f"sb-{agent_id}"
+        sandboxes.append(sb)
+        return sb
+
+    def ws_root(mgr) -> Path:
+        return mgr.ensure_sandbox().code_interpreter.root / "workspace"
+
+    monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        manager_module,
+        "_shared_daytona_client",
+        lambda *_args: SimpleNamespace(
+            snapshot=SimpleNamespace(),
+            create=create_sandbox,
+            stop=lambda *_a, **_kw: None,
+            delete=lambda *_a, **_kw: None,
+        ),
+    )
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "list_workspace_files",
+        lambda mgr: sorted(p.relative_to(ws_root(mgr)).as_posix() for p in ws_root(mgr).rglob("*") if p.is_file()),
+    )
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_files",
+        lambda mgr, paths, **_kw: {p: (ws_root(mgr) / p).read_bytes() for p in paths},
+    )
+
+    def write_files(mgr, files) -> None:
+        root = ws_root(mgr)
+        for rel, data in files.items():
+            dest = root / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+
+    monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_files", write_files)
+    return sandboxes
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_native_flex_nested_child_records_succeeded_even_across_nested_thread_and_skipped_promotion(
+    monkeypatch, tmp_path
+) -> None:
+    from dspy.primitives.facade import SandboxSession
+
+    sandboxes = _install_emulated_daytona(monkeypatch, tmp_path)
+    manager = DaytonaSandboxManager("key", "org", "vol", "sess-flex-child", turn_timeout_seconds=0)
+    with manager.turn_scope():
+        try:
+            parent = DaytonaInterpreter(manager, owns_manager=False)
+            session = SandboxSession({}, interpreter_factory=manager.interpreter_factory())
+            session.install(parent, import_dspy=False)
+            parent.start()
+            try:
+                handle = parent.answer_host_call(
+                    {"id": "c1", "tool": "__dspy_interpreter__", "args": ["create"], "kwargs": {}}
+                )["value"]
+                assert isinstance(handle, str)
+                exec_reply = parent.answer_host_call(
+                    {
+                        "id": "c2",
+                        "tool": "__dspy_interpreter__",
+                        "args": [],
+                        "kwargs": {
+                            "op": "execute",
+                            "id": handle,
+                            "code": "workspace.write_artifact('nested.txt', 'ok')\nSUBMIT(findings='ok')",
+                            "variables": {},
+                            "tools": {},
+                            "output_fields": [{"name": "findings", "type": "str"}],
+                        },
+                    }
+                )["value"]
+                assert exec_reply["final"] == {"findings": "ok"}
+
+                parent.answer_host_call(
+                    {"id": "c3", "tool": "__dspy_interpreter__", "args": ["shutdown", handle], "kwargs": {}}
+                )
+
+                assert len(manager._child_receipts) == 1
+                receipt = next(iter(manager._child_receipts.values()))
+                assert receipt["status"] == "succeeded"
+                assert any(row["path"] == f"artifacts/{receipt['agent_id']}/nested.txt" for row in receipt["artifacts"])
+
+                # Decoupled outcome recording: even if artifact promotion is stubbed/skipped, clean completion succeeds.
+                monkeypatch.setattr(DaytonaSandboxManager, "collect_child_artifacts", lambda _self: [])
+                handle2 = parent.answer_host_call(
+                    {"id": "c4", "tool": "__dspy_interpreter__", "args": ["create"], "kwargs": {}}
+                )["value"]
+                parent.answer_host_call(
+                    {
+                        "id": "c5",
+                        "tool": "__dspy_interpreter__",
+                        "args": [],
+                        "kwargs": {
+                            "op": "execute",
+                            "id": handle2,
+                            "code": "SUBMIT(findings='ok2')",
+                            "variables": {},
+                            "tools": {},
+                            "output_fields": [{"name": "findings", "type": "str"}],
+                        },
+                    }
+                )
+                parent.answer_host_call(
+                    {"id": "c6", "tool": "__dspy_interpreter__", "args": ["shutdown", handle2], "kwargs": {}}
+                )
+                receipts = list(manager._child_receipts.values())
+                assert len(receipts) == 2
+                assert receipts[1]["status"] == "succeeded"
+            finally:
+                session.close()
+                parent.shutdown()
+        finally:
+            manager.shutdown()
+            for sb in sandboxes:
+                sb.code_interpreter.close()
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_native_flex_nested_child_failure_keeps_failed_status_and_never_promotes(monkeypatch, tmp_path) -> None:
+    from dspy.primitives.facade import SandboxSession
+
+    sandboxes = _install_emulated_daytona(monkeypatch, tmp_path)
+    manager = DaytonaSandboxManager("key", "org", "vol", "sess-flex-fail", turn_timeout_seconds=0)
+    with manager.turn_scope():
+        try:
+            parent = DaytonaInterpreter(manager, owns_manager=False)
+            session = SandboxSession({}, interpreter_factory=manager.interpreter_factory())
+            session.install(parent, import_dspy=False)
+            parent.start()
+            try:
+                handle = parent.answer_host_call(
+                    {"id": "c1", "tool": "__dspy_interpreter__", "args": ["create"], "kwargs": {}}
+                )["value"]
+                parent.answer_host_call(
+                    {
+                        "id": "c2",
+                        "tool": "__dspy_interpreter__",
+                        "args": [],
+                        "kwargs": {
+                            "op": "execute",
+                            "id": handle,
+                            "code": "workspace.write_artifact('bad.txt', 'unsafe')\nraise RuntimeError('boom')",
+                            "variables": {},
+                            "tools": {},
+                        },
+                    }
+                )
+                parent.answer_host_call(
+                    {"id": "c3", "tool": "__dspy_interpreter__", "args": ["shutdown", handle], "kwargs": {}}
+                )
+
+                receipt = next(iter(manager._child_receipts.values()))
+                assert receipt["status"] == "failed"
+                assert receipt["artifacts"] == []
+                assert not any("bad.txt" in path for path in manager.list_workspace_files())
+
+                # Unclosed nested child cleaned up by session.close() outside _invoke_tool also fails without promotion.
+                handle2 = parent.answer_host_call(
+                    {"id": "c4", "tool": "__dspy_interpreter__", "args": ["create"], "kwargs": {}}
+                )["value"]
+                parent.answer_host_call(
+                    {
+                        "id": "c5",
+                        "tool": "__dspy_interpreter__",
+                        "args": [],
+                        "kwargs": {
+                            "op": "execute",
+                            "id": handle2,
+                            "code": "workspace.write_artifact('leaked.txt', 'unsafe')\nSUBMIT(findings='ok')",
+                            "variables": {},
+                            "tools": {},
+                            "output_fields": [{"name": "findings", "type": "str"}],
+                        },
+                    }
+                )
+                session.close()
+                receipts = list(manager._child_receipts.values())
+                assert receipts[1]["status"] == "failed"
+                assert not any("leaked.txt" in path for path in manager.list_workspace_files())
+            finally:
+                parent.shutdown()
+        finally:
+            manager.shutdown()
+            for sb in sandboxes:
+                sb.code_interpreter.close()
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        ("slow_host()", "host-ok"),
+        ("with ThreadPoolExecutor(2) as pool:\n    result = pool.submit(slow_host).result()\nresult", "host-ok"),
+        (
+            "with ThreadPoolExecutor(2) as pool:\n    result = list(pool.map(lambda _: slow_host(), range(2)))\nresult",
+            ["host-ok", "host-ok"],
+        ),
+        ("parallel([(slow_host, {})])", ["host-ok"]),
+    ],
+    ids=["direct", "thread-pool", "overlapping-thread-pool", "dspy-parallel"],
+)
+def test_local_exec_timeout_excludes_threaded_host_waits(sandbox, code, expected) -> None:
+    context = repl.create_context(sandbox)
+    # Imports and native executor initialization are outside the short local budget.
+    prepared = run(
+        sandbox,
+        context,
+        "import dspy\nfrom concurrent.futures import ThreadPoolExecutor\n"
+        "parallel = dspy.Parallel(num_threads=2, disable_progress_bar=True)\n"
+        "parallel([(lambda: None, {})])",
+    )
+    assert not prepared.get("error")
+
+    def slow_host_tool(_call):
+        time.sleep(0.35)
+        return {"value": "host-ok"}
+
+    result = run(sandbox, context, code, on_call=slow_host_tool, timeout=None, tools=["slow_host"], exec_timeout=0.15)
+    assert not result.get("error"), result
+    assert result["value"] == expected
+    assert run(sandbox, context, "1 + 41")["value"] == 42
+
+
+@pytest.mark.parametrize("worker_owner", [False, True], ids=["signal", "async"])
+def test_local_exec_timer_overlapping_waits_resume_and_expire_on_owner(worker_owner) -> None:
+    from fleet_rlm.sandbox.runtime.repl import _LocalExecTimer
+
+    results: dict[str, Any] = {}
+
+    def execute():
+        timer = _LocalExecTimer(0.15)
+        assert timer._use_signal is not worker_owner
+        with pytest.raises(TimeoutError), timer:
+            # Two workers enter a host wait, then complete in a controlled order.
+            with ThreadPoolExecutor(2) as pool:
+                assert pool.submit(timer.pause).result(timeout=2)
+                assert pool.submit(timer.pause).result(timeout=2)
+                pool.submit(timer.resume).result(timeout=2)
+                time.sleep(0.3)  # First completion must not rearm the timer.
+                pool.submit(timer.resume).result(timeout=2)
+            results["resumed"] = True
+            while True:
+                pass
+        results["expired"] = True
+
+    if worker_owner:
+        with ThreadPoolExecutor(1) as pool:
+            pool.submit(execute).result(timeout=5)
+    else:
+        execute()
+    assert results == {"resumed": True, "expired": True}
+
+
+def test_local_exec_timer_preserves_budget_and_ignores_stale_callbacks(monkeypatch) -> None:
+    from fleet_rlm.sandbox.runtime import repl as runtime_repl
+
+    clock = [0.0]
+    monkeypatch.setattr(runtime_repl.time, "monotonic", lambda: clock[0])
+    # Keep callbacks under test control, including ones already queued when cancelled.
+    monkeypatch.setattr(runtime_repl.threading.Timer, "start", lambda _self: None)
+    timer = runtime_repl._LocalExecTimer(10)
+    timer._use_signal = False
+    deliveries = []
+    monkeypatch.setattr(timer, "_set_async_exc", deliveries.append)
+    with timer:
+        first_generation = timer._generation
+        clock[0] = 2
+        assert timer.pause()
+        clock[0] = 100
+        timer.resume()
+        assert timer.remaining == 8
+        timer._fire_async(first_generation)
+        assert deliveries == []
+        clock[0] = 103
+        assert timer.pause()
+        assert timer.remaining == 5
+        # Exit while a host call is still pending.
+    with runtime_repl._LocalExecTimer(10) as next_timer:
+        timer.resume()
+        timer._fire_async(timer._generation)
+        assert not timer.pause()
+        assert not timer._armed
+        assert runtime_repl._STATE["exec_timer"] is next_timer
+        assert next_timer._armed
+    assert deliveries == [None]  # Only the fallback's exit cleanup, never expiry.
+
+
+@pytest.mark.parametrize("failure", ["reply", "emit", "deadline"])
+def test_local_exec_timer_bridge_failure_resumes_budget(monkeypatch, tmp_path, failure) -> None:
+    from fleet_rlm.sandbox.runtime import repl as runtime_repl
+
+    monkeypatch.setattr(runtime_repl, "REPLY_DIR", str(tmp_path))
+    monkeypatch.setitem(runtime_repl._STATE, "host_call_timeout", 0.01 if failure == "deadline" else None)
+
+    def emit(_mark, request):
+        if failure == "emit":
+            raise OSError("emit failed")
+        if failure == "reply":
+            (tmp_path / (request["id"] + ".json")).write_text(json.dumps({"error": "tool failed"}))
+
+    monkeypatch.setattr(runtime_repl, "_emit", emit)
+    with runtime_repl._LocalExecTimer(2) as timer:
+        with ThreadPoolExecutor(1) as pool, pytest.raises((RuntimeError, OSError, TimeoutError)):
+            pool.submit(runtime_repl._bridge_call, "tool", [], {}).result(timeout=3)
+        assert timer._host_waits == 0
+        assert timer._armed
+        assert 0 < timer.remaining <= timer.limit
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_local_exec_timeout_bounds_stalled_cells_and_pauses_for_host_calls(sandbox) -> None:
+    context = repl.create_context(sandbox)
+
+    # Deadline-free execution still fails cleanly on a local CPU/loop hang instead of hanging forever.
+    stalled = run(
+        sandbox,
+        context,
+        "while True:\n    pass",
+        timeout=None,
+        exec_timeout=0.15,
+    )
+    assert stalled["error"] is True
+    assert stalled["error_type"] == "TimeoutError"
+    assert "local limit" in stalled["stderr"]
+
+    # Context remains intact and reusable after a per-cell local timeout.
+    recovered = run(sandbox, context, "1 + 41", timeout=None)
+    assert not recovered.get("error")
+    assert recovered["value"] == 42
+
+    # Host bridge waits pause the local compute timer so bounded local timeouts do not break host calls.
+    def slow_host_tool(_call: dict[str, Any]) -> dict[str, Any]:
+        time.sleep(0.25)
+        return {"value": "host-ok"}
+
+    bridged = run(
+        sandbox,
+        context,
+        "slow_host()",
+        on_call=slow_host_tool,
+        timeout=None,
+        tools=["slow_host"],
+        exec_timeout=0.15,
+    )
+    assert not bridged.get("error")
+    assert bridged["value"] == "host-ok"
+
+    # Worker-thread fallback interrupts runaway bytecode too.
+    worker_results: dict[str, Any] = {}
+
+    def run_in_worker() -> None:
+        worker_results["stalled"] = run(
+            sandbox,
+            context,
+            "while True:\n    pass",
+            timeout=None,
+            exec_timeout=0.15,
+        )
+
+    thread = threading.Thread(target=run_in_worker)
+    thread.start()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert worker_results["stalled"]["error"] is True
+    assert worker_results["stalled"]["error_type"] == "TimeoutError"
+
+
+def test_local_exec_timeout_disabled_when_host_timeout_is_within_default_cap(
+    monkeypatch: pytest.MonkeyPatch, sandbox
+) -> None:
+    from daytona.common.errors import DaytonaTimeoutError
+
+    from fleet_rlm.sandbox.runtime import repl as runtime_repl
+
+    monkeypatch.setitem(runtime_repl._STATE, "exec_timeout", None)
+    monkeypatch.setitem(runtime_repl._STATE, "host_call_timeout", None)
+    assert runtime_repl._exec_limit() == runtime_repl.DEFAULT_EXEC_TIMEOUT_SECONDS
+
+    monkeypatch.setitem(runtime_repl._STATE, "host_call_timeout", runtime_repl.DEFAULT_EXEC_TIMEOUT_SECONDS + 1.0)
+    assert runtime_repl._exec_limit() == runtime_repl.DEFAULT_EXEC_TIMEOUT_SECONDS
+
+    monkeypatch.setitem(runtime_repl._STATE, "host_call_timeout", runtime_repl.DEFAULT_EXEC_TIMEOUT_SECONDS)
+    assert runtime_repl._exec_limit() is None
+
+    monkeypatch.setitem(runtime_repl._STATE, "host_call_timeout", 1.0)
+    assert runtime_repl._exec_limit() is None
+
+    monkeypatch.setitem(runtime_repl._STATE, "exec_timeout", 0.25)
+    assert runtime_repl._exec_limit() == 0.25
+
+    context = repl.create_context(sandbox)
+    timer_armed = run(sandbox, context, "import signal\nsignal.getitimer(signal.ITIMER_REAL)[0] == 0.0", timeout=1)
+    assert timer_armed["value"] is True
+    with pytest.raises(DaytonaTimeoutError):
+        run(sandbox, context, "import time\nwhile True:\n    time.sleep(0.05)", timeout=1)
+    assert run(sandbox, context, "1 + 41", timeout=1)["value"] == 42
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_delegation_bounds_errors_and_docstrings(monkeypatch) -> None:
+    from fleet_rlm.sandbox.delegation import ChildDelegation
+
+    manager = DaytonaSandboxManager("key", "org", "vol", "sess-delegation-bounds")
+    delegation = ChildDelegation(
+        manager,
+        metered_sub=None,
+        child_signature=dspy.Signature("subtask -> findings"),
+        sub_adapter=dspy.ChatAdapter(),
+    )
+
+    with pytest.raises(ValueError, match="subtask must be a non-empty string"):
+        delegation.spawn_agent("   ")
+    with pytest.raises(ValueError, match=r"max_iters=9 is invalid; expected an integer in 1\.\.8"):
+        delegation.spawn_agent("check", max_iters=9)
+    with pytest.raises(ValueError, match=r"max_iters=True is invalid; expected an integer in 1\.\.8"):
+        delegation.spawn_agent("check", max_iters=True)
+    with pytest.raises(ValueError, match=r"max_llm_calls=26 is invalid; expected an integer in 1\.\.25"):
+        delegation.spawn_agent("check", max_llm_calls=26)
+
+    # Batch validation rejects invalid bounds before allocating any child sandbox.
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "allocate_child", lambda *_args, **_kwargs: pytest.fail("allocate_child should not run")
+    )
+    with pytest.raises(ValueError, match=r"max_iters=0 is invalid; expected an integer in 1\.\.8"):
+        delegation.spawn_agents(["check"], max_iters=0)
+    with pytest.raises(ValueError, match=r"max_llm_calls=30 is invalid; expected an integer in 1\.\.25"):
+        delegation.spawn_agents(["check"], max_llm_calls=30)
+
+    doc = ChildDelegation.spawn_agents.__doc__ or ""
+    assert "1 <= len(subtasks) <= 8" in doc
+    assert "1 <= max_iters <= 8" in doc
+    assert "1 <= max_llm_calls <= 25" in doc
+    assert "artifacts/" in doc
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_spawn_agent_decouples_child_outcome_from_artifact_collection(monkeypatch, tmp_path) -> None:
+    from fleet_rlm.sandbox.delegation import ChildDelegation
+
+    sandboxes = _install_emulated_daytona(monkeypatch, tmp_path)
+    monkeypatch.setattr(DaytonaSandboxManager, "collect_child_artifacts", lambda _self: [])
+
+    class FakeRLM:
+        def __init__(self, _sig, **kwargs):
+            self.interpreter_factory = kwargs["interpreter_factory"]
+
+        def __call__(self, *, subtask: str):
+            interp = self.interpreter_factory()
+            try:
+                if "fail" in subtask:
+                    raise RuntimeError("child execution error")
+                return SimpleNamespace(findings="ok:" + subtask, interp=interp)
+            finally:
+                interp.shutdown()
+
+    monkeypatch.setattr(dspy, "RLM", FakeRLM)
+    manager = DaytonaSandboxManager("key", "org", "vol", "sess-delegation-outcome", turn_timeout_seconds=0)
+    with manager.turn_scope():
+        try:
+            delegation = ChildDelegation(
+                manager,
+                metered_sub=dspy.LM("openai/gpt-4o-mini"),
+                child_signature=dspy.Signature("subtask -> findings"),
+                sub_adapter=dspy.ChatAdapter(),
+            )
+            sig = dspy.Signature("subtask -> findings")
+            state = dspy.Predict(sig).dump_state()
+            delegation.bind_policies({"leaf_action": (sig, state), "delegating_action": (sig, state)})
+            parent_interp = manager.interpreter_factory(tools={"spawn_agent": delegation.spawn_agent})()
+            try:
+                ok_call = parent_interp.answer_host_call(
+                    {"id": "c1", "tool": "spawn_agent", "args": ["succeed"], "kwargs": {"allowed_tools": []}}
+                )
+                assert ok_call == {"value": {"findings": "ok:succeed", "artifacts": []}}
+
+                bad_call = parent_interp.answer_host_call(
+                    {"id": "c2", "tool": "spawn_agent", "args": ["fail"], "kwargs": {"allowed_tools": []}}
+                )
+                bad = bad_call["value"]
+                assert bad["findings"] == "" and "error" in bad and bad["artifacts"] == []
+            finally:
+                parent_interp.shutdown()
+
+            receipts = list(manager._child_receipts.values())
+            assert [row["status"] for row in receipts] == ["succeeded", "failed"]
+        finally:
+            manager.shutdown()
+            for sb in sandboxes:
+                sb.code_interpreter.close()
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_workspace_skill_reads_emit_bounded_skill_activity_and_docs_note_artifacts_isolation(sandbox) -> None:
+    context = repl.create_context(sandbox)
+    sandbox.fs.upload_file(b"# Delegation\nRules", "/workspace/skills/delegation/SKILL.md")
+    sandbox.fs.upload_file(b"hello", "/workspace/files/notes.txt")
+
+    via_read_text = run(sandbox, context, "workspace.read_text('skills/delegation/SKILL.md')")
+    assert "Rules" in via_read_text["value"]
+    assert via_read_text["skill_activity"] == [
+        {"helper": "workspace.read_text", "skill": "delegation", "completed": True}
+    ]
+
+    via_read = run(sandbox, context, "workspace.read('skills/delegation/SKILL.md')")
+    assert via_read["skill_activity"] == [{"helper": "workspace.read", "skill": "delegation", "completed": True}]
+
+    failed = run(
+        sandbox,
+        context,
+        "try:\n    workspace.read_text('skills/missing/SKILL.md')\nexcept FileNotFoundError:\n    pass",
+    )
+    assert failed["skill_activity"] == [{"helper": "workspace.read_text", "skill": "missing", "completed": False}]
+
+    non_skill = run(sandbox, context, "workspace.read_text('files/notes.txt')")
+    assert non_skill["skill_activity"] == []
+
+    capped = run(
+        sandbox,
+        context,
+        "for _ in range(25):\n    workspace.read_text('skills/delegation/SKILL.md')",
+    )
+    assert len(capped["skill_activity"]) == 20
+    assert capped["skill_activity_truncated"] is True
+
+    skill_doc = " ".join(
+        (Path(__file__).resolve().parents[2] / "src/fleet_rlm/bundled_skills/delegation/SKILL.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert "artifacts/" in skill_doc and "starts empty inside a child" in skill_doc
+    instructions = DaytonaSandboxManager("key", "org", "vol", "sess-doc").interpreter_factory().execution_instructions
+    assert "artifacts/ starts empty inside a child" in instructions
+
+
 @pytest.fixture
 def sandbox(tmp_path):
     emulated = emulated_sandbox(tmp_path)

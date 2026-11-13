@@ -143,6 +143,20 @@ class CollapsibleItem:
         return self.expanded
 
 
+_CHILD_LIFECYCLE_EVENTS = frozenset({"agent_spawn", "agent_result"})
+
+
+def _is_child_event(event: dict[str, Any], agent_depths: dict[str, int] | None = None) -> bool:
+    """Return True when an SSE event belongs to a child lifecycle or child agent."""
+    if event.get("event") in _CHILD_LIFECYCLE_EVENTS or event.get("parent_agent_id"):
+        return True
+    raw_depth = event.get("depth")
+    if type(raw_depth) is int and raw_depth > 0:
+        return True
+    agent_id = event.get("agent_id")
+    return bool(agent_depths and agent_id and agent_depths.get(agent_id, 0) > 0)
+
+
 @dataclass(slots=True)
 class TurnTracker:
     """Stateful collector and interactive renderer for a single Turn's live SSE stream."""
@@ -215,15 +229,17 @@ class TurnTracker:
         event_type = event.get("event")
         if event.get("turn_id") and not self.turn_id:
             self.turn_id = str(event["turn_id"])
-        # The server attaches the derived label to each event; the client renders it, never derives control.
-        if "status" in event:
+        # The server attaches the derived label to each event; scope footer updates to Turn/root events.
+        is_root_event = not _is_child_event(event, self._agent_depths)
+        if is_root_event and "status" in event:
             raw_status = event.get("status")
             self.status_label = str(raw_status)[:64] if isinstance(raw_status, str) and raw_status else None
         if event_type in {"progress", "status"}:
-            scope = event.get("scope")
-            self.status_scope = scope[:64] if isinstance(scope, str) and scope else None
-            checkpoint = event.get("checkpoint")
-            self.status_checkpoint = checkpoint if type(checkpoint) is int and checkpoint >= 0 else None
+            if is_root_event:
+                scope = event.get("scope")
+                self.status_scope = scope[:64] if isinstance(scope, str) and scope else None
+                checkpoint = event.get("checkpoint")
+                self.status_checkpoint = checkpoint if type(checkpoint) is int and checkpoint >= 0 else None
         elif event_type == "fenced":
             self.notices.append(Text("Publication fenced; the late result was not delivered.", style="yellow"))
         elif event_type == "done":
@@ -493,6 +509,7 @@ class TurnTracker:
             duration = event.get("duration_seconds")
             if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0:
                 self.server_duration_seconds = float(duration)
+            self.cancelling = False
             self.sandbox_status = None
             self.active_model = None
             end_status = (
@@ -868,5 +885,10 @@ def render_event(event: dict[str, Any]) -> None:
         )
     # Status is advisory metadata attached by the server; render it without changing any behavior.
     advisory = event.get("status")
-    if isinstance(advisory, str) and advisory and event_type not in {"status", "progress"}:
+    if (
+        isinstance(advisory, str)
+        and advisory
+        and event_type not in {"status", "progress"}
+        and not _is_child_event(event)
+    ):
         CONSOLE.print(f"[dim]Status: {advisory[:64]}[/dim]")

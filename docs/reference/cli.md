@@ -68,7 +68,11 @@ Managed service behavior for `cli` and `web`:
 
 - Local MLflow starts at `127.0.0.1:5001` by default, storing SQLite metadata
   and artifacts under `.fleet/mlflow`. Configure its port/data directory and
-  three experiments in `[mlflow.local]`. Data survives shutdown.
+  three experiments in `[mlflow.local]`. Data survives shutdown. When
+  `MLFLOW_CRYPTO_KEK_PASSPHRASE` or `MLFLOW_CRYPTO_KEK_VERSION` are set in the
+  environment or `.env` (process environment takes precedence), the launcher
+  forwards them to the managed local MLflow server so Gateway secrets stored in
+  `mlflow.db` can be decrypted.
 - Databricks mode starts no tracking server. It uses `[mlflow.databricks]`,
   including the workspace experiments and Unity Catalog trace destinations.
   For the default `databricks` URI, Fleet supplies the configured `.env`
@@ -111,11 +115,14 @@ Non-TTY input never prompts for credentials or consumes task input as setup answ
 
 Standalone `serve`, `eval`, `optimize`, and `trace` commands connect to an
 existing tracking server. For local operation, keep `fleet cli` running or
-start MLflow separately using the same port/storage configuration:
+start MLflow separately using the same port/storage configuration (load `.env`
+with `--env-file .env` if `MLFLOW_CRYPTO_KEK_PASSPHRASE` / `MLFLOW_CRYPTO_KEK_VERSION`
+or custom scorers are needed):
 
 ```bash
 mkdir -p .fleet/mlflow
-uv run mlflow server --host 127.0.0.1 --port 5001 \
+MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS=true uv run --env-file .env mlflow server \
+  --host 127.0.0.1 --port 5001 \
   --backend-store-uri sqlite:///$PWD/.fleet/mlflow/mlflow.db \
   --default-artifact-root "$PWD/.fleet/mlflow/artifacts"
 ```

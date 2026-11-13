@@ -138,8 +138,9 @@ not activate schedules or change generation defaults merely by being installed.
   judgments. This diagnostic does not change the shared metric or GEPA objectives.
 - `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
   actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
-  cover `use_skill`, `read_skill_reference`, `run_skill_script`, and `save_skill`,
-  even without TypeSafe selection. Each `sandbox.exec` holds at most 20 receipts
+  cover `use_skill`, `read_skill_reference`, `run_skill_script`, `save_skill`,
+  and `workspace.read` / `workspace.read_text` calls targeting `skills/...`
+  paths, even without TypeSafe selection. Each `sandbox.exec` holds at most 20 receipts
   with helper name, Skill name, and whether the helper returned, plus an explicit
   truncation flag. Bodies, script arguments, and results are excluded. A returned
   helper does not prove script exit status or compliance with its instructions.

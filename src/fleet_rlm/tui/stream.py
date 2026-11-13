@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import socket
+import ssl
 import uuid
 from collections.abc import Callable, Generator
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, nullcontext, suppress
 from typing import Any
 from urllib.parse import quote
 
@@ -55,6 +57,22 @@ def _request_turn(
         f"/sessions/{quote(session_id, safe='')}/turn",
         json=body,
     )
+
+
+def _abort_response(response: httpx.Response) -> None:
+    """Unblock a synchronous SSE response stream on cancellation without closing its fd mid-recv."""
+    network_stream = response.extensions.get("network_stream")
+    sock = network_stream.get_extra_info("socket") if hasattr(network_stream, "get_extra_info") else None
+    if isinstance(sock, ssl.SSLSocket):
+        with suppress(OSError):
+            # Bypass SSLSocket.shutdown() so the reader unblocks without racing close() or _sslobj.
+            socket.socket.shutdown(sock, socket.SHUT_RDWR)
+    elif hasattr(sock, "shutdown"):
+        with suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+    else:
+        with suppress(Exception):
+            response.close()
 
 
 def _turn_events(

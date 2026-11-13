@@ -23,6 +23,14 @@ def child_failure(exc: Exception) -> str:
     return f"child agent failed ({type(exc).__name__}): {str(exc)[:500]}"
 
 
+def _validate_child_limits(max_iters: int, max_llm_calls: int) -> None:
+    """Validate bounded child execution limits with actionable error messages."""
+    if type(max_iters) is not int or not 1 <= max_iters <= 8:
+        raise ValueError(f"max_iters={max_iters!r} is invalid; expected an integer in 1..8")
+    if type(max_llm_calls) is not int or not 1 <= max_llm_calls <= 25:
+        raise ValueError(f"max_llm_calls={max_llm_calls!r} is invalid; expected an integer in 1..25")
+
+
 class ChildDelegation:
     """Execute bounded child tasks using an invocation's copied learned policy state."""
 
@@ -60,18 +68,14 @@ class ChildDelegation:
 
         Skills are always copied; other inputs only when listed. input_paths may name files/,
         skills/ or earlier artifacts/ paths, and unchanged copied artifacts are not promoted back.
+        artifacts/ starts empty inside a child unless specific artifacts/... paths are requested in input_paths.
         The only optional Fleet tool is spawn_agent, allowing bounded further delegation.
+        Bounds: 1 <= max_iters <= 8 and 1 <= max_llm_calls <= 25.
         max_llm_calls is DSPy's query/facade limit; the shared turn ledger also meters actions.
         """
-        if (
-            not subtask.strip()
-            or len(subtask) > 20_000
-            or type(max_iters) is not int
-            or not 1 <= max_iters <= 8
-            or type(max_llm_calls) is not int
-            or not 1 <= max_llm_calls <= 25
-        ):
-            raise ValueError("Invalid child task or resource slice")
+        if not isinstance(subtask, str) or not subtask.strip() or len(subtask) > 20_000:
+            raise ValueError("subtask must be a non-empty string up to 20,000 characters")
+        _validate_child_limits(max_iters, max_llm_calls)
         names = ["spawn_agent"] if allowed_tools is None else allowed_tools
         if not isinstance(names, list) or any(name != "spawn_agent" for name in names):
             raise ValueError("Only the approved spawn_agent Fleet tool may be delegated")
@@ -110,6 +114,8 @@ class ChildDelegation:
             with dspy.context(lm=self._metered_sub, disable_history=True, adapter=self._sub_adapter):
                 result = child(subtask=subtask)
         except Exception as exc:
+            if interpreters and hasattr(interpreters[0].manager, "record_child_outcome"):
+                interpreters[0].manager.record_child_outcome(False)
             if turn_is_over(exc):
                 raise
             # A child that fails must not abort the parent's Turn or promote its unverified files.
@@ -117,9 +123,16 @@ class ChildDelegation:
             # error's severity; the parent sees the failure and can retry or use other children.
             return {"findings": "", "error": child_failure(exc), "artifacts": []}
         else:
+            if interpreters:
+                mgr = interpreters[0].manager
+                artifacts = mgr.collect_child_artifacts()
+                if hasattr(mgr, "record_child_outcome"):
+                    mgr.record_child_outcome(True)
+            else:
+                artifacts = []
             return {
                 "findings": str(result.findings)[:20_000],
-                "artifacts": interpreters[0].manager.collect_child_artifacts() if interpreters else [],
+                "artifacts": artifacts,
             }
         finally:
             if interpreters:
@@ -135,8 +148,12 @@ class ChildDelegation:
         """Run several independent children concurrently; return one result per subtask, in order.
 
         Prefer this over calling spawn_agent one after another when the subtasks do not depend on each
-        other. input_paths, when given, holds one list of `files/` paths per subtask. Each result is
-        spawn_agent's {findings, artifacts}, or {findings: "", error, artifacts: []} if that child failed.
+        other. input_paths, when given, holds one list of `files/`, `skills/`, or `artifacts/` paths per
+        subtask; `artifacts/` starts empty inside a child unless specific `artifacts/...` paths are requested
+        in `input_paths`. Each result is spawn_agent's {findings, artifacts}, or {findings: "", error,
+        artifacts: []} if that child failed.
+        Bounds: 1 <= len(subtasks) <= 8, 1 <= max_iters <= 8, and 1 <= max_llm_calls <= 25.
+        Values outside these bounds raise ValueError before any child starts.
         At most the active-child capacity run at once; the shared Turn budget and deadline still apply.
         """
         if (
@@ -147,6 +164,7 @@ class ChildDelegation:
             raise ValueError("subtasks must be a list of 1-8 strings")
         if input_paths is not None and (not isinstance(input_paths, list) or len(input_paths) != len(subtasks)):
             raise ValueError("input_paths must be omitted or hold one path list per subtask")
+        _validate_child_limits(max_iters, max_llm_calls)
 
         def run_child(index: int) -> dict[str, Any]:
             try:

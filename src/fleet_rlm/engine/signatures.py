@@ -28,7 +28,10 @@ class SkillRelevance(dspy.Signature):
 
 
 class TurnTriage(dspy.Signature):
-    """Choose the least expensive route that can satisfy the request."""
+    """Choose the least expensive route that can satisfy the request.
+
+    Prefer flex for single-pass bounded calculations or deterministic single-dataset checks with known inputs.
+    """
 
     task: str = dspy.InputField(desc="User request to route.")
     workspace_manifest: str = dspy.InputField(desc="Files available in the Session workspace.")
@@ -41,8 +44,11 @@ class FleetTask(dspy.Signature):
 
     __doc__ = (
         "Solve a task with Session-scoped workspace files and progressive Skills.\n\n"
-        "Delegate independent subtasks together with spawn_agents (they run concurrently) instead of calling\n"
-        "spawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:\n"
+        "Delegate independent subtasks concurrently via spawn_agents (1..8 subtasks) instead of calling\n"
+        "spawn_agent sequentially; both enforce max_iters in 1..8 and max_llm_calls in 1..25.\n"
+        "Child artifacts/ start empty unless explicitly passed via input_paths (`files/...` or earlier\n"
+        "`artifacts/...` paths; pass one list per subtask to spawn_agents). Use `/workspace/...` paths from\n"
+        "workspace_manifest rather than recursive globs from `/`. Finish with keyword arguments only:\n"
         "SUBMIT(answer=..., learned_skill_note=...).\n\n" + STOPPING_RULES
     )
 
@@ -67,7 +73,14 @@ class DirectAnswer(dspy.Signature):
 
 
 class ChildTask(dspy.Signature):
-    """Given the fields `subtask`, produce the fields `findings`."""
+    """Signature for a bounded child subtask executed in an isolated sandbox."""
+
+    __doc__ = (
+        "Given the fields `subtask`, produce the fields `findings`.\n\n"
+        "Workspace files live under `/workspace/...` (never run recursive globs from `/`).\n"
+        "Child `artifacts/` starts empty unless inputs were explicitly passed via input_paths.\n"
+        "If delegating, keep subtasks and max_iters in 1..8 and max_llm_calls in 1..25."
+    )
 
     subtask: str = dspy.InputField()
     findings: str = dspy.OutputField()

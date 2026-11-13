@@ -9,6 +9,7 @@ import json
 import os
 import shlex
 import signal
+import sqlite3
 import sys
 import threading
 import time
@@ -4697,6 +4698,142 @@ def test_local_service_uses_configured_persistent_directory(tmp_path):
     assert process.command[-2:] == ["--port", "5012"]
 
 
+def test_local_mlflow_server_environment_forwards_dotenv_kek_and_respects_env_precedence(tmp_path, monkeypatch):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("MLFLOW_CRYPTO_KEK_PASSPHRASE=dotenv-kek-marker\nMLFLOW_CRYPTO_KEK_VERSION=2\n")
+    data_dir = str(tmp_path / "mlflow")
+
+    baseline = FleetSettings(_env_file=None, mlflow_local_data_dir=data_dir)
+    settings = FleetSettings(_env_file=dotenv_path, mlflow_local_data_dir=data_dir)
+
+    assert settings.local_mlflow_server_environment() == {
+        "MLFLOW_CRYPTO_KEK_PASSPHRASE": "dotenv-kek-marker",
+        "MLFLOW_CRYPTO_KEK_VERSION": "2",
+    }
+    assert "dotenv-kek-marker" not in str(settings.configuration())
+    assert settings.configuration()["digest"] == baseline.configuration()["digest"]
+
+    monkeypatch.setenv("MLFLOW_CRYPTO_KEK_PASSPHRASE", "env-kek-marker")
+    monkeypatch.setenv("MLFLOW_CRYPTO_KEK_VERSION", "3")
+    assert settings.local_mlflow_server_environment() == {
+        "MLFLOW_CRYPTO_KEK_PASSPHRASE": "env-kek-marker",
+        "MLFLOW_CRYPTO_KEK_VERSION": "3",
+    }
+
+    monkeypatch.setenv("MLFLOW_CRYPTO_KEK_PASSPHRASE", "")
+    assert settings.local_mlflow_server_environment() == {"MLFLOW_CRYPTO_KEK_VERSION": "3"}
+
+    monkeypatch.setenv("MLFLOW_CRYPTO_KEK_VERSION", "0")
+    with pytest.raises(ValueError, match="MLFLOW_CRYPTO_KEK_VERSION"):
+        settings.local_mlflow_server_environment()
+    with pytest.raises(LaunchError, match="MLFLOW_CRYPTO_KEK_VERSION"):
+        _plan(settings=settings)
+
+
+def test_local_service_forwards_kek_env_and_keeps_repr_secret_free(tmp_path, monkeypatch):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("MLFLOW_CRYPTO_KEK_PASSPHRASE=dotenv-kek-marker\nMLFLOW_CRYPTO_KEK_VERSION=2\n")
+    data = tmp_path / "tracking"
+    settings = FleetSettings(_env_file=dotenv_path, mlflow_local_data_dir=str(data))
+
+    plan = _plan(settings=settings)
+    assert plan.start_mlflow
+    assert plan.mlflow_env == {
+        "MLFLOW_CRYPTO_KEK_PASSPHRASE": "dotenv-kek-marker",
+        "MLFLOW_CRYPTO_KEK_VERSION": "2",
+    }
+    assert "dotenv-kek-marker" not in repr(plan)
+    assert "MLFLOW_CRYPTO_KEK_PASSPHRASE" not in plan.api_env
+
+    seen_processes: list[ManagedProcess] = []
+    real_mlflow_process = launcher._mlflow_process
+
+    def fake_mlflow_process(mlflow_port: int, data_dir: str, env: dict[str, str] | None = None) -> Any:
+        proc = real_mlflow_process(mlflow_port, data_dir, env=env)
+        seen_processes.append(proc)
+        return SimpleNamespace(
+            name=proc.name,
+            log_path=proc.log_path,
+            start=lambda: None,
+            wait_ready=lambda *_a: 0.0,
+            stop=lambda **_kw: None,
+        )
+
+    monkeypatch.setattr(launcher, "_mlflow_process", fake_mlflow_process)
+    monkeypatch.setattr(
+        launcher,
+        "_api_process",
+        lambda *_a: SimpleNamespace(
+            name="API", log_path=Path("a.log"), start=lambda: None, wait_ready=lambda *_a: 0.0, stop=lambda **_kw: None
+        ),
+    )
+    _run_services(plan)
+    assert len(seen_processes) == 1
+    assert seen_processes[0].env == {
+        "MLFLOW_CRYPTO_KEK_PASSPHRASE": "dotenv-kek-marker",
+        "MLFLOW_CRYPTO_KEK_VERSION": "2",
+        "MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS": "true",
+    }
+    assert "dotenv-kek-marker" not in repr(seen_processes[0])
+
+
+def test_plan_launch_warns_and_doctor_blocks_on_local_mlflow_kek_mismatch(tmp_path, monkeypatch):
+    import fleet_rlm.doctor as doctor
+
+    mlflow_dir = tmp_path / "mlflow"
+    mlflow_dir.mkdir()
+    db_path = mlflow_dir / "mlflow.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE secrets (secret_id TEXT PRIMARY KEY, kek_version INTEGER)")
+        conn.execute("INSERT INTO secrets VALUES ('s-1', 2)")
+
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("MLFLOW_CRYPTO_KEK_PASSPHRASE=dotenv-kek-marker\nMLFLOW_CRYPTO_KEK_VERSION=2\n")
+    settings = FleetSettings(_env_file=dotenv_path, mlflow_local_data_dir=str(mlflow_dir))
+
+    def respond_secrets(using_default: bool) -> None:
+        monkeypatch.setattr(
+            launcher.httpx,
+            "get",
+            lambda *_a, **_kw: httpx.Response(
+                200,
+                json={"secrets_available": True, "using_default_passphrase": using_default},
+                request=httpx.Request("GET", "http://127.0.0.1:5001/ajax-api/3.0/mlflow/gateway/secrets/config"),
+            ),
+        )
+
+    respond_secrets(True)
+    reused_plan = _plan(mlflow_healthy=lambda _u: True, settings=settings)
+    assert not reused_plan.start_mlflow and reused_plan.mlflow_env == {}
+    assert any("default KEK passphrase" in note for note in reused_plan.notes)
+
+    monkeypatch.setattr(launcher, "mlflow_is_healthy", lambda _u: True)
+    blocked_reuse = doctor.check_mlflow(settings)
+    assert blocked_reuse["status"] == "blocked"
+    assert "default KEK passphrase" in blocked_reuse["message"]
+
+    respond_secrets(False)
+    assert doctor.check_mlflow(settings)["status"] == "ready"
+
+    dotenv_missing_version = tmp_path / ".env.v1"
+    dotenv_missing_version.write_text("MLFLOW_CRYPTO_KEK_PASSPHRASE=dotenv-kek-marker\n")
+    mismatch = doctor.check_mlflow(
+        FleetSettings(_env_file=dotenv_missing_version, mlflow_local_data_dir=str(mlflow_dir))
+    )
+    assert mismatch["status"] == "blocked"
+    assert "MLFLOW_CRYPTO_KEK_VERSION" in mismatch["message"]
+
+    no_passphrase = doctor.check_mlflow(FleetSettings(_env_file=None, mlflow_local_data_dir=str(mlflow_dir)))
+    assert no_passphrase["status"] == "blocked"
+    assert "MLFLOW_CRYPTO_KEK_PASSPHRASE" in no_passphrase["message"]
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE secrets SET kek_version = 1")
+    respond_secrets(True)
+    ready = doctor.check_mlflow(FleetSettings(_env_file=None, mlflow_local_data_dir=str(mlflow_dir)))
+    assert ready["status"] == "ready"
+
+
 def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination(monkeypatch, capsys):
     import time
 
@@ -4848,3 +4985,329 @@ def test_toml_backend_is_used_by_standalone_commands_and_explicit_flag_wins(tmp_
     cli.main(["trace", "verify", "trace-1"])
     cli.main(["trace", "verify", "trace-1", "--mlflow", "local"])
     assert seen == ["databricks", "local"]
+
+
+def test_abort_response_shuts_down_socketpair_stream_and_unblocks_reader():
+    import socket
+
+    from httpcore._backends.sync import SyncStream
+
+    from fleet_rlm.tui.stream import _abort_response
+
+    server_sock, client_sock = socket.socketpair()
+    reader_unblocked = threading.Event()
+    received: list[bytes] = []
+    errors: list[BaseException] = []
+
+    class _BlockingSocketStream(httpx.SyncByteStream):
+        def __init__(self, stream: SyncStream) -> None:
+            self._stream = stream
+
+        def __iter__(self):
+            try:
+                while True:
+                    chunk = self._stream.read(4096, timeout=300.0)
+                    if not chunk:
+                        break
+                    received.append(chunk)
+                    yield chunk
+            finally:
+                reader_unblocked.set()
+
+    class _NoPrematureCloseResponse(httpx.Response):
+        def close(self) -> None:
+            if not reader_unblocked.is_set():
+                raise AssertionError("response.close() must not race socket shutdown")
+            super().close()
+
+    sync_stream = SyncStream(client_sock)
+    try:
+        client_sock.settimeout(300.0)
+        response = _NoPrematureCloseResponse(
+            200,
+            stream=_BlockingSocketStream(sync_stream),
+            extensions={"network_stream": sync_stream},
+        )
+        thread = threading.Thread(
+            target=lambda: _consume_iter_lines(response, errors),
+            daemon=True,
+        )
+        thread.start()
+
+        started = time.monotonic()
+        _abort_response(response)
+        thread.join(timeout=1.0)
+        elapsed = time.monotonic() - started
+
+        assert not thread.is_alive()
+        assert elapsed < 0.5
+        assert not errors
+        assert received == []
+        server_sock.settimeout(0.5)
+        assert server_sock.recv(1) == b""
+    finally:
+        sync_stream.close()
+        server_sock.close()
+
+
+def _consume_iter_lines(response: httpx.Response, errors: list[BaseException]) -> None:
+    try:
+        list(response.iter_lines())
+    except BaseException as exc:
+        errors.append(exc)
+
+
+def _loopback_sse_server(on_turn_post):
+    import contextlib
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class _SSEHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def _write_chunk(self, data: bytes) -> None:
+            self.wfile.write(f"{len(data):x}\r\n".encode("ascii") + data + b"\r\n")
+            self.wfile.flush()
+
+        def do_GET(self) -> None:
+            if self.path == "/health":
+                body = json.dumps({"status": "ok"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_POST(self) -> None:
+            content_length = int(self.headers.get("Content-Length", "0") or "0")
+            if content_length:
+                self.rfile.read(content_length)
+            on_turn_post(self)
+
+    class _Server(ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    @contextlib.contextmanager
+    def _managed():
+        server = _Server(("127.0.0.1", 0), _SSEHandler)
+        port = int(server.server_address[1])
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        try:
+            yield f"http://127.0.0.1:{port}"
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=2.0)
+
+    return _managed()
+
+
+@pytest.mark.asyncio
+async def test_live_tcp_sse_cancel_unblocks_promptly_and_clears_cancelling_state():
+    import select
+    import socket
+
+    stream_open = threading.Event()
+    peer_disconnected = threading.Event()
+    release_server = threading.Event()
+
+    def handle_post(handler: Any) -> None:
+        if handler.path != "/sessions/tcp-cancel/turn":
+            handler.send_response(404)
+            handler.send_header("Content-Length", "0")
+            handler.end_headers()
+            return
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Transfer-Encoding", "chunked")
+        handler.end_headers()
+        handler._write_chunk(b": ping\n\n")
+        event = {"event": "repl_code", "code": "print(1)", "index": 1}
+        handler._write_chunk(f"data: {json.dumps(event)}\n\n".encode())
+        stream_open.set()
+
+        deadline = time.monotonic() + 5.0
+        while not release_server.is_set() and time.monotonic() < deadline:
+            try:
+                readable, _, _ = select.select([handler.connection], [], [], 0.02)
+                if readable and handler.connection.recv(1, socket.MSG_PEEK) == b"":
+                    peer_disconnected.set()
+                    break
+            except OSError:
+                peer_disconnected.set()
+                break
+
+    try:
+        with _loopback_sse_server(handle_post) as base_url:
+            state = SessionState()
+            with httpx.Client(
+                base_url=base_url,
+                timeout=httpx.Timeout(300.0, connect=10.0),
+            ) as client:
+                tui = FleetTextualApp(client, "tcp-cancel", state)
+                async with _menu_test(tui, size=(100, 30)) as (pilot, composer):
+                    composer.value = "run task"
+                    await pilot.press("enter")
+                    for _ in range(150):
+                        if (
+                            stream_open.is_set()
+                            and tui._turn_active
+                            and tui._active_response is not None
+                            and state.last_tracker is not None
+                            and len(state.last_tracker.items) == 1
+                        ):
+                            break
+                        await pilot.pause(0.01)
+                    assert stream_open.is_set()
+                    assert tui._turn_active
+                    assert tui._active_response is not None
+
+                    cancel_started = time.monotonic()
+                    await pilot.press("escape")
+                    await _wait_until_idle(tui, pilot)
+                    cancel_elapsed = time.monotonic() - cancel_started
+                    assert cancel_elapsed < 2.0
+                    assert peer_disconnected.wait(1.0)
+                    await pilot.pause(0.05)
+
+                    # Repeated cancel while idle must remain a safe no-op.
+                    tui.cancel_active_turn()
+
+                    assert not tui._turn_active
+                    assert tui._active_response is None
+                    assert tui._active_turn_widget is None
+                    assert state.last_tracker is not None
+                    assert not state.last_tracker.cancelling
+                    assert state.last_tracker.terminal_event == {"event": "interrupted"}
+                    assert state.last_tracker.items[0].status == "cancelled"
+                    left_plain = tui._render_status_left().plain
+                    assert "cancelling" not in left_plain
+                    assert "running" not in left_plain
+                    footer_plain = state.last_tracker.status_line().plain
+                    assert "── Turn summary:" in footer_plain
+                    assert "Cancelling turn" not in footer_plain
+
+                    health = client.get("/health")
+                    assert health.status_code == 200
+                    assert health.json() == {"status": "ok"}
+    finally:
+        release_server.set()
+
+
+@pytest.mark.asyncio
+async def test_live_tcp_sse_turn_with_keepalive_ping_completes_cleanly():
+    def handle_post(handler: Any) -> None:
+        assert handler.path == "/sessions/tcp-ping/turn"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Transfer-Encoding", "chunked")
+        handler.end_headers()
+        handler._write_chunk(b": ping\n\n")
+        events = [
+            {"event": "progress", "status": "working", "scope": "root", "checkpoint": 1},
+            {"event": "turn_complete", "answer": "ok", "route": "direct", "duration_seconds": 0.1},
+            {"event": "done"},
+        ]
+        for ev in events:
+            handler._write_chunk(f"data: {json.dumps(ev)}\n\n".encode())
+        handler.wfile.write(b"0\r\n\r\n")
+        handler.wfile.flush()
+
+    with _loopback_sse_server(handle_post) as base_url:
+        state = SessionState()
+        with httpx.Client(
+            base_url=base_url,
+            timeout=httpx.Timeout(300.0, connect=10.0),
+        ) as client:
+            tui = FleetTextualApp(client, "tcp-ping", state)
+            async with _menu_test(tui, size=(100, 30)) as (pilot, composer):
+                composer.value = "ping test"
+                await pilot.press("enter")
+                await _wait_until_idle(tui, pilot)
+                await pilot.pause(0.05)
+
+                assert not tui._turn_active
+                assert state.last_tracker is not None
+                assert not state.last_tracker.cancelling
+                assert state.last_tracker.status_label is None
+                assert state.last_tracker.terminal_event is not None
+                assert state.last_tracker.terminal_event["event"] == "turn_complete"
+                assert "── Turn summary: route=direct" in state.last_tracker.status_line().plain
+
+
+def test_turn_tracker_child_agent_result_does_not_overwrite_turn_status():
+    tracker = render.TurnTracker()
+    tracker.ingest({"event": "turn_status", "phase": "running", "agent_id": "root-1"})
+    tracker.ingest({"event": "progress", "status": "synthesizing", "scope": "root", "checkpoint": 2})
+    tracker.ingest({"event": "agent_spawn", "agent_id": "child-1", "parent_agent_id": "root-1", "depth": 1})
+    tracker.ingest({"event": "agent_spawn", "agent_id": "child-2", "parent_agent_id": "root-1", "depth": 1})
+
+    # Child completion carries status="succeeded" (workspace_io.py:385), which must not hijack Turn status.
+    tracker.ingest(
+        {
+            "event": "agent_result",
+            "agent_id": "child-1",
+            "parent_agent_id": "root-1",
+            "depth": 1,
+            "status": "succeeded",
+            "artifacts": [],
+        }
+    )
+    # Child-scoped tool/progress updates must not overwrite Turn status either (with or without parent_agent_id).
+    tracker.ingest(
+        {"event": "tool_start", "agent_id": "child-2", "call_id": "c2", "tool": "sub", "status": "child_busy"}
+    )
+    tracker.ingest({"event": "progress", "agent_id": "child-2", "parent_agent_id": "root-1", "status": "child_step"})
+
+    assert tracker.status_label == "synthesizing"
+    assert tracker.status_scope == "root"
+    assert tracker.status_checkpoint == 2
+    footer = tracker.status_line().plain
+    assert "synthesizing" in footer
+    assert "succeeded" not in footer
+    assert "child_busy" not in footer
+    assert "child_step" not in footer
+
+    # Fallback footer with active children also stays unpolluted when no Turn status_label is set.
+    tracker_no_label = render.TurnTracker()
+    tracker_no_label.ingest({"event": "turn_status", "phase": "running", "agent_id": "root-1"})
+    tracker_no_label.ingest({"event": "agent_spawn", "agent_id": "child-1", "parent_agent_id": "root-1", "depth": 1})
+    tracker_no_label.ingest({"event": "agent_spawn", "agent_id": "child-2", "parent_agent_id": "root-1", "depth": 1})
+    tracker_no_label.ingest({"event": "agent_result", "agent_id": "child-1", "status": "succeeded"})
+    assert tracker_no_label.status_label is None
+    fallback_footer = tracker_no_label.status_line().plain
+    assert "Running 1 child agent" in fallback_footer
+    assert "succeeded" not in fallback_footer
+
+    # Plain CLI event rendering must not print child agent_result status as Turn advisory status.
+    buf = io.StringIO()
+    old_console = render.CONSOLE
+    render.CONSOLE = Console(file=buf, force_terminal=False, no_color=True)
+    try:
+        render.render_event(
+            {
+                "event": "agent_result",
+                "agent_id": "child-1",
+                "parent_agent_id": "root-1",
+                "status": "succeeded",
+            }
+        )
+    finally:
+        render.CONSOLE = old_console
+    assert "Status: succeeded" not in buf.getvalue()
+
+    # Terminal events must clear cancelling state even before `done`.
+    tracker.ingest({"event": "cancellation_requested"})
+    assert tracker.cancelling
+    tracker.ingest({"event": "turn_cancelled", "route": "rlm", "duration_seconds": 1.2})
+    assert not tracker.cancelling

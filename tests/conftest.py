@@ -30,7 +30,16 @@ def mlflow_test_uri(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch: pytest.MonkeyPatch, mlflow_test_uri: str):
-    for name in _setting_env_names() | RETIRED_MLFLOW_ENV | {"MLFLOW_EXPERIMENT_ID", "DATABRICKS_CONFIG_PROFILE"}:
+    for name in (
+        _setting_env_names()
+        | RETIRED_MLFLOW_ENV
+        | {
+            "MLFLOW_EXPERIMENT_ID",
+            "DATABRICKS_CONFIG_PROFILE",
+            "MLFLOW_CRYPTO_KEK_PASSPHRASE",
+            "MLFLOW_CRYPTO_KEK_VERSION",
+        }
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setitem(FleetSettings.model_config, "env_file", None)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_test_uri)

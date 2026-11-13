@@ -6,12 +6,14 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import dspy
+from dotenv import dotenv_values
 from pydantic import (
     AliasChoices,
     Field,
@@ -643,6 +645,31 @@ class FleetSettings(BaseSettings):
         if profile == "databricks" and self.mlflow_tracking_uri.startswith("databricks://"):
             environment["DATABRICKS_CONFIG_PROFILE"] = self.mlflow_tracking_uri.removeprefix("databricks://")
         return environment
+
+    def local_mlflow_server_environment(self) -> dict[str, str]:
+        """Resolve MLflow KEK variables from process env or `.env` for a managed local MLflow server."""
+        dotenv: Mapping[str, str | None] | None = None
+        resolved: dict[str, str] = {}
+        for key in ("MLFLOW_CRYPTO_KEK_PASSPHRASE", "MLFLOW_CRYPTO_KEK_VERSION"):
+            if key in os.environ:
+                value: str | None = os.environ[key]
+            elif self._credential_env_file:
+                if dotenv is None:
+                    dotenv = dotenv_values(self._credential_env_file)
+                value = dotenv.get(key)
+            else:
+                value = None
+            if value:
+                resolved[key] = value
+        version = resolved.get("MLFLOW_CRYPTO_KEK_VERSION")
+        if version is not None:
+            try:
+                parsed = int(version)
+            except ValueError:
+                raise ValueError("MLFLOW_CRYPTO_KEK_VERSION must be a positive integer") from None
+            if parsed < 1:
+                raise ValueError("MLFLOW_CRYPTO_KEK_VERSION must be a positive integer")
+        return resolved
 
     def prepare_mlflow_auth(self) -> None:
         """Make .env credentials available to MLflow's default Databricks SDK authentication."""

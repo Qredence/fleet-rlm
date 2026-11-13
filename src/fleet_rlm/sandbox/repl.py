@@ -305,6 +305,8 @@ def run(
     protocol = _Protocol(sandbox, on_call, fence=fence, on_fence=on_fence)
     # The Turn's remaining deadline is the only production source of this bound. A value carried by
     # the payload is a test seam for shortening it; nothing may substitute a fixed fallback.
+    # Local Python compute per cell is bounded separately inside runtime/repl.py so a stalled cell
+    # returns TimeoutError/CodeExecutionError cleanly even when a Turn has no deadline (timeout=None).
     payload = {"host_call_timeout": timeout, **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
     try:

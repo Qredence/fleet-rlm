@@ -338,7 +338,10 @@ values that shadow TOML.
 
 Credentials (`DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`,
 `FLEET_TYPESAFE_API_KEY`, `FLEET_DATABASE_URL`, and
-`FLEET_DATABASE_MIGRATION_URL`) are environment/.env only.
+`FLEET_DATABASE_MIGRATION_URL`) are environment/.env only. Local MLflow Gateway
+encryption settings (`MLFLOW_CRYPTO_KEK_PASSPHRASE` and `MLFLOW_CRYPTO_KEK_VERSION`)
+follow the same environment/.env precedence and are forwarded to managed local
+MLflow servers by `fleet cli` and `fleet web` and validated by `fleet doctor`.
 TOML secret keys are rejected without echoing values. Organization and Volume
 identifiers are not credentials and may be configured in `[daytona]`.
 

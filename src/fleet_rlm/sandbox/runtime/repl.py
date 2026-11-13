@@ -13,11 +13,14 @@ and it is concatenated after other helper code, so it must not use ``from __futu
 import ast
 import builtins
 import contextlib
+import ctypes
 import functools
 import io
 import json
 import keyword
+import math
 import os
+import signal
 import sys
 import threading
 import time
@@ -49,6 +52,7 @@ RESERVED_NAMES = {
 REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
 SKILL_HELPERS = ("list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill")
 MAX_SKILL_RECEIPTS = 20
+DEFAULT_EXEC_TIMEOUT_SECONDS = 60.0
 
 _STATE: dict[str, Any] = {
     "module": None,
@@ -56,6 +60,8 @@ _STATE: dict[str, Any] = {
     "registered_tools": set(),
     "stdout": None,
     "host_call_timeout": None,
+    "exec_timeout": None,
+    "exec_timer": None,
 }
 _WRITE_LOCK = threading.Lock()
 
@@ -115,6 +121,146 @@ def _host_call_limit(value: Any) -> float | None:
     return float(value)
 
 
+def _exec_limit() -> float | None:
+    """Return a bounded positive per-cell local timeout, or None when host timeout owns it."""
+    raw = _STATE.get("exec_timeout")
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0:
+        return float(raw)
+    host_limit = _host_call_limit(_STATE.get("host_call_timeout"))
+    if host_limit is not None and host_limit <= DEFAULT_EXEC_TIMEOUT_SECONDS:
+        return None
+    return DEFAULT_EXEC_TIMEOUT_SECONDS
+
+
+class _LocalExecTimer:
+    """Bound local time per cell, excluding intervals with any pending host call.
+
+    Calls from all threads share the pause; local work concurrent with a host wait is
+    also excluded. Only the last completed call resumes the remaining budget.
+    """
+
+    def __init__(self, limit_seconds: float) -> None:
+        self.limit = limit_seconds
+        self.remaining = limit_seconds
+        self._lock = threading.Lock()
+        self._tid = threading.get_ident()
+        self._use_signal = (
+            threading.current_thread() is threading.main_thread()
+            and hasattr(signal, "SIGALRM")
+            and hasattr(signal, "setitimer")
+        )
+        self._armed = False
+        self._closed = False
+        self._host_waits = 0
+        self._generation = 0
+        self._started_at = 0.0
+        self._timed_out = False
+        self._timer: threading.Timer | None = None
+        self._prev_handler: Any = None
+        self._prev_timer: tuple[float, float] = (0.0, 0.0)
+
+    def _timeout_error(self) -> TimeoutError:
+        return TimeoutError(f"Sandbox code execution exceeded {self.limit:g}s local limit")
+
+    def _handle_alarm(self, _signum: int, _frame: Any) -> None:
+        if self._armed and not self._closed:
+            self._armed = False
+            self._timed_out = True
+            raise self._timeout_error()
+
+    def _fire_async(self, generation: int) -> None:
+        with self._lock:
+            if self._armed and not self._closed and generation == self._generation:
+                self._armed = False
+                self._timed_out = True
+                self._set_async_exc(TimeoutError)
+
+    def _set_async_exc(self, exc_type: Any) -> None:
+        pythonapi = getattr(ctypes, "pythonapi", None)
+        if pythonapi is None:
+            return
+        set_async = pythonapi.PyThreadState_SetAsyncExc
+        obj = ctypes.py_object(exc_type) if exc_type is not None else None
+        if set_async(ctypes.c_ulong(self._tid), obj) > 1 and exc_type is not None:
+            set_async(ctypes.c_ulong(self._tid), None)
+
+    def _arm_locked(self) -> None:
+        if self._closed or self._host_waits:
+            return
+        if self._timed_out or self.remaining <= 0:
+            self._timed_out = True
+            if threading.get_ident() == self._tid:
+                raise self._timeout_error()
+            self._set_async_exc(TimeoutError)
+            return
+        self._armed = True
+        self._generation += 1
+        self._started_at = time.monotonic()
+        delay = max(self.remaining, 0.001)
+        if self._use_signal:
+            signal.setitimer(signal.ITIMER_REAL, delay)
+        else:
+            self._timer = threading.Timer(delay, self._fire_async, args=(self._generation,))
+            self._timer.daemon = True
+            self._timer.start()
+
+    def _disarm_locked(self) -> None:
+        if self._armed:
+            self._armed = False
+            self.remaining = max(0.0, self.remaining - max(0.0, time.monotonic() - self._started_at))
+        self._generation += 1
+        if self._use_signal:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def __enter__(self) -> "_LocalExecTimer":
+        if self._use_signal:
+            self._prev_handler = signal.getsignal(signal.SIGALRM)
+            self._prev_timer = signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, self._handle_alarm)
+        with self._lock:
+            self._arm_locked()
+        _STATE["exec_timer"] = self
+        return self
+
+    def __exit__(self, exc_type: Any, _exc: Any, _tb: Any) -> None:
+        try:
+            if _STATE.get("exec_timer") is self:
+                _STATE["exec_timer"] = None
+            with self._lock:
+                self._closed = True
+                self._disarm_locked()
+        finally:
+            if self._use_signal:
+                signal.signal(signal.SIGALRM, self._prev_handler)
+                if any(self._prev_timer):
+                    signal.setitimer(signal.ITIMER_REAL, *self._prev_timer)
+            else:
+                self._set_async_exc(None)
+        if self._timed_out and exc_type is None:
+            raise self._timeout_error()
+
+    def pause(self) -> bool:
+        with self._lock:
+            if self._closed or self._timed_out:
+                return False
+            if not self._host_waits:
+                self._disarm_locked()
+                if self.remaining <= 0:
+                    self._arm_locked()  # Deliver expiry to the execution thread, including from a worker.
+                    return False
+            self._host_waits += 1
+            return True
+
+    def resume(self) -> None:
+        with self._lock:
+            self._host_waits -= 1
+            if not self._host_waits:
+                self._arm_locked()
+
+
 class _HostCallError(RuntimeError):
     """A failed bridge reply, with an opaque receipt issued by the host."""
 
@@ -140,27 +286,33 @@ def _bridge_call(tool_name: str, args: list[Any], kwargs: dict[str, Any]) -> Any
     if len(json.dumps(request, separators=(",", ":")).encode("utf-8")) > MAX_BODY:
         raise ValueError("Host tool request exceeds the size limit")
     path = os.path.join(REPLY_DIR, request["id"] + ".json")
-    _emit(CALL_MARK, request)
-    # The Turn's remaining deadline is the only bound: a deadline-free Turn waits without one, and no
-    # component substitutes a fixed cutoff. The wait turns a lost reply into an error the model can act
-    # on instead of a stall once a deadline exists.
-    limit = _host_call_limit(_STATE.get("host_call_timeout"))
-    deadline = None if limit is None else time.monotonic() + limit
-    delay = 0.005
-    while True:
-        try:
-            with open(path, encoding="utf-8") as handle:
-                reply = json.load(handle)
-        except (OSError, ValueError):  # absent, or the upload is still in progress
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError(f"Host tool {tool_name!r} did not reply within {limit:.0f}s") from None
-            time.sleep(delay)
-            delay = min(delay * 2, 0.05)
-            continue
-        os.unlink(path)
-        if reply.get("error"):
-            raise _HostCallError(str(reply["error"])[:2000], request["id"], reply.get("host_error_id"))
-        return reply.get("value")
+    timer = _STATE.get("exec_timer")
+    paused = timer is not None and timer.pause()
+    try:
+        _emit(CALL_MARK, request)
+        # The Turn's remaining deadline is the only bound: a deadline-free Turn waits without one, and no
+        # component substitutes a fixed cutoff. The wait turns a lost reply into an error the model can act
+        # on instead of a stall once a deadline exists.
+        limit = _host_call_limit(_STATE.get("host_call_timeout"))
+        deadline = None if limit is None else time.monotonic() + limit
+        delay = 0.005
+        while True:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    reply = json.load(handle)
+            except (OSError, ValueError):  # absent, or the upload is still in progress
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError(f"Host tool {tool_name!r} did not reply within {limit:.0f}s") from None
+                time.sleep(delay)
+                delay = min(delay * 2, 0.05)
+                continue
+            os.unlink(path)
+            if reply.get("error"):
+                raise _HostCallError(str(reply["error"])[:2000], request["id"], reply.get("host_error_id"))
+            return reply.get("value")
+    finally:
+        if paused:
+            timer.resume()
 
 
 def _make_tool(tool_name: str) -> Any:
@@ -171,6 +323,67 @@ def _make_tool(tool_name: str) -> Any:
     return tool
 
 
+def _record_skill_receipt(helper_name: str, skill: str | None, call: Any) -> Any:
+    """Record one bounded skill receipt without exposing instruction bodies, arguments, or results."""
+    receipt = {"helper": helper_name, "skill": skill[:64] if isinstance(skill, str) else None, "completed": False}
+    try:
+        value = call()
+        receipt["completed"] = True
+        return value
+    finally:
+        with _WRITE_LOCK:
+            receipts = _STATE.get("skill_activity")
+            if receipts is not None:
+                if len(receipts) < MAX_SKILL_RECEIPTS:
+                    receipts.append(receipt)
+                else:
+                    _STATE["skill_activity_truncated"] = True
+
+
+def _skill_name_from_path(path: Any) -> str | None:
+    """Return the skill name when a workspace read path targets skills/<name>/..."""
+    if not isinstance(path, str):
+        return None
+    rel = path.strip().replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    workspace_prefix = WORKSPACE.rstrip("/") + "/"
+    if rel.startswith(workspace_prefix):
+        rel = rel[len(workspace_prefix) :]
+    if not rel.startswith("skills/"):
+        return None
+    parts = [part for part in rel.split("/") if part and part != "."]
+    if len(parts) < 2 or parts[0] != "skills" or parts[1] == "..":
+        return None
+    return parts[1][:64]
+
+
+class _ReceiptWorkspace:
+    """Proxy workspace reads so direct reads under skills/ emit bounded skill_activity receipts."""
+
+    def __init__(self, workspace: Any) -> None:
+        self._workspace = workspace
+
+    def _read(self, method: str, path: Any, max_bytes: int, offset: int) -> Any:
+        fn = getattr(self._workspace, method)
+        skill = _skill_name_from_path(path)
+        if skill is None:
+            return fn(path, max_bytes=max_bytes, offset=offset)
+        return _record_skill_receipt(f"workspace.{method}", skill, lambda: fn(path, max_bytes=max_bytes, offset=offset))
+
+    def read(self, path: Any, max_bytes: int = 100000, offset: int = 0) -> Any:
+        return self._read("read", path, max_bytes, offset)
+
+    def read_text(self, path: Any, max_bytes: int = 100000, offset: int = 0) -> Any:
+        return self._read("read_text", path, max_bytes, offset)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._workspace, name)
+
+    def __repr__(self) -> str:
+        return repr(self._workspace)
+
+
 def _receipt_skill_helper(name: str, helper: Any) -> Any:
     """Record actual helper invocations, excluding instruction bodies, arguments, and results."""
     if name == "list_skills":
@@ -179,19 +392,7 @@ def _receipt_skill_helper(name: str, helper: Any) -> Any:
     @functools.wraps(helper)
     def invoke(*args: Any, **kwargs: Any) -> Any:
         skill = args[0] if args else kwargs.get("name")
-        receipt = {"helper": name, "skill": skill[:64] if isinstance(skill, str) else None, "completed": False}
-        try:
-            value = helper(*args, **kwargs)
-            receipt["completed"] = True
-            return value
-        finally:
-            with _WRITE_LOCK:
-                receipts = _STATE.get("skill_activity")
-                if receipts is not None:
-                    if len(receipts) < MAX_SKILL_RECEIPTS:
-                        receipts.append(receipt)
-                    else:
-                        _STATE["skill_activity_truncated"] = True
+        return _record_skill_receipt(name, skill if isinstance(skill, str) else None, lambda: helper(*args, **kwargs))
 
     return invoke
 
@@ -241,7 +442,8 @@ def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
     )
     if "workspace" in context_globals:
         namespace.update(
-            workspace=context_globals["workspace"], WorkspaceDatasetView=context_globals["WorkspaceDatasetView"]
+            workspace=_ReceiptWorkspace(context_globals["workspace"]),
+            WorkspaceDatasetView=context_globals["WorkspaceDatasetView"],
         )
     dynamic_tools: set[str] = set()
     for name in tool_names:
@@ -328,12 +530,14 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
                 tree.body.pop()
             else:
                 last = None
-            exec(compile(tree, "<fleet_rlm>", "exec"), namespace, namespace)
-            value = (
-                eval(compile(ast.Expression(last.value), "<fleet_rlm>", "eval"), namespace)
-                if last is not None
-                else None
-            )
+            limit = _exec_limit()
+            with _LocalExecTimer(limit) if limit is not None else contextlib.nullcontext():
+                exec(compile(tree, "<fleet_rlm>", "exec"), namespace, namespace)
+                value = (
+                    eval(compile(ast.Expression(last.value), "<fleet_rlm>", "eval"), namespace)
+                    if last is not None
+                    else None
+                )
         result: dict[str, Any] = {
             "stdout": output.getvalue(),
             "stderr": errors.getvalue(),
@@ -370,10 +574,10 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
 def _fleet_exec(payload_json: str) -> None:
     """Run one execution and report it as a single FLEET_RESULT line."""
     _STATE["stdout"] = sys.stdout  # the interpreter's per-run stream; markers must reach it, not the capture
-    _STATE["execution_thread"] = threading.get_ident()
     try:
         payload = json.loads(payload_json)
         _STATE["host_call_timeout"] = payload.get("host_call_timeout")
+        _STATE["exec_timeout"] = payload.get("exec_timeout")
         result = _run(
             payload.get("code"), payload.get("variables") or {}, payload.get("tools") or [], payload.get("outputs")
         )
@@ -382,6 +586,7 @@ def _fleet_exec(payload_json: str) -> None:
         _emit(RESULT_MARK, result)
     finally:
         _STATE["stdout"] = None
+        _STATE["exec_timeout"] = None
 
 
 os.makedirs(REPLY_DIR, mode=0o700, exist_ok=True)

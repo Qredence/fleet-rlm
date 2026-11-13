@@ -349,8 +349,9 @@ class DaytonaSandboxManager(WorkspaceIOMixin, SandboxBudgetMixin, SandboxLifecyc
             "llm_query or dspy.Predict. "
             "Use workspace.write_artifact(name, content) for results. "
             "Artifact names are relative to artifacts/ (e.g. 'result.txt'); use the helper's returned path. "
-            "Nested DSPy code agents allocate fresh child sandboxes; files/ and skills/ inputs are copied, and "
-            "spawn_agent(input_paths=[...]) can also pass earlier artifacts/ paths. "
+            "Nested DSPy code agents allocate fresh child sandboxes; files/ and skills/ inputs are copied, while "
+            "artifacts/ starts empty inside a child unless specific artifacts/... paths are requested in input_paths "
+            "(for example via spawn_agent/spawn_agents). "
             "Successful child artifacts appear under artifacts/<agent-id>/; inspect workspace.tree() for their paths. "
             + STOPPING_RULES
         )

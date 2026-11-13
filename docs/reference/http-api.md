@@ -442,11 +442,12 @@ Long-running Python and host-tool calls have no independent 120-second bridge
 or 180-second execution-read limit. Host-call waiting derives from the Turn's
 remaining deadline, so a bridged call never outlives a bounded Turn, and only a
 bounded Turn arms the watchdog. A deadline-free Turn sends `run_code(timeout=0)`
-explicitly and no Fleet component substitutes a fallback bound, so the call waits
-until it returns or the Turn is cancelled; Daytona's provider TTL and idle bounds
-still apply. Closing a stream before durable completion requests remote
-cancellation and drains the worker, serialized against commit/readback. Request
-cleanup retains the Session lock until the worker drains, including when HTTP
+explicitly and pauses host-call waits unboundedly until the call returns or the
+Turn is cancelled, while unbridged local Python execution inside a single cell
+has a 60-second safety cap (`DEFAULT_EXEC_TIMEOUT_SECONDS`) unless overridden
+(`exec_timeout`); Daytona's provider TTL and idle bounds still apply. Closing a
+stream before durable completion requests remote cancellation and drains the
+worker, serialized against commit/readback. Request cleanup retains the Session lock until the worker drains, including when HTTP
 forwarding is blocked after consuming a yielded event. After durable completion,
 disconnecting preserves a successful Turn's warm root while the worker finishes.
 Reconnection is not an automatic side-effect retry.
