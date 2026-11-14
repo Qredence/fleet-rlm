@@ -1,0 +1,24 @@
+src/fleet_rlm/engine/invocation.py
+  h_f276322eb5eb9f 6,8-9,11,17,192-221,230-242,244-245,253-281
+src/fleet_rlm/optimize/runner.py
+  h_f276322eb5eb9f 56,91,98-101
+src/fleet_rlm/sandbox/interpreter.py
+  h_f276322eb5eb9f 108
+src/fleet_rlm/sandbox/manager.py
+  h_f276322eb5eb9f 350-352
+src/fleet_rlm/sandbox/runtime/repl.py
+  h_f276322eb5eb9f 49,54-61
+src/fleet_rlm/skills.py
+  h_f276322eb5eb9f 26,37-47,54-62,92-114,203-260,264-269,281-286,288-291,298-299,353-373,462-465,467,469-470,472-485,654-660
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "16a8a4d357095fb0c80d4d5aec69e6b966d426f9",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
