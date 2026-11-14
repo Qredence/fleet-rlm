@@ -1,0 +1,42 @@
+src/fleet_rlm/bundled_skills/delegation/SKILL.md
+  h_f276322eb5eb9f 8-51
+src/fleet_rlm/bundled_skills/delegation/references/delegation-patterns.md
+  h_f276322eb5eb9f 1-42
+src/fleet_rlm/bundled_skills/delegation/scripts/delegation_tools.py
+  h_f276322eb5eb9f 1-296
+src/fleet_rlm/bundled_skills/long-context-search/SKILL.md
+  h_f276322eb5eb9f 8-9,13,16-18,21-22,24-47,49-50
+src/fleet_rlm/bundled_skills/long-context-search/references/batch-reading-patterns.md
+  h_f276322eb5eb9f 1-29
+src/fleet_rlm/bundled_skills/long-context-search/scripts/context_search.py
+  h_f276322eb5eb9f 1-490
+src/fleet_rlm/bundled_skills/repository-inspection/SKILL.md
+  h_f276322eb5eb9f 3,8-56
+src/fleet_rlm/bundled_skills/repository-inspection/references/security-policy.md
+  h_f276322eb5eb9f 1-40
+src/fleet_rlm/bundled_skills/repository-inspection/scripts/fetch_repo.py
+  h_f276322eb5eb9f 1-584
+src/fleet_rlm/bundled_skills/skill-creator/SKILL.md
+  h_f276322eb5eb9f 8-11,15,17-30,32,34-54
+src/fleet_rlm/bundled_skills/skill-creator/references/skill-authoring-guide.md
+  h_f276322eb5eb9f 1-39
+src/fleet_rlm/bundled_skills/skill-creator/scripts/skill_tools.py
+  h_f276322eb5eb9f 1-302
+src/fleet_rlm/bundled_skills/tabular-analysis/SKILL.md
+  h_f276322eb5eb9f 3,8-10,14,17-19,22,25-32,35-46,48-49,51-52
+src/fleet_rlm/bundled_skills/tabular-analysis/references/formulas-and-verifiers.md
+  h_f276322eb5eb9f 1-47
+src/fleet_rlm/bundled_skills/tabular-analysis/scripts/tabular_tools.py
+  h_f276322eb5eb9f 1-405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f782eb29b28aa6c3f6c4cd6a900eb4dcff00290d",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
