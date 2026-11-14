@@ -95,6 +95,80 @@ def encode_snapshot(snapshot: dict[str, Any]) -> tuple[str, bytes]:
     return hashlib.sha256(compressed).hexdigest(), compressed
 
 
+def split_snapshot_for_storage(digest: str, compressed: bytes) -> tuple[dict[str, Any], list[tuple[str, int, bytes]]]:
+    """Decompose an encoded replay snapshot into a manifest plus content-addressed file blobs."""
+    if len(compressed) > MAX_REPLAY_SNAPSHOT_BYTES or hashlib.sha256(compressed).hexdigest() != digest:
+        raise ValueError("Replay snapshot digest or size validation failed")
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(compressed), mode="rb") as stream:
+            raw = stream.read(MAX_REPLAY_JSON_BYTES + 1)
+        value = json.loads(raw) if len(raw) <= MAX_REPLAY_JSON_BYTES else None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        value = None
+
+    if isinstance(value, dict) and isinstance(value.get("replay_files"), dict):
+        try:
+            canonical_digest, canonical_bytes = encode_snapshot(value)
+        except ReplaySizeError:
+            canonical_digest, canonical_bytes = "", b""
+        if canonical_digest == digest and canonical_bytes == compressed:
+            blob_refs: dict[str, str] = {}
+            blobs_by_sha: dict[str, tuple[str, int, bytes]] = {}
+            valid_files = True
+            for path, encoded in sorted(value["replay_files"].items()):
+                if not isinstance(path, str) or not isinstance(encoded, str):
+                    valid_files = False
+                    break
+                try:
+                    content = base64.b64decode(encoded, validate=True)
+                except ValueError:
+                    valid_files = False
+                    break
+                if base64.b64encode(content).decode("ascii") != encoded:
+                    valid_files = False
+                    break
+                blob_sha256 = hashlib.sha256(content).hexdigest()
+                blob_refs[path] = blob_sha256
+                blobs_by_sha.setdefault(blob_sha256, (blob_sha256, len(content), content))
+            if valid_files:
+                manifest = {key: item for key, item in value.items() if key != "replay_files"}
+                manifest["replay_file_blobs"] = blob_refs
+                return manifest, [blobs_by_sha[key] for key in sorted(blobs_by_sha)]
+
+    return {"_raw_blob_sha256": digest}, [(digest, len(compressed), compressed)]
+
+
+def rehydrate_snapshot_from_storage(
+    digest: str, manifest: dict[str, Any], blob_map: dict[str, bytes]
+) -> tuple[str, bytes]:
+    """Reassemble deterministic replay snapshot bytes from a stored manifest and blob map."""
+    if not isinstance(manifest, dict):
+        raise ValueError("Replay snapshot manifest is corrupt")
+    raw_sha = manifest.get("_raw_blob_sha256")
+    if isinstance(raw_sha, str):
+        compressed = blob_map.get(raw_sha)
+        if compressed is None or hashlib.sha256(compressed).hexdigest() != digest:
+            raise ValueError("Replay snapshot blob is missing or corrupt")
+        return digest, compressed
+    blob_refs = manifest.get("replay_file_blobs")
+    if not isinstance(blob_refs, dict):
+        raise ValueError("Replay snapshot manifest is missing file blob references")
+    replay_files: dict[str, str] = {}
+    for path, blob_sha in blob_refs.items():
+        if not isinstance(path, str) or not isinstance(blob_sha, str):
+            raise ValueError("Replay snapshot manifest contains an invalid file blob reference")
+        content = blob_map.get(blob_sha)
+        if content is None or hashlib.sha256(content).hexdigest() != blob_sha:
+            raise ValueError("Replay snapshot file blob is missing or corrupt")
+        replay_files[path] = base64.b64encode(content).decode("ascii")
+    snapshot = {key: item for key, item in manifest.items() if key != "replay_file_blobs"}
+    snapshot["replay_files"] = replay_files
+    re_digest, compressed = encode_snapshot(snapshot)
+    if re_digest != digest:
+        raise ValueError("Rehydrated replay snapshot digest mismatch")
+    return re_digest, compressed
+
+
 def decode_snapshot(digest: str, compressed: bytes) -> dict[str, Any]:
     """Verify stored bytes, then validate the versioned replay file manifest."""
     if len(compressed) > MAX_REPLAY_SNAPSHOT_BYTES or hashlib.sha256(compressed).hexdigest() != digest:

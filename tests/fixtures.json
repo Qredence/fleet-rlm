@@ -1,0 +1,274 @@
+{
+  "pi_digit_trace": {
+    "trace_id": "tr-e60ebd3bf370e42a8d5e724925de964b",
+    "purpose": "Sanitized diagnostic fixture; no selected immutable replay and no independent gold assessment",
+    "task": "Tell me the 1492252th digits after the decimal point of Pi",
+    "answer": "5",
+    "neighborhood": "867705214653621709715",
+    "captured_stdout": "digit at position 1492252 : 5\nneighborhood: 867705214653621709715\ninteger truncation digit: 5\n",
+    "learned_note": "mp.dps = n + 200; use math.isqrt(10005 * 10**(2*PREC)) with constant 426880",
+    "historical_note_defect": "The accepted note changed executed ** exponentiation to ^, which is Python XOR",
+    "timeline_seconds": {
+      "rlm_start": 8.258,
+      "child_bootstrap_start": 43.185,
+      "first_check_complete": 106.999,
+      "remote_error_complete": 149.122,
+      "corrected_check_complete": 169.857,
+      "submit_rejected": 176.557,
+      "submit_accepted": 196.501,
+      "turn_complete": 215.546
+    },
+    "observed_counts": {
+      "generation_requests": 6,
+      "routing_decisions": 1,
+      "skill_decisions": 3,
+      "lm_calls": 10,
+      "sandbox_errors": 1,
+      "submit_rejections": 1
+    }
+  },
+  "triage_cases": [
+    {
+      "id": "direct-1",
+      "task": "Say hello in one short sentence.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "direct",
+      "review_status": "developer_reviewed",
+      "rationale": "Self-contained response with no execution required."
+    },
+    {
+      "id": "direct-2",
+      "task": "Explain the difference between a Python tuple and list without executing code.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "direct",
+      "review_status": "developer_reviewed",
+      "rationale": "Self-contained response with no execution required."
+    },
+    {
+      "id": "direct-3",
+      "task": "What does HTTP 404 mean? Give a brief conceptual answer.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "direct",
+      "review_status": "developer_reviewed",
+      "rationale": "Self-contained response with no execution required."
+    },
+    {
+      "id": "direct-4",
+      "task": "Rewrite this sentence politely: Send the report now.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "direct",
+      "review_status": "developer_reviewed",
+      "rationale": "Self-contained response with no execution required."
+    },
+    {
+      "id": "direct-5",
+      "task": "Define a database transaction in plain language.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "direct",
+      "review_status": "developer_reviewed",
+      "rationale": "Self-contained response with no execution required."
+    },
+    {
+      "id": "direct-6",
+      "task": "Suggest a concise title for a guide about organizing notes.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "direct",
+      "review_status": "developer_reviewed",
+      "rationale": "Self-contained response with no execution required."
+    },
+    {
+      "id": "flex-1",
+      "task": "Use Python to calculate sum(i*i for i in range(1,101)) and verify the result.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Automatic code work uses bounded RLM, even with known inputs."
+    },
+    {
+      "id": "flex-2",
+      "task": "Read files/sales.csv, group revenue by region, and write the totals as an artifact.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Automatic file work uses bounded RLM, even with known inputs."
+    },
+    {
+      "id": "flex-3",
+      "task": "Tell me the 1492252th digits after the decimal point of Pi",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Automatic computation uses bounded RLM."
+    },
+    {
+      "id": "flex-4",
+      "task": "Use the available Skill to convert files/input.json into a CSV artifact.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills><skill name=\"convert-json-csv\"/></available_skills>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Automatic Skill work uses bounded RLM."
+    },
+    {
+      "id": "flex-5",
+      "task": "Execute two independent arithmetic checks in parallel child tasks and combine their results.",
+      "workspace_manifest": "",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Automatic code and delegation work uses bounded RLM."
+    },
+    {
+      "id": "flex-6",
+      "task": "Using the same files/sales.csv selected earlier, compute its row count in Python.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Automatic selected-file work uses bounded RLM."
+    },
+    {
+      "id": "rlm-1",
+      "task": "Explore the unfamiliar files in this workspace, identify likely causes of inconsistent totals, and test competing explanations.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Open-ended iterative exploration determines subsequent actions."
+    },
+    {
+      "id": "rlm-2",
+      "task": "Investigate conflicting accounts in the incident documents; iteratively gather evidence until the contradictions are resolved.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Open-ended iterative exploration determines subsequent actions."
+    },
+    {
+      "id": "rlm-3",
+      "task": "Determine why the provided test suite fails by examining logs, forming hypotheses, and testing them.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Open-ended iterative exploration determines subsequent actions."
+    },
+    {
+      "id": "rlm-4",
+      "task": "Explore this unknown dataset for anomalies, then investigate whichever patterns the initial exploration reveals.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Open-ended iterative exploration determines subsequent actions."
+    },
+    {
+      "id": "rlm-5",
+      "task": "Investigate an intermittent production issue across traces and logs, revising the investigation as new evidence appears.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Open-ended iterative exploration determines subsequent actions."
+    },
+    {
+      "id": "rlm-6",
+      "task": "Continue the investigation in files/findings.md: identify unresolved hypotheses and decide what evidence to inspect next.",
+      "workspace_manifest": "files/sales.csv, files/input.json, files/findings.md, files/logs.txt",
+      "skills_catalog": "<available_skills/>",
+      "route": "rlm",
+      "review_status": "developer_reviewed",
+      "rationale": "Open-ended iterative exploration determines subsequent actions."
+    }
+  ],
+  "turn_results": {
+    "live_success": {
+      "event": "turn_complete",
+      "turn_id": "fixture-turn",
+      "answer": "verified",
+      "route": "flex",
+      "outcome": "completed",
+      "duration_seconds": 0.0,
+      "learned_skill_note": "A reusable hint.",
+      "artifacts": [
+        "artifacts/report.txt"
+      ],
+      "lm_calls": 4,
+      "sandbox_errors": 1,
+      "submit_rejections": 2,
+      "budget_breakdown": {
+        "generation_query": 3,
+        "routing": 1,
+        "skill_selection": 0,
+        "other_decisions": 0
+      },
+      "snapshot_name": "fleet-test",
+      "snapshot_id": "snap-1",
+      "snapshot_cpu": 4,
+      "snapshot_mem": 8,
+      "snapshot_disk": 8,
+      "snapshot_definition_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "snapshot_build_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "deadline_source": "request",
+      "effective_seconds": null,
+      "root_sandbox_id": "warm-root",
+      "ttl_minutes": 1440,
+      "auto_stop_interval": 60,
+      "maximum_lifespan_minutes": null,
+      "provider_owned": true,
+      "cleanup": "not_required",
+      "replay_snapshot_selected": true
+    },
+    "live_failure": {
+      "event": "error",
+      "turn_id": "fixture-turn",
+      "outcome": "failed",
+      "duration_seconds": 0.0,
+      "request_id": "fixture-turn",
+      "error": "The Turn failed (request fixture-turn).",
+      "cleanup": "stopped",
+      "deadline_source": "request",
+      "effective_seconds": 900
+    },
+    "legacy_rows": [
+      {
+        "turn_id": "historical-minimal",
+        "status": "completed",
+        "result": {
+          "event": "turn_complete",
+          "answer": "old answer",
+          "route": "rlm",
+          "historical_extension": {
+            "kept": true
+          }
+        }
+      },
+      {
+        "turn_id": "historical-deadline",
+        "status": "completed",
+        "result": {
+          "event": "turn_complete",
+          "answer": "deadline disabled",
+          "route": "direct",
+          "deadline_source": "request",
+          "effective_seconds": null,
+          "cleanup": "not_required",
+          "lm_calls": null,
+          "historical_extension": [
+            "unchanged"
+          ]
+        }
+      }
+    ]
+  }
+}

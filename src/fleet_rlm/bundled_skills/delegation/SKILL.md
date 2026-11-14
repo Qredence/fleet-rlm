@@ -32,8 +32,9 @@ for result in results:
   rejected before any child starts.
 - `input_paths` copies the listed files. Paths may be under `files/`,
   `skills/`, or `artifacts/` (a previous Turn's report, for example). Every
-  child also receives the Session's Skills under `skills/`; it sees nothing
-  else from the parent.
+  child also receives the Session's Skills under `skills/`; `artifacts/` starts
+  empty inside a child unless specific `artifacts/...` paths are requested in
+  `input_paths`, and it sees nothing else from the parent.
 - `spawn_agents` returns an error result `{findings: "", error, artifacts: []}` for
   ordinary child failures. Direct `spawn_agent` returns that shape for a reply
   parsing failure; other ordinary errors may propagate to the caller. Handle

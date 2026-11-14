@@ -27,14 +27,13 @@ from fleet_rlm.engine.programs import FleetProgram
 _FLEX_TYPE = cast(type[dspy.Module], dspy.Flex)
 
 APPROVAL_POLICY_VERSION = 6
-APPROVAL_EVIDENCE_VERSION = 2
+APPROVAL_EVIDENCE_VERSION = 3
 VALIDATION_PASSES = 3
 
 
 # Execution, review selection, and scoring affect approval; presentation-only code does not.
 DIGEST_SOURCES = (
     "models.py",
-    "config.py",
     "contracts.py",
     "execution_evidence.py",
     "optimization_runs.py",
@@ -43,7 +42,6 @@ DIGEST_SOURCES = (
     "workspace.py",
     "skills.py",
     "session.py",
-    "store.py",
 )
 
 
@@ -51,6 +49,8 @@ def optimization_code_digest() -> str:
     """Hash the runtime/evaluation source that determines candidate behavior and scoring."""
     package = Path(__file__).parents[1]
     paths = {package / name for name in DIGEST_SOURCES}
+    paths |= set((package / "config").rglob("*.py"))
+    paths |= set((package / "store").rglob("*.py"))
     paths |= set((package / "engine").rglob("*.py"))
     paths |= set((package / "optimize").rglob("*.py"))
     paths |= set((package / "sandbox").rglob("*.py"))
@@ -184,9 +184,29 @@ def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _calibrated_decision_fields(predictor: Any) -> dict[str, dict[str, Any]]:
+    raw_fields = getattr(predictor, "fields", None)
+    if not isinstance(raw_fields, Mapping):
+        return {}
+    calibrated: dict[str, dict[str, Any]] = {}
+    for field_name, cfg in sorted(raw_fields.items()):
+        if not isinstance(cfg, Mapping):
+            continue
+        params = {key: value for key, value in sorted(cfg.items()) if key in {"threshold", "weights", "cuts"}}
+        if params:
+            calibrated[str(field_name)] = params
+    return calibrated
+
+
 def tunable_components(program: dspy.Module) -> dict[str, str]:
-    """Inspect native GEPA instruction and Flex code components through public DSPy traversal."""
-    components = {name: predictor.signature.instructions for name, predictor in program.named_predictors()}
+    """Inspect native GEPA instruction, Flex code, and ReAnchor decision components."""
+    components: dict[str, str] = {}
+    for name, predictor in program.named_predictors():
+        text = predictor.signature.instructions
+        calibrated = _calibrated_decision_fields(predictor)
+        if calibrated:
+            text = f"{text}\n\n[decision_calibration]\n{json.dumps(calibrated, sort_keys=True)}"
+        components[name] = text
     for name, parameter in program.named_parameters():
         if isinstance(parameter, _FLEX_TYPE):
             components[name] = parameter.module_src or ""
@@ -218,7 +238,7 @@ def component_diffs(baseline: dspy.Module, candidate: dspy.Module) -> list[dict[
     return changes
 
 
-NO_CHANGE_REASON = "candidate changes no instructions or Flex code"
+NO_CHANGE_REASON = "candidate changes no instructions, Flex code, or calibrated decision fields"
 # The evaluation of a candidate identical to the incumbent: paired validation is skipped, the gate still decides.
 VALIDATION_SKIPPED = "skipped_unchanged"
 

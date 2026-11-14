@@ -33,7 +33,8 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import OptionList, Static, TextArea
+from textual.screen import ModalScreen
+from textual.widgets import Button, OptionList, Static, TextArea
 
 import fleet_rlm.tui.commands as commands_mod
 from fleet_rlm.config import FleetSettings
@@ -55,8 +56,7 @@ from fleet_rlm.tui.render import (
     print_http_error,
     render_event,
 )
-from fleet_rlm.tui.setup import ConfirmAction
-from fleet_rlm.tui.stream import _request_turn, _turn_events
+from fleet_rlm.tui.stream import _abort_response, _request_turn, _turn_events
 from fleet_rlm.tui.widgets import (
     _CommandMenu,
     _GradientRule,
@@ -68,6 +68,32 @@ from fleet_rlm.workspace import validate_session_id
 
 _LOCAL_PATH_COMMANDS = frozenset({"/attach", "/put"})
 _WORKSPACE_PATH_COMMANDS = frozenset({"/cat", "/stat", "/get", "/rm", "/context"})
+
+
+class ConfirmAction(ModalScreen[bool]):
+    """Confirm an explicit provider mutation or potentially billed test."""
+
+    DEFAULT_CSS = """
+    ConfirmAction { align: center middle; background: $background 75%; }
+    #confirmation { width: 65; height: auto; padding: 2; border: round $accent; }
+    #confirmation Horizontal { height: auto; }
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        """Render the operation description and explicit continue/cancel buttons."""
+        with VerticalScroll(id="confirmation"):
+            yield Static(self.message, markup=False)
+            with Horizontal():
+                yield Button("Continue", variant="primary", id="confirm")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Return the user's explicit action selection."""
+        self.dismiss(event.button.id == "confirm")
 
 
 class _SessionCompleter(Completer):
@@ -451,7 +477,10 @@ class FleetTextualApp(App[str | None]):
             left.append("  ", style="")
             left.append(" replay: on ", style="bold #34d399 on #14291f")
         if self._turn_active:
-            left.append("  running…", style="bold #fbbf24")
+            if self._cancel_requested:
+                left.append("  cancelling…", style="bold yellow")
+            else:
+                left.append("  running…", style="bold #fbbf24")
         elif self._optimization_active:
             left.append("  stopping…" if self._optimization_stopping else "  optimizing…", style="bold #fbbf24")
         elif self._last_ctrl_c and (time.monotonic() - self._last_ctrl_c) <= 2.5:
@@ -512,8 +541,8 @@ class FleetTextualApp(App[str | None]):
             inp.placeholder = "What would you like to do?"
 
     def _tick_live_turn(self) -> None:
-        if self._turn_active and self._active_turn_widget is not None:
-            with self._lock:
+        with self._lock:
+            if self._turn_active and self._active_turn_widget is not None:
                 self._active_turn_widget.tracker.advance_spinner()
                 self._active_turn_widget.sync_status()
 
@@ -1085,10 +1114,6 @@ class FleetTextualApp(App[str | None]):
             )
             return
 
-        if user_input.strip() == "/setup" and self.state.setup_available:
-            self.exit("setup")
-            return
-
         self._mount_to_chat(_UserPromptCard(user_input))
 
         if user_input.startswith("/"):
@@ -1187,12 +1212,22 @@ class FleetTextualApp(App[str | None]):
         self.exit()
 
     def cancel_active_turn(self) -> None:
-        """Request cancellation of the active Turn stream by closing the HTTP stream."""
-        self._cancel_requested = True
-        resp = self._active_response
-        if resp is not None:
+        """Request cancellation of the active Turn stream and unblock any waiting socket read."""
+        with self._lock:
+            if not self._turn_active and self._active_response is None:
+                return
+            self._cancel_requested = True
+            widget = self._active_turn_widget
+            if widget is not None and widget.tracker.terminal_event is None:
+                widget.tracker.cancelling = True
+            resp = self._active_response
+            self._active_response = None
+        if widget is not None and self.is_running:
             with suppress(Exception):
-                resp.close()
+                widget.sync_status()
+                self.refresh_chrome()
+        if resp is not None:
+            _abort_response(resp)
 
     def _notify_turn_update(self, turn_widget: _TurnWidget, *, scroll: bool = False) -> None:
         def update_ui() -> None:
@@ -1221,9 +1256,11 @@ class FleetTextualApp(App[str | None]):
         tracker = TurnTracker()
         self.state.last_tracker = tracker
         turn_widget = _TurnWidget(tracker)
-        self._active_turn_widget = turn_widget
-        self._turn_active = True
-        self._cancel_requested = False
+        with self._lock:
+            self._active_turn_widget = turn_widget
+            self._turn_active = True
+            self._cancel_requested = False
+            self._active_response = None
         self._mount_to_chat(turn_widget)
         self.refresh_chrome()
 
@@ -1236,28 +1273,36 @@ class FleetTextualApp(App[str | None]):
                     task_text,
                     cancelled=lambda: self._cancel_requested,
                 )
-                if self._cancel_requested:
+                with self._lock:
+                    stream_started = not self._cancel_requested
+                if not stream_started:
                     self.call_from_thread(
                         self.append_markup,
                         "[yellow]Attachment submission cancelled; no Turn was sent. "
                         "Any completed uploads remain in the workspace.[/yellow]",
                     )
                     return
-                stream_started = True
                 with _request_turn(self.client, self.session_id, prepared_text, self.state) as response:
-                    self._active_response = response
-                    response.raise_for_status()
-                    for event in _turn_events(
-                        response,
-                        self.state,
-                        tracker,
-                        lock=self._lock,
-                        cancelled=lambda: self._cancel_requested,
-                    ):
-                        if event is None:
-                            self.call_from_thread(self.append_markup, "[yellow]Ignoring malformed SSE event.[/yellow]")
-                            continue
-                        self._notify_turn_update(turn_widget, scroll=True)
+                    with self._lock:
+                        if not self._cancel_requested:
+                            self._active_response = response
+                    if not self._cancel_requested:
+                        response.raise_for_status()
+                        for event in _turn_events(
+                            response,
+                            self.state,
+                            tracker,
+                            lock=self._lock,
+                            cancelled=lambda: self._cancel_requested,
+                        ):
+                            if event is None:
+                                self.call_from_thread(
+                                    self.append_markup, "[yellow]Ignoring malformed SSE event.[/yellow]"
+                                )
+                                continue
+                            self._notify_turn_update(turn_widget, scroll=True)
+                with self._lock:
+                    self._active_response = None
                 self.call_from_thread(self._offer_label, tracker)
                 if self._cancel_requested and tracker.terminal_event is None:
                     with self._lock:
@@ -1289,13 +1334,13 @@ class FleetTextualApp(App[str | None]):
                 with self._lock:
                     tracker.finished_at = time.monotonic()
                     tracker.finalize_running_items("cancelled" if self._cancel_requested else "interrupted")
-                if self._cancel_requested:
+                if self._cancel_requested and tracker.terminal_event is None:
                     self.call_from_thread(
                         self.append_markup,
                         "[yellow]Turn stream closed; server cancels on disconnect. "
                         "Check /history for outcome.[/yellow]",
                     )
-                elif tracker.terminal_event is None:
+                elif not self._cancel_requested and tracker.terminal_event is None:
                     self.call_from_thread(self.append_markup, f"[red]Turn stream failed:[/red] {type(exc).__name__}")
             except (OSError, ValueError, KeyError) as exc:
                 self.call_from_thread(
@@ -1304,25 +1349,25 @@ class FleetTextualApp(App[str | None]):
             finally:
                 if not stream_started:
                     self.call_from_thread(self._restore_attachment_draft, task_text)
-                self._active_response = None
                 with self._lock:
+                    self._active_response = None
                     self._turn_active = False
+                    self._active_turn_widget = None
+                    tracker.cancelling = False
                     if tracker.finished_at is None:
                         tracker.finished_at = time.monotonic()
                     if tracker.terminal_event is None:
                         tracker.terminal_event = {"event": "interrupted"}
-                    tracker.finalize_running_items("interrupted")
+                    tracker.finalize_running_items("cancelled" if self._cancel_requested else "interrupted")
                 self._notify_turn_update(turn_widget, scroll=True)
 
         threading.Thread(target=worker, name="fleet-textual-turn", daemon=True).start()
 
 
-def run_interactive_cli(
-    base_url: str, session_id: str, *, settings: FleetSettings | None = None, setup_token: str = ""
-) -> str | None:
+def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettings | None = None) -> str | None:
     """Connect to the API and run the Textual full-screen chat TUI (or non-TTY fallback) until exit."""
     validate_session_id(session_id)
-    state = SessionState(mlflow_settings=settings, setup_available=bool(setup_token))
+    state = SessionState(mlflow_settings=settings)
     # FastAPI's SSE routing emits a `: ping` keepalive every 15 seconds while the Turn
     # generator is idle, so the 300-second read timeout is only a safety net.
     with httpx.Client(
@@ -1349,8 +1394,6 @@ def run_interactive_cli(
                 break
             if not user_input:
                 continue
-            if user_input == "/setup" and state.setup_available:
-                return "setup"
             if user_input.startswith("/"):
                 if not handle_command(client, user_input, session_id, state=state):
                     break

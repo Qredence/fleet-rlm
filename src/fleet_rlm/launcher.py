@@ -6,7 +6,7 @@ import atexit
 import contextlib
 import os
 import signal
-import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -55,7 +55,76 @@ class LaunchPlan:
     mlflow_mode: str = "local"
     mlflow_data_dir: str = ".fleet/mlflow"
     api_env: dict[str, str] = field(default_factory=dict)
+    mlflow_env: dict[str, str] = field(default_factory=dict, repr=False)
     notes: tuple[str, ...] = ()
+
+
+def mlflow_uses_default_passphrase(url: str) -> bool | None:
+    """Return whether a running MLflow server reports using the default Gateway KEK passphrase."""
+    try:
+        response = httpx.get(f"{url.rstrip('/')}/ajax-api/3.0/mlflow/gateway/secrets/config", timeout=1.5)
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    using_default = payload.get("using_default_passphrase")
+    return using_default if isinstance(using_default, bool) else None
+
+
+def local_mlflow_secret_kek_versions(data_dir: str) -> set[int]:
+    """Return distinct Gateway secret `kek_version` integers in a local SQLite MLflow store, read-only."""
+    db_path = Path(data_dir) / "mlflow.db"
+    if not db_path.is_file():
+        return set()
+    try:
+        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=1.0)) as conn:
+            rows = conn.execute("SELECT DISTINCT kek_version FROM secrets").fetchall()
+        return {int(row[0]) for row in rows if row[0] is not None}
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return set()
+
+
+def local_mlflow_kek_issue(
+    settings: FleetSettings,
+    *,
+    mlflow_url: str | None = None,
+    reachable: bool = False,
+) -> str | None:
+    """Return an actionable diagnostic when local MLflow KEK settings conflict with stored secrets or server state."""
+    try:
+        mlflow_env = settings.local_mlflow_server_environment()
+    except ValueError as exc:
+        return str(exc)
+
+    has_passphrase = "MLFLOW_CRYPTO_KEK_PASSPHRASE" in mlflow_env
+    configured_version = int(mlflow_env.get("MLFLOW_CRYPTO_KEK_VERSION", "1"))
+    kek_versions = local_mlflow_secret_kek_versions(settings.mlflow_local_data_dir)
+    if kek_versions:
+        versions_text = ", ".join(str(version) for version in sorted(kek_versions))
+        if not has_passphrase and any(version > 1 for version in kek_versions):
+            return (
+                f"Local MLflow database in {settings.mlflow_local_data_dir} contains encrypted Gateway secrets "
+                f"(KEK version(s) {versions_text}), but MLFLOW_CRYPTO_KEK_PASSPHRASE is not configured. "
+                "Set MLFLOW_CRYPTO_KEK_PASSPHRASE and MLFLOW_CRYPTO_KEK_VERSION in .env or the environment."
+            )
+        if has_passphrase and configured_version not in kek_versions:
+            return (
+                f"Local MLflow database in {settings.mlflow_local_data_dir} uses Gateway KEK version(s) "
+                f"{versions_text}, but MLFLOW_CRYPTO_KEK_VERSION resolves to {configured_version}. "
+                "Set MLFLOW_CRYPTO_KEK_VERSION to match."
+            )
+
+    if reachable and mlflow_url and has_passphrase and mlflow_uses_default_passphrase(mlflow_url) is True:
+        return (
+            f"Running MLflow server at {mlflow_url} is using the default KEK passphrase, but "
+            "MLFLOW_CRYPTO_KEK_PASSPHRASE is configured. Restart the MLflow server with .env loaded "
+            "(or stop it so `fleet cli` starts it) to decrypt Gateway secrets."
+        )
+    return None
 
 
 def verify_api_destination(url: str, expected: dict) -> None:
@@ -107,7 +176,17 @@ def plan_launch(
     if target.mode == "databricks":
         return LaunchPlan(api_url=api_url, start_api=True, api_env=environment, mlflow_mode="databricks")
     mlflow_url = target.tracking_uri
+    try:
+        mlflow_env = settings.local_mlflow_server_environment()
+    except ValueError as exc:
+        raise LaunchError(str(exc)) from None
     reuse = mlflow_healthy(mlflow_url)
+    notes: list[str] = []
+    if reuse:
+        notes.append(f"Reusing the MLflow server already running at {mlflow_url}.")
+    issue = local_mlflow_kek_issue(settings, mlflow_url=mlflow_url, reachable=reuse)
+    if issue:
+        notes.append(f"Warning: {issue}")
     return LaunchPlan(
         api_url=api_url,
         start_api=True,
@@ -115,7 +194,8 @@ def plan_launch(
         mlflow_url=mlflow_url,
         mlflow_data_dir=settings.mlflow_local_data_dir,
         api_env=environment,
-        notes=(f"Reusing the MLflow server already running at {mlflow_url}.",) if reuse else (),
+        mlflow_env={} if reuse else mlflow_env,
+        notes=tuple(notes),
     )
 
 
@@ -126,7 +206,7 @@ class ManagedProcess:
     name: str
     command: list[str]
     log_path: Path
-    env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict, repr=False)
     _process: subprocess.Popen[bytes] | None = field(default=None, init=False, repr=False)
 
     def start(self) -> None:
@@ -186,35 +266,6 @@ class ManagedProcess:
                 process.send_signal(sig)
 
 
-def _drain_experiments(plan: LaunchPlan, log: Callable[[str], None]) -> None:
-    """Fence admission and retain owned services until accepted experiments finish."""
-    token = plan.api_env.get("FLEET_SETUP_TOKEN")
-    if not token:
-        log("Waiting for API graceful shutdown; active experiments finish before owned services stop.")
-        return
-    with httpx.Client(
-        base_url=plan.api_url,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=httpx.Timeout(10.0, connect=2.0),
-    ) as client:
-        response = client.post("/setup/experiments/drain")
-        response.raise_for_status()
-        state = response.json()
-        previous = None
-        while state["busy"]:
-            summary = (
-                ", ".join(f"{run['run_id']}: {run.get('stage', run['status'])}" for run in state["experiments"])
-                or "worker cleanup"
-            )
-            if summary != previous:
-                log(f"Waiting for experiments before stopping owned services: {summary}")
-                previous = summary
-            time.sleep(1.0)
-            response = client.get("/setup/experiments/status")
-            response.raise_for_status()
-            state = response.json()
-
-
 def _api_process(plan: LaunchPlan, host: str, port: int) -> ManagedProcess:
     return ManagedProcess(
         "API server",
@@ -235,7 +286,7 @@ def _api_process(plan: LaunchPlan, host: str, port: int) -> ManagedProcess:
     )
 
 
-def _mlflow_process(mlflow_port: int, data_dir: str) -> ManagedProcess:
+def _mlflow_process(mlflow_port: int, data_dir: str, env: dict[str, str] | None = None) -> ManagedProcess:
     data = Path(data_dir).resolve()
     data.mkdir(parents=True, exist_ok=True)
     return ManagedProcess(
@@ -255,57 +306,8 @@ def _mlflow_process(mlflow_port: int, data_dir: str) -> ManagedProcess:
             str(mlflow_port),
         ],
         STATE_DIR / "logs" / "mlflow.log",
-        env={"MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS": "true"},
+        env={**(env or {}), "MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS": "true"},
     )
-
-
-@contextlib.contextmanager
-def running_setup(
-    *,
-    backend: str,
-    token: str,
-    startup_timeout: float,
-    log: Callable[[str], None],
-    overrides: dict[str, str] | None = None,
-) -> Generator[str, None, None]:
-    """Run the same FastAPI app on a private loopback port before runtime prerequisites exist."""
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-    url = f"http://127.0.0.1:{port}"
-    process = ManagedProcess(
-        "Setup API",
-        [
-            sys.executable,
-            "-m",
-            "fleet_rlm.cli",
-            "serve",
-            "--setup",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--mlflow",
-            backend,
-        ],
-        STATE_DIR / "logs" / "setup.log",
-        env={"FLEET_SETUP_TOKEN": token, "FLEET_SETUP_PROJECT_DIR": str(Path.cwd()), **(overrides or {})},
-    )
-
-    def ready() -> bool:
-        try:
-            response = httpx.get(url + "/health", timeout=1.5)
-            return response.status_code == 200 and response.json().get("status") == "setup"
-        except (httpx.HTTPError, ValueError):
-            return False
-
-    try:
-        log("Checking Fleet setup…")
-        process.start()
-        process.wait_ready(ready, startup_timeout)
-        yield url
-    finally:
-        process.stop()
 
 
 @contextlib.contextmanager
@@ -324,10 +326,11 @@ def running_services(
     api_ready = False
 
     def cleanup() -> None:
-        """Drain experiments and stop owned services in reverse startup order.
+        """Stop owned services in reverse startup order.
 
-        Wait for API shutdown without a kill deadline, keeping owned MLflow available
-        until then. Temporarily ignore termination signals on the main thread.
+        Wait for API shutdown without a kill deadline so active experiments and
+        traces drain before stopping local MLflow. Temporarily ignore termination
+        signals on the main thread.
         """
         nonlocal api_ready
         # A second Ctrl-C must not interrupt wait() and abandon owned services.
@@ -338,10 +341,7 @@ def running_services(
         try:
             if api_ready and owned_api is not None and owned_api in started:
                 api_ready = False
-                try:
-                    _drain_experiments(plan, log)
-                except (httpx.HTTPError, ValueError, KeyError):
-                    log("Could not observe experiment drain; waiting for API graceful shutdown.")
+                log("Waiting for API graceful shutdown; active experiments finish before owned services stop.")
             while started:
                 process = started.pop()
                 if process is owned_api:
@@ -360,7 +360,11 @@ def running_services(
         for note in plan.notes:
             log(note)
         if plan.start_mlflow and plan.mlflow_url:
-            mlflow_process = _mlflow_process(mlflow_port, plan.mlflow_data_dir)
+            mlflow_process = (
+                _mlflow_process(mlflow_port, plan.mlflow_data_dir, env=plan.mlflow_env)
+                if plan.mlflow_env
+                else _mlflow_process(mlflow_port, plan.mlflow_data_dir)
+            )
             log(f"Starting MLflow server at {plan.mlflow_url} (data in {plan.mlflow_data_dir}) ...")
             mlflow_process.start()
             started.append(mlflow_process)

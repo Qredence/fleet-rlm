@@ -23,6 +23,7 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.engine.programs import FleetProgram
+from fleet_rlm.engine.reasoning import deserialize_rlm_history
 from fleet_rlm.models import build_lm
 from fleet_rlm.replay import required_skills_from_snapshot, selected_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
@@ -161,11 +162,27 @@ class IsolatedFleetProgram(dspy.Module):
             engine = self.engine_factory(dspy.Example(**inputs), self.program)
             error = None
             try:
+                recorder = dspy.settings.get("_decision_evidence")
                 arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
                 if engine.optimization is not None:
                     arguments["context"] = engine.optimization.context
+                    arguments["rlm_history"] = engine.optimization.rlm_history
                     arguments["required_skills"] = engine.optimization.required_skills
-                return engine(**arguments)
+                result = engine(**arguments)
+                if recorder is not None:
+                    log, lock = recorder
+                    outer_by_name = dict(self.program.named_parameters())
+                    remap = {
+                        inner_param: outer_by_name[param_name]
+                        for param_name, inner_param in engine.program.named_parameters()
+                        if param_name in outer_by_name
+                    }
+                    if remap:
+                        with lock:
+                            for idx, (caller, field_name, evidence) in enumerate(log):
+                                if caller in remap:
+                                    log[idx] = (remap[caller], field_name, evidence)
+                return result
             except BaseException as exc:
                 error = exc
                 raise
@@ -174,7 +191,12 @@ class IsolatedFleetProgram(dspy.Module):
 
 
 def build_isolated_engine_factory(
-    settings: FleetSettings, store: Store, examples: Any = (), *, cleanup: RolloutCleanup | None = None
+    settings: FleetSettings,
+    store: Store,
+    examples: Any = (),
+    *,
+    cleanup: RolloutCleanup | None = None,
+    cache_decisions: bool = False,
 ) -> Any:
     """Return a factory that builds disposable replay engines with verified immutable inputs.
 
@@ -202,6 +224,8 @@ def build_isolated_engine_factory(
                 root = build_lm(settings, settings.fleet_root_model, "root")
                 sub = build_lm(settings, settings.fleet_sub_model, "sub")
                 jev = settings.build_jev_lm()
+                if cache_decisions and jev is not None and callable(getattr(jev, "copy", None)):
+                    jev = jev.copy(cache=True)
                 shared.extend((root, sub, jev))
             return shared[0], shared[1], shared[2]
 
@@ -259,6 +283,7 @@ def build_isolated_engine_factory(
             )
             engine.program.load_state(deepcopy(program.dump_state()))
             engine.optimization = OptimizationInputs(
+                rlm_history=deserialize_rlm_history(snapshot.get("rlm_history", [])),
                 required_skills=required_skills,
                 context=WorkspaceDataset(**replay_context) if replay_context else None,
                 verifications=tuple(

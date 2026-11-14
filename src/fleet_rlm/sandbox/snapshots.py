@@ -25,7 +25,7 @@ from daytona.common.image import SupportedPythonSeries
 from fleet_rlm.sandbox.repl import provider_not_found
 
 # Repository-owned Turn environment; provider availability is checked by preflight.
-SNAPSHOT_NAME = "fleet-rlm-python313-v14"
+SNAPSHOT_NAME = "fleet-rlm-python313-v15"
 PYTHON_VERSION: SupportedPythonSeries = "3.13"
 PYTHON_BASE_IMAGE = "python:3.13-slim-bookworm@sha256:e32be0e55814a08977501ca863271d9bd02443710db8f2afaf8372e2c4508530"
 SYSTEM_PACKAGES = ("git", "nodejs", "npm", "ripgrep", "jq", "ca-certificates")
@@ -114,7 +114,7 @@ DEFAULT_DEFINITION = SnapshotDefinition(
 PREFLIGHT_CACHE_TTL_SECONDS = 60
 SNAPSHOT_BUILD_TIMEOUT_SECONDS = 20 * 60
 MAX_REFUSAL_CHARS = 1000
-BUILD_COMMAND = "Open /setup in fleet cli and choose Build snapshot"
+BUILD_COMMAND = "Run: uv run fleet snapshot build"
 PROVENANCE_KEYS = (
     "snapshot_name",
     "snapshot_id",
@@ -247,7 +247,7 @@ def _resolve_snapshot(service: Any, name: str) -> SnapshotIdentity:
         or disk < DISK_FLOOR
     ):
         recovery = (
-            " Open /setup and choose Activate snapshot, then retry."
+            " Run: uv run fleet snapshot activate, then retry."
             if state == "inactive"
             else (
                 " The snapshot may still be building; wait for it to become active and retry."

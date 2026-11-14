@@ -463,11 +463,3 @@ class ImproveHistory(BaseModel):
 
     versions: list[Job]
     evaluations: list[Job]
-
-
-class ExperimentManagerStatus(BaseModel):
-    """Admission and active-run state observed by the local launcher."""
-
-    accepting: bool
-    busy: bool
-    experiments: list[Job]

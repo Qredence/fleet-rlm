@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from fleet_rlm.config import FleetSettings
 
 Role = Literal["root", "sub", "reflection", "judge"]
+AdapterName = Literal["xml", "chat", "json"]
+ModelType = Literal["auto", "chat", "responses"]
 ModelRoute = Annotated[str, Field(min_length=1, max_length=300, pattern=r"^\S+$")]
 EnvReference = Annotated[str, Field(pattern=r"^(?:[A-Za-z_][A-Za-z0-9_]*)?$")]
 
@@ -57,7 +59,8 @@ class ResolvedModel(BaseModel):
     model: ModelRoute
     api_base: Endpoint = ""
     api_key: SecretStr = Field(default_factory=lambda: SecretStr(""), exclude=True)
-    adapter: Literal["chat", "json"] = "chat"
+    adapter: AdapterName = "xml"
+    model_type: ModelType = "auto"
     response_format: Literal["auto", "json_object"] = "auto"
     max_tokens: int | None = Field(default=None, gt=0)
     temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
@@ -73,7 +76,11 @@ class ResolvedModel(BaseModel):
 
     def build_adapter(self) -> dspy.Adapter:
         """Create a native DSPy adapter for this role."""
-        return dspy.JSONAdapter() if self.adapter == "json" else dspy.ChatAdapter()
+        if self.adapter == "json":
+            return dspy.JSONAdapter()
+        if self.adapter == "chat":
+            return dspy.ChatAdapter()
+        return dspy.XMLAdapter(use_native_function_calling=True)
 
 
 def build_lm(settings: FleetSettings, model_id: str, role: Role) -> dspy.LM:
@@ -94,14 +101,25 @@ def build_lm(settings: FleetSettings, model_id: str, role: Role) -> dspy.LM:
             )
         )
         route = provider + "/" + route.split("/", 1)[1]
-    options = resolved.model_dump(exclude={"model", "adapter", "api_base", "response_format"}, exclude_none=True)
+    options = resolved.model_dump(
+        exclude={"model", "adapter", "model_type", "api_base", "response_format"}, exclude_none=True
+    )
+    model_type: ModelType = resolved.model_type
+    if (
+        model_type == "auto"
+        and route.startswith("openai/")
+        and resolved.api_base
+        and urlsplit(resolved.api_base).hostname != "api.openai.com"
+    ):
+        # Custom OpenAI-compatible gateways speak Chat Completions unless Responses is requested explicitly.
+        model_type = "chat"
     if resolved.api_base:
         options["api_base"] = resolved.api_base
     if resolved.api_key.get_secret_value():
         options["api_key"] = resolved.api_key.get_secret_value()
     if resolved.response_format == "json_object":
         options["response_format"] = {"type": "json_object"}
-    return dspy.LM(route, engine="lm15", **options)
+    return dspy.LM(route, model_type=model_type, engine="lm15", **options)
 
 
 def complete_text(
@@ -125,7 +143,8 @@ def complete_text(
         defaults["temperature"] = temperature
     config = Config(**defaults)
     response = lm(Request(model=lm.model, system=system, messages=(Message.user(prompt),), config=config))
-    return response.text
+    text = getattr(response, "text", None)
+    return text if isinstance(text, str) else ""
 
 
 def list_models(settings: FleetSettings, *, scope: str = "", role: Role | Literal["shared"] = "root") -> list[str]:

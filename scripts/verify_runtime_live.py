@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import dspy
 import psycopg
 from daytona import Daytona, DaytonaConfig, DaytonaNotFoundError, ListSandboxesQuery
-from dspy.primitives.facade import FacadeInvocation
+from dspy.primitives.facade import SandboxSession
 from fastapi.testclient import TestClient
 from psycopg import sql
 
@@ -233,11 +233,15 @@ def main() -> None:
             manager.reset_turn_budget()
             lm = build_lm(settings, args.model, "root")
             with dspy.context(lm=lm, adapter=settings.resolved_model("root").build_adapter()):
-                interpreter = manager.interpreter_factory(
-                    tools={"spawn_agent": runtime.engine.program.reasoning.rlm._user_tools["spawn_agent"]}
-                )()
-                facade = FacadeInvocation({}, manager.interpreter_factory(), 20, lm=lm, reserve=manager.consume_budget)
-                facade.install(interpreter)
+                spawn_tool = runtime.engine.program.reasoning.rlm._user_tools["spawn_agent"]
+                interpreter = manager.interpreter_factory(tools={"spawn_agent": spawn_tool})()
+                sandbox_session = SandboxSession(
+                    {"spawn_agent": spawn_tool},
+                    lm=lm,
+                    reserve=manager.consume_budget,
+                    interpreter_factory=manager.interpreter_factory(),
+                )
+                sandbox_session.install(interpreter, import_dspy=True)
                 try:
                     for kind in ("Predict", "ChainOfThought", "ReActV2"):
                         options = ", tools=[], max_iters=3" if kind == "ReActV2" else ""
@@ -257,12 +261,13 @@ def main() -> None:
                         "then SUBMIT(findings='checked').\", "
                         "input_paths=['files/ledger.csv'], allowed_tools=[], max_iters=4, max_llm_calls=5)"
                     )
-                    _require(isinstance(scoped, dict) and len(scoped["artifacts"]) == 1, scoped)
-                    promoted = scoped["artifacts"][0]
+                    scoped_decoded = sandbox_session.decode(scoped) if isinstance(scoped, dict) else scoped
+                    _require(isinstance(scoped_decoded, dict) and len(scoped_decoded["artifacts"]) == 1, scoped_decoded)
+                    promoted = scoped_decoded["artifacts"][0]
                     promoted_raw = manager.read_workspace_file(promoted["path"])
                     _require(hashlib.sha256(promoted_raw).hexdigest() == promoted["sha256"])
                     _require(json.loads(promoted_raw) == {"private_visible": False, "header": "id,value"})
-                    report["cases"]["scoped_spawn_and_promotion"] = scoped
+                    report["cases"]["scoped_spawn_and_promotion"] = scoped_decoded
                     result = interpreter.execute(
                         "import dspy\n"
                         "agent = dspy.RLM('task -> result', max_iters=5)\n"
@@ -273,6 +278,7 @@ def main() -> None:
                     _require("221" in str(result), str(result))
                     report["cases"]["nested_facade"] = {"result": str(result), "events": recursive_events}
                 finally:
+                    sandbox_session.close()
                     interpreter.shutdown()
                     manager.end_turn()
                     manager.event_callback = None

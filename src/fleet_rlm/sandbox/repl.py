@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import random
 import threading
 import time
@@ -25,43 +24,17 @@ from daytona.common.errors import (
     DaytonaNotFoundError,
     DaytonaRateLimitError,
     DaytonaTimeoutError,
+    DaytonaValidationError,
 )
 
 _LOGGER = logging.getLogger(__name__)
 CALL_MARK = "\x1eFLEET_CALL "
 RESULT_MARK = "\x1eFLEET_RESULT "
-PROGRESS_MARK = "\x1eFLEET_PROGRESS "
 REPLY_DIR = "/tmp/fleet/replies"
 _PREAMBLE_TIMEOUT_SECONDS = 60
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_SECONDS = 0.5
-_MAX_PROGRESS_LABEL = 64
-_PROGRESS_PHASES = frozenset({"start", "checkpoint", "exit"})
-
-
-def _bounded_progress(payload: Any) -> dict[str, Any] | None:
-    """Validate one progress observation from the sandbox and keep only bounded scalar fields."""
-    if not isinstance(payload, dict):
-        return None
-    phase = payload.get("phase")
-    scope = payload.get("scope")
-    if phase not in _PROGRESS_PHASES or not isinstance(scope, str) or not scope:
-        return None
-    expectation = payload.get("expect_seconds")
-    if isinstance(expectation, bool) or not isinstance(expectation, (int, float)):
-        return None
-    if not math.isfinite(float(expectation)) or float(expectation) <= 0:
-        return None
-    checkpoint = payload.get("checkpoint")
-    if checkpoint is not None and (isinstance(checkpoint, bool) or not isinstance(checkpoint, int) or checkpoint < 0):
-        return None
-    return {
-        "phase": phase,
-        "scope": scope[:_MAX_PROGRESS_LABEL],
-        "expect_seconds": float(expectation),
-        "checkpoint": checkpoint,
-    }
-
+_DEFINITIVE_CLIENT_STATUS_CODES = frozenset({400, 401, 403, 404, 405, 410, 413, 415, 422})
 
 _T = TypeVar("_T")
 
@@ -72,6 +45,13 @@ def is_transient(exc: BaseException) -> bool:
         return True
     status = exc.status_code if isinstance(exc, DaytonaError) else None
     return isinstance(status, int) and status >= 500
+
+
+def is_definitive_client_error(exc: BaseException) -> bool:
+    """Return True when Daytona rejected the create request outright (no sandbox allocated)."""
+    if isinstance(exc, DaytonaValidationError):
+        return True
+    return isinstance(exc, DaytonaError) and exc.status_code in _DEFINITIVE_CLIENT_STATUS_CODES
 
 
 def provider_not_found(exc: BaseException) -> bool:
@@ -202,14 +182,12 @@ class _Protocol:
         *,
         fence: ExecutionFence | None = None,
         on_fence: Callable[[], None] | None = None,
-        on_progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.on_call = on_call
         self.result: dict[str, Any] | None = None
         self.fence = fence if fence is not None else ExecutionFence()
         self._on_fence = on_fence
-        self._on_progress = on_progress
         self._buffer = ""
         self._workers: list[threading.Thread] = []
 
@@ -231,11 +209,7 @@ class _Protocol:
         self.fence.close()
 
     def _line(self, line: str) -> None:
-        """Dispatch a marker line to its result, host-call worker, or progress consumer.
-
-        Invalid progress and progress-consumer failures are dropped. Invalid result or
-        host-call JSON propagates as JSONDecodeError.
-        """
+        """Dispatch a marker line to its result or host-call worker; invalid JSON raises JSONDecodeError."""
         if line.startswith(RESULT_MARK):
             self.result = json.loads(line[len(RESULT_MARK) :])
         elif line.startswith(CALL_MARK):
@@ -243,15 +217,6 @@ class _Protocol:
             worker = threading.Thread(target=self._answer, args=(call,), name="fleet-host-call", daemon=True)
             self._workers.append(worker)
             worker.start()
-        elif line.startswith(PROGRESS_MARK):
-            # Progress is observation only. A malformed marker or a failing consumer is dropped;
-            # it must never disturb the execution or the stream.
-            try:
-                progress = _bounded_progress(json.loads(line[len(PROGRESS_MARK) :]))
-                if progress is not None and self._on_progress is not None:
-                    self._on_progress(progress)
-            except Exception:
-                _LOGGER.debug("Dropped a progress observation")
 
     def _answer(self, call: dict[str, Any]) -> None:
         # A host-call worker owns no Turn; nothing may escape it into the transport thread.
@@ -318,7 +283,6 @@ def run(
     timeout: int | None,
     fence: ExecutionFence | None = None,
     on_fence: Callable[[], None] | None = None,
-    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run one execution in `context`; return the runtime's result dict.
 
@@ -338,9 +302,11 @@ def run(
     A context-reported Python error becomes an error result. If neither a runtime result nor a
     context error is available, raises ExecutionOutcomeUnknownError.
     """
-    protocol = _Protocol(sandbox, on_call, fence=fence, on_fence=on_fence, on_progress=on_progress)
+    protocol = _Protocol(sandbox, on_call, fence=fence, on_fence=on_fence)
     # The Turn's remaining deadline is the only production source of this bound. A value carried by
     # the payload is a test seam for shortening it; nothing may substitute a fixed fallback.
+    # Local Python compute per cell is bounded separately inside runtime/repl.py so a stalled cell
+    # returns TimeoutError/CodeExecutionError cleanly even when a Turn has no deadline (timeout=None).
     payload = {"host_call_timeout": timeout, **payload}
     code = f"_fleet_exec({json.dumps(payload, separators=(',', ':'))!r})"
     try:

@@ -25,6 +25,8 @@ from dspy.utils import BaseCallback
 from dspy.utils.usage_tracker import UsageTracker
 from mlflow.entities import SpanType
 
+from fleet_rlm.contracts import supports_decision_requests
+
 AGENT_IDENTITY_SCHEME = "fleet-agent-v1"
 _AGENT_LOCK = threading.Lock()
 _STARTUP_IDENTITY: dict[str, str] | None = None
@@ -240,7 +242,11 @@ def _usage_summary(entry: dict[str, Any], *, derive_total: bool = True) -> dict[
     return summary
 
 
-class _DecisionWorkerUsage(BaseCallback):
+class FleetCallbackBase(BaseCallback):
+    """Public base class for Fleet's own DSPy callbacks, retained across typed decision scopes."""
+
+
+class _DecisionWorkerUsage(FleetCallbackBase):
     """Bridge usage from native DSPy batch workers, whose trackers are deep copies."""
 
     def __init__(self, target: UsageTracker) -> None:
@@ -249,7 +255,7 @@ class _DecisionWorkerUsage(BaseCallback):
         self.lock = threading.Lock()
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
-        if not getattr(instance, "supports_decision_requests", False):
+        if not supports_decision_requests(instance):
             return
         parent = dspy.settings.usage_tracker
         scope = track_usage()
@@ -288,9 +294,8 @@ def _to_mlflow_token_usage(usage: dict[str, int | float]) -> dict[str, int | flo
 def decision_usage(span: Any) -> Generator[None, None, None]:
     """Receipt TypeSafe usage on its manual span and roll it into DSPy exactly once.
 
-    DSPy 3.4.1 TypeSafe reports prompt/completion counts without total_tokens.
-    A detached native tracker also collects batched worker usage without allowing
-    the generation collector to attribute these calls to the surrounding module.
+    A detached native tracker collects batched worker usage without allowing the
+    generation collector to attribute these decision calls to the surrounding module.
     """
     parent = dspy.settings.usage_tracker
     tracker = UsageTracker()
@@ -311,7 +316,7 @@ def decision_usage(span: Any) -> Generator[None, None, None]:
             span.set_attribute("mlflow.chat.tokenUsage", totals)
 
 
-class LMUsageCallback(BaseCallback):
+class LMUsageCallback(FleetCallbackBase):
     """Isolate each generative call using native nested trackers, which roll up on exit.
 
     This callback must precede MLflow's DSPy callback: its end handler annotates the
@@ -325,7 +330,7 @@ class LMUsageCallback(BaseCallback):
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:  # noqa: ARG002
         """Capture numeric generation usage, excluding TypeSafe decision calls."""
-        if getattr(instance, "supports_decision_requests", False):
+        if supports_decision_requests(instance):
             return
         scope = track_usage()
         tracker = scope.__enter__()
@@ -404,7 +409,7 @@ def typed_decision_scope(
     TypeSafe clients emit their own usage, so only they are metered here; a generative backend
     already reports usage through the LM callback and must keep the MLflow hook off.
     """
-    adapter_options = {} if typesafe else {"adapter": adapter or dspy.ChatAdapter()}
+    adapter_options = {} if typesafe else {"adapter": adapter or dspy.XMLAdapter(use_native_function_calling=True)}
     with (
         dspy.context(
             lm=lm,
@@ -428,17 +433,10 @@ _CREDENTIAL = re.compile(
 _TRACE_STRING_LIMIT = 20_000
 _TRACE_NODE_LIMIT = 200
 
-try:  # MLflow's DSPy hook module is an integration detail; never fail import over it.
-    from mlflow.dspy.callback import MlflowCallback as _MlflowDspyCallback
-except ImportError:  # pragma: no cover - the integration moved or was removed
-    _MlflowDspyCallback = None
-
 
 def without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
-    """TypeSafe uses manual evidence spans rather than MLflow's generative-LM hook."""
-    if _MlflowDspyCallback is not None:
-        return [callback for callback in callbacks if not isinstance(callback, _MlflowDspyCallback)]
-    return [callback for callback in callbacks if callback.__class__.__name__ != "MlflowCallback"]
+    """Keep only Fleet callbacks in TypeSafe decision scopes; third-party hooks are excluded."""
+    return [callback for callback in callbacks if isinstance(callback, FleetCallbackBase)]
 
 
 @contextmanager

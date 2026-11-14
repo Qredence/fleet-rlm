@@ -4,31 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import math
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
-from dataclasses import dataclass
 from typing import Any
 
+import dspy
 from dspy.utils.callback import ACTIVE_CALL_ID
 
 from fleet_rlm.observability import LMUsageCallback, activity_preview, activity_text
 from fleet_rlm.sandbox.manager import _ACTIVE_MANAGER, DaytonaSandboxManager
 
-# Advisory labels derived from events Fleet already emits. Nothing here can act on a Turn.
-WAITING_ON_HOST = "waiting_on_host"
-PROGRESS_UNKNOWN = "progress_unknown"
-PROGRESSING = "progressing"
-STALLED = "stalled"
-INTERRUPTED = "interrupted"
-FENCED = "fenced"
 _MAX_STATUS_LABEL = 64
 _PROGRESS_INTERVAL_SECONDS = 1.0
-# A cell that ended without a trustworthy result: its state is partial, not a user error.
-_INTERRUPTED_OUTCOMES = frozenset({"interrupted", "partial_state", "transport_uncertain"})
+_TERMINAL_EVENTS = frozenset({"turn_complete", "turn_cancelled", "error", "done"})
 
 
 def _bounded_scope(value: Any) -> str | None:
@@ -39,166 +30,21 @@ def _bounded_scope(value: Any) -> str | None:
     return label[:_MAX_STATUS_LABEL] or None
 
 
-def _expectation(value: Any) -> float | None:
-    """Accept only a finite positive expectation; no implicit default exists."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    expectation = float(value)
-    return expectation if math.isfinite(expectation) and expectation > 0 else None
-
-
-@dataclass
-class _ActiveScope:
-    expect_seconds: float
-    advanced: float
-    checkpoint: int | None = None
-
-
-class AdvisoryStatus:
-    """Derive the advisory status label from the event stream, using a caller-supplied clock.
-
-    No scope means `progress_unknown` forever: `stalled` requires a declared expectation, so
-    silence alone can never become a watchdog. The tracker only reads events and time; it
-    never cancels, pauses, retries, or shortens anything.
-    """
-
-    def __init__(self) -> None:
-        self._host_calls: set[str] = set()
-        self._host_wait_started: float | None = None
-        self._scopes: dict[tuple[str, str], _ActiveScope] = {}
-        self._terminal = False
-        self._special: str | None = None
-        self._last_emitted: str | None = None
-
-    @property
-    def terminal(self) -> bool:
-        """True once the Turn has reached its terminal outcome; labels are absent afterwards."""
-        return self._terminal
-
-    def ingest(self, event: dict[str, Any], now: float) -> None:
-        """Update derived state from one event; `now` is a monotonic seconds value."""
-        kind = event.get("event")
-        if kind == "done" or kind in {"turn_complete", "turn_cancelled", "error"}:
-            self._terminal = True
-            self._host_calls.clear()
-            self._host_wait_started = None
-            self._scopes.clear()
-            self._special = None
-            return
-        if kind == "fenced":
-            self._special = FENCED
-            return
-        if kind == "repl_output":
-            outcome = event.get("outcome")
-            if outcome in _INTERRUPTED_OUTCOMES or event.get("partial_state") is True:
-                self._special = INTERRUPTED
-        if kind == "tool_start":
-            call_id = event.get("call_id")
-            if isinstance(call_id, str) and call_id:
-                if not self._host_calls:
-                    self._host_wait_started = now
-                self._host_calls.add(call_id)
-            self._special = None
-        elif kind == "tool_end":
-            call_id = event.get("call_id")
-            if isinstance(call_id, str) and call_id in self._host_calls:
-                self._host_calls.discard(call_id)
-                if not self._host_calls and self._host_wait_started is not None:
-                    wait_started = self._host_wait_started
-                    self._host_wait_started = None
-                    for state in self._scopes.values():
-                        state.advanced += max(0.0, now - max(wait_started, state.advanced))
-            self._special = None
-        elif kind == "progress":
-            self._ingest_progress(event, now)
-            self._special = None
-        elif kind == "repl_code":
-            self._special = None
-
-    def _ingest_progress(self, event: dict[str, Any], now: float) -> None:
-        """Track valid scope starts, advancing checkpoints, and exits using monotonic seconds.
-
-        Malformed observations are ignored; repeated or lower checkpoints do not renew a scope.
-        """
-        phase = event.get("phase")
-        scope = _bounded_scope(event.get("scope"))
-        if scope is None:
-            return
-        key = (str(event.get("agent_id") or "root"), scope)
-        if phase == "start":
-            expectation = _expectation(event.get("expect_seconds"))
-            if expectation is not None:
-                self._scopes[key] = _ActiveScope(expectation, now)
-        elif phase == "checkpoint":
-            state = self._scopes.get(key)
-            value = event.get("checkpoint")
-            if state is None or isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                return
-            # Only a value above the high-water mark renews the expectation window.
-            if state.checkpoint is None or value > state.checkpoint:
-                state.checkpoint = value
-                state.advanced = now
-        elif phase == "exit":
-            self._scopes.pop(key, None)
-
-    def _stalled_scope(self, now: float) -> tuple[str, _ActiveScope] | None:
-        """Return the first scope at or past its expectation in monotonic seconds, or None."""
-        for (_, scope), state in self._scopes.items():
-            if now - state.advanced >= state.expect_seconds:
-                return scope, state
-        return None
-
-    def label(self, now: float) -> str | None:
-        """Return the current advisory label, or None after the Turn acknowledged its outcome."""
-        if self._terminal:
-            return None
-        if self._special is not None:
-            return self._special
-        if self._host_calls:
-            return WAITING_ON_HOST
-        if self._stalled_scope(now) is not None:
-            return STALLED
-        if self._scopes:
-            return PROGRESSING
-        return PROGRESS_UNKNOWN
-
-    def detail(self, now: float) -> dict[str, Any]:
-        """Bounded scalar evidence behind the current label, with no percentage or completion claim."""
-        stalled = self._stalled_scope(now)
-        if stalled is not None:
-            scope, state = stalled
-            return {
-                "scope": scope,
-                "checkpoint": state.checkpoint,
-                "expect_seconds": state.expect_seconds,
-                "elapsed_since_advance": int(max(0.0, now - state.advanced)),
-            }
-        if self._scopes:
-            (_, scope), state = next(iter(self._scopes.items()))
-            return {
-                "scope": scope,
-                "checkpoint": state.checkpoint,
-                "expect_seconds": state.expect_seconds,
-                "elapsed_since_advance": int(max(0.0, now - state.advanced)),
-            }
-        return {}
-
-    def status_event(self, now: float) -> dict[str, Any] | None:
-        """Return one status event when the derived label changed since the last one, else None."""
-        label = self.label(now)
-        if label is None or label == self._last_emitted:
-            return None
-        self._last_emitted = label
-        return {"event": "status", "status": label, **self.detail(now)}
-
-    def annotate(self, payload: dict[str, Any], now: float) -> dict[str, Any]:
-        """Attach the derived label to one outgoing event payload."""
-        label = self.label(now)
-        return payload if label is None else {**payload, "status": label}
-
-
 def _reasoning_text(outputs: Any) -> str:
-    """The provider's reasoning_content for the first completion, redacted and capped for streaming."""
+    """The provider's thinking or reasoning text for the completion, redacted and capped for streaming."""
+    message = getattr(outputs, "message", None)
+    if message is None and isinstance(outputs, list) and outputs:
+        message = getattr(outputs[0], "message", None)
+    if message is not None and hasattr(message, "parts_of"):
+        with contextlib.suppress(Exception):
+            parts = list(message.parts_of(dspy.lm15.ThinkingPart))
+            if parts:
+                text = "".join(getattr(p, "text", "") for p in parts if getattr(p, "text", None))
+                if text:
+                    return activity_text(text)
+    thinking = getattr(outputs, "thinking", None)
+    if isinstance(thinking, str) and thinking:
+        return activity_text(thinking)
     first = outputs[0] if isinstance(outputs, list) and outputs else None
     reasoning = first.get("reasoning_content") if isinstance(first, dict) else None
     return activity_text(reasoning) if isinstance(reasoning, str) else ""
@@ -221,8 +67,8 @@ class SSERuntimeCallback(LMUsageCallback):
         self.queue = queue
         self.manager = manager
         self.clock = clock or time.monotonic
-        self.status = AdvisoryStatus()
-        # One reentrant lock serializes status ingestion, progress coalescing, call state, and pending futures.
+        self._terminal = False
+        # One reentrant lock serializes terminal tracking, progress coalescing, call state, and pending futures.
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._pending: set[Future] = set()
@@ -249,23 +95,23 @@ class SSERuntimeCallback(LMUsageCallback):
         """
         if self._closed.is_set():
             return
+        kind = payload.get("event")
         now = self.clock()
         with self._lock:
-            if self.status.terminal and payload.get("event") != "done":
+            if self._terminal and kind != "done":
                 return
-            self.status.ingest(payload, now)
-            payload = self.status.annotate(payload, now)
-            if self.status.terminal:
+            if kind in _TERMINAL_EVENTS:
+                self._terminal = True
                 self._progress_pending.clear()
                 self._progress_last.clear()
-            if payload.get("event") == "progress":
+            if kind == "progress":
                 # Observation only: coalesced, never blocking the producer.
                 self._coalesce_progress(payload, now)
                 return
         # A withheld progress value is offered before a lifecycle event only when its second has
         # elapsed; it is a non-blocking offer, so a full queue still drops it rather than delaying.
         self._release_progress(now)
-        if payload.get("event") not in {"turn_complete", "error", "turn_cancelled", "done"}:
+        if kind not in _TERMINAL_EVENTS:
             self._deliver_activity(payload)
             return
         future = asyncio.run_coroutine_threadsafe(self.queue.put(payload), self.loop)
@@ -313,7 +159,7 @@ class SSERuntimeCallback(LMUsageCallback):
             """Deliver accepted activity before the outcome; discard progress once it is obsolete."""
             try:
                 with self._lock:
-                    if self._closed.is_set() or (payload.get("event") == "progress" and self.status.terminal):
+                    if self._closed.is_set() or (payload.get("event") == "progress" and self._terminal):
                         return
                     with contextlib.suppress(asyncio.QueueFull):
                         self.queue.put_nowait(payload)
@@ -321,7 +167,7 @@ class SSERuntimeCallback(LMUsageCallback):
                 self._activity_slots.release()
 
         with self._lock:
-            if self._closed.is_set() or self.status.terminal or not self._activity_slots.acquire(blocking=False):
+            if self._closed.is_set() or self._terminal or not self._activity_slots.acquire(blocking=False):
                 return
             # Serialize acceptance/scheduling with terminal ingestion: accepted activity must be
             # scheduled before terminal queue writes, even when several worker threads emit.
@@ -356,18 +202,13 @@ class SSERuntimeCallback(LMUsageCallback):
         Called by the stream loop it already owns; no timer or background task is created.
         """
         with self._lock:
-            if self._closed.is_set() or self.status.terminal:
+            if self._closed.is_set() or self._terminal:
                 return
             for payload in self._take_due_progress(self.clock()):
                 try:
                     self.queue.put_nowait(payload)
                 except asyncio.QueueFull:
                     break
-
-    def status_event(self) -> dict[str, Any] | None:
-        """Return one derived status transition, sampled by the stream loop."""
-        with self._lock:
-            return self.status.status_event(self.clock())
 
     def _start(self, kind: str, call_id: str, **details: Any) -> None:
         manager = _ACTIVE_MANAGER.get() or self.manager
@@ -465,10 +306,7 @@ class Envelope:
         self.sequence = 0
 
     def wrap(self, event: dict[str, Any]) -> dict[str, Any]:
-        """Number one event and wrap it in a version-1 envelope.
-
-        The payload is nested under `payload` and also spread at the top level.
-        """
+        """Number one event and wrap it in a version-1 envelope with nested payload."""
         self.sequence += 1
         payload = {key: value for key, value in event.items() if key != "event"}
         return {
@@ -476,11 +314,10 @@ class Envelope:
             "event": event.get("event"),
             "session_id": self.session_id,
             "turn_id": self.turn_id,
-            "agent_id": None,
-            "parent_agent_id": None,
-            "sandbox_id": getattr(getattr(self.manager, "_sandbox", None), "id", None),
+            "agent_id": event.get("agent_id"),
+            "parent_agent_id": event.get("parent_agent_id"),
+            "sandbox_id": event.get("sandbox_id") or getattr(getattr(self.manager, "_sandbox", None), "id", None),
             "seq": self.sequence,
             "timestamp": time.time(),
             "payload": payload,
-            **payload,
         }

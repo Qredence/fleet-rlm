@@ -8,13 +8,11 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.contracts import STOPPING_RULES, TRIAGE_INSTRUCTION, TRIAGE_ROUTE, make_choice_type
+from fleet_rlm.contracts import STOPPING_RULES, TRIAGE_INSTRUCTION, TRIAGE_ROUTE, make_noul_type
 
-SKILL_RELEVANCE = make_choice_type(
-    (
-        ("relevant", "Following this Skill's instructions would help complete the task"),
-        ("not_relevant", "The Skill does not apply to this task"),
-    )
+SKILL_RELEVANCE = make_noul_type(
+    "Following this Skill's instructions would help complete the task",
+    "The Skill does not apply to this task",
 )
 
 
@@ -25,7 +23,7 @@ class SkillRelevance(dspy.Signature):
     skill_name: str = dspy.InputField(desc="Skill name.")
     skill_description: str = dspy.InputField(desc="When the Skill applies.")
     relevance: SKILL_RELEVANCE = dspy.OutputField(  # ty: ignore[invalid-type-form]
-        desc="relevant only when the Skill's described use matches what the task needs."
+        desc="True only when the Skill's described use matches what the task needs."
     )
 
 
@@ -43,8 +41,11 @@ class FleetTask(dspy.Signature):
 
     __doc__ = (
         "Solve a task with Session-scoped workspace files and progressive Skills.\n\n"
-        "Delegate independent subtasks together with spawn_agents (they run concurrently) instead of calling\n"
-        "spawn_agent one at a time. Pass child inputs as `files/...` paths. Finish with keyword arguments only:\n"
+        "Delegate independent subtasks concurrently via spawn_agents (1..8 subtasks) instead of calling\n"
+        "spawn_agent sequentially; both enforce max_iters in 1..8 and max_llm_calls in 1..25.\n"
+        "Child artifacts/ start empty unless explicitly passed via input_paths (`files/...` or earlier\n"
+        "`artifacts/...` paths; pass one list per subtask to spawn_agents). Use `/workspace/...` paths from\n"
+        "workspace_manifest rather than recursive globs from `/`. Finish with keyword arguments only:\n"
         "SUBMIT(answer=..., learned_skill_note=...).\n\n" + STOPPING_RULES
     )
 
@@ -69,7 +70,14 @@ class DirectAnswer(dspy.Signature):
 
 
 class ChildTask(dspy.Signature):
-    """Given the fields `subtask`, produce the fields `findings`."""
+    """Signature for a bounded child subtask executed in an isolated sandbox."""
+
+    __doc__ = (
+        "Given the fields `subtask`, produce the fields `findings`.\n\n"
+        "Workspace files live under `/workspace/...` (never run recursive globs from `/`).\n"
+        "Child `artifacts/` starts empty unless inputs were explicitly passed via input_paths.\n"
+        "If delegating, keep subtasks and max_iters in 1..8 and max_llm_calls in 1..25."
+    )
 
     subtask: str = dspy.InputField()
     findings: str = dspy.OutputField()

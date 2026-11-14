@@ -1,97 +1,73 @@
 # Database and persistence
 
+This release starts a new schema baseline at version 1. Existing version-12 databases
+are refused at startup; this release does not upgrade or restore them automatically.
+Keep the existing database and prior Fleet deployment intact. Use a new empty schema
+and a new empty Daytona Volume, then validate the new deployment before directing
+clients to it. Existing history remains accessible through the prior deployment.
+Do not renumber the old migration ledger or copy rows into the new schema. Rollback
+requires the prior deployment, database, and Volume together; the new schema is not
+backward compatible.
+
 Fleet requires PostgreSQL for Sessions, Turns, memories and selected replays.
 Workspace files live on the Session's Daytona Volume. Configure the
 connection with `FLEET_DATABASE_URL`; the default DSN is local PostgreSQL at
 `postgresql://postgres:postgres@localhost:5432/fleet`.
 
-`store.py` owns SQL, migrations, pooling, and transactions. `SessionRuntime`
-owns memory validation, bounded history, idempotency, and Turn-record policies,
-using one shared `runtime.store` reference rather than a separate harness. Session
-rows are created before lease acquisition; releasing a runtime closes its lease,
+`src/fleet_rlm/store/` (`Store`) owns SQL, schema migrations, pooling, and transactions.
+`SessionRuntime` owns memory validation, bounded history, idempotency, and Turn-record
+policies, using one shared `runtime.store` reference rather than a separate harness.
+Session rows are created before lease acquisition; releasing a runtime closes its lease,
 not the registry's Store.
 
 At startup, Fleet takes a transaction-scoped advisory lock, reads the
-`fleet_lite_schema_migrations` ledger, and applies each pending migration once.
-The initial migration creates additive tables for
-`fleet_lite_sessions`, `fleet_lite_vfs_files`, `fleet_lite_memories`,
-`fleet_lite_turns`, `fleet_lite_replay_snapshots`, and
-`fleet_lite_runtime_settings`. The ledger records the applied schema version;
-bootstrap and version recording run in one transaction. Future schema changes
-must add a numbered migration rather than edit an already released migration.
-Migration 2 adds `fleet_lite_review_labels`, which stores human curation metadata
-only for an existing selected replay and cascades with that replay's deletion.
-Migration 3 adds optional `structured_expectations` JSONB with an empty-object
-default. It stores artifact/delegation gold without changing replay snapshots.
-Migration 4 renames `fleet_lite_vfs_files` to `fleet_lite_vfs_files_retired`.
-Fleet no longer reads or writes it; the rows stay for manual recovery and the
-table can be dropped by an operator.
-Migration 5 adds `fleet_lite_sessions.environment_reported`, the durable
-once-per-Session marker for the soft `sandbox_environment_incomplete`
-observation. Existing rows default to unreported; no backfill is performed.
-The migration role owns the change; existing runtime DML grants apply.
-Migration 6 adds `fleet_lite_optimization_runs`, the canonical lifecycle ledger
-for API-owned and standalone CLI optimization runs. A unique partial index permits
-at most one globally active run or approval; there is no job queue. The record
-stores request idempotency, validated options, owner, managed-worker marker,
-status/stage, cooperative stop intent, and run metadata. Database owner/status
-checks fence stale workers from publishing lifecycle updates.
-Migration 11 makes jobs global. It adds `kind` (`optimize`, `evaluate_rescore`,
-`evaluate_replay`, or `evaluate_synthetic`, default `optimize`), drops the
-`session_id` column, and re-keys `fleet_lite_optimization_runs` by `run_id` with
-`request_id` unique across all jobs (idempotency is now global). Each existing
-row keeps its former Session as `legacy_session_id` in its metadata; request IDs
-that collided across Sessions are suffixed with their run ID, and a run ID shared by
-two Sessions keeps the earliest row's and gives the other `<run_id>-dup-<session_id>`,
-so the new primary key cannot abort startup. Old rows stay
-readable, and approval refuses them because their incumbent was a per-Session
-program. The one-active-job partial index is unchanged. The migration is not
-reversible by an older Fleet, which keys runs by Session: do not point an older
-build at a database already migrated to 11.
+`fleet_lite_schema_migrations` ledger, and applies each pending migration once
+(`SCHEMA_VERSION = 1` squashed baseline):
+
+- `fleet_lite_sessions`: session settings, memory summary, turn counter, once-per-Session
+  `environment_reported` marker (`sandbox_environment_incomplete` is observational only),
+  and `ownership_epoch` / advisory lease metadata. `ownership_epoch` advances whenever
+  a process acquires the Session lease so stale owners are fenced by CAS comparison.
+- `fleet_lite_sandbox_resources`: normalized epoch-fenced sandbox ownership ledger keyed
+  by `(session_id, agent_id)` tracking pending `create`/`stop`/`delete` intent, provider IDs,
+  and confirmation state. Resource rows are cleared only after provider confirmation (a
+  provider not-found answer counts as confirmation); a definitive create rejection clears its
+  pending intent, whereas conflicts, timeouts, rate limits, transport errors, and server
+  failures retain it for reconciliation. After an epoch takeover, the stale process fences
+  local handles and releases its runtime without provider mutations, while the new owner
+  reconciles durable resources before admitting writable work.
+- `fleet_lite_turns`: ordered per-session Turn records, unique `(session_id, idempotency_key)`
+  intent, status (`running`, `completed`, `failed`, `cancelled`), result JSON, and provenance.
+- `fleet_lite_memories`: scoped memories with kind, source digests, review flag, and an
+  expression GIN index matching `to_tsvector('english', content)`.
+- `fleet_lite_replay_blobs` and `fleet_lite_replay_snapshots`: content-addressed binary blobs
+  (`sha256` primary key) referenced by replay manifests so unchanged workspace files are not
+  duplicated across Turns.
+- `fleet_lite_review_labels`: human curation metadata and optional `structured_expectations`
+  JSONB for selected replay Turns, cascading with replay deletion.
+- `fleet_lite_leases`: global coordination leases (including `fleet:optimization-global-lease`).
+- `fleet_lite_global_settings`: settings that belong to no Session (`improve` scope auto-run
+  switch, thresholds, and token budgets).
+- `fleet_lite_optimization_runs`: canonical lifecycle ledger for API-owned and standalone CLI
+  jobs (`optimize`, `evaluate_rescore`, `evaluate_replay`, `evaluate_synthetic`) keyed by
+  `run_id` with unique `request_id` and a unique partial index (`fleet_lite_one_active_optimization_run`)
+  permitting at most one globally active `running` or `approving` job.
+
+Future schema changes must add a numbered migration (`version > 1`) rather than editing
+released migrations, and bootstrap/version recording run in one transaction under the
+migration lock.
 
 To try a branch with a migration against real data without touching the main
 schema, set `FLEET_DATABASE_SCHEMA` (for example `fleet_rlm_pr2`) to a new
 lowercase name in that process's environment. Fleet creates the schema, applies
 every migration inside it, and uses it through `search_path`; the default schema
-and any older Fleet build keep working against their own tables. Drop the schema
-when finished. An opt-in test applies migrations 11 and 12 to a scratch schema of a real
-PostgreSQL: set `FLEET_TEST_POSTGRES_URL` and run
-`uv run pytest tests/store/test_optimization_runs.py -k real_postgres`.
-Migration 12 creates `fleet_lite_global_settings` (`scope`, `settings` JSONB), which holds settings that
-belong to no Session; the Improve auto-run switch and budgets live under the `improve` scope. It uses
-`CREATE TABLE IF NOT EXISTS`, so a schema that applied an earlier draft of migration 11 and already holds an
-empty table of that name upgrades cleanly. Evaluate jobs store their per-split `evaluation` and the job
-`trigger` in the run row's existing metadata JSONB; no column is added.
-Migration 7 adds an expression GIN index matching memory search's
-`to_tsvector('english', content)` predicate. PostgreSQL chooses whether to use
-it; it does not eliminate ranking work. The initial index build runs under the
-existing migration transaction/lock and adds index-maintenance cost to writes.
-Migration 8 adds `fleet_lite_sessions.sandbox_ownership`, the durable record a
-Session needs to reconcile sandbox resources that a previous process may have
-left unresolved. The value is `{epoch, resources}`: `epoch` advances whenever a
-process acquires the Session lease (so a stale owner's writes are rejected by
-comparison, not by trust), and `resources` holds at most 32 bounded entries
-describing one pending create/stop/delete per agent, with at most 2,000 serialized
-characters per resource. New Session rows start with an explicit empty record. Rows created
-before migration 8 stay `NULL` and are refused for writable admission until an
-operator reconciles them: an absent provenance record is not evidence that no
-remote compute exists. Rollback must keep the reader or keep writable admission
-disabled; dropping unresolved intent restores the unsafe reclamation this record
-exists to prevent. Resource entries are removed only after the provider confirms
-cleanup, where a provider not-found answer counts as confirmation.
-A definitive create rejection clears its pending intent; conflicts, timeouts,
-rate limits, transport errors, and server failures retain it for reconciliation.
-After an epoch takeover, the stale process fences local handles and releases its
-runtime without provider mutations. The new owner reconciles the durable resources
-before admitting writable work; the stale manager cannot be reused.
-Migrations 9 and 10 are retained for compatibility with databases upgraded by
-an experimental managed-memory implementation. They create managed-session
-bindings, an outbox, a pipeline-run ledger, and an outbox purpose column. Fleet
-no longer reads or writes these tables. Existing rows remain untouched, and
-initialization still records these versions so upgraded databases can start.
-These tables do not enable remote recall, conversation export, or pipeline jobs.
+keeps working against its own tables. Drop the schema when finished. An opt-in
+test applies schema bootstrap to a scratch schema on real PostgreSQL: set
+`FLEET_TEST_POSTGRES_URL` and run `uv run pytest tests/store/test_store.py -k real_postgres`.
+
 At Store initialization, replay snapshots older than 30 days are deleted; their
-curation rows cascade with them. Since expiry runs at Store initialization, a
+curation rows cascade with them, and unreferenced blobs in `fleet_lite_replay_blobs`
+are garbage-collected. Since expiry runs at Store initialization, a
 snapshot can remain past nominal expiry while the service is stopped. This policy
 applies to selected replay payloads, not MLflow trace retention. MLflow
 assessments remain as evaluation history, but cannot make an expired replay
@@ -102,9 +78,10 @@ compatibility schema `public`, while the checked-in config selects
 `fleet_rlm_lite` in the public example. The configured database
 must already exist with appropriate permissions.
 
-`fleet_lite_sessions` stores each session's timestamp, memory summary, bounded
-turn history as JSONB, the once-per-Session environment-observation marker, and
-the bounded sandbox-ownership record described under migration 8.
+`fleet_lite_sessions` stores each session's timestamp, memory summary, turn
+count, the once-per-Session environment-observation marker, and the advisory lease
+epoch/owner/expiry metadata (with pending sandbox resource rows held in
+`fleet_lite_sandbox_resources`).
 Releasing a runtime keeps the row, so reopening the Session does not repeat the
 observation. A Turn's record, memory note, optional replay
 snapshot and completion commit in one transaction; workspace file bytes are not
@@ -119,8 +96,8 @@ Structured memories retain their kind, review status, and source digests.
 Retrieval uses bounded full-text relevance and recency ranking. Turn
 intents retain idempotency keys and terminal outcomes; uncertain running turns
 are not automatically replayed. Runtime settings retain selected mode and
-dataset revision. A session advisory lock prevents two workers from owning
-one session runtime at once and holds one database connection until close.
+dataset revision. A lease row with a 60-second TTL and a fencing epoch prevents two workers from
+owning one Session runtime. The shared heartbeat renews it every 20 seconds.
 Turn history and status reads use the shared pool and do not take the lease.
 A worker that loses the lease evicts the stale runtime and rebuilds it on the
 next request once any draining Turn finishes.
@@ -145,20 +122,19 @@ bytes in its isolated workspace rather than reading the current workspace. Ordin
 Turns retain hashes only and cannot enter GEPA without a selected snapshot.
 
 For Lakebase, use the direct PostgreSQL endpoint with TLS for `FLEET_DATABASE_URL`.
-Fleet holds a session-level PostgreSQL advisory lock on a dedicated connection;
-Lakebase's [transaction pooler](https://docs.databricks.com/gcp/en/oltp/projects/connection-pooling)
-does not support this lock lifetime. Keep
-application-side pooling for ordinary queries and use a direct connection for
-each session lease. Lakebase OAuth tokens are checked at login, and an
-established connection continues after its token expires. Databricks documents
-a 24-hour idle timeout and a three-day maximum connection lifetime; test Fleet's
-reconnect path against these service limits. The process probes each lease
-connection periodically; a failed probe cancels that session's sandbox work and fences the runtime so it
+Fleet uses pooled TTL-row leases for Sessions and optimization owners. Lease renewal
+shares the application pool; no dedicated connection is held for a lease. Use the
+direct endpoint for migration advisory locks and runtime transactions. Lakebase
+OAuth tokens are checked at login, and an established connection continues after
+its token expires. Databricks documents a 24-hour idle timeout and a three-day
+maximum connection lifetime; test Fleet's reconnect path against these service
+limits. The process renews pooled leases through the application pool; a failed
+renewal cancels that session's sandbox work and fences the runtime so it
 cannot accept another Turn. A server-side idle timeout or network partition may
 delay failure detection, so verify behavior with an authorized Lakebase
 fault-injection canary before relying on a specific detection time. When
 `FLEET_LAKEBASE_ENDPOINT` enables OAuth, Fleet mints fresh credentials for new
-physical pool connections and dedicated leases using Databricks SDK
+physical pool connections using Databricks SDK
 authentication. OAuth is not compatible with Lakebase's built-in PgBouncer
 transaction pooler. See the [Lakebase authentication guidance](https://docs.databricks.com/gcp/en/oltp/projects/authentication)
 and [pooling constraints](https://docs.databricks.com/gcp/en/oltp/projects/connection-pooling)
@@ -195,7 +171,7 @@ setting, and the dataset spans every Session's approved labels. API restart mark
 interrupted and does not rerun provider work; a later explicit review reconciles
 an interrupted approval against the active candidate digests.
 
-Each API holds a dedicated advisory owner lease through worker startup and
+Each API holds a pooled TTL owner lease through worker startup and
 draining. History reads preserve runs owned by another live API. Abandoned
 managed workers receive a cooperative stop request while holding the global
 optimization lease; their rows become interrupted only after it is released.

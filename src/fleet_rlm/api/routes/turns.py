@@ -26,8 +26,7 @@ from fleet_rlm.session import SessionRuntime
 
 router = APIRouter(tags=["turns"])
 _LOGGER = logging.getLogger("fleet_rlm.api")
-# The stream loop also samples the advisory status and releases withheld progress markers, so a
-# stalled expectation becomes visible without a timer or a background task of its own.
+# The stream loop also releases withheld progress markers while polling for disconnects.
 _DISCONNECT_POLL_SECONDS = 0.5
 _LOCK_POLL_SECONDS = 0.05
 # Turns run here, not on the loop's default executor, so queued Turns cannot starve cancellation,
@@ -52,19 +51,15 @@ def _turn_executor(request: Request) -> ThreadPoolExecutor:
 TurnExecutor = Annotated[ThreadPoolExecutor, Depends(_turn_executor)]
 
 
-async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[AsyncExitStack]:
+async def hold_turn_lock(runtime: Runtime, request: Request) -> AsyncIterator[AsyncExitStack]:  # noqa: ARG001
     """Hold the Session's lock for the whole streamed response, or raise 409 like the other routes.
 
     A request-scoped dependency: it is released after the stream has finished and the Turn has
     drained, and also when the request fails before the stream starts.
     """
-    if getattr(request.app.state, "setup_applying", False):
-        raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
     if not await _acquire(runtime):
         raise HTTPException(status_code=409, detail="A Turn is running on this Session; retry when it completes")
     try:
-        if getattr(request.app.state, "setup_applying", False):
-            raise HTTPException(status_code=503, detail="Fleet is restarting after setup")
         async with AsyncExitStack() as cleanup:
             yield cleanup
     finally:
@@ -159,15 +154,11 @@ async def stream_turn(
         yield frame_envelope(status)
         while True:
             getter = getter or asyncio.ensure_future(queue.get())
-            # Release withheld progress and sample the derived label on the loop this stream owns.
+            # Release withheld progress on the loop this stream owns.
             callback.pump_progress()
-            derived = callback.status_event()
             done, _ = await asyncio.wait(
                 {getter, worker}, timeout=_DISCONNECT_POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED
             )
-            if derived is not None and connected and not getter.done() and worker not in done:
-                wrapped_status = envelope.wrap(derived)
-                yield frame_envelope(wrapped_status)
             if getter.done():
                 event: dict[str, Any] | None = getter.result()
             elif worker in done:

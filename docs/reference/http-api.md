@@ -135,8 +135,8 @@ approval returns `409` because their incumbent was a per-Session program.
 
 **Progress and fail-fast.** During paired validation the worker persists `validation_done` and
 `validation_total` in `progress` (rollouts finished of 2 stages x 3 passes x dev+holdout examples). When the search
-returns a candidate that changes no instruction or Flex code, validation is skipped and the job completes with the
-gate's own reason, `candidate changes no instructions or Flex code`. Job detail adds `summary`, computed from the saved
+returns a candidate that changes no instruction, Flex code, or calibrated decision fields, validation is skipped and the job completes with the
+gate's own reason, `candidate changes no instructions, Flex code, or calibrated decision fields`. Job detail adds `summary`, computed from the saved
 comparison: `changed` components (of `components_total`), per-split baseline and candidate means with `improved`,
 `regressed` and `ties` counts over the paired per-example scores, the critical count, and a one-line `headline`.
 
@@ -277,8 +277,9 @@ The response uses `text/event-stream`. Each data event is JSON prefixed by
 `turn_status` preparation event, then DSPy callback events such as
 `module_start`, `lm_end`, `tool_start`, and `tool_end`. An `lm_end` event carries a `usage` object with
 numeric `prompt_tokens`, `completion_tokens`, `total_tokens`, and, when the provider reports them,
-`reasoning_tokens`; it is omitted when the provider reports no usage. Completion is reported as
-`turn_complete` with `answer`, `route`, optional `learned_skill_note`, and an
+`reasoning_tokens`; it is omitted when the provider reports no usage. Provider thinking and reasoning
+text (extracted from DSPy `ThinkingPart` or `reasoning_content`) is streamed in activity updates.
+Completion is reported as `turn_complete` with `answer`, `route` (`direct`, `flex`, or `rlm`), optional `learned_skill_note`, and an
 `artifacts` list. When MLflow tracing is configured, the completion event also
 includes the recorded `trace_id`. A Turn that provisioned its sandbox also reports
 the preflight-resolved environment identity as `snapshot_name`, `snapshot_id`,
@@ -348,7 +349,9 @@ may emit SSE comment keep-alives.
 Fleet validates the complete version-1 JSON envelope before native SSE framing.
 Terminal events (`turn_complete`, `error`, `turn_cancelled`, and `done`) use explicit
 payload models; dynamic activity cannot substitute for a malformed terminal event.
-The envelope retains nested `payload` data and the existing flattened fields.
+Event-specific data lives inside nested `payload`, with envelope headers carrying
+`version`, `event`, `session_id`, `turn_id`, `agent_id`, `parent_agent_id`,
+`sandbox_id`, `seq`, and `timestamp`.
 Historical replay preserves unknown fields and absent versus explicit null values;
 it does not restore a live interpreter. The OpenAPI stream schema describes the
 framed text, rather than claiming the whole response is one JSON object.
@@ -365,8 +368,7 @@ id: 3
 Job list responses contain `jobs`, nullable `active_run_id`, and `accepting`. Start,
 cancel, and review responses contain `job`; detail adds nullable `comparison`.
 Public job models retain `kind`, progress, options, failure, gate, scores, and review
-information while excluding private worker settings. Setup experiment status and
-drain (operator routes) return `accepting`, `busy`, and `experiments`, each a job.
+information while excluding private worker settings.
 
 Workspace writes require exactly one non-null `content` or `content_base64` field.
 An empty string writes an empty file. Neither or both returns the existing safe
@@ -416,8 +418,7 @@ available from any worker. A worker that loses its lease evicts the stale
 runtime and rebuilds it on the next request once any draining Turn finishes.
 
 Events include `version`, `session_id`, `turn_id`, agent/parent/sandbox IDs,
-monotonic per-stream `seq`, timestamp, and `payload`. Flat payload fields remain
-for compatibility. Generated code, bounded outputs, allocation/deletion, routing,
+monotonic per-stream `seq`, timestamp, and nested `payload`. Generated code, bounded outputs, allocation/deletion, routing,
 and call-budget events are available. Nonterminal activity is best effort: bounded
 queue and cross-thread handoff saturation may drop events, including either half
 of an activity pair, without delaying execution or cleanup. Progress is coalesced.
@@ -430,8 +431,8 @@ DSPy callbacks also include `parent_call_id`. End events report `ok`, `error_typ
 and `duration_ms`. Tool `inputs` and `output` are bounded, redacted text previews;
 `source` distinguishes `dspy` callbacks from `sandbox_bridge` operations. These
 may be nested observations, not additional model calls. Predictor payloads are
-omitted rather than exposing private reasoning. Previews redact sensitive keys
-and labelled credentials but cannot detect every secret in arbitrary text.
+omitted. Provider reasoning is streamed separately when returned by the model. Previews redact sensitive keys and labelled credentials, while provider reasoning redacts labelled credentials; this is not a DLP
+boundary and cannot detect every secret in arbitrary text.
 `repl_code`/`repl_output` share an `execution_id`, namespace, and `phase`
 (`bootstrap` or `task`); output includes timing, stdout/stderr, a bounded `value`
 preview, and error status. `triage_decision.summary` describes the selected route
@@ -441,11 +442,12 @@ Long-running Python and host-tool calls have no independent 120-second bridge
 or 180-second execution-read limit. Host-call waiting derives from the Turn's
 remaining deadline, so a bridged call never outlives a bounded Turn, and only a
 bounded Turn arms the watchdog. A deadline-free Turn sends `run_code(timeout=0)`
-explicitly and no Fleet component substitutes a fallback bound, so the call waits
-until it returns or the Turn is cancelled; Daytona's provider TTL and idle bounds
-still apply. Closing a stream before durable completion requests remote
-cancellation and drains the worker, serialized against commit/readback. Request
-cleanup retains the Session lock until the worker drains, including when HTTP
+explicitly and pauses host-call waits unboundedly until the call returns or the
+Turn is cancelled, while unbridged local Python execution inside a single cell
+has a 60-second safety cap (`DEFAULT_EXEC_TIMEOUT_SECONDS`) unless overridden
+(`exec_timeout`); Daytona's provider TTL and idle bounds still apply. Closing a
+stream before durable completion requests remote cancellation and drains the
+worker, serialized against commit/readback. Request cleanup retains the Session lock until the worker drains, including when HTTP
 forwarding is blocked after consuming a yielded event. After durable completion,
 disconnecting preserves a successful Turn's warm root while the worker finishes.
 Reconnection is not an automatic side-effect retry.
@@ -494,59 +496,13 @@ synced as user Skills.
 it does not download file contents. The workspace is session-scoped and
 persisted on the Session's Daytona Volume.
 
-## Private local setup API
+## Diagnostics and operator setup
 
-Setup is enabled only for a CLI-owned loopback server with a private per-launch
-bearer token. Every setup route requires this token and a loopback connection.
-Ordinary `fleet serve`, existing API reuse, and remote `--url` clients do not gain
-setup privileges. Disabled setup returns 404; missing/invalid credentials return
-401 and non-loopback callers return 403. Setup does not add authentication to the
-ordinary Session API.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/setup/status` | Sanitized fields/sources, readiness results, operation availability. |
-| `PATCH` | `/setup/config` | Stage supported edits with `{"values":{"ENV_NAME":"value"}}`; never echo secret input. |
-| `DELETE` | `/setup/config` | Discard unsaved edits and reload configuration. |
-| `POST` | `/setup/save` | Validate and atomically save staged edits to the fixed project `.env`. |
-| `POST` | `/setup/verify` | Run read-only checks of Models, Database, MLflow, and Daytona. |
-| `GET` | `/setup/daytona/volumes` | List safe Volume identities for the configured organization. |
-| `POST` | `/setup/daytona/volumes` | Explicitly create a named workspace Volume. |
-| `POST` | `/setup/daytona/snapshot/build` | Build the versioned packaged recipe; refuse an existing snapshot name. |
-| `POST` | `/setup/daytona/snapshot/activate` | Explicitly activate and verify an existing snapshot. |
-| `POST` | `/setup/models/test` | Make one optional, potentially billed root-model request. |
-| `GET` | `/setup/operations/{operation_id}/events?after=0` | Replay retained progress and stream SSE until `complete` or `error`. |
-| `GET` | `/setup/experiments/status` | Read whether the owned experiment is active and draining. |
-| `POST` | `/setup/experiments/drain` | Stop admitting jobs and wait for API-owned experiments to finish. |
-| `POST` | `/setup/apply` | Require saved/verified settings, fence new Turns, and request a launcher restart. |
-
-Background actions take a `request_id`; Volume creation also takes `name`.
-Verification accepts optional `sections` (`models`, `database`, `mlflow`,
-`daytona`), defaulting to all sections. Results from other sections are reused
-only for the same effective configuration. They
-return `operation_id`. Reusing a request ID for the same action returns the
-existing operation; another active operation returns 409. Events have `seq`,
-`event`, and a bounded redacted `message`, with a safe result on completion.
-Provider failures are sanitized. Disconnect does not cancel remote work or start
-it again. A process exit can leave an unknown provider outcome: recheck the
-snapshot/Volume before issuing another mutation. Progress retention is bounded
-and process-local; completed operation IDs are not durable job identifiers.
-
-Configuration edits are drafts until Save. Only supported fields are accepted;
-process environment overrides are read-only. File conflicts and running operations
-return 409. Save preserves unrelated dotenv entries and restricts file permissions.
-`apply` returns `{"restart_required":true}`; the owning CLI performs the restart.
-It returns 409 while any Turn, workspace operation, or API-owned experiment is
-active. On normal terminal-client exit, the owning launcher uses the protected
-experiment drain/status routes and waits for the worker and API/MLflow cleanup
-before stopping services it owns. Once accepted,
-apply is idempotent: status reports `restart_required=true`, and repeating apply
-recovers the same restart request without repeating provider work.
-
-Setup-mode `/health` returns `status="setup"` and `mlflow=null`; it must not be
-reused as a ready reasoning API. Setup mode exposes no Session routes and opens no
-database or tracking resources. After the controlled restart, normal startup
-initializes the schema and tracing destination under the existing lifecycle.
+The FastAPI server always runs in a single serving mode and exposes no `/setup/*`
+routes. Validate configuration, database readiness, MLflow destinations, and Daytona
+snapshots via `fleet doctor` and `fleet snapshot preflight|build|activate` before
+starting the server. During normal shutdown, the API drains any active API-owned
+experiment job cleanly in its FastAPI lifespan handler.
 
 
 Synthetic jobs are deferred until isolated evaluation and complete serving/judge

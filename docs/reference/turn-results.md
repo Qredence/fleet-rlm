@@ -10,7 +10,7 @@ application data; the engine continues to return native DSPy `Prediction` values
 
 This is the field and legacy-normalization inventory for PRD B. The baseline is
 `45795ffe26ef1d61ce671a6b5beb917a74b9d1c0`; representative baseline frames and old
-rows are retained in `tests/fixtures/turn_results.json`. Successful baseline live
+rows are retained in `tests/fixtures.json`. Successful baseline live
 frames already included `turn_id`; baseline stored results obtained it from their
 enclosing row. New successful results include it in their JSON as well.
 

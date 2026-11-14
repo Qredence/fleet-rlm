@@ -26,14 +26,16 @@ flowchart LR
     Worker --> MLflow
 ```
 
-- FastAPI (`fleet_rlm.api.app`) is the primary application; `cli.py` provides the
+- FastAPI (`fleet_rlm.api.app`) is the primary single-mode application; `cli.py` provides the
   `fleet` entry point, where `serve` starts the API, `web` serves the Textual client,
-  `optimize` is also available as a standalone CLI command, and `eval` is offline tooling.
+  `doctor` validates Models/Database/MLflow/Daytona configuration read-only, `snapshot`
+  manages Daytona execution snapshots, `optimize` runs standalone GEPA/eval workflows,
+  `eval` manages datasets/labels/scoring, and `trace` verifies recorded traces.
 - `launcher.py` owns the local API and optional local MLflow.
 - Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
 - The API owns TUI optimization jobs (`/improve/jobs`, one `kind` ledger shared by future evaluate kinds) through one subprocess slot; labels are managed globally but stay attached to their source Turns, while jobs and the installed program belong to no Session. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
-- The API drains both worker pipes without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and pipe draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
+- The API drains merged worker output into a private log capped at 1 MB per run, without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and output draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
 - A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
 - A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer. Polled status reads reconcile at most once per interval, while startup, admission, review, and shutdown drain reconcile immediately.
 - `session.py` owns the runtime registry and Session leases.
@@ -51,13 +53,14 @@ flowchart LR
   dataset admission, native invocation, callbacks and authoritative evidence between
   serving and freshly reconstructed isolated rollouts. Outer Turn/Session owners
   retain persistence, cancellation arbitration and teardown.
-- `engine/compiled.py` accepts only complete `fleet-program-b1` envelopes. Legacy
-  native JSON remains inspectable, not installable; there is no old-root alias or
-  key conversion. There is one global installed program, `fleet.json`; an absent
-  file means baseline only while no global job was ever approved. The ledger
-  (`Store.approved_program`) is checked at runtime creation and every Turn, so a
-  missing or changed file refuses execution regardless of process age; an invalid
-  file refuses too. Every Session picks up an approval at its next Turn.
+- `engine/compiled.py` accepts only complete `fleet-program-b2` envelopes. Legacy
+  native JSON and `fleet-program-b1` envelopes remain inspectable, not installable;
+  there is no old-root alias or key conversion. There is one global installed
+  program, `fleet.json`; an absent file means baseline only while no global job
+  was ever approved. The ledger (`Store.approved_program`) is checked at runtime
+  creation and every Turn, so a missing or changed file refuses execution regardless
+  of process age; an invalid file refuses too. Every Session picks up an approval
+  at its next Turn.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 
@@ -69,25 +72,28 @@ See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 - `/config` exposes safe values, sources, and a digest.
 - The selected local or Databricks MLflow profile initializes before API readiness.
 - `/health` identifies the tracking destination to prevent incompatible reuse.
+- Adapters default to `XMLAdapter` (`adapter = "xml"`, with native function calling) across all roles, with optional `"chat"` (`ChatAdapter`) and `"json"` (`JSONAdapter`).
+- `model_type` defaults to `"auto"` across all roles, automatically routing custom OpenAI-compatible gateways to `"chat"`.
 
-Local setup:
+Local readiness and snapshots:
 
-- `fleet cli` starts a private loopback setup API before opening runtime resources.
-- A per-launch bearer token protects setup routes.
-- The TUI stages edits, saves `.env` atomically, and probes readiness.
-- Provider operations run serially with bounded, reconnectable progress.
-- Secrets are masked. Ambiguous provider outcomes require readback before retrying.
-- Apply fences new Turns and refuses to restart while work is active.
-- The launcher restarts owned services with fresh settings and preserves the Session ID.
-- Reused and remote servers expose no client-managed setup actions.
+- `fleet doctor` (`doctor.py`) validates configured model routes, PostgreSQL/Lakebase
+  connections and schema version, MLflow destination, and Daytona snapshot readiness in
+  read-only checks (adding `--probe-models` only when an explicit inference probe is
+  requested).
+- `fleet snapshot check|build|activate` manages Daytona's execution snapshot
+  through `sandbox/snapshots.py`.
+- `fleet cli` and `fleet web` open the ordinary FastAPI server directly without a
+  separate setup-mode server; configuration and `.env` / `config/fleet.toml` edits
+  remain operator-managed on the host and apply on restart.
 
-See [configuration](docs/reference/configuration.md) and [setup API](docs/reference/http-api.md#private-local-setup-api).
+See [configuration](docs/reference/configuration.md) and [CLI](docs/reference/cli.md).
 
 ## Durable state and workspace
 
 - The Store owns PostgreSQL access and locked additive migrations.
 - Durable data includes Turn history, files, reviewed memories, request outcomes, settings, and selected immutable replays.
-- A dedicated advisory-lock connection owns each runtime.
+- A pooled PostgreSQL TTL row owns each runtime; a batched heartbeat renews leases and fences loss.
 - Eviction fences stale runtime references before releasing ownership.
 - Stored history cannot restore live Python variables.
 - Daytona Volumes hold Session workspaces.
@@ -103,7 +109,7 @@ Workspace inputs:
 - Optional `/learned` files are written for human review and are not separately read into Turn prompts; their notes may also be persisted as Session memories, separate from executable Skills.
 - Datasets stay in Daytona as file-backed `WorkspaceDataset` handles.
 - Handles expose bounded previews and digests through the DSPy sandbox serialization contract.
-- Initial `known_empty` workspace state is recorded under the Session advisory lease and
+- Initial `known_empty` workspace state is recorded under the Session TTL lease and
   refreshed after lease acquisition. While `known_empty`, Hybrid previews the route with
   the locally staged Skill manifest/catalog; a `Direct` result reuses local history/memory
   and captures local Skill files in selected replays without starting Daytona (leaving Turn
@@ -171,15 +177,22 @@ Deadlines:
 - Routes are `direct`, `flex`, and `rlm`.
 - Strict modes bypass triage.
 - Hybrid uses Jev when configured, otherwise generative routing.
-- Automatic Hybrid chooses Direct or RLM; Flex remains an explicit mode only.
+- Automatic Hybrid uses a 3-way `Choice` across `direct`, `flex`, and `rlm`:
+  `direct` for self-contained responses requiring no code, files, or Skills;
+  `flex` for one bounded calculation, structured file/table inspection, or single-pass workflow with known inputs and verifiable outputs;
+  `rlm` for multi-step iterative investigation, open-ended discovery, progressive Skill workflows, or multi-agent decomposition.
 - Routing errors or unknown labels fall back to RLM.
 - Selected datasets cannot use context-free direct answers.
-- RLM tunes instructions. Flex rewrites module source and initially wraps RLM when given tools.
-- Both execution routes carry the Turn's RLM budgets. The outer Flex interpreter supplies
-  omitted `max_iters` / `max_llm_calls` at native RLM construction, without editing source.
-  Explicit values are preserved; deeper factories and explicit child limits do not inherit these defaults.
+- RLM tunes instructions and supports multi-turn `dspy.History`. Flex rewrites module source and wraps RLM when given tools.
+- Both execution routes share the host-enforced Turn budget. RLMs authored inside Flex
+  retain native DSPy constructor defaults (`max_iters=20`, `max_llm_calls=50`) unless
+  explicitly set; Fleet does not patch constructors or rewrite generated source.
+- Native guest RLM executes inside Daytona with preloaded DSPy (`dspy.primitives.sandbox_guest`)
+  and native wire serialization. Host dataset codecs create file-backed `WorkspaceDatasetView`
+  handles; forwarded views carry only JSON metadata. Guest codec reconstruction never runs on the host.
+  `workspace.load_image` supplies native DSPy images.
 - Both RLM and Flex can delegate.
-- Optional Jev Skill selection preloads up to three instructions and consumes shared budget.
+- Optional Jev Skill selection preloads up to three instructions using `Noul` relevance and consumes shared budget.
 - Ordinary Skill selection failures retain the catalog.
 - DSPy overrides use scoped `dspy.context`. Pinned bridges need upgrade validation.
 
@@ -232,6 +245,12 @@ Progress events:
 - Serving, correctness judging, and reflection use separate roles; `[llm.judge]` inherits base `[llm]` credentials when omitted.
 - Route assessments identify Jev or generative backends.
 - Diagnostic scorers do not automatically become GEPA objectives; execution-evidence diagnostics (`execution-evidence-v3`) can run out-of-band via `fleet eval score` without blocking online Turn tracing.
+- Two-stage optimization runs native GEPA search followed by ReAnchor calibration:
+  Stage 1 searches instruction candidates and Flex code via `dspy.GEPA`.
+  Stage 2 executes native `dspy.experimental.ReAnchor` when a decision LM is configured,
+  fitting triage `Choice` weights and Skill `Noul` thresholds on training examples only.
+  Changed calibrated state is adopted when validation does not regress, before paired validation
+  and holdout gates (`fleet-program-b2`, approval evidence version 3).
 - Search uses approved immutable replays grouped by lineage in isolated runtimes.
   Nonempty train/dev/holdout splits and critical holdout are required before native search.
 - Gold stays outside program inputs. Host receipts support artifact and delegation scoring.

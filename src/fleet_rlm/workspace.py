@@ -2,20 +2,184 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
 
-from dspy import SandboxSerializable, Type
-from pydantic import ConfigDict, GetCoreSchemaHandler
-from pydantic_core import CoreSchema
+from dspy import SandboxSerializable
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _ALLOWED_WORKSPACE_ROOTS = frozenset({"files", "artifacts", "memory", "skills", "buffers", "sessions"})
 # The single byte ceiling for one workspace file: the host API, the remote Workspace, and settings
 # all enforce the same number, so a value raised here cannot silently disagree with the sandbox.
 MAX_WORKSPACE_FILE_BYTES = 25_000_000
+
+_WORKSPACE_FILES_CODE = (
+    "import json,os\n"
+    "root='/workspace'\n"
+    "items=[]\n"
+    f"for area in {tuple(sorted(_ALLOWED_WORKSPACE_ROOTS))!r}:\n"
+    " managed=os.path.join(root,area)\n"
+    " if os.path.islink(managed): raise ValueError('workspace root may not be a symbolic link')\n"
+    " for base,dirs,files in os.walk(managed,followlinks=False):\n"
+    "  dirs[:]=[name for name in dirs if not os.path.islink(os.path.join(base,name))]\n"
+    "  for name in files:\n"
+    "   path=os.path.join(base,name)\n"
+    "   if not os.path.islink(path) and os.path.isfile(path): items.append(os.path.relpath(path,root))\n"
+)
+
+_DIGESTS_CODE = (
+    _WORKSPACE_FILES_CODE + "import hashlib\n"
+    "digests={}\n"
+    "sizes={}\n"
+    "for relative in items:\n"
+    " sizes[relative]=os.path.getsize(os.path.join(root,relative))\n"
+    " digest=hashlib.sha256()\n"
+    " with open(os.path.join(root,relative),'rb') as handle:\n"
+    "  for block in iter(lambda: handle.read(1048576), b''): digest.update(block)\n"
+    " digests[relative]=digest.hexdigest()\n"
+)
+
+ENVIRONMENT_MODULES = (
+    ("numpy", "numpy"),
+    ("pandas", "pandas"),
+    ("scipy", "scipy"),
+    ("mpmath", "mpmath"),
+    ("sympy", "sympy"),
+    ("gmpy2", "gmpy2"),
+    ("polars", "polars"),
+    ("pyarrow", "pyarrow"),
+    ("sklearn", "scikit-learn"),
+    ("openpyxl", "openpyxl"),
+    ("matplotlib", "matplotlib"),
+    ("PIL", "pillow"),
+    ("pypdf", "pypdf"),
+    ("requests", "requests"),
+    ("bs4", "beautifulsoup4"),
+    ("pdfplumber", "pdfplumber"),
+    ("reportlab", "reportlab"),
+    ("docx", "python-docx"),
+    ("pptx", "python-pptx"),
+    ("markitdown", "markitdown"),
+    ("dspy", "dspy"),
+    ("gepa", "gepa"),
+)
+
+ENVIRONMENT_CODE = (
+    "import importlib.metadata,importlib.util,platform,shutil,sys\n"
+    "found=[]\n"
+    f"for module,distribution in {ENVIRONMENT_MODULES!r}:\n"
+    " if importlib.util.find_spec(module) is None: continue\n"
+    " try: found.append(module+' '+importlib.metadata.version(distribution))\n"
+    " except importlib.metadata.PackageNotFoundError: found.append(module)\n"
+    "names=[item.split()[0] for item in found]\n"
+    f"missing=[module for module,_ in {ENVIRONMENT_MODULES!r} if module not in names]\n"
+    "environment='Sandbox environment: Python '+platform.python_version()+'; installed: '+(', '.join(found) or 'none')"
+    "+'; not installed: '+(', '.join(missing) or 'none')"
+    "+'; coding tools: '+(', '.join(name for name in "
+    "('git','node','npm','pnpm','tsc','uv','pytest','ruff','rg','jq') if shutil.which(name)) or 'none')"
+    "+('; call sys.set_int_max_str_digits(0) before converting integers over 4300 digits to str'"
+    " if hasattr(sys,'set_int_max_str_digits') else '')+'.'\n"
+)
+
+
+def turn_inputs_code() -> str:
+    """Build the single remote exec script that gathers workspace digests and environment info."""
+    return (
+        _DIGESTS_CODE
+        + ENVIRONMENT_CODE
+        + "print(json.dumps({'digests': digests, 'sizes': sizes, 'environment': environment, "
+        "'missing': missing}, sort_keys=True))"
+    )
+
+
+def list_workspace_files_code() -> str:
+    """Build the remote Python script to list regular files under managed workspace roots."""
+    return _WORKSPACE_FILES_CODE + "print(json.dumps(sorted(items)))"
+
+
+def workspace_files_metadata_code(
+    rel_paths: list[str],
+    *,
+    create_parents: bool,
+    max_bytes: int | None = None,
+    include_digest: bool = False,
+) -> str:
+    """Build the remote Python script to validate paths, optionally create parent directories, and stat/digest files."""
+    paths_b64 = base64.b64encode(json.dumps(rel_paths).encode("utf-8")).decode("ascii")
+    create_clause = " os.makedirs(parent,exist_ok=True)\n" if create_parents else ""
+    read_clause = " if not os.path.isfile(target): raise FileNotFoundError('workspace file is unavailable')\n"
+    if create_parents:
+        read_clause = (
+            " if os.path.exists(target) and not os.path.isfile(target): "
+            "raise ValueError('workspace target is not a file')\n"
+        )
+    size_clause = " size=os.path.getsize(target) if os.path.isfile(target) else None\n"
+    if max_bytes is not None:
+        size_clause += f" if size>{max_bytes}: raise ValueError('workspace file exceeds size limit')\n"
+    result_clause = " return {'size':size}\n"
+    if include_digest:
+        result_clause = (
+            " digest=hashlib.sha256()\n"
+            " count=0\n"
+            " with open(target,'rb') as handle:\n"
+            "  before=os.fstat(handle.fileno())\n"
+            "  for block in iter(lambda: handle.read(1048576),b''):\n"
+            "   count+=len(block)\n"
+            "   if count>size: raise ValueError('workspace file changed while inspected')\n"
+            "   digest.update(block)\n"
+            "  after=os.fstat(handle.fileno())\n"
+            " if count!=size or before.st_size!=size or "
+            "(before.st_mtime_ns,before.st_ctime_ns)!=(after.st_mtime_ns,after.st_ctime_ns):\n"
+            "  raise ValueError('workspace file changed while inspected')\n"
+            " return {'size':size,'sha256':digest.hexdigest()}\n"
+        )
+    return (
+        "import base64,hashlib,json,os\n"
+        "root=os.path.realpath('/workspace')\n"
+        "def check(relative):\n"
+        " parts=relative.split('/')\n"
+        " parent=root\n"
+        " for part in parts[:-1]:\n"
+        "  parent=os.path.join(parent,part)\n"
+        "  if os.path.islink(parent): raise ValueError('workspace path may not traverse symbolic links')\n"
+        "  if os.path.exists(parent) and not os.path.isdir(parent): "
+        "raise ValueError('workspace parent is not a directory')\n"
+        " if os.path.commonpath((root,os.path.realpath(parent))) != root: "
+        "raise ValueError('invalid workspace path')\n" + create_clause + " target=os.path.join(parent,parts[-1])\n"
+        " if os.path.islink(target): raise ValueError('workspace target may not be a symbolic link')\n"
+        " if os.path.commonpath((root,parent)) != root: raise ValueError('invalid workspace path')\n"
+        + read_clause
+        + size_clause
+        + result_clause
+        + "relatives=json.loads(base64.b64decode('"
+        + paths_b64
+        + "').decode('utf-8'))\n"
+        "print(json.dumps([check(relative) for relative in relatives]))"
+    )
+
+
+def verify_python_artifact_code(path: str, *, digest: str, timeout: int) -> str:
+    """Build the remote Python script to execute a verified `.py` artifact in an isolated process group."""
+    return (
+        "import hashlib,json,os,signal,subprocess,sys,tempfile\n"
+        f"path={json.dumps('/workspace/' + path)}\n"
+        f"assert hashlib.sha256(open(path,'rb').read()).hexdigest()=={digest!r}\n"
+        "with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:\n"
+        " p=subprocess.Popen([sys.executable,'-I',path],cwd='/workspace',stdout=out,stderr=err,"
+        "start_new_session=True)\n"
+        " complete=True\n"
+        f" try: p.wait(timeout={timeout})\n"
+        " except subprocess.TimeoutExpired: complete=False\n"
+        " finally:\n"
+        "  try: os.killpg(p.pid,signal.SIGKILL)\n"
+        "  except ProcessLookupError: pass\n"
+        "  p.wait()\n"
+        " out.seek(0); data=out.read(65537)\n"
+        " print(json.dumps({'complete':complete and len(data)<=65536,'exit_code':p.returncode,"
+        "'stdout':data[:65536].decode('utf-8',errors='replace')}))\n"
+    )
 
 
 def validate_session_id(session_id: str) -> str:
@@ -143,10 +307,29 @@ class Workspace:
     def remember(self,name,content): return self.write('memory/'+name,content)
     def diff(self,path,proposed):
         return ''.join(difflib.unified_diff(self.read_text(path).splitlines(True),proposed.splitlines(True)))
+    def load_image(self,path,max_bytes=10000000):
+        import base64, mimetypes
+        import dspy
+        if not 0<=max_bytes<=__FLEET_MAX_FILE_BYTES__: raise ValueError('invalid read bounds')
+        p = self.resolve(path)
+        size = p.stat().st_size
+        if size>max_bytes: raise ValueError('image exceeds max_bytes')
+        raw = p.read_bytes()
+        mime, _ = mimetypes.guess_type(p.name)
+        if not mime or not mime.startswith('image/'):
+            if raw.startswith(b'\x89PNG\r\n\x1a\n'): mime = 'image/png'
+            elif raw.startswith(b'\xff\xd8\xff'): mime = 'image/jpeg'
+            elif raw.startswith((b'GIF87a', b'GIF89a')): mime = 'image/gif'
+            elif raw.startswith(b'RIFF') and raw[8:12]==b'WEBP': mime = 'image/webp'
+            else: raise ValueError('unsupported image format')
+        return dspy.Image(url=f'data:{mime};base64,{base64.b64encode(raw).decode("ascii")}')
 
-class WorkspaceDatasetView:
+class WorkspaceDatasetView(dict):
     def __init__(self, metadata):
-        self.metadata = metadata
+        # The host's one-way SandboxSerializable hook creates this guest-only view.
+        # When forwarded to a nested agent or host tool, only JSON metadata crosses.
+        super().__init__(metadata)
+        self.metadata = self
         self.path = str(workspace.resolve(metadata['path']))
         actual = workspace.stat(metadata['path'])
         if metadata.get('sha256') and actual['sha256']!=metadata['sha256']:
@@ -169,6 +352,12 @@ class WorkspaceDatasetView:
                 out.append((n,line[:2000]))
                 if len(out)>=limit: break
         return out
+    def rlm_preview(self,max_chars=500):
+        return (
+            f"WorkspaceDataset({self.metadata['path']!r}, {self.metadata.get('size_bytes', 0)} bytes): "
+            f"{self.metadata.get('description', '')}. Use .path, .preview(), .chunks(), .lines(), .search()."
+        )[:max_chars]
+    def __str__(self): return self.rlm_preview()
 
 workspace = Workspace()
 """.replace("__FLEET_WORKSPACE_ROOTS__", repr(tuple(sorted(_ALLOWED_WORKSPACE_ROOTS)))).replace(
@@ -178,7 +367,7 @@ workspace = Workspace()
 
 @dataclass(frozen=True)
 class WorkspaceDataset(SandboxSerializable):
-    """A content-addressed file handle injected once per native RLM invocation."""
+    """A content-addressed file handle injected once per native RLM or Flex invocation."""
 
     workspace_path: str
     description: str = ""
@@ -200,10 +389,6 @@ class WorkspaceDataset(SandboxSerializable):
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
         }
-
-    def flex_input(self) -> SandboxSerializable:
-        """Use native Flex custom-type restoration without changing this dataclass's public contract."""
-        return _FlexDatasetInput(dataset=self)
 
     def sandbox_setup(self) -> str:
         """Import JSON; Fleet's interpreter preamble already installs WorkspaceDatasetView."""
@@ -234,35 +419,3 @@ class WorkspaceDataset(SandboxSerializable):
     def __str__(self) -> str:
         """Return the same summary as rlm_preview."""
         return self.rlm_preview()
-
-
-class _FlexDatasetInput(Type, SandboxSerializable):
-    """Flex restores this host object before an inner RLM invokes the dataset's four native hooks.
-
-    The wrapper keeps DSPy's Type.description() separate from the existing
-    WorkspaceDataset.description field. Only the metadata marker crosses Flex;
-    the file-backed view is constructed by the RLM in its own interpreter.
-    """
-
-    model_config = ConfigDict(frozen=True)
-    dataset: WorkspaceDataset
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
-        """Use Type's model schema, rather than SandboxSerializable's pass-through field schema."""
-        return handler(source_type)
-
-    def format(self) -> str:
-        return "WorkspaceDataset:" + json.dumps(self.dataset.to_descriptor(), sort_keys=True, separators=(",", ":"))
-
-    def sandbox_setup(self) -> str:
-        return self.dataset.sandbox_setup()
-
-    def to_sandbox(self) -> bytes:
-        return self.dataset.to_sandbox()
-
-    def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
-        return self.dataset.sandbox_assignment(var_name, data_expr)
-
-    def rlm_preview(self, max_chars: int = 500) -> str:
-        return self.dataset.rlm_preview(max_chars)

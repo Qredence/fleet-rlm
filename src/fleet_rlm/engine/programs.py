@@ -73,6 +73,7 @@ class FleetProgram(dspy.Module):
         execution_mode: str = "hybrid",
         required_skills: tuple[RequiredSkill, ...] = (),
         selected_route: Route | None = None,
+        rlm_history: dspy.History | None = None,
     ) -> dspy.Prediction:
         """Compose effective-route policy, optional Skill selection and native reasoning."""
         route = selected_route or self.routing(
@@ -95,4 +96,5 @@ class FleetProgram(dspy.Module):
             session_history=session_history,
             context=context,
             mode=execution_mode,
+            rlm_history=rlm_history,
         )

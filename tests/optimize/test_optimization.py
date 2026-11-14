@@ -1,36 +1,59 @@
+"""Offline domain regression coverage."""
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import json
+import os
+import signal
+import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from runpy import run_path
 from types import SimpleNamespace
+from typing import Any
 
 import dspy
 import pytest
+from dspy import ChatAdapter, JSONAdapter
+from dspy.primitives.facade import BOOTSTRAP
 from dspy.utils import DummyLM
 
 from fleet_rlm.config import FleetSettings
-from fleet_rlm.engine.compiled import program_envelope
+from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, Route
+from fleet_rlm.engine.compiled import CompiledProgramFile, program_envelope
 from fleet_rlm.engine.invocation import FleetRuntime
+from fleet_rlm.engine.programs import FleetProgram
 from fleet_rlm.optimization_runs import add_optimization_arguments
 from fleet_rlm.optimize import artifacts, dataset, validation
+from fleet_rlm.optimize import cli_commands as cli_mod
 from fleet_rlm.optimize import gepa as workflow
+from fleet_rlm.optimize import progress as progress_mod
+from fleet_rlm.optimize import runner as runner_mod
 from fleet_rlm.optimize.artifacts import (
     ArtifactManifest,
     approve_candidate,
+    component_diffs,
     digest_bytes,
     promotion_gate,
     tunable_components,
 )
 from fleet_rlm.optimize.dataset import grouped_split
 from fleet_rlm.optimize.scorers import SCORER_VERSION, fleet_metric
-from fleet_rlm.optimize.validation import IsolatedFleetProgram, score_split
+from fleet_rlm.optimize.validation import IsolatedFleetProgram, RolloutCleanup, RolloutCleanupError, score_split
 from fleet_rlm.replay import encode_snapshot
+from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+
+# Consolidated from optimize/test_optimization.py
+
+
+# Optimizer lifecycle and gates
 
 EVENT_PREFIX = "FLEET_EVENT "
 
@@ -67,6 +90,9 @@ class MemoryOptimizationStore:
 
     def acquire_optimization_lease(self):
         return SimpleNamespace(close=lambda: self.events.append(("lease.close", None)))
+
+    def assert_optimization_lease(self, *, verify=False):
+        assert verify is True
 
     def optimization_owner_alive(self, _owner_id):
         return False
@@ -180,7 +206,8 @@ def _selected_snapshot(session: str, turn_id: str, task: str, files: dict[str, b
 @pytest.mark.parametrize("case", ["sensitive_filename", "large_workspace", "long_task"])
 def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypatch, case):
     from fleet_rlm import cli
-    from fleet_rlm.observability import sanitize_trace_span
+    from fleet_rlm.observability import sanitize_trace_span, trace_object
+    from fleet_rlm.optimize import evaluation as evaluation_module
     from fleet_rlm.store import Store
 
     files = {"files/token_counts.csv": b"4"}
@@ -217,16 +244,31 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
     saved = []
     store = SimpleNamespace(
         replay_snapshot=lambda *_args: (digest, compressed),
+        reviewed_examples=lambda *_args: [
+            {
+                "session_id": "s1",
+                "turn_id": "t1",
+                "answer": labels["expected_answer"],
+                "expected_values": labels["expected_values"],
+                "route": labels["route"],
+                "critical": labels["critical"],
+                "source_group": labels["source_group"],
+                "replay_snapshot_sha256": digest,
+                "replay_snapshot": compressed,
+            }
+        ],
         save_review_labels=lambda *args, **kwargs: saved.append((args, kwargs)),
         close=lambda: None,
     )
-    monkeypatch.setattr(dataset, "turn_traces", lambda *_args: [trace])
-    examples = dataset.load_examples_from_mlflow("exp", store=store)
+    assert trace_object(json.dumps(json.dumps({"task": task}))) == {"task": task}
+    examples = dataset.load_examples(store, "exp")
     assert len(examples) == 1 and examples[0].task == task
     assert examples[0].inputs()["session_history"] == "prior conversation"
     monkeypatch.setattr(Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(dataset.mlflow, "get_trace", lambda *_args, **_kw: trace)
-    monkeypatch.setattr(dataset.mlflow, "log_expectation", lambda **kw: labels.update({kw["name"]: kw["value"]}))
+    monkeypatch.setattr(evaluation_module.mlflow, "get_trace", lambda *_args, **_kw: trace)
+    monkeypatch.setattr(
+        evaluation_module.mlflow, "log_expectation", lambda **kw: labels.update({kw["name"]: kw["value"]})
+    )
     settings = SimpleNamespace(
         fleet_database_url="postgresql://fake", fleet_database_schema="fleet", fleet_lakebase_endpoint=""
     )
@@ -252,6 +294,7 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
 @pytest.mark.parametrize("failure", ["missing_snapshot", "invalid_labels", "partial_sync"])
 def test_label_preflight_and_retry_never_clear_omitted_expectations(monkeypatch, failure):
     from fleet_rlm import cli
+    from fleet_rlm.optimize import evaluation as evaluation_module
     from fleet_rlm.store import Store
 
     _snapshot, digest, compressed = _selected_snapshot("s1", "t1", "add", {})
@@ -280,13 +323,13 @@ def test_label_preflight_and_retry_never_clear_omitted_expectations(monkeypatch,
         close=lambda: None,
     )
     monkeypatch.setattr(Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(dataset.mlflow, "get_trace", lambda *_args, **_kw: trace)
+    monkeypatch.setattr(evaluation_module.mlflow, "get_trace", lambda *_args, **_kw: trace)
 
     def log(**kwargs):
         writes.append(kwargs)
         labels[kwargs["name"]] = kwargs["value"]
 
-    monkeypatch.setattr(dataset.mlflow, "log_expectation", log)
+    monkeypatch.setattr(evaluation_module.mlflow, "log_expectation", log)
     args = SimpleNamespace(
         trace_id="tr1", status=None, group=None, answer=None, value=None, route=None, critical=False, reviewer="human"
     )
@@ -360,18 +403,18 @@ def test_required_replay_v2_reconstructs_exact_bytes_and_rejects_mismatched_orig
 
 
 def test_mapping_reads_a_request_that_unity_catalog_double_encoded() -> None:
+    from fleet_rlm.observability import trace_object
+
     request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)"}
-    assert dataset.trace_object(json.dumps(request)) == request
-    assert dataset.trace_object(json.dumps(json.dumps(request))) == request
-    assert dataset.trace_object("not json") == {}
-    assert dataset.trace_object(json.dumps("just a string")) == {}
+    assert trace_object(json.dumps(request)) == request
+    assert trace_object(json.dumps(json.dumps(request))) == request
+    assert trace_object("not json") == {}
+    assert trace_object(json.dumps("just a string")) == {}
 
 
-def test_turn_traces_skip_pytest_traces_in_the_runtime_experiment(monkeypatch) -> None:
+def test_is_benchmark_trace_detects_tags_and_root_span_attributes() -> None:
     request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)", "context_files": {}}
     user_turn = _trace("t1", "sess-a", request, {})
-    pytest_turn = _trace("t2", "sess-b", request, {})
-    pytest_turn.info.trace_metadata["mlflow.source.name"] = "/repo/.venv/bin/pytest"
     tagged_benchmark = _trace("t3", "sess-c", request, {})
     tagged_benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
     span_benchmark = _trace("t4", "sess-d", request, {})
@@ -379,79 +422,9 @@ def test_turn_traces_skip_pytest_traces_in_the_runtime_experiment(monkeypatch) -
         SimpleNamespace(parent_id="root", attributes={}),
         SimpleNamespace(parent_id=None, attributes={"fleet.benchmark.model_id": "m-bench"}),
     ]
-    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(
-        dataset.mlflow,
-        "MlflowClient",
-        lambda: SimpleNamespace(
-            search_traces=lambda **_kwargs: [user_turn, pytest_turn, tagged_benchmark, span_benchmark]
-        ),
-    )
-    assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev")] == ["t1"]
-
-
-def test_turn_traces_page_past_benchmark_traces(monkeypatch) -> None:
-    request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)", "context_files": {}}
-    benchmark = _trace("bench", "sess-b", request, {})
-    benchmark.info.tags = {"fleet.benchmark.campaign": "cold-start"}
-    user_turn = _trace("user", "sess-a", request, {})
-
-    class Page(list):
-        def __init__(self, items, token):
-            super().__init__(items)
-            self.token = token
-
-    def search_traces(**kwargs):
-        if kwargs.get("page_token") is None:
-            return Page([benchmark], "next")
-        return Page([user_turn], None)
-
-    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=search_traces))
-    assert [trace.info.trace_id for trace in dataset.turn_traces("fleet-rlm-dev", max_results=1)] == ["user"]
-
-
-def test_mlflow_loader_requires_approved_gold_and_skips_rejected_or_legacy_traces(monkeypatch) -> None:
-    labels = {"expected_answer": "4", "review_status": "approved", "source_group": "g"}
-    snapshots = {}
-
-    def request_for(session: str, turn_id: str, task: str) -> dict:
-        snapshot, digest, compressed = _selected_snapshot(session, turn_id, task, {})
-        snapshots[(session, turn_id)] = (digest, compressed)
-        return {
-            "task": task,
-            "turn_id": turn_id,
-            "workspace_manifest": snapshot["workspace_manifest"],
-            "context_files": snapshot["context_files"],
-            "replay_snapshot_selected": True,
-            "replay_snapshot_sha256": digest,
-        }
-
-    request = request_for("sess-a", "turn-1", "2+2")
-    traces = [
-        _trace("t1", "sess-a", request, labels),
-        _trace(
-            "t2",
-            "sess-b",
-            request_for("sess-b", "turn-2", "3+1"),
-            {**labels, "expected_values": ["4"], "route": "direct"},
-        ),
-        _trace("t3", "sess-c", {"task": "legacy", "session_id": "sess-c"}, labels),  # no manifest: not self-contained
-        _trace("t4", "sess-d", request, {**labels, "review_status": "rejected"}),
-        _trace("t5", "sess-e", request_for("sess-e", "turn-5", "unlabelled"), {}),
-    ]
-    monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-    monkeypatch.setattr(dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=lambda **_kwargs: traces))
-    store = SimpleNamespace(replay_snapshot=lambda session, turn: snapshots.get((session, turn)))
-    examples = dataset.load_examples_from_mlflow("fleet-rlm-dev", store=store)
-    assert [(example.source_session, example.task) for example in examples] == [
-        ("sess-a", "2+2"),
-        ("sess-b", "3+1"),
-    ]
-    assert examples[1].expected_values == ["4"] and examples[1].route == "direct"
-    assert examples[0].memory_summary == "reviewed memory" and examples[0].session_history == "prior conversation"
-    assert examples[0].replay_turn_id == "turn-1"
-    assert examples[0].inputs()["session_history"] == "prior conversation"
+    assert not dataset.is_benchmark_trace(user_turn)
+    assert dataset.is_benchmark_trace(tagged_benchmark)
+    assert dataset.is_benchmark_trace(span_benchmark)
 
 
 def test_dataset_digest_changes_when_gold_or_context_changes() -> None:
@@ -483,15 +456,13 @@ def test_curation_refuses_too_few_examples_and_names_the_label_command(monkeypat
         )
         for index in range(9)
     ]
-    monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
-    monkeypatch.setattr(dataset, "load_examples_from_mlflow", lambda *_args, **_kwargs: examples)
+    monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: examples)
     with pytest.raises(ValueError, match=r"3 source groups are needed; found 2.*fleet eval label"):
         dataset.curate_dataset(SimpleNamespace(), "exp")
 
 
-@pytest.mark.parametrize("source", ["postgres", "mlflow"])
 @pytest.mark.parametrize("snapshot", ["complete", "missing", "extra", "invalid", "empty"])
-def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source, snapshot) -> None:
+def test_curation_only_accepts_complete_workspace_revisions(snapshot) -> None:
     # A comma in a filename must not be treated as a manifest separator.
     files = {"files/rates.csv": b"rate\n3\n", "files/input, old.csv": b"id,value\n1,17\n"}
     session, turn_id, task = "s1", "turn-1", "Apply the rates to the input"
@@ -509,6 +480,7 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         contexts = {}
     digest, compressed = encode_snapshot(replay)
     row = {
+        "session_id": "s1",
         "turn_id": turn_id,
         "task": task,
         "answer": "",
@@ -523,34 +495,8 @@ def test_curation_only_accepts_complete_workspace_revisions(monkeypatch, source,
         "replay_snapshot_sha256": digest,
         "replay_snapshot": compressed,
     }
-    if source == "postgres":
-        row["session_id"] = "s1"
-        store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
-        examples = dataset.load_examples_from_postgres(store)
-    else:
-        labels = {
-            "expected_answer": "",
-            "expected_values": ["17"],
-            "route": "rlm",
-            "critical": True,
-            "review_status": "approved",
-            "source_group": "reviewed-source",
-        }
-        request = {
-            "task": task,
-            "turn_id": turn_id,
-            "workspace_manifest": replay["workspace_manifest"],
-            "context_files": contexts,
-            "replay_snapshot_selected": True,
-            "replay_snapshot_sha256": digest,
-        }
-        trace = _trace("reviewed-trace", "s1", request, labels)
-        monkeypatch.setattr(dataset.mlflow, "get_experiment_by_name", lambda _name: SimpleNamespace(experiment_id="1"))
-        monkeypatch.setattr(
-            dataset.mlflow, "MlflowClient", lambda: SimpleNamespace(search_traces=lambda **_kwargs: [trace])
-        )
-        store = SimpleNamespace(replay_snapshot=lambda *_args: (digest, compressed))
-        examples = dataset.load_examples_from_mlflow("unused", store=store)
+    store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
+    examples = dataset.load_examples(store, "unused")
     if snapshot in {"complete", "empty"}:
         assert len(examples) == 1
         assert examples[0].context_files == contexts
@@ -572,6 +518,21 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     files = {"files/input.csv": b"id,value\n1,17\n", "files/rates.csv": b"rate\n3\n"}
     contexts = {path: digest_bytes(raw) for path, raw in files.items()}
     replay, snapshot_digest, compressed = _selected_snapshot("s1", "turn-1", "read these files", files)
+    from dspy.primitives.repl_types import REPLEntry, build_repl_event
+
+    from fleet_rlm.engine.reasoning import serialize_rlm_turn_history
+
+    prior_history = dspy.History(
+        messages=[
+            build_repl_event(
+                {"task": "prior computation"},
+                REPLEntry(reasoning="calculate", code="1 + 1", output="2", max_output_chars=3000),
+                {},
+            )
+        ]
+    )
+    replay["rlm_history"] = [{"rlm_history": serialize_rlm_turn_history(prior_history)}]
+    snapshot_digest, compressed = encode_snapshot(replay)
     if snapshot == "missing":
         del contexts["files/rates.csv"]
     if snapshot == "changed":
@@ -642,6 +603,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             (current.fleet_sub_model, "sub"),
         ]
         assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
+        assert engine.optimization.rlm_history == prior_history
         assert engine.compiled_path is None
 
 
@@ -795,7 +757,7 @@ def test_approval_rechecks_policy_candidate_bytes_and_current_incumbent(tmp_path
     lm = dspy.LM("openai/offline")
     program = FleetRuntime(DaytonaSandboxManager("k", "o", "v", "approval"), lm, lm).program
     candidate.write_bytes(program_envelope(program))
-    evidence = {"evidence_format": "2", "incumbent_digest": "", "configuration_digest": "current"}
+    evidence = {"evidence_format": "3", "incumbent_digest": "", "configuration_digest": "current"}
     manifest = _manifest(candidate, "s1-1", _evaluation())
     manifest = replace(manifest, dependencies=evidence)
 
@@ -854,7 +816,7 @@ def test_approval_evidence_uses_sorted_installed_distribution_identity(monkeypat
 
     evidence = artifacts.approval_evidence(FleetSettings(_env_file=None), "incumbent", scorer_version=SCORER_VERSION)
 
-    assert evidence["evidence_format"] == "2"
+    assert evidence["evidence_format"] == "3"
     assert evidence["dependency_fingerprint"] == expected_fingerprint
     assert "lockfile_digest" not in evidence
     assert evidence["incumbent_digest"] == "incumbent"
@@ -1057,12 +1019,8 @@ def test_isolated_rollouts_retain_candidate_instructions_without_sharing_runtime
 
 
 def test_metric_binds_the_explicit_judge_instead_of_serving_lm() -> None:
-    serving = DummyLM(
-        [{"reasoning": "incorrect", "is_correct": False, "is_safe": True, "critique": "wrong model role"}]
-    )
-    judge = DummyLM(
-        [{"reasoning": "verified", "is_correct": True, "is_safe": True, "critique": "Matches expected result"}]
-    )
+    serving = DummyLM([{"plan": "incorrect", "is_correct": False, "is_safe": True, "critique": "wrong model role"}])
+    judge = DummyLM([{"plan": "verified", "is_correct": True, "is_safe": True, "critique": "Matches expected result"}])
     with dspy.context(lm=serving):
         result = fleet_metric(
             dspy.Example(task="13*17", answer="221"),
@@ -1074,9 +1032,7 @@ def test_metric_binds_the_explicit_judge_instead_of_serving_lm() -> None:
 
 
 def test_metric_accepts_native_sixth_program_trace_argument() -> None:
-    judge = DummyLM(
-        [{"reasoning": "verified", "is_correct": True, "is_safe": True, "critique": "Matches reviewed result"}]
-    )
+    judge = DummyLM([{"plan": "verified", "is_correct": True, "is_safe": True, "critique": "Matches reviewed result"}])
     result = fleet_metric(
         dspy.Example(task="13*17", answer="221"),
         dspy.Prediction(answer="221", lm_calls=1, sandbox_errors=0, submit_rejections=0),
@@ -1196,7 +1152,7 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
 
     live.compiled.reload_if_changed(live.program)  # the shared host invocation boundary
     assert live.compiled.digest == manifest.digest
-    serving = DummyLM([{"reasoning": "r", "answer": "Paris"}])
+    serving = DummyLM([{"plan": "r", "answer": "Paris"}])
     with dspy.context(lm=serving):
         assert (
             live.program.reasoning.direct(memory_summary="", session_history="", task="Capital of France?").answer
@@ -1206,8 +1162,9 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.parametrize("stale_evidence", [False, True])
+@pytest.mark.parametrize("lease_lost", [False, True])
 def test_managed_approval_leaves_terminal_transition_to_api_parent(
-    tmp_path, monkeypatch, capsys, stale_evidence
+    tmp_path, monkeypatch, capsys, stale_evidence, lease_lost
 ) -> None:
 
     settings = FleetSettings(
@@ -1265,7 +1222,18 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
         "--managed-owner-id",
         "api-owner",
     ]
-    if stale_evidence:
+    if lease_lost:
+
+        def lost_lease(*, verify=False):
+            assert verify is True
+            raise RuntimeError("Optimization lease was lost or expired")
+
+        monkeypatch.setattr(store, "assert_optimization_lease", lost_lease)
+        with pytest.raises(RuntimeError, match="lease was lost"):
+            workflow.run(parser.parse_args(args), parser, settings)
+        assert not (tmp_path / "fleet.json").exists()
+        expected = "failed"
+    elif stale_evidence:
         with pytest.raises(ValueError, match="evidence is stale"):
             workflow.run(parser.parse_args(args), parser, settings)
         assert not (tmp_path / "fleet.json").exists()
@@ -1313,14 +1281,14 @@ def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_pat
         fleet_database_migration_url="postgresql://migrator:secret@db.example:5432/fleet",
         compiled_program_dir=str(tmp_path),
     )
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(
         workflow.Store,
         "open",
         lambda dsn, **kwargs: captured.update(dsn=dsn, **kwargs) or store,
     )
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
     parser = _optimization_parser()
 
     workflow.run(parser.parse_args(["--structured-events"]), parser, settings)
@@ -1344,9 +1312,9 @@ def test_autolog_trace_configuration(monkeypatch, tmp_path, phase, trace_search)
         settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
         store = MemoryOptimizationStore()
         monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-        monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-        monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
         parser = _optimization_parser()
         argv = []
         if trace_search:
@@ -1382,7 +1350,7 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
 
     store.close = fail_close
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -1390,7 +1358,7 @@ def test_unconfirmed_store_close_cannot_leave_standalone_run_approvable(monkeypa
         if outcome == "budget_exhausted":
             raise workflow.BudgetExhaustedError("Optimization token budget exhausted")
 
-    monkeypatch.setattr(workflow, "_compile", compile_outcome)
+    monkeypatch.setattr(cli_mod, "_compile", compile_outcome)
     parser = _optimization_parser()
 
     with pytest.raises(RuntimeError, match="pool close failed"):
@@ -1478,6 +1446,7 @@ def test_postgres_examples_span_every_session() -> None:
         True,
         "finalization",
         "evidence_change",
+        "lease_loss",
         "interrupt_search",
         "interrupt_validation",
         "callback_failure",
@@ -1528,7 +1497,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     active.write_bytes(program_envelope(incumbent))
     digest = digest_bytes(active.read_bytes())
     store = MemoryOptimizationStore([{"run_id": "s1-run", "status": "running", "owner_id": "owner"}])
-    monkeypatch.setattr(workflow, "build_lm", lambda _settings, _model_id, _role: lm)
+    monkeypatch.setattr(runner_mod, "build_lm", lambda _settings, _model_id, _role: lm)
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
 
     def unavailable_reflection(*_args, **_kwargs):
@@ -1539,7 +1508,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     train, dev, holdout = [
         [dspy.Example(task=name, source_group=name, critical=name == "holdout")] for name in ("train", "dev", "holdout")
     ]
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_args, **_kw: (train, dev, holdout))
     factories = []
     late_entered = threading.Event()
     release_late = threading.Event()
@@ -1563,16 +1532,16 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         factories.append(config)
         return lambda *_args: Runtime()
 
-    monkeypatch.setattr(workflow, "build_isolated_engine_factory", factory)
+    monkeypatch.setattr(runner_mod, "build_isolated_engine_factory", factory)
     searched = []
     optimizer_kwargs = {}
 
     def judge_metric(*_args, **kwargs):
         assert kwargs["judge_lm"] is lm
-        assert type(dspy.settings.adapter) is dspy.ChatAdapter
+        assert type(dspy.settings.adapter) is dspy.XMLAdapter
         return dspy.Prediction(score=1.0)
 
-    monkeypatch.setattr(workflow, "fleet_metric", judge_metric)
+    monkeypatch.setattr(runner_mod, "fleet_metric", judge_metric)
 
     class Optimizer:
         def __init__(self, **kwargs):
@@ -1661,7 +1630,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             assert late_entered.wait(timeout=10)
         return _evaluation()["candidate" if changed else "baseline"]["passes"][0]
 
-    monkeypatch.setattr(workflow, "score_stage", score)
+    monkeypatch.setattr(runner_mod, "score_stage", score)
     narration_budgets = []
     if cancel_after_validation == "optional_narration":
 
@@ -1671,7 +1640,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             narration_budgets.append(budget)
             return "Optional summary."
 
-        monkeypatch.setattr(workflow, "_comparison_rationale", narration)
+        monkeypatch.setattr(runner_mod, "_comparison_rationale", narration)
     if cancel_after_validation == "evidence_change":
         digest_calls = 0
 
@@ -1693,7 +1662,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             write_manifest(*args)
             (Path(optimizer_kwargs["log_dir"]) / "gepa.stop").touch()
 
-        monkeypatch.setattr(workflow, "write_manifest", write_then_cancel)
+        monkeypatch.setattr(runner_mod, "write_manifest", write_then_cancel)
     if cancel_after_validation == "validation_write_failure":
         original = store.update_optimization_run
 
@@ -1709,12 +1678,19 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
             raise RuntimeError("private telemetry credential")
 
         if cancel_after_validation == "optional_stdout":
-            monkeypatch.setattr(workflow, "print", unavailable, raising=False)
+            monkeypatch.setattr(runner_mod, "print", unavailable, raising=False)
         elif cancel_after_validation == "optional_tracking_setup":
             monkeypatch.setattr(workflow.mlflow, "start_run", unavailable)
         else:
             for name in ("log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
                 monkeypatch.setattr(workflow.mlflow, name, unavailable)
+    if cancel_after_validation == "lease_loss":
+
+        def lost_lease(*, verify=False):
+            assert verify is True
+            raise RuntimeError("Optimization lease was lost or expired")
+
+        monkeypatch.setattr(store, "assert_optimization_lease", lost_lease)
     args = SimpleNamespace(
         validation_ratio=0.35,
         max_metric_calls=4,
@@ -1728,11 +1704,22 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         # No rollouts are wasted on a candidate identical to the incumbent; the gate names the reason.
         assert measured == []
         manifest = json.loads(next((tmp_path / "candidates").glob("*.manifest.json")).read_text())
-        assert manifest["gate"] == {"passed": False, "reasons": ["candidate changes no instructions or Flex code"]}
+        assert manifest["gate"] == {
+            "passed": False,
+            "reasons": ["candidate changes no instructions, Flex code, or calibrated decision fields"],
+        }
         assert manifest["evaluation"]["validation"] == "skipped_unchanged"
         full = json.loads(next((tmp_path / "candidates").glob("*.comparison.json")).read_text())
         assert full["rationale"] == "" and "paired validation was skipped" in full["report"]
         assert "scores" not in store.records["s1-run"]
+        return
+    if cancel_after_validation == "lease_loss":
+        with pytest.raises(RuntimeError, match="lease was lost"):
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert measured.count(False) == measured.count(True) == 3
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        assert digest_bytes(active.read_bytes()) == digest
+        assert "candidate_path" not in store.records["s1-run"]
         return
     if cancel_after_validation == "token_budget":
         with pytest.raises(workflow.BudgetExhaustedError):
@@ -1776,7 +1763,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     if cancel_after_validation in {"interrupt_search", "interrupt_validation"}:
         store.records.clear()
         monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-        monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+        monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
         monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
         parser = _optimization_parser()
@@ -1857,12 +1844,6 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     assert active.read_bytes() and digest_bytes(active.read_bytes()) == digest
 
 
-def test_optimize_no_longer_accepts_a_session() -> None:
-    parser = _optimization_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--session", "sess_a"])
-
-
 def test_relabelling_a_trace_overrides_the_earlier_label() -> None:
     newer = SimpleNamespace(name="route", value="direct", create_time_ms=2)
     older = SimpleNamespace(name="route", value="flex", create_time_ms=1)
@@ -1882,16 +1863,10 @@ def test_code_digest_covers_behavior_modules_and_ignores_docs_or_api():
         "optimization_runs.py",
         "observability.py",
         "session.py",
-        "store.py",
     } <= set(DIGEST_SOURCES)
-    # Docs, the API layer, the TUI, and the Store cannot change Turn behavior or scoring.
+    # Docs and presentation layers (api/, tui/) do not change Turn behavior or scoring.
     for excluded in ("api/", "tui/", "dspy_support.py"):
         assert not any(name.startswith(excluded) for name in DIGEST_SOURCES)
-
-
-def test_mlflow_example_loading_requires_a_store() -> None:
-    with pytest.raises(ValueError, match="store is required"):
-        dataset.load_examples_from_mlflow("experiment", store=None)
 
 
 def test_gepa_progress_callback_emits_only_observed_metric_call_counts(capsys) -> None:
@@ -1940,9 +1915,7 @@ def test_gepa_progress_callback_persists_latest_snapshot_without_transport_event
     ("scenario", "expected_status"),
     [
         ("candidate-active", "approved"),
-        ("incumbent-current-evidence", "approved"),
         ("incumbent-stale-evidence", "completed"),
-        ("unknown-active", "interrupted"),
     ],
 )
 def test_standalone_approval_reconciles_imported_legacy_approving_records(
@@ -2050,12 +2023,12 @@ def test_database_stop_fence_is_checked_at_safe_boundaries(tmp_path) -> None:
 
 def test_run_persists_cancellation_without_candidate(tmp_path, monkeypatch) -> None:
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     store = MemoryOptimizationStore()
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
     monkeypatch.setattr(
-        workflow,
+        cli_mod,
         "_compile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(workflow.OptimizationCancelledError("stop requested")),
     )
@@ -2101,7 +2074,7 @@ def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypa
     store.acquire_optimization_lease = acquire
     store.update_optimization_run = guarded_update
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -2109,7 +2082,7 @@ def test_standalone_recovers_orphan_before_admitting_next_run(tmp_path, monkeypa
         assert lease_held
         assert store.get_optimization_run(old["run_id"])["status"] == "interrupted"
 
-    monkeypatch.setattr(workflow, "_compile", fake_compile)
+    monkeypatch.setattr(cli_mod, "_compile", fake_compile)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     workflow.run(parser.parse_args([]), parser, settings)
@@ -2127,9 +2100,9 @@ def test_standalone_preserves_live_api_pending_launch(tmp_path, monkeypatch):
     store.optimization_owner_alive = lambda _owner_id: True
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kw: pytest.fail("must not start paid work"))
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kw: pytest.fail("must not start paid work"))
     monkeypatch.setattr(
-        workflow,
+        cli_mod,
         "configure_mlflow_observability",
         lambda *_args, **_kw: pytest.fail("must reject before tracing setup"),
     )
@@ -2155,14 +2128,14 @@ def test_managed_keyboard_interrupt_persists_and_emits_one_cancelled_worker_outc
         ]
     )
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
     def interrupt(*_args, **_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(workflow, "_compile", interrupt)
+    monkeypatch.setattr(cli_mod, "_compile", interrupt)
     parser = _optimization_parser()
     args = parser.parse_args(["--managed-run-id", run_id, "--managed-owner-id", "api-owner", "--structured-events"])
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
@@ -2191,11 +2164,11 @@ def test_managed_run_records_worker_outcome_without_publishing_terminal_status(t
             }
         ]
     )
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
     parser = _optimization_parser()
     workflow.run(
         parser.parse_args(
@@ -2226,13 +2199,13 @@ def test_run_records_failed_lifecycle_with_sanitized_details(tmp_path, monkeypat
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     monkeypatch.setattr(
-        workflow,
+        cli_mod,
         "_compile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("Authorization: Bearer secret-token; task payload: private-test-vector-917")
         ),
     )
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     parser = _optimization_parser()
 
@@ -2412,7 +2385,7 @@ def test_lifecycle_events_preserve_standalone_pipe_output(monkeypatch, managed):
     try:
         with monkeypatch.context() as patch:
             patch.setattr(sys, "stdout", SimpleNamespace(fileno=lambda: writer))
-            patch.setattr(workflow, "emit_event", events.append)
+            patch.setattr(progress_mod, "emit_event", events.append)
             for kind in ("started", "terminal"):
                 workflow._optional_event({"type": kind}, managed=managed)
     finally:
@@ -2425,7 +2398,7 @@ def test_optional_callback_emission_failure_is_bounded_and_does_not_stop(monkeyp
     def fail(_event):
         raise RuntimeError("private diagnostic credential")
 
-    monkeypatch.setattr(workflow, "emit_event", fail)
+    monkeypatch.setattr(progress_mod, "emit_event", fail)
     reporter = workflow.GEPAProgressReporter()
     for _ in range(3):
         reporter.on_budget_updated({"metric_calls_used": 1})
@@ -2435,7 +2408,10 @@ def test_optional_callback_emission_failure_is_bounded_and_does_not_stop(monkeyp
     assert "private diagnostic credential" not in caplog.text
 
 
-def test_locked_native_gepa_observes_required_persistence_stop_without_provider_calls(tmp_path):
+@pytest.mark.parametrize("failure_kind", ["write", "lease"])
+def test_locked_native_gepa_observes_required_persistence_stop_without_provider_calls(
+    tmp_path, monkeypatch, failure_kind
+):
     class Student(dspy.Module):
         def __init__(self):
             super().__init__()
@@ -2449,7 +2425,11 @@ def test_locked_native_gepa_observes_required_persistence_stop_without_provider_
     def fail(*_args, **_kwargs):
         raise RuntimeError("private database credential")
 
-    store.update_optimization_run = fail
+    if failure_kind == "lease":
+        store = workflow.Store(SimpleNamespace())
+        monkeypatch.setattr(store, "assert_optimization_lease", fail)
+    else:
+        store.update_optimization_run = fail
     reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False)
 
     def metric(_gold, _pred, _trace=None, _pred_name=None, _pred_trace=None):
@@ -2480,7 +2460,7 @@ def test_locked_native_gepa_observes_required_persistence_stop_without_provider_
 
 
 @pytest.mark.parametrize("managed", [False, True])
-@pytest.mark.parametrize("failure_at", ["validation", "finalization", "candidate", "outcome", "ownership"])
+@pytest.mark.parametrize("failure_at", ["validation", "outcome", "ownership", "lease"])
 def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch, managed, failure_at):
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
@@ -2492,7 +2472,7 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
         store.create_optimization_run("s1-run", "request", ExperimentOptions().model_dump(), "owner", managed=True)
         argv += ["--managed-run-id", "s1-run", "--managed-owner-id", "owner", "--structured-events"]
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
     original = store.update_optimization_run
@@ -2517,8 +2497,15 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
         reporter.update(stage="validation")
         reporter.update(stage="finalization")
         reporter.update(candidate_path="candidate.json")
+        if failure_at == "lease":
 
-    monkeypatch.setattr(workflow, "_compile", compile_stub)
+            def lost_lease(*, verify=False):
+                assert verify is True
+                raise RuntimeError("Optimization lease was lost or expired")
+
+            monkeypatch.setattr(store, "assert_optimization_lease", lost_lease)
+
+    monkeypatch.setattr(cli_mod, "_compile", compile_stub)
     with pytest.raises((workflow.OptimizationPersistenceError, RuntimeError)):
         workflow.run(parser.parse_args(argv), parser, settings)
     record = store.list_optimization_runs()[0]
@@ -2528,13 +2515,25 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
     assert store.events[-1][0] == "lease.close"
 
 
+def test_lost_optimization_lease_has_a_specific_persisted_reason():
+    reporter = workflow.GEPAProgressReporter("run", emit_events=False)
+    reporter._failure = RuntimeError("Optimization lease was lost or expired")
+
+    with pytest.raises(workflow.OptimizationPersistenceError, match="Optimization lease was lost or expired") as error:
+        reporter.raise_if_failed()
+
+    assert workflow.failure_detail(error.value) == (
+        "OptimizationPersistenceError: Optimization lease was lost or expired"
+    )
+
+
 @pytest.mark.parametrize("operation", ["setup", "flush"])
 def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch, caplog, operation):
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kwargs: store)
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kwargs: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -2542,7 +2541,7 @@ def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch,
         raise RuntimeError("private telemetry credential")
 
     if operation == "setup":
-        monkeypatch.setattr(workflow, "configure_mlflow_observability", fail)
+        monkeypatch.setattr(cli_mod, "configure_mlflow_observability", fail)
     else:
         monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", fail)
     parser = _optimization_parser()
@@ -2592,9 +2591,9 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
     lm = SimpleNamespace()
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: lm)
     monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
-    monkeypatch.setattr(workflow, "build_lm", lambda *_args: lm)
+    monkeypatch.setattr(runner_mod, "build_lm", lambda *_args: lm)
     splits = tuple([Example(name, name, critical=name == "holdout")] for name in ("train", "dev", "holdout"))
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_args, **_kwargs: splits)
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_args, **_kwargs: splits)
 
     class ReachedTemplateError(Exception):
         pass
@@ -2602,7 +2601,7 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
     def stop_before_runtime(*_args, **_kwargs):
         raise ReachedTemplateError
 
-    monkeypatch.setattr(workflow, "DaytonaSandboxManager", stop_before_runtime)
+    monkeypatch.setattr(runner_mod, "DaytonaSandboxManager", stop_before_runtime)
     with pytest.raises(ReachedTemplateError):
         workflow._compile(
             SimpleNamespace(validation_ratio=0.2),
@@ -2675,14 +2674,14 @@ def test_token_budget_ignores_typesafe_decision_calls() -> None:
 def test_run_records_budget_exhausted_without_a_candidate_or_a_failure(tmp_path, monkeypatch, capsys) -> None:
     store = MemoryOptimizationStore()
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
     def exhausted(*_args, **_kwargs):
         raise workflow.BudgetExhaustedError("Optimization token budget exhausted")
 
-    monkeypatch.setattr(workflow, "_compile", exhausted)
+    monkeypatch.setattr(cli_mod, "_compile", exhausted)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     workflow.run(parser.parse_args(["--structured-events", "--max-total-tokens", "500"]), parser, settings)
@@ -2700,11 +2699,13 @@ def test_check_prints_readiness_and_exits_nonzero_without_any_live_call(tmp_path
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(
-        workflow, "load_examples", lambda *_args: [Example(f"t{index}", f"g{index % 2}") for index in range(3)]
+        cli_mod, "load_examples", lambda *_args: [Example(f"t{index}", f"g{index % 2}") for index in range(3)]
     )
     forbidden = pytest.fail
-    monkeypatch.setattr(workflow, "build_lm", forbidden)
-    monkeypatch.setattr(workflow, "DaytonaSandboxManager", forbidden)
+    monkeypatch.setattr(cli_mod, "build_lm", forbidden)
+    monkeypatch.setattr(cli_mod, "DaytonaSandboxManager", forbidden)
+    monkeypatch.setattr(runner_mod, "build_lm", forbidden)
+    monkeypatch.setattr(runner_mod, "DaytonaSandboxManager", forbidden)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     with pytest.raises(SystemExit) as exit_info:
@@ -2721,7 +2722,7 @@ def test_check_exits_zero_when_ready(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
     examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
-    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
+    monkeypatch.setattr(cli_mod, "load_examples", lambda *_args: examples)
     parser = _optimization_parser()
     workflow.run(
         parser.parse_args(["--check"]),
@@ -2744,8 +2745,9 @@ def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledg
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
     monkeypatch.setattr(workflow.mlflow, "set_tracking_uri", lambda _uri: None)
     examples = [Example(f"t{index}", f"g{index % 4}", critical=index == 0) for index in range(8)]
-    monkeypatch.setattr(workflow, "load_examples", lambda *_args: examples)
-    monkeypatch.setattr(workflow, "build_lm", pytest.fail)
+    monkeypatch.setattr(cli_mod, "load_examples", lambda *_args: examples)
+    monkeypatch.setattr(cli_mod, "build_lm", pytest.fail)
+    monkeypatch.setattr(runner_mod, "build_lm", pytest.fail)
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     with pytest.raises(SystemExit):
@@ -2754,34 +2756,6 @@ def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledg
     assert report["ready"] is False and any("fleet.json" in item for item in report["missing"])
     with pytest.raises(ValueError, match=r"fleet\.json"):
         workflow._compile(parser.parse_args([]), settings, store, SimpleNamespace(), "optimize-x")
-
-
-def test_approval_refuses_a_legacy_per_session_candidate(tmp_path, monkeypatch) -> None:
-    settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
-    version = "sess_old-abc"
-    candidate = tmp_path / "candidates" / f"{version}.json"
-    candidate.parent.mkdir()
-    candidate.write_bytes(b"{}")
-    manifest = ArtifactManifest(version, digest_bytes(b"{}"), "now", {}, _evaluation(), {"passed": True}, {})
-    workflow.write_manifest(candidate.with_suffix(".manifest.json"), manifest)
-    store = MemoryOptimizationStore(
-        [
-            {
-                "run_id": version,
-                "status": "completed",
-                "owner_id": "old",
-                "candidate_version": version,
-                "legacy_session_id": "sess_old",
-            }
-        ]
-    )
-    monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
-    parser = _optimization_parser()
-    with pytest.raises(ValueError, match="per-Session candidate"):
-        workflow.run(parser.parse_args(["--approve", version]), parser, settings)
-    assert store.get_optimization_run(version)["status"] == "completed"
-    assert not (tmp_path / "fleet.json").exists()
 
 
 def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_composition() -> None:
@@ -2802,7 +2776,7 @@ def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_compos
 
 def _patched_worker(monkeypatch, store) -> None:
     monkeypatch.setattr(workflow.Store, "open", lambda *_args, **_kw: store)
-    monkeypatch.setattr(workflow, "configure_mlflow_observability", lambda *_args, **_kw: None)
+    monkeypatch.setattr(cli_mod, "configure_mlflow_observability", lambda *_args, **_kw: None)
     monkeypatch.setattr(workflow.mlflow.dspy, "autolog", lambda **_kw: None)
     monkeypatch.setattr(workflow.mlflow, "flush_trace_async_logging", lambda: None)
 
@@ -2823,9 +2797,9 @@ def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tm
     _patched_worker(monkeypatch, store)
     splits = _split_results()
     for body in ("_replay", "_synthetic"):
-        monkeypatch.setattr(workflow, body, lambda *_args, **_kw: splits)
-    monkeypatch.setattr(workflow, "_rescore", lambda *_args, **_kw: (splits, 2))
-    monkeypatch.setattr(workflow, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
+        monkeypatch.setattr(runner_mod, body, lambda *_args, **_kw: splits)
+    monkeypatch.setattr(runner_mod, "_rescore", lambda *_args, **_kw: (splits, 2))
+    monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
     parser = _optimization_parser()
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     workflow.run(parser.parse_args(["--evaluate", kind, "--structured-events"]), parser, settings)
@@ -2862,7 +2836,7 @@ def _guarded(tmp_path, monkeypatch, *, cap=None):
     args = SimpleNamespace(validation_ratio=0.35, threads=1, max_total_tokens=cap, evaluate="replay")
     monkeypatch.setattr(FleetSettings, "build_judge_lm", lambda _self: object())
     monkeypatch.setattr(FleetSettings, "build_jev_lm", lambda _self: None)
-    return settings, store, args, workflow._JobGuard(args, settings, store, "run-1", "owner")
+    return settings, store, args, workflow.OptimizationStopPolicy(args, settings, store, "run-1", "owner")
 
 
 def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path, monkeypatch):
@@ -2874,12 +2848,12 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
         ]
         for name in ("train", "dev", "holdout")
     )
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
     template = object()
-    monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=template))
+    monkeypatch.setattr(runner_mod, "_serving_runtime", lambda _settings: SimpleNamespace(program=template))
     factories = []
     monkeypatch.setattr(
-        workflow, "build_isolated_engine_factory", lambda config, *_a, **_k: factories.append(config) or object()
+        runner_mod, "build_isolated_engine_factory", lambda config, *_a, **_k: factories.append(config) or object()
     )
     scored = []
 
@@ -2889,7 +2863,7 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
         critical = [1.0, 0.0] if examples[0] is holdout[0] else []
         return SimpleNamespace(scores=[1.0, 0.5], critical_scores=critical, errors=1)
 
-    monkeypatch.setattr(workflow, "score_split", score)
+    monkeypatch.setattr(runner_mod, "score_split", score)
     splits = workflow._replay(args, settings, store, settings.mlflow_target(), guard)
     assert scored == [train, dev, holdout]
     assert not factories[0].fleet_root_cache and not factories[0].fleet_sub_cache
@@ -2914,14 +2888,14 @@ def test_rescore_uses_the_optimization_split_and_counts_examples_without_a_label
         for index in range(8)
     ]
     train, dev, holdout = examples[:3], examples[3:6], examples[6:]
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: (train, dev, holdout))
     synced_gold = {"tr-0", "tr-1", "tr-3", "tr-4", "tr-7"}  # tr-5: a PostgreSQL-only label (no MLflow gold yet)
     references = {f"turn-{index}": {"trace_id": f"tr-{index}"} for index in range(4, 8)} | {"turn-6": None}
     store = SimpleNamespace(turn_reference=lambda turn_id: references.get(turn_id))
     traces = {f"tr-{index}": SimpleNamespace(info=SimpleNamespace(trace_id=f"tr-{index}")) for index in range(8)}
     monkeypatch.setattr(workflow.mlflow, "get_trace", lambda trace_id, **_k: traces.get(trace_id))
     monkeypatch.setattr(
-        workflow,
+        runner_mod,
         "labels_of",
         lambda trace: {"review_status": "approved"} if trace.info.trace_id in synced_gold else {},
     )
@@ -2955,10 +2929,10 @@ def test_a_postgres_label_whose_trace_carries_gold_is_rescored_in_its_split(tmp_
 
     settings, _store, args, guard = _guarded(tmp_path, monkeypatch)
     example = dspy.Example(task="t", source_group="g", replay_turn_id="turn-1", provenance="postgres-session:s:turn-1")
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([example], [], []))
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: ([example], [], []))
     trace = SimpleNamespace(info=SimpleNamespace(trace_id="tr-1"))
     monkeypatch.setattr(workflow.mlflow, "get_trace", lambda *_a, **_k: trace)
-    monkeypatch.setattr(workflow, "labels_of", lambda _trace: {"review_status": "approved"})
+    monkeypatch.setattr(runner_mod, "labels_of", lambda _trace: {"review_status": "approved"})
     frame = pd.DataFrame({"fleet_metric/value": [0.25], "expectations": [{}]})
     monkeypatch.setattr(evaluation, "score_evaluation_traces", lambda *_a, **_k: SimpleNamespace(result_df=frame))
     store = SimpleNamespace(turn_reference=lambda turn_id: {"trace_id": "tr-1"} if turn_id == "turn-1" else None)
@@ -2972,9 +2946,9 @@ def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_m
         dspy.Example(task=f"h{index}", source_group="h", critical=False, replay_turn_id=f"h{index}")
         for index in range(20)
     ]
-    monkeypatch.setattr(workflow, "curate_dataset", lambda *_a, **_k: ([], [], holdout))
-    monkeypatch.setattr(workflow, "_serving_runtime", lambda _settings: SimpleNamespace(program=object()))
-    monkeypatch.setattr(workflow, "build_isolated_engine_factory", lambda *_a, **_k: object())
+    monkeypatch.setattr(runner_mod, "curate_dataset", lambda *_a, **_k: ([], [], holdout))
+    monkeypatch.setattr(runner_mod, "_serving_runtime", lambda _settings: SimpleNamespace(program=object()))
+    monkeypatch.setattr(runner_mod, "build_isolated_engine_factory", lambda *_a, **_k: object())
     sizes = []
 
     def score(_program, chunk, _metric, _threads):
@@ -2982,7 +2956,7 @@ def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_m
         guard.tokens.used += 60  # the second chunk crosses the cap
         return SimpleNamespace(scores=[1.0] * len(chunk), critical_scores=[], errors=0)
 
-    monkeypatch.setattr(workflow, "score_split", score)
+    monkeypatch.setattr(runner_mod, "score_split", score)
     with pytest.raises(workflow.BudgetExhaustedError):
         workflow._replay(args, settings, store, settings.mlflow_target(), guard)
     assert sizes == [8, 8]  # stopped before the third chunk of 4; never a whole split
@@ -3005,9 +2979,9 @@ def test_the_token_cap_applies_to_evaluate_jobs_and_keeps_the_partial_result_out
         guard.check_boundary()
         return _split_results()
 
-    monkeypatch.setattr(workflow, "_replay", body)
+    monkeypatch.setattr(runner_mod, "_replay", body)
     before = list(dspy.settings.callbacks)
-    monkeypatch.setattr(workflow, "_JobGuard", lambda *_a, **_k: guard)
+    monkeypatch.setattr(runner_mod, "OptimizationStopPolicy", lambda *_a, **_k: guard)
     with pytest.raises(workflow.BudgetExhaustedError):
         workflow._evaluate(args, settings, store, settings.mlflow_target(), "run-1", owner_id="owner")
     assert seen == {"calls": 1} and dspy.settings.callbacks == before
@@ -3066,23 +3040,37 @@ def test_installed_program_names_the_approved_job_whose_manifest_matches_the_fil
     assert result["headline"] == {"holdout": None, "critical_pass_rate": 0.5}
 
 
-def test_the_rationale_call_is_seen_by_the_token_budget_and_bounded():
+def test_the_rationale_call_is_seen_by_the_token_budget_and_bounded(monkeypatch):
+    from dspy.clients.engines.lm15_engine import LM15Engine
+
     budget = workflow.TokenBudget(0)
     seen, kwargs_seen = [], {}
-    budget.on_lm_start = lambda *_a, **_k: seen.append("start")
+    orig_start = budget.on_lm_start
 
-    class CountedLM(dspy.BaseLM):
-        def forward(self, *_args, **kwargs):
-            kwargs_seen.update(kwargs)
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None), finish_reason="stop")],
-                usage={},
-                model="m",
-            )
+    def on_start(call_id, instance, inputs):
+        seen.append("start")
+        kwargs_seen.update(inputs.get("options", {}))
+        orig_start(call_id, instance, inputs)
 
-    text = workflow._comparison_rationale(CountedLM(model="m"), "report", budget)
-    assert text == "ok" and seen == ["start"]
+    budget.on_lm_start = on_start
+
+    def complete(self, request):
+        kwargs_seen["request_max_tokens"] = request.config.max_tokens
+        kwargs_seen["read_timeout"] = self.config.timeouts.read
+        return dspy.lm15.Response(
+            id=None,
+            model=request.model,
+            message=dspy.lm15.Message.assistant([dspy.lm15.TextPart("ok")]),
+            finish_reason="stop",
+            usage=dspy.lm15.Usage(input_tokens=3, output_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr(LM15Engine, "complete", complete)
+    lm = dspy.LM("openai/gpt-4o-mini", api_key="test", cache=False)
+    text = workflow._comparison_rationale(lm, "report", budget)
+    assert text == "ok" and seen == ["start"] and budget.used == 5
     assert kwargs_seen["timeout"] == 30 and kwargs_seen["max_tokens"] == 1500
+    assert kwargs_seen["request_max_tokens"] == 1500 and kwargs_seen["read_timeout"] == 30
     assert "num_retries" not in kwargs_seen  # lm15 refuses per-call retry overrides
 
 
@@ -3106,7 +3094,7 @@ def test_a_failing_judge_scores_zero_never_none_and_fails_the_job_with_its_reaso
     def judge_down(*_args, **_kwargs):
         raise LMUnsupportedModelError('[deepseek/deepseek-v4.1-flash] Model "x" is not supported on this endpoint.')
 
-    monkeypatch.setattr(workflow, "fleet_metric", judge_down)
+    monkeypatch.setattr(runner_mod, "fleet_metric", judge_down)
     metric = workflow._judged_metric(settings, object(), guard.judge)
 
     def exception_safe(wrapped):  # the behaviour of mlflow.dspy.autolog._patch_metric
@@ -3143,6 +3131,25 @@ def test_failure_detail_names_provider_errors_but_never_quotes_evaluated_content
         "Optimization failed; exception details omitted."
     )
     assert len(workflow.failure_detail(LMUnsupportedModelError("m" * 5000))) < 400
+
+
+def test_optimization_stop_policy_callbacks_order_and_judge_reason(tmp_path, monkeypatch):
+    from dspy.utils.exceptions import LMUnsupportedModelError
+
+    settings, _store, _args, policy = _guarded(tmp_path, monkeypatch, cap=50)
+    assert settings.compiled_program_dir == str(tmp_path)
+    callbacks = policy.stop_callbacks(max_candidate_proposals=3)
+    assert len(callbacks) == 7
+    assert type(callbacks[0]).__name__ == "FileStopper"
+    assert type(callbacks[1]).__name__ == "_DatabaseStopper"
+    assert callbacks[2] == policy.reporter.should_stop
+    assert callbacks[3] == policy.cleanup.should_stop
+    assert callbacks[4] == policy.tokens.should_stop
+    assert callbacks[5] == policy.judge.should_stop
+    assert type(callbacks[6]).__name__ == "MaxCandidateProposalsStopper"
+    policy.judge.record(LMUnsupportedModelError('[deepseek/x] Model "x" is not supported'))
+    assert policy.judge.should_stop() is True
+    assert policy.judge.reason == "LMUnsupportedModelError: model is not supported on this endpoint"
 
 
 def test_the_gate_alone_rejects_a_skipped_validation_and_cannot_be_forged_into_passing():
@@ -3249,3 +3256,1295 @@ def test_adapter_failure_never_exposes_evaluated_content():
     error = AdapterParseError("JSONAdapter", dspy.Signature("question -> answer"), "private evaluated answer")
     assert workflow.failure_reason(error) == "AdapterParseError"
     assert "private evaluated answer" not in workflow.failure_detail(error)
+
+
+# Offline canary verifier
+
+
+def _canary_namespace():
+    return run_path(str(Path(__file__).resolve().parents[2] / "scripts/verify_gepa_live.py"))
+
+
+def test_canary_rollout_satisfies_isolated_program_runtime_contract():
+    from fleet_rlm.optimize.validation import IsolatedFleetProgram
+
+    namespace = _canary_namespace()
+    cleanup = []
+    manager = SimpleNamespace(
+        interpreter_factory=lambda: lambda: None,
+        reset_turn_budget=lambda: None,
+        consume_budget=lambda *_args: None,
+        turn_usage=lambda: {"lm_calls": 0, "sandbox_errors": 0},
+        end_turn=lambda: None,
+        shutdown=lambda: cleanup.append("shutdown") or True,
+    )
+    program = namespace["AdditionProgram"](manager, DummyLM([]))
+
+    class Answer(dspy.Module):
+        def forward(self, task):
+            return dspy.Prediction(answer=task)
+
+    program.flex_agent = Answer()
+    isolated = IsolatedFleetProgram(program, lambda _example, _candidate: program)
+    assert isolated(task="fixture").answer == "fixture"
+    assert cleanup == ["shutdown"]
+
+
+@pytest.mark.parametrize("adapter_type", [dspy.ChatAdapter, dspy.JSONAdapter])
+def test_canary_instruction_probe_uses_reflection_lm(monkeypatch, tmp_path, adapter_type):
+    import json
+    import sys
+
+    namespace = _canary_namespace()
+    main = namespace["main"]
+    serving = DummyLM([{"answer": "4"}])
+    reflection_adapter = adapter_type()
+    reflection = DummyLM([{"new_instruction": "Add the integers correctly."}], adapter=reflection_adapter)
+    ambient = DummyLM([{"answer": "unexpected ambient call"}])
+    settings = SimpleNamespace(
+        fleet_root_model="serving-model",
+        fleet_reflection_model="reflection-model",
+        fleet_daytona_api_key="offline",
+        fleet_daytona_org_id="offline",
+        fleet_daytona_volume_id="offline",
+        build_judge_lm=lambda: serving,
+        resolved_model=lambda role: SimpleNamespace(
+            build_adapter=lambda: reflection_adapter if role == "reflection" else dspy.ChatAdapter()
+        ),
+    )
+    settings.with_explicit_overrides = lambda **_kwargs: settings
+    monkeypatch.setitem(
+        main.__globals__, "build_lm", lambda _settings, _model_id, role: reflection if role == "reflection" else serving
+    )
+    monkeypatch.setitem(main.__globals__, "FleetSettings", lambda **_kwargs: settings)
+    monkeypatch.setitem(
+        main.__globals__,
+        "DaytonaSandboxManager",
+        lambda *_args, **_kwargs: SimpleNamespace(_client=None, shutdown=lambda: None),
+    )
+    monkeypatch.setitem(
+        main.__globals__,
+        "AdditionProgram",
+        lambda *_args: SimpleNamespace(flex_agent=SimpleNamespace(load_state=lambda _state: None)),
+    )
+    monkeypatch.setitem(main.__globals__, "IsolatedFleetProgram", lambda seed, _factory: seed)
+
+    def stop_before_search(**kwargs):
+        assert dspy.settings.adapter is reflection_adapter
+        assert kwargs["instruction_proposer"].adapter is reflection_adapter
+        raise RuntimeError("Offline test stops after the two native probes")
+
+    monkeypatch.setattr(dspy, "GEPA", stop_before_search)
+    report_path = tmp_path / "report.json"
+    monkeypatch.setattr(sys, "argv", ["verify_gepa_live.py", "--live", "--output", str(report_path)])
+    ambient_adapter = dspy.ChatAdapter()
+    with dspy.context(lm=ambient, adapter=ambient_adapter):
+        with pytest.raises(SystemExit, match="1"):
+            main()
+        assert dspy.settings.adapter is ambient_adapter
+
+    report = json.loads(report_path.read_text())
+    assert report["serving_probe"] is True
+    assert report["native_instruction_json_probe"] is True
+    assert len(serving.history) == 1
+    assert reflection.history
+    assert not ambient.history
+
+
+# Consolidated from optimize/test_artifacts.py
+
+
+# Compiled artifacts
+
+
+@pytest.mark.parametrize("kind", ["predictor", "flex"])
+def test_component_diff_distinguishes_absence_from_existing_empty(kind):
+    from fleet_rlm.optimize.artifacts import component_diffs
+
+    class Program(dspy.Module):
+        def __init__(self, present):
+            super().__init__()
+            if present:
+                if kind == "predictor":
+                    self.component = dspy.Predict("task -> answer")
+                    self.component.signature.instructions = ""
+                else:
+                    self.component = dspy.Flex("task -> answer")
+                    self.component._module_src = ""
+
+    absent, empty = Program(False), Program(True)
+    changes = component_diffs(absent, empty)
+    assert changes == [{"component": "component", "before": "", "after": "", "diff": ""}]
+    assert component_diffs(empty, empty.deepcopy()) == []
+    # The existing comparison policy ignores removed candidate keys.
+    assert component_diffs(empty, absent) == []
+
+
+LM = dspy.LM("openai/test", engine="lm15", cache=False)
+
+
+def engine(name="sess_art", compiled_path=None) -> FleetRuntime:
+    return FleetRuntime(DaytonaSandboxManager("key", "org", "volume", name), LM, LM, compiled_path=compiled_path)
+
+
+def tuned() -> FleetRuntime:
+    runtime = engine()
+    predictor = runtime.program.routing.predict
+    predictor.signature = predictor.signature.with_instructions("TUNED triage")
+    return runtime
+
+
+@pytest.mark.parametrize("saved_from", ["root", "wrapper"])
+def test_saved_candidate_loads_into_a_fresh_engine(tmp_path, saved_from):
+    candidate = tuned().program
+    path = tmp_path / "candidate.json"
+    if saved_from == "wrapper":
+        wrapped = IsolatedFleetProgram(candidate, None)
+        candidate = wrapped.program
+    path.write_bytes(program_envelope(candidate))
+
+    fresh = engine("sess_fresh", compiled_path=str(path))
+
+    assert fresh.program.routing.predict.signature.instructions == "TUNED triage"
+    assert fresh.compiled.digest
+
+
+def test_turn_time_reload_picks_up_a_changed_file(tmp_path):
+    path = tmp_path / "sess_reload.json"
+    path.write_bytes(program_envelope(engine().program))
+    live = engine("sess_reload", compiled_path=str(path))
+    assert live.program.routing.predict.signature.instructions != "TUNED triage"
+
+    path.write_bytes(program_envelope(tuned().program))
+    os.utime(path, ns=(1, 1))  # distinct mtime even on coarse filesystems
+    live.compiled.reload_if_changed(live.program)
+
+    assert live.program.routing.predict.signature.instructions == "TUNED triage"
+
+
+def test_a_symlinked_artifact_is_refused(tmp_path):
+    real = tmp_path / "real.json"
+    real.write_bytes(program_envelope(engine().program))
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    with pytest.raises(ValueError, match="regular file"):
+        engine("sess_link", compiled_path=str(link))
+
+
+def test_exact_native_tree_has_one_owner_per_parameter():
+    runtime = engine()
+    expected = {
+        "routing.predict",
+        "skill_selection.predict",
+        "reasoning.direct.predict",
+        "reasoning.rlm.generate_action",
+        "reasoning.rlm.extract",
+        "reasoning.flex",
+        "child_policies.leaf_action",
+        "child_policies.delegating_action",
+    }
+    parameters = runtime.program.named_parameters()
+    assert {name for name, _ in parameters} == expected
+    assert len({id(value) for _, value in parameters}) == 8
+    assert {name for name, _ in runtime.program.named_predictors()} == expected - {"reasoning.flex"}
+    assert not isinstance(runtime, dspy.Module)
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "legacy",
+        "wrapped",
+        "version",
+        "schema",
+        "extra",
+        "metadata",
+        "missing",
+        "signature",
+        "field_config",
+        "unknown_predictor_key",
+        "flex",
+    ],
+)
+def test_invalid_artifacts_leave_incumbent_and_digest_unchanged(tmp_path, invalid):
+    runtime = tuned()
+    path = tmp_path / "selected.json"
+    path.write_bytes(program_envelope(runtime.program))
+    loader = CompiledProgramFile(str(path))
+    loader.load_initial(runtime.program)
+    before, digest = deepcopy(runtime.program.dump_state()), loader.digest
+    envelope = json.loads(path.read_bytes())
+    state = envelope["state"]
+    # A valid change before the bad component must not be partially applied.
+    state["routing.predict"]["signature"]["instructions"] = "MUST NOT APPLY"
+    if invalid == "legacy":
+        envelope = state
+    elif invalid == "wrapped":
+        envelope["state"] = {f"program.{key}": value for key, value in state.items()}
+    elif invalid == "version":
+        envelope["format_version"] = True
+    elif invalid == "schema":
+        envelope["program_schema"] = "fleet-program-a1"
+    elif invalid == "extra":
+        envelope["unknown"] = 1
+    elif invalid == "metadata":
+        envelope["metadata"] = {"code_digest": 7}
+    elif invalid == "missing":
+        del state["skill_selection.predict"]
+    elif invalid == "signature":
+        state["reasoning.rlm.extract"]["signature"]["fields"] = []
+    elif invalid == "field_config":
+        state["routing.predict"]["fields"] = {"nonexistent": {}}
+    elif invalid == "unknown_predictor_key":
+        state["reasoning.direct.predict"]["_runtime"] = "override"
+    else:
+        state["reasoning.flex"]["module_src"] = "class Invalid(:\n"
+    path.write_text(json.dumps(envelope))
+    with pytest.raises((ValueError, SyntaxError)):
+        loader.reload_if_changed(runtime.program)
+    assert runtime.program.dump_state() == before and loader.digest == digest
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "routing.predict",
+        "skill_selection.predict",
+        "reasoning.direct.predict",
+        "reasoning.rlm.generate_action",
+        "reasoning.rlm.extract",
+        "reasoning.flex",
+        "child_policies.leaf_action",
+        "child_policies.delegating_action",
+    ],
+)
+def test_no_component_can_install_a_serialized_model(name):
+    runtime = engine()
+    before = deepcopy(runtime.program.dump_state())
+    state = deepcopy(before)
+    state[name]["lm"] = dspy.LM("openai/unmetered").dump_state()
+    with pytest.raises(ValueError, match="runtime"):
+        runtime.program.load_state(state, allow_unsafe_lm_state=True)
+    assert runtime.program.dump_state() == before
+
+
+def test_missing_selected_file_refuses_without_replacing_incumbent(tmp_path):
+    path = tmp_path / "selected.json"
+    with pytest.raises(FileNotFoundError):
+        engine(compiled_path=str(path))
+    path.write_bytes(program_envelope(tuned().program))
+    runtime = engine(compiled_path=str(path))
+    before, digest = deepcopy(runtime.program.dump_state()), runtime.compiled.digest
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        runtime.compiled.reload_if_changed(runtime.program)
+    assert runtime.program.dump_state() == before and runtime.compiled.digest == digest
+    assert engine(compiled_path=None).compiled.digest == ""  # explicit baseline, no silent fallback
+
+
+def test_loader_verifies_content_even_when_file_stats_are_unchanged(tmp_path, monkeypatch):
+    path = tmp_path / "selected.json"
+    path.write_bytes(program_envelope(tuned().program))
+    runtime = engine(compiled_path=str(path))
+    reads = 0
+    original_read = runtime.compiled.read
+
+    def counting_read() -> bytes:
+        nonlocal reads
+        reads += 1
+        return original_read()
+
+    monkeypatch.setattr(runtime.compiled, "read", counting_read)
+    runtime.compiled.reload_if_changed(runtime.program)
+    assert reads == 1
+
+    staged = tmp_path / "staged.json"
+    staged.write_bytes(original_read().replace(b"TUNED triage", b"OTHER triage"))
+    saved = path.stat()
+    path.write_bytes(staged.read_bytes())
+    import os
+
+    os.utime(path, ns=(saved.st_atime_ns, saved.st_mtime_ns))
+    runtime.compiled.reload_if_changed(runtime.program)
+    assert reads == 2
+    assert runtime.program.routing.predict.signature.instructions == "OTHER triage"
+
+
+@pytest.mark.parametrize("invalid", ["legacy", "missing-policy", "model"])
+def test_approval_refuses_incompatible_state_even_with_matching_digest_and_evidence(tmp_path, invalid):
+    from dataclasses import replace
+
+    from fleet_rlm.optimize.artifacts import approve_candidate
+
+    program = engine().program
+    envelope = json.loads(program_envelope(program))
+    if invalid == "legacy":
+        envelope = envelope["state"]
+    elif invalid == "missing-policy":
+        del envelope["state"]["child_policies.leaf_action"]
+    else:
+        envelope["state"]["reasoning.flex"]["lm"] = dspy.LM("openai/unmetered").dump_state()
+    candidate, destination = tmp_path / "candidate.json", tmp_path / "active.json"
+    candidate.write_text(json.dumps(envelope))
+    evidence = {"evidence_format": "2", "incumbent_digest": ""}
+    manifest = replace(_manifest(candidate, "s1-1", _evaluation()), dependencies=evidence)
+    before = deepcopy(program.dump_state())
+    with pytest.raises(ValueError):
+        approve_candidate(candidate, manifest, destination, evidence=evidence, program=program)
+    assert not destination.exists() and program.dump_state() == before
+
+
+# Native GEPA and Flex optimization
+
+BASELINE_SOURCE = """\
+class FleetTaskModule(dspy.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, **inputs):
+        return dspy.Prediction(answer="wrong")
+"""
+
+REVISED_SOURCE = """\
+class FleetTaskModule(dspy.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, **inputs):
+        return dspy.Prediction(answer=lookup(task=inputs["task"]))
+"""
+
+
+class ScriptedCodeInterpreter(DaytonaInterpreter):
+    """Stand in for the remote interpreter; only recognizes fixed test source fixtures."""
+
+    def __init__(self, tool: Any):
+        super().__init__(manager=SimpleNamespace(), tools={"lookup": tool})
+        self.source: str | None = None
+
+    def start(self) -> None:
+        pass
+
+    def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+        if code in (BOOTSTRAP, "import dspy"):
+            return None
+        source = code.strip()
+        if source in {BASELINE_SOURCE.strip(), REVISED_SOURCE.strip()}:
+            self.source = source
+            return None
+        if "__dspy_run_forward(globals(), 'FleetTaskModule', __dspy_flex_inputs)" in code:
+            if self.source is None:
+                raise AssertionError("Flex driver ran before a recognized module source was installed")
+            inputs = (variables or {}).get("__dspy_flex_inputs")
+            if not isinstance(inputs, dict) or not isinstance(inputs.get("task"), str):
+                raise AssertionError("Flex driver did not pass its inputs through __dspy_flex_inputs")
+            answer = "wrong" if self.source == BASELINE_SOURCE.strip() else self.tools["lookup"](task=inputs["task"])
+            return json.dumps({"fields": {"answer": answer}})
+        raise AssertionError(f"Refusing to execute unrecognized interpreter source: {code[:120]!r}")
+
+    def shutdown(self) -> None:
+        pass
+
+
+def lookup(*, task: str) -> str:
+    return "right" if task == "solve fixture" else "wrong"
+
+
+def _flex() -> dspy.Flex:
+    flex = dspy.Flex("task -> answer", tools=[lookup], interpreter_factory=lambda: ScriptedCodeInterpreter(lookup))
+    # Keep a real Flex baseline source at construction, then use a small, fixed baseline fixture for rollouts.
+    flex.load_state({"module_src": BASELINE_SOURCE})
+    return flex
+
+
+class _RolloutEngine(dspy.Module):
+    def __init__(self, flex: dspy.Flex):
+        super().__init__()
+        self.flex_agent = flex
+        self.sandbox_mgr = SimpleNamespace(shutdown=lambda: True)
+        self.optimization = None
+
+    def forward(self, task: str, **_kwargs: Any) -> dspy.Prediction:
+        return self.flex_agent(task=task)
+
+
+def _factory(example: dspy.Example, candidate: dspy.Module, loaded: list[dspy.Flex]):
+    del example
+    flex = _flex()
+    flex.load_state(candidate.dump_state())
+    loaded.append(flex)
+    return _RolloutEngine(flex)
+
+
+@pytest.mark.parametrize("bounded_canary", [False, True])
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_native_gepa_rewrites_flex_code_with_whole_program_feedback_and_round_trips(
+    tmp_path, bounded_canary, adapter_type
+) -> None:
+    from gepa.utils.stop_condition import MaxCandidateProposalsStopper
+
+    baseline = _flex()
+    assert "dspy.RLM" in baseline._baseline_src()
+    assert set(tunable_components(baseline)) == {"self"}
+
+    reflection_adapter = adapter_type()
+    reflection_lm = DummyLM([{"revised_source": REVISED_SOURCE}] * 8, adapter=reflection_adapter)
+
+    def metric(
+        example: dspy.Example,
+        prediction: dspy.Prediction,
+        _trace: Any = None,
+        _pred_name: str | None = None,
+        _pred_trace: Any = None,
+    ) -> dspy.Prediction:
+        passed = prediction.answer == example.answer
+        return dspy.Prediction(
+            score=1.0 if passed else 0.0,
+            feedback=("Answer matches the reviewed result." if passed else "Whole-program answer must be right."),
+        )
+
+    gepa = dspy.GEPA(
+        metric=metric,
+        reflection_lm=reflection_lm,
+        max_metric_calls=10 if bounded_canary else 5,
+        reflection_minibatch_size=1,
+        use_merge=False,
+        skip_perfect_score=False,
+        num_threads=1,
+        seed=0,
+        track_stats=True,
+        gepa_kwargs={"stop_callbacks": [MaxCandidateProposalsStopper(1)]} if bounded_canary else None,
+    )
+    example = dspy.Example(task="solve fixture", answer="right").with_inputs("task")
+    ambient = ChatAdapter(use_json_adapter_fallback=False)
+    with dspy.context(adapter=ambient, trace=[]):
+        with dspy.context(adapter=reflection_adapter):
+            candidate = gepa.compile(baseline, trainset=[example], valset=[example] * (3 if bounded_canary else 1))
+        assert dspy.settings.adapter is ambient
+
+    if bounded_canary:
+        assert candidate.detailed_results.total_metric_calls == 8
+
+    assert [item["component"] for item in component_diffs(baseline, candidate)] == ["self"]
+    assert candidate.module_src.strip() == REVISED_SOURCE.strip()
+    reflected = json.dumps(reflection_lm.history, default=str)
+    assert "Whole-program answer must be right." in reflected
+    assert "wrong" in reflected and "solve fixture" in reflected
+    assert "current_source" in reflected and "available_context" in reflected
+
+    loaded_flex: list[dspy.Flex] = []
+    isolated = IsolatedFleetProgram(candidate, lambda ex, program: _factory(ex, program, loaded_flex))
+    assert isolated(task="solve fixture").answer == "right"
+    assert loaded_flex[-1].module_src.strip() == REVISED_SOURCE.strip()
+
+    artifact = tmp_path / "native-gepa.json"
+    isolated.save(str(artifact))
+    restored = IsolatedFleetProgram(_flex(), lambda ex, program: _factory(ex, program, loaded_flex))
+    restored.load(str(artifact))
+    assert restored(task="solve fixture").answer == "right"
+    assert loaded_flex[-1].module_src.strip() == REVISED_SOURCE.strip()
+
+
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_native_gepa_instruction_component_contract(adapter_type) -> None:
+    from fleet_rlm.optimize.gepa import INSTRUCTION_MAX_CHARS, build_instruction_proposer
+
+    reflection_adapter = adapter_type()
+    proposer = build_instruction_proposer(adapter=reflection_adapter)
+    assert proposer.adapter is reflection_adapter
+    assert proposer.max_chars == INSTRUCTION_MAX_CHARS
+    assert proposer.truncate_history_outputs is True
+
+    student = dspy.Predict("task -> answer")
+    student.signature = student.signature.with_instructions("Return a concise answer.")
+    # The native proposer uses the reflection role's adapter for its typed field.
+    reflection_lm = DummyLM(
+        [{"new_instruction": "Return the reviewed answer exactly."}] * 8,
+        adapter=reflection_adapter,
+    )
+
+    def metric(
+        example: dspy.Example,
+        prediction: dspy.Prediction,
+        _trace: Any = None,
+        _pred_name: str | None = None,
+        _pred_trace: Any = None,
+    ) -> dspy.Prediction:
+        passed = prediction.answer == example.answer
+        return dspy.Prediction(score=float(passed), feedback="Use the reviewed answer exactly.")
+
+    gepa = dspy.GEPA(
+        metric=metric,
+        reflection_lm=reflection_lm,
+        instruction_proposer=proposer,
+        max_metric_calls=4,
+        reflection_minibatch_size=1,
+        use_merge=False,
+        skip_perfect_score=False,
+        num_threads=1,
+        seed=0,
+    )
+    example = dspy.Example(task="fixture", answer="right").with_inputs("task")
+    serving_lm = DummyLM([{"answer": "wrong"}, {"answer": "wrong"}, {"answer": "right"}, {"answer": "right"}])
+    serving_adapter = ChatAdapter(use_json_adapter_fallback=False)
+    with dspy.context(lm=serving_lm, adapter=serving_adapter, trace=[]):
+        candidate = gepa.compile(student, trainset=[example], valset=[example])
+        assert dspy.settings.adapter is serving_adapter
+    assert candidate.signature.instructions == "Return the reviewed answer exactly."
+    assert student.signature.instructions == "Return a concise answer."
+
+
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_instruction_proposal_failure_restores_ambient_adapter(adapter_type):
+    from fleet_rlm.optimize.gepa import build_instruction_proposer
+
+    reflection_adapter = adapter_type()
+    proposer = build_instruction_proposer(adapter=reflection_adapter)
+    ambient = JSONAdapter() if adapter_type is ChatAdapter else ChatAdapter()
+    lm = DummyLM([{"unrelated_field": "missing instruction"}] * 4, adapter=reflection_adapter)
+    with dspy.context(lm=lm, adapter=ambient), pytest.raises(dspy.AdapterParseError):
+        try:
+            proposer(
+                candidate={"predict": "Answer incorrectly."},
+                reflective_dataset={"predict": [{"Inputs": {"task": "fixture"}, "Feedback": "Fix it."}]},
+                components_to_update=["predict"],
+            )
+        finally:
+            assert dspy.settings.adapter is ambient
+
+
+@pytest.mark.parametrize("adapter_type", [ChatAdapter, JSONAdapter])
+def test_flex_proposal_parse_failure_keeps_source_and_restores_ambient_adapter(adapter_type):
+    from dspy.teleprompt.gepa.gepa_flex_utils import propose_code
+
+    reflection_adapter = adapter_type()
+    ambient = JSONAdapter() if adapter_type is ChatAdapter else ChatAdapter()
+    lm = DummyLM([{"unrelated_field": "missing revised source"}] * 4, adapter=reflection_adapter)
+    candidate = {"self": BASELINE_SOURCE}
+    with dspy.context(adapter=ambient):
+        with dspy.context(adapter=reflection_adapter):
+            result = propose_code(["self"], candidate, {"self": []}, {"self": "task -> answer"}, {}, lm)
+        assert dspy.settings.adapter is ambient
+    assert result == candidate
+    assert lm.history
+
+
+def test_public_parameter_traversal_finds_predictor_and_flex_together() -> None:
+    class MixedProgram(dspy.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.route = dspy.Predict("task -> route")
+            self.flex_agent = _flex()
+
+    program = MixedProgram()
+    components = tunable_components(program)
+    assert set(components) == {"route", "flex_agent"}
+    assert components["route"] == program.route.signature.instructions
+    assert components["flex_agent"] == BASELINE_SOURCE
+
+
+# Isolated rollout state
+
+
+class FleetScriptedInterpreter(ScriptedCodeInterpreter):
+    def execute(self, code, variables=None):
+        result = super().execute(code, variables)
+        if "__dspy_run_forward(globals(), 'FleetTaskModule', __dspy_flex_inputs)" in code:
+            return json.dumps({"fields": {**json.loads(result)["fields"], "learned_skill_note": ""}})
+        return result
+
+
+@pytest.fixture
+def _no_provider(monkeypatch):
+    def refuse(*_args, **_kwargs):
+        pytest.fail("Offline state tests must not provision a sandbox")
+
+    monkeypatch.setattr(DaytonaSandboxManager, "_ensure_sandbox", refuse)
+
+
+def _engine(mode="hybrid", jev=None):
+    manager = DaytonaSandboxManager("key", "org", "volume", "state-parity", max_llm_calls=7)
+    return FleetRuntime(
+        manager,
+        dspy.utils.DummyLM([{"plan": "Fixed offline response", "answer": "right"}] * 20),
+        dspy.LM("openai/sub"),
+        jev_lm=jev,
+        execution_mode=mode,
+    )
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("mode", ["hybrid", "flex", "rlm"])
+@pytest.mark.parametrize("typed", [False, True])
+def test_native_state_matches_durable_loader_and_preserves_constructor_policy(tmp_path, monkeypatch, mode, typed):
+    monkeypatch.setattr(DaytonaSandboxManager, "check_turn", lambda _self: None)
+    monkeypatch.setattr(
+        DaytonaSandboxManager, "interpreter_factory", lambda *_args, **_kwargs: lambda: FleetScriptedInterpreter(lookup)
+    )
+
+    def rlm_forward(self, **inputs):
+        assert inputs["execution_route"] == "rlm"
+        assert self.max_llm_calls == 7
+        return dspy.Prediction(answer="right", learned_skill_note="")
+
+    monkeypatch.setattr(dspy.RLM, "forward", rlm_forward)
+    jev = SimpleNamespace(model="typed-fixture") if typed else None
+    candidate_runtime = _engine(jev=jev)
+    candidate = candidate_runtime.program
+    candidate.reasoning.direct.predict.signature = candidate.reasoning.direct.predict.signature.with_instructions(
+        "Reviewed answer"
+    )
+    candidate.reasoning.direct.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
+    candidate.child_policies.leaf_action.signature = candidate.child_policies.leaf_action.signature.with_instructions(
+        "Leaf policy"
+    )
+    candidate.child_policies.delegating_action.signature = (
+        candidate.child_policies.delegating_action.signature.with_instructions("Delegating policy")
+    )
+    from fleet_rlm.contracts import TRIAGE_CRITERIA
+
+    criteria = deepcopy(TRIAGE_CRITERIA)
+    criteria["direct"]["definition"] = "Non-default reviewed criterion"
+    candidate.routing.predict.set_criteria("route", criteria)
+    candidate.reasoning.flex.load_state({"module_src": REVISED_SOURCE})
+    before = deepcopy(candidate.dump_state())
+
+    native_runtime = _engine(mode, jev)
+    native = native_runtime.program
+    native.load_state(deepcopy(before))
+    assert native.dump_state() == before
+    assert [name for name, _ in native.named_parameters()] == [name for name, _ in candidate.named_parameters()]
+    wrapped = IsolatedFleetProgram(candidate, None)
+    assert wrapped.dump_state() == {f"program.{key}": value for key, value in before.items()}
+    assert [name for name, _ in wrapped.named_parameters()] == [f"program.{key}" for key in before]
+
+    for program in (candidate, wrapped):
+        path = tmp_path / "published.json"
+        root = program.program if isinstance(program, IsolatedFleetProgram) else program
+        path.write_bytes(program_envelope(root))
+        durable_runtime = FleetRuntime(
+            native_runtime.sandbox_mgr,
+            native_runtime.root_lm,
+            native_runtime.sub_lm,
+            jev_lm=jev,
+            compiled_path=str(path),
+            execution_mode=mode,
+        )
+        assert durable_runtime.program.dump_state() == native.dump_state()
+        for runtime in (native_runtime, durable_runtime):
+            engine = runtime.program
+            for route in Route:
+                decision_lm = dspy.utils.DummyLM(
+                    [
+                        {
+                            "route": json.dumps(
+                                {
+                                    "probabilities": {item.value: float(item is route) for item in Route},
+                                    "confidence": 1.0,
+                                }
+                            )
+                        }
+                    ]
+                )
+                with dspy.context(lm=decision_lm, adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)):
+                    decision = engine.routing.predict(
+                        task="solve fixture", workspace_manifest="", skills_catalog=""
+                    ).route
+                assert isinstance(decision, engine.routing.predict.signature.fields["route"].annotation)
+                assert decision.value == route.value
+            for route in Route:
+                result = runtime("", "", "solve fixture", "", "", None, route.value)
+                assert result.answer == "right" and result.route == route.value
+
+    assert native_runtime.execution_mode == mode
+    assert native_runtime.jev_lm is jev
+    assert native_runtime._metered_root._lm is native_runtime.root_lm
+    assert native_runtime._metered_sub._lm is native_runtime.sub_lm
+    assert native.reasoning.rlm.max_llm_calls == 7
+    assert native.reasoning.flex._interpreter_factory is not candidate.reasoning.flex._interpreter_factory
+    for name in ("routing", "skill_selection"):
+        original, restored = getattr(candidate, name).predict, getattr(native, name).predict
+        assert restored.signature.dump_state() == original.signature.dump_state()
+        assert {key: field.annotation for key, field in restored.signature.fields.items()} == {
+            key: field.annotation for key, field in original.signature.fields.items()
+        }
+    assert native.routing.predict.fields == candidate.routing.predict.fields
+    native.reasoning.direct.predict.demos[0]["nested"].append(2)
+    assert candidate.dump_state() == before
+
+
+@pytest.mark.usefixtures("_no_provider")
+def test_native_load_keeps_unsafe_lm_state_disabled():
+    candidate = _engine().program
+    candidate.reasoning.direct.predict.lm = dspy.LM("openai/serialized", api_base="https://untrusted.invalid")
+    state = deepcopy(candidate.dump_state())
+    restored = _engine()
+    root, sub = restored.root_lm, restored.sub_lm
+    with pytest.raises(ValueError, match="runtime"):
+        restored.program.load_state(state)
+    assert restored.root_lm is root and restored.sub_lm is sub
+    assert restored.program.reasoning.direct.predict.lm is None
+
+
+@pytest.mark.usefixtures("_no_provider")
+def test_native_load_failure_does_not_mutate_candidate_or_target():
+    candidate, target = _engine().program, _engine().program
+    before = deepcopy(candidate.dump_state())
+    invalid = deepcopy(before)
+    invalid["reasoning.flex"]["module_src"] = "class Invalid(:\n"
+    with pytest.raises((SyntaxError, ValueError)):
+        target.load_state(invalid)
+    assert target.dump_state() == before
+    assert candidate.dump_state() == before
+
+
+@pytest.mark.parametrize("threads", [1, 2])
+@pytest.mark.parametrize("decision_kind", ["noul", "choice"])
+def test_native_reanchor_calibrates_isolated_copies_with_attributed_evidence(threads, decision_kind):
+    from dspy.experimental import Choice, Noul, ReAnchor
+
+    is_noul = decision_kind == "noul"
+    kind = Noul if is_noul else Choice[("keep", "Keep the eligible task"), ("skip", "Skip the ineligible task")]
+    initial_fields = {"threshold": 0.5} if is_noul else {"weights": {"keep": 1.0, "skip": 1.0}}
+    expected = True if is_noul else "keep"
+    evidence = {"noul": 0.4} if is_noul else {"probabilities": {"keep": 0.4, "skip": 0.6}, "confidence": 0.6}
+    signature = dspy.Signature(
+        {
+            "task": (str, dspy.InputField()),
+            "eligible": (kind, dspy.OutputField(desc="Does this task meet the eligibility criteria?")),
+        }
+    )
+
+    class DecisionProgram(dspy.Module):
+        def __init__(self):
+            super().__init__()
+            self.predict = dspy.Predict(signature)
+            self.predict.fields["eligible"] = deepcopy(initial_fields)
+
+        def forward(self, **inputs):
+            return self.predict(**inputs)
+
+    class Engine:
+        optimization = None
+
+        def __init__(self, candidate):
+            self.program = candidate.deepcopy()
+            self.sandbox_mgr = SimpleNamespace(shutdown=lambda: True)
+
+        def __call__(self, **inputs):
+            return self.program(**inputs)
+
+    student = IsolatedFleetProgram(DecisionProgram(), lambda _example, candidate: Engine(candidate))
+    examples = [
+        dspy.Example(task=f"eligible task {index}", expected=expected).with_inputs("task") for index in range(5)
+    ]
+    validation_examples = [
+        dspy.Example(task=f"validation task {index}", expected=expected).with_inputs("task") for index in range(5)
+    ]
+    optimizer = ReAnchor(
+        lambda gold, pred: float(pred.eligible.value == gold.expected), num_threads=threads, require_cache=False
+    )
+    lm = dspy.utils.DummyLM([{"eligible": evidence}] * 1000)
+    with dspy.context(lm=lm, adapter=dspy.JSONAdapter(), disable_history=True):
+        calibrated = optimizer.compile(student, trainset=examples, valset=validation_examples)
+    assert optimizer.report["train_score_before"] == optimizer.report["val_score_before"] == 0.0
+    assert optimizer.report["train_score"] == optimizer.report["val_score"] == 1.0
+    assert optimizer.report["fitted"][0]["observed"]["calls"] == len(examples)
+    assert calibrated.program.predict.fields["eligible"] != initial_fields
+    assert student.program.predict.fields["eligible"] == initial_fields
+
+
+@pytest.fixture
+def rollout(monkeypatch, request):
+    template = _engine()
+    candidate = template.program
+    candidate.reasoning.direct.predict.demos = [{"task": "fixture", "answer": "right", "nested": [1]}]
+    candidate.child_policies.leaf_action.demos = [{"reasoning": "leaf demo", "code": "print('leaf')", "nested": [11]}]
+    candidate.child_policies.delegating_action.signature = (
+        candidate.child_policies.delegating_action.signature.with_instructions("Use reviewed delegated reasoning")
+    )
+    replay, _, _ = _selected_snapshot("s1", "t1", "fixture", {"files/input.csv": b"fixture"})
+    replay["dataset_context"] = {
+        "workspace_path": "files/input.csv",
+        "size_bytes": 7,
+        "sha256": replay["context_files"]["files/input.csv"],
+    }
+    if getattr(request, "param", False):
+        import base64
+
+        from fleet_rlm.skills import captured_required_skill
+
+        raw = b"---\r\nname: recorded\r\ndescription: Immutable source\r\n---\r\nUse exact original text."
+        skill = captured_required_skill("recorded", "workspace", (("SKILL.md", raw),))
+        replay.update(
+            schema_version=2,
+            requested_skills=["recorded"],
+            required_skills=[{"name": skill.name, "source": skill.source, "sha256": skill.sha256}],
+        )
+        replay["context_files"]["skills/recorded/SKILL.md"] = hashlib.sha256(raw).hexdigest()
+        replay["replay_files"]["skills/recorded/SKILL.md"] = base64.b64encode(raw).decode()
+        replay["workspace_manifest"] = ", ".join(f"/workspace/{path}" for path in sorted(replay["context_files"]))
+        replay["skill_revision_sha256"] = hashlib.sha256(
+            json.dumps(
+                {"skills/recorded/SKILL.md": hashlib.sha256(raw).hexdigest()}, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+    digest, compressed = encode_snapshot(replay)
+    example = dspy.Example(
+        **{key: replay[key] for key in (*ENGINE_INPUT_FIELDS, "context_files")},
+        source_session="s1",
+        replay_turn_id="t1",
+        replay_snapshot_sha256=digest,
+        requested_skills=replay.get("requested_skills", []),
+    ).with_inputs(
+        *ENGINE_INPUT_FIELDS,
+        "context_files",
+        "source_session",
+        "replay_turn_id",
+        "replay_snapshot_sha256",
+        "requested_skills",
+    )
+    managers = []
+
+    class OfflineManager(DaytonaSandboxManager):
+        pass
+
+    def manager(**options):
+        instance = OfflineManager(**options)
+        instance.test_files = {}
+        instance.shutdown_calls = 0
+        managers.append(instance)
+        return instance
+
+    def write(self, path, content):
+        self.test_files[path] = content
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        return True
+
+    monkeypatch.setattr(validation, "DaytonaSandboxManager", manager)
+    monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", write)
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "stat_workspace_file",
+        lambda self, path: {
+            "size_bytes": len(self.test_files[path]),
+            "sha256": hashlib.sha256(self.test_files[path]).hexdigest(),
+        },
+    )
+    models = {"root": template.root_lm, "sub": template.sub_lm}
+    monkeypatch.setattr(validation, "build_lm", lambda _settings, _model_id, role: models[role])
+    cleanup = RolloutCleanup()
+    factory = validation.build_isolated_engine_factory(
+        FleetSettings(
+            _env_file=None,
+            max_llm_calls_per_turn=7,
+            fleet_daytona_api_key="key",
+            fleet_daytona_org_id="org",
+            fleet_daytona_volume_id="volume",
+        ),
+        SimpleNamespace(replay_snapshot=lambda *_args: (digest, compressed)),
+        cleanup=cleanup,
+    )
+    return candidate, example, factory, managers, cleanup
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("rollout", [True], indirect=True)
+def test_isolated_invocation_uses_recorded_required_instructions_not_deployment_files(rollout):
+    candidate, example, factory, managers, cleanup = rollout
+    observed = []
+
+    def prepared(item, program):
+        runtime = factory(item, program)
+
+        def answer(**inputs):
+            observed.append(inputs["skills_catalog"])
+            return dspy.Prediction(answer="recorded", learned_skill_note="")
+
+        runtime.program.reasoning.rlm = answer
+        return runtime
+
+    result = IsolatedFleetProgram(candidate, prepared, cleanup)(**example.inputs())
+    assert result.answer == "recorded" and result.route == "rlm"
+    assert len(observed) == 1 and "Use exact original text." in observed[0]
+    skill_bytes = managers[0].test_files["skills/recorded/SKILL.md"]
+    assert skill_bytes.decode("utf-8") in observed[0]
+    assert managers[0].shutdown_calls == 1
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("rollout", [False, True], indirect=True)
+def test_concurrent_rollouts_own_state_workspace_and_context_without_transport_files(rollout, monkeypatch):
+    candidate, example, factory, managers, _cleanup = rollout
+    before = deepcopy(candidate.dump_state())
+    rollout_thread = threading.local()
+
+    def guard_transport_files(original):
+        def guarded(*args, **kwargs):
+            if getattr(rollout_thread, "active", False):
+                pytest.fail("Rollout must not save, create or unlink candidate transport files")
+            return original(*args, **kwargs)
+
+        return guarded
+
+    # Guard rollout workers, not unrelated MLflow exporter threads writing native trace artifacts.
+    for owner, name in ((FleetProgram, "save"), (tempfile, "mkstemp"), (Path, "unlink")):
+        monkeypatch.setattr(owner, name, guard_transport_files(getattr(owner, name)))
+    barrier = threading.Barrier(2)
+
+    def run(index):
+        rollout_thread.active = True
+        engine = factory(example, candidate)
+        try:
+            assert engine.program.dump_state() == before
+            barrier.wait(timeout=10)
+            program = engine.program
+            program.reasoning.direct.predict.demos[0]["nested"].append(index)
+            program.reasoning.direct.predict.signature = program.reasoning.direct.predict.signature.with_instructions(
+                str(index)
+            )
+            program.child_policies.leaf_action.demos[0]["nested"].append(index)
+            program.reasoning.flex.load_state({"module_src": REVISED_SOURCE + f"\n# rollout {index}\n"})
+            engine.sandbox_mgr.write_workspace_file("files/input.csv", str(index).encode())
+            return engine
+        finally:
+            engine.sandbox_mgr.shutdown()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        engines = list(pool.map(run, (2, 3)))
+    assert candidate.dump_state() == before
+    assert len({manager.session_id for manager in managers}) == 2
+    assert engines[0].optimization.context is not engines[1].optimization.context
+    if example.requested_skills:
+        first, second = [engine.optimization.required_skills for engine in engines]
+        assert first == second and first is not second and first[0] is not second[0]
+        loaded = [
+            engine.workspace.load_skills("", [], required_skills=engine.optimization.required_skills)
+            for engine in engines
+        ]
+        assert loaded[0] == loaded[1] and "Use exact original text." in loaded[0]
+    for index, engine in zip((2, 3), engines, strict=True):
+        program = engine.program
+        assert program.reasoning.direct.predict.demos[0]["nested"] == [1, index]
+        assert program.child_policies.leaf_action.demos[0]["nested"] == [11, index]
+        assert program.child_policies.delegating_action.signature.instructions == "Use reviewed delegated reasoning"
+        assert program.reasoning.direct.predict.signature.instructions == str(index)
+        assert program.reasoning.flex.module_src.endswith(f"# rollout {index}\n")
+        assert engine.sandbox_mgr.test_files["files/input.csv"] == str(index).encode()
+        assert engine.sandbox_mgr.shutdown_calls == 1
+        assert engine.compiled_path is None
+        assert program.reasoning.rlm.max_llm_calls == 7
+        assert program.reasoning.flex._max_predictor_calls == 7
+        assert program.reasoning.rlm._user_tools["spawn_agent"].func.__self__ is engine.delegation
+    assert engines[0].delegation is not engines[1].delegation
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("failure", ["copy", "load", "restore", "execute"])
+@pytest.mark.parametrize("cleanup_result", [True, False, "raises"])
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_rollout_failure_has_one_cleanup_owner(rollout, monkeypatch, failure, cleanup_result, error_type):
+    candidate, example, factory, managers, cleanup = rollout
+    before = deepcopy(candidate.dump_state())
+    original = error_type(failure)
+
+    def fail(*_args, **_kwargs):
+        raise original
+
+    if failure == "copy":
+        monkeypatch.setattr(validation, "deepcopy", fail)
+    elif failure == "load":
+        monkeypatch.setattr(FleetProgram, "load_state", fail)
+    elif failure == "restore":
+        monkeypatch.setattr(DaytonaSandboxManager, "write_workspace_file", fail)
+    else:
+        monkeypatch.setattr(FleetProgram, "forward", fail)
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        if cleanup_result == "raises":
+            raise OSError("cleanup unconfirmed")
+        return cleanup_result
+
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
+
+    isolated = IsolatedFleetProgram(candidate, factory, cleanup)
+    with pytest.raises(error_type, match=failure) as raised:
+        isolated(**example.inputs())
+    assert raised.value is original
+    assert len(managers) == 1 and managers[0].shutdown_calls == 1
+    assert candidate.dump_state() == before
+    if cleanup_result is True:
+        cleanup.raise_if_failed()
+    else:
+        assert any("cleanup is unconfirmed" in note for note in original.__notes__)
+        with pytest.raises(RolloutCleanupError):
+            cleanup.raise_if_failed()
+
+
+@pytest.mark.usefixtures("_no_provider")
+def test_factory_rejects_wrapper_state_before_allocating_runtime(rollout):
+    candidate, example, factory, managers, _cleanup = rollout
+    with pytest.raises(TypeError, match="unwrapped FleetProgram candidate"):
+        factory(example, IsolatedFleetProgram(candidate, factory))
+    assert managers == []
+
+
+@pytest.mark.usefixtures("_no_provider")
+def test_actual_gepa_result_unwraps_engine_at_factory_boundary(rollout, monkeypatch, tmp_path):
+    candidate, example, factory, managers, cleanup = rollout
+    seen = []
+
+    def tracked_factory(item, program):
+        assert isinstance(program, FleetProgram)
+        seen.append(program)
+        return factory(item, program)
+
+    monkeypatch.setattr(FleetProgram, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
+    baseline = IsolatedFleetProgram(candidate, tracked_factory, cleanup)
+    optimizer = dspy.GEPA(
+        metric=lambda *_args: dspy.Prediction(score=1.0, feedback="Reviewed answer"),
+        reflection_lm=dspy.utils.DummyLM([]),
+        max_metric_calls=1,
+        num_threads=1,
+        use_merge=False,
+        reflection_minibatch_size=1,
+    )
+    optimized = optimizer.compile(baseline, trainset=[example], valset=[example])
+    assert isinstance(optimized, IsolatedFleetProgram)
+    assert isinstance(optimized.program, FleetProgram)
+    assert optimized.dump_state() == {f"program.{key}": value for key, value in optimized.program.dump_state().items()}
+    assert IsolatedFleetProgram(optimized.program, tracked_factory)(**example.inputs()).answer == "right"
+    assert seen[-1] is optimized.program
+    artifact = tmp_path / "published-candidate.json"
+    artifact.write_bytes(program_envelope(optimized.program))
+    assert json.loads(artifact.read_text())["state"] == optimized.program.dump_state()
+    assert all(manager.shutdown_calls == 1 for manager in managers)
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("cleanup_result", [False, None, "raises"])
+@pytest.mark.parametrize("native", ["evaluate", "gepa"])
+def test_native_scoring_cannot_clear_cleanup_failure(rollout, monkeypatch, cleanup_result, native):
+    candidate, example, factory, managers, cleanup = rollout
+    monkeypatch.setattr(FleetProgram, "forward", lambda _self, **_kwargs: dspy.Prediction(answer="right"))
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        if cleanup_result == "raises":
+            raise OSError("private cleanup details")
+        return cleanup_result
+
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
+    baseline = IsolatedFleetProgram(candidate, factory, cleanup)
+
+    def metric(*_args):
+        return pytest.fail("An unconfirmed rollout must not reach the metric")
+
+    if native == "evaluate":
+        result = validation.score_split(baseline, [example], metric, 1)
+        assert result.errors == 1 and result.scores == [0.0]
+        assert result.failures[0]["type"] == "RolloutCleanupError"
+    else:
+        optimized = dspy.GEPA(
+            metric=metric,
+            reflection_lm=dspy.utils.DummyLM([]),
+            max_metric_calls=1,
+            num_threads=1,
+            use_merge=False,
+            reflection_minibatch_size=1,
+            gepa_kwargs={"stop_callbacks": [cleanup.should_stop]},
+        ).compile(baseline, trainset=[example], valset=[example])
+        with pytest.raises(RolloutCleanupError, match="unconfirmed"):
+            optimized(**example.inputs())
+    assert len(managers) == 1 and managers[0].shutdown_calls == 1
+    with pytest.raises(RolloutCleanupError, match="evidence is invalid"):
+        cleanup.raise_if_failed()
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("cancel", [False, True])
+def test_run_drains_late_cleanup_and_closes_admission_without_masking_cancellation(rollout, monkeypatch, cancel):
+    candidate, example, factory, managers, cleanup = rollout
+    entered = threading.Barrier(3)
+    release = threading.Event()
+    closing = threading.Event()
+    original = KeyboardInterrupt("stop")
+
+    def forward(_self, **_kwargs):
+        entered.wait(timeout=10)
+        assert release.wait(timeout=10)
+        return dspy.Prediction(answer="right")
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        return False
+
+    monkeypatch.setattr(FleetProgram, "forward", forward)
+    monkeypatch.setattr(DaytonaSandboxManager, "shutdown", shutdown)
+    baseline = IsolatedFleetProgram(candidate, factory, cleanup)
+
+    def finish():
+        with cleanup.run():
+            closing.set()
+            if cancel:
+                raise original
+            cleanup.close()
+            cleanup.raise_if_failed()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        attempts = [pool.submit(baseline, **example.inputs()) for _ in range(2)]
+        entered.wait(timeout=10)
+        finalized = pool.submit(finish)
+        assert closing.wait(timeout=10)
+        try:
+            with pytest.raises(TimeoutError):
+                finalized.result(timeout=0.05)
+            with pytest.raises(RolloutCleanupError, match="admission is closed"):
+                baseline(**example.inputs())
+        finally:
+            release.set()
+        for attempt in attempts:
+            with pytest.raises(RolloutCleanupError):
+                attempt.result(timeout=10)
+        with pytest.raises(KeyboardInterrupt if cancel else RolloutCleanupError) as raised:
+            finalized.result(timeout=10)
+    if cancel:
+        assert raised.value is original
+        assert any("cleanup is unconfirmed" in note for note in original.__notes__)
+    assert len(managers) == 2
+    assert len({manager.session_id for manager in managers}) == 2
+    assert all(manager.shutdown_calls == 1 for manager in managers)
+
+
+@pytest.mark.usefixtures("_no_provider")
+@pytest.mark.parametrize("primary", [None, ValueError, KeyboardInterrupt])
+def test_sigint_during_drain_waits_for_attempt_and_preserves_primary(monkeypatch, primary):
+    cleanup = RolloutCleanup()
+    original = primary("primary failure") if primary is not None else None
+    interruption = KeyboardInterrupt("SIGINT during drain")
+    admitted = threading.Event()
+    waiting = threading.Event()
+    delivered = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    exited = threading.Event()
+    wait = cleanup._condition.wait
+
+    def observe_wait(timeout=None):
+        waiting.set()
+        return wait(timeout)
+
+    # Observe the wait only to deliver the signal at the failing boundary, not to
+    # assert an implementation detail. Assertions below concern completion/error identity.
+    monkeypatch.setattr(cleanup._condition, "wait", observe_wait)
+
+    def interrupt(_signum, _frame):
+        delivered.set()
+        raise interruption
+
+    previous_handler = signal.signal(signal.SIGINT, interrupt)
+
+    def attempt():
+        with cleanup.attempt():
+            admitted.set()
+            assert release.wait(timeout=10)
+            completed.set()
+
+    def send_signal():
+        try:
+            assert waiting.wait(timeout=10)
+            os.kill(os.getpid(), signal.SIGINT)
+            assert delivered.wait(timeout=10)
+            return exited.wait(timeout=0.05)
+        finally:
+            release.set()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            active = pool.submit(attempt)
+            assert admitted.wait(timeout=10)
+            sender = pool.submit(send_signal)
+            try:
+                with pytest.raises(BaseException) as raised, cleanup.run():
+                    if original is not None:
+                        raise original
+                assert completed.is_set(), "Run must not exit while an admitted attempt is active"
+                assert raised.value is (original if original is not None else interruption)
+            finally:
+                exited.set()
+            assert sender.result(timeout=10) is False, "SIGINT must not bypass the drain"
+            active.result(timeout=10)
+        with pytest.raises(RolloutCleanupError, match="admission is closed"), cleanup.attempt():
+            pytest.fail("Closed run must not admit another attempt")
+    finally:
+        release.set()
+        signal.signal(signal.SIGINT, previous_handler)
+
+
+# Source and dependency identity
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "engine/programs.py",
+        "engine/children.py",
+        "engine/signatures.py",
+        "optimize/objectives.py",
+        "optimize/validation.py",
+        "optimize/new_component.py",
+        "sandbox/runtime/repl.py",
+        "sandbox/snapshots.py",
+        "sandbox/new_bridge.py",
+        "sandbox/snapshot-requirements.txt",
+        "bundled_skills/example/SKILL.md",
+        "bundled_skills/example/references/policy.txt",
+        "models.py",
+        "config/settings.py",
+        "config/new_config.py",
+        "contracts.py",
+        "observability.py",
+        "execution_evidence.py",
+        "replay.py",
+        "workspace.py",
+        "skills.py",
+        "session.py",
+        "store/schema.py",
+        "store/new_store.py",
+        "optimization_runs.py",
+    ],
+)
+def test_source_identity_covers_mutation_addition_and_deletion(tmp_path, monkeypatch, relative):
+    package = tmp_path / "fleet_rlm"
+    owner = package / "optimize/artifacts.py"
+    owner.parent.mkdir(parents=True)
+    owner.write_text("# identity owner\n")
+    monkeypatch.setattr(artifacts, "__file__", str(owner))
+    initial = artifacts.optimization_code_digest()
+    path = package / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"first behavior")
+    added = artifacts.optimization_code_digest()
+    assert added != initial
+    path.write_bytes(b"second behavior")
+    assert artifacts.optimization_code_digest() not in {initial, added}
+    path.unlink()
+    assert artifacts.optimization_code_digest() == initial
+
+
+def test_presentation_is_excluded_from_execution_identity(tmp_path, monkeypatch):
+    package = tmp_path / "fleet_rlm"
+    owner = package / "optimize/artifacts.py"
+    owner.parent.mkdir(parents=True)
+    owner.write_text("# identity owner\n")
+    monkeypatch.setattr(artifacts, "__file__", str(owner))
+    before = artifacts.optimization_code_digest()
+    for name in ("api/schemas.py", "tui/app.py", "setup.py", "README.md"):
+        path = package / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("presentation-only fixture")
+    assert artifacts.optimization_code_digest() == before

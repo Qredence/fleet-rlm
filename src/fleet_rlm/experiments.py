@@ -10,15 +10,15 @@ import asyncio
 import hashlib
 import json
 import os
+import stat
 import sys
 import time
 import uuid
 from collections.abc import Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-from psycopg import Connection
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.optimization_runs import (
@@ -31,7 +31,7 @@ from fleet_rlm.optimization_runs import (
     validate_run_id,
     worker_settings_payload,
 )
-from fleet_rlm.store import Store
+from fleet_rlm.store import PooledLease, Store
 
 # The `fleet` subcommand that runs each job kind: one worker process, one lifecycle, different bodies.
 _WORKER_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -52,11 +52,39 @@ class ExperimentBusyError(ValueError):
 _RECOVERY_INTERVAL_SECONDS = 5.0
 
 
-def _require_worker_pipes(process: asyncio.subprocess.Process) -> tuple[Any, Any, Any]:
-    """Return the configured worker pipes, failing explicitly if subprocess setup is broken."""
-    if process.stdin is None or process.stdout is None or process.stderr is None:
-        raise RuntimeError("Experiment worker subprocess pipes were not created")
-    return process.stdin, process.stdout, process.stderr
+def _open_worker_log(root: Path, run_id: str) -> int:
+    """Append to a private log through directory descriptors, refusing symlinks in every component."""
+    validated = validate_run_id(run_id)
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in (*root.absolute().parts[1:], "runs", validated):
+            with suppress(FileExistsError):
+                os.mkdir(component, mode=0o700, dir_fd=directory)
+            try:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            except OSError as error:
+                raise RuntimeError("Worker log directory must not contain symlinks") from error
+            os.close(directory)
+            directory = child
+        try:
+            fd = os.open(
+                "worker.log",
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
+                0o600,
+                dir_fd=directory,
+            )
+        except OSError as error:
+            raise RuntimeError("Worker log must be a regular file without symlinks") from error
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RuntimeError("Worker log target is not a regular file")
+            os.fchmod(fd, 0o600)
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+    finally:
+        os.close(directory)
 
 
 class ExperimentManager:
@@ -70,7 +98,7 @@ class ExperimentManager:
         self.accepting = True
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
-        self._owner_lease: Connection | None = None
+        self._owner_lease: PooledLease | None = None
         self._recovered_at: float | None = None
 
     @property
@@ -313,37 +341,57 @@ class ExperimentManager:
         ]
 
     async def _execute(self, run_id: str, kind: str, options: ExperimentOptions, *, approval: bool) -> None:
-        """Run a worker and drain both output pipes before finalizing its ledger outcome.
+        """Run a worker, drain output into a bounded private log, and finalize its ledger outcome.
 
         Ordinary worker or I/O errors become sanitized failure metadata. Task
         cancellation requests a cooperative stop for search and is re-raised.
         Finalization and storage errors can still propagate.
         """
         process = None
-        readers: list[asyncio.Task[None]] = []
         failure: dict[str, str] | None = None
+        log_fd: int | None = None
+        drain_task: asyncio.Task[None] | None = None
         try:
             environment = dict(os.environ)
             for key in ("MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_ID", "FLEET_SETUP_TOKEN"):
                 environment.pop(key, None)
+            log_fd = await asyncio.to_thread(_open_worker_log, self.root, run_id)
             process = await asyncio.create_subprocess_exec(
                 *self._command(run_id, kind, options, approval=approval),
                 env=environment,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
                 start_new_session=True,
             )
-            stdin, stdout, stderr = _require_worker_pipes(process)
-            readers = [
-                asyncio.create_task(self._discard_output(stdout)),
-                asyncio.create_task(self._discard_output(stderr)),
-            ]
+
+            async def drain_output() -> None:
+                retained = os.fstat(log_fd).st_size
+                write_error = None
+                if process.stdout is None:
+                    raise RuntimeError("Experiment worker output pipe was not created")
+                while chunk := await process.stdout.read(64_000):
+                    # Keep at most 1 MB per run; continue draining after the cap.
+                    selected = chunk[: max(0, 1_000_000 - retained)]
+                    if selected:
+                        try:
+                            await asyncio.to_thread(os.write, log_fd, selected)
+                            retained += len(selected)
+                        except OSError as error:
+                            write_error = error
+                            retained = 1_000_000
+                if write_error is not None:
+                    raise write_error
+
+            drain_task = asyncio.create_task(drain_output())
+            if process.stdin is None:
+                raise RuntimeError("Experiment worker stdin pipe was not created")
+            stdin = process.stdin
             stdin.write(worker_settings_payload(self.settings))
             await stdin.drain()
             stdin.close()
             await process.wait()
-            await asyncio.gather(*readers)
+            await asyncio.shield(drain_task)
         except asyncio.CancelledError:
             if not approval:
                 await self.cancel(run_id)
@@ -351,13 +399,14 @@ class ExperimentManager:
         except Exception as error:
             failure = {"type": type(error).__name__, "detail": "Experiment worker failed; sensitive details omitted."}
         finally:
-            # Ownership ends after all work and both pipes. Client requests never cancel this task.
+            # Ownership ends after exit and output drain, including cancellation/error paths.
             if process is not None:
                 await asyncio.shield(process.wait())
-            if readers:
-                results = await asyncio.shield(asyncio.gather(*readers, return_exceptions=True))
-                if any(isinstance(result, BaseException) for result in results):
-                    failure = {"type": "WorkerOutput", "detail": "Experiment output could not be drained."}
+            if drain_task is not None:
+                with suppress(Exception):
+                    await asyncio.shield(drain_task)
+            if log_fd is not None:
+                os.close(log_fd)
             await self._finish(run_id, process, failure, approval=approval)
 
     async def _finish(
@@ -415,12 +464,6 @@ class ExperimentManager:
                 owner_id=self.owner_id,
                 expected_statuses=("running",),
             )
-
-    @staticmethod
-    async def _discard_output(stream: asyncio.StreamReader) -> None:
-        """Drain worker output to EOF without retaining or exposing its contents."""
-        while await stream.read(8192):
-            pass
 
     async def _recover_approval(self, record: dict[str, Any], *, failure: dict[str, str] | None = None) -> None:
         """Reconcile atomic install receipts; never install bytes during crash recovery."""
@@ -497,7 +540,7 @@ class ExperimentManager:
 
     async def status(self) -> dict[str, Any]:
         """Report admission and live/unfinished worker ownership to the local launcher."""
-        # Setup apply already holds this lock while it asks for status.
+        # Poll recovery unless admission is already draining.
         if not self._lock.locked():
             # The launcher polls this every second while draining services and must observe
             # recovery promptly, so a closed admission bypasses the poll throttle.

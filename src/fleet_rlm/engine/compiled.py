@@ -11,10 +11,10 @@ from typing import Any
 
 from fleet_rlm.engine.programs import FleetProgram
 
-PROGRAM_SCHEMA = "fleet-program-b1"
+PROGRAM_SCHEMA = "fleet-program-b2"
 _IDENTITY = {
     "format": "fleet-program",
-    "format_version": 1,
+    "format_version": 2,
     "program_schema": PROGRAM_SCHEMA,
     "child_policy_contract": 1,
 }
@@ -41,7 +41,7 @@ def load_program_envelope(program: FleetProgram, content: bytes) -> None:
         or not isinstance(envelope["metadata"], dict)
         or any(not isinstance(key, str) or not isinstance(value, str) for key, value in envelope["metadata"].items())
     ):
-        raise ValueError("Unsupported compiled program: select fleet-program-b1 or explicit baseline")
+        raise ValueError("Unsupported compiled program: select fleet-program-b2 or explicit baseline")
     program.load_state(envelope["state"])
 
 
@@ -91,7 +91,7 @@ class CompiledProgramFile:
             self._apply(program, self.read())
 
     def reload_if_changed(self, program: FleetProgram) -> None:
-        """Read bounded bytes at the serialized Turn boundary, including same-size/mtime changes."""
+        """Verify file content at serialized Turn boundaries; reload when its digest changes."""
         if self.path is None or (self._baseline and not os.path.lexists(self.path)):
             return
         content = self.read()
@@ -113,7 +113,11 @@ class CompiledProgramFile:
             raise ValueError("Compiled program exceeds the 10 MB size limit")
         return content
 
-    def _apply(self, program: FleetProgram, content: bytes) -> None:
+    def _apply(
+        self,
+        program: FleetProgram,
+        content: bytes,
+    ) -> None:
         load_program_envelope(program, content)
         self.digest = hashlib.sha256(content).hexdigest()
         self._baseline = False

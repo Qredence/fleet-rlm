@@ -14,14 +14,14 @@ from daytona import FileDownloadRequest, FileUpload
 
 from fleet_rlm.observability import activity_text, phase_span
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError, with_retries
-from fleet_rlm.sandbox.runtime.fs_ops import (
-    existing_workspace_paths_code,
+from fleet_rlm.workspace import (
+    MAX_WORKSPACE_FILE_BYTES,
+    _workspace_relative_path,
     list_workspace_files_code,
     turn_inputs_code,
     verify_python_artifact_code,
     workspace_files_metadata_code,
 )
-from fleet_rlm.workspace import MAX_WORKSPACE_FILE_BYTES, _workspace_relative_path
 
 if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
@@ -165,6 +165,23 @@ class WorkspaceIOMixin:
             sandbox, [clean_path], create_parents=False, max_bytes=MAX_WORKSPACE_FILE_BYTES, include_digest=True
         )[0]
         return {"path": clean_path, "size_bytes": metadata["size"], "sha256": metadata["sha256"]}
+
+    def stat_workspace_files(self: DaytonaSandboxManager, rel_paths: list[str]) -> dict[str, dict[str, Any]]:
+        """Return sizes and digests in one remote check without downloading file contents."""
+        clean_paths = [_workspace_relative_path(path) for path in rel_paths]
+        if not clean_paths:
+            return {}
+        metadata = self._workspace_files_metadata(
+            self.ensure_sandbox(),
+            clean_paths,
+            create_parents=False,
+            max_bytes=MAX_WORKSPACE_FILE_BYTES,
+            include_digest=True,
+        )
+        return {
+            path: {"path": path, "size_bytes": item["size"], "sha256": item["sha256"]}
+            for path, item in zip(clean_paths, metadata, strict=True)
+        }
 
     def read_workspace_file_to_path(
         self: DaytonaSandboxManager, rel_path: str, local_path: str | Path, *, max_bytes: int = MAX_WORKSPACE_FILE_BYTES
@@ -320,9 +337,8 @@ class WorkspaceIOMixin:
         total = 0
         with self.root._budget_lock:
             inputs = dict(self.root._child_receipts.get(self.agent_id, {}).get("inputs", {}))
-        for path in self.list_workspace_files():
-            if not path.startswith("artifacts/"):
-                continue
+        artifact_paths = [path for path in self.list_workspace_files() if path.startswith("artifacts/")]
+        for path in artifact_paths:
             if len(selected) >= _MAX_PROMOTED_FILES and path not in inputs:
                 raise ValueError("Child output promotion quota exceeded")
             raw = self.read_workspace_file(path)
@@ -353,10 +369,6 @@ class WorkspaceIOMixin:
         if destinations:
             own_paths = set(self.parent.list_workspace_files())
             collisions = own_paths.intersection(destinations)
-            occupied = json.loads(self.parent.exec_remote_python(existing_workspace_paths_code(destinations)))
-            if not isinstance(occupied, list) or not all(isinstance(path, str) for path in occupied):
-                raise RuntimeError("Invalid child output destination check")
-            collisions.update(occupied)
         # A destination already holding identical bytes is a completed publication, so a retried
         # promotion stays idempotent instead of failing on its own earlier work.
         by_destination = {target: raw for _, target, raw in selected}

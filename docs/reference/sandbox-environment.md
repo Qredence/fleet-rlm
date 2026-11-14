@@ -53,16 +53,25 @@ task-specific computation and verification code and executes it in the Daytona
 REPL. Shared instructions guide timing and stopping behavior across tasks.
 
 Semantic `llm_query_batched` calls delegate to injected native DSPy tools first.
-The outer Flex fallback reserves the whole prompt list once and runs at most
-eight workers, each with a separate copy of the submitting Turn's ContextVars.
+`jev_decide_batched` handles batched item decisions with discrete choices or boolean
+`Noul` classification. The outer Flex fallback reserves the whole prompt list once and
+runs at most eight workers, each with a separate copy of the submitting Turn's ContextVars.
 Results remain in input order and worker exceptions propagate. Skill relevance
-and item decision batches use native DSPy batching with `timeout=0` to disable
+batches use native DSPy boolean `Noul` classification with `timeout=0` to disable
 speculative straggler resubmission; Fleet's independent Turn deadline still applies.
 These logical budget units differ from observable model requests and token usage.
 
-Flex/RLM and explicit children use native ChatAdapter execution and JSON recovery
-with a temporary native-first parser for two recorded gateway formats. Valid
-native responses are never preprocessed, and Fleet makes no corrective request.
+Flex/RLM and explicit children use native `XMLAdapter` execution by default (with
+`ChatAdapter` and `JSONAdapter` available via configuration) and native wire serialization.
+The guest environment runs with preloaded DSPy (`dspy.primitives.sandbox_guest`).
+The host's `WorkspaceDataset` uses the native one-way `SandboxSerializable` contract
+to create a file-backed `WorkspaceDatasetView` in guest Python. Forwarding that view
+to a nested agent or host tool carries only JSON metadata (`path`, description, size,
+and digest), never reconstruction code or file contents. A nested agent can use
+`workspace.read_text(context['path'])` or `WorkspaceDatasetView(context)` to access
+its copied input. DSPy's host decoder remains unmodified and rejects guest codecs.
+`workspace.load_image(path)` loads workspace images as native `dspy.Image` objects.
+Valid native responses are never preprocessed, and Fleet makes no corrective request.
 The direct route retains its separate adapter policy. See the
 [native DSPy implementation report](../runbooks/native-dspy-integration.md)
 for offline coverage and the remaining compatibility gate.
@@ -133,7 +142,8 @@ gates in [PRD F](../archive/fleet-rlm-prds/F-cleanup-publication.md).
 
 ### Durable ownership and admission
 
-Each Session row carries a bounded sandbox-ownership record (see
+Each Session tracks `ownership_epoch` on `fleet_lite_sessions` and normalized
+per-resource intent rows in `fleet_lite_sandbox_resources` (see
 [database](database.md)). Acquiring the Session lease advances its epoch, and
 every resource mutation is compare-and-set against that epoch, so a late reply
 from a previous owner cannot clear a newer intent. Before a runtime is admitted,
@@ -187,15 +197,16 @@ Older records without the optional build digest remain readable.
 ## Build and promotion
 
 The versioned definition must be built and validated before deploying the default
-snapshot change. Live Daytona work requires explicit authorization. The operator
-setup action **Build snapshot** uses the packaged recipe and streams provider logs
-and uses a 20-minute wait by default; pass a positive finite timeout or another
-callback through the Python operator API in
-`fleet_rlm.sandbox.snapshots`. The TUI uses the FastAPI setup routes.
+snapshot change. Live Daytona work requires explicit authorization. Run
+`fleet snapshot build` (which calls `fleet_rlm.sandbox.snapshots.build_snapshot`,
+streaming provider logs with a 20-minute default wait) to build from the packaged
+recipe, or call the Python operator API directly to pass a custom finite timeout
+or callback.
 
 A wait timeout does not prove the remote build stopped. Inspect the existing
-snapshot with **Verify** in `/setup` before deciding whether to retry; do not
-blindly issue another create. Verification checks provider state and resource
+snapshot with `fleet snapshot preflight` (or `fleet doctor`) before deciding whether
+to retry; do not blindly issue another create, and use `fleet snapshot activate`
+for an existing inactive snapshot. Verification checks provider state and resource
 floors, not Python imports or task correctness.
 
 Before promotion, compare the current snapshot and candidate using saved snapshot

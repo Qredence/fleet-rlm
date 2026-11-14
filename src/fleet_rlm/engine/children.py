@@ -16,9 +16,14 @@ class ChildPolicies(dspy.Module):
             action = dspy.RLM(
                 ChildTask, tools=tools, interpreter_factory=interpreter_factory, max_iters=8, max_llm_calls=25
             ).generate_action
+            sig = action.signature
+            assert sig is not None
+            extra = sig.fields["code"].json_schema_extra
+            base_desc = extra["desc"] if isinstance(extra, dict) and "desc" in extra else ""
             # Native GEPA attributes traces by signature equality, including role metadata.
-            action.signature = action.signature.with_updated_fields(
-                "code", desc=f"{action.signature.fields['code'].json_schema_extra['desc']} Fleet child role: {name}."
+            action.signature = sig.with_updated_fields(
+                "code",
+                desc=f"{base_desc} Fleet child role: {name}.",  # ty: ignore[invalid-argument-type]
             )
             setattr(self, name, action)
 

@@ -88,11 +88,9 @@ not activate schedules or change generation defaults merely by being installed.
 `build_mlflow_scorer_suite(judge_model, judge_lm=None, jev_lm=None)` returns:
 
 - MLflow judges: `RelevanceToQuery`, `RetrievalGroundedness`, and versioned
-  Fleet rubrics for route suitability, execution verification, tool integrity,
-  output instruction compliance, and Skill progressive disclosure.
+  Fleet rubrics for route suitability, execution verification, and tool integrity.
 - `jev_routing_efficiency_judge`: judgment of whether the selected route fit
-  the task. This is separate from `jev_routing_efficiency`, the deterministic
-  budget-efficiency score. When `jev_lm` is given (`FleetSettings.build_jev_lm`,
+  the task. When `jev_lm` is given (`FleetSettings.build_jev_lm`,
   a TypeSafe `jev-*` client), one System One request asks two independent
   questions — `Noul` route suitability and a `Choice` over `direct`/`flex`/`rlm`
   — and the verdict is the `Noul` value at threshold 0.5. The rationale is
@@ -112,7 +110,7 @@ not activate schedules or change generation defaults merely by being installed.
   a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
   lineage, status, outcome, code, stdout, stderr, and return values (including
   `SUBMIT` payloads), with bounded redaction. These assessments use
-  `fleet-trace-assessments-v8`. It does not ask the judge to
+  `fleet-trace-assessments-v9`. It does not ask the judge to
   reconstruct evidence from a serialized full trace. Execution rationales cite
   real sandbox span IDs; malformed results, placeholder rationales, or unknown
   citations are scorer errors. The evidence summary includes at most eight
@@ -121,39 +119,6 @@ not activate schedules or change generation defaults merely by being installed.
   Use this validated suite with `mlflow.genai.evaluate` for these two assessment names. A
   server-registered `{{ trace }}` judge with the same names has none of these
   checks and can record a pass for a rationale that cites nothing.
-- `stopping_discipline`: judges actual computation code and execution output,
-  including redundant methods within one code block. One target computation
-  plus a supporting check is sufficient; failed checks, disagreement, or an
-  explicit request for verification justify more work.
-  Bootstrap is excluded. Up to eight task execution spans and 12,000 characters
-  of code per span are supported; truncated evidence fails scoring. The judge
-  must cite a supplied execution span when one exists. This is a diagnostic,
-  not a GEPA objective or a host-enforced stopping guarantee. It adds one judge
-  call per scored trace; no scoring call runs during an ordinary serving Turn.
-- `output_instruction_compliance`: evaluates the complete redacted user request
-  and final answer, up to 20,000 characters each. It does not replace the middle
-  of either field with a preview. Missing, empty, oversized, or already truncated
-  evidence produces a scorer error before any judge call. Diagnostic version
-  `fleet-trace-assessments-v8` retains v7's invalidation of comparisons with earlier partial-text
-  judgments. This diagnostic does not change the shared metric or GEPA objectives.
-- `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
-  actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
-  cover `use_skill`, `read_skill_reference`, `run_skill_script`, and `save_skill`,
-  even without TypeSafe selection. Each `sandbox.exec` holds at most 20 receipts
-  with helper name, Skill name, and whether the helper returned, plus an explicit
-  truncation flag. Bodies, script arguments, and results are excluded. A returned
-  helper does not prove script exit status or compliance with its instructions.
-  Catalog listing and code that merely mentions a helper do not activate this
-  scorer; it is skipped when no applicable activity or claim is present.
-- `rlm_trajectory_efficiency`: applies the shared efficiency formula to the
-  host-recorded `fleet_turn` output. Nested predictor/model spans and tracebacks
-  are not counted as additional calls or failures.
-- `jev_routing_efficiency`: rewards fast paths without RLM/Flex and bounded
-  RLM/Flex runs, using host-recorded budget units rather than wrapper spans. Both
-  route classes are monotonic in budget units: a direct Turn keeps `1.0` up to two
-  units and loses 0.02 per extra unit, and a Flex/RLM Turn keeps `0.95` up to fifteen
-  and loses the same 0.02 per extra unit, floored at 0.2. This is a routing gauge,
-  distinct from the GEPA efficiency term in `fleet_metric`.
 - `route_correctness`: compares the turn's reported `route` (`direct`, `flex`,
   `rlm`) with the `route` expectation on a labeled case. It returns no value
   when a case has no gold route.
@@ -190,14 +155,7 @@ verify subsequent assessment metadata. Do not restore an old definition blindly
 or change the eight-execution diagnostic limit to accommodate a historical trace.
 Live evaluation and shared registry changes require explicit authorization.
 
-In particular, `stopping_discipline` is included in the offline suite but may be
-absent from a production trace's automatic assessments. Its absence is not a
-passing verdict. Check the registered scorer's identity, schedule, sampling, and
-assessment errors before attributing missing feedback to runtime wiring. Offline
-regressions preserve complete chronological receipts for same-library precision
-rechecks, immediate submission, failed checks, and requested verification. Their
-scripted judge responses verify evidence transport and rubric contracts; they do
-not demonstrate that a live judge classifies those cases correctly.
+Online selection must use scorers that accept the available live evidence.
 
 Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
@@ -270,7 +228,7 @@ if experiment is None:
 trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_runtime/TRACE_ID"]
 traces = [mlflow.get_trace(trace_id, silent=True, flush=True) for trace_id in trace_ids]
 suite = build_mlflow_scorer_suite(settings.fleet_judge_model)
-eligible_names = {"output_instruction_compliance", "rlm_trajectory_efficiency", "jev_routing_efficiency"}
+eligible_names = {"execution_evidence_diagnostics"}
 selected = [scorer for scorer in suite if scorer.name in eligible_names]
 result = score_evaluation_traces(
     traces,
@@ -380,15 +338,18 @@ TypeSafe/Jev serves decisions with a finite answer space that repeat, whose corr
 be labelled, and where probability evidence is useful: route selection, Skill relevance, and
 route suitability. Plans, generated code, summaries, Skill bodies, and explanations stay on
 generative predictors, and no `RLM` or `Flex` output carries a decision type. The route
-suitability judge keeps `Noul` at `JEV_ROUTE_THRESHOLD`. Calibrating the router's `Choice`
-weights with DSPy's `ReAnchor` is deferred until a candidate artifact can carry fitted fields
-into paired validation; installing calibrated fields after the gate would ship behavior the
-gate never measured.
+suitability judge keeps `Noul` at `JEV_ROUTE_THRESHOLD`. Calibrating decision modules
+(router `Choice` weights and Skill `Noul` thresholds) is performed in stage 2
+of optimization using DSPy's native `ReAnchor` (`dspy.experimental.ReAnchor`).
+It fits only on the training split; the dev split reports before/after scores and
+permits adoption only without regression. Holdout remains outside search and calibration.
+Calibrated decision fields are integrated directly into candidate artifacts
+(`fleet-program-b2`, approval evidence version 3) and checked by paired validation before promotion.
 
 ### Trace regression boundary
 
 Trace `tr-e60ebd3bf370e42a8d5e724925de964b` has a sanitized diagnostic fixture
-in `tests/fixtures/pi_digit_trace.json`. It returned `5`, with first supporting
+in `tests/fixtures.json`. It returned `5`, with first supporting
 checks complete at 106.999 seconds and Turn completion at 215.546 seconds.
 Six generations plus one route and three Skill decisions explain ten budget
 units. It recovered from one Python error and one submission rejection.
@@ -514,26 +475,25 @@ executes cases and scores only the traces it just produced.
 
 ## DSPy integration rationale and validation
 
-The integration follows the locked DSPy 3.4.1 and GEPA 0.1.4 contracts. These
-were the latest published stable releases checked on 2026-10-25; `uv.lock` is
-authoritative for installed packages. DSPy 3.4.1 treats each
+The integration follows the locked DSPy 3.5.0 and GEPA contracts (`uv.lock` is
+authoritative for installed packages). DSPy 3.5.0 treats each
 Flex as a whole source-code component; predictors inside that Flex are owned by
 the source and are not separately tuned. Ordinary predictors remain instruction
-components. DSPy supplies native instruction reflection using its JSON adapter,
+components. DSPy supplies native instruction reflection using its reflection adapter,
 Flex code proposal, component selection, and candidate selection. Fleet sets
 bounded instruction length and task guidance, supplies the metric and isolated
 runtime, and uses DSPy's `SandboxLM` to account host-mediated calls against the
 shared Turn budget. GEPA's file stop and candidate-proposal
-callbacks are isolated version-specific integration points from GEPA 0.1.4;
+callbacks are isolated version-specific integration points;
 search metric call limits remain advisory between native batches. See the [versioned Flex
-contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
-API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
+contract](https://dspy.ai/3.5.0/api/modules/Flex/) and [GEPA
+API](https://dspy.ai/3.5.0/api/optimizers/GEPA/overview/).
 
 Explicit Fleet child calls expose `child_policies.leaf_action` and
 `child_policies.delegating_action` as ordinary native instruction components outside
 Flex source ownership (`program.`-prefixed in the isolated wrapper). Fresh native
 child RLMs receive independent copies of the selected policy's instructions and
-demos, not its LM or live runtime. DSPy 3.4.1's GEPA adapter attributes predictor traces by
+demos, not its LM or live runtime. DSPy 3.5.0's GEPA adapter attributes predictor traces by
 signature equality; immutable role-specific `code` field descriptions distinguish
 the policies even when their instruction strings match. Child extraction and
 arbitrary RLMs authored inside Flex remain outside this separate policy inventory.
@@ -550,12 +510,13 @@ synthetic trace injection or change in child error severity is introduced.
 
 LM and serving-adapter overrides use scoped `dspy.context` calls. DSPy's evaluator
 owns worker context propagation. Fleet uses native predictor/parameter traversal
-and native state loading. Missing RLM limits are supplied only by the outer Flex
-interpreter's constructor adapter, not by source rewriting or a second state load.
-DSPy support is pinned to the tested 3.4.1 release because this facade protocol is internal. JSON state preserves optimized instructions
-and Flex source; the host reconstructs the Daytona interpreter and current
-credentials. Installation now requires a complete host envelope with
-`format="fleet-program"`, `format_version=1`, `program_schema="fleet-program-b1"`,
+and native state loading. RLMs authored inside Flex keep native constructor defaults
+unless the source supplies explicit limits; the host independently enforces the shared
+Turn budget. No constructor adapter, source rewriting, or second state load is used.
+DSPy support is pinned to the tested 3.5.0 release because this facade protocol is internal. JSON state preserves optimized instructions,
+Flex source, and ReAnchor calibrated decision fields; the host reconstructs the Daytona interpreter and current
+credentials. Installation requires a complete host envelope with
+`format="fleet-program"`, `format_version=2`, `program_schema="fleet-program-b2"`,
 `child_policy_contract=1`, canonical unwrapped native `state`, and string-valued
 `metadata`. The exporter deliberately reads the isolated wrapper's `.program`;
 native `.save()` output is not an installation artifact. Missing/extra parameters,
@@ -563,14 +524,15 @@ incompatible field contracts, malformed Flex source and any non-null learned LM
 binding are rejected before any state changes. Native field criteria/configuration
 are preserved and validated by DSPy, not translated by Fleet.
 
-Gate A `fleet-program-a1` envelopes are incompatible with the two-way automatic
-route contract. They remain inspectable, not installable. Explicit baseline
-selection or a newly reviewed/revalidated B1 artifact is required; there is no
-automatic transplant of old instructions, demos or criteria. Native parameter
-paths and `child_policy_contract=1` are unchanged. Route assessments use
-`jev-route-v2` / `fleet-trace-assessments-v8`: bounded code, file and Skill work
-can reasonably use RLM; explicit Flex remains valid. The independent route judge
-still has three choices and the same Noul threshold and evidence requirements.
+Earlier envelopes (`fleet-program-a1`, `fleet-program-b1`) are incompatible with the
+3-way automatic route contract (`Choice` across `direct`, `flex`, `rlm`) and ReAnchor calibration.
+They remain inspectable, not installable. Explicit baseline selection or a newly
+reviewed/revalidated B2 artifact is required; there is no automatic transplant of old
+instructions, demos, or decision criteria. Native parameter paths and `child_policy_contract=1`
+are unchanged. Automatic triage uses 3-way `Choice` across `direct`, `flex`, and `rlm`.
+Route assessments use `jev-route-v3` / `fleet-trace-assessments-v9`: bounded code, file and Skill work
+can reasonably use RLM or Flex; the independent route judge evaluates `Choice` over `direct`, `flex`,
+and `rlm` with the same Noul threshold and evidence requirements.
 
 Old bare/wrapped JSON and older child-policy markers are readable as historical
 artifacts only. They cannot be approved or installed into this schema. Do not rename
@@ -592,7 +554,7 @@ replacement bytes retain the valid in-memory program/digest but refuse the Turn.
 Runtime and configuration digests, a digest of optimization source,
 and a versioned fingerprint of installed distribution names and versions are
 captured before search and rechecked before the candidate manifest is written and
-again at approval. Evidence format 2 does not depend on finding a source-tree
+again at approval. Evidence format 3 does not depend on finding a source-tree
 `uv.lock` at runtime.
 Source identity includes engine/optimizer/sandbox Python (including additions and
 removals), snapshot requirements, bundled Skill resources, and the shared
@@ -605,7 +567,7 @@ recipe identity does not prove every remote environment's identity.
 See [settings and context](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/settings-and-context.md)
 and [saving and loading](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/diving-deeper/saving-and-loading.md).
 
-`tests/optimize/test_native_gepa.py` exercises actual native compilation with
+`tests/optimize/test_optimization.py` exercises actual native compilation with
 scripted models and a fake interpreter that rejects unknown source. For explicitly
 authorized live validation, `uv run python scripts/verify_gepa_live.py --live`
 uses synthetic addition tasks, the configured Gateway models and judge, and
@@ -616,18 +578,19 @@ quality improvement or approve an artifact. Reports are local under
 
 ### Offline native boundary checks
 
-The locked source paths are `dspy.primitives.facade.FacadeInvocation.install`,
-`construct`, `_build_predictor`, and `call`; Flex's `BridgeRuntime` installs the
-shim and registers `__dspy_construct__` with nested `kwargs`. Native signature
-resolution, tool decoding, handles, LM scoping, and factory propagation remain
-native. Fleet copies only omitted `max_iters` / `max_llm_calls`, leaving explicit
-values (including `None`) and malformed payloads to native behavior. Propagated
-factories do not pass these defaults into deeper interpreters.
+The pinned bridge is `dspy.primitives.facade.SandboxSession`: `install` registers
+`__dspy_lm__`, `__dspy_tool_call__`, `__dspy_trace__`, and `__dspy_interpreter__`.
+Flex's `BridgeRuntime` imports the real DSPy guest and delegates nested interpreter
+creation, LM calls, provided tools, signature parsing, and wire values to that session.
+There is no `FacadeInvocation` or `__dspy_construct__` compatibility shim. Native
+constructor defaults, explicit values (including `None`), and malformed payloads
+retain native behavior. Host dataset codecs are one-way into Daytona; forwarded
+dataset views carry JSON metadata and the native host decoder rejects guest codecs.
 
-`tests/sandbox/test_native_defaults.py` executes real native Flex source through
+`tests/sandbox/test_sandbox.py` executes real native Flex source through
 an emulated Daytona transport, including aliases, expanded kwargs, multiple
 constructors, source save/load, factory isolation, and host-budget exhaustion.
-`tests/lite/test_dspy_contracts.py` covers native query metering, child lifecycle,
+`tests/engine/test_runtime.py` covers native query metering, child lifecycle,
 and success-only promotion. Semantic `llm_query` calls are not code-executing
 children. Native nested RLMs retain the Daytona backend and host cleanup;
 Fleet-managed `spawn_agent` / `spawn_agents` retain input selection, allowlisted
@@ -714,7 +677,7 @@ errors remain visible to the caller.
 
 Root, sub and Jev model roles, execution mode and Turn budgets come from the
 current deployment constructors. All non-null learned predictor/Flex LM bindings
-are rejected. Published candidates use the complete `fleet-program-b1` envelope,
+are rejected. Published candidates use the complete `fleet-program-b2` envelope,
 manifest/digest approval and the bounded serving loader described above. Historical
 bare state, `program.` wrapper keys and `fleet_child_policy_version` markers are
 not accepted for installation. This code/schema change invalidates prior approval
@@ -802,8 +765,8 @@ case to have quality 1.0 on every pass. Candidate approval fails closed when the
 The manual 30-day Unity Catalog trace cleanup procedure is documented in the
 [MLflow trace retention runbook](../runbooks/mlflow-trace-retention.md).
 
-`tests/fixtures/triage_cases.json` contains 18 developer-reviewed routing cases,
-six per effective route. Compare unchanged and structured criteria using the same
+`tests/fixtures.json` contains 18 developer-reviewed routing cases,
+12 RLM and 6 Direct cases; it currently contains no Flex cases. Compare unchanged and structured criteria using the same
 backend, inputs and existing `route_correctness` scorer. Preserve probability,
 confidence and cache evidence; revised criteria must not regress aggregate accuracy.
 Mode overrides and context protection are deterministic invariants.
@@ -821,7 +784,10 @@ settings unchanged. Keep shared learned notes disabled and gold outside agent in
 Promotion requires at least 10% lower median short-task latency, no correctness or
 truncation regression, no aggregate observable generation-call increase and a successful
 Pi canary. Missing version or finish-reason evidence blocks promotion. Otherwise retain
-current defaults. ReAnchor remains deferred; native GEPA integration is covered by the offline and live canaries.
+current defaults. ReAnchor runs as stage 2 of optimization to calibrate decision modules.
+Offline tests exercise native calibration through isolated rollout copies. Historical live
+canaries do not qualify the DSPy 3.5.0 bridge or ReAnchor stage; fresh live validation
+requires explicit authorization.
 
 Stopping instructions apply within generated code blocks as well as between
 REPL actions. When multiple computation methods are used, the agent is
@@ -850,7 +816,7 @@ unknown. Only the cumulative metric-call count is monotonic.
 | Candidate paths, manifest digest, gate and dataset sizes | Required worker Store writes backed by local artifact/evidence writes. Failure prevents eligible completion. |
 | Cancellation intent | API commits the database stop flag before signaling the stop file. Worker checks both at native safe points and stage boundaries. |
 | Managed worker outcome | Worker records the required database handoff; stdout terminal events have no authority. |
-| Managed terminal outcome | API confirms process exit and drains both pipes before owner/status-fenced terminal arbitration. Accepted cancellation overrides completion. |
+| Managed terminal outcome | API confirms process exit and drains merged output into a private log capped at 1 MB per run before owner/status-fenced terminal arbitration. Accepted cancellation overrides completion. |
 | Standalone terminal outcome | Worker persists after required cleanup and cancellation/ownership checks, before releasing its lease. |
 | MLflow setup, tracking logs and trace flush; CLI diagnostic events | Best effort, with sanitized diagnostics. These failures do not set the required-persistence stop latch. Approval evidence flush policy is unchanged. |
 
