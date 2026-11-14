@@ -33,7 +33,7 @@ classifiers = [
 dependencies = [
     # Flex, SandboxSession, and DecisionTypes contracts verified on DSPy 3.5.0 (GEPA lock: 0.1.4).
     "dspy==3.5.0",
-    "daytona==0.231.0",
+    "daytona==0.231.1",
     "mlflow[databricks]==3.18.0",
     "databricks-sdk>=0.153.0,<1",
     "psycopg[binary]>=3.3.6,<4",
