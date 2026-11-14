@@ -80,9 +80,12 @@ def judge_environment(settings: FleetSettings) -> dict[str, str]:
     key = resolved.api_key.get_secret_value()
     if not settings.fleet_judge_model.startswith("openai:/"):
         return {}
-    if not (resolved.api_base and key):
-        return {}
-    return {"OPENAI_API_BASE": resolved.api_base, "OPENAI_API_KEY": key}
+    environment = {}
+    if resolved.api_base:
+        environment["OPENAI_API_BASE"] = resolved.api_base
+    if key:
+        environment["OPENAI_API_KEY"] = key
+    return environment
 
 
 def build_jev_lm(settings: FleetSettings) -> dspy.LM | None:

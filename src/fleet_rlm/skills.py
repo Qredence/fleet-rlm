@@ -483,11 +483,15 @@ class SkillManager:
             remote_files = set(self.sandbox_mgr.list_workspace_files())
             existing_paths = [relative for relative, _ in staged_files if relative in remote_files]
             if existing_paths:
-                existing_contents = self.sandbox_mgr.read_workspace_files(
-                    existing_paths,
-                    max_total_bytes=MAX_SKILL_TOTAL_BYTES,
-                )
-                existing = {relative: hashlib.sha256(raw).hexdigest() for relative, raw in existing_contents.items()}
+                try:
+                    metadata = self.sandbox_mgr.stat_workspace_files(existing_paths)
+                    if sum(item["size_bytes"] for item in metadata.values()) > MAX_SKILL_TOTAL_BYTES:
+                        raise ValueError("Existing Skills exceed the synchronization bounds")
+                except ValueError as error:
+                    raise ValueError(
+                        "Skill sync cannot verify existing session files within the synchronization bounds"
+                    ) from error
+                existing = {relative: item["sha256"] for relative, item in metadata.items()}
             else:
                 existing = {}
             span.set_outputs({"existing": len(existing)})
@@ -516,7 +520,7 @@ class SkillManager:
     def export_volume_skills_to_local(self) -> list[str]:
         """Pull runtime-authored Skills into the separate local Fleet Skills folder."""
         skill_paths = sorted(path for path in self.sandbox_mgr.list_workspace_files() if path.startswith("skills/"))
-        if len(skill_paths) >= MAX_SKILL_FILES:
+        if len(skill_paths) > MAX_SKILL_FILES:
             raise ValueError("Exported Skills exceed the synchronization bounds")
         try:
             downloaded = (

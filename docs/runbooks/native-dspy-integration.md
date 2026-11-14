@@ -7,12 +7,12 @@ uses native DSPy mechanisms, not the historical parser or facade described below
 
 | Boundary | Current contract | Offline coverage |
 | --- | --- | --- |
-| LM and adapters | Native `engine="lm15"`, `Request`/`Response`, XML/Chat/JSON adapters, explicit API-family selection, and scoped role overrides | `tests/engine/test_runtime.py`, `tests/engine/test_runtime.py` |
+| LM and adapters | Native `engine="lm15"`, `Request`/`Response`, XML/Chat/JSON adapters, explicit API-family selection, and scoped role overrides | `tests/engine/test_runtime.py` |
 | Typed decisions | Ordinary `dspy.LM("typesafe:...")`, native `Choice` and `Noul`, native field configuration and serialization | `tests/engine/test_runtime.py`, `tests/optimize/test_optimization.py` |
-| Code execution | Native `SandboxSession` and zero-argument Daytona factories; nested code stays in isolated child sandboxes | `tests/sandbox/test_sandbox.py`, `tests/sandbox/test_sandbox.py` |
+| Code execution | Native `SandboxSession` and zero-argument Daytona factories; nested code stays in isolated child sandboxes | `tests/sandbox/test_sandbox.py` |
 | Dataset inputs | Host-only `SandboxSerializable` setup; guest file-backed views forward as plain JSON metadata; the native host decoder rejects guest codecs | `tests/sandbox/test_sandbox.py` |
 | RLM history | Native `History`, REPL event helpers, and per-call trajectory; bounded persistence accounts for history pruning and extract fallback without restoring variables | `tests/sandbox/test_sandbox.py`, `tests/engine/test_runtime.py` |
-| Optimization | Native GEPA and ReAnchor; isolated-copy evidence is attributed to the candidate predictor, including parallel calibration | `tests/optimize/test_optimization.py`, `tests/optimize/test_optimization.py` |
+| Optimization | Native GEPA and ReAnchor; isolated-copy evidence is attributed to the candidate predictor, including parallel calibration | `tests/optimize/test_optimization.py` |
 
 The one-way dataset boundary follows the
 [DSPy 3.5.0 RLM contract](https://dspy.ai/3.5.0/api/modules/RLM/#custom-sandbox-serializable-inputs).
@@ -36,6 +36,11 @@ or measured quality/cost gains. The dated canaries below predate this integratio
 and must not be treated as DSPy 3.5.0 or ReAnchor acceptance evidence.
 
 ## Historical DSPy 3.4.1 implementation report
+
+The sections below record the former adapter implementation and its historical
+acceptance evidence. The adapter and its frozen gateway corpus were retired in
+the 3.5 migration. They are not current test coverage or live compatibility proof.
+Current coverage is listed above.
 
 PRD A is implemented with a temporary, fixture-backed native-first parser.
 Baseline: `61bea5095dbbc992db2aeb8049a05e079b0bda10`; DSPy remains pinned to
@@ -82,9 +87,9 @@ independently reviewable with
 excluding context/batch changes. Historical evidence remains
 readable but does not measure this parser.
 
-## Frozen corpus and acceptance
+## Historical frozen corpus and acceptance
 
-[`fixtures.json` (`gateway_adapter_replies`)](../../tests/fixtures.json)
+the former `gateway_adapter_replies` corpus (retired from `tests/fixtures.json` in 3.5)
 freezes eleven parser attempts from five browser-initiated traces of the configured
 `openai/system.ai.deepseek-v4-1-flash-1017` gateway. Each case has a stable ID,
 route, trace/span IDs, capture date, signature output fields, exact completion,

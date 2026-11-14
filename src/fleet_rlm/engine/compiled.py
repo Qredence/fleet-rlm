@@ -84,38 +84,19 @@ class CompiledProgramFile:
         self.path = path
         self.digest = ""
         self._baseline = baseline or path is None
-        self._stat_key: tuple[int, int, int] | None = None
 
     def load_initial(self, program: FleetProgram) -> None:
         """None explicitly selects baseline; a watched new-session baseline may await installation."""
         if self.path is not None and not self._baseline:
-            stat_key = self._regular_stat_key()
-            self._apply(program, self.read(), stat_key=stat_key)
+            self._apply(program, self.read())
 
     def reload_if_changed(self, program: FleetProgram) -> None:
-        """Skip unchanged file stats at serialized Turn boundaries; reload when stat or digest changes."""
+        """Verify file content at serialized Turn boundaries; reload when its digest changes."""
         if self.path is None or (self._baseline and not os.path.lexists(self.path)):
-            return
-        stat_key = self._regular_stat_key()
-        if not self._baseline and stat_key is not None and self._stat_key == stat_key:
             return
         content = self.read()
         if hashlib.sha256(content).hexdigest() != self.digest:
-            self._apply(program, content, stat_key=stat_key)
-        else:
-            self._stat_key = stat_key
-
-    def _regular_stat_key(self) -> tuple[int, int, int] | None:
-        if self.path is None or os.path.islink(self.path):
-            return None
-        try:
-            info = os.stat(self.path)
-        except FileNotFoundError:
-            self._stat_key = None
-            raise
-        if not stat.S_ISREG(info.st_mode):
-            return None
-        return (info.st_ino, info.st_mtime_ns, info.st_size)
+            self._apply(program, content)
 
     def read(self) -> bytes:
         """Read bounded regular-file bytes for either selection or candidate approval."""
@@ -136,10 +117,7 @@ class CompiledProgramFile:
         self,
         program: FleetProgram,
         content: bytes,
-        *,
-        stat_key: tuple[int, int, int] | None = None,
     ) -> None:
         load_program_envelope(program, content)
         self.digest = hashlib.sha256(content).hexdigest()
         self._baseline = False
-        self._stat_key = stat_key

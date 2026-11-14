@@ -10,7 +10,7 @@ uv run fleet web [--host 127.0.0.1] [--port 8080] [--url API_URL]
                 [--public-url URL] [--session SESSION] [--mlflow local|databricks]
                 [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
 uv run fleet doctor [--probe-models] [--mlflow local|databricks]
-uv run fleet snapshot preflight|build|activate
+uv run fleet snapshot check|build|activate
 uv run fleet eval dataset|run|score|label ... [--mlflow local|databricks]
 uv run fleet optimize [--check] ... [--mlflow local|databricks]
 uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
@@ -102,7 +102,7 @@ Before starting a Session or deploying a configuration change, run:
   and Daytona snapshot readiness. It does not run model inference, build snapshots,
   create Volumes, apply migrations, or provision experiments. Pass `--probe-models` to
   execute an optional root-model inference probe.
-- `uv run fleet snapshot preflight`: inspects the active Daytona snapshot state and
+- `uv run fleet snapshot check`: inspects the active Daytona snapshot state and
   resource floors.
 - `uv run fleet snapshot build`: builds the repository-packaged Python 3.13 snapshot in
   Daytona.

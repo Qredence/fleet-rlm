@@ -325,6 +325,18 @@ def _finalize_optimization_run(
     except Exception as error:
         status, failure = "failed", error
         worker_outcome = {"status": status, "failure": {"type": type(error).__name__}}
+        if not managed_run_id:
+            with suppress(Exception):
+                _update_run(
+                    store,
+                    run_id,
+                    owner_id=owner_id,
+                    expected_statuses=("running",),
+                    status="failed",
+                    stage="failed",
+                    candidate_version=None,
+                    failure={"type": type(error).__name__, "detail": "Optimization outcome persistence failed."},
+                )
     try:
         store.close()
     except Exception as error:

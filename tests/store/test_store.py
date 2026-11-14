@@ -1163,6 +1163,7 @@ def test_heartbeat_batches_session_and_global_lease_renewals_and_handles_transie
 
     store.heartbeat.tick()
     assert lost_events == ["s2"]
+    store.heartbeat._idle_thread.join(timeout=1)
     assert idle_calls == [1]
     assert "UPDATE fleet_lite_sessions AS s" in pool.conn.statements[0][0]
     assert "UPDATE fleet_lite_leases AS l" in pool.conn.statements[1][0]
@@ -1295,3 +1296,27 @@ def test_fresh_lakebase_role_split_and_default_privileges() -> None:
                 runtime.execute(sql.SQL("DELETE FROM {} WHERE id = 1").format(qualified_table))
         finally:
             migration.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(qualified_table))
+
+
+def test_idle_cleanup_cannot_block_heartbeat_renewals():
+    import threading
+
+    from fleet_rlm.store.leases import LeaseHeartbeatService
+
+    entered, release = threading.Event(), threading.Event()
+    service = LeaseHeartbeatService(SimpleNamespace())
+
+    def cleanup():
+        entered.set()
+        assert release.wait(2)
+
+    service.register_idle_callback(cleanup)
+    try:
+        service.tick()
+        assert entered.wait(1)
+        # A second tick finishes while cleanup remains blocked.
+        service.tick()
+        service.unregister_idle_callback(cleanup)
+    finally:
+        release.set()
+        service.stop()

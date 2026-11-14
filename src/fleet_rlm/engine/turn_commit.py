@@ -7,7 +7,6 @@ import binascii
 import hashlib
 import logging
 import time
-from contextlib import suppress
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
@@ -86,7 +85,7 @@ def _terminal_failure(
     if trace_id:
         failure["trace_id"] = trace_id
     if persist:
-        with suppress(Exception):
+        try:
             runtime.store.finish_turn(
                 session_id,
                 turn_id,
@@ -94,6 +93,8 @@ def _terminal_failure(
                 failure,
                 **({"ownership_epoch": runtime.ownership_epoch} if runtime.ownership_epoch is not None else {}),
             )
+        except Exception as error:
+            _LOGGER.warning("Failed to persist terminal Turn outcome (%s)", type(error).__name__)
     return failure
 
 
@@ -169,7 +170,7 @@ def _capture_artifact_view(evidence: Any) -> dict[str, Any]:
     files = observed["files"]
     complete = observed["complete"]
     paths = observed.get("paths", sorted(files) if complete else None)
-    if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+    if not isinstance(paths, list) or len(paths) > 10_000 or any(not isinstance(path, str) for path in paths):
         raise RuntimeError("Artifact inventory is incomplete")
     for path in paths:
         artifact_path(path)

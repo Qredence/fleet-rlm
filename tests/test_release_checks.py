@@ -735,6 +735,13 @@ def test_registry_exists_or_unknown_blocks_publication(monkeypatch):
     monkeypatch.setattr(automation.urllib.request, "urlopen", missing)
     automation.registry_preflight("1.0.0")
 
+    def unavailable(*_args, **_kwargs):
+        raise urllib.error.HTTPError("url", 503, "unavailable", {}, None)
+
+    monkeypatch.setattr(automation.urllib.request, "urlopen", unavailable)
+    with pytest.raises(SystemExit):
+        automation.registry_preflight("1.0.0")
+
 
 def test_deployment_does_not_merge_and_reports_exact_source(tmp_path, monkeypatch):
     calls = []
@@ -1336,12 +1343,16 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
         }[failed_command]
     )
     assert steps.index(coverage_upload) < len(steps) - 1
+    persisted = next(step["persist_to_workspace"] for step in steps if "persist_to_workspace" in step)
+    # Even a missing shard or failed XML generation must preserve the status for the final enforcement step.
+    assert persisted["paths"] == ["coverage"]
+    assert (tmp_path / persisted["paths"][0] / ".status").is_file()
     (tmp_path / "coverage/.status").unlink()
     assert subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False).returncode != 0
     assert steps.index(next(step for step in steps if "persist_to_workspace" in step)) > steps.index(
         next(step for step in steps if isinstance(step, dict) and "run" in step)
     )
-    assert workflow_jobs()["coverage-report"]["requires"] == [{"test-python-3.11": "terminal"}]
+    assert workflow_jobs()["coverage-report"]["requires"] == [{"test-python-3.13": "terminal"}]
     assert "test-python-3.11" in workflow_jobs()["quality"]["requires"]
 
 

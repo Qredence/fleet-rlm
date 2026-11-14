@@ -23,6 +23,7 @@ from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import ENGINE_INPUT_FIELDS, OptimizationInputs
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.engine.programs import FleetProgram
+from fleet_rlm.engine.reasoning import deserialize_rlm_history
 from fleet_rlm.models import build_lm
 from fleet_rlm.replay import required_skills_from_snapshot, selected_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT, DaytonaSandboxManager
@@ -165,6 +166,7 @@ class IsolatedFleetProgram(dspy.Module):
                 arguments = {name: value for name, value in inputs.items() if name in ENGINE_INPUT_FIELDS}
                 if engine.optimization is not None:
                     arguments["context"] = engine.optimization.context
+                    arguments["rlm_history"] = engine.optimization.rlm_history
                     arguments["required_skills"] = engine.optimization.required_skills
                 result = engine(**arguments)
                 if recorder is not None:
@@ -281,6 +283,7 @@ def build_isolated_engine_factory(
             )
             engine.program.load_state(deepcopy(program.dump_state()))
             engine.optimization = OptimizationInputs(
+                rlm_history=deserialize_rlm_history(snapshot.get("rlm_history", [])),
                 required_skills=required_skills,
                 context=WorkspaceDataset(**replay_context) if replay_context else None,
                 verifications=tuple(

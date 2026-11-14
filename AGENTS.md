@@ -18,6 +18,8 @@ preserve the contracts below.
   JavaScript.
 - Use native DSPy directly. Do not duplicate its mechanisms, add speculative
   abstractions, or introduce compatibility aliases.
+- Live Daytona, model-provider, database, and evaluation runs require explicit authorization.
+- User Skills live in `.fleet/skills/`; `.agents/skills/` is developer guidance and must not be synced.
 - Never commit credentials or `.env` files. Treat traces and artifacts as sensitive.
 - Commit, push, publish, and deploy only with explicit authorization. Use
   conventional commit prefixes.
@@ -25,6 +27,8 @@ preserve the contracts below.
 ## Runtime contracts
 
 ### Routing and execution
+
+- Preserve `direct` / `flex` / `rlm`, strict-mode triage bypass, dataset routing constraints, and native DSPy tuning and delegation.
 
 - Execute generated Python in Daytona; keep credentials and host-mediated tools
   on the server. Preserve shared Turn budgets, isolated child sandboxes,
@@ -81,6 +85,8 @@ References: [HTTP API](docs/reference/http-api.md),
 
 ### Data and promotion
 
+- Preserve run/trace IDs and recover completed work before rerunning. GEPA metric-call budgets do not cap total cost.
+
 - Use approved immutable replays grouped by source lineage in isolated runtimes.
   Keep gold/structured expectations outside inputs and holdout outside search.
 - Exclude benchmark traces, including `fleet.benchmark.*`-tagged traces, from
@@ -94,7 +100,7 @@ References: [HTTP API](docs/reference/http-api.md),
 ### Worker lifecycle
 
 - Keep optimizer stages and counters worker-owned in CLI and managed runs. The
-  API drains output and arbitrates managed terminal outcomes after process exit.
+  API drains merged output into a bounded private log and arbitrates managed terminal outcomes after process exit.
 - Required persistence failures must stop native GEPA and block publication.
   Optional telemetry must not set that failure latch.
 - Preserve both database and file cancellation checks.

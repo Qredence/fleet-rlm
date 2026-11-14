@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -1736,7 +1737,7 @@ def test_toml_turn_timeout_stays_a_bounded_integer(value):
 @pytest.mark.parametrize(
     ("configured", "configured_source", "requested", "expected"),
     [
-        (900, "default", None, ("default", 0)),
+        (900, "default", None, ("default", None)),
         (1200, "toml", None, ("configuration", 1200)),
         (1200, "environment", 600, ("request", 600)),
         (1200, "toml", 0, ("request", None)),
@@ -2117,7 +2118,7 @@ def test_native_judge_configuration_does_not_export_gateway_environment():
         fleet_llm_api_base="https://workspace.example/ai-gateway/mlflow/v1",
         databricks_token="token",
     )
-    assert settings.judge_environment() == {}
+    assert settings.judge_environment() == {"OPENAI_API_BASE": "https://workspace.example/ai-gateway/mlflow/v1"}
     assert FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint").judge_environment() == {}
     with pytest.raises(ValidationError, match="provider"):
         FleetSettings(_env_file=None, fleet_judge_model="deepseek")
@@ -5221,8 +5222,17 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
         def list_workspace_files(self) -> list[str]:
             return sorted(self.existing)
 
-        def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
-            return {path: self.existing[path] for path in paths if path in self.existing}
+        def read_workspace_files(self, _paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
+            pytest.fail("Skill sync must inspect remote digests without downloading contents")
+
+        def stat_workspace_files(self, paths: list[str]) -> dict[str, dict[str, Any]]:
+            return {
+                path: {
+                    "size_bytes": len(self.existing[path]),
+                    "sha256": hashlib.sha256(self.existing[path]).hexdigest(),
+                }
+                for path in paths
+            }
 
         def write_workspace_files(self, files: dict[str, bytes]) -> None:
             self.writes.extend(files.items())
@@ -5235,6 +5245,12 @@ def test_sync_conflicts_are_reported_before_any_staged_upload(tmp_path: Path) ->
     sandbox.existing["skills/ledger-audit/existing.txt"] = b"local version"
     assert SkillManager(sandbox, skills, None).sync_local_skills_to_volume() == 1  # type: ignore[arg-type]
     assert sandbox.writes == [("skills/ledger-audit/new.txt", b"new file")]
+
+    sandbox.existing["skills/ledger-audit/existing.txt"] = b"x" * 5_000_001
+    sandbox.writes.clear()
+    with pytest.raises(ValueError, match=r"Skill sync.*synchronization bounds"):
+        SkillManager(sandbox, skills, None).sync_local_skills_to_volume()  # type: ignore[arg-type]
+    assert sandbox.writes == []
 
 
 def test_export_conflicts_are_reported_before_any_local_write(tmp_path: Path) -> None:
@@ -5280,6 +5296,12 @@ class _VolumeDouble:
 
     def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
         return {path: self.existing[path] for path in paths if path in self.existing}
+
+    def stat_workspace_files(self, paths: list[str]) -> dict[str, dict[str, Any]]:
+        return {
+            path: {"size_bytes": len(self.existing[path]), "sha256": hashlib.sha256(self.existing[path]).hexdigest()}
+            for path in paths
+        }
 
     def write_workspace_files(self, files: dict[str, bytes]) -> None:
         self.batches = getattr(self, "batches", 0) + 1
@@ -5648,9 +5670,46 @@ def test_turn_triage_prefers_flex_for_bounded_checks_without_drifting_route_fiel
     from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, ROUTE_DESCRIPTIONS, TRIAGE_CRITERIA, TRIAGE_INSTRUCTION
     from fleet_rlm.engine.signatures import TurnTriage
 
-    assert "Prefer flex" in TurnTriage.instructions
+    assert "bounded" in TRIAGE_INSTRUCTION
     assert TurnTriage.model_fields["route"].json_schema_extra["desc"] == TRIAGE_INSTRUCTION
     assert dict(JUDGE_ROUTE_CHOICES) == {route.value: item["judge"] for route, item in ROUTE_DESCRIPTIONS.items()}
     assert {key: value["definition"] for key, value in TRIAGE_CRITERIA.items()} == {
         route.value: item["definition"] for route, item in ROUTE_DESCRIPTIONS.items()
     }
+
+
+def test_registry_reserves_capacity_while_a_session_builds(monkeypatch):
+    import threading
+
+    from fleet_rlm.session import SessionRuntimeRegistry
+
+    registry = SessionRuntimeRegistry(FleetSettings(_env_file=None, max_active_sessions=1), SimpleNamespace())
+    registry.root_lm = registry.sub_lm = registry.jev_lm = object()
+    entered, release = threading.Event(), threading.Event()
+    runtime = SimpleNamespace(touch=lambda: None, lease_lost=threading.Event())
+    errors = []
+
+    def build(_self, _sid):
+        entered.set()
+        assert release.wait(2)
+        return runtime
+
+    def first():
+        try:
+            registry.get("first")
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(SessionRuntimeRegistry, "_build", build)
+    thread = threading.Thread(target=first)
+    thread.start()
+    try:
+        assert entered.wait(1)
+        with pytest.raises(RuntimeError, match="maximum number"):
+            registry.get("second")
+    finally:
+        release.set()
+        thread.join(2)
+    assert not errors
+    assert registry.peek("first") is runtime
+    assert len(registry._session_gates) == 0

@@ -83,6 +83,7 @@ class LeaseHeartbeatService:
         # Maps scope -> (epoch, owner_id, on_lost, last_renewed_monotonic)
         self._leases: dict[str, tuple[int, str, Callable[[], None] | None, float]] = {}
         self._idle_callbacks: list[Callable[[], None]] = []
+        self._idle_thread: threading.Thread | None = None
 
     def start(self) -> None:
         """Start the background heartbeat daemon if not already running."""
@@ -105,12 +106,15 @@ class LeaseHeartbeatService:
             thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=timeout)
+        idle_thread = self._idle_thread
+        if idle_thread is not None and idle_thread is not threading.current_thread():
+            idle_thread.join(timeout=timeout)
         with self._lock:
             if self._thread is thread and (thread is None or not thread.is_alive()):
                 self._thread = None
 
     def register_idle_callback(self, callback: Callable[[], None]) -> None:
-        """Register an idle-eviction hook executed periodically on the heartbeat thread."""
+        """Register an idle-eviction hook executed on a separate cleanup thread."""
         with self._lock:
             if callback not in self._idle_callbacks:
                 self._idle_callbacks.append(callback)
@@ -171,7 +175,17 @@ class LeaseHeartbeatService:
             self._renew_sessions(sessions, now)
         if leases:
             self._renew_global_leases(leases, now)
-        for callback in idle_callbacks:
+        with self._lock:
+            if idle_callbacks and (self._idle_thread is None or not self._idle_thread.is_alive()):
+                self._idle_thread = threading.Thread(
+                    target=self._run_idle_callbacks, args=(idle_callbacks,), name="fleet-idle-eviction", daemon=True
+                )
+                self._idle_thread.start()
+
+    def _run_idle_callbacks(self, callbacks: tuple[Callable[[], None], ...]) -> None:
+        for callback in callbacks:
+            if self._stop.is_set():
+                break
             with suppress(Exception):
                 callback()
 

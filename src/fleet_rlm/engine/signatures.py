@@ -28,10 +28,7 @@ class SkillRelevance(dspy.Signature):
 
 
 class TurnTriage(dspy.Signature):
-    """Choose the least expensive route that can satisfy the request.
-
-    Prefer flex for single-pass bounded calculations or deterministic single-dataset checks with known inputs.
-    """
+    """Choose the least expensive route that can satisfy the request."""
 
     task: str = dspy.InputField(desc="User request to route.")
     workspace_manifest: str = dspy.InputField(desc="Files available in the Session workspace.")

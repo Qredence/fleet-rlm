@@ -515,6 +515,21 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
     files = {"files/input.csv": b"id,value\n1,17\n", "files/rates.csv": b"rate\n3\n"}
     contexts = {path: digest_bytes(raw) for path, raw in files.items()}
     replay, snapshot_digest, compressed = _selected_snapshot("s1", "turn-1", "read these files", files)
+    from dspy.primitives.repl_types import REPLEntry, build_repl_event
+
+    from fleet_rlm.engine.reasoning import serialize_rlm_turn_history
+
+    prior_history = dspy.History(
+        messages=[
+            build_repl_event(
+                {"task": "prior computation"},
+                REPLEntry(reasoning="calculate", code="1 + 1", output="2", max_output_chars=3000),
+                {},
+            )
+        ]
+    )
+    replay["rlm_history"] = [{"rlm_history": serialize_rlm_turn_history(prior_history)}]
+    snapshot_digest, compressed = encode_snapshot(replay)
     if snapshot == "missing":
         del contexts["files/rates.csv"]
     if snapshot == "changed":
@@ -585,6 +600,7 @@ def test_isolated_factory_stages_every_advertised_revision_or_rejects(monkeypatc
             (current.fleet_sub_model, "sub"),
         ]
         assert engine.execution_mode == "flex" and engine.sandbox_mgr.options["turn_timeout_seconds"] == 123
+        assert engine.optimization.rlm_history == prior_history
         assert engine.compiled_path is None
 
 
@@ -1665,7 +1681,10 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         # No rollouts are wasted on a candidate identical to the incumbent; the gate names the reason.
         assert measured == []
         manifest = json.loads(next((tmp_path / "candidates").glob("*.manifest.json")).read_text())
-        assert manifest["gate"] == {"passed": False, "reasons": ["candidate changes no instructions or Flex code"]}
+        assert manifest["gate"] == {
+            "passed": False,
+            "reasons": ["candidate changes no instructions, Flex code, or calibrated decision fields"],
+        }
         assert manifest["evaluation"]["validation"] == "skipped_unchanged"
         full = json.loads(next((tmp_path / "candidates").glob("*.comparison.json")).read_text())
         assert full["rationale"] == "" and "paired validation was skipped" in full["report"]
@@ -3466,7 +3485,7 @@ def test_missing_selected_file_refuses_without_replacing_incumbent(tmp_path):
     assert engine(compiled_path=None).compiled.digest == ""  # explicit baseline, no silent fallback
 
 
-def test_loader_skips_unchanged_stat_and_reloads_on_change(tmp_path, monkeypatch):
+def test_loader_verifies_content_even_when_file_stats_are_unchanged(tmp_path, monkeypatch):
     path = tmp_path / "selected.json"
     path.write_bytes(program_envelope(tuned().program))
     runtime = engine(compiled_path=str(path))
@@ -3480,13 +3499,17 @@ def test_loader_skips_unchanged_stat_and_reloads_on_change(tmp_path, monkeypatch
 
     monkeypatch.setattr(runtime.compiled, "read", counting_read)
     runtime.compiled.reload_if_changed(runtime.program)
-    assert reads == 0
+    assert reads == 1
 
     staged = tmp_path / "staged.json"
     staged.write_bytes(original_read().replace(b"TUNED triage", b"OTHER triage"))
-    staged.replace(path)
+    saved = path.stat()
+    path.write_bytes(staged.read_bytes())
+    import os
+
+    os.utime(path, ns=(saved.st_atime_ns, saved.st_mtime_ns))
     runtime.compiled.reload_if_changed(runtime.program)
-    assert reads == 1
+    assert reads == 2
     assert runtime.program.routing.predict.signature.instructions == "OTHER triage"
 
 

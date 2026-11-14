@@ -4951,7 +4951,8 @@ def test_snapshot_cli_commands_redact_secrets_and_route_actions(monkeypatch):
 
     def fake_build(*, api_key, org_id, on_logs):
         assert api_key == "daytona-secret-xyz" and org_id == "org-1"
-        on_logs("building with key daytona-secret-xyz\n")
+        on_logs("building with key daytona-sec")
+        on_logs("ret-xyz\n")
         return SimpleNamespace(name="fleet-rlm-python313-v15", id="snap-2")
 
     monkeypatch.setattr(doctor, "build_snapshot", fake_build)

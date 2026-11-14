@@ -13,6 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from weakref import WeakValueDictionary
 
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import RequiredSkill, SkillAdmissionError
@@ -27,6 +28,11 @@ from fleet_rlm.workspace import WorkspaceDataset, _workspace_relative_path, vali
 _LOGGER = logging.getLogger("fleet_rlm.session")
 _EVICT_WAIT_SECONDS = 2.0
 _IDLE_EVICT_SECONDS = 600.0
+
+
+def memory_search_query(query: str) -> str:
+    """Bound the memory query before constructing PostgreSQL OR terms."""
+    return " OR ".join(query[:2000].split()[:32])
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +124,7 @@ class SessionRuntime:
 
     def memories(self, query: str = "", *, reviewed_only: bool = False) -> list[dict[str, Any]]:
         """Search memories with a bounded OR-of-words query, optionally only reviewed ones."""
-        search = " OR ".join(query[:2000].split()[:32])
+        search = memory_search_query(query)
         return self.store.memories(self.session_id, search, reviewed_only=reviewed_only)
 
     def delete_memory(self, memory_id: str) -> None:
@@ -434,7 +440,8 @@ class SessionRuntimeRegistry:
         self.sub_lm: Any = None
         self.jev_lm: Any = None
         self._sessions: dict[str, SessionRuntime] = {}
-        self._session_gates: dict[str, threading.RLock] = {}
+        self._session_gates: WeakValueDictionary[str, threading.RLock] = WeakValueDictionary()
+        self._building: set[str] = set()
         self._lock = threading.Lock()
 
     def _session_gate(self, session_id: str) -> threading.RLock:
@@ -494,15 +501,22 @@ class SessionRuntimeRegistry:
                     self.root_lm = build_lm(self.settings, self.settings.fleet_root_model, "root")
                     self.sub_lm = build_lm(self.settings, self.settings.fleet_sub_model, "sub")
                     self.jev_lm = self.settings.build_jev_lm()
-            runtime = self._build(session_id)
-            runtime.touch()
             with self._lock:
-                self._sessions[session_id] = runtime
-            return runtime
+                self._check_capacity_locked()
+                self._building.add(session_id)
+            try:
+                runtime = self._build(session_id)
+                runtime.touch()
+                with self._lock:
+                    self._sessions[session_id] = runtime
+                return runtime
+            finally:
+                with self._lock:
+                    self._building.discard(session_id)
 
     def _check_capacity_locked(self) -> None:
         """Refuse a new Session when the registry is full. The caller holds `_lock`."""
-        if len(self._sessions) >= self.settings.max_active_sessions:
+        if len(self._sessions) + len(self._building) >= self.settings.max_active_sessions:
             raise RuntimeError("The maximum number of active Sessions has been reached")
 
     def _build(self, session_id: str) -> SessionRuntime:

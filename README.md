@@ -45,7 +45,8 @@ FLEET_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/fleet
 FLEET_DAYTONA_API_KEY=your-daytona-api-key
 FLEET_DAYTONA_ORG_ID=your-organization-id
 FLEET_DAYTONA_VOLUME_ID=your-volume-id
-FLEET_LLM_MODEL=openai/gpt-4o-mini
+# Optional provider/model override (requires its provider credentials):
+# FLEET_LLM_MODEL=openai/gpt-4o-mini
 FLEET_LLM_API_KEY=your-model-api-key
 # Optional OpenAI-compatible endpoint:
 # FLEET_LLM_BASE_URL=https://your-endpoint.example/v1

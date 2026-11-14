@@ -2560,10 +2560,26 @@ def test_remote_stat_checks_size_digest_and_paths_without_downloads(monkeypatch,
         message = "changed" if case == "changed" else "size limit" if case == "oversized" else "symbolic link"
         with pytest.raises(ValueError, match=message):
             manager.stat_workspace_file("skills/outside.txt" if case == "parent_symlink" else "files/data.txt")
-    assert len(calls) == 1
+    if case == "file":
+        (root / "files/other.txt").write_bytes(b"other")
+        metadata = manager.stat_workspace_files(["files/data.txt", "files/other.txt"])
+        assert metadata == {
+            "files/data.txt": {
+                "path": "files/data.txt",
+                "size_bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            },
+            "files/other.txt": {
+                "path": "files/other.txt",
+                "size_bytes": 5,
+                "sha256": hashlib.sha256(b"other").hexdigest(),
+            },
+        }
+    expected_calls = 2 if case == "file" else 1
+    assert len(calls) == expected_calls
     with pytest.raises(ValueError):
         manager.stat_workspace_file("../outside.txt")
-    assert len(calls) == 1
+    assert len(calls) == expected_calls
 
 
 @pytest.mark.parametrize(
@@ -5601,6 +5617,11 @@ def _install_emulated_daytona(monkeypatch, tmp_path: Path):
         "read_workspace_files",
         lambda mgr, paths, **_kw: {p: (ws_root(mgr) / p).read_bytes() for p in paths},
     )
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_file",
+        lambda mgr, path, **_kw: (ws_root(mgr) / path).read_bytes(),
+    )
 
     def write_files(mgr, files) -> None:
         root = ws_root(mgr)
@@ -6116,3 +6137,13 @@ def sandbox(tmp_path):
         yield emulated
     finally:
         emulated.code_interpreter.close()
+
+
+def test_bootstrap_marker_cannot_hide_a_task_or_side_effect():
+    from fleet_rlm.sandbox.interpreter import _is_bootstrap_code
+
+    injection = 'context = __dspy_values.decode(__import__("json").loads(_raw_context))'
+    assert _is_bootstrap_code(injection)
+    assert not _is_bootstrap_code(injection + '; SUBMIT(answer="unverified")')
+    assert not _is_bootstrap_code('x = "__dspy_values.decode(__import__(\\"json\\").loads("; SUBMIT(answer="x")')
+    assert not _is_bootstrap_code('context = __dspy_values.decode(__import__("json").loads(side_effect()))')

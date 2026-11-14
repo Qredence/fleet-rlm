@@ -163,7 +163,7 @@ def resolve_turn_deadline(
         return DeadlinePolicy("request", request_seconds if request_seconds > 0 else None)
     if configured_source != "default":
         return DeadlinePolicy("configuration", configured_seconds if configured_seconds > 0 else None)
-    return DeadlinePolicy("default", DEFAULT_TURN_TIMEOUT_SECONDS)
+    return DeadlinePolicy("default", DEFAULT_TURN_TIMEOUT_SECONDS or None)
 
 
 class MlflowTarget(NamedTuple):

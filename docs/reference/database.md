@@ -1,5 +1,14 @@
 # Database and persistence
 
+This release starts a new schema baseline at version 1. Existing version-12 databases
+are refused at startup; this release does not upgrade or restore them automatically.
+Keep the existing database and prior Fleet deployment intact. Use a new empty schema
+and a new empty Daytona Volume, then validate the new deployment before directing
+clients to it. Existing history remains accessible through the prior deployment.
+Do not renumber the old migration ledger or copy rows into the new schema. Rollback
+requires the prior deployment, database, and Volume together; the new schema is not
+backward compatible.
+
 Fleet requires PostgreSQL for Sessions, Turns, memories and selected replays.
 Workspace files live on the Session's Daytona Volume. Configure the
 connection with `FLEET_DATABASE_URL`; the default DSN is local PostgreSQL at
@@ -87,8 +96,8 @@ Structured memories retain their kind, review status, and source digests.
 Retrieval uses bounded full-text relevance and recency ranking. Turn
 intents retain idempotency keys and terminal outcomes; uncertain running turns
 are not automatically replayed. Runtime settings retain selected mode and
-dataset revision. A session advisory lock prevents two workers from owning
-one session runtime at once and holds one database connection until close.
+dataset revision. A lease row with a 60-second TTL and a fencing epoch prevents two workers from
+owning one Session runtime. The shared heartbeat renews it every 20 seconds.
 Turn history and status reads use the shared pool and do not take the lease.
 A worker that loses the lease evicts the stale runtime and rebuilds it on the
 next request once any draining Turn finishes.
@@ -113,11 +122,9 @@ bytes in its isolated workspace rather than reading the current workspace. Ordin
 Turns retain hashes only and cannot enter GEPA without a selected snapshot.
 
 For Lakebase, use the direct PostgreSQL endpoint with TLS for `FLEET_DATABASE_URL`.
-Fleet holds a session-level PostgreSQL advisory lock on a dedicated connection;
-Lakebase's [transaction pooler](https://docs.databricks.com/gcp/en/oltp/projects/connection-pooling)
-does not support this lock lifetime. Keep
-application-side pooling for ordinary queries and use a direct connection for
-each session lease. Lakebase OAuth tokens are checked at login, and an
+Fleet uses pooled TTL-row leases for Sessions and optimization owners. Lease renewal
+shares the application pool; no dedicated connection is held for a lease. Use the
+direct endpoint for migration advisory locks and runtime transactions.
 established connection continues after its token expires. Databricks documents
 a 24-hour idle timeout and a three-day maximum connection lifetime; test Fleet's
 reconnect path against these service limits. The process probes each lease
@@ -163,7 +170,7 @@ setting, and the dataset spans every Session's approved labels. API restart mark
 interrupted and does not rerun provider work; a later explicit review reconciles
 an interrupted approval against the active candidate digests.
 
-Each API holds a dedicated advisory owner lease through worker startup and
+Each API holds a pooled TTL owner lease through worker startup and
 draining. History reads preserve runs owned by another live API. Abandoned
 managed workers receive a cooperative stop request while holding the global
 optimization lease; their rows become interrupted only after it is released.

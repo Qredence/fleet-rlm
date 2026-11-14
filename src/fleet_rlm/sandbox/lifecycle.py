@@ -389,7 +389,7 @@ class SandboxLifecycleMixin:
                         self._creation_pending = False
                     raise
                 self._creation_pending = False
-                self._persist_ownership_resource("stop" if not child else "delete", self._sandbox.id)
+                self._persist_ownership_resource("delete" if child or self.disposable else "stop", self._sandbox.id)
                 self.check_turn()
                 self.emit("sandbox_ready", depth=self.depth)
                 created = True

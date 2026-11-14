@@ -158,7 +158,8 @@ def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], s
 def improve_readiness(store: StoreDep, settings: Settings) -> ImproveReadiness:
     """Report what the labelled examples support, what is missing, and how many labels are new."""
     with translate("Readiness is unavailable"):
-        return ImproveReadiness.model_validate(_readiness(store, settings)[0])
+        report = _readiness(store, settings)[0]
+    return ImproveReadiness.model_validate(report)
 
 
 _NEEDS_TOKEN_CAP = "Auto-run needs a token cap: set max_total_tokens above 0 (0 is unlimited)."
@@ -380,7 +381,7 @@ async def review_job(run_id: str, body: ReviewJob, manager: Experiments) -> JobE
     """Approve through the evidence-checking worker, or persist an explicit rejection."""
     with _job_errors():
         run = await manager.review(run_id, body.decision, body.request_id)
-        return JobEnvelope(job=Job.model_validate(public_run(run)))
+    return JobEnvelope(job=Job.model_validate(public_run(run)))
 
 
 @router.get("/history", response_model=ImproveHistory, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)

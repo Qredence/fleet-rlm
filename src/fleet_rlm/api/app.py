@@ -79,8 +79,9 @@ def create_app(
             resources.push_async_callback(asyncio.to_thread, application.state.session_registry.close)
             heartbeat = getattr(application.state.store, "heartbeat", None)
             if heartbeat is not None:
-                heartbeat.register_idle_callback(application.state.session_registry.evict_idle)
-                resources.callback(heartbeat.unregister_idle_callback, application.state.session_registry.evict_idle)
+                evict_idle = application.state.session_registry.evict_idle
+                heartbeat.register_idle_callback(evict_idle)
+                resources.callback(heartbeat.unregister_idle_callback, evict_idle)
             application.state.turn_executor = turns.create_turn_executor()
             resources.callback(application.state.turn_executor.shutdown, wait=False, cancel_futures=True)
             if application.state.store is not None:

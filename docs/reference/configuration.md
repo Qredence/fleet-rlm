@@ -29,7 +29,7 @@ source control.
 | `FLEET_LLM_API_KEY` | empty | Shared inference credential. Keep it in `.env` or a secret manager. |
 | `FLEET_LLM_API_KEY_ENV` | empty | Name of the environment variable containing the shared inference credential, equivalent to `[llm].api_key_env`. Role-specific `FLEET_ROOT_API_KEY_ENV`, SUB, REFLECTION and JUDGE references override it. |
 | `FLEET_LLM_ADAPTER` | `xml` | Shared model adapter: `xml` (default, with native function calling), `chat`, or `json`. Role-specific `FLEET_ROOT_ADAPTER`, SUB, REFLECTION, and JUDGE overrides apply. |
-| `FLEET_LLM_MODEL_TYPE` | `auto` | Shared model type: `auto` (default), `chat`, or `responses`. Custom OpenAI-compatible endpoints auto-route to `chat`. Role-specific overrides apply. |
+| `FLEET_LLM_MODEL_TYPE` | `auto` | Shared model type: `auto` (default), `chat`, or `responses`. OpenAI routes (`openai/...`) with a configured non-`api.openai.com` endpoint auto-route to `chat`. Role-specific overrides apply. |
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |

@@ -88,11 +88,9 @@ not activate schedules or change generation defaults merely by being installed.
 `build_mlflow_scorer_suite(judge_model, judge_lm=None, jev_lm=None)` returns:
 
 - MLflow judges: `RelevanceToQuery`, `RetrievalGroundedness`, and versioned
-  Fleet rubrics for route suitability, execution verification, tool integrity,
-  output instruction compliance, and Skill progressive disclosure.
+  Fleet rubrics for route suitability, execution verification, and tool integrity.
 - `jev_routing_efficiency_judge`: judgment of whether the selected route fit
-  the task. This is separate from `jev_routing_efficiency`, the deterministic
-  budget-efficiency score. When `jev_lm` is given (`FleetSettings.build_jev_lm`,
+  the task. When `jev_lm` is given (`FleetSettings.build_jev_lm`,
   a TypeSafe `jev-*` client), one System One request asks two independent
   questions — `Noul` route suitability and a `Choice` over `direct`/`flex`/`rlm`
   — and the verdict is the `Noul` value at threshold 0.5. The rationale is
@@ -112,7 +110,7 @@ not activate schedules or change generation defaults merely by being installed.
   a bounded summary of the root task/answer and actual `sandbox.exec` span IDs,
   lineage, status, outcome, code, stdout, stderr, and return values (including
   `SUBMIT` payloads), with bounded redaction. These assessments use
-  `fleet-trace-assessments-v8`. It does not ask the judge to
+  `fleet-trace-assessments-v9`. It does not ask the judge to
   reconstruct evidence from a serialized full trace. Execution rationales cite
   real sandbox span IDs; malformed results, placeholder rationales, or unknown
   citations are scorer errors. The evidence summary includes at most eight
@@ -121,40 +119,6 @@ not activate schedules or change generation defaults merely by being installed.
   Use this validated suite with `mlflow.genai.evaluate` for these two assessment names. A
   server-registered `{{ trace }}` judge with the same names has none of these
   checks and can record a pass for a rationale that cites nothing.
-- `stopping_discipline`: judges actual computation code and execution output,
-  including redundant methods within one code block. One target computation
-  plus a supporting check is sufficient; failed checks, disagreement, or an
-  explicit request for verification justify more work.
-  Bootstrap is excluded. Up to eight task execution spans and 12,000 characters
-  of code per span are supported; truncated evidence fails scoring. The judge
-  must cite a supplied execution span when one exists. This is a diagnostic,
-  not a GEPA objective or a host-enforced stopping guarantee. It adds one judge
-  call per scored trace; no scoring call runs during an ordinary serving Turn.
-- `output_instruction_compliance`: evaluates the complete redacted user request
-  and final answer, up to 20,000 characters each. It does not replace the middle
-  of either field with a preview. Missing, empty, oversized, or already truncated
-  evidence produces a scorer error before any judge call. Diagnostic version
-  `fleet-trace-assessments-v8` retains v7's invalidation of comparisons with earlier partial-text
-  judgments. This diagnostic does not change the shared metric or GEPA objectives.
-- `agent_skills_progressive_disclosure`: evaluates selected Skill evidence,
-  actual sandbox helper-execution receipts, or explicit Skill claims. Receipts
-  cover `use_skill`, `read_skill_reference`, `run_skill_script`, `save_skill`,
-  and `workspace.read` / `workspace.read_text` calls targeting `skills/...`
-  paths, even without TypeSafe selection. Each `sandbox.exec` holds at most 20 receipts
-  with helper name, Skill name, and whether the helper returned, plus an explicit
-  truncation flag. Bodies, script arguments, and results are excluded. A returned
-  helper does not prove script exit status or compliance with its instructions.
-  Catalog listing and code that merely mentions a helper do not activate this
-  scorer; it is skipped when no applicable activity or claim is present.
-- `rlm_trajectory_efficiency`: applies the shared efficiency formula to the
-  host-recorded `fleet_turn` output. Nested predictor/model spans and tracebacks
-  are not counted as additional calls or failures.
-- `jev_routing_efficiency`: rewards fast paths without RLM/Flex and bounded
-  RLM/Flex runs, using host-recorded budget units rather than wrapper spans. Both
-  route classes are monotonic in budget units: a direct Turn keeps `1.0` up to two
-  units and loses 0.02 per extra unit, and a Flex/RLM Turn keeps `0.95` up to fifteen
-  and loses the same 0.02 per extra unit, floored at 0.2. This is a routing gauge,
-  distinct from the GEPA efficiency term in `fleet_metric`.
 - `route_correctness`: compares the turn's reported `route` (`direct`, `flex`,
   `rlm`) with the `route` expectation on a labeled case. It returns no value
   when a case has no gold route.
@@ -191,14 +155,7 @@ verify subsequent assessment metadata. Do not restore an old definition blindly
 or change the eight-execution diagnostic limit to accommodate a historical trace.
 Live evaluation and shared registry changes require explicit authorization.
 
-In particular, `stopping_discipline` is included in the offline suite but may be
-absent from a production trace's automatic assessments. Its absence is not a
-passing verdict. Check the registered scorer's identity, schedule, sampling, and
-assessment errors before attributing missing feedback to runtime wiring. Offline
-regressions preserve complete chronological receipts for same-library precision
-rechecks, immediate submission, failed checks, and requested verification. Their
-scripted judge responses verify evidence transport and rubric contracts; they do
-not demonstrate that a live judge classifies those cases correctly.
+Online selection must use scorers that accept the available live evidence.
 
 Unity Catalog's JSON-wrapped inputs
 and outputs are decoded before deterministic, route, and Fleet metric scoring.
@@ -271,7 +228,7 @@ if experiment is None:
 trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_runtime/TRACE_ID"]
 traces = [mlflow.get_trace(trace_id, silent=True, flush=True) for trace_id in trace_ids]
 suite = build_mlflow_scorer_suite(settings.fleet_judge_model)
-eligible_names = {"output_instruction_compliance", "rlm_trajectory_efficiency", "jev_routing_efficiency"}
+eligible_names = {"route_correctness", "execution_evidence_diagnostics"}
 selected = [scorer for scorer in suite if scorer.name in eligible_names]
 result = score_evaluation_traces(
     traces,
@@ -529,8 +486,8 @@ runtime, and uses DSPy's `SandboxLM` to account host-mediated calls against the
 shared Turn budget. GEPA's file stop and candidate-proposal
 callbacks are isolated version-specific integration points;
 search metric call limits remain advisory between native batches. See the [versioned Flex
-contract](https://dspy.ai/3.4.1/api/modules/Flex/) and [GEPA
-API](https://dspy.ai/3.4.1/api/optimizers/GEPA/overview/).
+contract](https://dspy.ai/3.5.0/api/modules/Flex/) and [GEPA
+API](https://dspy.ai/3.5.0/api/optimizers/GEPA/overview/).
 
 Explicit Fleet child calls expose `child_policies.leaf_action` and
 `child_policies.delegating_action` as ordinary native instruction components outside
@@ -809,7 +766,7 @@ The manual 30-day Unity Catalog trace cleanup procedure is documented in the
 [MLflow trace retention runbook](../runbooks/mlflow-trace-retention.md).
 
 `tests/fixtures.json` contains 18 developer-reviewed routing cases,
-six per effective route. Compare unchanged and structured criteria using the same
+12 RLM and 6 Direct cases; it currently contains no Flex cases. Compare unchanged and structured criteria using the same
 backend, inputs and existing `route_correctness` scorer. Preserve probability,
 confidence and cache evidence; revised criteria must not regress aggregate accuracy.
 Mode overrides and context protection are deterministic invariants.
@@ -859,7 +816,7 @@ unknown. Only the cumulative metric-call count is monotonic.
 | Candidate paths, manifest digest, gate and dataset sizes | Required worker Store writes backed by local artifact/evidence writes. Failure prevents eligible completion. |
 | Cancellation intent | API commits the database stop flag before signaling the stop file. Worker checks both at native safe points and stage boundaries. |
 | Managed worker outcome | Worker records the required database handoff; stdout terminal events have no authority. |
-| Managed terminal outcome | API confirms process exit and drains both pipes before owner/status-fenced terminal arbitration. Accepted cancellation overrides completion. |
+| Managed terminal outcome | API confirms process exit and drains merged output into a private log capped at 1 MB per run before owner/status-fenced terminal arbitration. Accepted cancellation overrides completion. |
 | Standalone terminal outcome | Worker persists after required cleanup and cancellation/ownership checks, before releasing its lease. |
 | MLflow setup, tracking logs and trace flush; CLI diagnostic events | Best effort, with sanitized diagnostics. These failures do not set the required-persistence stop latch. Approval evidence flush policy is unchanged. |
 

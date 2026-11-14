@@ -35,7 +35,7 @@ flowchart LR
 - Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
 - The API owns TUI optimization jobs (`/improve/jobs`, one `kind` ledger shared by future evaluate kinds) through one subprocess slot; labels are managed globally but stay attached to their source Turns, while jobs and the installed program belong to no Session. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
-- The API drains both worker pipes without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and pipe draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
+- The API drains merged worker output into a private log capped at 1 MB per run, without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and output draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
 - A disconnected client does not cancel its experiment. Explicit cancellation is cooperative. The launcher drains API-owned experiments before stopping services; an API restart fences abandoned work as interrupted and never reruns it.
 - A dedicated PostgreSQL owner lease distinguishes live APIs from abandoned owners, including before worker startup. Orphaned running rows are reconciled under the global optimization lease by both the API and standalone optimizer. Polled status reads reconcile at most once per interval, while startup, admission, review, and shutdown drain reconcile immediately.
 - `session.py` owns the runtime registry and Session leases.
@@ -81,7 +81,7 @@ Local readiness and snapshots:
   connections and schema version, MLflow destination, and Daytona snapshot readiness in
   read-only checks (adding `--probe-models` only when an explicit inference probe is
   requested).
-- `fleet snapshot preflight|build|activate` manages Daytona's execution snapshot
+- `fleet snapshot check|build|activate` manages Daytona's execution snapshot
   through `sandbox/snapshots.py`.
 - `fleet cli` and `fleet web` open the ordinary FastAPI server directly without a
   separate setup-mode server; configuration and `.env` / `config/fleet.toml` edits
@@ -93,7 +93,7 @@ See [configuration](docs/reference/configuration.md) and [CLI](docs/reference/cl
 
 - The Store owns PostgreSQL access and locked additive migrations.
 - Durable data includes Turn history, files, reviewed memories, request outcomes, settings, and selected immutable replays.
-- A dedicated advisory-lock connection owns each runtime.
+- A pooled PostgreSQL TTL row owns each runtime; a batched heartbeat renews leases and fences loss.
 - Eviction fences stale runtime references before releasing ownership.
 - Stored history cannot restore live Python variables.
 - Daytona Volumes hold Session workspaces.
@@ -109,7 +109,7 @@ Workspace inputs:
 - Optional `/learned` files are written for human review and are not separately read into Turn prompts; their notes may also be persisted as Session memories, separate from executable Skills.
 - Datasets stay in Daytona as file-backed `WorkspaceDataset` handles.
 - Handles expose bounded previews and digests through the DSPy sandbox serialization contract.
-- Initial `known_empty` workspace state is recorded under the Session advisory lease and
+- Initial `known_empty` workspace state is recorded under the Session TTL lease and
   refreshed after lease acquisition. While `known_empty`, Hybrid previews the route with
   the locally staged Skill manifest/catalog; a `Direct` result reuses local history/memory
   and captures local Skill files in selected replays without starting Daytona (leaving Turn

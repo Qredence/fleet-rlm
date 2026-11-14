@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import contextvars
 import json
 import keyword
@@ -47,11 +48,20 @@ def _unwrap_wire(value: Any) -> Any:
 
 def _is_bootstrap_code(code: str) -> bool:
     """Classify DSPy internal session setup and wire-injection cells as bootstrap."""
-    return (
-        code == BOOTSTRAP
-        or code == "import dspy"
-        or (code.count("\n") == 0 and '__dspy_values.decode(__import__("json").loads(' in code)
-    )
+    if code in {BOOTSTRAP, "import dspy"}:
+        return True
+    try:
+        statements = ast.parse(code).body
+    except SyntaxError:
+        return False
+    if len(statements) != 1 or not isinstance(statements[0], ast.Assign):
+        return False
+    assignment = statements[0]
+    if len(assignment.targets) != 1 or not isinstance(assignment.targets[0], ast.Name):
+        return False
+    name = assignment.targets[0].id
+    expected = ast.parse(f'{name} = __dspy_values.decode(__import__("json").loads(_raw_{name}))')
+    return ast.dump(ast.Module(body=statements, type_ignores=[])) == ast.dump(expected)
 
 
 def _strip_rebind_prelude(code: str) -> str:

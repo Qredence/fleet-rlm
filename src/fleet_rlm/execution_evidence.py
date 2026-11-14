@@ -176,7 +176,7 @@ def collect_artifacts(manager: Any) -> dict[str, Any]:
                     files[path] = {"sha256": hashlib.sha256(raw).hexdigest(), "base64": base64.b64encode(raw).decode()}
                 return {"complete": complete, "files": files, "paths": paths}
             except (ValueError, OSError):
-                complete = False
+                complete = True
                 files.clear()
                 total = 0
 

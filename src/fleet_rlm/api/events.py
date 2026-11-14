@@ -313,7 +313,7 @@ class Envelope:
             "version": 1,
             "event": event.get("event"),
             "session_id": self.session_id,
-            "turn_id": event.get("turn_id") or self.turn_id,
+            "turn_id": self.turn_id,
             "agent_id": event.get("agent_id"),
             "parent_agent_id": event.get("parent_agent_id"),
             "sandbox_id": event.get("sandbox_id") or getattr(getattr(self.manager, "_sandbox", None), "id", None),

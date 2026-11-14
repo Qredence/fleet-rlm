@@ -43,10 +43,10 @@ src/fleet_rlm/
 │   └── children.py    # ChildPolicies: two persistent native action predictors
 ├── store/             # Squashed PostgreSQL schema, pooling, leases, and transactions
 │   ├── __init__.py    # Store class combining mixins, connection pool, and migrations
-│   ├── schema.py      # Version-1 DDL tables, retry policy, Lakebase OAuth connections
-│   ├── sessions.py    # Session rows, turns, memories, global/session settings
+│   ├── schema.py      # Version-1 DDL tables and retry policy
+│   ├── sessions.py    # Session rows, turns, memories, settings, CAS sandbox resource tracking
 │   ├── replays.py     # Content-addressed replay blobs, snapshots, and review labels
-│   ├── leases.py      # Session advisory leases and normalized CAS sandbox resource tracking
+│   ├── leases.py      # Pooled TTL leases, heartbeat renewal, and Lakebase OAuth connections
 │   └── optimization.py # Global optimization run ledger and owner arbitration
 ├── optimize/          # GEPA/evaluation modules; never imported by engine/runtime
 │   ├── objectives.py  # Pure scoring objectives: no MLflow, LM, or filesystem
@@ -131,12 +131,12 @@ sections inside each module:
 
 | Area | Suites |
 | --- | --- |
-| HTTP API | `api/test_turns.py` (routes, setup, lifecycle, outcomes, SSE, managed experiments) |
+| HTTP API | `api/test_turns.py` (routes, lifecycle, outcomes, SSE, managed experiments) |
 | Runtime | `engine/test_runtime.py` (native programs, configuration, models, Sessions, Skills, usage, tracing) |
 | Sandbox | `sandbox/test_sandbox.py` (lifecycle, budgets, snapshots, interpreter, delegation, transport, workspace) |
 | Optimization | `optimize/test_optimization.py` (workers, artifacts, native GEPA, isolated rollouts, promotion) |
 | Evaluation | `optimize/test_evaluation.py` (curation, benchmarks, reports, scorers, objectives, evidence) |
-| Clients | `tui/test_clients.py` (CLI, launcher, Textual UI, browser security, setup) |
+| Clients | `tui/test_clients.py` (CLI, launcher, Textual UI, browser security) |
 | Persistence | `store/test_store.py` (migrations, history, leases, opt-in database contracts) |
 | CI and publication | `test_release_checks.py` (discovery, release automation, publication evidence, verifiers) |
 

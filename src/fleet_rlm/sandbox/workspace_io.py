@@ -166,6 +166,23 @@ class WorkspaceIOMixin:
         )[0]
         return {"path": clean_path, "size_bytes": metadata["size"], "sha256": metadata["sha256"]}
 
+    def stat_workspace_files(self: DaytonaSandboxManager, rel_paths: list[str]) -> dict[str, dict[str, Any]]:
+        """Return sizes and digests in one remote check without downloading file contents."""
+        clean_paths = [_workspace_relative_path(path) for path in rel_paths]
+        if not clean_paths:
+            return {}
+        metadata = self._workspace_files_metadata(
+            self.ensure_sandbox(),
+            clean_paths,
+            create_parents=False,
+            max_bytes=MAX_WORKSPACE_FILE_BYTES,
+            include_digest=True,
+        )
+        return {
+            path: {"path": path, "size_bytes": item["size"], "sha256": item["sha256"]}
+            for path, item in zip(clean_paths, metadata, strict=True)
+        }
+
     def read_workspace_file_to_path(
         self: DaytonaSandboxManager, rel_path: str, local_path: str | Path, *, max_bytes: int = MAX_WORKSPACE_FILE_BYTES
     ) -> int:
@@ -321,23 +338,10 @@ class WorkspaceIOMixin:
         with self.root._budget_lock:
             inputs = dict(self.root._child_receipts.get(self.agent_id, {}).get("inputs", {}))
         artifact_paths = [path for path in self.list_workspace_files() if path.startswith("artifacts/")]
-        batched: dict[str, bytes] | None = None
-        read_batch = getattr(self, "read_workspace_files", None)
-        if artifact_paths and callable(read_batch):
-            unchanged_count = sum(1 for path in artifact_paths if path in inputs)
-            if len(artifact_paths) - unchanged_count > _MAX_PROMOTED_FILES:
-                raise ValueError("Child output promotion quota exceeded")
-            quota = _MAX_PROMOTED_BYTES + sum(MAX_WORKSPACE_FILE_BYTES for path in artifact_paths if path in inputs)
-            try:
-                batched = read_batch(artifact_paths, max_total_bytes=quota)
-            except ValueError as exc:
-                if "transfer quota" in str(exc):
-                    raise ValueError("Child output promotion quota exceeded") from exc
-                raise
         for path in artifact_paths:
             if len(selected) >= _MAX_PROMOTED_FILES and path not in inputs:
                 raise ValueError("Child output promotion quota exceeded")
-            raw = batched[path] if batched is not None else self.read_workspace_file(path)
+            raw = self.read_workspace_file(path)
             if inputs.get(path) == hashlib.sha256(raw).hexdigest():
                 continue  # an unchanged copied-in artifact is the parent's, not this child's output
             total += len(raw)

@@ -67,6 +67,7 @@ class OptimizationInputs:
     context: Any = None
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     required_skills: tuple[RequiredSkill, ...] = ()
+    rlm_history: Any = None
 
 
 def turn_is_over(exc: BaseException) -> bool:
@@ -163,7 +164,7 @@ ROUTE_DESCRIPTIONS: dict[Route, dict[str, Any]] = {
         ),
         "judge": "Code, file or Skill work, including bounded calculations and iterative investigation",
         "definition": "Bounded RLM for code, file or Skill work, exploration or decomposition",
-        "examples": ["Compute a specified digit", "Summarize an attached table", "Investigate conflicting evidence"],
+        "examples": ["Investigate conflicting evidence"],
         "not": "A route that guarantees delegation; both execution routes can delegate",
         "summary": "Execute a bounded RLM with Daytona Python and optional child agents.",
     },

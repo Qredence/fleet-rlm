@@ -6,6 +6,7 @@ import argparse
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from fleet_rlm.config import FleetSettings
@@ -277,7 +278,7 @@ def run_doctor(
     table.add_column("Detail")
 
     if config_error or settings is None:
-        table.add_row("Configuration", "[red]blocked[/red]", config_error or "Invalid configuration")
+        table.add_row("Configuration", "[red]blocked[/red]", escape(config_error or "Invalid configuration"))
         out.print(table)
         return 1
 
@@ -301,7 +302,7 @@ def run_doctor(
             badge = "[red]blocked[/red]"
         else:
             badge = "[green]ready[/green]"
-        table.add_row(name, badge, str(result.get("message", "")))
+        table.add_row(name, badge, escape(str(result.get("message", ""))))
 
     out.print(table)
     return 1 if blocked else 0
@@ -333,17 +334,34 @@ def run_snapshot(
         if action == "build":
             secrets = _secret_values(settings)
 
-            def on_logs(chunk: str) -> None:
-                text = chunk
-                for secret in secrets:
-                    text = text.replace(secret, "[redacted]")
+            pending = ""
+
+            def on_logs(chunk: str, *, final: bool = False) -> None:
+                nonlocal pending
+                pending += chunk
+                text = ""
+                while pending:
+                    matched = next((secret for secret in secrets if pending.startswith(secret)), None)
+                    if matched:
+                        text += "[redacted]"
+                        pending = pending[len(matched) :]
+                    elif not final and any(secret.startswith(pending) for secret in secrets):
+                        break
+                    else:
+                        text += pending[0]
+                        pending = pending[1:]
                 out.print(text, end="", markup=False)
 
-            identity = build_snapshot(
-                api_key=settings.fleet_daytona_api_key,
-                org_id=settings.fleet_daytona_org_id,
-                on_logs=on_logs,
-            )
+            try:
+                identity = build_snapshot(
+                    api_key=settings.fleet_daytona_api_key,
+                    org_id=settings.fleet_daytona_org_id,
+                    on_logs=on_logs,
+                )
+            finally:
+                # A trailing partial secret is withheld rather than printed on failure.
+                if not any(secret.startswith(pending) for secret in secrets):
+                    on_logs("", final=True)
             out.print(f"\nSnapshot built: {identity.name} ({identity.id})", markup=False)
             return 0
         if action == "activate":

@@ -238,7 +238,7 @@ def component_diffs(baseline: dspy.Module, candidate: dspy.Module) -> list[dict[
     return changes
 
 
-NO_CHANGE_REASON = "candidate changes no instructions or Flex code"
+NO_CHANGE_REASON = "candidate changes no instructions, Flex code, or calibrated decision fields"
 # The evaluation of a candidate identical to the incumbent: paired validation is skipped, the gate still decides.
 VALIDATION_SKIPPED = "skipped_unchanged"
 

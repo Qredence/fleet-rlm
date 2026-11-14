@@ -80,7 +80,7 @@ def rlm_history_processor(history: dspy.History) -> dspy.History:
     total_chars = 0
     for event in reversed(sanitized[-_MAX_RLM_HISTORY_EVENTS:]):
         cost = _event_char_cost(event)
-        if kept_reversed and total_chars + cost > _MAX_RLM_HISTORY_CHARS:
+        if total_chars + cost > _MAX_RLM_HISTORY_CHARS:
             break
         kept_reversed.append(event)
         total_chars += cost

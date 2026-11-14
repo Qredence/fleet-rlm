@@ -39,8 +39,18 @@ from fleet_rlm.api.schemas import (
     Status,
     TurnStatus,
 )
-from fleet_rlm.session import runtime_configuration
+from fleet_rlm.session import SessionRuntime, memory_search_query, runtime_configuration
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
+
+
+def _resolve_runtime(request: Request, registry: Registry, session_id: str) -> SessionRuntime | None:
+    """Prefer an existing runtime, falling back to storage without claiming ownership."""
+    peek = getattr(registry, "peek", None)
+    runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
+    if runtime is None and request.app.state.store is None:
+        runtime = get_runtime(registry, session_id)
+    return runtime
+
 
 router = APIRouter(tags=["sessions"])
 memory_router = APIRouter(prefix="/sessions/{session_id}/memory", tags=["memory"])
@@ -88,10 +98,7 @@ def session_config(request: Request, session_id: str, settings: Settings, regist
     """Describe a Session's mode, models, context, configuration, and limits without claiming a runtime."""
     with translate("Session configuration is unavailable", invalid="Invalid Session ID"):
         session_id = validate_session_id(session_id)
-        peek = getattr(registry, "peek", None)
-        runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
-        if runtime is None and request.app.state.store is None:
-            runtime = get_runtime(registry, session_id)
+        runtime = _resolve_runtime(request, registry, session_id)
         if runtime is not None:
             manager = runtime.sandbox_mgr
             return SessionConfig(
@@ -156,10 +163,7 @@ def get_mode(request: Request, session_id: str, settings: Settings, registry: Re
     """Return a Session's current execution mode without claiming a runtime."""
     with translate("Session mode is unavailable", invalid="Invalid Session ID"):
         session_id = validate_session_id(session_id)
-        peek = getattr(registry, "peek", None)
-        runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
-        if runtime is None and request.app.state.store is None:
-            runtime = get_runtime(registry, session_id)
+        runtime = _resolve_runtime(request, registry, session_id)
         if runtime is not None:
             return Mode(mode=runtime.engine.execution_mode)
         saved = request.app.state.store.runtime_settings(session_id)
@@ -258,13 +262,10 @@ def list_memory(
     """List a Session's memory entries that match an optional query without claiming a runtime."""
     with translate("Session memory is unavailable", invalid="Invalid Session ID"):
         session_id = validate_session_id(session_id)
-        peek = getattr(registry, "peek", None)
-        runtime = peek(session_id) if callable(peek) else get_runtime(registry, session_id)
-        if runtime is None and request.app.state.store is None:
-            runtime = get_runtime(registry, session_id)
+        runtime = _resolve_runtime(request, registry, session_id)
         if runtime is not None:
             return Memories(memories=runtime.memories(q))
-        search = " OR ".join(q[:2000].split()[:32])
+        search = memory_search_query(q)
         return Memories(memories=request.app.state.store.memories(session_id, search, reviewed_only=False))
 
 

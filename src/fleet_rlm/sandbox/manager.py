@@ -6,7 +6,7 @@ import base64
 import contextvars
 import logging
 import threading
-import time  # noqa: F401
+import time  # noqa: F401 - shared clock used by budget and lifecycle modules
 import uuid
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager

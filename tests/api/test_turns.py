@@ -1394,8 +1394,8 @@ def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
                 assert first["replay_snapshot"] is None
             replayed = events_of(client.post("/sessions/session-a/turn", json=body))
             recovered = next(event for event in replayed if event["event"] == "turn_complete")
-            assert {key: value for key, value in recovered.items() if key != "timestamp"} == {
-                key: value for key, value in terminal[0].items() if key != "timestamp"
+            assert {key: value for key, value in recovered.items() if key not in {"timestamp", "turn_id"}} == {
+                key: value for key, value in terminal[0].items() if key not in {"timestamp", "turn_id"}
             }
             assert len(engine_calls) == 1 and len(records) == 1
             second = {**body, "idempotency_key": "inventory-second"}
@@ -1408,10 +1408,24 @@ def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
 
 @pytest.mark.parametrize("environment", ["", "Sandbox environment: Python 3.12; pandas available."])
 def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment) -> None:
+    from dspy.primitives.repl_types import REPLEntry, build_repl_event
+
+    from fleet_rlm.engine.reasoning import deserialize_rlm_history
+
+    prior_history = dspy.History(
+        messages=[
+            build_repl_event(
+                {"task": "prior computation"},
+                REPLEntry(reasoning="calculate", code="1 + 1", output="2", max_output_chars=3000),
+                {},
+            )
+        ]
+    )
     content = b"id,value\n1,17\n"
     files = {"files/input.csv": content}
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
+        load_rlm_history=lambda _sid: prior_history,
         sandbox_mgr=FakeManager(
             list_workspace_files=lambda: list(files),
             read_workspace_file=lambda path: files[path],
@@ -1443,6 +1457,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
     snapshot = decode_snapshot(digest, compressed)
     assert turn_record["replay_snapshot_selected"] is True
     assert turn_record["replay_snapshot_sha256"] == digest
+    assert deserialize_rlm_history(snapshot["rlm_history"]) == prior_history
     assert snapshot["session_id"] == "session-a"
     assert snapshot["task"] == "sum the values"
     assert snapshot["workspace_manifest"] == "/workspace/files/input.csv"
@@ -2301,7 +2316,8 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
     with opened_client(runtime, store=store) as (client, _):
         response = client.post("/sessions/s1/turn", json={"task": "same task", "idempotency_key": "same-key"})
         outcomes = [event for event in events_of(response) if event["event"] in {"turn_complete", "error"}]
-        assert len(outcomes) == 1 and outcomes[0]["turn_id"] == "original-turn"
+        assert len(outcomes) == 1 and outcomes[0]["payload"]["turn_id"] == "original-turn"
+        assert len({event["turn_id"] for event in events_of(response)}) == 1
         recovered = client.get("/sessions/s1/turns/original-turn")
     assert recovered.status_code == 200 and recovered.json()["status"] == status
     if status == "completed":
@@ -3197,11 +3213,11 @@ def test_turn_request_timeout_rejects_values_outside_the_strict_contract(monkeyp
 @pytest.mark.parametrize(
     ("configured", "configured_source", "body_timeout", "expected"),
     [
-        (900, "default", "omit", ("default", 0)),
+        (900, "default", "omit", ("default", None)),
         (1200, "toml", "omit", ("configuration", 1200)),
         (1200, "toml", 300, ("request", 300)),
         (1200, "toml", 0, ("request", None)),
-        (900, "default", None, ("default", 0)),
+        (900, "default", None, ("default", None)),
     ],
 )
 def test_deadline_provenance_matches_across_span_turn_record_and_replay(
@@ -6264,7 +6280,11 @@ def test_an_environment_change_that_removes_the_cap_blocks_auto_run_and_says_why
     assert settings["auto_run"] is True and "token cap" in settings["auto_run_blocked"]
 
 
-def test_a_job_request_inherits_the_saved_token_cap_unless_it_sets_its_own(tmp_path: Path) -> None:
+def test_a_job_request_inherits_the_saved_token_cap_unless_it_sets_its_own(tmp_path: Path, monkeypatch) -> None:
+    async def fake_execute(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ExperimentManager, "_execute", fake_execute)
     store = _LabelStore()
     store.update_global_settings("improve", {"max_total_tokens": 777})
     _app, client = _app_client(tmp_path, store)

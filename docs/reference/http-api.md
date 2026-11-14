@@ -136,7 +136,7 @@ approval returns `409` because their incumbent was a per-Session program.
 **Progress and fail-fast.** During paired validation the worker persists `validation_done` and
 `validation_total` in `progress` (rollouts finished of 2 stages x 3 passes x dev+holdout examples). When the search
 returns a candidate that changes no instruction, Flex code, or calibrated decision fields, validation is skipped and the job completes with the
-gate's own reason, `candidate changes no instructions or Flex code`. Job detail adds `summary`, computed from the saved
+gate's own reason, `candidate changes no instructions, Flex code, or calibrated decision fields`. Job detail adds `summary`, computed from the saved
 comparison: `changed` components (of `components_total`), per-split baseline and candidate means with `improved`,
 `regressed` and `ties` counts over the paired per-example scores, the critical count, and a one-line `headline`.
 
@@ -431,8 +431,8 @@ DSPy callbacks also include `parent_call_id`. End events report `ok`, `error_typ
 and `duration_ms`. Tool `inputs` and `output` are bounded, redacted text previews;
 `source` distinguishes `dspy` callbacks from `sandbox_bridge` operations. These
 may be nested observations, not additional model calls. Predictor payloads are
-omitted rather than exposing private reasoning. Previews redact sensitive keys
-and labelled credentials but cannot detect every secret in arbitrary text.
+omitted. Provider reasoning is streamed separately when returned by the model. Previews and provider reasoning redact labelled credentials; this is not a DLP
+boundary and cannot detect every secret in arbitrary text.
 `repl_code`/`repl_output` share an `execution_id`, namespace, and `phase`
 (`bootstrap` or `task`); output includes timing, stdout/stderr, a bounded `value`
 preview, and error status. `triage_decision.summary` describes the selected route
