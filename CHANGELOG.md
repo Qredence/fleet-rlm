@@ -4,6 +4,55 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-14
+
+### Features
+
+- Add `fleet doctor` for read-only diagnostics and `fleet snapshot` commands for
+  explicit snapshot operations. See [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+- Persist bounded RLM REPL history per Turn and restore it for later Turns.
+  See [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+
+### Changed
+
+- Pin DSPy to 3.5.0 and adopt its native typed-decision and `SandboxSession`
+  execution contracts; carry calibrated decision state in B2 program artifacts.
+  See [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+- Simplify configuration, sandbox, persistence, optimizer, and API boundaries;
+  replace setup-mode server and TUI flows with single-mode FastAPI and CLI setup.
+  See [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+- Retire compiled `fleet-program-b1` artifacts in favor of `fleet-program-b2`;
+  rebuild Daytona snapshots as `fleet-rlm-python313-v15` with
+  `fleet snapshot build`. See [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+- Change the default LLM adapter from `chat` to `xml` with `model_type = "auto"`.
+  See [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+
+### Fixed
+
+- Fence optimizer workers after lease loss and harden sandbox execution, TUI
+  cancellation, and local client lifecycle handling. See
+  [PR #694](https://github.com/Qredence/fleet-rlm/pull/694).
+
+### Migration
+
+- Older `fleet-program-b1` artifacts are rejected; recreate compiled artifacts
+  with the 0.13.0 runtime. Rebuild Daytona snapshots with `fleet snapshot build`.
+- The private `/setup` routes and `fleet_rlm/setup.py` are removed. Configure
+  runtime setup through the CLI. To retain the previous chat formatting, set
+  `adapter = "chat"`; the default is now `xml`.
+- Version-12 databases are refused at startup. Version 0.13.0 starts from a new
+  schema baseline and does not migrate or restore the old data. Deploy with a
+  new empty database schema and Daytona Volume, and keep the prior deployment
+  and its data available for history and rollback.
+
+### Validation
+
+- Offline `make check` passed on the source PR with 2,311 tests passed, 2
+  opt-in tests skipped, and 85% coverage.
+- One live CLI Flex/Daytona smoke test returned 391, persisted its Turn, and
+  exported its trace. This is a smoke test, not a broad live compatibility claim
+  or a measured performance gain.
+
 ## [0.12.0] - 2026-11-12
 
 ### Features
