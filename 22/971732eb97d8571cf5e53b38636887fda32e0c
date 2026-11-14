@@ -1,0 +1,51 @@
+.circleci/config.yml
+  s_973d7802201e6f::t_3d3edcf4f3a6e2 373
+docs/reference/database.md
+  s_973d7802201e6f::t_1a9de81a187298 127-132,137
+docs/reference/evaluation.md
+  s_973d7802201e6f::t_17bf690b35e9d7 231
+docs/reference/http-api.md
+  s_973d7802201e6f::t_1cef96c8957291 434
+src/fleet_rlm/contracts.py
+  s_973d7802201e6f::t_ca6a96dc353d56 70
+src/fleet_rlm/doctor.py
+  s_973d7802201e6f::t_71644c787ad039 342-345,347-351,354-357
+src/fleet_rlm/engine/turn_prepare.py
+  s_973d7802201e6f::t_fc886a3e9a9fde 16,338,341
+src/fleet_rlm/optimize/cli_commands.py
+  s_973d7802201e6f::t_2dcf58d9d71116 339
+src/fleet_rlm/optimize/progress.py
+  s_973d7802201e6f::t_02dc2d14134add 147-152
+src/fleet_rlm/sandbox/interpreter.py
+  s_973d7802201e6f::t_e589a489bf1f5e 53-54,57-65
+src/fleet_rlm/session.py
+  s_973d7802201e6f::t_750ffa3475e2b3 469
+src/fleet_rlm/store/leases.py
+  s_973d7802201e6f::t_6c052b50d50ba8 49,62,88,188-190,194,209-211,406
+tests/engine/test_runtime.py
+  s_973d7802201e6f::t_19424b19fbe791 2115,5673,5703-5711,5717-5718,5724-5725,5727
+tests/optimize/test_optimization.py
+  s_973d7802201e6f::t_e6668dcbbc2001 2518-2529
+tests/sandbox/test_sandbox.py
+  s_973d7802201e6f::t_6f14216232958e 6150
+tests/store/test_store.py
+  s_973d7802201e6f::t_97aab0cfe8336d 1305,1323,1336,1400-1410
+tests/test_release_checks.py
+  s_973d7802201e6f::t_85fdc4a633ab90 1347-1348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22971732eb97d8571cf5e53b38636887fda32e0c",
+  "prompts": {},
+  "sessions": {
+    "s_973d7802201e6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d77d-a0cb-7970-9ccf-28c90a3bde90",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
