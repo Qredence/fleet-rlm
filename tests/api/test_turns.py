@@ -3850,7 +3850,7 @@ def test_framing_validation_error_does_not_expose_rejected_payload() -> None:
 def test_openapi_documents_session_controls_and_the_sse_stream():
     _, app = client_for()
     schema = app.openapi()
-    assert schema["info"]["version"] == "0.12.0"
+    assert schema["info"]["version"] == "0.13.0"
     assert {"get", "put"} <= set(schema["paths"]["/sessions/{session_id}/mode"])
     for path in ("/sessions/{session_id}/history", "/sessions/{session_id}/turns/{turn_id}"):
         assert "get" in schema["paths"][path]
@@ -3876,7 +3876,7 @@ def test_openapi_documents_session_controls_and_the_sse_stream():
 def test_health_reports_the_package_version():
     with opened_client() as (client, _):
         health = client.get("/health").json()
-        assert (health["status"], health["version"]) == ("ok", "0.12.0")
+        assert (health["status"], health["version"]) == ("ok", "0.13.0")
         assert health["mlflow"]["mode"] == "local"
         assert health["mlflow"]["ready"] is False
 
