@@ -1,0 +1,37 @@
+src/fleet_rlm/optimize/cli_commands.py
+  s_6b1a635e889bfd::t_78e3ab7d2fe194 193,291
+src/fleet_rlm/optimize/progress.py
+  s_6b1a635e889bfd::t_91b060969018ec 132-136,141-145
+src/fleet_rlm/optimize/runner.py
+  s_6b1a635e889bfd::t_6f2b74e5868a36 645-646
+src/fleet_rlm/store/leases.py
+  s_973d7802201e6f::t_b8c245a847dd35 48,51-75,283-294,300,358-363,400-402,432,451
+tests/optimize/test_optimization.py
+  s_973d7802201e6f::t_c568c7a0866180 94-96,1165,1167,1225-1236,1449,1687-1693,1716-1723,2411-2414,2428-2432,2463,2500-2506
+tests/store/test_store.py
+  s_973d7802201e6f::t_e7682c5eebb35c 1117-1118,1172-1173,1327-1422
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e0afcc52cff08ebf7f6f8078a3bcacbb9a8342cc",
+  "prompts": {},
+  "sessions": {
+    "s_6b1a635e889bfd": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "21a2d81d-bd8b-4fd2-b95b-c178a80ef8a5",
+        "model": "custom:Deepseek-V4.1-Flash-1017---Command-0"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_973d7802201e6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d77d-a0cb-7970-9ccf-28c90a3bde90",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
