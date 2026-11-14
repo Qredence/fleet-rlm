@@ -190,6 +190,7 @@ def _run_approval(
                 if not preclaimed:
                     record = store.claim_optimization_review(version, review_owner_id)
                 try:
+                    store.assert_optimization_lease(verify=True)
                     approve_candidate(
                         candidate_path,
                         manifest,
@@ -287,6 +288,7 @@ def _finalize_optimization_run(
             status, failure = "failed", error
     if status == "completed":
         try:
+            store.assert_optimization_lease(verify=True)
             record = store.get_optimization_run(run_id)
             if record is None or record.get("owner_id") != owner_id or record.get("status") != "running":
                 raise OptimizationPersistenceError("Optimization ownership or status changed")

@@ -642,6 +642,8 @@ def _compile(
             raise RuntimeError("Optimization evidence changed during the run; candidate requires reevaluation")
         destination = directory / "candidates" / f"{version}.json"
         destination.parent.mkdir(parents=True, exist_ok=True)
+        guard.check_boundary()
+        store.assert_optimization_lease(verify=True)
         atomic_write(destination, program_envelope(selected_program, metadata=search_evidence))
         manifest = ArtifactManifest(
             version=version,

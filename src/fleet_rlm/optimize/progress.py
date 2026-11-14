@@ -129,11 +129,20 @@ class GEPAProgressReporter:
     def should_stop(self, *_args: Any, **_kwargs: Any) -> bool:
         """Request GEPA's native safe-point stop after the first required failure."""
         with self._lock:
-            return self._failure is not None
+            try:
+                self.raise_if_failed()
+            except OptimizationPersistenceError:
+                return True
+            return False
 
     def raise_if_failed(self) -> None:
         """Reject partial native results even when GEPA swallowed a callback exception."""
         with self._lock:
+            if isinstance(self.store, Store) and self._failure is None:
+                try:
+                    self.store.assert_optimization_lease()
+                except Exception as error:
+                    self._failure = error
             if self._failure is not None:
                 raise OptimizationPersistenceError("Required optimization persistence failed") from self._failure
 

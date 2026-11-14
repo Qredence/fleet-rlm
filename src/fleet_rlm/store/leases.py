@@ -45,7 +45,33 @@ class PooledLease:
         self.epoch = epoch
         self.created = created
         self.closed = False
+        self.lost = threading.Event()
         self._close_lock = threading.Lock()
+
+    def assert_held(self, *, verify: bool = False) -> None:
+        """Fence expired or lost global coordination, optionally verifying the current DB owner."""
+        heartbeat = self._store.heartbeat
+        with heartbeat._lock:
+            entry = heartbeat._leases.get(self.scope)
+        if (
+            self.closed
+            or self.lost.is_set()
+            or entry is None
+            or entry[0] != self.epoch
+            or time.monotonic() - entry[3] >= LEASE_TTL_SECONDS
+        ):
+            self.lost.set()
+            raise RuntimeError("Optimization lease was lost or expired")
+        if verify:
+            with self._store.pool.connection() as connection:
+                row = connection.execute(
+                    "SELECT 1 FROM fleet_lite_leases WHERE scope = %s AND owner_id = %s "
+                    "AND epoch = %s AND expires_at > NOW()",
+                    (self.scope, self.owner_id, self.epoch),
+                ).fetchone()
+            if row is None:
+                self.lost.set()
+                raise RuntimeError("Optimization lease was lost or expired")
 
     def close(self) -> None:
         """Unregister heartbeat renewal and release the lease row if this epoch still owns it."""
@@ -254,12 +280,24 @@ class LeaseHeartbeatService:
                 renewed = self._store._batch_renew_global_leases(scopes, epochs, owner_id, LEASE_TTL_SECONDS)
             except psycopg.OperationalError:
                 _LOGGER.warning("Transient failure renewing %d global lease(s)", len(items))
+                expired_callbacks = []
+                with self._lock:
+                    for scope, _epoch, _owner_lost, last_renewed in items:
+                        current = self._leases.get(scope)
+                        # A deleted global row can be reacquired at the same epoch.
+                        if current is not None and current == leases[scope] and now - last_renewed >= LEASE_TTL_SECONDS:
+                            self._leases.pop(scope, None)
+                            if current[2] is not None:
+                                expired_callbacks.append(current[2])
+                for callback in expired_callbacks:
+                    with suppress(Exception):
+                        callback()
                 continue
             lost: list[Callable[[], None]] = []
             with self._lock:
                 for scope, epoch, on_lost, _last_renewed in items:
                     current = self._leases.get(scope)
-                    if current is None or current[0] != epoch:
+                    if current is None or current != leases[scope]:
                         continue
                     if scope in renewed:
                         self._leases[scope] = (epoch, owner_id, on_lost, now)
@@ -317,6 +355,12 @@ class LeaseStoreMixin:
         """Hold the global optimization execution lease via a pooled TTL row."""
         return self._acquire_global_lease(_OPTIMIZATION_LOCK_SCOPE, owner_id=owner_id or self.worker_id)
 
+    def assert_optimization_lease(self, *, verify: bool = False) -> None:
+        """Check the optimizer execution lease when this Store has acquired one."""
+        lease = getattr(self, "_optimization_lease", None)
+        if lease is not None:
+            lease.assert_held(verify=verify)
+
     def acquire_optimization_owner_lease(self, owner_id: str) -> PooledLease:
         """Keep an API optimization owner alive across pending launch and execution."""
         validated = _optimization_owner_id(owner_id)
@@ -353,7 +397,9 @@ class LeaseStoreMixin:
             raise RuntimeError("An optimization run is already owned by another worker")
         epoch = int(_row_value(row, "epoch", 0))
         lease = PooledLease(self, scope, kind="global", owner_id=owner_id, epoch=epoch)
-        self.heartbeat.register_lease(scope, epoch, owner_id=owner_id)
+        self.heartbeat.register_lease(scope, epoch, owner_id=owner_id, on_lost=lease.lost.set)
+        if scope == _OPTIMIZATION_LOCK_SCOPE:
+            self._optimization_lease = lease
         return lease
 
     def _release_lease(self, scope: str, *, kind: str, owner_id: str, epoch: int) -> None:
@@ -383,6 +429,7 @@ class LeaseStoreMixin:
                 WHERE s.session_id = req.sid
                   AND s.ownership_epoch = req.ep
                   AND s.lease_owner = %s
+                  AND s.lease_expires_at > NOW()
                 RETURNING s.session_id
                 """,
                 (ttl_seconds, session_ids, epochs, owner_id),
@@ -401,6 +448,7 @@ class LeaseStoreMixin:
                 WHERE l.scope = req.sc
                   AND l.epoch = req.ep
                   AND l.owner_id = %s
+                  AND l.expires_at > NOW()
                 RETURNING l.scope
                 """,
                 (ttl_seconds, scopes, epochs, owner_id),

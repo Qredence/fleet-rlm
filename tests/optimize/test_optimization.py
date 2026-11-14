@@ -91,6 +91,9 @@ class MemoryOptimizationStore:
     def acquire_optimization_lease(self):
         return SimpleNamespace(close=lambda: self.events.append(("lease.close", None)))
 
+    def assert_optimization_lease(self, *, verify=False):
+        assert verify is True
+
     def optimization_owner_alive(self, _owner_id):
         return False
 
@@ -1159,8 +1162,9 @@ def test_optimize_approve_reload_and_serve_round_trip(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.parametrize("stale_evidence", [False, True])
+@pytest.mark.parametrize("lease_lost", [False, True])
 def test_managed_approval_leaves_terminal_transition_to_api_parent(
-    tmp_path, monkeypatch, capsys, stale_evidence
+    tmp_path, monkeypatch, capsys, stale_evidence, lease_lost
 ) -> None:
 
     settings = FleetSettings(
@@ -1218,7 +1222,18 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
         "--managed-owner-id",
         "api-owner",
     ]
-    if stale_evidence:
+    if lease_lost:
+
+        def lost_lease(*, verify=False):
+            assert verify is True
+            raise RuntimeError("Optimization lease was lost or expired")
+
+        monkeypatch.setattr(store, "assert_optimization_lease", lost_lease)
+        with pytest.raises(RuntimeError, match="lease was lost"):
+            workflow.run(parser.parse_args(args), parser, settings)
+        assert not (tmp_path / "fleet.json").exists()
+        expected = "failed"
+    elif stale_evidence:
         with pytest.raises(ValueError, match="evidence is stale"):
             workflow.run(parser.parse_args(args), parser, settings)
         assert not (tmp_path / "fleet.json").exists()
@@ -1431,6 +1446,7 @@ def test_postgres_examples_span_every_session() -> None:
         True,
         "finalization",
         "evidence_change",
+        "lease_loss",
         "interrupt_search",
         "interrupt_validation",
         "callback_failure",
@@ -1668,6 +1684,13 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         else:
             for name in ("log_metrics", "log_params", "log_artifact", "log_dict", "log_text"):
                 monkeypatch.setattr(workflow.mlflow, name, unavailable)
+    if cancel_after_validation == "lease_loss":
+
+        def lost_lease(*, verify=False):
+            assert verify is True
+            raise RuntimeError("Optimization lease was lost or expired")
+
+        monkeypatch.setattr(store, "assert_optimization_lease", lost_lease)
     args = SimpleNamespace(
         validation_ratio=0.35,
         max_metric_calls=4,
@@ -1689,6 +1712,14 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         full = json.loads(next((tmp_path / "candidates").glob("*.comparison.json")).read_text())
         assert full["rationale"] == "" and "paired validation was skipped" in full["report"]
         assert "scores" not in store.records["s1-run"]
+        return
+    if cancel_after_validation == "lease_loss":
+        with pytest.raises(RuntimeError, match="lease was lost"):
+            workflow._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+        assert measured.count(False) == measured.count(True) == 3
+        assert not list((tmp_path / "candidates").glob("*.json"))
+        assert digest_bytes(active.read_bytes()) == digest
+        assert "candidate_path" not in store.records["s1-run"]
         return
     if cancel_after_validation == "token_budget":
         with pytest.raises(workflow.BudgetExhaustedError):
@@ -2377,7 +2408,10 @@ def test_optional_callback_emission_failure_is_bounded_and_does_not_stop(monkeyp
     assert "private diagnostic credential" not in caplog.text
 
 
-def test_locked_native_gepa_observes_required_persistence_stop_without_provider_calls(tmp_path):
+@pytest.mark.parametrize("failure_kind", ["write", "lease"])
+def test_locked_native_gepa_observes_required_persistence_stop_without_provider_calls(
+    tmp_path, monkeypatch, failure_kind
+):
     class Student(dspy.Module):
         def __init__(self):
             super().__init__()
@@ -2391,7 +2425,11 @@ def test_locked_native_gepa_observes_required_persistence_stop_without_provider_
     def fail(*_args, **_kwargs):
         raise RuntimeError("private database credential")
 
-    store.update_optimization_run = fail
+    if failure_kind == "lease":
+        store = workflow.Store(SimpleNamespace())
+        monkeypatch.setattr(store, "assert_optimization_lease", fail)
+    else:
+        store.update_optimization_run = fail
     reporter = workflow.GEPAProgressReporter("s1-run", store=store, owner_id="owner", emit_events=False)
 
     def metric(_gold, _pred, _trace=None, _pred_name=None, _pred_trace=None):
@@ -2422,7 +2460,7 @@ def test_locked_native_gepa_observes_required_persistence_stop_without_provider_
 
 
 @pytest.mark.parametrize("managed", [False, True])
-@pytest.mark.parametrize("failure_at", ["validation", "outcome", "ownership"])
+@pytest.mark.parametrize("failure_at", ["validation", "outcome", "ownership", "lease"])
 def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch, managed, failure_at):
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))
     store = MemoryOptimizationStore()
@@ -2459,6 +2497,13 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
         reporter.update(stage="validation")
         reporter.update(stage="finalization")
         reporter.update(candidate_path="candidate.json")
+        if failure_at == "lease":
+
+            def lost_lease(*, verify=False):
+                assert verify is True
+                raise RuntimeError("Optimization lease was lost or expired")
+
+            monkeypatch.setattr(store, "assert_optimization_lease", lost_lease)
 
     monkeypatch.setattr(cli_mod, "_compile", compile_stub)
     with pytest.raises((workflow.OptimizationPersistenceError, RuntimeError)):

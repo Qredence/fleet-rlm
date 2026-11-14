@@ -1114,6 +1114,8 @@ def test_optimization_lease_uses_pooled_leases_table_and_distinct_lock_scope():
         delete_sql, delete_params = pool.conn.statements[-1]
         assert "DELETE FROM fleet_lite_leases" in delete_sql
         assert delete_params == (_OPTIMIZATION_LOCK_SCOPE, "worker-1", 1)
+        with pytest.raises(RuntimeError, match="lost or expired"):
+            store.assert_optimization_lease(verify=True)
     finally:
         store.heartbeat.stop()
 
@@ -1167,6 +1169,8 @@ def test_heartbeat_batches_session_and_global_lease_renewals_and_handles_transie
     assert idle_calls == [1]
     assert "UPDATE fleet_lite_sessions AS s" in pool.conn.statements[0][0]
     assert "UPDATE fleet_lite_leases AS l" in pool.conn.statements[1][0]
+    assert "s.lease_expires_at > NOW()" in pool.conn.statements[0][0]
+    assert "l.expires_at > NOW()" in pool.conn.statements[1][0]
 
     # Transient operational error keeps lease alive before TTL expires, then expires after TTL.
     pool.conn.error = psycopg.errors.OperationalError("brief glitch")
@@ -1320,3 +1324,99 @@ def test_idle_cleanup_cannot_block_heartbeat_renewals():
     finally:
         release.set()
         service.stop()
+
+
+def test_global_lease_is_fenced_after_renewal_loss(monkeypatch):
+    from fleet_rlm.store.leases import PooledLease
+
+    store, _pool = make_store([])
+    lease = PooledLease(store, "global", kind="global", owner_id="w1", epoch=1)
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: 100.0)
+    store.heartbeat.register_lease("global", 1, owner_id="w1", on_lost=lease.lost.set)
+    lease.assert_held()
+    store.heartbeat.tick()
+    try:
+        assert lease.lost.is_set()
+        with pytest.raises(RuntimeError, match="lost or expired"):
+            lease.assert_held()
+    finally:
+        store.heartbeat.stop()
+
+
+def test_global_lease_expires_during_a_database_outage(monkeypatch):
+    from fleet_rlm.store.leases import LeaseHeartbeatService
+
+    def disconnected(*_args):
+        raise psycopg.OperationalError("offline")
+
+    service = LeaseHeartbeatService(SimpleNamespace(_batch_renew_global_leases=disconnected))
+    lost = []
+    service._leases["optimization"] = (1, "w1", lambda: lost.append(True), 100.0)
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: 159.0)
+    service.tick()
+    assert not lost
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: 160.0)
+    service.tick()
+    assert lost == [True]
+    assert not service._leases
+
+
+@pytest.mark.parametrize("remote_owner_held", [False, True])
+def test_optimization_lease_verifies_database_owner_before_publication(monkeypatch, remote_owner_held):
+    store, pool = make_store([(1,)], [(1,)] if remote_owner_held else [])
+    monkeypatch.setattr(store.heartbeat, "start", lambda: None)
+    lease = store.acquire_optimization_lease(owner_id="worker-1")
+    store.assert_optimization_lease()
+    assert pool.borrowed == 1  # Native safe points use local heartbeat state.
+    if remote_owner_held:
+        store.assert_optimization_lease(verify=True)
+        assert not lease.lost.is_set()
+    else:
+        with pytest.raises(RuntimeError, match="lost or expired"):
+            store.assert_optimization_lease(verify=True)
+        assert lease.lost.is_set()
+        with pytest.raises(RuntimeError, match="lost or expired"):
+            store.assert_optimization_lease()
+    statement, params = pool.conn.statements[-1]
+    assert "expires_at > NOW()" in statement
+    assert params == (_OPTIMIZATION_LOCK_SCOPE, "worker-1", 1)
+
+
+def test_optimization_lease_expires_locally_without_a_heartbeat_tick(monkeypatch):
+    now = {"value": 100.0}
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: now["value"])
+    store, pool = make_store([(1,)])
+    monkeypatch.setattr(store.heartbeat, "start", lambda: None)
+    store.acquire_optimization_lease()
+    now["value"] = 159.0
+    store.assert_optimization_lease()
+    now["value"] = 160.0
+    with pytest.raises(RuntimeError, match="lost or expired"):
+        store.assert_optimization_lease()
+    assert pool.borrowed == 1
+
+
+@pytest.mark.parametrize("renewal_result", ["renewed", "not_renewed", "outage"])
+def test_stale_heartbeat_does_not_fence_a_reacquired_global_lease(monkeypatch, renewal_result):
+    from fleet_rlm.store.leases import LeaseHeartbeatService
+
+    lost = []
+
+    def replacement_lost():
+        lost.append("new")
+
+    def renew(*_args):
+        # Releasing a global lease deletes its row, so reacquisition may reuse epoch 1.
+        service.register_lease("optimization", 1, owner_id="w1", on_lost=replacement_lost)
+        if renewal_result == "outage":
+            raise psycopg.OperationalError("offline")
+        return {"optimization"} if renewal_result == "renewed" else set()
+
+    service = LeaseHeartbeatService(SimpleNamespace(_batch_renew_global_leases=renew))
+    monkeypatch.setattr(service, "start", lambda: None)
+    service._leases["optimization"] = (1, "w1", lambda: lost.append("old"), 100.0)
+    monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: 160.0)
+    service.tick()
+    assert service._leases["optimization"][3] == 160.0
+    assert service._leases["optimization"][2] is replacement_lost
+    assert lost == []
