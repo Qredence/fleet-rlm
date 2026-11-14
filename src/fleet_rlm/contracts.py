@@ -67,7 +67,7 @@ class OptimizationInputs:
     context: Any = None
     verifications: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     required_skills: tuple[RequiredSkill, ...] = ()
-    rlm_history: Any = None
+    rlm_history: dspy.History | None = None
 
 
 def turn_is_over(exc: BaseException) -> bool:

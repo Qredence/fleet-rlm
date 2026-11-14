@@ -431,7 +431,7 @@ DSPy callbacks also include `parent_call_id`. End events report `ok`, `error_typ
 and `duration_ms`. Tool `inputs` and `output` are bounded, redacted text previews;
 `source` distinguishes `dspy` callbacks from `sandbox_bridge` operations. These
 may be nested observations, not additional model calls. Predictor payloads are
-omitted. Provider reasoning is streamed separately when returned by the model. Previews and provider reasoning redact labelled credentials; this is not a DLP
+omitted. Provider reasoning is streamed separately when returned by the model. Previews redact sensitive keys and labelled credentials, while provider reasoning redacts labelled credentials; this is not a DLP
 boundary and cannot detect every secret in arbitrary text.
 `repl_code`/`repl_output` share an `execution_id`, namespace, and `phase`
 (`bootstrap` or `task`); output includes timing, stdout/stderr, a bounded `value`

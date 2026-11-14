@@ -6147,3 +6147,4 @@ def test_bootstrap_marker_cannot_hide_a_task_or_side_effect():
     assert not _is_bootstrap_code(injection + '; SUBMIT(answer="unverified")')
     assert not _is_bootstrap_code('x = "__dspy_values.decode(__import__(\\"json\\").loads("; SUBMIT(answer="x")')
     assert not _is_bootstrap_code('context = __dspy_values.decode(__import__("json").loads(side_effect()))')
+    assert not _is_bootstrap_code("x = " + "+".join("1" for _ in range(1_500)))

@@ -144,7 +144,12 @@ class GEPAProgressReporter:
                 except Exception as error:
                     self._failure = error
             if self._failure is not None:
-                raise OptimizationPersistenceError("Required optimization persistence failed") from self._failure
+                message = (
+                    "Optimization lease was lost or expired"
+                    if str(self._failure) == "Optimization lease was lost or expired"
+                    else "Required optimization persistence failed"
+                )
+                raise OptimizationPersistenceError(message) from self._failure
 
     def update(self, **updates: Any) -> None:
         """Persist a required owner-fenced write; retain its first failure for native stopping."""

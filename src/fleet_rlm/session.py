@@ -466,7 +466,7 @@ class SessionRuntimeRegistry:
             if runtime is not None and not runtime.lease_lost.is_set():
                 runtime.touch()
                 return runtime
-            if runtime is None:
+            if runtime is None and session_id not in self._building:
                 self._check_capacity_locked()
 
         # Only first use and recovery take this path. Per-Session gates let independent

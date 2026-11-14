@@ -228,7 +228,7 @@ if experiment is None:
 trace_ids = ["trace:/example_catalog.fleet_observability.fleet_rlm_runtime/TRACE_ID"]
 traces = [mlflow.get_trace(trace_id, silent=True, flush=True) for trace_id in trace_ids]
 suite = build_mlflow_scorer_suite(settings.fleet_judge_model)
-eligible_names = {"route_correctness", "execution_evidence_diagnostics"}
+eligible_names = {"execution_evidence_diagnostics"}
 selected = [scorer for scorer in suite if scorer.name in eligible_names]
 result = score_evaluation_traces(
     traces,

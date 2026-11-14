@@ -1344,11 +1344,8 @@ def test_coverage_xml_survives_test_or_threshold_failure(tmp_path, failed_comman
     )
     assert steps.index(coverage_upload) < len(steps) - 1
     persisted = next(step["persist_to_workspace"] for step in steps if "persist_to_workspace" in step)
-    # Even a missing shard or failed XML generation must preserve the status for the final enforcement step.
-    assert persisted["paths"] == ["coverage"]
-    assert (tmp_path / persisted["paths"][0] / ".status").is_file()
-    (tmp_path / "coverage/.status").unlink()
-    assert subprocess.run(["bash", "-ec", enforcement], cwd=tmp_path, env=env, check=False).returncode != 0
+    # SonarCloud consumes only the XML; the final status enforcement runs in this job.
+    assert persisted["paths"] == ["coverage/coverage.xml"]
     assert steps.index(next(step for step in steps if "persist_to_workspace" in step)) > steps.index(
         next(step for step in steps if isinstance(step, dict) and "run" in step)
     )

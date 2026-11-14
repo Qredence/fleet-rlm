@@ -370,7 +370,7 @@ jobs:
       - persist_to_workspace:
           root: .
           paths:
-            - coverage
+            - coverage/coverage.xml
       - run:
           name: Enforce coverage-report result
           command: |

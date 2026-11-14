@@ -2112,7 +2112,7 @@ def test_configuration_defaults_to_local_and_keeps_databricks_available():
 
 
 @pytest.mark.usefixtures("isolated_settings")
-def test_native_judge_configuration_does_not_export_gateway_environment():
+def test_judge_environment_exports_inherited_openai_gateway_endpoint():
     settings = FleetSettings(
         _env_file=None,
         fleet_llm_api_base="https://workspace.example/ai-gateway/mlflow/v1",
@@ -5670,7 +5670,7 @@ def test_turn_triage_prefers_flex_for_bounded_checks_without_drifting_route_fiel
     from fleet_rlm.contracts import JUDGE_ROUTE_CHOICES, ROUTE_DESCRIPTIONS, TRIAGE_CRITERIA, TRIAGE_INSTRUCTION
     from fleet_rlm.engine.signatures import TurnTriage
 
-    assert "bounded" in TRIAGE_INSTRUCTION
+    assert "choose flex for one bounded calculation" in TRIAGE_INSTRUCTION
     assert TurnTriage.model_fields["route"].json_schema_extra["desc"] == TRIAGE_INSTRUCTION
     assert dict(JUDGE_ROUTE_CHOICES) == {route.value: item["judge"] for route, item in ROUTE_DESCRIPTIONS.items()}
     assert {key: value["definition"] for key, value in TRIAGE_CRITERIA.items()} == {
@@ -5700,16 +5700,30 @@ def test_registry_reserves_capacity_while_a_session_builds(monkeypatch):
         except BaseException as error:
             errors.append(error)
 
+    served = []
+    same_session = None
+
+    def concurrent_same_session():
+        try:
+            served.append(registry.get("first"))
+        except BaseException as error:
+            errors.append(error)
+
     monkeypatch.setattr(SessionRuntimeRegistry, "_build", build)
     thread = threading.Thread(target=first)
     thread.start()
     try:
         assert entered.wait(1)
+        same_session = threading.Thread(target=concurrent_same_session)
+        same_session.start()
         with pytest.raises(RuntimeError, match="maximum number"):
             registry.get("second")
     finally:
         release.set()
         thread.join(2)
+        if same_session is not None:
+            same_session.join(2)
     assert not errors
+    assert served == [runtime]
     assert registry.peek("first") is runtime
     assert len(registry._session_gates) == 0

@@ -339,18 +339,22 @@ def run_snapshot(
             def on_logs(chunk: str, *, final: bool = False) -> None:
                 nonlocal pending
                 pending += chunk
-                text = ""
-                while pending:
-                    matched = next((secret for secret in secrets if pending.startswith(secret)), None)
+                fragments: list[str] = []
+                index = 0
+                while index < len(pending):
+                    matched = next((secret for secret in secrets if pending.startswith(secret, index)), None)
                     if matched:
-                        text += "[redacted]"
-                        pending = pending[len(matched) :]
-                    elif not final and any(secret.startswith(pending) for secret in secrets):
+                        fragments.append("[redacted]")
+                        index += len(matched)
+                    elif not final and any(
+                        len(pending) - index < len(secret) and secret.startswith(pending[index:]) for secret in secrets
+                    ):
                         break
                     else:
-                        text += pending[0]
-                        pending = pending[1:]
-                out.print(text, end="", markup=False)
+                        fragments.append(pending[index])
+                        index += 1
+                pending = pending[index:]
+                out.print("".join(fragments), end="", markup=False)
 
             try:
                 identity = build_snapshot(

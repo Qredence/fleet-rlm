@@ -46,6 +46,7 @@ class PooledLease:
         self.created = created
         self.closed = False
         self.lost = threading.Event()
+        self._on_lost = self.lost.set
         self._close_lock = threading.Lock()
 
     def assert_held(self, *, verify: bool = False) -> None:
@@ -58,6 +59,7 @@ class PooledLease:
             or self.lost.is_set()
             or entry is None
             or entry[0] != self.epoch
+            or entry[2] is not self._on_lost
             or time.monotonic() - entry[3] >= LEASE_TTL_SECONDS
         ):
             self.lost.set()
@@ -83,7 +85,7 @@ class PooledLease:
             if self.kind == "session":
                 heartbeat.unregister_session(self.scope, self.epoch)
             else:
-                heartbeat.unregister_lease(self.scope, self.epoch)
+                heartbeat.unregister_lease(self.scope, self.epoch, on_lost=self._on_lost)
         self._store._release_lease(self.scope, kind=self.kind, owner_id=self.owner_id, epoch=self.epoch)
         with self._close_lock:
             self.closed = True
@@ -183,11 +185,13 @@ class LeaseHeartbeatService:
             self._leases[scope] = (epoch, owner_id, on_lost, time.monotonic())
         self.start()
 
-    def unregister_lease(self, scope: str, epoch: int | None = None) -> None:
+    def unregister_lease(
+        self, scope: str, epoch: int | None = None, *, on_lost: Callable[[], None] | None = None
+    ) -> None:
         """Stop tracking a `fleet_lite_leases` scope."""
         with self._lock:
             entry = self._leases.get(scope)
-            if entry is not None and (epoch is None or entry[0] == epoch):
+            if entry is not None and (epoch is None or entry[0] == epoch) and (on_lost is None or entry[2] is on_lost):
                 self._leases.pop(scope, None)
 
     def tick(self) -> None:
@@ -202,7 +206,9 @@ class LeaseHeartbeatService:
         if leases:
             self._renew_global_leases(leases, now)
         with self._lock:
-            if idle_callbacks and (self._idle_thread is None or not self._idle_thread.is_alive()):
+            if idle_callbacks and self._idle_thread is not None and self._idle_thread.is_alive():
+                _LOGGER.warning("Previous idle-cleanup thread is still running; skipping this cleanup cycle")
+            elif idle_callbacks:
                 self._idle_thread = threading.Thread(
                     target=self._run_idle_callbacks, args=(idle_callbacks,), name="fleet-idle-eviction", daemon=True
                 )
@@ -397,7 +403,7 @@ class LeaseStoreMixin:
             raise RuntimeError("An optimization run is already owned by another worker")
         epoch = int(_row_value(row, "epoch", 0))
         lease = PooledLease(self, scope, kind="global", owner_id=owner_id, epoch=epoch)
-        self.heartbeat.register_lease(scope, epoch, owner_id=owner_id, on_lost=lease.lost.set)
+        self.heartbeat.register_lease(scope, epoch, owner_id=owner_id, on_lost=lease._on_lost)
         if scope == _OPTIMIZATION_LOCK_SCOPE:
             self._optimization_lease = lease
         return lease

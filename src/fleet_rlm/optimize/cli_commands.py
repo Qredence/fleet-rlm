@@ -336,6 +336,7 @@ def _finalize_optimization_run(
                     expected_statuses=("running",),
                     status="failed",
                     stage="failed",
+                    finished_at=details["finished_at"],
                     candidate_version=None,
                     failure={"type": type(error).__name__, "detail": "Optimization outcome persistence failed."},
                 )

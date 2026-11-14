@@ -124,16 +124,17 @@ Turns retain hashes only and cannot enter GEPA without a selected snapshot.
 For Lakebase, use the direct PostgreSQL endpoint with TLS for `FLEET_DATABASE_URL`.
 Fleet uses pooled TTL-row leases for Sessions and optimization owners. Lease renewal
 shares the application pool; no dedicated connection is held for a lease. Use the
-direct endpoint for migration advisory locks and runtime transactions.
-established connection continues after its token expires. Databricks documents
-a 24-hour idle timeout and a three-day maximum connection lifetime; test Fleet's
-reconnect path against these service limits. The process probes each lease
-connection periodically; a failed probe cancels that session's sandbox work and fences the runtime so it
+direct endpoint for migration advisory locks and runtime transactions. Lakebase
+OAuth tokens are checked at login, and an established connection continues after
+its token expires. Databricks documents a 24-hour idle timeout and a three-day
+maximum connection lifetime; test Fleet's reconnect path against these service
+limits. The process renews pooled leases through the application pool; a failed
+renewal cancels that session's sandbox work and fences the runtime so it
 cannot accept another Turn. A server-side idle timeout or network partition may
 delay failure detection, so verify behavior with an authorized Lakebase
 fault-injection canary before relying on a specific detection time. When
 `FLEET_LAKEBASE_ENDPOINT` enables OAuth, Fleet mints fresh credentials for new
-physical pool connections and dedicated leases using Databricks SDK
+physical pool connections using Databricks SDK
 authentication. OAuth is not compatible with Lakebase's built-in PgBouncer
 transaction pooler. See the [Lakebase authentication guidance](https://docs.databricks.com/gcp/en/oltp/projects/authentication)
 and [pooling constraints](https://docs.databricks.com/gcp/en/oltp/projects/connection-pooling)

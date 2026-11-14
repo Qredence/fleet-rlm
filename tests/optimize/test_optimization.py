@@ -2515,6 +2515,18 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
     assert store.events[-1][0] == "lease.close"
 
 
+def test_lost_optimization_lease_has_a_specific_persisted_reason():
+    reporter = workflow.GEPAProgressReporter("run", emit_events=False)
+    reporter._failure = RuntimeError("Optimization lease was lost or expired")
+
+    with pytest.raises(workflow.OptimizationPersistenceError, match="Optimization lease was lost or expired") as error:
+        reporter.raise_if_failed()
+
+    assert workflow.failure_detail(error.value) == (
+        "OptimizationPersistenceError: Optimization lease was lost or expired"
+    )
+
+
 @pytest.mark.parametrize("operation", ["setup", "flush"])
 def test_optional_tracking_outage_does_not_fail_valid_run(tmp_path, monkeypatch, caplog, operation):
     settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path))

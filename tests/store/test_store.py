@@ -1302,7 +1302,7 @@ def test_fresh_lakebase_role_split_and_default_privileges() -> None:
             migration.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(qualified_table))
 
 
-def test_idle_cleanup_cannot_block_heartbeat_renewals():
+def test_idle_cleanup_cannot_block_heartbeat_renewals(caplog):
     import threading
 
     from fleet_rlm.store.leases import LeaseHeartbeatService
@@ -1320,6 +1320,7 @@ def test_idle_cleanup_cannot_block_heartbeat_renewals():
         assert entered.wait(1)
         # A second tick finishes while cleanup remains blocked.
         service.tick()
+        assert "Previous idle-cleanup thread is still running" in caplog.text
         service.unregister_idle_callback(cleanup)
     finally:
         release.set()
@@ -1332,7 +1333,7 @@ def test_global_lease_is_fenced_after_renewal_loss(monkeypatch):
     store, _pool = make_store([])
     lease = PooledLease(store, "global", kind="global", owner_id="w1", epoch=1)
     monkeypatch.setattr("fleet_rlm.store.leases.time.monotonic", lambda: 100.0)
-    store.heartbeat.register_lease("global", 1, owner_id="w1", on_lost=lease.lost.set)
+    store.heartbeat.register_lease("global", 1, owner_id="w1", on_lost=lease._on_lost)
     lease.assert_held()
     store.heartbeat.tick()
     try:
@@ -1394,6 +1395,17 @@ def test_optimization_lease_expires_locally_without_a_heartbeat_tick(monkeypatch
     with pytest.raises(RuntimeError, match="lost or expired"):
         store.assert_optimization_lease()
     assert pool.borrowed == 1
+
+
+def test_stale_optimization_lease_rejects_same_epoch_replacement(monkeypatch):
+    store, _pool = make_store([(1,)])
+    monkeypatch.setattr(store.heartbeat, "start", lambda: None)
+    lease = store.acquire_optimization_lease(owner_id="worker-1")
+    store.heartbeat.register_lease(_OPTIMIZATION_LOCK_SCOPE, lease.epoch, owner_id="worker-1", on_lost=lambda: None)
+
+    with pytest.raises(RuntimeError, match="lost or expired"):
+        store.assert_optimization_lease()
+    assert lease.lost.is_set()
 
 
 @pytest.mark.parametrize("renewal_result", ["renewed", "not_renewed", "outage"])

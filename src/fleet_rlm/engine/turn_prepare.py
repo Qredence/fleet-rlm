@@ -13,7 +13,7 @@ import dspy
 import mlflow
 
 from fleet_rlm.contracts import RequiredSkill, Route, SkillAdmissionError
-from fleet_rlm.engine.reasoning import serialize_rlm_turn_history
+from fleet_rlm.engine.reasoning import _MAX_RLM_STORED_TURN_EVENTS, serialize_rlm_turn_history
 from fleet_rlm.observability import phase_span, stream_callbacks
 from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, ReplaySizeError, encode_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT
@@ -335,10 +335,10 @@ def _capture_replay_snapshot(
             "rlm_history": [
                 {
                     "rlm_history": serialize_rlm_turn_history(
-                        dspy.History(messages=inputs["rlm_history"].messages[i : i + 8])
+                        dspy.History(messages=inputs["rlm_history"].messages[i : i + _MAX_RLM_STORED_TURN_EVENTS])
                     )
                 }
-                for i in range(0, len(inputs["rlm_history"].messages), 8)
+                for i in range(0, len(inputs["rlm_history"].messages), _MAX_RLM_STORED_TURN_EVENTS)
             ]
             if inputs.get("rlm_history") is not None
             else [],
