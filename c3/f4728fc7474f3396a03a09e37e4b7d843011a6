@@ -1,0 +1,25 @@
+openapi.yaml
+  s_96598cd0cc6f22::t_ae877fefd28ba5 4
+pyproject.toml
+  s_96598cd0cc6f22::t_87343beed515ca 3
+tests/api/test_turns.py
+  s_96598cd0cc6f22::t_f81a93ecb41a41 3853,3879
+uv.lock
+  s_96598cd0cc6f22::t_14cc0f2c8ea501 1292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c3f4728fc7474f3396a03a09e37e4b7d843011a6",
+  "prompts": {},
+  "sessions": {
+    "s_96598cd0cc6f22": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d7fa-c04d-7e01-b149-60363015ef49",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
