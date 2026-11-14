@@ -4827,7 +4827,6 @@ def test_invalid_approval_manifest_becomes_interrupted_without_install(tmp_path,
 def test_worker_log_redirection_never_writes_progress_even_when_storage_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import os
 
     async def scenario() -> None:
         store = MemoryStore()
@@ -4848,26 +4847,32 @@ def test_worker_log_redirection_never_writes_progress_even_when_storage_is_unava
             stdin = FakeStdin()
             returncode = 0
 
+            def __init__(self, output: bytes) -> None:
+                self.stdout = asyncio.StreamReader()
+                self.stdout.feed_data(output)
+                self.stdout.feed_eof()
+
             async def wait(self) -> int:
                 return 0
 
         captured: dict[str, Any] = {}
+        outputs = iter((b"search diagnostics\n", b"x" * 1_100_000, b"approval retry\n"))
 
         async def fake_spawn(*_args: str, **kwargs: Any) -> FakeProcess:
             captured.update(kwargs)
-            os.write(
-                kwargs["stdout"],
-                b'FLEET_EVENT {"type":"progress","run_id":"s1-run","metric_calls_used":1}\n',
-            )
-            return FakeProcess()
+            return FakeProcess(next(outputs))
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
         await manager._execute("s1-run", "optimize", ExperimentOptions(), approval=False)
-        assert isinstance(captured["stdout"], int)
+        assert captured["stdout"] == asyncio.subprocess.PIPE
         assert captured["stderr"] is asyncio.subprocess.STDOUT
-        with pytest.raises(OSError):
-            os.fstat(captured["stdout"])
-        assert (tmp_path / "runs" / "s1-run" / "worker.log").is_file()
+        log_path = tmp_path / "runs" / "s1-run" / "worker.log"
+        assert log_path.read_bytes() == b"search diagnostics\n"
+        await manager._execute("s1-run", "optimize", ExperimentOptions(), approval=True)
+        expected = b"search diagnostics\n" + b"x" * (1_000_000 - len(b"search diagnostics\n"))
+        assert log_path.read_bytes() == expected
+        await manager._execute("s1-run", "optimize", ExperimentOptions(), approval=True)
+        assert log_path.read_bytes() == expected
         assert not (tmp_path / "runs" / "s1-run" / "gepa.stop").exists()
 
     asyncio.run(scenario())
@@ -5507,7 +5512,7 @@ def test_managed_subprocess_drains_noisy_output_without_replaying_progress(
         assert "secret-token" not in command
         assert "--managed-owner-id" in command
         assert captured["spawn_kwargs"]["stdin"] is asyncio.subprocess.PIPE
-        assert isinstance(captured["spawn_kwargs"]["stdout"], int)
+        assert captured["spawn_kwargs"]["stdout"] == asyncio.subprocess.PIPE
         assert captured["spawn_kwargs"]["stderr"] is asyncio.subprocess.STDOUT
         assert captured["spawn_kwargs"]["start_new_session"] is True
 
