@@ -1,0 +1,97 @@
+.circleci/config.yml
+  s_973d7802201e6f::t_0d78a2dd4286e4 292-294,317,325,328,335,339,343,373,1126
+AGENTS.md
+  s_973d7802201e6f::t_e08236dd921337 21-22,31-32,88-89,103
+ARCHITECTURE.md
+  s_973d7802201e6f::t_0063fc38221b4f 38,84,96,112
+README.md
+  s_973d7802201e6f::t_f3763a4293f367 48-49
+docs/reference/cli.md
+  s_973d7802201e6f::t_d45fd80c796f71 13,105
+docs/reference/configuration.md
+  s_973d7802201e6f::t_6edcfc2765c6c4 32
+docs/reference/database.md
+  s_973d7802201e6f::t_329787bb153e19 3-11,99-100,125-127,173
+docs/reference/evaluation.md
+  s_973d7802201e6f::t_82ea91823d4804 91,93,113,158,231,489-490,769,819
+docs/reference/http-api.md
+  s_973d7802201e6f::t_3888286d46a1da 139,434-435
+docs/reference/source-layout.md
+  s_973d7802201e6f::t_064c4befbd411b 46-47,49,134,139
+docs/runbooks/native-dspy-integration.md
+  s_973d7802201e6f::t_7b5699914f30c5 10,12,15,40-44,90,92
+src/fleet_rlm/api/app.py
+  s_973d7802201e6f::t_b0553d2179ebc7 82-84
+src/fleet_rlm/api/events.py
+  s_973d7802201e6f::t_d759153b893753 316
+src/fleet_rlm/api/routes/improve.py
+  s_973d7802201e6f::t_8e2a749fdc8561 161-162,384
+src/fleet_rlm/api/routes/sessions.py
+  s_973d7802201e6f::t_9ac7da456e8def 42,45-54,101,166,265,268
+src/fleet_rlm/config/llm.py
+  s_973d7802201e6f::t_1317020df6de84 83-88
+src/fleet_rlm/config/sources.py
+  s_973d7802201e6f::t_204dcf3b26de6a 166
+src/fleet_rlm/contracts.py
+  s_973d7802201e6f::t_ad8a0778fe45f2 70,167
+src/fleet_rlm/doctor.py
+  s_973d7802201e6f::t_9adbdc1bbeb45a 9,281,305,337-352,355-364
+src/fleet_rlm/engine/compiled.py
+  s_973d7802201e6f::t_c16b55c2ecd0ed 91,94,99
+src/fleet_rlm/engine/reasoning.py
+  s_973d7802201e6f::t_cb2c2b8db0874e 83
+src/fleet_rlm/engine/signatures.py
+  s_973d7802201e6f::t_ca7f655f3abc4b 31
+src/fleet_rlm/engine/turn_commit.py
+  s_973d7802201e6f::t_f36521e507cb6f 88,96-97,173
+src/fleet_rlm/engine/turn_prepare.py
+  s_973d7802201e6f::t_46df44b25a1ba7 16,335-344
+src/fleet_rlm/execution_evidence.py
+  s_973d7802201e6f::t_e0673a5aa27f08 179
+src/fleet_rlm/optimize/artifacts.py
+  s_973d7802201e6f::t_74787009567e95 241
+src/fleet_rlm/optimize/validation.py
+  s_973d7802201e6f::t_7303e15dad4155 26,169,286
+src/fleet_rlm/sandbox/interpreter.py
+  s_973d7802201e6f::t_ba6bdc2783a861 5,51-64
+src/fleet_rlm/sandbox/lifecycle.py
+  s_973d7802201e6f::t_d9bf54fdacbeb5 392
+src/fleet_rlm/sandbox/manager.py
+  s_973d7802201e6f::t_78c643a72b1e4d 9
+src/fleet_rlm/sandbox/snapshots.py
+  s_973d7802201e6f::t_882f72ae00dd66 117,250
+src/fleet_rlm/sandbox/workspace_io.py
+  s_973d7802201e6f::t_e417ef30c85f36 169-185,344
+src/fleet_rlm/session.py
+  s_973d7802201e6f::t_ada71f125f88e5 16,33-37,127,443-444,505-515,519
+src/fleet_rlm/skills.py
+  s_973d7802201e6f::t_aff7bbe71d572a 486-494,523
+tests/api/test_turns.py
+  s_973d7802201e6f::t_c376c3d558fea9 1397-1398,1411-1423,1428,1460,2319-2320,3216,3220,6283-6287
+tests/engine/test_runtime.py
+  s_973d7802201e6f::t_8ab2cb5b1b072e 7,1740,2121,5225-5235,5249-5254,5300-5305,5673,5679-5715
+tests/sandbox/test_sandbox.py
+  s_973d7802201e6f::t_d7cd3f925596d9 2563-2579,2582,5620-5624,6140-6149
+tests/test_release_checks.py
+  s_973d7802201e6f::t_674c577f638f56 738-744,1346-1349,1355
+tests/tui/test_clients.py
+  s_973d7802201e6f::t_d458129fdb30b3 4954-4955
+uv.lock
+  s_973d7802201e6f::t_c5ad5106fdb3a6 1032,1034,1036,2922,2927,2929,2994,3002,3004,3009,3018,3020,3037,3044,3046,3051,3057,3059,3064,3066,3068,4612-4626
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3cb93ca0824ae864c20afd50f92d9cf1f0608c9",
+  "prompts": {},
+  "sessions": {
+    "s_973d7802201e6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d77d-a0cb-7970-9ccf-28c90a3bde90",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
