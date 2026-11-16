@@ -21,12 +21,11 @@ from psycopg.errors import InsufficientPrivilege
 
 from fleet_rlm.session import SessionRuntime
 from fleet_rlm.store import (
-    _OPTIMIZATION_LOCK_SCOPE,
-    _SCHEMA_MIGRATIONS,
     SCHEMA_VERSION,
     IdempotencyConflictError,
     Store,
 )
+from fleet_rlm.store.schema import _OPTIMIZATION_LOCK_SCOPE, _SCHEMA_MIGRATIONS
 
 # Store persistence and migrations
 

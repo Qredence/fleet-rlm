@@ -13,8 +13,6 @@ from psycopg_pool import ConnectionPool
 
 from fleet_rlm.store.chat import ChatStoreMixin
 from fleet_rlm.store.leases import (
-    HEARTBEAT_INTERVAL_SECONDS,
-    LEASE_TTL_SECONDS,
     LeaseHeartbeatService,
     LeaseStoreMixin,
     PooledLease,
@@ -22,40 +20,18 @@ from fleet_rlm.store.leases import (
 from fleet_rlm.store.optimization import OptimizationStoreMixin
 from fleet_rlm.store.replays import ReplayStoreMixin
 from fleet_rlm.store.schema import (
-    _OPTIMIZATION_LOCK_SCOPE,
     _POOL_MAX_IDLE_SECONDS,
     _POOL_MAX_LIFETIME_SECONDS,
     _POOL_RECONNECT_TIMEOUT_SECONDS,
-    _REPLAY_RETENTION_DAYS,
     _SCHEMA_MIGRATIONS,
     _SCHEMA_VERSION_TABLE,
-    JOB_KINDS,
-    SCHEMA_STATEMENTS,
     SCHEMA_VERSION,
     IdempotencyConflictError,
     _retry_once,
 )
 from fleet_rlm.store.sessions import SessionStoreMixin
 
-__all__ = [
-    "HEARTBEAT_INTERVAL_SECONDS",
-    "JOB_KINDS",
-    "LEASE_TTL_SECONDS",
-    "SCHEMA_STATEMENTS",
-    "SCHEMA_VERSION",
-    "_OPTIMIZATION_LOCK_SCOPE",
-    "_POOL_MAX_IDLE_SECONDS",
-    "_POOL_MAX_LIFETIME_SECONDS",
-    "_POOL_RECONNECT_TIMEOUT_SECONDS",
-    "_REPLAY_RETENTION_DAYS",
-    "_SCHEMA_MIGRATIONS",
-    "_SCHEMA_VERSION_TABLE",
-    "IdempotencyConflictError",
-    "LeaseHeartbeatService",
-    "PooledLease",
-    "Store",
-    "_retry_once",
-]
+__all__ = ["SCHEMA_VERSION", "IdempotencyConflictError", "LeaseHeartbeatService", "PooledLease", "Store"]
 
 
 class Store(ChatStoreMixin, LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationStoreMixin):

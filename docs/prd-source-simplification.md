@@ -100,27 +100,23 @@ validation before deleting the paths replaced by the next stage.
 | C2 | Delete standalone-versus-managed ownership branches and duplicate readiness assembly | Not started | One admission, cancellation, recovery, review, and terminal-arbitration path; preserve required persistence failure behavior |
 | D1 | Remove alternate Rich chat loop and exclusively used event renderer/command branches | Complete | One Textual interactive path; non-TTY invocation exits clearly and directs users to API-backed commands |
 | D2 | Verify terminal/browser composition, completion, file handling, activity, and Improve behavior | Complete | Preserve browser session isolation/sharing, draft recovery, cancellation, and evidence-gated review |
-| E1 | Remove unused Store constructor state and redundant aliases/exports | In progress | Verify production callers; inspect actual pool arguments in tests; preserve pool, heartbeat, schema, and migration ownership |
+| E1 | Remove unused Store constructor state and redundant aliases/exports | Complete | Verify production callers; inspect actual pool arguments in tests; preserve pool, heartbeat, schema, and migration ownership |
 | E2 | Remove retry helper imports back into the Store package | Complete | Use defining-module constants and sleep directly; patch that module in tests; preserve existing retry behavior |
 | E3 | Remove the broad GEPA re-export facade | Complete | Update production, test, and script imports to owning modules; no replacement compatibility facade |
-| E4 | Implement further source-audit-backed consolidations in coherent slices | Not started | Depends on A2; preserve cross-domain transactions and explain each simplification's concrete benefit |
+| E4 | Implement further source-audit-backed consolidations in coherent slices | In progress | Depends on A2; preserve cross-domain transactions and explain each simplification's concrete benefit |
 | F1 | Update architecture, source layout, CLI/API references, and changed-command guidance | In progress | Documentation describes the final implementation and retained local operator exceptions |
 | F2 | Complete validation and record results and remaining limitations | In progress | Required checks pass; before/after evidence includes actual removals, remaining branches, and unresolved risks |
 
-### Specific implementation cautions
+### Implementation constraints retained after cleanup
 
-- Store currently retains constructor state with no identified production reads;
-  recheck callers before removing it. Pool configuration must remain observable
-  in tests without storing duplicate configuration on the Store instance.
-- Retry helpers currently retrieve constants and `time` through their parent
-  package as test seams. Simplify those references rather than adding injection wrappers.
-- `optimize/gepa.py` is a re-export facade with callers in tests and scripts.
-  Update all consumers before deleting it; reuse native DSPy implementations.
-- The alternate chat loop uses Rich input. Prompt Toolkit is also actively used
-  by Textual completion. Removing the loop does not establish that dependency is
-  unused. Preserve completion before considering any dependency removal.
-- Rich remains useful inside Textual and operator output. Removing the alternate
-  renderer does not mean removing the Rich library.
+- Store pool configuration is verified at pool construction. Keep heartbeat,
+  schema, migration, and pool ownership in their existing implementations.
+- Retry behavior uses constants and sleep in its defining module; tests patch
+  that module directly. Do not restore parent-package lookup seams.
+- The GEPA facade is removed. Consumers import owning modules directly; retain
+  native DSPy implementations without a replacement compatibility facade.
+- Textual is the only interactive client. Prompt Toolkit still supplies its
+  completion, and Rich still supports Textual and operator output. Retain both.
 - Preserve one transaction for completed Turn state, messages, files, and replay
   promotion. Do not split atomic work to make modules appear more independent.
 
@@ -189,19 +185,17 @@ E1 constructor-state cleanup removes unused `dsn`, `connection_class`, and
 `connection_kwargs` parameters/state from Store; production construction uses
 `Store.open`, which continues to configure both pools directly. Existing tests
 inspect captured pool arguments, schema, pool recycling and shutdown ownership.
-Other aliases/exports remain pending caller audit, so E1 remains in progress.
+The follow-up export audit below removes unused re-exports and moves private
+migration imports in tests to their defining module.
 
 E2 removes parent-package retry lookups and their two helper functions. The
 retry decorator uses its defining module's constant and `time.sleep` directly;
 the existing dropped-connection regression patches that module. Retry count and
 OperationalError behavior are unchanged.
 
-Validation: `uv run pytest tests/store/test_store.py -q` passed (94 passed,
-3 skipped); scoped Ruff and `git diff --check` passed. `make check` was started;
-its final result must be recorded before marking these tasks complete. This is
-offline evidence only. Production Store source decreased by 27 lines in this
-slice. Full-source inventory, API parity, CLI migration, worker consolidation,
-Textual consolidation, and GEPA facade removal remain unimplemented.
+The original Store slice passed `uv run pytest tests/store/test_store.py -q`
+(94 passed, three skipped). The completed client-stage full-check result is
+recorded below; this offline evidence is separate from live client checks.
 
 ### GEPA facade removal (2026-11-16)
 
@@ -210,10 +204,8 @@ Removed the 133-line `optimize/gepa.py` re-export facade. CLI execution imports
 Optimization tests now reference owning modules directly, including monkeypatches,
 without a replacement facade. `uv run pytest tests/optimize/test_optimization.py
 -xq --tb=short` passed all 294 tests. Repository Ruff and diff whitespace checks
-passed. A fresh `make check` is running; the earlier run passed 2377 tests but
-coverage reporting failed because the facade was deleted during that run.
-E3 remains in progress until the stable-tree full check completes. No application
-ownership or API parity tasks are complete, and no commit/push has occurred.
+passed. The completed client-stage `make check` also passed, as recorded below.
+Optimization/evaluation ownership changes remain deferred.
 
 ### CLI/browser consolidation (2026-11-16)
 
@@ -260,8 +252,8 @@ the candidate source did not change, so the canary status is failed. Its report
 recorded no remaining provider sandboxes and no cleanup errors. This is not an
 optimizer quality claim and no further optimization run was launched in this stage.
 
-Production source baseline at `7c69b5474`: 91 Python files / 33,529 lines. Current
-source: 90 Python files / 32,991 lines (538 fewer lines), including the earlier
+Production source baseline at `7c69b5474`: 91 Python files / 33,529 lines. At client-stage
+completion: 90 Python files / 32,991 lines (538 fewer lines), including the earlier
 Store and GEPA facade cleanup. Count includes bundled Python scripts. Concrete
 simplifications are one startup decision path, no connected-client backend auth,
 and one interactive implementation; line count alone is not correctness evidence.
@@ -287,4 +279,33 @@ freshly restarted server internals or comprehensive provider compatibility.
 B3, D1 and D2 are complete for the selected client scope; E2 and E3's earlier
 cleanup now has full offline validation. F1/F2 are complete for this stage only.
 The full A inventory, application CLI/evaluation API migration, internal worker
-consolidation, remaining E1 export audit, and broader E4 work remain deferred.
+consolidation and broader E4 work remain deferred.
+
+### Pre-PR import cleanup (2026-11-16)
+
+Turn preparation no longer resolves constants through `sys.modules` and
+`engine.turn`. Its memory limit is read directly in `turn_prepare`; preparation
+and skipped-replay event reporting both use `replay.MAX_REPLAY_FILE_BYTES`.
+The three lookup helpers and the corresponding orchestration exports are removed.
+Existing memory truncation, oversized replay, and no-download regressions patch
+those defining modules; their behavior and replay-skip metadata remain unchanged.
+
+Store exports retain `Store`, `PooledLease`, `LeaseHeartbeatService`,
+`IdempotencyConflictError`, and `SCHEMA_VERSION`, which have production callers.
+Unused schema/lease re-export imports are removed; private migration constants
+in tests come from `store.schema`. Constants needed by Store itself remain local
+imports, excluded from the package's public export list. No pool, migration,
+transaction, sandbox, or optimization implementation changed. No test files or
+test functions were added.
+
+Validation: 35 selected replay/memory cases passed using
+`uv run pytest tests/api/test_turns.py -k 'replay or reviewed_memories' tests/store/test_store.py -q --tb=short`.
+The full `uv run pytest tests/store/test_store.py -q --tb=short` also passed
+(94 passed, three skipped). `make check` passed: 2,361 tests passed, four skipped,
+one existing SQLAlchemy deprecation warning; lint, formatting, types, docs,
+OpenAPI verification and package builds passed. Whitespace checks passed.
+This follow-up adds no live-service evidence and needs no configuration change.
+
+E1 is complete. E4 now includes this validated Turn-import consolidation; wider
+source-audit work remains deferred. Production source is 90 Python files and
+32,949 lines, 42 fewer than the client-stage commit (580 fewer than `7c69b5474`).

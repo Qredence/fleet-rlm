@@ -5,17 +5,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import sys
 from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 import dspy
 import mlflow
 
+from fleet_rlm import replay
 from fleet_rlm.contracts import RequiredSkill, Route, SkillAdmissionError
 from fleet_rlm.engine.reasoning import _MAX_RLM_STORED_TURN_EVENTS, serialize_rlm_turn_history
 from fleet_rlm.observability import phase_span, stream_callbacks
-from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, ReplaySizeError, encode_snapshot
+from fleet_rlm.replay import ReplaySizeError, encode_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT
 
 if TYPE_CHECKING:
@@ -26,22 +26,6 @@ _TRACE_PREVIEW_CHARS = 200
 _MAX_MEMORIES_CHARS = 12_000
 _ROOT_SANDBOX_ATTRIBUTE = "root_sandbox_id"
 _PROVIDER_BOUND_KEYS = ("ttl_minutes", "auto_stop_interval", "maximum_lifespan_minutes", "provider_owned")
-
-
-def _turn_facade() -> Any:
-    return sys.modules.get("fleet_rlm.engine.turn")
-
-
-def _max_memories_chars() -> int:
-    facade = _turn_facade()
-    value = getattr(facade, "_MAX_MEMORIES_CHARS", _MAX_MEMORIES_CHARS)
-    return int(value)
-
-
-def _max_replay_file_bytes() -> int:
-    facade = _turn_facade()
-    value = getattr(facade, "MAX_REPLAY_FILE_BYTES", MAX_REPLAY_FILE_BYTES)
-    return int(value)
 
 
 def _live_sandbox_id(manager: Any) -> str | None:
@@ -94,7 +78,7 @@ def _format_reviewed_memories(memories: list[dict[str, Any]]) -> str:
     """Format reviewed Session memories as clean Markdown bullets bounded to 12,000 characters."""
     if not memories:
         return ""
-    limit = _max_memories_chars()
+    limit = _MAX_MEMORIES_CHARS
     lines: list[str] = []
     total = 0
     for item in memories:
@@ -177,7 +161,7 @@ def _prepare_empty_direct_inputs(
     replay_selected = False
     replay_skipped_bytes: int | None = None
     if record_replay:
-        max_replay_bytes = _max_replay_file_bytes()
+        max_replay_bytes = replay.MAX_REPLAY_FILE_BYTES
         total_bytes = sum(map(len, local_files.values()))
         if total_bytes <= max_replay_bytes:
             replay_files = {
@@ -244,7 +228,7 @@ def _prepare_inputs(
     replay_bytes = 0
     replay_selected = record_replay
     replay_skipped_bytes: int | None = None
-    max_replay_bytes = _max_replay_file_bytes()
+    max_replay_bytes = replay.MAX_REPLAY_FILE_BYTES
     if record_replay:
         # Remote sizes decide before any download: an oversized workspace is never pulled just to be dropped.
         remote_sizes = remote.get("sizes", {})

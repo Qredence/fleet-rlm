@@ -19,6 +19,7 @@ import mlflow
 from mlflow.entities import SpanType
 from mlflow.entities.trace_location import MlflowExperimentLocation
 
+from fleet_rlm import replay
 from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import RequiredSkill, Route, SkillAdmissionError
 from fleet_rlm.engine.turn_commit import (
@@ -32,7 +33,6 @@ from fleet_rlm.engine.turn_commit import (
     _write_learned_note,
 )
 from fleet_rlm.engine.turn_prepare import (
-    _MAX_MEMORIES_CHARS,
     _ROOT_SANDBOX_ATTRIBUTE,
     _TRACE_PREVIEW_CHARS,
     _capture_replay_snapshot,
@@ -46,7 +46,7 @@ from fleet_rlm.engine.turn_prepare import (
     _unpack_context,
 )
 from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
-from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
+from fleet_rlm.replay import encode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.skills import validate_requested_skills
 from fleet_rlm.store import IdempotencyConflictError
@@ -56,9 +56,7 @@ if TYPE_CHECKING:
     from fleet_rlm.session import SessionRuntime
 
 __all__ = [
-    "MAX_REPLAY_FILE_BYTES",
     "_CLEANUP_ATTRIBUTE",
-    "_MAX_MEMORIES_CHARS",
     "_ROOT_SANDBOX_ATTRIBUTE",
     "Emit",
     "_artifact_changes",
@@ -284,7 +282,7 @@ def run_turn(
                             {
                                 "event": "replay_skipped",
                                 "bytes": inputs["replay_skipped_bytes"],
-                                "limit": MAX_REPLAY_FILE_BYTES,
+                                "limit": replay.MAX_REPLAY_FILE_BYTES,
                             }
                         )
                     phase.set_outputs(
