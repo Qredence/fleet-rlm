@@ -1257,12 +1257,12 @@ def test_edit_tools_preserves_file_mode_on_atomic_and_fallback_writes(
     mod = _load_bundled_script("file-editing", "edit_tools.py")
     target = tmp_path / "run.sh"
     target.write_text("echo one\n", encoding="utf-8")
-    os.chmod(target, 0o750)
+    os.chmod(target, 0o700)
 
     # mkstemp creates 0600 files; the replace must carry the original mode across.
     mod.edit_unique(target, "one", "two")
     assert target.read_text(encoding="utf-8") == "echo two\n"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o750
+    assert stat.S_IMODE(target.stat().st_mode) == 0o700
 
     # The in-place fallback writes the same inode, so the mode survives it too.
     def refuse_rename(_src: Any, _dst: Any) -> None:
@@ -1271,7 +1271,7 @@ def test_edit_tools_preserves_file_mode_on_atomic_and_fallback_writes(
     monkeypatch.setattr(os, "replace", refuse_rename)
     mod.apply_edits(target, [("two", "three")])
     assert target.read_text(encoding="utf-8") == "echo three\n"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o750
+    assert stat.S_IMODE(target.stat().st_mode) == 0o700
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".run.sh.")]
 
 
