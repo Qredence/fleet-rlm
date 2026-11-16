@@ -4,24 +4,7 @@ Evaluation scorers live in `src/fleet_rlm/optimize/scorers.py`. This page descri
 the explicit evaluation workflows. `fleet eval` exposes dataset/run/score/label commands;
 GEPA remains a deliberate isolated optimization workflow.
 
-The default installation includes `databricks-agents`, which MLflow needs to
-open and create Databricks Unity Catalog evaluation datasets. Dataset creation
-falls back to a new dataset only when lookup reports that the dataset does not
-exist; authentication, permission, and other lookup failures are surfaced.
-
 ## Run evaluation against its own server
-
-Use `uv run --env-file .env` for the server, evaluation commands, and trace
-verification so Databricks SDK authentication can read the credentials. Fleet's
-typed settings read `.env` themselves, but do not export its values into the
-process environment used by SDKs.
-
-For the configured `openai:/` Gateway judge, `fleet eval run` applies both the
-resolved Gateway API base and credential to its own process, overriding stale
-ambient `OPENAI_API_BASE`/`OPENAI_API_KEY` values. Keep those settings paired;
-an old provider URL must not receive a credential intended for Databricks.
-With duplicate keys in `.env`, use the runbook's python-dotenv wrapper to
-preserve FleetSettings' resolution order without editing the file.
 
 The server creates each Turn trace. Selecting an evaluation experiment in the
 evaluation client does not redirect another process's runtime trace. With
@@ -176,51 +159,9 @@ run alone.
 These custom code-based scorers run in offline evaluation; they are not
 automatically registered for production monitoring.
 
-## Databricks experiment layout and saved-trace scoring
-
-Fleet uses the Databricks `/Shared/fleet-rlm-runtime` experiment for runtime
-traces and trace-level scoring. Keep the curated evaluation dataset and repeatable
-offline evaluation runs in `/Shared/fleet-rlm-eval`; keep GEPA runs in
-`/Shared/fleet-rlm-gepa`. The selected workspace profile and all three absolute
-experiment paths live in `config/fleet.toml`. Backend selection remains explicit,
-so local tracking stays the default unless a command selects Databricks.
-
-To validate Fleet scorers on a small historical sample without executing new
-Turns, read completed, nonduplicate traces from the runtime experiment and pass
-only eligible scorers to `score_evaluation_traces`. Set the named Databricks
-profile and warehouse before trace reads; pass the runtime experiment ID so the
-scoring run is recorded alongside the traces. Do not include retrieval scorers
-when the sample has no retriever spans, or expectation-based scorers when the
-sample lacks matching labels. Preserve prior assessments and inspect only new
-feedback with `mlflow.assessment.sourceRunId` equal to the returned evaluation
-run ID.
-
-```python
-import os
-import mlflow
-from mlflow import MlflowClient
-from databricks.sdk import WorkspaceClient
-
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.optimize.evaluation import score_evaluation_traces
 from fleet_rlm.optimize.scorers import build_mlflow_scorer_suite
-
-settings = FleetSettings(
-    mlflow_mode="databricks",
-    mlflow_databricks_experiment_name="/Shared/fleet-rlm-runtime",
-)
-settings.prepare_mlflow_auth()
-target = settings.mlflow_target()
-mlflow.set_tracking_uri(target.tracking_uri)
-os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
-workspace = WorkspaceClient()
-if workspace.config.auth_type == "pat":
-    os.environ["OPENAI_API_KEY"] = workspace.config.token
-elif workspace.config.auth_type == "databricks-cli" or workspace.config.auth_type.startswith("oauth"):
-    os.environ["OPENAI_API_KEY"] = workspace.config.oauth_token().access_token
-else:
-    raise ValueError(f"Unsupported Databricks auth type: {workspace.config.auth_type}")
-os.environ["OPENAI_API_BASE"] = workspace.config.host.rstrip("/") + "/ai-gateway/mlflow/v1"
 
 experiment = MlflowClient().get_experiment_by_name(target.experiment_name)
 if experiment is None:
@@ -238,19 +179,6 @@ result = score_evaluation_traces(
 )
 print(result.run_id, result.metrics)
 ```
-
-Check task and answer evidence locally before choosing trace IDs; do not print
-payloads into logs. Add `route_correctness` only for traces carrying reviewed route
-expectations. This explicit scoring workflow does not register a production scorer
-or activate sampling. Databricks production scorers are experiment-scoped, and
-custom remote scorer serialization has separate runtime constraints; validate
-those constraints before registering any scorer for ongoing monitoring. The
-Databricks registry also requires a `databricks:/` judge model for production
-scorers; Fleet's `openai:/` Gateway model can be used for an explicit offline
-scoring run but cannot be registered for remote monitoring as-is.
-Production monitoring is Beta. Start registered scorers stopped, inspect the
-definition and sample rate, then use an explicitly authorized canary before
-enabling low-rate sampling.
 
 
 ## Metrics
@@ -739,11 +667,6 @@ deployment settings and credentials; recorded model configuration is provenance
 only. Credentials are never captured in the snapshot. A replay captured under an
 unsupported sandbox transport is rejected. Lossy MLflow traces carry identity
 references only and do not supply replay content.
-
-Framework-captured inputs and outputs pass through a recursive span processor that
-redacts credential-like fields and bounds strings, collections, and nesting before
-export. This is a defense against accidental credential disclosure, not a complete
-PII detector; verify with synthetic canaries before live Databricks trace export.
 
 ## Trace previews
 

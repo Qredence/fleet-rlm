@@ -41,7 +41,7 @@ class OptimizationStoreMixin:
         """
         with self.pool.connection() as connection:
             rows = connection.execute(
-                "SELECT status, metadata->>'manifest_digest' FROM fleet_lite_optimization_runs "
+                "SELECT status, metadata->>'manifest_digest' FROM jobs "
                 "WHERE kind = 'optimize' AND status IN ('approved', 'approving') "
                 "AND NOT (metadata ? 'legacy_session_id') "
                 "ORDER BY updated_at DESC"
@@ -75,7 +75,7 @@ class OptimizationStoreMixin:
         try:
             with self.pool.connection() as connection, connection.transaction():
                 inserted = connection.execute(
-                    "INSERT INTO fleet_lite_optimization_runs "
+                    "INSERT INTO jobs "
                     "(run_id, request_id, kind, options, owner_id, managed, status, stage, metadata) "
                     "VALUES (%s, %s, %s, %s::jsonb, %s, %s, 'running', 'preparing', "
                     "jsonb_build_object('trigger', %s::text)) "
@@ -85,7 +85,7 @@ class OptimizationStoreMixin:
                 if inserted is not None:
                     return self._optimization_run_record(inserted)
                 prior = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE request_id = %s FOR UPDATE",
+                    "SELECT * FROM jobs WHERE request_id = %s FOR UPDATE",
                     (request_id,),
                 ).fetchone()
                 if prior is None:
@@ -108,7 +108,7 @@ class OptimizationStoreMixin:
         run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
-                "SELECT * FROM fleet_lite_optimization_runs WHERE run_id = %s",
+                "SELECT * FROM jobs WHERE run_id = %s",
                 (run_id,),
             ).fetchone()
         return self._optimization_run_record(row) if row is not None else None
@@ -117,9 +117,7 @@ class OptimizationStoreMixin:
     def list_optimization_runs(self) -> list[dict[str, Any]]:
         """List the job history, newest update first."""
         with self.pool.connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM fleet_lite_optimization_runs ORDER BY updated_at DESC, run_id"
-            ).fetchall()
+            rows = connection.execute("SELECT * FROM jobs ORDER BY updated_at DESC, run_id").fetchall()
         return [self._optimization_run_record(row) for row in rows]
 
     @_retry_once
@@ -158,7 +156,7 @@ class OptimizationStoreMixin:
         try:
             with self.pool.connection() as connection:
                 row = connection.execute(
-                    "UPDATE fleet_lite_optimization_runs SET "
+                    "UPDATE jobs SET "
                     "status=CASE WHEN %s AND stop_requested THEN 'cancelled' ELSE COALESCE(%s,status) END,"
                     "stage=CASE WHEN %s AND stop_requested THEN 'cancelled' ELSE COALESCE(%s,stage) END,"
                     "stop_requested=COALESCE(%s,stop_requested),"
@@ -192,14 +190,14 @@ class OptimizationStoreMixin:
         run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
-                "UPDATE fleet_lite_optimization_runs SET stop_requested = TRUE, "
+                "UPDATE jobs SET stop_requested = TRUE, "
                 "updated_at = CASE WHEN stop_requested THEN updated_at ELSE NOW() END "
                 "WHERE run_id = %s AND status = 'running' RETURNING *",
                 (run_id,),
             ).fetchone()
             if row is None:
                 row = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE run_id = %s",
+                    "SELECT * FROM jobs WHERE run_id = %s",
                     (run_id,),
                 ).fetchone()
         if row is None:
@@ -217,7 +215,7 @@ class OptimizationStoreMixin:
         try:
             with self.pool.connection() as connection, connection.transaction():
                 prior = connection.execute(
-                    "SELECT * FROM fleet_lite_optimization_runs WHERE run_id = %s FOR UPDATE",
+                    "SELECT * FROM jobs WHERE run_id = %s FOR UPDATE",
                     (run_id,),
                 ).fetchone()
                 if prior is None:
@@ -226,7 +224,7 @@ class OptimizationStoreMixin:
                 if record["status"] not in {"completed", "approving"}:
                     raise ValueError("only a completed or recoverable approving run can be reviewed")
                 row = connection.execute(
-                    "UPDATE fleet_lite_optimization_runs SET status = 'approving', owner_id = %s, updated_at = NOW() "
+                    "UPDATE jobs SET status = 'approving', owner_id = %s, updated_at = NOW() "
                     "WHERE run_id = %s AND status IN ('completed', 'approving') RETURNING *",
                     (owner_id, run_id),
                 ).fetchone()
@@ -242,7 +240,7 @@ class OptimizationStoreMixin:
         run_id = validate_run_id(run_id)
         with self.pool.connection() as connection:
             row = connection.execute(
-                "UPDATE fleet_lite_optimization_runs SET status = 'rejected', "
+                "UPDATE jobs SET status = 'rejected', "
                 "metadata = metadata || CASE WHEN status = 'rejected' THEN '{}'::jsonb "
                 "ELSE jsonb_build_object('decision', 'rejected', 'decision_at', NOW()) END, "
                 "updated_at = CASE WHEN status = 'rejected' THEN updated_at ELSE NOW() END "

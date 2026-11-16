@@ -282,17 +282,6 @@ native JSON fallback also failed. Its request was prompt-only: DSPy's model cata
 did not recognize the Unity service ID, so `supported_params` omitted `response_format`.
 The durable failed outcome confirmed cleanup `stopped`; this attempt remains failed.
 
-`FleetSettings._build_lm` now declares native DSPy provider capabilities for the Unity
-Gateway versions `deepseek-v4-1-flash` and `deepseek-v4-1-flash-1017`, across LM roles.
-[Databricks' function-calling documentation](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling)
-includes DeepSeek V4.1 Flash; its
-[structured-output contract](https://docs.databricks.com/aws/en/machine-learning/model-serving/structured-outputs)
-defines JSON mode. The declaration enables documented function calling but leaves
-schema output disabled. Pinned DSPy consequently sends `response_format={"type":"json_object"}`
-on its existing JSON fallback. A real one-call gateway probe accepted that request
-and returned the expected `reasoning` and `code` fields. No JSON schema capability
-is inferred for this service.
-
 The provider alias is stable for a gateway/service pair. Other services and non-Unity
 URLs retain their existing routing, and Claude reflection remains prompt-only to avoid
 its forced-tool incompatibility. Parser rules, native-first selection, native retry

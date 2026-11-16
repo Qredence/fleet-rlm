@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import AbstractContextManager, nullcontext, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,6 +77,8 @@ class SessionRuntime:
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
     last_active_at: float = field(default_factory=time.monotonic, repr=False)
     _lease_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    storage_settings: FleetSettings | None = None
 
     def touch(self) -> None:
         """Record recent Session runtime activity for idle eviction."""
@@ -149,12 +151,16 @@ class SessionRuntime:
         requested_skills: tuple[str, ...] = (),
         required_skills: tuple[RequiredSkill, ...] = (),
         admission_error: SkillAdmissionError | None = None,
+        submission: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Persist intent before side effects; an uncertain running turn is never replayed."""
-        digest = hashlib.sha256(task.encode()).hexdigest()
+        intent_task = task
+        if submission:
+            intent_task = json.dumps({"task": task, "submission": submission}, sort_keys=True)
+        digest = hashlib.sha256(intent_task.encode()).hexdigest()
         intent = None
         if requested_skills:
-            intent = _required_intent_digest(task, requested_skills)
+            intent = _required_intent_digest(intent_task, requested_skills)
             identities = [[skill.name, skill.source, skill.sha256] for skill in required_skills]
             source = (
                 "refused:admission"
@@ -163,7 +169,15 @@ class SessionRuntime:
             )
             digest = f"v2:{intent}:{source}"
         ownership = {"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}
-        prior = self.store.claim_turn(self.session_id, turn_id, key, digest, **ownership)
+        prior = self.store.claim_turn(
+            self.session_id,
+            turn_id,
+            key,
+            digest,
+            task=task,
+            **({"submission": submission} if submission else {}),
+            **ownership,
+        )
         if prior is not None and prior["task_sha256"] != digest:
             # A completed request is a receipt, not permission to execute today's deployment.
             if (
@@ -229,6 +243,7 @@ class SessionRuntime:
         replay_snapshot: tuple[str, bytes] | None = None,
         *,
         artifact_paths: list[str] | None = None,
+        commit_guard: AbstractContextManager[None] | None = None,
     ) -> dict[str, Any]:
         """Commit and return the canonical completion, including the current artifact inventory.
 
@@ -236,6 +251,7 @@ class SessionRuntime:
         together. `replay_snapshot` is the digest and compressed bytes selected by the record.
         `artifact_paths` optionally supplies a captured workspace view; by default the
         current workspace is listed. Both paths use the same validation and sorting.
+        `commit_guard` arbitrates cancellation around persistence after remote publication.
 
         Raises:
             ValueError: Replay selection metadata or digest is inconsistent, the Turn ID is
@@ -320,16 +336,52 @@ class SessionRuntime:
         # The live root handle this Turn used, when it provisioned one.
         if turn_record.get("root_sandbox_id"):
             result["root_sandbox_id"] = turn_record["root_sandbox_id"]
+        result["assistant_message_id"] = f"{turn_record['turn_id']}_assistant"
+        published_files = []
+        # The runtime registry installs host storage configuration; no credentials enter Daytona.
+        storage_settings = getattr(self, "storage_settings", None)
+        if storage_settings is not None and storage_settings.fleet_storage_bucket:
+            import tempfile
+            from pathlib import Path
+
+            from fleet_rlm.object_storage import ObjectStorage
+
+            storage = ObjectStorage(storage_settings)
+            changes = turn_record.get("artifact_changes", {}).get("files", {})
+            for artifact in artifacts:
+                if changes.get(artifact, {}).get("state") not in {"created", "modified"}:
+                    continue
+                with tempfile.TemporaryDirectory(prefix="fleet-artifact-") as temporary:
+                    path = Path(temporary) / "content"
+                    self.sandbox_mgr.read_workspace_file_to_path(artifact, str(path), max_bytes=25_000_000)
+                    published = storage.upload(
+                        session_id,
+                        path,
+                        filename=Path(artifact).name,
+                        origin="artifact",
+                        turn_id=turn_record["turn_id"],
+                        workspace_path=artifact,
+                    )
+                    if published["sha256"] != changes[artifact].get("sha256"):
+                        raise RuntimeError("Artifact changed after its verified evidence capture")
+                    self.sandbox_mgr.check_turn()
+                    published_files.append(published)
+            self.sandbox_mgr.check_turn()
+            result["files"] = [
+                {k: v for k, v in file.items() if k not in {"bucket", "object_key"}} for file in published_files
+            ]
         completion = (turn_record["turn_id"], deepcopy(result))
-        self.store.commit_turn(
-            session_id,
-            turn_record_json=record_json,
-            max_turns=_MAX_STORED_TURNS,
-            memory_note=new_memory_note,
-            completion=completion,
-            replay_snapshot=replay_snapshot,
-            **({"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}),
-        )
+        with commit_guard if commit_guard is not None else nullcontext():
+            self.store.commit_turn(
+                session_id,
+                turn_record_json=record_json,
+                max_turns=_MAX_STORED_TURNS,
+                memory_note=new_memory_note,
+                completion=completion,
+                replay_snapshot=replay_snapshot,
+                **({"published_files": published_files} if published_files else {}),
+                **({"ownership_epoch": self.ownership_epoch} if self.ownership_epoch is not None else {}),
+            )
         return result
 
     @staticmethod
@@ -621,6 +673,7 @@ class SessionRuntimeRegistry:
                 runtime.set_engine(self.engine_for_models(runtime, saved["models"]))
             if saved.get("context"):
                 runtime.context = WorkspaceDataset(**saved["context"])
+            runtime.storage_settings = self.settings
             runtime.start_lease_monitor()
         except BaseException:
             runtime.close_lease()

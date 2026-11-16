@@ -356,7 +356,7 @@ def test_baseline_live_success_and_failure_fields_are_preserved(turn_results):
 def test_historical_recovery_preserves_unknown_fields_and_only_normalizes_at_read_boundary(turn_results):
     for row in turn_results["legacy_rows"]:
         prior = deepcopy(row)
-        runtime = runtime_with(claim_turn=lambda *_args, prior=prior: prior)
+        runtime = runtime_with(claim_turn=lambda *_args, prior=prior, **_kwargs: prior)
         store = store_with(
             turn_status=lambda *_args, prior=prior: {**deepcopy(prior), "updated_at": "2026-10-01T00:00:00Z"}
         )
@@ -377,7 +377,7 @@ def durable_runtime(*, lose_ack=False, unavailable_readback=False):
     """Exercise real Session policies over a JSON-owning Store fake."""
     rows, commits, executions, cancellations = {}, [], [], []
 
-    def claim(_session, turn_id, key, digest):
+    def claim(_session, turn_id, key, digest, **_kwargs):
         if key in rows:
             return deepcopy(rows[key])
         rows[key] = {"turn_id": turn_id, "task_sha256": digest, "status": "running", "result": {}}
@@ -1131,6 +1131,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     assert outcome == "completed"
     assert duration_seconds >= 0
     assert payload == {
+        "assistant_message_id": f"{turn_id}_assistant",
         "replay_snapshot_selected": True,
         "answer": "processed locally",
         "route": "flex",
@@ -1316,7 +1317,7 @@ def test_real_runtime_commits_managed_inventory_and_reports_commit_failure(
     monkeypatch.setattr(DaytonaSandboxManager, "exec_remote_python", remote_exec)
     remote = DaytonaSandboxManager("key", "org", "volume", "session-a")
 
-    def claim(_session, turn_id, key, digest):
+    def claim(_session, turn_id, key, digest, **_kwargs):
         if key in claims:
             return claims[key]
         claims[key] = {"turn_id": turn_id, "task_sha256": digest, "status": "running", "result": {}}
@@ -2208,7 +2209,7 @@ def test_a_replayed_unknown_outcome_creates_no_new_execution() -> None:
         return SimpleNamespace(answer="unreachable", route="direct")
 
     runtime = runtime_with(
-        claim_turn=lambda *_args: prior,
+        claim_turn=lambda *_args, **_kwargs: prior,
         engine=never,
     )
     emitted: list[dict[str, Any]] = []
@@ -2312,7 +2313,7 @@ def test_a_replayed_turn_returns_the_original_outcome_without_running(status, tr
         raise AssertionError("a replayed turn must not run the engine")
 
     runtime = runtime_with(
-        claim_turn=lambda *_args: prior,
+        claim_turn=lambda *_args, **_kwargs: prior,
         engine=never,
     )
     store = store_with(
@@ -4651,7 +4652,7 @@ def test_openapi_is_version_valid_and_deterministic():
                     streams.append(media)
                     assert media["schema"] == {"type": "string"}
                     assert "itemSchema" not in media
-    assert len(streams) == 1
+    assert len(streams) == 2
 
 
 # Doctor probes and configuration checks
@@ -4728,49 +4729,6 @@ def test_model_probe_uses_normalized_request_and_response(monkeypatch, json_mode
     assert result["status"] == "ready"
     assert result["inference_tested"] is True
     assert "probe succeeded" in result["message"]
-
-
-def test_lakebase_probe_uses_candidate_tracking_auth_without_mutating_environment(monkeypatch):
-    import os
-
-    import databricks.sdk
-    import databricks.sdk.core
-
-    import fleet_rlm.store as db
-    from fleet_rlm.doctor import check_database
-
-    observed = []
-
-    def workspace_client(**kwargs):
-        observed.append(kwargs["config"])
-        return object()
-
-    monkeypatch.setattr(databricks.sdk, "WorkspaceClient", workspace_client)
-    # Config's normal constructor probes workspace metadata and retries on network failure.
-    # This test checks candidate credentials are wired through, not SDK discovery behavior.
-    monkeypatch.setattr(databricks.sdk.core, "Config", lambda **kw: SimpleNamespace(**kw))
-
-    class Connection:
-        @classmethod
-        def connect(cls, *_a, **_kw):
-            raise RuntimeError("probe reached connection")
-
-    monkeypatch.setattr(db, "lakebase_connection_class", lambda *_a: Connection)
-    settings = FleetSettings(
-        _env_file=None,
-        mlflow_mode="databricks",
-        mlflow_databricks_tracking_uri="databricks",
-        databricks_host="https://candidate.test",
-        databricks_token="candidate-token",
-        fleet_database_url="postgresql://reader@db.invalid/fleet?sslmode=require",
-        fleet_lakebase_endpoint="projects/a/branches/b/endpoints/c",
-    )
-    result = check_database(settings)
-    assert result["status"] == "blocked"
-    assert "RuntimeError" in result["message"]
-    assert observed[0].host == "https://candidate.test"
-    assert observed[0].token == "candidate-token"
-    assert "DATABRICKS_TOKEN" not in os.environ
 
 
 def test_settings_validates_json_mode():
@@ -6546,3 +6504,111 @@ def test_review_queue_pages_every_captured_turn(tmp_path):
         assert len(first["items"]) == 50 and first["next_offset"] == 50
         assert len(second["items"]) == 3 and second["next_offset"] is None
         assert client.get("/improve/queue?offset=-1").status_code == 422
+
+
+def test_saved_state_observer_is_non_owning_and_serializes_dates():
+    """A reader emits an initial snapshot without runtime acquisition or cancellation."""
+    import asyncio
+    import datetime
+
+    from fleet_rlm.api.routes.chat import updates
+
+    async def check():
+        request = SimpleNamespace(
+            is_disconnected=lambda: asyncio.sleep(0, result=False),
+            app=SimpleNamespace(state=SimpleNamespace(mlflow_experiment_id=None)),
+        )
+        store = SimpleNamespace(
+            messages=lambda _sid: [{"message_id": "m1", "created_at": datetime.datetime.now(datetime.UTC)}],
+            published_files=lambda _sid: [],
+            workspace_inventory=lambda _sid: {"files": []},
+            runtime_settings=lambda _sid: {},
+        )
+        stream = updates("session-a", request, store, api_settings())
+        event = await anext(stream)
+        assert event.event == "state"
+        assert json.loads(event.raw_data)["messages"][0]["message_id"] == "m1"
+        await stream.aclose()
+
+    asyncio.run(check())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configuration", [{"mode": "direct"}, {"model": "test/model"}])
+async def test_turn_configuration_runs_off_loop_and_binds_submission(monkeypatch, configuration):
+    runtime = runtime_with()
+    loop_thread = threading.get_ident()
+    captured = {}
+
+    def save(*_args):
+        assert threading.get_ident() != loop_thread
+
+    runtime.store.save_runtime_settings = save
+    runtime.store.turn_by_key = lambda *_args: None
+    runtime.engine.sub_lm = SimpleNamespace(model="test/sub")
+    registry = SimpleNamespace(engine_for_models=lambda *_args: runtime.engine)
+    monkeypatch.setattr(api_deps, "get_registry", lambda _request: registry)
+
+    def run(*_args, **kwargs):
+        captured.update(kwargs)
+        kwargs["emit"]({"event": "done"})
+
+    monkeypatch.setattr(turns_route, "run_turn", run)
+
+    async def connected():
+        return False
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(mlflow_experiment_id=None)), is_disconnected=connected
+    )
+    with create_turn_executor() as executor:
+        stream = turns_route.stream_turn(
+            "session-a",
+            TurnRequest(task="test", **configuration),
+            request,
+            runtime,
+            api_settings(),
+            executor,
+            AsyncExitStack(),
+        )
+        async for _event in stream:
+            pass
+    assert all(captured["submission"][key] == value for key, value in configuration.items())
+
+
+@pytest.mark.usefixtures("traced")
+def test_disconnect_during_artifact_publication_prevents_commit(monkeypatch):
+    runtime, state = durable_runtime()
+    disconnected = threading.Event()
+    lock = threading.Lock()
+    runtime.sandbox_mgr.turn_inputs = lambda: {"digests": {}, "environment": ""}
+    runtime.storage_settings = SimpleNamespace(fleet_storage_bucket="test")
+    runtime.sandbox_mgr.read_workspace_file_to_path = lambda *_args, **_kwargs: None
+    runtime.sandbox_mgr.check_turn = lambda: None
+
+    def upload(*_args, **_kwargs):
+        assert lock.acquire(blocking=False), "publication must leave cancellation free to acquire the lock"
+        lock.release()
+        disconnected.set()
+        return {"sha256": hashlib.sha256(b"").hexdigest()}
+
+    monkeypatch.setattr("fleet_rlm.object_storage.ObjectStorage", lambda _settings: SimpleNamespace(upload=upload))
+    runtime.store.finish_turn = lambda *_args, **_kwargs: None
+    emitted = []
+    turn_module.run_turn(
+        runtime,
+        api_settings(),
+        session_id="session-a",
+        turn_id="publication",
+        task="test",
+        idempotency_key="publication",
+        mlflow_experiment_id=None,
+        callback=None,
+        emit=emitted.append,
+        completion_lock=lock,
+        cancellation_requested=disconnected,
+    )
+    assert disconnected.is_set()
+    assert state.commits == []
+    assert state.cancellations
+    assert not any(event["event"] == "turn_complete" for event in emitted)

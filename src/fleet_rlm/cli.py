@@ -83,7 +83,6 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
             Store.open(
                 settings.fleet_database_url,
                 wait=True,
-                lakebase_endpoint=settings.fleet_lakebase_endpoint,
                 schema=settings.fleet_database_schema,
             )
         )

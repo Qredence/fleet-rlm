@@ -70,14 +70,14 @@ See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
 - Precedence: defaults → TOML → `.env` → environment → explicit overrides.
 - Persisted Session mode/model choices remain overrides.
 - `/config` exposes safe values, sources, and a digest.
-- The selected local or Databricks MLflow profile initializes before API readiness.
+- Local MLflow initializes before API readiness.
 - `/health` identifies the tracking destination to prevent incompatible reuse.
 - Adapters default to `XMLAdapter` (`adapter = "xml"`, with native function calling) across all roles, with optional `"chat"` (`ChatAdapter`) and `"json"` (`JSONAdapter`).
 - `model_type` defaults to `"auto"` across all roles, automatically routing custom OpenAI-compatible gateways to `"chat"`.
 
 Local readiness and snapshots:
 
-- `fleet doctor` (`doctor.py`) validates configured model routes, PostgreSQL/Lakebase
+- `fleet doctor` (`doctor.py`) validates configured model routes, Neon PostgreSQL
   connections and schema version, MLflow destination, and Daytona snapshot readiness in
   read-only checks (adding `--probe-models` only when an explicit inference probe is
   requested).

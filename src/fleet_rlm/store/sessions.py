@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
 
@@ -18,13 +19,15 @@ class SessionStoreMixin:
     """Session, sandbox resource ownership, settings, memory, and Turn methods for Store."""
 
     pool: Any
+    bind_turn_submission: Callable[..., None]
+    _save_file: Callable[..., None]
 
     @_retry_once
     def ensure_session(self, session_id: str) -> bool:
         """Create a Session row if absent and report whether it was newly inserted."""
         with self.pool.connection() as connection:
             created = connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING session_id",
+                "INSERT INTO sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING session_id",
                 (session_id,),
             ).fetchone()
         return created is not None
@@ -34,7 +37,7 @@ class SessionStoreMixin:
         """Advance the current Session's sandbox ownership epoch."""
         with self.pool.connection() as connection, connection.transaction():
             row = connection.execute(
-                "UPDATE fleet_lite_sessions SET ownership_epoch = ownership_epoch + 1, updated_at = NOW() "
+                "UPDATE sessions SET ownership_epoch = ownership_epoch + 1, updated_at = NOW() "
                 "WHERE session_id = %s RETURNING ownership_epoch",
                 (session_id,),
             ).fetchone()
@@ -45,7 +48,7 @@ class SessionStoreMixin:
         """Read normalized sandbox ownership state and bounded resource records."""
         with self.pool.connection() as connection:
             session_row = connection.execute(
-                "SELECT ownership_epoch FROM fleet_lite_sessions WHERE session_id = %s",
+                "SELECT ownership_epoch FROM sessions WHERE session_id = %s",
                 (session_id,),
             ).fetchone()
             if session_row is None:
@@ -59,7 +62,7 @@ class SessionStoreMixin:
                     """
                     SELECT agent_id, allocation_nonce, provider_id, parent_agent_id,
                            action, intended_action, confirmed
-                    FROM fleet_lite_sandbox_resources
+                    FROM sandbox_resources
                     WHERE session_id = %s
                     ORDER BY agent_id
                     """,
@@ -83,7 +86,7 @@ class SessionStoreMixin:
             raise ValueError("Sandbox resource intent exceeds its size limit")
         with self.pool.connection() as connection, connection.transaction():
             row = connection.execute(
-                "SELECT ownership_epoch FROM fleet_lite_sessions WHERE session_id = %s FOR SHARE",
+                "SELECT ownership_epoch FROM sessions WHERE session_id = %s FOR SHARE",
                 (session_id,),
             ).fetchone()
             current_epoch = _row_value(row, "ownership_epoch", 0) if row is not None else None
@@ -91,12 +94,12 @@ class SessionStoreMixin:
                 return False
             if resource is None:
                 connection.execute(
-                    "DELETE FROM fleet_lite_sandbox_resources WHERE session_id = %s AND agent_id = %s",
+                    "DELETE FROM sandbox_resources WHERE session_id = %s AND agent_id = %s",
                     (session_id, agent_id),
                 )
                 return True
             existing = connection.execute(
-                "SELECT agent_id FROM fleet_lite_sandbox_resources WHERE session_id = %s",
+                "SELECT agent_id FROM sandbox_resources WHERE session_id = %s",
                 (session_id,),
             ).fetchall()
             existing_ids = {str(_row_value(item, "agent_id", 0)) for item in existing}
@@ -104,7 +107,7 @@ class SessionStoreMixin:
                 raise RuntimeError("Session sandbox ownership resource limit reached")
             connection.execute(
                 """
-                INSERT INTO fleet_lite_sandbox_resources (
+                INSERT INTO sandbox_resources (
                     session_id, agent_id, epoch, allocation_nonce, provider_id,
                     parent_agent_id, action, intended_action, confirmed, updated_at
                 )
@@ -138,7 +141,7 @@ class SessionStoreMixin:
         """Atomically claim this Session's one-time environment observation."""
         with self.pool.connection() as connection:
             claimed = connection.execute(
-                "UPDATE fleet_lite_sessions SET environment_reported = TRUE "
+                "UPDATE sessions SET environment_reported = TRUE "
                 "WHERE session_id = %s AND environment_reported = FALSE RETURNING session_id",
                 (session_id,),
             ).fetchone()
@@ -150,10 +153,7 @@ class SessionStoreMixin:
         with self.pool.connection() as connection:
             return (
                 connection.cursor(row_factory=dict_row)
-                .execute(
-                    "SELECT session_id, updated_at, turn_count "
-                    "FROM fleet_lite_sessions ORDER BY updated_at DESC LIMIT 100"
-                )
+                .execute("SELECT session_id, updated_at, turn_count FROM sessions ORDER BY updated_at DESC LIMIT 100")
                 .fetchall()
             )
 
@@ -163,7 +163,7 @@ class SessionStoreMixin:
         with self.pool.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT record FROM fleet_lite_turns
+                SELECT record FROM turns
                 WHERE session_id = %s AND status = 'completed'
                 ORDER BY seq DESC
                 LIMIT %s
@@ -178,7 +178,7 @@ class SessionStoreMixin:
         """Return the Session's saved runtime settings, or an empty dict."""
         with self.pool.connection() as connection:
             row = connection.execute(
-                "SELECT settings FROM fleet_lite_sessions WHERE session_id = %s",
+                "SELECT settings FROM sessions WHERE session_id = %s",
                 (session_id,),
             ).fetchone()
         if not row:
@@ -194,10 +194,10 @@ class SessionStoreMixin:
         with self.pool.connection() as connection:
             connection.execute(
                 """
-                INSERT INTO fleet_lite_sessions (session_id, settings)
+                INSERT INTO sessions (session_id, settings)
                 VALUES (%s, %s::jsonb)
                 ON CONFLICT (session_id) DO UPDATE SET
-                    settings = fleet_lite_sessions.settings || EXCLUDED.settings,
+                    settings = sessions.settings || EXCLUDED.settings,
                     updated_at = NOW()
                 """,
                 (session_id, json.dumps(settings)),
@@ -208,7 +208,7 @@ class SessionStoreMixin:
         """Return a global scope's saved settings, or an empty dict."""
         with self.pool.connection() as connection:
             row = connection.execute(
-                "SELECT settings FROM fleet_lite_global_settings WHERE scope = %s",
+                "SELECT settings FROM global_settings WHERE scope = %s",
                 (scope,),
             ).fetchone()
         if not row:
@@ -224,10 +224,10 @@ class SessionStoreMixin:
         with self.pool.connection() as connection:
             connection.execute(
                 """
-                INSERT INTO fleet_lite_global_settings (scope, settings)
+                INSERT INTO global_settings (scope, settings)
                 VALUES (%s, %s::jsonb)
                 ON CONFLICT (scope) DO UPDATE SET
-                    settings = (fleet_lite_global_settings.settings - %s::text[]) || EXCLUDED.settings,
+                    settings = (global_settings.settings - %s::text[]) || EXCLUDED.settings,
                     updated_at = NOW()
                 """,
                 (scope, json.dumps(kept), removed),
@@ -241,7 +241,7 @@ class SessionStoreMixin:
         with self.pool.connection() as connection:
             connection.execute(
                 """
-                INSERT INTO fleet_lite_memories (session_id, memory_id, content, kind, sources, reviewed)
+                INSERT INTO notes (session_id, memory_id, content, kind, sources, reviewed)
                 VALUES (%s, %s, %s, %s, %s::jsonb, %s)
                 ON CONFLICT (session_id, memory_id) DO UPDATE SET
                     content = EXCLUDED.content,
@@ -261,7 +261,7 @@ class SessionStoreMixin:
             rows = cursor.execute(
                 """
                 SELECT memory_id, content, kind, sources, reviewed, updated_at
-                FROM fleet_lite_memories
+                FROM notes
                 WHERE session_id = %s
                   AND (%s = FALSE OR reviewed = TRUE)
                   AND (%s = '' OR to_tsvector('english', content) @@ websearch_to_tsquery('english', %s))
@@ -282,7 +282,7 @@ class SessionStoreMixin:
         """Delete one memory row from a Session."""
         with self.pool.connection() as connection:
             connection.execute(
-                "DELETE FROM fleet_lite_memories WHERE session_id = %s AND memory_id = %s",
+                "DELETE FROM notes WHERE session_id = %s AND memory_id = %s",
                 (session_id, memory_id),
             )
 
@@ -295,6 +295,7 @@ class SessionStoreMixin:
         task_sha256: str,
         *,
         task: str = "",
+        submission: dict[str, Any] | None = None,
         ownership_epoch: int | None = None,
     ) -> dict[str, Any] | None:
         """Record Turn intent; None when newly claimed, else the prior attempt with the same key."""
@@ -303,7 +304,7 @@ class SessionStoreMixin:
                 self._assert_ownership_epoch(connection, session_id, ownership_epoch)
             inserted = connection.execute(
                 """
-                INSERT INTO fleet_lite_turns (session_id, turn_id, idempotency_key, task_sha256, task)
+                INSERT INTO turns (session_id, turn_id, idempotency_key, task_sha256, task)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (session_id, idempotency_key) DO NOTHING
                 RETURNING turn_id
@@ -311,11 +312,12 @@ class SessionStoreMixin:
                 (session_id, turn_id, key, task_sha256, task),
             ).fetchone()
             if inserted:
+                self.bind_turn_submission(connection, session_id, turn_id, task, submission or {})
                 return None
             prior = (
                 connection.cursor(row_factory=dict_row)
                 .execute(
-                    "SELECT turn_id, task_sha256, status, result FROM fleet_lite_turns "
+                    "SELECT turn_id, task_sha256, status, result FROM turns "
                     "WHERE session_id = %s AND idempotency_key = %s",
                     (session_id, key),
                 )
@@ -332,7 +334,7 @@ class SessionStoreMixin:
             return (
                 connection.cursor(row_factory=dict_row)
                 .execute(
-                    "SELECT turn_id, task_sha256, status, result FROM fleet_lite_turns "
+                    "SELECT turn_id, task_sha256, status, result FROM turns "
                     "WHERE session_id = %s AND idempotency_key = %s",
                     (session_id, key),
                 )
@@ -355,13 +357,13 @@ class SessionStoreMixin:
                 with connection.transaction():
                     self._assert_ownership_epoch(connection, session_id, ownership_epoch)
                     connection.execute(
-                        "UPDATE fleet_lite_turns SET status = %s, result = %s::jsonb, updated_at = NOW() "
+                        "UPDATE turns SET status = %s, result = %s::jsonb, updated_at = NOW() "
                         "WHERE session_id = %s AND turn_id = %s AND status <> 'completed'",
                         (status, json.dumps(result), session_id, turn_id),
                     )
                 return
             connection.execute(
-                "UPDATE fleet_lite_turns SET status = %s, result = %s::jsonb, updated_at = NOW() "
+                "UPDATE turns SET status = %s, result = %s::jsonb, updated_at = NOW() "
                 "WHERE session_id = %s AND turn_id = %s AND status <> 'completed'",
                 (status, json.dumps(result), session_id, turn_id),
             )
@@ -369,7 +371,7 @@ class SessionStoreMixin:
     @staticmethod
     def _assert_ownership_epoch(connection: Any, session_id: str, ownership_epoch: int) -> None:
         row = connection.execute(
-            "SELECT ownership_epoch FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE",
+            "SELECT ownership_epoch FROM sessions WHERE session_id = %s FOR UPDATE",
             (session_id,),
         ).fetchone()
         raw_epoch = _row_value(row, "ownership_epoch", 0) if row is not None else None
@@ -388,7 +390,7 @@ class SessionStoreMixin:
         with self.pool.connection() as connection, connection.transaction():
             self._assert_ownership_epoch(connection, session_id, ownership_epoch)
             rows = connection.execute(
-                "UPDATE fleet_lite_turns SET status = 'failed', result = %s::jsonb, updated_at = NOW() "
+                "UPDATE turns SET status = 'failed', result = %s::jsonb, updated_at = NOW() "
                 "WHERE session_id = %s AND status = 'running' RETURNING turn_id",
                 (json.dumps(result), session_id),
             ).fetchall()
@@ -401,8 +403,7 @@ class SessionStoreMixin:
             row = (
                 connection.cursor(row_factory=dict_row)
                 .execute(
-                    "SELECT turn_id, status, result, updated_at FROM fleet_lite_turns "
-                    "WHERE session_id = %s AND turn_id = %s",
+                    "SELECT turn_id, status, result, updated_at FROM turns WHERE session_id = %s AND turn_id = %s",
                     (session_id, turn_id),
                 )
                 .fetchone()
@@ -418,14 +419,14 @@ class SessionStoreMixin:
             session_row = (
                 connection.cursor(row_factory=dict_row)
                 .execute(
-                    "SELECT memory_summary FROM fleet_lite_sessions WHERE session_id = %s",
+                    "SELECT memory_summary FROM sessions WHERE session_id = %s",
                     (session_id,),
                 )
                 .fetchone()
             )
             turn_rows = connection.execute(
                 """
-                SELECT record FROM fleet_lite_turns
+                SELECT record FROM turns
                 WHERE session_id = %s AND status = 'completed'
                 ORDER BY seq DESC
                 LIMIT %s
@@ -447,6 +448,7 @@ class SessionStoreMixin:
         memory_note: str = "",
         completion: tuple[str, dict[str, Any]] | None = None,
         replay_snapshot: tuple[str, bytes] | None = None,
+        published_files: list[dict[str, Any]] | None = None,
         ownership_epoch: int | None = None,
     ) -> None:
         """In one transaction: record Turn completion, memory note, optional deduplicated replay, and turn count."""
@@ -465,11 +467,11 @@ class SessionStoreMixin:
         note = memory_note[:10_000]
         with self.pool.connection() as connection, connection.transaction():
             connection.execute(
-                "INSERT INTO fleet_lite_sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                "INSERT INTO sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING",
                 (session_id,),
             )
             connection.execute(
-                "SELECT session_id FROM fleet_lite_sessions WHERE session_id = %s FOR UPDATE",
+                "SELECT session_id FROM sessions WHERE session_id = %s FOR UPDATE",
                 (session_id,),
             )
             if ownership_epoch is not None:
@@ -477,13 +479,13 @@ class SessionStoreMixin:
             result_json = json.dumps(completion[1]) if completion is not None else "{}"
             status = "completed"
             previous = connection.execute(
-                "SELECT status FROM fleet_lite_turns WHERE session_id = %s AND turn_id = %s",
+                "SELECT status FROM turns WHERE session_id = %s AND turn_id = %s",
                 (session_id, turn_id),
             ).fetchone()
             was_completed = previous is not None and _row_value(previous, "status", 0) == "completed"
             updated = connection.execute(
                 """
-                UPDATE fleet_lite_turns
+                UPDATE turns
                 SET task = CASE WHEN %s <> '' THEN %s ELSE task END,
                     status = %s,
                     result = %s::jsonb,
@@ -497,7 +499,7 @@ class SessionStoreMixin:
             if updated is None:
                 connection.execute(
                     """
-                    INSERT INTO fleet_lite_turns
+                    INSERT INTO turns
                         (session_id, turn_id, idempotency_key, task_sha256, task, status, result, record)
                     VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
                     """,
@@ -505,7 +507,7 @@ class SessionStoreMixin:
                 )
             connection.execute(
                 """
-                UPDATE fleet_lite_sessions
+                UPDATE sessions
                 SET memory_summary = CASE
                         WHEN %s = '' THEN memory_summary
                         WHEN memory_summary = '' THEN %s
@@ -517,6 +519,29 @@ class SessionStoreMixin:
                 """,
                 (note, note, note, was_completed, session_id),
             )
+            connection.execute(
+                "UPDATE turns SET route=%s WHERE session_id=%s AND turn_id=%s",
+                (str(turn_record.get("route", "")).lower() or None, session_id, turn_id),
+            )
+            for position, role, text in ((0, "user", task), (1, "assistant", str(turn_record.get("answer") or ""))):
+                connection.execute(
+                    "INSERT INTO messages(session_id,message_id,turn_id,position,role,content) "
+                    "VALUES (%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT (session_id,turn_id,position) DO NOTHING",
+                    (
+                        session_id,
+                        f"{turn_id}_{role}",
+                        turn_id,
+                        position,
+                        role,
+                        json.dumps([{"type": "text", "text": text}]),
+                    ),
+                )
+            for file in published_files or []:
+                self._save_file(connection, session_id, file)
+                connection.execute(
+                    "INSERT INTO message_files(session_id,message_id,file_id) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (session_id, f"{turn_id}_assistant", file["file_id"]),
+                )
             if replay_snapshot is not None:
                 assert completion is not None
                 _store_replay_snapshot(connection, session_id, completion[0], *replay_snapshot)

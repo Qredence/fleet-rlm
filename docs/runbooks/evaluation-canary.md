@@ -9,13 +9,6 @@ conservative forecast when dedicated model rates are unavailable.
 
 ## Prepare an isolated server
 
-Check that loopback port 8001 is unused. Do not reuse or terminate an unrelated
-server. Resolve the configured evaluation experiment and UC prefix from
-`FleetSettings(mlflow_mode="databricks").mlflow_target().eval_experiment_name` and
-`FleetSettings.mlflow_eval_trace_table_prefix`; use those values for the two
-overrides below. The names shown are the checked-in defaults. Keep the
-configured catalog, schema, warehouse, and model routes. Do not edit `.env`.
-
 If `.env` contains duplicate keys, uv's environment-file loader may select an
 earlier entry than FleetSettings/python-dotenv. The current local file has an
 obsolete SQLite DSN followed by the intended PostgreSQL DSN. Preserve the file
@@ -32,13 +25,6 @@ It resolves duplicate entries with python-dotenv, preserves existing process
 overrides, and executes `uv run fleet ...` with credentials in memory. For the
 recovery Python snippet below, run it from the same environment by loading
 `.env` with `load_dotenv(".env", override=False)` before importing MLflow.
-
-```bash
-FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME=/Shared/fleet-rlm-eval \
-FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX=fleet_rlm_eval \
-FLEET_PORT=8001 \
-uv run --env-file .env fleet cli databricks --session evaluation-UNIQUE
-```
 
 Use a unique Session name. Run this in a real terminal/PTY. The terminal
 launcher owns the temporary API server and stops it on `/exit`. For the bounded
@@ -69,13 +55,6 @@ the client. Confirm the trace belongs to the configured evaluation experiment
 and exact UC prefix, is complete, and has spans. Allow one 180-second readback
 window for a cold warehouse; poll the same trace and record any timeout.
 
-```bash
-uv run --env-file .env fleet trace verify TRACE_ID --scope evaluation --mlflow databricks
-uv run --env-file .env fleet eval label TRACE_ID --mlflow databricks \
-  --status synthetic --group synthetic-direct-00 \
-  --answer 22.2 --value 22.2 --route flex --critical
-```
-
 For a bounded read and scoring of the already executed Turn, use the following
 Python API from `uv run --env-file .env python`. Replace `TRACE_ID` first:
 
@@ -86,49 +65,11 @@ from fleet_rlm.config import get_settings
 from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.optimize.evaluation import read_evaluation_trace, score_evaluation_traces
 
-settings = get_settings("databricks")
-settings.prepare_mlflow_auth()
-target = settings.mlflow_target()
-experiment_id = configure_mlflow_observability(
-    target.eval_experiment_name,
-    target.tracking_uri,
-    trace_catalog=settings.mlflow_trace_catalog,
-    trace_schema=settings.mlflow_trace_schema,
-    trace_table_prefix=settings.mlflow_eval_trace_table_prefix,
-    tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
-)
-for name, value in settings.judge_environment().items():
-    os.environ[name] = value
-trace = read_evaluation_trace(
-    "TRACE_ID",
-    experiment_id=experiment_id,
-    uc_location=(
-        settings.mlflow_trace_catalog,
-        settings.mlflow_trace_schema,
-        settings.mlflow_eval_trace_table_prefix,
-    ),
-)
-result = score_evaluation_traces(
-    [trace],
-    judge_model=settings.fleet_judge_model,
-    judge_lm=settings.build_judge_lm(),
-    jev_lm=settings.build_jev_lm(),
-)
-print(result.run_id, result.metrics)
-mlflow.flush_trace_async_logging()
-```
-
 Read expectations and feedback back from the saved trace. Record the scoring
 run ID, deterministic value check, available token/cost fields, elapsed time,
 and provider cleanup state. A scorer error is incomplete evaluation; a negative
 score is a measured result and must remain visible. A direct numeric task can
 be inapplicable to retrieval scoring.
-
-When reading feedback after a scoring retry, filter assessment metadata
-`mlflow.assessment.sourceRunId` to the new scoring run ID. Historical failed
-assessments remain as audit history. For the configured Gateway judge, assign
-both values returned by `judge_environment()` as above; using `setdefault`
-can leave an unrelated provider URL paired with the Databricks token.
 
 After a diagnostic scorer update, use `score_evaluation_traces([trace], ...)` on
 the saved trace to create a new scoring run without repeating the Turn. Confirm

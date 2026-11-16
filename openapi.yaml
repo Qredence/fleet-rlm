@@ -22,6 +22,231 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
+  /sessions/{session_id}/messages:
+    get:
+      tags:
+      - chat
+      summary: Messages
+      description: Read a chronological page of durable conversation entries.
+      operationId: messages_sessions__session_id__messages_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Before
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/messages/{message_id}/activity:
+    post:
+      tags:
+      - chat
+      summary: Save Message Activity
+      description: Persist bounded streamed activity on its completed assistant message.
+      operationId: save_message_activity_sessions__session_id__messages__message_id__activity_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: message_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Message Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageActivityRequest'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/published-files:
+    get:
+      tags:
+      - chat
+      summary: Published Files
+      description: List immutable files for the selected session.
+      operationId: published_files_sessions__session_id__published_files_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishedFiles'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/published-files/{file_id}:
+    get:
+      tags:
+      - chat
+      summary: Download File
+      description: Authorize a session file and issue a short-lived download redirect.
+      operationId: download_file_sessions__session_id__published_files__file_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/attachments:
+    post:
+      tags:
+      - chat
+      summary: Upload
+      description: Publish a bounded upload before saving its session-owned metadata.
+      operationId: upload_sessions__session_id__attachments_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_sessions__session_id__attachments_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishedFile'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/workspace/index:
+    get:
+      tags:
+      - chat
+      summary: Workspace Index
+      description: Read the last known workspace inventory without acquiring a runtime.
+      operationId: workspace_index_sessions__session_id__workspace_index_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceInventory'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sessions/{session_id}/updates:
+    get:
+      tags:
+      - chat
+      summary: Updates
+      description: Observe saved state only. Disconnect has no ownership or cancellation effects.
+      operationId: updates_sessions__session_id__updates_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /sessions:
     get:
       tags:
@@ -1405,6 +1630,16 @@ components:
       required:
       - file
       title: Body_attach_file_sessions__session_id__attach_post
+    Body_upload_sessions__session_id__attachments_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_upload_sessions__session_id__attachments_post
     Catalog:
       properties:
         catalog_xml:
@@ -2079,6 +2314,60 @@ components:
       - memory_id
       title: MemorySaved
       description: Acknowledgement of a saved memory entry.
+    MessageActivityPart:
+      properties:
+        type:
+          type: string
+          const: data-fleetActivity
+          title: Type
+        id:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Id
+        data:
+          additionalProperties: true
+          type: object
+          title: Data
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      - id
+      - data
+      title: MessageActivityPart
+      description: One UI activity part attached to a completed assistant message.
+    MessageActivityRequest:
+      properties:
+        activity:
+          items:
+            $ref: '#/components/schemas/MessageActivityPart'
+          type: array
+          maxItems: 1000
+          title: Activity
+      additionalProperties: false
+      type: object
+      required:
+      - activity
+      title: MessageActivityRequest
+      description: Bounded Fleet activity captured by the chat client for durable history.
+    MessagePage:
+      properties:
+        messages:
+          items:
+            $ref: '#/components/schemas/SavedMessage'
+          type: array
+          title: Messages
+        next_before:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Before
+      type: object
+      required:
+      - messages
+      title: MessagePage
+      description: A chronological page of complete turns; cursor is exclusive.
     MlflowHealth:
       properties:
         mode:
@@ -2217,6 +2506,67 @@ components:
       - models
       title: Models
       description: Model routes from optional compatible-endpoint discovery; scope is deprecated.
+    PublishedFile:
+      properties:
+        file_id:
+          type: string
+          title: File Id
+        turn_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Turn Id
+        origin:
+          type: string
+          enum:
+          - upload
+          - artifact
+          title: Origin
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+        size_bytes:
+          type: integer
+          minimum: 0.0
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+        workspace_path:
+          type: string
+          title: Workspace Path
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+      type: object
+      required:
+      - file_id
+      - origin
+      - filename
+      - media_type
+      - size_bytes
+      - sha256
+      - workspace_path
+      title: PublishedFile
+      description: Immutable session file metadata; object credentials and locators stay private.
+    PublishedFiles:
+      properties:
+        files:
+          items:
+            $ref: '#/components/schemas/PublishedFile'
+          type: array
+          title: Files
+      type: object
+      required:
+      - files
+      title: PublishedFiles
+      description: A bounded list of published files in one session.
     Pushed:
       properties:
         pushed:
@@ -2314,6 +2664,89 @@ components:
       - request_id
       title: ReviewJob
       description: An explicit human decision, never an implicit promotion after optimization.
+    SavedMessage:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        message_id:
+          type: string
+          title: Message Id
+        turn_id:
+          type: string
+          title: Turn Id
+        position:
+          type: integer
+          title: Position
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          title: Role
+        content:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Content
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        seq:
+          type: integer
+          title: Seq
+        status:
+          type: string
+          enum:
+          - running
+          - completed
+          - failed
+          - cancelled
+          title: Status
+        route:
+          anyOf:
+          - type: string
+            enum:
+            - direct
+            - flex
+            - rlm
+          - type: 'null'
+          title: Route
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Id
+        trace_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Url
+        regenerates_turn_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Regenerates Turn Id
+        files:
+          items:
+            $ref: '#/components/schemas/PublishedFile'
+          type: array
+          title: Files
+      type: object
+      required:
+      - session_id
+      - message_id
+      - turn_id
+      - position
+      - role
+      - content
+      - created_at
+      - seq
+      - status
+      title: SavedMessage
+      description: One durable conversation entry with its owning execution outcome.
     SessionConfig:
       properties:
         mode:
@@ -2474,6 +2907,42 @@ components:
       description: One part of the program GEPA can rewrite, in plain words.
     TurnRequest:
       properties:
+        message_id:
+          anyOf:
+          - type: string
+            pattern: ^[A-Za-z0-9_-]{1,64}$
+          - type: 'null'
+          title: Message Id
+        file_ids:
+          items:
+            type: string
+            pattern: ^[A-Za-z0-9_-]{1,64}$
+          type: array
+          maxItems: 20
+          title: File Ids
+        regenerates_turn_id:
+          anyOf:
+          - type: string
+            pattern: ^[A-Za-z0-9_-]{1,64}$
+          - type: 'null'
+          title: Regenerates Turn Id
+        mode:
+          anyOf:
+          - type: string
+            enum:
+            - direct
+            - flex
+            - rlm
+            - hybrid
+          - type: 'null'
+          title: Mode
+        model:
+          anyOf:
+          - type: string
+            maxLength: 300
+            minLength: 1
+          - type: 'null'
+          title: Model
         task:
           type: string
           maxLength: 100000
@@ -2567,6 +3036,50 @@ components:
       - msg
       - type
       title: ValidationError
+    WorkspaceInventory:
+      properties:
+        indexed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Indexed At
+        files:
+          items:
+            $ref: '#/components/schemas/WorkspaceInventoryFile'
+          type: array
+          title: Files
+      type: object
+      required:
+      - indexed_at
+      - files
+      title: WorkspaceInventory
+      description: Passive cached workspace navigation with explicit freshness.
+    WorkspaceInventoryFile:
+      properties:
+        path:
+          type: string
+          title: Path
+        size_bytes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Size Bytes
+        sha256:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sha256
+        observed_at:
+          type: string
+          format: date-time
+          title: Observed At
+      type: object
+      required:
+      - path
+      - observed_at
+      title: WorkspaceInventoryFile
+      description: A path observed during a complete managed-workspace scan.
     WorkspaceWriteRequest:
       oneOf:
       - properties:

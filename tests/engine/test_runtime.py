@@ -1950,29 +1950,6 @@ def test_session_digest_uses_route_overrides_without_resolving_connections_again
 
 
 @pytest.mark.usefixtures("isolated_settings")
-def test_lakebase_oauth_requires_endpoint_and_password_free_tls_dsn():
-    endpoint = "projects/fleet-rlm/branches/production/endpoints/primary"
-    settings = FleetSettings(
-        _env_file=None,
-        fleet_database_url="postgresql://fleet_app@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
-        fleet_lakebase_endpoint=endpoint,
-    )
-    assert settings.fleet_lakebase_endpoint == endpoint
-    with pytest.raises(ValidationError, match="sslmode=require"):
-        FleetSettings(
-            _env_file=None,
-            fleet_database_url="postgresql://fleet_app@ep.example.databricks.com/fleet_rlm_lite",
-            fleet_lakebase_endpoint=endpoint,
-        )
-    with pytest.raises(ValidationError, match="embedded password"):
-        FleetSettings(
-            _env_file=None,
-            fleet_database_url="postgresql://fleet_app:password@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
-            fleet_lakebase_endpoint=endpoint,
-        )
-
-
-@pytest.mark.usefixtures("isolated_settings")
 def test_database_schema_is_a_safe_identifier_and_migration_url_is_not_public_configuration():
     settings = FleetSettings(
         _env_file=None,
@@ -1991,25 +1968,6 @@ def test_database_schema_is_a_safe_identifier_and_migration_url_is_not_public_co
             _env_file=None,
             fleet_database_url="postgresql://runtime@db.example/fleet",
             fleet_database_migration_url="postgresql://migrator@other.example/fleet",
-        )
-
-
-@pytest.mark.usefixtures("isolated_settings")
-def test_lakebase_migration_dsn_uses_the_same_tls_database_with_a_separate_role():
-    endpoint = "projects/fleet-rlm/branches/production/endpoints/primary"
-    settings = FleetSettings(
-        _env_file=None,
-        fleet_database_url="postgresql://runtime@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
-        fleet_database_migration_url="postgresql://migrator@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
-        fleet_lakebase_endpoint=endpoint,
-    )
-    assert settings.fleet_database_schema == "public"
-    with pytest.raises(ValidationError, match="must target the runtime database"):
-        FleetSettings(
-            _env_file=None,
-            fleet_database_url="postgresql://runtime@ep.example.databricks.com/fleet_rlm_lite?sslmode=require",
-            fleet_database_migration_url="postgresql://migrator@ep.example.databricks.com/other?sslmode=require",
-            fleet_lakebase_endpoint=endpoint,
         )
 
 
@@ -3188,7 +3146,7 @@ def test_required_claim_binds_ordered_intent_but_completed_receipts_survive_sour
     a, b = skill("alpha"), skill("beta")
     rows = {}
 
-    def claim(_session, turn_id, key, digest):
+    def claim(_session, turn_id, key, digest, **_kwargs):
         if key in rows:
             return rows[key]
         rows[key] = {"turn_id": turn_id, "task_sha256": digest, "status": status}
@@ -3283,7 +3241,7 @@ def test_turn_intent_and_completion_are_fenced_by_the_runtime_ownership_epoch() 
     runtime.claim_turn("turn-1", "key-1", "task")
     runtime.commit_turn("s1", {"turn_id": "turn-1"})
 
-    assert claims[0][1] == {"ownership_epoch": 12}
+    assert claims[0][1] == {"ownership_epoch": 12, "task": "task"}
     assert commits[0][1]["ownership_epoch"] == 12
 
 

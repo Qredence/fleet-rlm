@@ -239,13 +239,17 @@ class FleetSettings(BaseSettings):
         description="Optional PostgreSQL DSN for schema migrations; defaults to the runtime DSN.",
     )
     fleet_database_schema: str = Field(
-        default="public",
-        description="PostgreSQL schema containing Fleet Lite tables.",
+        default="fleet",
+        description="PostgreSQL schema containing Fleet tables.",
     )
-    fleet_lakebase_endpoint: str = Field(
-        default="",
-        validation_alias="FLEET_LAKEBASE_ENDPOINT",
-        description="Lakebase endpoint resource path; enables per-connection Databricks OAuth credentials.",
+    fleet_storage_endpoint: str = ""
+    fleet_storage_region: str = "eu-central-1"
+    fleet_storage_bucket: str = ""
+    fleet_storage_access_key: str = ""
+    fleet_storage_secret_key: SecretStr = SecretStr("")
+    mlflow_local_backend_store_uri: str = Field(default="", validation_alias="FLEET_MLFLOW_LOCAL_BACKEND_STORE_URI")
+    mlflow_local_artifact_destination: str = Field(
+        default="", validation_alias="FLEET_MLFLOW_LOCAL_ARTIFACT_DESTINATION"
     )
 
     fleet_daytona_api_key: str = ""
@@ -522,31 +526,6 @@ class FleetSettings(BaseSettings):
             for key, default in (("host", ""), ("port", "5432"), ("dbname", "")):
                 if migration_database.get(key, default) != runtime_database.get(key, default):
                     raise ValueError("FLEET_DATABASE_MIGRATION_URL must target the runtime database")
-        if self.fleet_lakebase_endpoint:
-            if not re.fullmatch(
-                r"projects/[a-z0-9-]+/branches/[a-z0-9-]+/endpoints/[a-z0-9-]+",
-                self.fleet_lakebase_endpoint,
-            ):
-                raise ValueError("FLEET_LAKEBASE_ENDPOINT must be a Lakebase endpoint resource path")
-            from psycopg.conninfo import conninfo_to_dict
-
-            database = conninfo_to_dict(self.fleet_database_url)
-            if database.get("sslmode") != "require" or not database.get("host") or not database.get("user"):
-                raise ValueError("OAuth Lakebase DSN requires host, user, and sslmode=require")
-            if database.get("password"):
-                raise ValueError("Remove the embedded password when FLEET_LAKEBASE_ENDPOINT enables OAuth")
-            if self.fleet_database_migration_url:
-                migration = conninfo_to_dict(self.fleet_database_migration_url)
-                if (
-                    migration.get("sslmode") != "require"
-                    or not migration.get("host")
-                    or not migration.get("user")
-                    or migration.get("host") != database.get("host")
-                    or migration.get("dbname") != database.get("dbname")
-                ):
-                    raise ValueError("Lakebase migration DSN must target the same TLS endpoint and database")
-                if migration.get("password"):
-                    raise ValueError("Remove the embedded password from the Lakebase migration DSN")
         if self.mlflow_mode == "databricks":
             if not self.mlflow_tracking_uri.startswith("databricks"):
                 raise ValueError("Databricks mode requires a databricks tracking URI")
@@ -660,7 +639,14 @@ class FleetSettings(BaseSettings):
         """Resolve MLflow KEK variables from process env or `.env` for a managed local MLflow server."""
         dotenv: Mapping[str, str | None] | None = None
         resolved: dict[str, str] = {}
-        for key in ("MLFLOW_CRYPTO_KEK_PASSPHRASE", "MLFLOW_CRYPTO_KEK_VERSION"):
+        for key in (
+            "MLFLOW_CRYPTO_KEK_PASSPHRASE",
+            "MLFLOW_CRYPTO_KEK_VERSION",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_DEFAULT_REGION",
+            "MLFLOW_S3_ENDPOINT_URL",
+        ):
             if key in os.environ:
                 value: str | None = os.environ[key]
             elif self._credential_env_file:

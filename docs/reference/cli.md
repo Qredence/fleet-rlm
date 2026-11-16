@@ -2,26 +2,6 @@
 
 The `fleet` command has these modes:
 
-```bash
-uv run fleet cli [databricks] [--mlflow local|databricks] [--session SESSION_ID] [--url URL]
-                 [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
-uv run fleet serve [--host 127.0.0.1] [--port 8000] [--mlflow local|databricks]
-uv run fleet web [--host 127.0.0.1] [--port 8080] [--url API_URL]
-                [--public-url URL] [--session SESSION] [--mlflow local|databricks]
-                [--mlflow-port 5001] [--mlflow-experiment NAME] [--startup-timeout 180]
-uv run fleet doctor [--probe-models] [--mlflow local|databricks]
-uv run fleet snapshot check|build|activate
-uv run fleet eval dataset|run|score|label ... [--mlflow local|databricks]
-uv run fleet optimize [--check] ... [--mlflow local|databricks]
-uv run fleet trace verify <trace-id> [--scope runtime|evaluation|optimization] [--mlflow local|databricks]
-```
-
-The configured `[mlflow].mode` selects the default backend (`local` when omitted).
-An explicit `--mlflow` option overrides that setting. `uv run fleet cli databricks` is the
-shorthand for `uv run fleet cli --mlflow databricks`. The command selects the
-backend; environment variables override values only inside that backend.
-Conflicting selectors are errors, and `--mlflow env` has been retired.
-
 `cli` starts the API server, waits for readiness, opens the terminal client,
 and stops services it owns when the client exits. `web` starts the same local
 services and serves the Textual client in a browser through Textual Serve; pass
@@ -66,47 +46,9 @@ runtime Turns.
 
 Managed service behavior for `cli` and `web`:
 
-- Local MLflow starts at `127.0.0.1:5001` by default, storing SQLite metadata
-  and artifacts under `.fleet/mlflow`. Configure its port/data directory and
-  three experiments in `[mlflow.local]`. Data survives shutdown. When
-  `MLFLOW_CRYPTO_KEK_PASSPHRASE` or `MLFLOW_CRYPTO_KEK_VERSION` are set in the
-  environment or `.env` (process environment takes precedence), the launcher
-  forwards them to the managed local MLflow server so Gateway secrets stored in
-  `mlflow.db` can be decrypted.
-- Databricks mode starts no tracking server. It uses `[mlflow.databricks]`,
-  including the workspace experiments and Unity Catalog trace destinations.
-  For the default `databricks` URI, Fleet supplies the configured `.env`
-  `DATABRICKS_HOST` and `DATABRICKS_TOKEN` to MLflow SDK authentication.
-  `databricks://<profile>` keeps explicit SDK profile selection.
-- `--mlflow-port` overrides the local port and is rejected for Databricks.
-  `--mlflow-experiment` overrides the selected runtime experiment.
-- A healthy API already on the configured port is reused only if its MLflow
-  backend, tracking URI, experiments, and trace location match. `--url` starts
-  nothing and performs the same check. Unknown metadata, unready tracing, or
-  a mismatch aborts the connection. Stop the existing server or choose a
-  different `FLEET_PORT` when switching destinations.
-- Tracking initialization failure aborts API startup. A service that exits or
-  misses `--startup-timeout` aborts the launch and reports its log. Logs are
-  `.fleet/logs/server.log` and `.fleet/logs/mlflow.log`.
-- The launcher stops the API first to flush traces, then its owned MLflow
-  process. Reused services remain running. During shutdown, further Ctrl-C
-  presses cannot interrupt service cleanup. An uncaught Ctrl-C during startup
-  or client operation exits with status 130 without a traceback after cleanup.
-
 ## Diagnostics and snapshot management
 
 Before starting a Session or deploying a configuration change, run:
-
-- `uv run fleet doctor`: performs read-only checks for Models, PostgreSQL/Lakebase
-  connections and schema initialization, the selected local/Databricks MLflow profile,
-  and Daytona snapshot readiness. It does not run model inference, build snapshots,
-  create Volumes, apply migrations, or provision experiments. Pass `--probe-models` to
-  execute an optional root-model inference probe.
-- `uv run fleet snapshot check`: inspects the active Daytona snapshot state and
-  resource floors.
-- `uv run fleet snapshot build`: builds the repository-packaged Python 3.13 snapshot in
-  Daytona.
-- `uv run fleet snapshot activate`: explicitly activates an existing inactive snapshot.
 
 Configuration and `.env` / `config/fleet.toml` edits belong to the host operator and take
 effect when services restart.
@@ -127,13 +69,6 @@ MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS=true uv run --env-file .env mlflow server \
   --default-artifact-root "$PWD/.fleet/mlflow/artifacts"
 ```
 
-`fleet eval run` checks its API destination before creating work. The API must
-trace into the selected evaluation experiment and, for Databricks, its evaluation
-UC prefix. Follow the [evaluation canary runbook](../runbooks/evaluation-canary.md).
-The command prints recovery identifiers and exits unsuccessfully on incomplete
-collection or scoring. A successful startup does not guarantee later asynchronous
-trace export; use `trace verify` for explicit readback.
-
 Local MLflow changes tracking and artifact storage. Models, Daytona, judges,
 and PostgreSQL retain their separately configured services and credentials.
 
@@ -148,14 +83,6 @@ Turn. `/trace` looks for an ID in the saved `/history` records, and
 have no ID; the client reports that explicitly. A completed Turn is reported
 as persisted only after the server has successfully synchronized it to Session
 history.
-
-`fleet trace verify <trace-id>` flushes pending async writes and checks that a
-stored trace can be read with its spans. Use `--scope evaluation` or
-`--scope optimization` for those configured experiments. In Databricks mode,
-the command also verifies the experiment is bound to the configured Unity
-Catalog schema and table prefix; pass the fully qualified `trace:/...` ID for a
-Unity Catalog trace. This explicit operator check may issue a read to the
-configured tracking destination; it is not run during serving.
 
 Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
 `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
@@ -358,28 +285,6 @@ reopen the menu; editing the recalled text or requesting Tab completion does.
 
 Use `/replay on` to opt in to bounded immutable snapshot capture for subsequent
 Turns in this client process; `/replay off` disables it. Capture is off by default.
-
-- `/config` or `/settings` (add `json` for raw JSON): inspect non-secret session models, mode, dataset,
-  and operator-owned resource limits. Credentials are never returned. Its
-  `limits.timeout_seconds` is the server-resolved configured value; it does not
-  change when `/timeout` is used.
-- `/timeout <seconds|off|default>`: set or clear this client's deadline override
-  for subsequent Turns. `<seconds>` must be `0` or `10`–`3600`; `off` sends `0`
-  (no Fleet deadline) and `default` clears the override so Turns inherit the
-  server configuration again. The override is client-local state, transmitted as
-  `TurnRequest.timeout_seconds` on each later Turn and recorded by the server as
-  `source=request`. It never mutates the persisted Session or the server
-  configuration, and a new client against the same Session does not inherit it.
-  A deadline-free Turn still obeys Daytona's provider TTL and idle bounds.
-- `/config mode rlm` (also `/settings mode rlm`): change mode; `/mode` remains supported.
-- `/models [catalog.schema]`: discover accessible chat-capable Unity Gateway
-  model services, defaulting to `system.ai`. This uses the Databricks model-services
-  API, not an assumed OpenAI `/models` endpoint. Discovery requires catalog/schema
-  permissions; an empty list or authorization failure is not a fabricated catalog.
-- `/model` or `/model root`: show a numbered interactive root-model picker.
-  `/model sub` selects the recursive-agent model. Enter cancels without changing it.
-  `/model root team.models` opens another catalog/schema; `/model root
-  openai/team.models.service` sets a discovered model explicitly.
 
 Root/sub selections are validated by the server, isolated to this session, applied
 at turn boundaries, and persisted across restarts alongside mode/context. Busy

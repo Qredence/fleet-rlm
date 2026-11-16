@@ -35,14 +35,6 @@ Fleet exposes a FastAPI application with the following routes:
 | `PUT`, `DELETE` | `/sessions/{session_id}/memory/{memory_id}` | Create/review/update/delete memories. |
 | `POST` | `/skills/push?session_id=...` | Synchronize validated local user Skills. |
 
-The `/health` response always includes `runtime_digest` (the active sandbox REPL runtime
-fingerprint) and `mlflow.workspace_host`, the resolved non-secret
-Databricks tracking workspace URL (`null` for local tracking). API reuse and
-evaluation preflight compare MLflow destinations and require a `runtime_digest` that
-matches the caller's runtime. A mismatched or absent digest is treated as stale, so a
-server that predates the field is not reused silently. Named tracking profiles resolve
-their own workspace rather than the model gateway host.
-
 Workspace listings and Turn input inventories include regular files beneath
 `files/`, `artifacts/`, `memory/`, `skills/`, `buffers/`, and `sessions/` only.
 Unmanaged top-level scratch files are left intact but are not advertised or
@@ -53,6 +45,9 @@ Routes that change or read workspace, context, memory, Skill, mode, or model sta
 session lock. While a Turn holds it they answer `409` after two seconds rather than queueing.
 `POST /sessions/{session_id}/turn` takes the same lock and answers `409` the same way when another Turn
 or workspace change is running; it holds the lock until the stream ends and the Turn has drained.
+Turn mode and model overrides are applied off the event loop while holding that lock. They are
+bound to the idempotency key even when no message ID or attachments are supplied. Artifact
+publication precedes the completion lock; a disconnect before the database commit cancels the Turn.
 
 ## Improve
 
@@ -523,3 +518,28 @@ Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance wit
 `GET /improve/queue` accepts nonnegative `offset` and `limit` (1–200, default 50).
 The response includes nullable `next_offset`; null means the final page.
 The canonical `turn_complete` payload includes the effective `replay_snapshot_selected` boolean.
+
+
+## Durable chat and published files
+
+- `GET /sessions/{id}/messages?before=<turn-sequence>&limit=100`: chronological
+  messages with durable IDs, roles, turn status/route, trace links, attachments
+  and any saved UI activity.
+- `POST /sessions/{id}/messages/{message_id}/activity`: replace the bounded
+  `data-fleetActivity` parts on a completed assistant message. The target must
+  belong to the Session; payloads are limited to 1,000 parts and 512 KiB.
+- `GET /sessions/{id}/updates`: non-owning saved-state SSE (`state` events), with
+  current messages, published files, cached workspace inventory and session settings.
+  Reconnect refreshes state; this is separate from generation/progress SSE.
+- `POST /sessions/{id}/attachments`: bounded multipart upload to private storage;
+  returns a stable file ID. No runtime is acquired until the file is used by a turn.
+- `GET /sessions/{id}/published-files`: published-file metadata for that session.
+- `GET /sessions/{id}/published-files/{file_id}`: authorized private download redirect.
+- `GET /sessions/{id}/workspace/index`: passive cached inventory. Existing
+  `/workspace/tree` explicitly refreshes it and can start Daytona or return busy.
+
+Turn submissions optionally accept `message_id`, `file_ids`, `regenerates_turn_id`,
+`model` and `mode`. Send a stable `idempotency_key` for retries; regenerate with a new
+key/message ID and the previous turn ID. Model/mode selection is serialized with
+admission. Completion includes `assistant_message_id`; published outputs also appear
+in `files`. Existing result fields, routes and generation cancellation remain intact.

@@ -43,10 +43,11 @@ src/fleet_rlm/
 │   └── children.py    # ChildPolicies: two persistent native action predictors
 ├── store/             # Squashed PostgreSQL schema, pooling, leases, and transactions
 │   ├── __init__.py    # Store class combining mixins, connection pool, and migrations
-│   ├── schema.py      # Version-1 DDL tables and retry policy
+│   ├── schema.py      # Immutable v1 baseline, v2 migrations and retry policy
 │   ├── sessions.py    # Session rows, turns, memories, settings, CAS sandbox resource tracking
+│   ├── chat.py        # Durable messages, published files and cached workspace inventory
 │   ├── replays.py     # Content-addressed replay blobs, snapshots, and review labels
-│   ├── leases.py      # Pooled TTL leases, heartbeat renewal, and Lakebase OAuth connections
+│   ├── leases.py      # Pooled TTL leases and heartbeat renewal
 │   └── optimization.py # Global optimization run ledger and owner arbitration
 ├── optimize/          # GEPA/evaluation modules; never imported by engine/runtime
 │   ├── objectives.py  # Pure scoring objectives: no MLflow, LM, or filesystem

@@ -110,6 +110,7 @@ def workspace_files_metadata_code(
     paths_b64 = base64.b64encode(json.dumps(rel_paths).encode("utf-8")).decode("ascii")
     return f"""import base64,hashlib,json,os,stat
 root=os.path.realpath('/workspace')
+max_bytes={max_bytes!r}
 def check(relative):
  parts=relative.split('/')
  if any(part in ('','.','..') for part in parts): raise ValueError('invalid workspace path')
@@ -133,7 +134,7 @@ def check(relative):
    before=os.fstat(handle.fileno())
    if not stat.S_ISREG(before.st_mode): raise ValueError('workspace target is not a file')
    size=before.st_size
-   if {max_bytes!r} is not None and size>{max_bytes!r}: raise ValueError('workspace file exceeds size limit')
+   if max_bytes is not None and size>max_bytes: raise ValueError('workspace file exceeds size limit')
    if not {include_digest!r}: return {{'size':size}}
    digest=hashlib.sha256()
    count=0

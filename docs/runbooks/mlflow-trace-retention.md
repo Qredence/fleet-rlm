@@ -13,8 +13,6 @@ estimate the preflight query cost with the workspace billing owner. Agree a
 cap before running it. This runbook does not authorize a warehouse query or a
 trace deletion by itself.
 
-The public template's Databricks destinations are:
-
 | Purpose | Catalog | Schema | Prefix |
 |---|---|---|---|
 | Runtime traces | `example_catalog` | `fleet_observability` | `fleet_rlm_runtime` |
@@ -32,19 +30,6 @@ Each configured prefix can have `_otel_annotations`, `_otel_logs`,
 Fleet prefixes. Do not use a schema-wide wildcard.
 
 ## Preflight and dry run
-
-1. Confirm the active Unity Catalog catalog, schema, exact four table names for
-   each prefix, and the bound MLflow experiment trace locations. If a table is
-   absent, skip it and record that fact; do not create it for cleanup.
-2. Run `DESCRIBE TABLE EXTENDED` for each existing table. Confirm its schema and
-   timestamp type before using a time predicate. Databricks documents the `time`
-   column on spans and logs; verify the current metrics and annotations schemas
-   rather than assuming they match. Stop for any table without a verified time
-   column or with a different type.
-3. Choose and record one cutoff timestamp in UTC: the cleanup execution time
-   minus 30 days. Use that same literal in every preview and deletion statement.
-4. Preview the eligible row count in each table. For spans, logs, and metrics
-   whose `time` column was verified as a timestamp, use:
 
    ```sql
    SELECT count(*) AS eligible_rows
@@ -113,16 +98,6 @@ WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 DELETE FROM example_catalog.<verified_schema>.<exact_prefix>_otel_spans
 WHERE time < TIMESTAMP '<recorded UTC cutoff>';
 ```
-
-Repeat the preview after deletion and record the run date, cutoff, exact table
-names, deleted counts, and operator. Use the workspace's governed SQL warehouse
-and approved change record. Do not run a recurring job as part of this
-procedure. Unity Catalog trace deletion is performed through governed SQL;
-MLflow does not provide an API for deleting these rows. Follow the current
-[Databricks trace table guidance](https://docs.databricks.com/gcp/en/mlflow3/genai/tracing/trace-unity-catalog)
-and [trace governance guidance](https://docs.databricks.com/gcp/en/mlflow3/genai/tracing/govern-redact)
-before each cleanup because table schemas and provider retention behavior can
-change.
 
 ## Preflight validation record — 2026-10-17
 

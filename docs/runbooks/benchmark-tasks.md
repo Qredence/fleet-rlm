@@ -1,22 +1,11 @@
 # External task benchmarks
 
-Fleet owns its DSPy metrics, scorers, judges, evaluators, MLflow/Databricks experiments,
-and native Flex/GEPA optimization. External benchmark families supply tasks and official
-verification through development notebooks; they add no runtime policy or CLI flags.
-
 Use [LongCoT](../../notebooks/longcot_benchmark.ipynb) or
 [OOLONG-Synth](../../notebooks/oolong_benchmark.ipynb). Install their optional environment:
 
 ```bash
 uv sync --locked --group benchmarks
 ```
-
-Select the repository's `.venv` kernel. Start the normal service with `uv run fleet cli`
-or `uv run fleet cli databricks`, and match `MLFLOW_MODE` in the notebook to the service.
-The notebook reads normal Fleet settings. Outside the comparison pilot, API execution preserves the service's mode,
-models, retries, token caps, cache, and shared notes configuration. It does not start
-services, replace provider engines, or select a custom benchmark TOML. The optional
-LongCoT comparison pilot below explicitly selects modes and isolates notes/cache.
 
 ## Prepare tasks
 

@@ -29,7 +29,7 @@ The default `hybrid` mode chooses a route for each Turn: a direct answer for sel
 
 </div>
 
-Fleet needs Python **3.11–3.13**, [uv](https://docs.astral.sh/uv/), an existing PostgreSQL database, a Daytona organization and Volume, and access to a DSPy supported model. Databricks is optional; it can provide model access or MLflow tracking, independently of each other.
+Fleet needs Python **3.11–3.13**, [uv](https://docs.astral.sh/uv/), a Neon PostgreSQL database, a Daytona organization and Volume, and access to a DSPy supported model. MLflow runs locally by default.
 
 ```bash
 git clone https://github.com/Qredence/fleet-rlm.git

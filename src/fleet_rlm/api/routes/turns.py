@@ -96,6 +96,37 @@ async def stream_turn(
     A client disconnect cancels an uncommitted Turn. Durable success preserves the warm root
     even before its outcome can be queued. The Session stays locked until sandbox work has drained.
     """
+    from fleet_rlm.api.deps import get_registry, translate
+
+    submission = req.model_dump(
+        include={"message_id", "file_ids", "regenerates_turn_id", "mode", "model"}, exclude_none=True
+    )
+
+    def configure() -> None:
+        with translate("Turn configuration is unavailable"):
+            prior = (
+                runtime.store.turn_by_key(session_id, req.idempotency_key)
+                if req.idempotency_key and (req.mode is not None or req.model is not None)
+                else None
+            )
+            if prior is None and (req.mode is not None or req.model is not None):
+                saved = {}
+                engine = None
+                if req.mode is not None:
+                    saved["mode"] = req.mode
+                if req.model is not None:
+                    registry = get_registry(request)
+                    models = {"root": req.model, "sub": runtime.engine.sub_lm.model}
+                    engine = registry.engine_for_models(runtime, models)
+                    saved["models"] = models
+                runtime.store.save_runtime_settings(session_id, saved)
+                if engine is not None:
+                    runtime.set_engine(engine)
+                if req.mode is not None:
+                    runtime.set_mode(req.mode)
+
+    if req.mode is not None or req.model is not None:
+        await anyio.to_thread.run_sync(configure)
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
     callback = SSERuntimeCallback(loop, queue, runtime.sandbox_mgr)
@@ -120,6 +151,7 @@ async def stream_turn(
         callback=callback,
         emit=callback.emit,
         record_replay=req.record_replay,
+        **({"submission": submission} if any(submission.values()) else {}),
         requested_skills=tuple(req.requested_skills),
         timeout_seconds=req.timeout_seconds,
         completion_committed=completion_committed,
