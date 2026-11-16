@@ -6540,6 +6540,17 @@ def test_workspace_preparation_bounds_volume_metadata_round_trips(monkeypatch, t
     assert len(calls) <= 100, f"Cold skill preparation used {len(calls)} metadata lookups"
 
 
+def test_workspace_metadata_with_limit_compiles_without_syntax_warnings():
+    import warnings
+
+    from fleet_rlm.workspace import workspace_files_metadata_code
+
+    code = workspace_files_metadata_code(["files/a"], create_parents=False, max_bytes=1000)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SyntaxWarning)
+        compile(code, "<fleet-remote>", "exec")
+
+
 def test_metadata_parent_swap_cannot_escape_volume(tmp_path, monkeypatch, capsys):
     import hashlib
 

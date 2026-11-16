@@ -7,7 +7,6 @@ import base64
 import json
 import re
 import shlex
-import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from fleet_rlm.config import FleetSettings, validate_turn_timeout_seconds
+from fleet_rlm.config import validate_turn_timeout_seconds
 from fleet_rlm.contracts import catalog_entries
 from fleet_rlm.optimization_runs import ExperimentOptions, add_search_arguments
 from fleet_rlm.skills import validate_requested_skills
@@ -33,7 +32,7 @@ MODES = ("direct", "flex", "rlm", "hybrid")
 class SessionState:
     """Client-side view of the active Session's mode, models, context, replay flag, and latest Turn."""
 
-    mlflow_settings: FleetSettings | None = field(default=None, repr=False)
+    mlflow_mode: str = "local"
     mode: str = "hybrid"
     root_model: str = ""
     sub_model: str = ""
@@ -47,7 +46,6 @@ class SessionState:
     last_trace_id: str | None = None
     workspace_files: list[str] = field(default_factory=list)
     last_tracker: TurnTracker | None = None
-    fullscreen: bool = False
     pending_model_choice: tuple[str, list[str]] | None = None
     optimizer_launcher: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
     optimizer_reviewer: Callable[[str, str, str], None] | None = field(default=None, repr=False)
@@ -236,14 +234,8 @@ def _model(ctx: Context, arg: str) -> None:
             return
         for index, name in enumerate(models, 1):
             _out(ctx).print(f"{index}. {name}")
-        if ctx.state.fullscreen:
-            ctx.state.pending_model_choice = (role, models)
-            _out(ctx).print(
-                f"[cyan]Select {role} model [1-{len(models)}; Enter cancels] in the input box below.[/cyan]"
-            )
-            return
-        choice = _out(ctx).input(f"Select {role} model [1-{len(models)}; Enter cancels]: ").strip()
-        apply_model_choice(ctx, role, models, choice)
+        ctx.state.pending_model_choice = (role, models)
+        _out(ctx).print(f"[cyan]Select {role} model [1-{len(models)}; Enter cancels] in the input box below.[/cyan]")
         return
     model = ctx.put(f"{ctx.session}/model", json={"role": role, "model": selected}).json()["model"]
     if role == "root":
@@ -559,8 +551,7 @@ def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], 
     except ValueError as exc:
         _out(ctx).print(f"[red]Invalid /optimize options:[/red] {exc}")
         return None
-    settings = ctx.state.mlflow_settings
-    backend = settings.mlflow_mode if settings is not None else "local"
+    backend = ctx.state.mlflow_mode
     if args.mlflow is not None and args.mlflow != backend:
         _out(ctx).print("[red]/optimize must use the session's MLflow backend.[/red]")
         return None
@@ -586,7 +577,7 @@ def _optimize(ctx: Context, arg: str) -> None:
     Without arguments the fullscreen TUI only opens the Runs tab, where starting is confirmed.
     """
     if not arg.strip():
-        if ctx.state.fullscreen and ctx.state.improve_opener is not None:
+        if ctx.state.improve_opener is not None:
             ctx.state.improve_opener("runs")
         else:
             _out(ctx).print("Use the fullscreen TUI to review and confirm an optimization run.")
@@ -595,48 +586,16 @@ def _optimize(ctx: Context, arg: str) -> None:
     if parsed is None:
         return
     payload, approve_run = parsed
-    if ctx.state.fullscreen:
-        callback = ctx.state.optimizer_reviewer if approve_run is not None else ctx.state.optimizer_launcher
-        if callback is None:
-            _out(ctx).print("[red]The fullscreen Improve screen is unavailable.[/red]")
-            return
-        if approve_run is not None:
-            assert ctx.state.optimizer_reviewer is not None
-            ctx.state.optimizer_reviewer(approve_run, "approved", str(uuid.uuid4()))
-        else:
-            assert ctx.state.optimizer_launcher is not None
-            ctx.state.optimizer_launcher(payload)
+    callback = ctx.state.optimizer_reviewer if approve_run is not None else ctx.state.optimizer_launcher
+    if callback is None:
+        _out(ctx).print("[red]The fullscreen Improve screen is unavailable.[/red]")
         return
     if approve_run is not None:
-        response = ctx.post(
-            f"/improve/jobs/{quote(approve_run, safe='')}/review",
-            json={"decision": "approved", "request_id": str(uuid.uuid4())},
-        )
-        run = response.json().get("job", {})
+        assert ctx.state.optimizer_reviewer is not None
+        ctx.state.optimizer_reviewer(approve_run, "approved", str(uuid.uuid4()))
     else:
-        try:
-            response = ctx.post("/improve/jobs", json=payload)
-        except httpx.HTTPStatusError as exc:
-            if 400 <= exc.response.status_code < 500:
-                _finish_optimizer_request(ctx.state, str(payload["request_id"]))
-            raise
-        _finish_optimizer_request(ctx.state, str(payload["request_id"]))
-        run = response.json().get("job", {})
-    run_id = run.get("run_id")
-    if not isinstance(run_id, str):
-        _out(ctx).print("[red]Fleet API returned an invalid experiment record.[/red]")
-        return
-    _out(ctx).print(f"[cyan]Optimization {run.get('status', 'started')}:[/cyan] {run_id}")
-    terminal = {"completed", "failed", "cancelled", "interrupted", "approved", "rejected", "budget_exhausted"}
-    last_stage: str | None = None
-    while run.get("status") not in terminal:
-        time.sleep(1)
-        run = ctx.get(f"/improve/jobs/{quote(run_id, safe='')}").json().get("job", {})
-        stage = run.get("stage")
-        if stage and stage != last_stage:
-            last_stage = stage
-            _out(ctx).print(f"[cyan]Optimization stage:[/cyan] {str(stage)[:60]}")
-    _out(ctx).print(f"[green]Optimization {run.get('status')}.[/green]")
+        assert ctx.state.optimizer_launcher is not None
+        ctx.state.optimizer_launcher(payload)
 
 
 _MODE_OPTIONS = dict.fromkeys(MODES)

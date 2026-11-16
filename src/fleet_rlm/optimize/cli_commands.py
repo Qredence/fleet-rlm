@@ -50,7 +50,6 @@ def _open_optimization_store(
         settings.fleet_database_url,
         wait=True,
         max_size=max_size,
-        lakebase_endpoint=settings.fleet_lakebase_endpoint,
         migration_dsn=settings.fleet_database_migration_url if initialize else "",
         schema=settings.fleet_database_schema,
     )

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
@@ -19,6 +19,7 @@ import mlflow
 from mlflow.entities import SpanType
 from mlflow.entities.trace_location import MlflowExperimentLocation
 
+from fleet_rlm import replay
 from fleet_rlm.config import resolve_turn_deadline
 from fleet_rlm.contracts import RequiredSkill, Route, SkillAdmissionError
 from fleet_rlm.engine.turn_commit import (
@@ -32,7 +33,6 @@ from fleet_rlm.engine.turn_commit import (
     _write_learned_note,
 )
 from fleet_rlm.engine.turn_prepare import (
-    _MAX_MEMORIES_CHARS,
     _ROOT_SANDBOX_ATTRIBUTE,
     _TRACE_PREVIEW_CHARS,
     _capture_replay_snapshot,
@@ -46,7 +46,7 @@ from fleet_rlm.engine.turn_prepare import (
     _unpack_context,
 )
 from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
-from fleet_rlm.replay import MAX_REPLAY_FILE_BYTES, encode_snapshot
+from fleet_rlm.replay import encode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.skills import validate_requested_skills
 from fleet_rlm.store import IdempotencyConflictError
@@ -56,9 +56,7 @@ if TYPE_CHECKING:
     from fleet_rlm.session import SessionRuntime
 
 __all__ = [
-    "MAX_REPLAY_FILE_BYTES",
     "_CLEANUP_ATTRIBUTE",
-    "_MAX_MEMORIES_CHARS",
     "_ROOT_SANDBOX_ATTRIBUTE",
     "Emit",
     "_artifact_changes",
@@ -116,12 +114,14 @@ def run_turn(
     emit: Emit,
     record_replay: bool = True,
     requested_skills: tuple[str, ...] = (),
+    submission: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
     completion_committed: Event | None = None,
     completion_lock: Lock | None = None,
     cancellation_requested: Event | None = None,
 ) -> None:
     """Run one Turn for a Session, claiming its id and emitting progress events through emit."""
+    submission_options: dict[str, Any] = {"submission": submission} if submission else {}
     manager = runtime.sandbox_mgr
     started_at = time.monotonic()
     policy = resolve_turn_deadline(
@@ -195,7 +195,9 @@ def run_turn(
         manager.event_callback = emit
         with completion_lock if completion_lock is not None else nullcontext():
             prior = (
-                runtime.completed_turn(idempotency_key or turn_id, task, requested_skills) if requested_skills else None
+                runtime.completed_turn(idempotency_key or turn_id, task, requested_skills)
+                if requested_skills and not submission
+                else None
             )
             if prior is not None:
                 committed = {**_replayed(prior), "turn_id": prior["turn_id"]}
@@ -211,9 +213,10 @@ def run_turn(
                     requested_skills=requested_skills,
                     required_skills=required_skills,
                     admission_error=admission_error,
+                    **submission_options,
                 )
             else:
-                prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task)
+                prior = runtime.claim_turn(turn_id, idempotency_key or turn_id, task, **submission_options)
             if prior is not None:
                 terminal_event = {**_replayed(prior), "turn_id": prior["turn_id"]}
                 if prior["status"] == "completed":
@@ -228,6 +231,23 @@ def run_turn(
                 raise RuntimeError("Turn cancelled")
         if admission_error is not None:
             raise admission_error
+        if submission and submission.get("file_ids"):
+            import tempfile
+            from pathlib import Path
+
+            from fleet_rlm.object_storage import ObjectStorage
+
+            storage = ObjectStorage(settings)
+            for file_id in submission["file_ids"]:
+                file = runtime.store.published_file(session_id, file_id)
+                if file is None or file["origin"] != "upload":
+                    raise ValueError("Attachment does not belong to this session")
+                with tempfile.TemporaryDirectory(prefix="fleet-attachment-") as temporary:
+                    path = Path(temporary) / "content"
+                    storage.download(file, path)
+                    runtime.set_workspace_state("unknown")
+                    manager.write_workspace_file_from_path(file["workspace_path"], str(path))
+
         destination = MlflowExperimentLocation(mlflow_experiment_id) if mlflow_experiment_id else None
         with mlflow.start_span(name="fleet_turn", span_type=SpanType.CHAIN, trace_destination=destination) as span:
             try:
@@ -262,7 +282,7 @@ def run_turn(
                             {
                                 "event": "replay_skipped",
                                 "bytes": inputs["replay_skipped_bytes"],
-                                "limit": MAX_REPLAY_FILE_BYTES,
+                                "limit": replay.MAX_REPLAY_FILE_BYTES,
                             }
                         )
                     phase.set_outputs(
@@ -380,24 +400,34 @@ def run_turn(
                     _CLEANUP_ATTRIBUTE: CLEANUP_NOT_REQUIRED,
                 }
                 with phase_span("turn.commit", turn_id=turn_id, learned_note=bool(learned_note)) as phase:
+
+                    @contextmanager
+                    def commit_guard():
+                        nonlocal commit_attempted
+                        with completion_lock if completion_lock is not None else nullcontext():
+                            if manager._cancelled.is_set() or (
+                                cancellation_requested is not None and cancellation_requested.is_set()
+                            ):
+                                raise RuntimeError("Turn was cancelled before commit")
+                            runtime.assert_lease_held()
+                            commit_attempted = True
+                            try:
+                                yield
+                            except Exception as exc:
+                                resolve_exception(exc)
+                                raise
+                            if completion_committed is not None:
+                                completion_committed.set()
+
+                    committed = runtime.commit_turn(
+                        session_id=session_id,
+                        turn_record=turn_record,
+                        new_memory_note=learned_note,
+                        replay_snapshot=replay_snapshot,
+                        artifact_paths=artifact_capture["paths"],
+                        commit_guard=commit_guard(),
+                    )
                     with completion_lock if completion_lock is not None else nullcontext():
-                        if manager._cancelled.is_set():
-                            raise RuntimeError("Turn was cancelled before commit")
-                        runtime.assert_lease_held()
-                        commit_attempted = True
-                        try:
-                            committed = runtime.commit_turn(
-                                session_id=session_id,
-                                turn_record=turn_record,
-                                new_memory_note=learned_note,
-                                replay_snapshot=replay_snapshot,
-                                artifact_paths=artifact_capture["paths"],
-                            )
-                        except Exception as exc:
-                            resolve_exception(exc)
-                            raise
-                        if completion_committed is not None:
-                            completion_committed.set()
                         end_execution()
                     phase.set_outputs({"artifacts": len(committed["artifacts"])})
                 _write_learned_note(runtime, turn_id, learned_note, trace_id)

@@ -227,7 +227,8 @@
       "maximum_lifespan_minutes": null,
       "provider_owned": true,
       "cleanup": "not_required",
-      "replay_snapshot_selected": true
+      "replay_snapshot_selected": true,
+      "assistant_message_id": "fixture-turn_assistant"
     },
     "live_failure": {
       "event": "error",

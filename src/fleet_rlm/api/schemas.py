@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -31,6 +32,11 @@ class _Request(BaseModel):
 class TurnRequest(_Request):
     """User prompt sent to one Session's Fleet engine."""
 
+    message_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    file_ids: list[Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]] = Field(default_factory=list, max_length=20)
+    regenerates_turn_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    mode: Literal["direct", "flex", "rlm", "hybrid"] | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=300)
     task: str = Field(min_length=1, max_length=MAX_TASK_CHARS)
     idempotency_key: str | None = Field(default=None, max_length=128)
     requested_skills: list[
@@ -464,3 +470,88 @@ class ImproveHistory(BaseModel):
 
     versions: list[Job]
     evaluations: list[Job]
+
+
+class PublishedFile(BaseModel):
+    """Immutable session file metadata; object credentials and locators stay private."""
+
+    file_id: str
+    turn_id: str | None = None
+    origin: Literal["upload", "artifact"]
+    filename: str
+    media_type: str
+    size_bytes: int = Field(ge=0)
+    sha256: str
+    workspace_path: str
+    created_at: datetime | None = None
+
+
+class SavedMessage(BaseModel):
+    """One durable conversation entry with its owning execution outcome."""
+
+    session_id: str
+    message_id: str
+    turn_id: str
+    position: int
+    role: Literal["user", "assistant"]
+    content: list[dict[str, Any]]
+    created_at: datetime
+    seq: int
+    status: Literal["running", "completed", "failed", "cancelled"]
+    route: Literal["direct", "flex", "rlm"] | None = None
+    trace_id: str | None = None
+    trace_url: str | None = None
+    regenerates_turn_id: str | None = None
+    files: list[PublishedFile] = Field(default_factory=list)
+
+
+class MessagePage(BaseModel):
+    """A chronological page of complete turns; cursor is exclusive."""
+
+    messages: list[SavedMessage]
+    next_before: int | None = None
+
+
+class MessageActivityPart(_Request):
+    """One UI activity part attached to a completed assistant message."""
+
+    type: Literal["data-fleetActivity"]
+    id: str = Field(min_length=1, max_length=256)
+    data: dict[str, Any]
+
+
+class MessageActivityRequest(_Request):
+    """Bounded Fleet activity captured by the chat client for durable history."""
+
+    activity: list[MessageActivityPart] = Field(max_length=1000)
+
+    @field_validator("activity")
+    @classmethod
+    def activity_size(cls, activity: list[MessageActivityPart]) -> list[MessageActivityPart]:
+        """Keep persisted activity within the per-message storage budget."""
+        encoded = json.dumps([part.model_dump() for part in activity], ensure_ascii=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > 512 * 1024:
+            raise ValueError("Message activity exceeds the 512 KiB limit")
+        return activity
+
+
+class PublishedFiles(BaseModel):
+    """A bounded list of published files in one session."""
+
+    files: list[PublishedFile]
+
+
+class WorkspaceInventoryFile(BaseModel):
+    """A path observed during a complete managed-workspace scan."""
+
+    path: str
+    size_bytes: int | None = None
+    sha256: str | None = None
+    observed_at: datetime
+
+
+class WorkspaceInventory(BaseModel):
+    """Passive cached workspace navigation with explicit freshness."""
+
+    indexed_at: datetime | None
+    files: list[WorkspaceInventoryFile]

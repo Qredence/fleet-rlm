@@ -24,17 +24,17 @@ def _store_replay_snapshot(
     manifest, blobs = split_snapshot_for_storage(digest, content)
     for blob_sha256, size_bytes, blob_bytes in blobs:
         connection.execute(
-            "INSERT INTO fleet_lite_replay_blobs (sha256, size_bytes, content) "
+            "INSERT INTO replay_blobs (sha256, size_bytes, content) "
             "VALUES (%s, %s, %s) ON CONFLICT (sha256) DO NOTHING",
             (blob_sha256, size_bytes, blob_bytes),
         )
     connection.execute(
-        "INSERT INTO fleet_lite_replay_snapshots (session_id, turn_id, sha256, manifest) "
+        "INSERT INTO replay_snapshots (session_id, turn_id, sha256, manifest) "
         "VALUES (%s, %s, %s, %s::jsonb) ON CONFLICT (session_id, turn_id) DO NOTHING",
         (session_id, turn_id, digest, json.dumps(manifest, sort_keys=True, separators=(",", ":"))),
     )
     stored_digest = connection.execute(
-        "SELECT sha256 FROM fleet_lite_replay_snapshots WHERE session_id = %s AND turn_id = %s",
+        "SELECT sha256 FROM replay_snapshots WHERE session_id = %s AND turn_id = %s",
         (session_id, turn_id),
     ).fetchone()
     if not stored_digest or _row_value(stored_digest, "sha256", 0) != digest:
@@ -60,7 +60,7 @@ class ReplayStoreMixin:
         if not digests:
             return {}
         rows = connection.execute(
-            "SELECT sha256, content FROM fleet_lite_replay_blobs WHERE sha256 = ANY(%s::text[])",
+            "SELECT sha256, content FROM replay_blobs WHERE sha256 = ANY(%s::text[])",
             (sorted(digests),),
         ).fetchall()
         return {str(_row_value(row, "sha256", 0)): bytes(_row_value(row, "content", 1)) for row in rows}
@@ -104,14 +104,14 @@ class ReplayStoreMixin:
         with self.pool.connection() as connection:
             saved = connection.execute(
                 """
-                INSERT INTO fleet_lite_review_labels(
+                INSERT INTO review_labels(
                     session_id, turn_id, task, workspace_manifest, context_files, review_status,
                     source_group, expected_answer, expected_values, route, critical, reviewer,
                     structured_expectations
                 )
                 SELECT %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb
                 WHERE EXISTS (
-                    SELECT 1 FROM fleet_lite_replay_snapshots
+                    SELECT 1 FROM replay_snapshots
                     WHERE session_id = %s AND turn_id = %s AND sha256 = %s
                 )
                 ON CONFLICT (session_id, turn_id) DO UPDATE SET
@@ -172,8 +172,8 @@ class ReplayStoreMixin:
                            labels.context_files,
                            replay.sha256 AS replay_snapshot_sha256,
                            replay.manifest AS replay_manifest
-                    FROM fleet_lite_review_labels AS labels
-                    JOIN fleet_lite_replay_snapshots AS replay
+                    FROM review_labels AS labels
+                    JOIN replay_snapshots AS replay
                       ON replay.session_id = labels.session_id AND replay.turn_id = labels.turn_id
                     WHERE labels.review_status = 'approved'
                       AND (NULLIF(labels.expected_answer, '') IS NOT NULL
@@ -213,7 +213,7 @@ class ReplayStoreMixin:
         """Count approved labels written after `since` (an ISO timestamp), or all of them when None."""
         with self.pool.connection() as connection:
             row = connection.execute(
-                "SELECT COUNT(*) FROM fleet_lite_review_labels "
+                "SELECT COUNT(*) FROM review_labels "
                 "WHERE review_status = 'approved' AND (%s::timestamptz IS NULL OR updated_at > %s::timestamptz)",
                 (since, since),
             ).fetchone()
@@ -241,10 +241,10 @@ class ReplayStoreMixin:
                            labels.expected_values,
                            labels.critical,
                            labels.source_group
-                    FROM fleet_lite_replay_snapshots AS replay
-                    JOIN fleet_lite_turns AS turns
+                    FROM replay_snapshots AS replay
+                    JOIN turns AS turns
                       ON turns.session_id = replay.session_id AND turns.turn_id = replay.turn_id
-                    LEFT JOIN fleet_lite_review_labels AS labels
+                    LEFT JOIN review_labels AS labels
                       ON labels.session_id = replay.session_id AND labels.turn_id = replay.turn_id
                     WHERE turns.status = 'completed'
                     ORDER BY turns.updated_at DESC, replay.session_id, replay.turn_id
@@ -268,8 +268,8 @@ class ReplayStoreMixin:
                            replay.sha256 AS replay_snapshot_sha256,
                            turns.result->>'trace_id' AS trace_id,
                            turns.result->>'answer' AS answer
-                    FROM fleet_lite_replay_snapshots AS replay
-                    JOIN fleet_lite_turns AS turns
+                    FROM replay_snapshots AS replay
+                    JOIN turns AS turns
                       ON turns.session_id = replay.session_id AND turns.turn_id = replay.turn_id
                     WHERE replay.turn_id = %s
                     ORDER BY turns.updated_at DESC
@@ -285,7 +285,7 @@ class ReplayStoreMixin:
         """Fetch and rehydrate immutable replay evidence by its owning Session and Turn."""
         with self.pool.connection() as connection:
             row = connection.execute(
-                "SELECT sha256, manifest FROM fleet_lite_replay_snapshots WHERE session_id = %s AND turn_id = %s",
+                "SELECT sha256, manifest FROM replay_snapshots WHERE session_id = %s AND turn_id = %s",
                 (session_id, turn_id),
             ).fetchone()
             if not row:
@@ -310,13 +310,13 @@ class ReplayStoreMixin:
         with self.pool.connection() as connection, connection.transaction():
             deleted_snapshots = connection.execute(
                 """
-                DELETE FROM fleet_lite_replay_snapshots
+                DELETE FROM replay_snapshots
                 WHERE ctid IN (
                     SELECT s.ctid
-                    FROM fleet_lite_replay_snapshots AS s
+                    FROM replay_snapshots AS s
                     WHERE s.created_at < NOW() - (%s * INTERVAL '1 day')
                       AND NOT EXISTS (
-                          SELECT 1 FROM fleet_lite_review_labels AS l
+                          SELECT 1 FROM review_labels AS l
                           WHERE l.session_id = s.session_id AND l.turn_id = s.turn_id
                       )
                     LIMIT %s
@@ -327,18 +327,18 @@ class ReplayStoreMixin:
             ).fetchall()
             deleted_blobs = connection.execute(
                 """
-                DELETE FROM fleet_lite_replay_blobs AS b
+                DELETE FROM replay_blobs AS b
                 WHERE b.ctid IN (
                     SELECT candidate.ctid
-                    FROM fleet_lite_replay_blobs AS candidate
+                    FROM replay_blobs AS candidate
                     WHERE NOT EXISTS (
                         SELECT 1
-                        FROM fleet_lite_replay_snapshots AS s,
+                        FROM replay_snapshots AS s,
                              jsonb_each_text(COALESCE(s.manifest->'replay_file_blobs', '{}'::jsonb)) AS ref(path, sha)
                         WHERE ref.sha = candidate.sha256
                     )
                       AND NOT EXISTS (
-                        SELECT 1 FROM fleet_lite_replay_snapshots AS s
+                        SELECT 1 FROM replay_snapshots AS s
                         WHERE s.manifest->>'_raw_blob_sha256' = candidate.sha256
                     )
                     LIMIT %s

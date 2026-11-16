@@ -9,7 +9,6 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import UTC, datetime
 from typing import Any, Self
 
 import psycopg
@@ -20,8 +19,6 @@ from fleet_rlm.store.schema import _OPTIMIZATION_LOCK_SCOPE, _optimization_owner
 _LOGGER = logging.getLogger("fleet_rlm.store")
 LEASE_TTL_SECONDS = 60
 HEARTBEAT_INTERVAL_SECONDS = 20
-_OAUTH_REFRESH_MARGIN_SECONDS = 300.0
-_OAUTH_DEFAULT_TTL_SECONDS = 3_300.0
 _DEFAULT_OWNER_ID = f"{os.getpid()}-{uuid.uuid4().hex[:12]}"
 
 
@@ -67,8 +64,7 @@ class PooledLease:
         if verify:
             with self._store.pool.connection() as connection:
                 row = connection.execute(
-                    "SELECT 1 FROM fleet_lite_leases WHERE scope = %s AND owner_id = %s "
-                    "AND epoch = %s AND expires_at > NOW()",
+                    "SELECT 1 FROM leases WHERE scope = %s AND owner_id = %s AND epoch = %s AND expires_at > NOW()",
                     (self.scope, self.owner_id, self.epoch),
                 ).fetchone()
             if row is None:
@@ -180,7 +176,7 @@ class LeaseHeartbeatService:
         owner_id: str,
         on_lost: Callable[[], None] | None = None,
     ) -> None:
-        """Track a `fleet_lite_leases` scope (optimization worker/owner) for batched renewal."""
+        """Track a `leases` scope (optimization worker/owner) for batched renewal."""
         with self._lock:
             self._leases[scope] = (epoch, owner_id, on_lost, time.monotonic())
         self.start()
@@ -188,7 +184,7 @@ class LeaseHeartbeatService:
     def unregister_lease(
         self, scope: str, epoch: int | None = None, *, on_lost: Callable[[], None] | None = None
     ) -> None:
-        """Stop tracking a `fleet_lite_leases` scope."""
+        """Stop tracking a `leases` scope."""
         with self._lock:
             entry = self._leases.get(scope)
             if entry is not None and (epoch is None or entry[0] == epoch) and (on_lost is None or entry[2] is on_lost):
@@ -335,16 +331,16 @@ class LeaseStoreMixin:
                 connection.cursor(row_factory=dict_row)
                 .execute(
                     """
-                    INSERT INTO fleet_lite_sessions (session_id, ownership_epoch, lease_owner, lease_expires_at)
+                    INSERT INTO sessions (session_id, ownership_epoch, lease_owner, lease_expires_at)
                     VALUES (%s, 1, %s, NOW() + (%s * INTERVAL '1 second'))
                     ON CONFLICT (session_id) DO UPDATE SET
-                        ownership_epoch = fleet_lite_sessions.ownership_epoch + 1,
+                        ownership_epoch = sessions.ownership_epoch + 1,
                         lease_owner = EXCLUDED.lease_owner,
                         lease_expires_at = EXCLUDED.lease_expires_at,
                         updated_at = NOW()
-                    WHERE fleet_lite_sessions.lease_owner IS NULL
-                       OR fleet_lite_sessions.lease_expires_at < NOW()
-                       OR fleet_lite_sessions.lease_owner = EXCLUDED.lease_owner
+                    WHERE sessions.lease_owner IS NULL
+                       OR sessions.lease_expires_at < NOW()
+                       OR sessions.lease_owner = EXCLUDED.lease_owner
                     RETURNING ownership_epoch, (xmax = 0) AS created
                     """,
                     (session_id, owner, LEASE_TTL_SECONDS),
@@ -378,7 +374,7 @@ class LeaseStoreMixin:
         scope = f"fleet:optimization-owner:{validated}"
         with self.pool.connection() as connection:
             row = connection.execute(
-                "SELECT 1 FROM fleet_lite_leases WHERE scope = %s AND expires_at >= NOW() AND owner_id = %s",
+                "SELECT 1 FROM leases WHERE scope = %s AND expires_at >= NOW() AND owner_id = %s",
                 (scope, validated),
             ).fetchone()
         return row is not None
@@ -387,14 +383,14 @@ class LeaseStoreMixin:
         with self.pool.connection() as connection:
             row = connection.execute(
                 """
-                INSERT INTO fleet_lite_leases (scope, owner_id, epoch, expires_at)
+                INSERT INTO leases (scope, owner_id, epoch, expires_at)
                 VALUES (%s, %s, 1, NOW() + (%s * INTERVAL '1 second'))
                 ON CONFLICT (scope) DO UPDATE SET
                     owner_id = EXCLUDED.owner_id,
-                    epoch = fleet_lite_leases.epoch + 1,
+                    epoch = leases.epoch + 1,
                     expires_at = EXCLUDED.expires_at
-                WHERE fleet_lite_leases.expires_at < NOW()
-                   OR fleet_lite_leases.owner_id = EXCLUDED.owner_id
+                WHERE leases.expires_at < NOW()
+                   OR leases.owner_id = EXCLUDED.owner_id
                 RETURNING epoch
                 """,
                 (scope, owner_id, LEASE_TTL_SECONDS),
@@ -412,13 +408,13 @@ class LeaseStoreMixin:
         with self.pool.connection() as connection:
             if kind == "session":
                 connection.execute(
-                    "UPDATE fleet_lite_sessions SET lease_owner = NULL, lease_expires_at = NULL "
+                    "UPDATE sessions SET lease_owner = NULL, lease_expires_at = NULL "
                     "WHERE session_id = %s AND ownership_epoch = %s AND lease_owner = %s",
                     (scope, epoch, owner_id),
                 )
             else:
                 connection.execute(
-                    "DELETE FROM fleet_lite_leases WHERE scope = %s AND owner_id = %s AND epoch = %s",
+                    "DELETE FROM leases WHERE scope = %s AND owner_id = %s AND epoch = %s",
                     (scope, owner_id, epoch),
                 )
 
@@ -428,7 +424,7 @@ class LeaseStoreMixin:
         with self.pool.connection() as connection:
             rows = connection.execute(
                 """
-                UPDATE fleet_lite_sessions AS s
+                UPDATE sessions AS s
                 SET lease_expires_at = NOW() + (%s * INTERVAL '1 second'),
                     updated_at = NOW()
                 FROM (SELECT unnest(%s::text[]) AS sid, unnest(%s::bigint[]) AS ep) AS req
@@ -448,7 +444,7 @@ class LeaseStoreMixin:
         with self.pool.connection() as connection:
             rows = connection.execute(
                 """
-                UPDATE fleet_lite_leases AS l
+                UPDATE leases AS l
                 SET expires_at = NOW() + (%s * INTERVAL '1 second')
                 FROM (SELECT unnest(%s::text[]) AS sc, unnest(%s::bigint[]) AS ep) AS req
                 WHERE l.scope = req.sc
@@ -460,62 +456,3 @@ class LeaseStoreMixin:
                 (ttl_seconds, scopes, epochs, owner_id),
             ).fetchall()
         return {str(_row_value(row, "scope", 0)) for row in rows}
-
-
-def _credential_expiry_monotonic(credential: Any, now: float) -> float:
-    expiration = getattr(credential, "expiration_time", None)
-    if isinstance(expiration, (int, float)):
-        delta = float(expiration) - time.time()
-        return now + max(delta, 0.0)
-    if isinstance(expiration, datetime):
-        target = expiration if expiration.tzinfo is not None else expiration.replace(tzinfo=UTC)
-        delta = target.timestamp() - time.time()
-        return now + max(delta, 0.0)
-    return now + _OAUTH_DEFAULT_TTL_SECONDS
-
-
-def lakebase_connection_class(client: Any, endpoint: str) -> type[psycopg.Connection[Any]]:
-    """Create psycopg connections caching the Lakebase OAuth token until near expiry."""
-    token_lock = threading.Lock()
-    cached_token: str | None = None
-    cached_expires_at = 0.0
-
-    def current_token() -> str:
-        nonlocal cached_token, cached_expires_at
-        now = time.monotonic()
-        if cached_token is not None and now + _OAUTH_REFRESH_MARGIN_SECONDS < cached_expires_at:
-            return cached_token
-        with token_lock:
-            now = time.monotonic()
-            if cached_token is not None and now + _OAUTH_REFRESH_MARGIN_SECONDS < cached_expires_at:
-                return cached_token
-            credential = client.postgres.generate_database_credential(endpoint=endpoint)
-            cached_token = str(credential.token)
-            cached_expires_at = _credential_expiry_monotonic(credential, time.monotonic())
-            return cached_token
-
-    class LakebaseOAuthConnection(psycopg.Connection):
-        @classmethod
-        def connect(
-            cls,
-            conninfo: str = "",
-            *,
-            autocommit: bool = False,
-            prepare_threshold: int | None = 5,
-            context: Any = None,
-            row_factory: Any = None,
-            cursor_factory: Any = None,
-            **kwargs: Any,
-        ) -> Self:
-            kwargs["password"] = current_token()
-            return super().connect(
-                conninfo,
-                autocommit=autocommit,
-                prepare_threshold=prepare_threshold,
-                context=context,
-                row_factory=row_factory,
-                cursor_factory=cursor_factory,
-                **kwargs,
-            )
-
-    return LakebaseOAuthConnection

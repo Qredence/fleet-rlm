@@ -15,6 +15,9 @@ from pydantic_settings import BaseSettings
 # Dev and holdout each need this many labelled examples before a run can tell a gain from noise.
 MIN_SPLIT_EXAMPLES = 5
 _SECRET_FIELDS = {
+    "fleet_storage_access_key",
+    "fleet_storage_secret_key",
+    "mlflow_local_backend_store_uri",
     "fleet_database_url",
     "fleet_database_migration_url",
     "fleet_daytona_api_key",
@@ -56,7 +59,6 @@ _TOML_FIELDS: dict[str, dict[str, str]] = {
         "max_upload_bytes": "max_upload_bytes",
         "compiled_program_dir": "compiled_program_dir",
         "local_skills_dir": "local_skills_dir",
-        "lakebase_endpoint": "fleet_lakebase_endpoint",
         "database_schema": "fleet_database_schema",
     },
     "mlflow.local": {

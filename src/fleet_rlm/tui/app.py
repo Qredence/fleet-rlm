@@ -27,7 +27,6 @@ from prompt_toolkit.completion import (
 )
 from prompt_toolkit.document import Document
 from rich.console import Console
-from rich.panel import Panel
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
@@ -37,7 +36,6 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, OptionList, Static, TextArea
 
 import fleet_rlm.tui.commands as commands_mod
-from fleet_rlm.config import FleetSettings
 from fleet_rlm.tui.commands import (
     COMMANDS,
     MODES,
@@ -54,7 +52,6 @@ from fleet_rlm.tui.render import (
     TurnTracker,
     _extract_http_detail,
     print_http_error,
-    render_event,
 )
 from fleet_rlm.tui.stream import _abort_response, _request_turn, _turn_events
 from fleet_rlm.tui.widgets import (
@@ -357,7 +354,6 @@ class FleetTextualApp(App[str | None]):
         self.client = client
         self.session_id = session_id
         self.state = state
-        self.state.fullscreen = True
         self._lock = threading.Lock()
         self._turn_active: bool = False
         self._cancel_requested: bool = False
@@ -1364,60 +1360,11 @@ class FleetTextualApp(App[str | None]):
         threading.Thread(target=worker, name="fleet-textual-turn", daemon=True).start()
 
 
-def run_interactive_cli(base_url: str, session_id: str, *, settings: FleetSettings | None = None) -> str | None:
-    """Connect to the API and run the Textual full-screen chat TUI (or non-TTY fallback) until exit."""
+def run_interactive_cli(base_url: str, session_id: str, *, mlflow_mode: str = "local") -> str | None:
+    """Run the terminal Textual client; browser clients use the same app directly."""
+    if not sys.stdin.isatty() or not CONSOLE.is_terminal:
+        raise SystemExit("fleet cli requires an interactive terminal; use fleet web or the HTTP API")
     validate_session_id(session_id)
-    state = SessionState(mlflow_settings=settings)
-    # FastAPI's SSE routing emits a `: ping` keepalive every 15 seconds while the Turn
-    # generator is idle, so the 300-second read timeout is only a safety net.
-    with httpx.Client(
-        base_url=base_url,
-        timeout=httpx.Timeout(300.0, connect=10.0),
-    ) as client:
-        if sys.stdin.isatty() and CONSOLE.is_terminal:
-            return FleetTextualApp(client, session_id, state).run()
-
-        CONSOLE.print(
-            Panel.fit(
-                f"[bold cyan]Fleet-RLM Lite[/bold cyan] | Session: [yellow]{session_id}[/yellow]\n"
-                "Enter `/help` for commands; `/replay on|off` selects bounded replay capture; `/exit` to quit."
-            )
-        )
-        while True:
-            try:
-                user_input = CONSOLE.input("\n[bold green]fleet>[/bold green] ").strip()
-            except KeyboardInterrupt:
-                CONSOLE.print("[dim]Input cleared. Use /exit to quit.[/dim]")
-                continue
-            except EOFError:
-                CONSOLE.print()
-                break
-            if not user_input:
-                continue
-            if user_input.startswith("/"):
-                if not handle_command(client, user_input, session_id, state=state):
-                    break
-                continue
-            tracker = TurnTracker()
-            state.last_tracker = tracker
-            try:
-                with _request_turn(client, session_id, user_input, state) as response:
-                    response.raise_for_status()
-                    for event in _turn_events(response, state, tracker):
-                        if event is None:
-                            CONSOLE.print("[yellow]Ignoring malformed SSE event.[/yellow]")
-                            continue
-                        render_event(event)
-                if tracker.terminal_event is None:
-                    CONSOLE.print(
-                        "[yellow]Stream ended without a final outcome. Check /history before retrying.[/yellow]"
-                    )
-            except httpx.HTTPStatusError as exc:
-                print_http_error(exc)
-            except httpx.HTTPError as exc:
-                CONSOLE.print(f"[red]Turn stream failed:[/red] {type(exc).__name__}")
-            except KeyboardInterrupt:
-                CONSOLE.print(
-                    "[yellow]Turn stream closed; server cancels on disconnect. Check /history for outcome.[/yellow]"
-                )
-    return None
+    state = SessionState(mlflow_mode=mlflow_mode)
+    with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
+        return FleetTextualApp(client, session_id, state).run()

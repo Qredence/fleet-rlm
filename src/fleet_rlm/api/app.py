@@ -14,7 +14,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from fleet_rlm.api.routes import improve, sessions, turns, workspace
+from fleet_rlm.api.routes import chat, improve, sessions, turns, workspace
 from fleet_rlm.api.schemas import Health
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.experiments import ExperimentManager
@@ -59,7 +59,6 @@ def create_app(
                 await asyncio.to_thread(
                     Store.open,
                     resolved.fleet_database_url,
-                    lakebase_endpoint=resolved.fleet_lakebase_endpoint,
                     migration_dsn=resolved.fleet_database_migration_url,
                     schema=resolved.fleet_database_schema,
                 )
@@ -100,15 +99,15 @@ def create_app(
         schema = native_openapi()
         # FastAPI 0.162 adds the OpenAPI 3.2 Media Type itemSchema to SSE routes.
         # Only correct these media declarations; retain native components and framing.
-        path = schema.get("paths", {}).get("/sessions/{session_id}/turn", {})
-        for operation in path.values():
-            if not isinstance(operation, dict):
-                continue
-            for response in operation.get("responses", {}).values():
-                media = response.get("content", {}).get("text/event-stream")
-                if media is not None:
-                    media.pop("itemSchema", None)
-                    media["schema"] = {"type": "string"}
+        for path in schema.get("paths", {}).values():
+            for operation in path.values():
+                if not isinstance(operation, dict):
+                    continue
+                for response in operation.get("responses", {}).values():
+                    media = response.get("content", {}).get("text/event-stream")
+                    if media is not None:
+                        media.pop("itemSchema", None)
+                        media["schema"] = {"type": "string"}
         return schema
 
     app.openapi = openapi_contract  # ty: ignore[invalid-assignment] -- FastAPI's supported OpenAPI hook.
@@ -153,6 +152,7 @@ def create_app(
         )
 
     for router in (
+        chat.router,
         sessions.router,
         workspace.router,
         sessions.memory_router,

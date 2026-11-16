@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import time
 import uuid
 from typing import Any
 
@@ -12,79 +11,45 @@ import psycopg_pool
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from fleet_rlm.store.chat import ChatStoreMixin
 from fleet_rlm.store.leases import (
-    HEARTBEAT_INTERVAL_SECONDS,
-    LEASE_TTL_SECONDS,
     LeaseHeartbeatService,
     LeaseStoreMixin,
     PooledLease,
-    lakebase_connection_class,
 )
 from fleet_rlm.store.optimization import OptimizationStoreMixin
 from fleet_rlm.store.replays import ReplayStoreMixin
 from fleet_rlm.store.schema import (
-    _OPTIMIZATION_LOCK_SCOPE,
     _POOL_MAX_IDLE_SECONDS,
     _POOL_MAX_LIFETIME_SECONDS,
     _POOL_RECONNECT_TIMEOUT_SECONDS,
-    _REPLAY_RETENTION_DAYS,
-    _RETRY_DELAY_SECONDS,
     _SCHEMA_MIGRATIONS,
     _SCHEMA_VERSION_TABLE,
-    JOB_KINDS,
-    SCHEMA_STATEMENTS,
     SCHEMA_VERSION,
     IdempotencyConflictError,
     _retry_once,
 )
 from fleet_rlm.store.sessions import SessionStoreMixin
 
-__all__ = [
-    "HEARTBEAT_INTERVAL_SECONDS",
-    "JOB_KINDS",
-    "LEASE_TTL_SECONDS",
-    "SCHEMA_STATEMENTS",
-    "SCHEMA_VERSION",
-    "_OPTIMIZATION_LOCK_SCOPE",
-    "_POOL_MAX_IDLE_SECONDS",
-    "_POOL_MAX_LIFETIME_SECONDS",
-    "_POOL_RECONNECT_TIMEOUT_SECONDS",
-    "_REPLAY_RETENTION_DAYS",
-    "_RETRY_DELAY_SECONDS",
-    "_SCHEMA_MIGRATIONS",
-    "_SCHEMA_VERSION_TABLE",
-    "IdempotencyConflictError",
-    "LeaseHeartbeatService",
-    "PooledLease",
-    "Store",
-    "_retry_once",
-    "lakebase_connection_class",
-    "time",
-]
+__all__ = ["SCHEMA_VERSION", "IdempotencyConflictError", "LeaseHeartbeatService", "PooledLease", "Store"]
 
 
-class Store(LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationStoreMixin):
+class Store(ChatStoreMixin, LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationStoreMixin):
     """Durable PostgreSQL state for Sessions, sandbox ownership, memories, replays, and optimization."""
 
     def __init__(
         self,
         pool: Any,
-        dsn: str = "",
-        connection_class: Any = psycopg.Connection,
         *,
         migration_pool: Any = None,
         schema: str = "public",
-        connection_kwargs: dict[str, Any] | None = None,
         worker_id: str | None = None,
     ) -> None:
         self.pool = pool
-        self.dsn = dsn
-        self.connection_class = connection_class
         self.migration_pool = migration_pool or pool
         if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", schema):
             raise ValueError("database schema must be a lowercase PostgreSQL identifier")
         self.schema = schema
-        self.connection_kwargs = connection_kwargs or {}
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
         self.heartbeat = LeaseHeartbeatService(self)
 
@@ -95,7 +60,6 @@ class Store(LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationSt
         *,
         wait: bool = False,
         max_size: int = 20,
-        lakebase_endpoint: str = "",
         migration_dsn: str = "",
         schema: str = "public",
     ) -> Store:
@@ -103,10 +67,6 @@ class Store(LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationSt
         if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", schema):
             raise ValueError("database schema must be a lowercase PostgreSQL identifier")
         connection_class: type[psycopg.Connection[Any]] = psycopg.Connection
-        if lakebase_endpoint:
-            from databricks.sdk import WorkspaceClient
-
-            connection_class = lakebase_connection_class(WorkspaceClient(), lakebase_endpoint)
         connection_kwargs: dict[str, Any] = {"connect_timeout": 30, "autocommit": True}
         if schema != "public":
             connection_kwargs["options"] = f"-c search_path={schema}"
@@ -133,11 +93,8 @@ class Store(LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationSt
             raise
         return cls(
             pool,
-            dsn,
-            connection_class,
             migration_pool=migration_pool,
             schema=schema,
-            connection_kwargs=connection_kwargs,
         )
 
     def close(self) -> None:
@@ -167,8 +124,16 @@ class Store(LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationSt
             connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,17))", ("fleet_lite_schema_migrations",)
             )
+            ledgers = connection.execute(
+                "SELECT to_regclass(%s), to_regclass(%s)",
+                (f"{self.schema}.schema_migrations", f"{self.schema}.fleet_lite_schema_migrations"),
+            ).fetchone()
+            if ledgers and ledgers[0] and ledgers[1]:
+                raise RuntimeError("Conflicting Fleet migration ledgers")
+            if ledgers and ledgers[1]:
+                connection.execute("ALTER TABLE fleet_lite_schema_migrations RENAME TO schema_migrations")
             connection.execute(_SCHEMA_VERSION_TABLE)
-            row = connection.execute("SELECT MAX(version) FROM fleet_lite_schema_migrations").fetchone()
+            row = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
             current_version = int(row[0]) if row and row[0] is not None else 0
             if current_version > SCHEMA_VERSION:
                 raise RuntimeError(
@@ -182,7 +147,7 @@ class Store(LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin, OptimizationSt
                 for statement in statements:
                     connection.execute(statement)
                 connection.execute(
-                    "INSERT INTO fleet_lite_schema_migrations(version) VALUES (%s) ON CONFLICT DO NOTHING",
+                    "INSERT INTO schema_migrations(version) VALUES (%s) ON CONFLICT DO NOTHING",
                     (version,),
                 )
                 current_version = version

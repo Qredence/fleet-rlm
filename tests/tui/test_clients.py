@@ -119,83 +119,6 @@ def test_improve_actions_are_visible_in_compact_terminals(size) -> None:
     asyncio.run(scenario())
 
 
-def test_rich_cli_renders_help_and_streams_a_turn(monkeypatch: pytest.MonkeyPatch) -> None:
-    events = [
-        {"event": "module_start", "module": "AdaptiveFleetEngine"},
-        {"event": "tool_start", "tool": "read_file"},
-        {"event": "tool_end", "ok": True},
-        {
-            "event": "turn_complete",
-            "answer": "# Summary\n\nThe file contains three records.",
-            "route": "flex",
-            "learned_skill_note": "Use the ledger-audit Skill for reconciliation.",
-            "artifacts": ["artifacts/summary.csv"],
-            "trace_id": "trace-123",
-        },
-    ]
-    submitted_tasks: list[dict[str, Any]] = []
-
-    def handle_request(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert request.url.path == "/sessions/session-1/turn"
-        submitted_tasks.append(json.loads(request.content))
-        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
-        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
-
-    real_client = httpx.Client
-    transport = httpx.MockTransport(handle_request)
-
-    def create_client(*args: Any, **kwargs: Any) -> httpx.Client:
-        return real_client(*args, transport=transport, **kwargs)
-
-    monkeypatch.setattr(app.httpx, "Client", create_client)
-
-    output, console = _capture_console(monkeypatch, width=100)
-    user_inputs = iter(("/replay on", "summarize the file", "/replay off", "/help", "/exit"))
-
-    def read_input(prompt: str) -> str:
-        console.print(prompt, end="")
-        return next(user_inputs)
-
-    monkeypatch.setattr(console, "input", read_input)
-
-    app.run_interactive_cli("http://fleet.test", "session-1")
-
-    rendered = output.getvalue()
-    assert len(submitted_tasks) == 1
-    assert submitted_tasks[0]["task"] == "summarize the file"
-    assert len(submitted_tasks[0]["idempotency_key"]) == 32
-    assert submitted_tasks[0]["record_replay"] is True
-    assert "Replay capture enabled" in rendered and "Replay capture disabled" in rendered
-    assert "Fleet-RLM Lite" in rendered
-    assert "Session: session-1" in rendered
-    assert "→ Module: AdaptiveFleetEngine" in rendered
-    assert "⚙ Tool: read_file" in rendered
-    assert "Answer (route=flex)" in rendered
-    assert "The file contains three records." in rendered
-    assert "Use the ledger-audit Skill for reconciliation." in rendered
-    assert "artifacts/summary.csv" in rendered
-    assert "MLflow trace ID: trace-123" in rendered
-    assert "`/skills [pull|push|require <names...>|clear]`" in rendered and "`/exit`" in rendered
-
-
-def test_rich_cli_renders_versioned_event_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    output, _console = _capture_console(monkeypatch, width=100)
-
-    render.render_event(
-        {
-            "version": 1,
-            "event": "turn_complete",
-            "seq": 4,
-            "payload": {"answer": "Versioned result", "route": "hybrid"},
-        }
-    )
-
-    rendered = output.getvalue()
-    assert "Answer (route=hybrid)" in rendered
-    assert "Versioned result" in rendered
-
-
 def test_shared_turn_events_update_state_and_tracker_under_the_supplied_lock(monkeypatch):
     import threading
 
@@ -297,95 +220,6 @@ def test_trace_command_shows_trace_id_when_saved_turn_has_one(monkeypatch: pytes
 
 
 @pytest.mark.parametrize(
-    ("event", "expected"),
-    [
-        ({"event": "turn_cancelled", "error": "Cancelled by client."}, "Turn cancelled"),
-        ({"event": "budget_update", "lm_calls": 3, "max_llm_calls": 3}, "budget full; no calls remain"),
-        ({"event": "ungrounded_submit", "figures": ["16995.71"], "rejected": True}, "not seen in sandbox output"),
-        ({"event": "skill_selection", "selected": ["tabular-analysis"]}, "Skills preloaded: tabular-analysis"),
-        ({"event": "turn_complete", "answer": "Done", "route": "hybrid"}, "Turn persisted"),
-    ],
-)
-def test_terminal_statuses_are_rendered_truthfully(
-    monkeypatch: pytest.MonkeyPatch, event: dict[str, Any], expected: str
-) -> None:
-    output, _console = _capture_console(monkeypatch, width=100)
-
-    render.render_event(event)
-
-    assert expected in output.getvalue()
-
-
-def test_host_rejection_is_distinct_from_remote_python_errors_in_the_tracker():
-    from io import StringIO
-
-    from rich.console import Console
-
-    tracker = render.TurnTracker()
-    tracker.ingest({"event": "ungrounded_submit", "rejected": True, "figures": ["426880"]})
-    tracker.ingest(
-        {
-            "event": "repl_output",
-            "execution_id": "host",
-            "error": True,
-            "error_type": "CodeExecutionError",
-            "outcome": "ungrounded_submit_rejected",
-            "stdout": "Checks passed",
-            "stderr": "SUBMIT rejected: figures ['426880'] were typed, not taken from sandbox output.",
-            "value": None,
-        }
-    )
-    assert tracker.submit_rejections == 1 and tracker.sandbox_errors == 0
-    host_item = tracker.items[-1]
-    assert host_item.outcome == "ungrounded_submit_rejected"
-
-    buf = StringIO()
-    console = Console(file=buf, force_terminal=False, width=120)
-    console.print(widgets._StepWidget(host_item, lambda: None).render())
-    rendered = buf.getvalue()
-    assert "SUBMIT rejected (ungrounded figures)" in rendered
-    assert "failed (CodeExecutionError)" not in rendered
-    assert "Checks passed" in rendered
-    assert "SUBMIT rejected: figures ['426880'] were typed, not taken from sandbox output." in rendered
-    assert (
-        render.format_repl_output_text(
-            "Checks passed",
-            "SUBMIT rejected: figures ['426880'] were typed.",
-            '{"answer": "leaked"}',
-            outcome="ungrounded_submit_rejected",
-            error=True,
-        )
-        == "Checks passed\nSUBMIT rejected: figures ['426880'] were typed."
-    )
-    assert "Return value:" not in rendered
-
-    transcript_buf = StringIO()
-    original_console = render.CONSOLE
-    render.CONSOLE = Console(file=transcript_buf, force_terminal=False, width=120)
-    try:
-        render.render_event(
-            {
-                "event": "repl_output",
-                "execution_id": "host",
-                "error": True,
-                "error_type": "CodeExecutionError",
-                "outcome": "ungrounded_submit_rejected",
-                "stdout": "Checks passed",
-                "stderr": "SUBMIT rejected: figures ['426880'] were typed.",
-                "value": '{"answer": "leaked"}',
-            }
-        )
-    finally:
-        render.CONSOLE = original_console
-    transcript = transcript_buf.getvalue()
-    assert "SUBMIT rejected (ungrounded figures)" in transcript
-    assert "Return value:" not in transcript
-
-    tracker.ingest({"event": "repl_output", "execution_id": "remote", "error": True, "outcome": "remote_code_error"})
-    assert tracker.submit_rejections == tracker.sandbox_errors == 1
-
-
-@pytest.mark.parametrize(
     ("text", "expected"),
     [
         ("/mo", "/model"),
@@ -407,8 +241,8 @@ def test_command_and_argument_completion(text: str, expected: str) -> None:
 
 @pytest.mark.parametrize(("choice", "selected"), [("2", True), ("", False), ("0", False), ("oops", False)])
 def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selected: bool) -> None:
-    output, console = _capture_console(monkeypatch, width=100)
-    monkeypatch.setattr(console, "input", lambda _prompt: choice)
+    output, _console = _capture_console(monkeypatch, width=100)
+    state = commands.SessionState()
     writes = []
 
     def handle(request):
@@ -422,89 +256,12 @@ def test_interactive_model_choice_and_settings(monkeypatch, choice: str, selecte
 
     with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
         commands.handle_command(client, "/settings", "s1")
-        commands.handle_command(client, "/model sub", "s1")
+        commands.handle_command(client, "/model sub", "s1", state=state)
+        role, models = state.pending_model_choice
+        commands.apply_model_choice(commands.Context(client, "s1", state), role, models, choice)
     assert writes == ([{"role": "sub", "model": "openai/system.ai.beta"}] if selected else [])
     assert "Session configuration" in output.getvalue()
     assert "openai/system.ai.beta" in output.getvalue()
-
-
-@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled", "disconnect", "interrupt", "network", "http"])
-def test_free_form_tasks_stream_live_and_recover_from_errors(monkeypatch, outcome: str) -> None:
-    output, console = _capture_console(monkeypatch, width=120)
-    inputs = iter(["Analyze '分析' and explain why 17 * 19 differs from 17 + 19?", "/exit"])
-    monkeypatch.setattr(console, "input", lambda _prompt: next(inputs))
-    submitted = []
-
-    class Stream(httpx.SyncByteStream):
-        closed = False
-
-        def __iter__(self):
-            yield b'data: nonsense\n\ndata: []\n\ndata:{"event":"tool_start","payload":{"tool":"streaming_probe"}}\n\n'
-            assert "streaming_probe" in output.getvalue()  # Rendered before the response ends.
-            if outcome == "interrupt":
-                raise KeyboardInterrupt
-            if outcome == "network":
-                raise httpx.ReadError("disconnected")
-            if outcome == "disconnect":
-                return
-            event = {
-                "event": {"complete": "turn_complete", "error": "error", "cancelled": "turn_cancelled"}[outcome],
-                "payload": {"answer": "323, not 36", "error": "stopped", "route": "rlm"},
-            }
-            yield f"data: {json.dumps(event)}\n\n".encode()
-
-        def close(self):
-            self.closed = True
-
-    stream = Stream()
-
-    def handle(request):
-        submitted.append(json.loads(request.content))
-        return httpx.Response(503 if outcome == "http" else 200, stream=stream)
-
-    real_client = httpx.Client
-    monkeypatch.setattr(
-        app.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handle), **kwargs)
-    )
-    app.run_interactive_cli("http://fleet.test", "s1")
-    assert submitted[0]["task"].startswith("Analyze '分析'")
-    assert stream.closed
-    expected = {
-        "complete": "323, not 36",
-        "error": "Turn failed",
-        "cancelled": "Turn cancelled",
-        "disconnect": "without a final outcome",
-        "interrupt": "server cancels on disconnect",
-        "network": "Turn stream failed",
-        "http": "HTTP 503",
-    }[outcome]
-    assert expected in output.getvalue()
-    if outcome != "complete":
-        assert "Turn persisted" not in output.getvalue()
-
-
-def test_activity_and_literal_multiline_answer_are_separate(monkeypatch: pytest.MonkeyPatch) -> None:
-    output, _console = _capture_console(monkeypatch, width=120)
-    for event in (
-        {"event": "triage_decision", "mode": "hybrid", "route": "rlm", "summary": "Context requires code."},
-        {"event": "lm_start", "model": "test-model", "call_id": "lm-17", "agent_id": "child-2"},
-        {"event": "tool_start", "tool": "lookup", "inputs": '{"path": "files/a.csv"}'},
-        {"event": "tool_end", "tool": "lookup", "call_id": "tool-3", "ok": True, "output": "323", "duration_ms": 17},
-        {"event": "repl_output", "error": True, "error_type": "TimeoutError", "duration_ms": 23},
-        {"event": "turn_complete", "answer": "A=7 [literal]\n6\nD", "learned_skill_note": "Separate note."},
-    ):
-        render.render_event(event)
-    text = output.getvalue()
-    assert "Decision summary · not private reasoning" in text
-    assert "Context requires code." in text
-    assert "Model running: test-model" in text and "agent=child-2" in text
-    assert "Tool arguments" in text and "files/a.csv" in text
-    assert "Tool result" in text and "323" in text and "17 ms" in text
-    assert "Execution failed (TimeoutError)" in text
-    rows = [line.strip("│ ") for line in text.splitlines()]
-    start = rows.index("A=7 [literal]")
-    assert rows[start : start + 3] == ["A=7 [literal]", "6", "D"]
-    assert "Learned note · not part of answer" in text
 
 
 def test_every_command_has_help_and_completion():
@@ -523,7 +280,7 @@ def test_unknown_and_exit_commands(monkeypatch):
 
 def test_fullscreen_optimize_submits_options_to_api_worker() -> None:
     captured: list[dict[str, Any] | str] = []
-    state = commands.SessionState(fullscreen=True, optimizer_launcher=captured.append)
+    state = commands.SessionState(optimizer_launcher=captured.append)
     ctx = type("Context", (), {"session_id": "sess_tui", "state": state})()
 
     commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
@@ -539,7 +296,6 @@ def test_fullscreen_optimize_submits_options_to_api_worker() -> None:
 def test_fullscreen_review_uses_typed_callback_without_launch_roundtrip():
     launches, reviews = [], []
     state = commands.SessionState(
-        fullscreen=True,
         optimizer_launcher=launches.append,
         optimizer_reviewer=lambda *args: reviews.append(args),
     )
@@ -554,7 +310,7 @@ def test_plain_optimize_opens_runs_tab_and_run_button_confirms_before_starting()
     from types import SimpleNamespace
 
     launches, opened, pushed = [], [], []
-    state = commands.SessionState(fullscreen=True, optimizer_launcher=launches.append, improve_opener=opened.append)
+    state = commands.SessionState(optimizer_launcher=launches.append, improve_opener=opened.append)
     ctx = commands.Context(None, "sess_tui", state)
     commands.COMMANDS["/optimize"].run(ctx, "")
     commands.COMMANDS["/improve"].run(ctx, "")
@@ -580,68 +336,13 @@ def test_plain_optimize_opens_runs_tab_and_run_button_confirms_before_starting()
 
 def test_fullscreen_optimize_rejects_session_override_and_mlflow_mismatch() -> None:
     calls: list[Any] = []
-    state = commands.SessionState(fullscreen=True, optimizer_launcher=calls.append)
+    state = commands.SessionState(optimizer_launcher=calls.append)
     ctx = type("Context", (), {"session_id": "sess_tui", "state": state})()
 
     commands.COMMANDS["/optimize"].run(ctx, "--session other-session")
     commands.COMMANDS["/optimize"].run(ctx, "--mlflow databricks")
 
     assert calls == []
-
-
-def test_non_tty_optimize_starts_and_polls_api_run(monkeypatch) -> None:
-    import time
-
-    requests: list[httpx.Request] = []
-    run_id = "sess_cli-run"
-    record = {"run_id": run_id, "status": "running", "stage": "search"}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.method == "POST":
-            return httpx.Response(202, json={"job": record})
-        record.update(status="completed", stage="completed")
-        return httpx.Response(200, json={"job": record})
-
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    output, _console = _capture_console(monkeypatch, width=100)
-    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handler)) as client:
-        ctx = commands.Context(client, "sess_cli")
-        commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
-
-    assert [request.method for request in requests] == ["POST", "GET"]
-    assert requests[0].url.path == "/improve/jobs"
-    assert json.loads(requests[0].content)["max_metric_calls"] == 10
-    assert "Optimization completed" in output.getvalue()
-
-
-def test_non_tty_optimize_deduplicates_repeated_stage_output(monkeypatch) -> None:
-    import time
-
-    polls = 0
-    run_id = "sess_cli-dedupe"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal polls
-        if request.method == "POST":
-            return httpx.Response(202, json={"job": {"run_id": run_id, "status": "running", "stage": "search"}})
-        polls += 1
-        if polls < 3:
-            return httpx.Response(200, json={"job": {"run_id": run_id, "status": "running", "stage": "search"}})
-        if polls == 3:
-            return httpx.Response(200, json={"job": {"run_id": run_id, "status": "running", "stage": "validation"}})
-        return httpx.Response(200, json={"job": {"run_id": run_id, "status": "completed", "stage": "completed"}})
-
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    output, _console = _capture_console(monkeypatch, width=100)
-    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handler)) as client:
-        ctx = commands.Context(client, "sess_cli")
-        commands.COMMANDS["/optimize"].run(ctx, "--max-metric-calls 10")
-
-    rendered = output.getvalue()
-    assert rendered.count("Optimization stage: search") == 1
-    assert rendered.count("Optimization stage: validation") == 1
-    assert "Optimization completed" in rendered
 
 
 def test_optimize_reuses_pending_start_request_until_definitive_outcome() -> None:
@@ -764,46 +465,6 @@ def test_turn_tracker_toggles_and_confidence_bar() -> None:
 
     bar = render.confidence_bar_text(0.94)
     assert "94%" in bar.plain and "█" in bar.plain and "░" in bar.plain
-
-
-def test_bootstrap_omitted_payloads_and_sandbox_resuming_render_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
-    output, _console = _capture_console(monkeypatch, width=110)
-
-    for event in (
-        {"event": "sandbox_resuming", "state": "paused", "agent_id": "root-1"},
-        {"event": "orphan_deleted", "sandbox_id": "sbx-old", "agent_id": "child-9"},
-        {"event": "repl_code", "phase": "bootstrap", "code": "VERY_LONG_SHIM_SETUP = 1", "execution_id": "b1"},
-        {"event": "repl_output", "phase": "bootstrap", "duration_ms": 14, "execution_id": "b1"},
-        {
-            "event": "tool_start",
-            "tool": "llm_query",
-            "source": "sandbox_bridge",
-            "inputs": "[predictor payload omitted]",
-        },
-        {
-            "event": "tool_end",
-            "tool": "llm_query",
-            "ok": True,
-            "duration_ms": 8,
-            "output": "[predictor payload omitted]",
-        },
-        {
-            "event": "triage_decision",
-            "mode": "hybrid",
-            "route": "rlm",
-            "evidence": {"override_reason": "selected_context", "probability": 0.91},
-        },
-    ):
-        render.render_event(event)
-
-    rendered = output.getvalue()
-    assert "Resuming paused Daytona sandbox" in rendered
-    assert "Deleted orphaned sandbox sbx-old" in rendered
-    assert "Python bootstrap · Daytona" in rendered
-    assert "VERY_LONG_SHIM_SETUP" not in rendered
-    assert "Bootstrap completed · 14 ms" in rendered
-    assert "[predictor payload omitted]" not in rendered
-    assert "override=selected_context" in rendered and "confidence=91%" in rendered
 
 
 def test_http_error_detail_turn_command_and_workspace_completions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1195,20 +856,6 @@ def test_tui_displays_the_stored_route_answer_and_elapsed_time() -> None:
     assert tracker.elapsed_seconds() == 12.5
     summary = tracker.status_line().plain
     assert "route=flex" in summary and "12.5s" in summary
-
-
-def test_rich_cli_renders_status_progress_and_fenced_observations(monkeypatch) -> None:
-    output, _console = _capture_console(monkeypatch, width=100)
-
-    render.render_event({"event": "status", "status": "stalled", "scope": "scan workspace"})
-    render.render_event({"event": "progress", "scope": "scan workspace", "checkpoint": 9})
-    render.render_event({"event": "fenced", "namespace": "ns-1"})
-
-    rendered = output.getvalue()
-    assert "stalled" in rendered and "scan workspace" in rendered
-    assert "checkpoint 9" in rendered
-    assert "Publication fenced" in rendered
-    assert not any(token in rendered for token in ("%", "percent", "complete", "remaining", "ETA"))
 
 
 def _experiment_record(run_id: str, status: str = "completed") -> dict[str, Any]:
@@ -3139,10 +2786,7 @@ def test_nested_path_search_reuses_git_index_across_typing_windows(monkeypatch, 
 def test_build_web_app_command_quotes_arguments_and_preserves_options() -> None:
     command = web.build_web_app_command(
         api_url="http://fleet.test/api's-root",
-        mlflow_mode="local",
         session_id="browser-session",
-        mlflow_port=5100,
-        mlflow_experiment="team's runtime",
     )
 
     assert shlex.split(command) == [
@@ -3151,14 +2795,8 @@ def test_build_web_app_command_quotes_arguments_and_preserves_options() -> None:
         "fleet_rlm.tui.web_client",
         "--url",
         "http://fleet.test/api's-root",
-        "--mlflow",
-        "local",
         "--session",
         "browser-session",
-        "--mlflow-port",
-        "5100",
-        "--mlflow-experiment",
-        "team's runtime",
     ]
 
 
@@ -3168,7 +2806,6 @@ def test_build_web_app_command_rejects_credential_bearing_api_urls() -> None:
     with pytest.raises(ValueError, match="without credentials"):
         web.build_web_app_command(
             api_url="https://user:secret@fleet.test",
-            mlflow_mode="local",
         )
 
 
@@ -3186,7 +2823,6 @@ def test_serve_web_client_configures_textual_serve(monkeypatch) -> None:
 
     web.serve_web_client(
         api_url="http://fleet.test",
-        mlflow_mode="local",
         host="127.0.0.1",
         port=8080,
         public_url="https://fleet.example.test",
@@ -3196,7 +2832,7 @@ def test_serve_web_client_configures_textual_serve(monkeypatch) -> None:
     assert captured["port"] == 8080
     assert captured["title"] == "Fleet RLM Lite"
     assert captured["public_url"] == "https://fleet.example.test"
-    assert shlex.split(captured["command"])[-2:] == ["--mlflow", "local"]
+    assert shlex.split(captured["command"])[-2:] == ["--url", "http://fleet.test"]
     assert captured["served"] is True
 
 
@@ -3343,12 +2979,11 @@ def test_authenticated_non_loopback_client_still_requires_matching_origin(monkey
 @pytest.mark.parametrize(
     ("arguments", "expected_session", "mlflow_mode"),
     [
-        (["--mlflow", "databricks"], "generated", "databricks"),
+        ([], "generated", "databricks"),
         (["--session", "shared-browser-session"], "shared-browser-session", "local"),
     ],
 )
 def test_web_client_session_and_mlflow_configuration(monkeypatch, arguments, expected_session, mlflow_mode) -> None:
-    settings = FleetSettings(_env_file=None)
     selected = []
     apps = []
 
@@ -3359,18 +2994,21 @@ def test_web_client_session_and_mlflow_configuration(monkeypatch, arguments, exp
         def run(self):
             pass
 
-    monkeypatch.setattr(web_client, "get_settings", lambda mode: selected.append(mode) or settings)
+    monkeypatch.setattr(web_client, "verify_api_destination", lambda _url: {"mode": mlflow_mode})
+    real_client = httpx.Client
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200))
+    monkeypatch.setattr(web_client.httpx, "Client", lambda **kwargs: real_client(transport=transport, **kwargs))
     monkeypatch.setattr(web_client, "FleetTextualApp", FakeApp)
 
     web_client.main(["--url", "http://fleet.test", *arguments])
 
-    assert selected == [mlflow_mode]
+    assert selected == []
     session_id, state = apps[0]
     if expected_session == "generated":
         assert session_id.startswith("sess_web_")
     else:
         assert session_id == expected_session
-    assert state.mlflow_settings is settings
+    assert state.mlflow_mode == mlflow_mode
 
 
 # Consolidated from lite/test_cli.py
@@ -3381,6 +3019,8 @@ def test_web_client_session_and_mlflow_configuration(monkeypatch, arguments, exp
 
 @pytest.mark.parametrize("port", [0, -1, 65536])
 def test_serve_rejects_invalid_explicit_ports_before_starting_a_server(monkeypatch, capsys, port):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     settings = FleetSettings(_env_file=None)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     monkeypatch.setattr(
@@ -3393,6 +3033,8 @@ def test_serve_rejects_invalid_explicit_ports_before_starting_a_server(monkeypat
 
 
 def test_serve_validates_and_applies_explicit_bind_settings(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     settings = FleetSettings(_env_file=None)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     captured = {}
@@ -3415,7 +3057,7 @@ def test_eval_missing_experiment_diagnostic_names_selected_profile(monkeypatch, 
         mlflow_tracing_sql_warehouse_id="offline",
     )
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
-    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
     with pytest.raises(SystemExit) as error:
         cli._eval_command(SimpleNamespace(eval_command="run", url="http://test"), settings)
     message = str(error.value)
@@ -3425,6 +3067,8 @@ def test_eval_missing_experiment_diagnostic_names_selected_profile(monkeypatch, 
 
 @pytest.mark.parametrize("backend", ["local", "databricks"])
 def test_eval_rejects_empty_selected_experiment_before_external_work(monkeypatch, capsys, backend):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setenv(f"FLEET_MLFLOW_{backend.upper()}_EVAL_EXPERIMENT_NAME", "")
     monkeypatch.setattr(
         cli.launcher, "mlflow_is_healthy", lambda *_args: pytest.fail("invalid settings must not probe MLflow")
@@ -3457,7 +3101,7 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(mlflow, "set_experiment", lambda _name: SimpleNamespace(experiment_id="eval-id"))
     captured = {}
-    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
 
     def evaluate(_cases, **kwargs):
         import os
@@ -3481,6 +3125,8 @@ def test_eval_run_passes_destination_and_exits_unsuccessfully_on_incomplete_coll
 
 
 def test_eval_label_cli_accepts_critical_and_explicit_unpin(monkeypatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     captured = []
     settings = FleetSettings(_env_file=None)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
@@ -3554,6 +3200,8 @@ def test_eval_label_syncs_selected_replay_labels_to_configured_lakebase(monkeypa
 
 
 def test_trace_verify_command_routes_scope_to_the_trace_handler(monkeypatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     captured = []
     settings = FleetSettings(_env_file=None)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
@@ -3693,6 +3341,8 @@ def test_trace_verify_accepts_wrapped_unity_catalog_location(monkeypatch, capsys
 
 
 def test_web_cli_serves_textual_client_after_verifying_api_destination(monkeypatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     from contextlib import nullcontext
 
     settings = FleetSettings(_env_file=None)
@@ -3726,7 +3376,7 @@ def test_web_cli_serves_textual_client_after_verifying_api_destination(monkeypat
         ]
     )
 
-    assert calls["plan"]["url"] == "http://fleet.test"
+    assert "plan" not in calls
     assert calls["verified"][0] == "http://fleet.test"
     assert calls["web"]["host"] == "127.0.0.1"
     assert calls["web"]["port"] == 8765
@@ -3734,6 +3384,8 @@ def test_web_cli_serves_textual_client_after_verifying_api_destination(monkeypat
 
 
 def test_web_starts_owned_services_when_no_external_url_is_given(monkeypatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     from contextlib import nullcontext
 
     settings = FleetSettings(_env_file=None)
@@ -3753,7 +3405,7 @@ def test_web_starts_owned_services_when_no_external_url_is_given(monkeypatch) ->
         return nullcontext(selected_plan)
 
     monkeypatch.setattr(cli.launcher, "running_services", running_services)
-    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(cli.launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
     monkeypatch.setattr(cli, "serve_web_client", lambda **kwargs: calls.update(web=kwargs))
 
     cli.main(["web", "--host", "127.0.0.1", "--port", "8765"])
@@ -3763,12 +3415,13 @@ def test_web_starts_owned_services_when_no_external_url_is_given(monkeypatch) ->
 
 
 def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     from fleet_rlm.optimization_runs import worker_settings_payload
 
     settings = FleetSettings(
         _env_file=None,
         compiled_program_dir=str(tmp_path),
-        mlflow_mode="local",
     )
     monkeypatch.setattr(cli.launcher, "mlflow_is_healthy", lambda _url: True)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: pytest.fail("managed worker must use stdin settings"))
@@ -3783,13 +3436,13 @@ def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(mo
     monkeypatch.setattr(sys, "stdin", io.StringIO(worker_settings_payload(settings).decode()))
     fake_gepa = types.SimpleNamespace(run=lambda args, parser, selected: events.append(("run", args, parser, selected)))
     fake_optimizer_package = types.ModuleType("fleet_rlm.optimize")
-    fake_optimizer_package.gepa = fake_gepa
+    fake_optimizer_package.cli_commands = fake_gepa
     monkeypatch.setitem(sys.modules, "fleet_rlm.optimize", fake_optimizer_package)
     real_import = builtins.__import__
 
     def tracked_import(name, *args, **kwargs):
         fromlist = kwargs.get("fromlist", args[2] if len(args) > 2 else ())
-        if name == "fleet_rlm.optimize" and "gepa" in fromlist:
+        if name == "fleet_rlm.optimize" and "cli_commands" in fromlist:
             events.append("import optimizer")
         return real_import(name, *args, **kwargs)
 
@@ -3822,6 +3475,9 @@ def test_managed_optimize_reads_private_settings_before_lazy_optimizer_import(mo
     ],
 )
 def test_web_cli_rejects_invalid_public_listener(monkeypatch, capsys, allow_public, arguments, message):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setenv("FLEET_ALLOW_NON_LOOPBACK_BIND", str(allow_public).lower())
     settings = FleetSettings(_env_file=None, allow_non_loopback_bind=allow_public)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     monkeypatch.setattr(
@@ -3839,6 +3495,9 @@ def test_web_cli_rejects_invalid_public_listener(monkeypatch, capsys, allow_publ
 
 
 def test_web_cli_requires_authentication_before_starting_services(monkeypatch, capsys):
+    monkeypatch.setenv("FLEET_ALLOW_NON_LOOPBACK_BIND", "true")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     settings = FleetSettings(_env_file=None, allow_non_loopback_bind=True)
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     monkeypatch.delenv("FLEET_WEB_AUTH_TOKEN", raising=False)
@@ -3853,6 +3512,8 @@ def test_web_cli_requires_authentication_before_starting_services(monkeypatch, c
 
 @pytest.mark.parametrize("command", ["cli", "web"])
 def test_inherited_databricks_port_is_rejected_before_launch(monkeypatch, capsys, command):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     settings = FleetSettings(_env_file=None, mlflow_mode="databricks")
     monkeypatch.setattr(cli, "get_settings", lambda *_args: settings)
     monkeypatch.setattr(cli.launcher, "api_is_healthy", lambda _url: False)
@@ -3898,7 +3559,9 @@ def test_eval_score_cli_scores_collected_traces_without_running_turns(monkeypatc
 
 
 def test_optimize_cli_takes_no_session_and_offers_check_and_a_token_cap(monkeypatch) -> None:
-    from fleet_rlm.optimize import gepa
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    from fleet_rlm.optimize import cli_commands as gepa
 
     captured = []
     settings = FleetSettings(_env_file=None)
@@ -4003,13 +3666,13 @@ def _plan(**overrides: Any) -> LaunchPlan:
 
 
 def test_explicit_url_starts_nothing(monkeypatch) -> None:
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
     plan = _plan(url="http://example.test:9000/")
     assert (plan.api_url, plan.start_api, plan.start_mlflow) == ("http://example.test:9000", False, False)
 
 
 def test_a_healthy_api_is_reused_and_nothing_is_started(monkeypatch) -> None:
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
     plan = _plan(api_healthy=lambda _url: True)
     assert not plan.start_api and not plan.start_mlflow and plan.api_env == {}
     assert any("Reusing the API server" in note for note in plan.notes)
@@ -4215,7 +3878,7 @@ def test_a_failed_api_start_still_stops_mlflow(monkeypatch: pytest.MonkeyPatch) 
 
 def _stub_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
 
     class Services:
         def __init__(self, plan: LaunchPlan, **kwargs: Any) -> None:
@@ -4235,23 +3898,30 @@ def _stub_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def test_fleet_cli_starts_services_then_runs_the_client_against_the_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     seen = _stub_cli(monkeypatch)
     cli.main(["cli", "--session", "s1"])
     plan = seen["plan"]
     assert plan.start_api and plan.start_mlflow and seen["exited"]
     assert seen["ran"]["base_url"] == plan.api_url
     assert seen["ran"]["session_id"] == "s1"
-    assert seen["ran"]["settings"].mlflow_mode == "local"
+    assert seen["ran"]["mlflow_mode"] == "local"
 
 
 def test_fleet_cli_with_an_explicit_url_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     seen = _stub_cli(monkeypatch)
     cli.main(["cli", "--session", "s1", "--url", "http://remote.test:9000"])
-    assert not seen["plan"].start_api and seen["ran"]["base_url"] == "http://remote.test:9000"
+    assert "plan" not in seen
+    assert seen["ran"]["base_url"] == "http://remote.test:9000"
 
 
 @pytest.mark.parametrize("during_startup", [False, True])
 def test_fleet_cli_handles_interrupt_without_traceback(monkeypatch, capsys, during_startup) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     seen = _stub_cli(monkeypatch)
 
     def interrupt(**_kwargs) -> None:
@@ -4272,6 +3942,9 @@ def test_fleet_cli_handles_interrupt_without_traceback(monkeypatch, capsys, duri
 
 
 def test_fleet_cli_reports_a_startup_failure_and_exits_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
     class Failing:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             pass
@@ -4421,6 +4094,8 @@ def test_retired_dotenv_keys_require_migration_without_showing_values(tmp_path, 
 
 
 def test_retired_process_mode_cannot_redirect_the_cli(monkeypatch, capsys):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setenv("FLEET_MLFLOW_MODE", "databricks")
     with pytest.raises(SystemExit) as error:
         cli.main(["cli"])
@@ -4441,18 +4116,19 @@ def test_old_schema_requires_migration_and_toml_selects_mlflow_mode(tmp_path, mo
 
 @pytest.mark.parametrize("arguments", [["databricks"], ["--mlflow", "databricks"], ["--session", "s1", "databricks"]])
 def test_cli_selects_databricks_and_propagates_the_profile(monkeypatch, arguments):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     from contextlib import nullcontext
 
     seen = {}
     monkeypatch.setenv("DATABRICKS_HOST", "https://workspace.invalid")
     monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACKING_URI", "databricks")
     monkeypatch.setattr(launcher, "api_is_healthy", lambda _url: False)
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: None)
+    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: {"mode": "databricks"})
     monkeypatch.setattr(launcher, "running_services", lambda plan, **_kwargs: nullcontext(plan))
     monkeypatch.setattr(cli, "run_interactive_cli", lambda **kwargs: seen.update(kwargs))
     cli.main(["cli", *arguments])
-    assert seen["settings"].mlflow_mode == "databricks"
-    assert seen["settings"].mlflow_target().experiment_name.startswith("/")
+    assert seen["mlflow_mode"] == "databricks"
 
 
 @pytest.mark.parametrize(
@@ -4465,6 +4141,8 @@ def test_cli_selects_databricks_and_propagates_the_profile(monkeypatch, argument
     ],
 )
 def test_invalid_selectors_and_overrides_fail_before_launch(monkeypatch, arguments):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(launcher, "plan_launch", lambda **_kwargs: pytest.fail("must not launch"))
     with pytest.raises(SystemExit) as error:
         cli.main(arguments)
@@ -4473,12 +4151,14 @@ def test_invalid_selectors_and_overrides_fail_before_launch(monkeypatch, argumen
 
 @pytest.mark.parametrize("backend", ["local", "databricks"])
 def test_standalone_commands_receive_selected_backend(monkeypatch, backend):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     seen = []
     monkeypatch.setattr(launcher, "mlflow_is_healthy", lambda _url: True)
     monkeypatch.setattr(cli, "_eval_command", lambda _args, settings: seen.append(settings.mlflow_mode))
     monkeypatch.setattr(cli, "_trace_verify_command", lambda _args, settings: seen.append(settings.mlflow_mode))
     monkeypatch.setattr(
-        "fleet_rlm.optimize.gepa.run", lambda _args, _parser, settings: seen.append(settings.mlflow_mode)
+        "fleet_rlm.optimize.cli_commands.run", lambda _args, _parser, settings: seen.append(settings.mlflow_mode)
     )
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **_kwargs: seen.append(app.state.settings.mlflow_mode))
     cli.main(["eval", "label", "tr-1", "--mlflow", backend])
@@ -4489,6 +4169,8 @@ def test_standalone_commands_receive_selected_backend(monkeypatch, backend):
 
 
 def test_standalone_local_command_explains_missing_server(monkeypatch, capsys):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(launcher, "mlflow_is_healthy", lambda _url: False)
     with pytest.raises(SystemExit) as error:
         cli.main(["trace", "verify", "tr-1"])
@@ -4931,44 +4613,24 @@ def test_plan_launch_warns_and_doctor_blocks_on_local_mlflow_kek_mismatch(tmp_pa
 
 
 def test_optimize_inherits_backend_and_effective_profile_without_sdk_destination(monkeypatch, capsys):
-    import time
-
-    settings = FleetSettings(
-        _env_file=None, mlflow_mode="databricks", mlflow_databricks_experiment_name="/Shared/custom"
-    )
-    state = commands.SessionState(mlflow_settings=settings)
-    requests = []
-
-    def handle(request):
-        requests.append(request)
-        if request.method == "POST":
-            return httpx.Response(
-                202,
-                json={"job": {"run_id": "s1-run", "status": "running", "stage": "search"}},
-            )
-        return httpx.Response(200, json={"job": {"run_id": "s1-run", "status": "completed"}})
-
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    payloads = []
+    state = commands.SessionState(mlflow_mode="databricks", optimizer_launcher=payloads.append)
     monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "stale")
-    with httpx.Client(base_url="http://fleet.test", transport=httpx.MockTransport(handle)) as client:
-        ctx = commands.Context(client, "s1", state)
-        commands._optimize(ctx, "--max-metric-calls 1")
-        commands._optimize(ctx, "--mlflow=local")
-
-    assert [request.method for request in requests] == ["POST", "GET"]
-    assert requests[0].url.path == "/improve/jobs"
-    body = json.loads(requests[0].content)
-    assert body["max_metric_calls"] == 1
-    assert body["request_id"]
-    assert "mlflow" not in body and "tracking_uri" not in body and "experiment_name" not in body
-    assert "MLFLOW_EXPERIMENT_ID" not in requests[0].headers
-    assert "MLFLOW_TRACKING_URI" not in requests[0].headers
+    ctx = commands.Context(None, "s1", state)
+    commands._optimize(ctx, "--max-metric-calls 1")
+    commands._optimize(ctx, "--mlflow=local")
+    assert len(payloads) == 1
+    assert payloads[0]["max_metric_calls"] == 1
+    assert payloads[0]["request_id"]
+    assert not {"mlflow", "tracking_uri", "experiment_name"}.intersection(payloads[0])
     assert os.environ["MLFLOW_EXPERIMENT_ID"] == "stale"
     assert "session's MLflow backend" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("command", ["cli", "web"])
 def test_invalid_configured_backend_exits_with_doctor_hint(tmp_path, monkeypatch, capsys, command):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.chdir(tmp_path)
     config = tmp_path / "fleet.toml"
     config.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
@@ -4981,6 +4643,8 @@ def test_invalid_configured_backend_exits_with_doctor_hint(tmp_path, monkeypatch
 
 
 def test_doctor_command_reports_config_and_check_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     import fleet_rlm.doctor as doctor
 
     monkeypatch.chdir(tmp_path)
@@ -5023,6 +4687,8 @@ def test_doctor_command_reports_config_and_check_status(tmp_path, monkeypatch):
 
 
 def test_snapshot_cli_commands_redact_secrets_and_route_actions(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     import fleet_rlm.doctor as doctor
 
     settings = FleetSettings(
@@ -5072,6 +4738,8 @@ def test_snapshot_cli_commands_redact_secrets_and_route_actions(monkeypatch):
 
 
 def test_toml_backend_is_used_by_standalone_commands_and_explicit_flag_wins(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.chdir(tmp_path)
     config = tmp_path / "fleet.toml"
     config.write_text('[config]\nschema_version=5\n[mlflow]\nmode="databricks"\n')
@@ -5342,6 +5010,80 @@ async def test_live_tcp_sse_turn_with_keepalive_ping_completes_cleanly():
                 assert "── Turn summary: route=direct" in state.last_tracker.status_line().plain
 
 
+@pytest.mark.parametrize("command", ["cli", "web"])
+def test_explicit_client_url_needs_no_backend_settings_or_services(monkeypatch, command):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "get_settings", lambda *_: pytest.fail("connected client loaded backend settings"))
+    monkeypatch.setattr(launcher, "plan_launch", lambda **_: pytest.fail("connected client planned services"))
+    monkeypatch.setattr(
+        launcher, "running_services", lambda *_a, **_k: pytest.fail("connected client started services")
+    )
+    monkeypatch.setattr(launcher, "verify_api_destination", lambda _url: {"mode": "local"})
+    seen = []
+    monkeypatch.setattr(cli, "run_interactive_cli", lambda **kwargs: seen.append(kwargs))
+    monkeypatch.setattr(cli, "serve_web_client", lambda **kwargs: seen.append(kwargs))
+    cli.main([command, "--url", "http://fleet.test", "--session", "connected"])
+    assert len(seen) == 1
+    assert seen[0]["session_id"] == "connected"
+    assert "settings" not in seen[0]
+
+
+def test_non_tty_cli_fails_before_configuration_or_startup(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(cli, "get_settings", lambda *_: pytest.fail("non-TTY client loaded settings"))
+    with pytest.raises(SystemExit) as error:
+        cli.main(["cli"])
+    assert error.value.code == 2
+
+
+def test_host_rejection_is_distinct_from_remote_python_errors_in_the_tracker():
+    from io import StringIO
+
+    from rich.console import Console
+
+    tracker = render.TurnTracker()
+    tracker.ingest({"event": "ungrounded_submit", "rejected": True, "figures": ["426880"]})
+    tracker.ingest(
+        {
+            "event": "repl_output",
+            "execution_id": "host",
+            "error": True,
+            "error_type": "CodeExecutionError",
+            "outcome": "ungrounded_submit_rejected",
+            "stdout": "Checks passed",
+            "stderr": "SUBMIT rejected: figures ['426880'] were typed, not taken from sandbox output.",
+            "value": None,
+        }
+    )
+    assert tracker.submit_rejections == 1 and tracker.sandbox_errors == 0
+    host_item = tracker.items[-1]
+    assert host_item.outcome == "ungrounded_submit_rejected"
+
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=120)
+    console.print(widgets._StepWidget(host_item, lambda: None).render())
+    rendered = buf.getvalue()
+    assert "SUBMIT rejected (ungrounded figures)" in rendered
+    assert "failed (CodeExecutionError)" not in rendered
+    assert "Checks passed" in rendered
+    assert "SUBMIT rejected: figures ['426880'] were typed, not taken from sandbox output." in rendered
+    assert (
+        render.format_repl_output_text(
+            "Checks passed",
+            "SUBMIT rejected: figures ['426880'] were typed.",
+            '{"answer": "leaked"}',
+            outcome="ungrounded_submit_rejected",
+            error=True,
+        )
+        == "Checks passed\nSUBMIT rejected: figures ['426880'] were typed."
+    )
+    assert "Return value:" not in rendered
+
+    tracker.ingest({"event": "repl_output", "execution_id": "remote", "error": True, "outcome": "remote_code_error"})
+    assert tracker.submit_rejections == tracker.sandbox_errors == 1
+
+
 def test_turn_tracker_child_agent_result_does_not_overwrite_turn_status():
     tracker = render.TurnTracker()
     tracker.ingest({"event": "turn_status", "phase": "running", "agent_id": "root-1"})
@@ -5385,23 +5127,6 @@ def test_turn_tracker_child_agent_result_does_not_overwrite_turn_status():
     fallback_footer = tracker_no_label.status_line().plain
     assert "Running 1 child agent" in fallback_footer
     assert "succeeded" not in fallback_footer
-
-    # Plain CLI event rendering must not print child agent_result status as Turn advisory status.
-    buf = io.StringIO()
-    old_console = render.CONSOLE
-    render.CONSOLE = Console(file=buf, force_terminal=False, no_color=True)
-    try:
-        render.render_event(
-            {
-                "event": "agent_result",
-                "agent_id": "child-1",
-                "parent_agent_id": "root-1",
-                "status": "succeeded",
-            }
-        )
-    finally:
-        render.CONSOLE = old_console
-    assert "Status: succeeded" not in buf.getvalue()
 
     # Terminal events must clear cancelling state even before `done`.
     tracker.ingest({"event": "cancellation_requested"})

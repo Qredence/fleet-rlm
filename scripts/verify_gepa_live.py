@@ -23,7 +23,8 @@ from dspy.primitives.facade import SandboxLM
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.models import build_lm
 from fleet_rlm.optimize.artifacts import digest_bytes
-from fleet_rlm.optimize.gepa import build_instruction_proposer, build_proposal_stop_callback
+from fleet_rlm.optimize.progress import build_proposal_stop_callback
+from fleet_rlm.optimize.runner import build_instruction_proposer
 from fleet_rlm.optimize.scorers import fleet_metric
 from fleet_rlm.optimize.validation import IsolatedFleetProgram
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager

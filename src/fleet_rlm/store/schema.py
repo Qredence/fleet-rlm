@@ -9,7 +9,7 @@ from typing import Any
 
 import psycopg
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _REPLAY_RETENTION_DAYS = 30
 _RETRY_DELAY_SECONDS = 0.25
 _POOL_MAX_LIFETIME_SECONDS = 2_400
@@ -19,7 +19,7 @@ _OPTIMIZATION_LOCK_SCOPE = "fleet:optimization-global-lease"
 JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
 
 _SCHEMA_VERSION_TABLE = """
-CREATE TABLE IF NOT EXISTS fleet_lite_schema_migrations (
+CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
@@ -188,7 +188,105 @@ SCHEMA_STATEMENTS = (
     """,
 )
 
-_SCHEMA_MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = ((SCHEMA_VERSION, SCHEMA_STATEMENTS),)
+_V1_STATEMENTS = SCHEMA_STATEMENTS
+_V2_STATEMENTS = (
+    "ALTER TABLE fleet_lite_sessions RENAME TO sessions",
+    "ALTER TABLE fleet_lite_sandbox_resources RENAME TO sandbox_resources",
+    "ALTER TABLE fleet_lite_turns RENAME TO turns",
+    "ALTER TABLE fleet_lite_memories RENAME TO notes",
+    "ALTER TABLE fleet_lite_replay_blobs RENAME TO replay_blobs",
+    "ALTER TABLE fleet_lite_replay_snapshots RENAME TO replay_snapshots",
+    "ALTER TABLE fleet_lite_review_labels RENAME TO review_labels",
+    "ALTER TABLE fleet_lite_leases RENAME TO leases",
+    "ALTER TABLE fleet_lite_global_settings RENAME TO global_settings",
+    "ALTER TABLE fleet_lite_optimization_runs RENAME TO jobs",
+    """DO $$ DECLARE r RECORD; n TEXT; BEGIN
+        FOR r IN SELECT conname, conrelid FROM pg_constraint
+            WHERE connamespace = current_schema()::regnamespace AND conname LIKE 'fleet_lite_%'
+        LOOP
+            n := replace(replace(regexp_replace(r.conname, '^fleet_lite_', ''),
+                'memories', 'notes'), 'optimization_runs', 'jobs');
+            EXECUTE format('ALTER TABLE %s RENAME CONSTRAINT %I TO %I', r.conrelid::regclass, r.conname, n);
+        END LOOP;
+        FOR r IN SELECT relname, relkind FROM pg_class
+            WHERE relnamespace = current_schema()::regnamespace AND relname LIKE 'fleet_lite_%'
+                AND relkind IN ('i', 'S')
+        LOOP
+            n := replace(replace(regexp_replace(r.relname, '^fleet_lite_', ''),
+                'memories', 'notes'), 'optimization_runs', 'jobs');
+            IF n = 'one_active_optimization_run' THEN n := 'jobs_one_active'; END IF;
+            EXECUTE format('ALTER %s %I.%I RENAME TO %I',
+                CASE WHEN r.relkind = 'i' THEN 'INDEX' ELSE 'SEQUENCE' END,
+                current_schema(), r.relname, n);
+        END LOOP;
+    END $$""",
+    "ALTER TABLE sessions ADD CHECK (turn_count >= 0 AND ownership_epoch >= 0)",
+    "ALTER TABLE sessions ADD COLUMN workspace_indexed_at TIMESTAMPTZ",
+    "ALTER TABLE notes ADD CHECK (jsonb_typeof(sources) = 'object')",
+    "ALTER TABLE replay_snapshots ADD CHECK (jsonb_typeof(manifest) = 'object')",
+    "ALTER TABLE replay_blobs ADD CHECK (size_bytes = octet_length(content))",
+    (
+        "ALTER TABLE review_labels ADD FOREIGN KEY (session_id, turn_id) REFERENCES "
+        "replay_snapshots(session_id, turn_id) ON DELETE CASCADE"
+    ),
+    "ALTER TABLE turns ADD COLUMN route TEXT CHECK (route IN ('direct', 'flex', 'rlm'))",
+    "ALTER TABLE turns ADD COLUMN regenerates_turn_id TEXT",
+    "ALTER TABLE turns ADD FOREIGN KEY (session_id, regenerates_turn_id) REFERENCES turns(session_id, turn_id)",
+    """CREATE TABLE messages (
+        session_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        position INTEGER NOT NULL CHECK (position IN (0, 1)),
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content JSONB NOT NULL CHECK (jsonb_typeof(content) = 'array'),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, message_id),
+        UNIQUE (session_id, turn_id, position),
+        UNIQUE (session_id, turn_id, role),
+        FOREIGN KEY (session_id, turn_id) REFERENCES turns(session_id, turn_id) ON DELETE CASCADE
+    )""",
+    """INSERT INTO messages(session_id, message_id, turn_id, position, role, content)
+        SELECT session_id, turn_id || '_user', turn_id, 0, 'user',
+            jsonb_build_array(jsonb_build_object('type', 'text', 'text', task)) FROM turns""",
+    """INSERT INTO messages(session_id, message_id, turn_id, position, role, content)
+        SELECT session_id, turn_id || '_assistant', turn_id, 1, 'assistant',
+            jsonb_build_array(jsonb_build_object('type', 'text', 'text',
+                COALESCE(result->>'answer', record->>'answer', '')))
+        FROM turns WHERE status = 'completed'""",
+    """CREATE TABLE files (
+        session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL,
+        turn_id TEXT,
+        origin TEXT NOT NULL CHECK (origin IN ('upload', 'artifact')),
+        filename TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+        sha256 TEXT NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+        bucket TEXT NOT NULL,
+        object_key TEXT NOT NULL UNIQUE,
+        workspace_path TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, file_id),
+        FOREIGN KEY (session_id, turn_id) REFERENCES turns(session_id, turn_id) ON DELETE CASCADE
+    )""",
+    """CREATE TABLE message_files (
+        session_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        PRIMARY KEY (session_id, message_id, file_id),
+        FOREIGN KEY (session_id, message_id) REFERENCES messages(session_id, message_id) ON DELETE CASCADE,
+        FOREIGN KEY (session_id, file_id) REFERENCES files(session_id, file_id) ON DELETE CASCADE
+    )""",
+    """CREATE TABLE workspace_files (
+        session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        size_bytes BIGINT CHECK (size_bytes >= 0),
+        sha256 TEXT,
+        observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, path)
+    )""",
+)
+_SCHEMA_MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = ((1, _V1_STATEMENTS), (2, _V2_STATEMENTS))
 
 
 class IdempotencyConflictError(ValueError):
@@ -209,19 +307,6 @@ def _row_value(row: Any, key: str, index: int = 0) -> Any:
     return row[index]
 
 
-def _retry_delay_seconds() -> float:
-    import fleet_rlm.store as store_pkg
-
-    return float(getattr(store_pkg, "_RETRY_DELAY_SECONDS", _RETRY_DELAY_SECONDS))
-
-
-def _sleep(seconds: float) -> None:
-    import fleet_rlm.store as store_pkg
-
-    sleep_fn = getattr(getattr(store_pkg, "time", time), "sleep", time.sleep)
-    sleep_fn(seconds)
-
-
 def _retry_once(method: Callable[..., Any]) -> Callable[..., Any]:
     """Retry once after a brief backoff on transient PostgreSQL connection errors."""
 
@@ -230,7 +315,7 @@ def _retry_once(method: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return method(*args, **kwargs)
         except psycopg.OperationalError:
-            _sleep(_retry_delay_seconds())
+            time.sleep(_RETRY_DELAY_SECONDS)
             return method(*args, **kwargs)
 
     return wrapper

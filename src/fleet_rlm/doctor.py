@@ -76,25 +76,9 @@ def check_database(settings: FleetSettings) -> dict[str, Any]:
     import psycopg
     from psycopg import sql
 
-    from fleet_rlm.store import SCHEMA_VERSION, lakebase_connection_class
+    from fleet_rlm.store import SCHEMA_VERSION
 
     connection_class: type[psycopg.Connection[Any]] = psycopg.Connection
-    if settings.fleet_lakebase_endpoint:
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.core import Config
-
-        if settings.mlflow_mode == "databricks" and settings.mlflow_tracking_uri == "databricks":
-            auth = Config(
-                host=settings.databricks_host,
-                token=settings.databricks_token.get_secret_value(),
-                auth_type="pat",
-                http_timeout_seconds=20,
-                retry_timeout_seconds=20,
-            )
-        else:
-            auth = Config(http_timeout_seconds=20, retry_timeout_seconds=20)
-        connection_class = lakebase_connection_class(WorkspaceClient(config=auth), settings.fleet_lakebase_endpoint)
-
     initialized = False
     versions: list[int] = []
     try:
@@ -105,15 +89,15 @@ def check_database(settings: FleetSettings) -> dict[str, Any]:
                 connection.execute("SET TRANSACTION READ ONLY")
                 connection.execute("SELECT 1").fetchone()
                 exists = connection.execute(
-                    "SELECT to_regclass(%s)", (f"{settings.fleet_database_schema}.fleet_lite_sessions",)
+                    "SELECT to_regclass(%s)", (f"{settings.fleet_database_schema}.sessions",)
                 ).fetchone()
                 initialized = initialized or bool(exists and exists[0])
                 migrations = connection.execute(
-                    "SELECT to_regclass(%s)", (f"{settings.fleet_database_schema}.fleet_lite_schema_migrations",)
+                    "SELECT to_regclass(%s)", (f"{settings.fleet_database_schema}.schema_migrations",)
                 ).fetchone()
                 if migrations and migrations[0]:
                     row = connection.execute(
-                        sql.SQL("SELECT MAX(version) FROM {}.fleet_lite_schema_migrations").format(
+                        sql.SQL("SELECT MAX(version) FROM {}.schema_migrations").format(
                             sql.Identifier(settings.fleet_database_schema)
                         )
                     ).fetchone()

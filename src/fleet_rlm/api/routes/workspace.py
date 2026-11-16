@@ -40,6 +40,8 @@ def _list_files(session_id: str, runtime: Runtime) -> Files:
         files = runtime.sandbox_mgr.list_workspace_files()
         if files:
             _mark_workspace_unknown(runtime)
+        if runtime.ownership_epoch is not None:
+            runtime.store.save_workspace_inventory(session_id, files, runtime.ownership_epoch)
     return Files(
         session_id=session_id,
         files=files,

@@ -7,6 +7,7 @@ import ipaddress
 import os
 import sys
 import uuid
+from contextlib import nullcontext
 from typing import Any
 
 import uvicorn
@@ -83,7 +84,6 @@ def _label_command(args: argparse.Namespace, settings: Any) -> None:
             Store.open(
                 settings.fleet_database_url,
                 wait=True,
-                lakebase_endpoint=settings.fleet_lakebase_endpoint,
                 schema=settings.fleet_database_schema,
             )
         )
@@ -293,6 +293,74 @@ def _trace_verify_command(args: argparse.Namespace, settings: Any) -> None:
     _CONSOLE.print(f"Trace export verified: {args.trace_id} ({span_count} spans; {destination})")
 
 
+def _run_client(args: argparse.Namespace, settings: Any, parser: argparse.ArgumentParser) -> None:
+    """Run either Textual transport within the same backend lifecycle."""
+    web = args.command == "web"
+    if web:
+        if not 1 <= args.port <= 65535:
+            parser.error("web --port must be between 1 and 65535")
+        allow_external = (
+            settings.allow_non_loopback_bind
+            if settings is not None
+            else (os.environ.get("FLEET_ALLOW_NON_LOOPBACK_BIND", "").lower() in {"true", "1", "yes"})
+        )
+        if not allow_external and not _is_loopback(args.host):
+            parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
+        if (args.host in {"0.0.0.0", "::"} or ":" in args.host) and args.public_url is None:
+            parser.error("web --public-url is required when binding to a wildcard or IPv6 host")
+        try:
+            web_auth_token(args.host)
+            if args.session is not None:
+                validate_session_id(args.session)
+        except ValueError as exc:
+            parser.error(str(exc))
+    elif not sys.stdin.isatty() or not sys.stdout.isatty():
+        parser.error("fleet cli requires an interactive terminal; use fleet web or the HTTP API")
+    try:
+        if settings is None:
+            url = validate_api_url(args.url)
+            metadata = launcher.verify_api_destination(url)
+            selected = getattr(args, "backend", None) or args.mlflow
+            if selected is not None and metadata["mode"] != selected:
+                parser.error("Selected MLflow backend does not match the connected server")
+            if args.mlflow_port is not None or args.mlflow_experiment is not None:
+                parser.error("MLflow launch options cannot configure an explicit --url server")
+            services = nullcontext()
+        else:
+            if not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
+                parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
+            plan = launcher.plan_launch(url=None, host=settings.host, port=settings.port, settings=settings)
+            url = plan.api_url
+            services = launcher.running_services(
+                plan,
+                host=settings.host,
+                port=settings.port,
+                mlflow_port=settings.mlflow_local_port,
+                startup_timeout=getattr(args, "startup_timeout", 180.0),
+                log=lambda message: _CONSOLE.print(f"[dim]{message}[/dim]"),
+            )
+        with services:
+            if settings is not None:
+                metadata = launcher.verify_api_destination(url, settings.mlflow_descriptor())
+            if web:
+                browser_url = args.public_url or f"http://{args.host}:{args.port}"
+                _CONSOLE.print(f"Fleet RLM Lite web app: {browser_url}", markup=False)
+                serve_web_client(
+                    api_url=url, host=args.host, port=args.port, session_id=args.session, public_url=args.public_url
+                )
+            else:
+                run_interactive_cli(
+                    base_url=url,
+                    session_id=getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}"),
+                    mlflow_mode=metadata["mode"],
+                )
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    except (launcher.LaunchError, OSError, ValueError) as exc:
+        _CONSOLE.print(f"[bold red]Could not start client:[/bold red] {exc}")
+        raise SystemExit(1) from None
+
+
 def main(argv: list[str] | None = None) -> None:
     """Run Fleet's server, terminal client, evaluation, tracing, or optimization commands."""
     parser = argparse.ArgumentParser(prog="fleet", description="Fleet-RLM Lite server and terminal client")
@@ -439,6 +507,12 @@ def main(argv: list[str] | None = None) -> None:
         if not 1 <= args.mlflow_port <= 65535:
             parser.error("--mlflow-port must be between 1 and 65535")
 
+    if args.command in {None, "cli", "web"} and getattr(args, "url", None):
+        _run_client(args, None, parser)
+        return
+    if args.command in {None, "cli"} and (not sys.stdin.isatty() or not sys.stdout.isatty()):
+        parser.error("fleet cli requires an interactive terminal; use fleet web or the HTTP API")
+
     settings = managed_settings
     config_error: str | None = None
     if settings is None:
@@ -499,7 +573,7 @@ def main(argv: list[str] | None = None) -> None:
             "or run an MLflow server separately before using standalone commands."
         )
     if args.command == "optimize":
-        from fleet_rlm.optimize import gepa
+        from fleet_rlm.optimize import cli_commands as gepa
 
         gepa.run(args, optimize, settings)
         return
@@ -522,85 +596,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
 
-    if args.command == "web":
-        if not 1 <= args.port <= 65535:
-            parser.error("web --port must be between 1 and 65535")
-        if not settings.allow_non_loopback_bind and not _is_loopback(args.host):
-            parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
-        if (args.host in {"0.0.0.0", "::"} or ":" in args.host) and args.public_url is None:
-            parser.error("web --public-url is required when binding to a wildcard or IPv6 host")
-        try:
-            web_auth_token(args.host)
-        except ValueError as exc:
-            parser.error(str(exc))
-        if args.session is not None:
-            try:
-                validate_session_id(args.session)
-            except ValueError as exc:
-                parser.error(str(exc))
-        if not args.url and not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
-            parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
-        try:
-            plan = launcher.plan_launch(
-                url=args.url,
-                host=settings.host,
-                port=settings.port,
-                settings=settings,
-            )
-            _CONSOLE.print(f"MLflow: {target.mode} | {target.tracking_uri} | {target.experiment_name}", markup=False)
-            with launcher.running_services(
-                plan,
-                host=settings.host,
-                port=settings.port,
-                mlflow_port=settings.mlflow_local_port,
-                startup_timeout=args.startup_timeout,
-                log=lambda message: _CONSOLE.print(f"[dim]{message}[/dim]"),
-            ):
-                launcher.verify_api_destination(plan.api_url, settings.mlflow_descriptor())
-                browser_url = args.public_url or f"http://{args.host}:{args.port}"
-                _CONSOLE.print(f"Fleet RLM Lite web app: {browser_url}", markup=False)
-                serve_web_client(
-                    api_url=plan.api_url,
-                    mlflow_mode=backend,
-                    host=args.host,
-                    port=args.port,
-                    session_id=args.session,
-                    mlflow_port=args.mlflow_port,
-                    mlflow_experiment=args.mlflow_experiment,
-                    public_url=args.public_url,
-                )
-        except KeyboardInterrupt:
-            raise SystemExit(130) from None
-        except launcher.LaunchError as exc:
-            _CONSOLE.print(f"[bold red]Could not start services:[/bold red] {exc}")
-            raise SystemExit(1) from None
-        except OSError as exc:
-            _CONSOLE.print(f"[bold red]Could not start web server:[/bold red] {type(exc).__name__}")
-            raise SystemExit(1) from None
-        return
-
-    session_id = getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}")
-    url = getattr(args, "url", None)
-    if not url and not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
-        parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
-    try:
-        plan = launcher.plan_launch(url=url, host=settings.host, port=settings.port, settings=settings)
-        _CONSOLE.print(f"MLflow: {target.mode} | {target.tracking_uri} | {target.experiment_name}", markup=False)
-        with launcher.running_services(
-            plan,
-            host=settings.host,
-            port=settings.port,
-            mlflow_port=settings.mlflow_local_port,
-            startup_timeout=getattr(args, "startup_timeout", 180.0),
-            log=lambda message: _CONSOLE.print(f"[dim]{message}[/dim]"),
-        ):
-            launcher.verify_api_destination(plan.api_url, settings.mlflow_descriptor())
-            run_interactive_cli(base_url=plan.api_url, session_id=session_id, settings=settings)
-    except KeyboardInterrupt:
-        raise SystemExit(130) from None
-    except launcher.LaunchError as exc:
-        _CONSOLE.print(f"[bold red]Could not start services:[/bold red] {exc}")
-        raise SystemExit(1) from None
+    _run_client(args, settings, parser)
 
 
 if __name__ == "__main__":
