@@ -36,7 +36,6 @@ import fleet_rlm.api.routes.turns as turns_route
 import fleet_rlm.engine.turn as turn_module
 import fleet_rlm.engine.turn_prepare as turn_prepare
 import fleet_rlm.observability as observability
-import fleet_rlm.replay as replay_module
 from fleet_rlm.api.app import create_app
 from fleet_rlm.api.deps import get_registry
 from fleet_rlm.api.events import SSERuntimeCallback
@@ -1486,7 +1485,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
 
 
 def test_oversized_replay_workspace_completes_without_a_snapshot(monkeypatch) -> None:
-    monkeypatch.setattr(replay_module, "MAX_REPLAY_FILE_BYTES", 4)
+    monkeypatch.setattr("fleet_rlm.replay.MAX_REPLAY_FILE_BYTES", 4)
     files = {"files/input.csv": b"too large for replay"}
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
@@ -2589,7 +2588,7 @@ def test_prepare_inputs_hashes_remotely_without_downloading_files() -> None:
 
 
 def test_prepare_inputs_skips_replay_capture_for_an_oversized_workspace(monkeypatch) -> None:
-    monkeypatch.setattr(replay_module, "MAX_REPLAY_FILE_BYTES", 8)
+    monkeypatch.setattr("fleet_rlm.replay.MAX_REPLAY_FILE_BYTES", 8)
     files = {"files/a.txt": b"12345", "files/b.txt": b"67890"}
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: list(files), read_workspace_file=lambda path: files[path])
@@ -2602,7 +2601,7 @@ def test_prepare_inputs_skips_replay_capture_for_an_oversized_workspace(monkeypa
 
 
 def test_prepare_inputs_decides_replay_size_from_remote_sizes_before_downloading(monkeypatch) -> None:
-    monkeypatch.setattr(replay_module, "MAX_REPLAY_FILE_BYTES", 8)
+    monkeypatch.setattr("fleet_rlm.replay.MAX_REPLAY_FILE_BYTES", 8)
     digests = {"files/big.bin": hashlib.sha256(b"x").hexdigest()}
 
     def no_download(_path):
@@ -3398,8 +3397,6 @@ def test_prepare_inputs_refuses_invalid_batch_replay(downloaded):
 
 
 def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> None:
-    import asyncio
-
     from fleet_rlm.api.events import SSERuntimeCallback
 
     async def scenario() -> list[dict[str, Any]]:
@@ -3437,8 +3434,6 @@ def test_dspy_activity_stream_correlates_calls_without_predictor_contents() -> N
 
 
 def _usage_callback() -> tuple[Any, list[dict]]:
-    import asyncio
-
     import fleet_rlm.api.events as server
 
     events: list[dict] = []
@@ -3503,8 +3498,6 @@ def test_lm_end_event_streams_provider_reasoning_redacted() -> None:
 
 
 def test_lm_end_event_isolates_usage_between_concurrent_tasks() -> None:
-    import asyncio
-
     from dspy.utils.usage_tracker import UsageTracker
 
     callback, events = _usage_callback()
@@ -3550,8 +3543,6 @@ class _FakeClock:
 
 
 def test_a_checkpoint_flood_is_coalesced_and_never_delays_cancellation_or_done() -> None:
-    import asyncio
-
     from fleet_rlm.api.events import SSERuntimeCallback
 
     async def scenario() -> list[dict[str, Any]]:
@@ -3608,8 +3599,6 @@ def test_a_checkpoint_flood_is_coalesced_and_never_delays_cancellation_or_done()
 
 
 def test_terminal_outcome_discards_withheld_and_late_progress() -> None:
-    import asyncio
-
     from fleet_rlm.api.events import SSERuntimeCallback
 
     async def scenario() -> list[dict[str, Any]]:
@@ -3641,8 +3630,6 @@ def test_terminal_outcome_discards_withheld_and_late_progress() -> None:
 
 
 def test_progress_emission_never_raises_the_slow_consumer_timeout_on_a_full_queue() -> None:
-    import asyncio
-
     from fleet_rlm.api.events import SSERuntimeCallback
 
     async def scenario() -> int:
@@ -3670,8 +3657,6 @@ def test_progress_emission_never_raises_the_slow_consumer_timeout_on_a_full_queu
 
 
 def test_full_activity_queue_cannot_interrupt_budget_tools_or_cancellation() -> None:
-    import asyncio
-
     from fleet_rlm.api.events import SSERuntimeCallback
     from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
     from fleet_rlm.sandbox.manager import CLEANUP_STOPPED, DaytonaSandboxManager

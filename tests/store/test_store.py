@@ -719,11 +719,9 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
 def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
     import psycopg
 
-    import fleet_rlm.store.schema as store_db
-
     paused: list[float] = []
-    monkeypatch.setattr(store_db, "_RETRY_DELAY_SECONDS", 0.25)
-    monkeypatch.setattr(store_db.time, "sleep", paused.append)
+    monkeypatch.setattr("fleet_rlm.store.schema._RETRY_DELAY_SECONDS", 0.25)
+    monkeypatch.setattr("fleet_rlm.store.schema.time.sleep", paused.append)
     store, pool = make_store([({"mode": "flex"},)])
     calls = []
     real = pool.connection
@@ -1415,8 +1413,7 @@ def test_real_postgres_chat_integrity_and_ledger_handoff():
         store.initialize()
         store.initialize()
         store.ensure_session("chat")
-        lease = store.acquire_session_lease("chat")
-        try:
+        with store.acquire_session_lease("chat") as lease:
             assert (
                 store.claim_turn("chat", "first", "request", "digest", task="hello", ownership_epoch=lease.epoch)
                 is None
@@ -1445,8 +1442,6 @@ def test_real_postgres_chat_integrity_and_ledger_handoff():
             assert len(store.messages("chat")) == 2
             with pytest.raises(RuntimeError, match="fenced"):
                 store.claim_turn("chat", "stale", "stale-request", "digest", ownership_epoch=lease.epoch + 1)
-        finally:
-            lease.close()
         with store.pool.connection() as connection:
             connection.execute("CREATE TABLE fleet_lite_schema_migrations(version integer PRIMARY KEY)")
         with pytest.raises(RuntimeError, match="Conflicting"):
@@ -1530,7 +1525,6 @@ def test_orphan_cleanup_protects_recent_and_referenced_objects():
 @pytest.mark.parametrize("fault", ["changed", "cancelled"])
 def test_artifact_publication_refuses_changed_evidence_or_expired_turn(monkeypatch, fault):
     """Object upload alone cannot authorize a successful database completion."""
-    import fleet_rlm.object_storage as objects
     from fleet_rlm.config import FleetSettings
 
     committed = []
@@ -1547,8 +1541,7 @@ def test_artifact_publication_refuses_changed_evidence_or_expired_turn(monkeypat
 
     runtime.sandbox_mgr.check_turn = check
     monkeypatch.setattr(
-        objects,
-        "ObjectStorage",
+        "fleet_rlm.object_storage.ObjectStorage",
         lambda _settings: SimpleNamespace(
             upload=lambda *_args, **_kwargs: {
                 "sha256": "0" * 64 if fault == "changed" else expected,
