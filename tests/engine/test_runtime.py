@@ -5556,7 +5556,7 @@ def test_workspace_inputs_load_skills_appends_resources_only_when_present(
 
 
 def test_skill_bytecode_artifacts_are_ignored_everywhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.skills as fleet_skills
+    from fleet_rlm import skills as fleet_skills
     from fleet_rlm.engine.invocation import WorkspaceInputs
     from fleet_rlm.skills import RequiredSkill
 

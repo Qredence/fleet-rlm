@@ -165,6 +165,7 @@ def profile_table(path: str | Path, *, sample_rows: int = 5) -> dict[str, Any]:
                     _to_decimal(val, col)
                     numeric_count += 1
                 except ValueError:
+                    # Non-numeric cells contribute to distinct/non-empty counts only.
                     pass
         column_stats[col] = {
             "non_empty_count": non_empty,

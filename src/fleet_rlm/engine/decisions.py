@@ -323,7 +323,6 @@ class SkillSelection(dspy.Module):
             except Exception as exc:
                 if turn_is_over(exc):
                     raise
-                accepted = []
                 _LOGGER.warning("Optional Skill verification failed (%s); using catalog only", type(exc).__name__)
                 self._emit(
                     "skill_selection",

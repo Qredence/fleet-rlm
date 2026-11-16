@@ -458,7 +458,10 @@ def _unwrap_ddg_url(href: str) -> str:
     if href.startswith("//"):
         href = "https:" + href
     parsed = urllib.parse.urlsplit(href)
-    if "duckduckgo.com" in parsed.netloc or parsed.path.startswith("/l/"):
+    host = (parsed.hostname or "").lower()
+    if (host == "duckduckgo.com" or host.endswith(".duckduckgo.com")) or (
+        not parsed.netloc and not parsed.scheme and parsed.path.startswith("/l/")
+    ):
         qs = urllib.parse.parse_qs(parsed.query)
         target = qs.get("uddg", [""])[0]
         if target:

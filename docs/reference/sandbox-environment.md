@@ -125,9 +125,26 @@ and agent workflows:
 [document extraction](../../src/fleet_rlm/bundled_skills/document-extraction/SKILL.md), and
 [file editing](../../src/fleet_rlm/bundled_skills/file-editing/SKILL.md).
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:915d60434322a3e83e695f723fdef7d3c3f002ba39ab3fd72e535f219e1416f3 -->
+
 Each bundled Skill ships concise `SKILL.md` instructions alongside executable
 `scripts/` modules and Stage-3 `references/` material, rather than server-side
-tools or automatic package installers. In the sandbox REPL,
+tools or automatic package installers.
+
+These helpers execute with the guest Python process's existing filesystem and
+process permissions. Their CLI arguments are local sandbox input, not HTTP
+request parameters handled by the Fleet server. Reading a selected dataset,
+editing a selected file, or using temporary repository storage does not grant
+additional host permissions; the Daytona sandbox provides that isolation.
+Do not import or expose these helpers as privileged server tools. Host-mediated
+workspace transfers have their own path validation and lease checks.
+Repository downloads use private `mkdtemp` acquisition directories beneath the
+selected temporary-storage parent; `/tmp` itself is never an acquisition directory
+or an allowed cleanup target.
+
+<!-- /coderabbit-ai-generated:v1 --> In the sandbox REPL,
 `load_skill_module(name, script_rel_path=None)` imports a Skill's Python helper
 module into REPL variable space (exposing a callable module bound to `run(...)`
 plus named helpers), `run_skill_script(name, script_rel_path, args=None)` runs a

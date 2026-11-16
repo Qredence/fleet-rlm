@@ -1257,12 +1257,12 @@ def test_edit_tools_preserves_file_mode_on_atomic_and_fallback_writes(
     mod = _load_bundled_script("file-editing", "edit_tools.py")
     target = tmp_path / "run.sh"
     target.write_text("echo one\n", encoding="utf-8")
-    os.chmod(target, 0o751)
+    os.chmod(target, 0o750)
 
     # mkstemp creates 0600 files; the replace must carry the original mode across.
     mod.edit_unique(target, "one", "two")
     assert target.read_text(encoding="utf-8") == "echo two\n"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o751
+    assert stat.S_IMODE(target.stat().st_mode) == 0o750
 
     # The in-place fallback writes the same inode, so the mode survives it too.
     def refuse_rename(_src: Any, _dst: Any) -> None:
@@ -1271,7 +1271,7 @@ def test_edit_tools_preserves_file_mode_on_atomic_and_fallback_writes(
     monkeypatch.setattr(os, "replace", refuse_rename)
     mod.apply_edits(target, [("two", "three")])
     assert target.read_text(encoding="utf-8") == "echo three\n"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o751
+    assert stat.S_IMODE(target.stat().st_mode) == 0o750
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".run.sh.")]
 
 
@@ -1754,3 +1754,23 @@ def test_pinned_connection_uses_validated_address(monkeypatch) -> None:
     assert connection.host == "example.com"
     connection._create_connection(("example.com", 443), 2)
     assert calls == ["resolve", ("93.184.216.34", 443)]
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "https://duckduckgo.com.evil.example/l/?uddg=https%3A%2F%2Fexample.org",
+        "https://evilduckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org",
+        "https://evil.example/l/?uddg=https%3A%2F%2Fexample.org",
+        "https://duckduckgo.com@evil.example/l/?uddg=https%3A%2F%2Fexample.org",
+    ],
+)
+def test_ddg_unwrap_refuses_unrelated_origins(href):
+    mod = _load_bundled_script("web-research", "web_tools.py")
+    assert mod._unwrap_ddg_url(href) == href
+
+
+@pytest.mark.parametrize("prefix", ["/l/", "https://duckduckgo.com/l/", "https://html.duckduckgo.com/l/"])
+def test_ddg_unwrap_accepts_provider_and_relative_links(prefix):
+    mod = _load_bundled_script("web-research", "web_tools.py")
+    assert mod._unwrap_ddg_url(prefix + "?uddg=https%3A%2F%2Fexample.org") == "https://example.org"
