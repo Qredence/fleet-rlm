@@ -5461,7 +5461,7 @@ def test_managed_subprocess_drains_noisy_output_without_replaying_progress(
             captured["spawn_kwargs"] = kwargs
             run_id = args[args.index("--managed-run-id") + 1]
             run_id_holder["run_id"] = run_id
-            from fleet_rlm.optimize.gepa import GEPAProgressReporter
+            from fleet_rlm.optimize.progress import GEPAProgressReporter
 
             reporter = GEPAProgressReporter(run_id, store=store, owner_id=manager.owner_id, emit_events=False)
             reporter.on_budget_updated({"metric_calls_used": 20, "iteration": 2})
@@ -5766,7 +5766,7 @@ def test_rejection_records_decision_and_preserves_candidate_and_comparison(tmp_p
 
 
 def test_database_cancel_remains_authoritative_when_stop_file_signal_fails(tmp_path, monkeypatch):
-    from fleet_rlm.optimize.gepa import _check_cancelled, _database_stop_requested, _DatabaseStopper
+    from fleet_rlm.optimize.progress import _check_cancelled, _database_stop_requested, _DatabaseStopper
 
     async def scenario():
         store = MemoryStore()

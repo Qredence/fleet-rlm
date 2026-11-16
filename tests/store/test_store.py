@@ -92,7 +92,7 @@ class FakePool:
 
 def make_store(*replies: list[Any], error: Exception | None = None) -> tuple[Store, FakePool]:
     pool = FakePool(*replies, error=error)
-    return Store(pool, "postgresql://fake"), pool  # ty: ignore[invalid-argument-type]
+    return Store(pool), pool  # ty: ignore[invalid-argument-type]
 
 
 def test_schema_preserves_baseline_and_adds_clean_names():
@@ -274,7 +274,6 @@ def test_custom_schema_is_created_by_migration_pool_and_runtime_uses_runtime_poo
     migration_pool = FakePool()
     store = Store(
         runtime_pool,  # ty: ignore[invalid-argument-type]
-        "postgresql://runtime",
         migration_pool=migration_pool,  # ty: ignore[invalid-argument-type]
         schema="fleet_rlm_lite",
     )
@@ -326,7 +325,6 @@ def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(
         assert pool.kwargs["max_lifetime"] < 60 * 60 and pool.kwargs["max_idle"] <= pool.kwargs["max_lifetime"]
         assert callable(pool.kwargs["check"])
     assert store.migration_pool is opened[1]
-    assert store.connection_kwargs["options"] == "-c search_path=fleet_rlm_lite"
     store.close_migration_pool()
     assert store.migration_pool is store.pool
     assert opened[1].closed and not opened[0].closed
@@ -722,7 +720,7 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
 def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
     import psycopg
 
-    import fleet_rlm.store as store_db
+    import fleet_rlm.store.schema as store_db
 
     paused: list[float] = []
     monkeypatch.setattr(store_db, "_RETRY_DELAY_SECONDS", 0.25)

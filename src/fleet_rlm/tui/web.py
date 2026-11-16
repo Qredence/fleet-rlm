@@ -133,10 +133,7 @@ def validate_api_url(value: str) -> str:
 def build_web_app_command(
     *,
     api_url: str,
-    mlflow_mode: str,
     session_id: str | None = None,
-    mlflow_port: int | None = None,
-    mlflow_experiment: str | None = None,
 ) -> str:
     """Build the shell-quoted Textual Serve command for one browser client."""
     command = [
@@ -145,37 +142,25 @@ def build_web_app_command(
         "fleet_rlm.tui.web_client",
         "--url",
         validate_api_url(api_url),
-        "--mlflow",
-        mlflow_mode,
     ]
     if session_id is not None:
         command.extend(("--session", validate_session_id(session_id)))
-    if mlflow_port is not None:
-        command.extend(("--mlflow-port", str(mlflow_port)))
-    if mlflow_experiment is not None:
-        command.extend(("--mlflow-experiment", mlflow_experiment))
     return shlex.join(command)
 
 
 def serve_web_client(
     *,
     api_url: str,
-    mlflow_mode: str,
     host: str,
     port: int,
     session_id: str | None = None,
-    mlflow_port: int | None = None,
-    mlflow_experiment: str | None = None,
     public_url: str | None = None,
 ) -> None:
     """Start Textual Serve; each browser connection gets its own Textual subprocess."""
     server = FleetWebServer(
         build_web_app_command(
             api_url=api_url,
-            mlflow_mode=mlflow_mode,
             session_id=session_id,
-            mlflow_port=mlflow_port,
-            mlflow_experiment=mlflow_experiment,
         ),
         host=host,
         port=port,

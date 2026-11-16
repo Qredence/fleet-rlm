@@ -19,9 +19,13 @@ uv run fleet web
 # Open http://127.0.0.1:8080
 ```
 
-`cli` and `web` verify the API's MLflow destination. Pass `--url` to connect to an
-existing API. Standalone `serve`, `eval`, `optimize`, and `trace` use an existing
-tracking server. For a separate local MLflow process:
+`cli` and `web` share startup and verify the configured MLflow destination when
+starting or reusing local services. Pass `--url` to connect to an existing API
+without loading local backend settings or starting services. Connected clients
+use the server's MLflow metadata and need no local model, Daytona, PostgreSQL, or
+MLflow credentials. Explicit backend selectors must match that server; MLflow
+launch overrides cannot be combined with `--url`. Standalone `serve`, `eval`,
+`optimize`, and `trace` use an existing tracking server. For a separate local MLflow process:
 
 ```bash
 mkdir -p .fleet/mlflow
@@ -78,7 +82,13 @@ Directory uploads skip hidden, symlink and Git-ignored paths, including tracked
 files matching ignore rules. Git ignore-check failures block uploads. Limits are
 1,000 files and 100 MB per submission, plus server per-file limits; empty or
 oversized selections are refused. Upload failure preserves the draft and sends
-no Turn; completed uploads remain. The Rich fallback uses `/attach` instead.
+no Turn; completed uploads remain.
+
+Both terminal and browser clients use Textual. `fleet cli` requires an interactive
+terminal; use `fleet web` or the HTTP API for other environments.
+For an explicit-URL web host, external listener opt-in must be supplied through
+the `FLEET_ALLOW_NON_LOOPBACK_BIND` environment variable, since backend settings
+are not loaded. Existing web authentication and origin checks still apply.
 
 ## Improve and evaluation
 

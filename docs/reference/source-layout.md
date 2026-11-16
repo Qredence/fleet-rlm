@@ -5,7 +5,7 @@ See [architecture](../../ARCHITECTURE.md) for request flow and trust boundaries.
 
 | Path | Responsibility |
 | --- | --- |
-| `cli.py`, `launcher.py`, `tui/` | CLI entry point, owned local services, Textual/Rich clients and browser transport |
+| `cli.py`, `launcher.py`, `tui/` | CLI entry point, owned local services, Textual clients and browser transport |
 | `api/` | FastAPI routes, request/response schemas and versioned SSE envelopes |
 | `session.py` | Session registry, leases, history, memory and idempotent Turn results |
 | `config/`, `models.py` | Frozen settings, provenance, role models and native DSPy provider declarations |

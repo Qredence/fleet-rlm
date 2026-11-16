@@ -32,7 +32,7 @@ flowchart LR
   manages Daytona execution snapshots, `optimize` runs standalone GEPA/eval workflows,
   `eval` manages datasets/labels/scoring, and `trace` verifies recorded traces.
 - `launcher.py` owns the local API and optional local MLflow.
-- Textual/Rich clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
+- Textual clients submit requests and render events. `fleet web` serves the same Textual client through Textual Serve; each browser connection runs an isolated client subprocess against the API.
 - FastAPI validates requests and streams SSE. Ordinary routes use its threadpool.
 - The API owns TUI optimization jobs (`/improve/jobs`, one `kind` ledger shared by future evaluate kinds) through one subprocess slot; labels are managed globally but stay attached to their source Turns, while jobs and the installed program belong to no Session. The worker runs the existing CLI optimizer and is the sole durable writer of running stages and progress counters for managed and standalone runs. PostgreSQL owns lifecycle state; local manifests/reports hold required candidate evidence, while MLflow tracking is best effort. The API does not import GEPA.
 - The API drains merged worker output into a private log capped at 1 MB per run, without interpreting progress. Managed workers persist an outcome handoff; the API confirms exit and output draining before owner/status-fenced terminal arbitration. Admission, cancellation intent and owner recovery remain API responsibilities.
@@ -63,6 +63,18 @@ flowchart LR
   at its next Turn.
 
 See [HTTP API](docs/reference/http-api.md) and [CLI](docs/reference/cli.md).
+
+### Client startup ownership
+
+`fleet cli` and `fleet web` share one launch/reuse lifecycle. Local startup uses
+host settings and validates the configured destination. An explicit `--url`
+connects without loading backend settings or starting services; the existing
+health contract supplies safe MLflow metadata and runtime compatibility.
+Browser Textual subprocesses receive only the API URL and optional Session ID.
+They do not load backend credentials or prepare MLflow authentication. Both
+interactive transports use Textual; non-TTY terminal invocation exits before
+starting services. Rich remains in use for Textual and operator output.
+
 
 ## Configuration and setup
 

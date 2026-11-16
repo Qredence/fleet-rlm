@@ -81,7 +81,7 @@ from fleet_rlm.optimization_runs import (
 from fleet_rlm.optimize import artifacts
 from fleet_rlm.optimize.artifacts import tunable_components
 from fleet_rlm.optimize.dataset import _INPUTS
-from fleet_rlm.optimize.gepa import build_instruction_proposer
+from fleet_rlm.optimize.runner import build_instruction_proposer
 from fleet_rlm.optimize.scorers import SCORER_VERSION
 from fleet_rlm.sandbox.interpreter import DaytonaInterpreter
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager

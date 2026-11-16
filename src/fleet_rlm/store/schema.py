@@ -307,19 +307,6 @@ def _row_value(row: Any, key: str, index: int = 0) -> Any:
     return row[index]
 
 
-def _retry_delay_seconds() -> float:
-    import fleet_rlm.store as store_pkg
-
-    return float(getattr(store_pkg, "_RETRY_DELAY_SECONDS", _RETRY_DELAY_SECONDS))
-
-
-def _sleep(seconds: float) -> None:
-    import fleet_rlm.store as store_pkg
-
-    sleep_fn = getattr(getattr(store_pkg, "time", time), "sleep", time.sleep)
-    sleep_fn(seconds)
-
-
 def _retry_once(method: Callable[..., Any]) -> Callable[..., Any]:
     """Retry once after a brief backoff on transient PostgreSQL connection errors."""
 
@@ -328,7 +315,7 @@ def _retry_once(method: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return method(*args, **kwargs)
         except psycopg.OperationalError:
-            _sleep(_retry_delay_seconds())
+            time.sleep(_RETRY_DELAY_SECONDS)
             return method(*args, **kwargs)
 
     return wrapper

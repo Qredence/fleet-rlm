@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import time
 import uuid
 from typing import Any
 
@@ -28,7 +27,6 @@ from fleet_rlm.store.schema import (
     _POOL_MAX_LIFETIME_SECONDS,
     _POOL_RECONNECT_TIMEOUT_SECONDS,
     _REPLAY_RETENTION_DAYS,
-    _RETRY_DELAY_SECONDS,
     _SCHEMA_MIGRATIONS,
     _SCHEMA_VERSION_TABLE,
     JOB_KINDS,
@@ -50,7 +48,6 @@ __all__ = [
     "_POOL_MAX_LIFETIME_SECONDS",
     "_POOL_RECONNECT_TIMEOUT_SECONDS",
     "_REPLAY_RETENTION_DAYS",
-    "_RETRY_DELAY_SECONDS",
     "_SCHEMA_MIGRATIONS",
     "_SCHEMA_VERSION_TABLE",
     "IdempotencyConflictError",
@@ -58,7 +55,6 @@ __all__ = [
     "PooledLease",
     "Store",
     "_retry_once",
-    "time",
 ]
 
 
@@ -68,22 +64,16 @@ class Store(ChatStoreMixin, LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin
     def __init__(
         self,
         pool: Any,
-        dsn: str = "",
-        connection_class: Any = psycopg.Connection,
         *,
         migration_pool: Any = None,
         schema: str = "public",
-        connection_kwargs: dict[str, Any] | None = None,
         worker_id: str | None = None,
     ) -> None:
         self.pool = pool
-        self.dsn = dsn
-        self.connection_class = connection_class
         self.migration_pool = migration_pool or pool
         if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", schema):
             raise ValueError("database schema must be a lowercase PostgreSQL identifier")
         self.schema = schema
-        self.connection_kwargs = connection_kwargs or {}
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
         self.heartbeat = LeaseHeartbeatService(self)
 
@@ -127,11 +117,8 @@ class Store(ChatStoreMixin, LeaseStoreMixin, SessionStoreMixin, ReplayStoreMixin
             raise
         return cls(
             pool,
-            dsn,
-            connection_class,
             migration_pool=migration_pool,
             schema=schema,
-            connection_kwargs=connection_kwargs,
         )
 
     def close(self) -> None:

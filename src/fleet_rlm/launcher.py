@@ -132,7 +132,7 @@ def local_mlflow_kek_issue(
     return None
 
 
-def verify_api_destination(url: str, expected: dict) -> None:
+def verify_api_destination(url: str, expected: dict | None = None) -> dict:
     """Reject unknown or mismatched tracking destinations without acquiring a Session."""
     try:
         response = httpx.get(f"{url.rstrip('/')}/health", timeout=5.0)
@@ -145,13 +145,14 @@ def verify_api_destination(url: str, expected: dict) -> None:
         not isinstance(payload, dict)
         or payload.get("status") != "ok"
         or not isinstance(actual, dict)
+        or actual.get("mode") not in {"local", "databricks"}
         or actual.get("ready") is not True
         or not actual.get("experiment_id")
     ):
         raise LaunchError(
             f"API at {url} has no ready MLflow destination metadata; restart it with the current Fleet version."
         )
-    if any(actual.get(key) != value for key, value in expected.items()):
+    if expected is not None and any(actual.get(key) != value for key, value in expected.items()):
         raise LaunchError(
             f"API MLflow destination mismatch at {url}: requested {expected['mode']} "
             f"({expected['experiment_name']}); server reports {actual.get('mode')} "
@@ -170,6 +171,8 @@ def verify_api_destination(url: str, expected: dict) -> None:
             f"API runtime mismatch at {url}: running server has stale sandbox helpers/runtime "
             f"({actual_digest} != {expected_digest}). Stop that server or select another FLEET_PORT."
         )
+
+    return actual
 
 
 def plan_launch(
