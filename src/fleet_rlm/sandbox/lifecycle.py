@@ -151,6 +151,8 @@ class SandboxLifecycleMixin:
                 sub_lm=self.sub_lm,
                 sub_adapter=self.sub_adapter,
                 jev_lm=self.jev_lm,
+                serper_api_key=self.serper_api_key,
+                you_api_key=self.you_api_key,
                 max_llm_calls=root.max_llm_calls,
                 parent=self,
                 linked_children=root.linked_children,
@@ -548,7 +550,7 @@ class SandboxLifecycleMixin:
                 if self.parent is not None or self.disposable:
                     self._notify("sandbox_deleting", sandbox_id=sandbox.id)
                     try:
-                        self._remote_exec(sandbox, CLEAR_WORKSPACE_CODE, timeout=60)
+                        self._remote_exec(sandbox, CLEAR_WORKSPACE_CODE, timeout=60, turn_bound=False)
                     except Exception:
                         self._notify("workspace_cleanup_failed", sandbox_id=sandbox.id)
                     _mgr.with_retries(lambda: client.delete(sandbox, timeout=60, wait=True))

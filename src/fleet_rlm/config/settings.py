@@ -307,6 +307,16 @@ class FleetSettings(BaseSettings):
         default="",
         validation_alias=AliasChoices("FLEET_TYPESAFE_API_KEY", "TYPESAFE_API_KEY"),
     )
+    serper_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("FLEET_SERPER_API_KEY", "SERPER_API_KEY"),
+        description="Host-side Serper key for the sandbox web_search builtin; never enters the sandbox.",
+    )
+    you_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("FLEET_YOU_API_KEY", "YOU_API_KEY"),
+        description="Host-side You.com key for the sandbox web_search builtin; never enters the sandbox.",
+    )
 
     max_llm_calls_per_turn: int = Field(
         default=150,

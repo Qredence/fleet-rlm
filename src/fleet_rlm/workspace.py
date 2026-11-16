@@ -108,16 +108,22 @@ def workspace_files_metadata_code(
 ) -> str:
     """Build the remote Python script to validate paths, optionally create parent directories, and stat/digest files."""
     paths_b64 = base64.b64encode(json.dumps(rel_paths).encode("utf-8")).decode("ascii")
-    create_clause = " os.makedirs(parent,exist_ok=True)\n" if create_parents else ""
-    read_clause = " if not os.path.isfile(target): raise FileNotFoundError('workspace file is unavailable')\n"
+    create_clause = (
+        "   os.mkdir(parent)\n" if create_parents else "   raise FileNotFoundError('workspace parent is unavailable')\n"
+    )
+    read_clause = (
+        " if info is None or not stat.S_ISREG(info.st_mode): raise FileNotFoundError('workspace file is unavailable')\n"
+    )
     if create_parents:
         read_clause = (
-            " if os.path.exists(target) and not os.path.isfile(target): "
+            " if info is not None and not stat.S_ISREG(info.st_mode): "
             "raise ValueError('workspace target is not a file')\n"
         )
-    size_clause = " size=os.path.getsize(target) if os.path.isfile(target) else None\n"
+    size_clause = " size=info.st_size if info is not None else None\n"
     if max_bytes is not None:
-        size_clause += f" if size>{max_bytes}: raise ValueError('workspace file exceeds size limit')\n"
+        size_clause += (
+            f" if size is not None and size>{max_bytes}: raise ValueError('workspace file exceeds size limit')\n"
+        )
     result_clause = " return {'size':size}\n"
     if include_digest:
         result_clause = (
@@ -136,20 +142,26 @@ def workspace_files_metadata_code(
             " return {'size':size,'sha256':digest.hexdigest()}\n"
         )
     return (
-        "import base64,hashlib,json,os\n"
+        "import base64,hashlib,json,os,stat\n"
         "root=os.path.realpath('/workspace')\n"
+        "checked_dirs={root}\n"
         "def check(relative):\n"
         " parts=relative.split('/')\n"
+        " if any(part in ('','.','..') for part in parts): raise ValueError('invalid workspace path')\n"
         " parent=root\n"
         " for part in parts[:-1]:\n"
         "  parent=os.path.join(parent,part)\n"
-        "  if os.path.islink(parent): raise ValueError('workspace path may not traverse symbolic links')\n"
-        "  if os.path.exists(parent) and not os.path.isdir(parent): "
-        "raise ValueError('workspace parent is not a directory')\n"
-        " if os.path.commonpath((root,os.path.realpath(parent))) != root: "
-        "raise ValueError('invalid workspace path')\n" + create_clause + " target=os.path.join(parent,parts[-1])\n"
-        " if os.path.islink(target): raise ValueError('workspace target may not be a symbolic link')\n"
-        " if os.path.commonpath((root,parent)) != root: raise ValueError('invalid workspace path')\n"
+        "  if parent in checked_dirs: continue\n"
+        "  try: directory=os.lstat(parent)\n"
+        "  except FileNotFoundError:\n" + create_clause + "  else:\n"
+        "   if stat.S_ISLNK(directory.st_mode): raise ValueError('workspace path may not traverse symbolic links')\n"
+        "   if not stat.S_ISDIR(directory.st_mode): raise ValueError('workspace parent is not a directory')\n"
+        "  checked_dirs.add(parent)\n"
+        " target=os.path.join(parent,parts[-1])\n"
+        " try: info=os.lstat(target)\n"
+        " except FileNotFoundError: info=None\n"
+        " if info is not None and stat.S_ISLNK(info.st_mode): "
+        "raise ValueError('workspace target may not be a symbolic link')\n"
         + read_clause
         + size_clause
         + result_clause

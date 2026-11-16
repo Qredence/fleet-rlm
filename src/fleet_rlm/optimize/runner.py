@@ -53,6 +53,7 @@ from fleet_rlm.optimize.validation import (
     summarize_passes,
 )
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
+from fleet_rlm.skills import bundled_skill_names
 from fleet_rlm.store import Store
 
 logger = logging.getLogger(__name__)
@@ -87,15 +88,17 @@ def _curated_proposer_skills(skills_dir: Path | str | None) -> list[Path]:
         return []
     if ".agents" in root.parts or root.is_symlink() or not root.is_dir():
         return []
+    bundled_names = bundled_skill_names()
     found: list[Path] = []
     for child in sorted(root.iterdir()):
         if child.is_symlink() or not child.is_dir():
             continue
         skill_md = child / "SKILL.md"
         if not skill_md.is_symlink() and skill_md.is_file():
-            found.append(child)
-            if len(found) >= _MAX_PROPOSER_SKILLS:
-                break
+            if child.name in bundled_names:
+                logger.warning("Ignoring local Skill %r: bundled Skill names are reserved", child.name)
+            elif len(found) < _MAX_PROPOSER_SKILLS:
+                found.append(child)
     return found
 
 

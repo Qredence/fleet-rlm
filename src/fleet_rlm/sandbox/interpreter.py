@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, ClassVar
 
 import dspy
+import httpx
 import mlflow
 from dspy.primitives.facade import BOOTSTRAP, LM_ERROR_KEY
 from mlflow.entities import SpanType
@@ -74,6 +75,84 @@ def _strip_rebind_prelude(code: str) -> str:
     return code
 
 
+_WEB_SEARCH_MAX_RESULTS = 10
+_WEB_SEARCH_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+
+
+def _web_search_request(provider: str, method: str, url: str, **kwargs: Any) -> Any:
+    """Make one bounded provider call. Errors name the provider and status, never the key or URL."""
+    try:
+        response = httpx.request(method, url, timeout=_WEB_SEARCH_TIMEOUT, **kwargs)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"{provider} search request failed ({type(exc).__name__})") from None
+    if response.status_code >= 400:
+        raise RuntimeError(f"{provider} search returned HTTP {response.status_code}")
+    try:
+        return response.json()
+    except ValueError:
+        raise RuntimeError(f"{provider} search returned an invalid response") from None
+
+
+def _serper_rows(api_key: str, query: str, max_results: int) -> list[dict[str, Any]]:
+    """Serper Google Search: organic results with `link` and `snippet`."""
+    data = _web_search_request(
+        "Serper",
+        "POST",
+        "https://google.serper.dev/search",
+        headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+        json={"q": query, "num": max_results},
+    )
+    organic = data.get("organic") if isinstance(data, dict) else None
+    return [
+        {"title": item.get("title"), "url": item.get("link"), "snippet": item.get("snippet")}
+        for item in (organic or [])
+        if isinstance(item, dict)
+    ]
+
+
+def _you_rows(api_key: str, query: str, max_results: int) -> list[dict[str, Any]]:
+    """You.com Search: `hits` (or `results.web`) with snippet lists."""
+    data = _web_search_request(
+        "You.com",
+        "GET",
+        "https://api.ydc-index.io/search",
+        params={"query": query, "num_web_results": max_results},
+        headers={"X-API-Key": api_key, "Accept": "application/json"},
+    )
+    if not isinstance(data, dict):
+        return []
+    hits = data.get("hits")
+    if not isinstance(hits, list):
+        hits = (data.get("results") or {}).get("web") or []
+    rows: list[dict[str, Any]] = []
+    for item in hits:
+        if isinstance(item, dict):
+            snippets = item.get("snippets") or []
+            snippet = " ".join(str(part) for part in snippets if part) or str(item.get("description") or "")
+            rows.append({"title": item.get("title"), "url": item.get("url"), "snippet": snippet})
+    return rows
+
+
+def _bounded_web_results(provider: str, rows: list[dict[str, Any]], max_results: int) -> list[dict[str, str]]:
+    """Keep http(s) hits only, with clipped title, url, and snippet text."""
+    results: list[dict[str, str]] = []
+    for row in rows:
+        url = str(row.get("url") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            continue
+        results.append(
+            {
+                "title": " ".join(str(row.get("title") or "").split())[:200],
+                "url": url[:500],
+                "snippet": " ".join(str(row.get("snippet") or "").split())[:600],
+                "provider": provider,
+            }
+        )
+        if len(results) == max_results:
+            break
+    return results
+
+
 class StructuredResponseError(dspy.CodeExecutionError):
     """A host-verified structured response failure that escaped remote execution."""
 
@@ -105,7 +184,9 @@ class DaytonaInterpreter:
             "use_skill",
             "read_skill_reference",
             "run_skill_script",
+            "load_skill_module",
             "save_skill",
+            "web_search",
         }
         if any(
             not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name) or name in reserved
@@ -396,11 +477,39 @@ class DaytonaInterpreter:
         self.manager.consume_budget(len(items), category="other_decisions")
         return self._run_jev_batch(items, question, choices)
 
+    def _web_search(self, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        """Host-mediated keyed search: Serper first, then You.com. Keys never leave the host."""
+        if len(args) != 2 or kwargs:
+            raise ValueError("web_search requires query and max_results")
+        query, max_results = args
+        if not isinstance(query, str) or not query.strip() or len(query) > 1000:
+            raise ValueError("web_search requires a query of 1-1000 characters")
+        if (
+            isinstance(max_results, bool)
+            or not isinstance(max_results, int)
+            or not 1 <= max_results <= _WEB_SEARCH_MAX_RESULTS
+        ):
+            raise ValueError(f"web_search max_results must be an integer from 1 to {_WEB_SEARCH_MAX_RESULTS}")
+        if self.manager.serper_api_key:
+            provider = "serper"
+        elif self.manager.you_api_key:
+            provider = "you"
+        else:
+            raise RuntimeError("web_search not configured")
+        # Charge before the provider request, so a refused budget never reaches the provider.
+        self.manager.consume_budget(1, category="web_search")
+        if provider == "serper":
+            rows = _serper_rows(self.manager.serper_api_key, query.strip(), max_results)
+        else:
+            rows = _you_rows(self.manager.you_api_key, query.strip(), max_results)
+        return _bounded_web_results(provider, rows, max_results)
+
     # Interpreter APIs every namespace has; registered tools with other names go to _invoke_tool.
     _BUILTINS: ClassVar[Mapping[str, Callable[[DaytonaInterpreter, list[Any], dict[str, Any]], Any]]] = {
         "llm_query": _llm_query,
         "llm_query_batched": _llm_query_batched,
         "jev_decide_batched": _jev_decide_batched,
+        "web_search": _web_search,
     }
 
     def _run_jev_batch(self, items: list[str], question: str, choices: list[str] | None = None) -> list[dict[str, Any]]:
@@ -564,6 +673,10 @@ class DaytonaInterpreter:
                 with self._host_call_lock:
                     self._format_failures[execution_id] = {}
                 response = self.manager.run_namespace(self, payload)
+                self.manager.record_skill_activity(
+                    response.get("skill_activity", []),
+                    truncated=response.get("skill_activity_truncated", False),
+                )
                 preview_target = _unwrap_wire(
                     response.get("final") if response.get("final") is not None else response.get("value")
                 )
@@ -616,6 +729,22 @@ class DaytonaInterpreter:
             except Exception as exc:
                 if isinstance(exc, CodeExecutionError) and response.get("outcome") == "completed":
                     response["outcome"] = "ungrounded_submit_rejected"
+                    rejection_text = str(exc).strip()
+                    if rejection_text:
+                        existing_stderr = str(response.get("stderr") or "")
+                        response["stderr"] = (
+                            f"{existing_stderr}\n{rejection_text}" if existing_stderr else rejection_text
+                        )
+                    span.set_outputs(
+                        {
+                            "skill_activity": response.get("skill_activity", []),
+                            "skill_activity_truncated": response.get("skill_activity_truncated", False),
+                            "stdout": activity_text(str(response.get("stdout", ""))),
+                            "stderr": activity_text(str(response.get("stderr", ""))),
+                            "value": activity_preview(None),
+                            "error": True,
+                        }
+                    )
                 response.update(error=True, error_type=response.get("error_type") or type(exc).__name__)
                 span.set_attribute("transport_retries", getattr(exc, "transport_retries", 0))
                 if not isinstance(exc, CodeExecutionError):
@@ -639,6 +768,11 @@ class DaytonaInterpreter:
                 if phase == "task":
                     self._observe(f"{response.get('stdout', '')}\n{response.get('value', '')}")
                 span.set_attribute("host_calls", self._host_calls - host_calls_before)
+                value_target = (
+                    None
+                    if response.get("outcome") == "ungrounded_submit_rejected"
+                    else (response.get("final") if response.get("final") is not None else response.get("value"))
+                )
                 self.manager.emit(
                     "repl_output",
                     namespace=self.ns_id,
@@ -647,11 +781,7 @@ class DaytonaInterpreter:
                     duration_ms=round((time.monotonic() - started) * 1000),
                     stdout=activity_text(str(response.get("stdout", ""))),
                     stderr=activity_text(str(response.get("stderr", ""))),
-                    value=activity_preview(
-                        _unwrap_wire(
-                            response.get("final") if response.get("final") is not None else response.get("value")
-                        )
-                    ),
+                    value=activity_preview(_unwrap_wire(value_target)),
                     error=bool(response.get("error")) or not response,
                     error_type=response.get("error_type"),
                     outcome=response.get("outcome"),

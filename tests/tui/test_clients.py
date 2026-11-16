@@ -10,6 +10,7 @@ import os
 import shlex
 import signal
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -32,6 +33,7 @@ from fleet_rlm import cli, launcher
 from fleet_rlm.api import app as api
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.launcher import LaunchError, LaunchPlan, ManagedProcess, plan_launch
+from fleet_rlm.sandbox.repl import runtime_digest
 from fleet_rlm.tui import local_paths, mentions, web, web_client
 from fleet_rlm.tui.app import FleetTextualApp, _PromptInput
 from fleet_rlm.tui.commands import COMMANDS, SessionState
@@ -315,12 +317,70 @@ def test_terminal_statuses_are_rendered_truthfully(
 
 
 def test_host_rejection_is_distinct_from_remote_python_errors_in_the_tracker():
+    from io import StringIO
+
+    from rich.console import Console
+
     tracker = render.TurnTracker()
     tracker.ingest({"event": "ungrounded_submit", "rejected": True, "figures": ["426880"]})
     tracker.ingest(
-        {"event": "repl_output", "execution_id": "host", "error": True, "outcome": "ungrounded_submit_rejected"}
+        {
+            "event": "repl_output",
+            "execution_id": "host",
+            "error": True,
+            "error_type": "CodeExecutionError",
+            "outcome": "ungrounded_submit_rejected",
+            "stdout": "Checks passed",
+            "stderr": "SUBMIT rejected: figures ['426880'] were typed, not taken from sandbox output.",
+            "value": None,
+        }
     )
     assert tracker.submit_rejections == 1 and tracker.sandbox_errors == 0
+    host_item = tracker.items[-1]
+    assert host_item.outcome == "ungrounded_submit_rejected"
+
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=120)
+    console.print(widgets._StepWidget(host_item, lambda: None).render())
+    rendered = buf.getvalue()
+    assert "SUBMIT rejected (ungrounded figures)" in rendered
+    assert "failed (CodeExecutionError)" not in rendered
+    assert "Checks passed" in rendered
+    assert "SUBMIT rejected: figures ['426880'] were typed, not taken from sandbox output." in rendered
+    assert (
+        render.format_repl_output_text(
+            "Checks passed",
+            "SUBMIT rejected: figures ['426880'] were typed.",
+            '{"answer": "leaked"}',
+            outcome="ungrounded_submit_rejected",
+            error=True,
+        )
+        == "Checks passed\nSUBMIT rejected: figures ['426880'] were typed."
+    )
+    assert "Return value:" not in rendered
+
+    transcript_buf = StringIO()
+    original_console = render.CONSOLE
+    render.CONSOLE = Console(file=transcript_buf, force_terminal=False, width=120)
+    try:
+        render.render_event(
+            {
+                "event": "repl_output",
+                "execution_id": "host",
+                "error": True,
+                "error_type": "CodeExecutionError",
+                "outcome": "ungrounded_submit_rejected",
+                "stdout": "Checks passed",
+                "stderr": "SUBMIT rejected: figures ['426880'] were typed.",
+                "value": '{"answer": "leaked"}',
+            }
+        )
+    finally:
+        render.CONSOLE = original_console
+    transcript = transcript_buf.getvalue()
+    assert "SUBMIT rejected (ungrounded figures)" in transcript
+    assert "Return value:" not in transcript
+
     tracker.ingest({"event": "repl_output", "execution_id": "remote", "error": True, "outcome": "remote_code_error"})
     assert tracker.submit_rejections == tracker.sandbox_errors == 1
 
@@ -4437,7 +4497,11 @@ def test_standalone_local_command_explains_missing_server(monkeypatch, capsys):
 
 
 def _health(settings):
-    return {"status": "ok", "mlflow": {**settings.mlflow_descriptor(), "ready": True, "experiment_id": "17"}}
+    return {
+        "status": "ok",
+        "runtime_digest": runtime_digest(),
+        "mlflow": {**settings.mlflow_descriptor(), "ready": True, "experiment_id": "17"},
+    }
 
 
 def _respond(monkeypatch, payload):
@@ -4475,6 +4539,38 @@ def test_reuse_rejects_destination_mismatches(monkeypatch, field, value):
     _respond(monkeypatch, payload)
     with pytest.raises(launcher.LaunchError, match="destination mismatch"):
         launcher.verify_api_destination("http://fleet.test", settings.mlflow_descriptor())
+
+
+def test_reuse_rejects_stale_or_missing_runtime_digest_and_accepts_matching_digest(monkeypatch):
+    settings = FleetSettings(_env_file=None)
+    stale = {**_health(settings), "runtime_digest": "0000000000000000"}
+    _respond(monkeypatch, stale)
+    with pytest.raises(launcher.LaunchError, match="runtime mismatch"):
+        launcher.verify_api_destination("http://fleet.test", settings.mlflow_descriptor())
+
+    # A server that predates the digest omits the field; a null digest cannot be verified either.
+    predating = {key: value for key, value in _health(settings).items() if key != "runtime_digest"}
+    for payload in (predating, {**_health(settings), "runtime_digest": None}):
+        _respond(monkeypatch, payload)
+        with pytest.raises(launcher.LaunchError, match="predates runtime digest"):
+            launcher.verify_api_destination("http://fleet.test", settings.mlflow_descriptor())
+
+    _respond(monkeypatch, _health(settings))
+    launcher.verify_api_destination("http://fleet.test", settings.mlflow_descriptor())
+
+
+def test_launcher_import_does_not_load_the_daytona_sdk():
+    """Reuse checks import the launcher on every `fleet cli` start; they must not load the Daytona SDK."""
+    code = (
+        "import sys\n"
+        "import fleet_rlm.launcher\n"
+        "loaded = sorted(name for name in sys.modules if name.split('.')[0] == 'daytona')\n"
+        "print('DAYTONA_MODULES=' + ','.join(loaded))\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False)
+    assert result.returncode == 0, result.stderr
+    markers = [line for line in result.stdout.splitlines() if line.startswith("DAYTONA_MODULES=")]
+    assert markers == ["DAYTONA_MODULES="]
 
 
 @pytest.mark.parametrize("payload", [[], {"status": "ok"}, {"status": "ok", "mlflow": {"ready": False}}])

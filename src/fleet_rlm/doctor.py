@@ -258,6 +258,8 @@ def _secret_values(settings: FleetSettings) -> list[str]:
                 settings.fleet_database_migration_url,
                 settings.typesafe_api_key,
                 settings.fleet_llm_api_key.get_secret_value(),
+                settings.serper_api_key.get_secret_value(),
+                settings.you_api_key.get_secret_value(),
             ],
         )
     )

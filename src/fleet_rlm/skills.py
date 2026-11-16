@@ -10,7 +10,7 @@ import os
 import re
 import stat
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import mlflow
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 _LOGGER = logging.getLogger(__name__)
-# Skills shipped with Fleet; a user Skill with the same name in the local folder replaces one.
+# Canonical Skills shipped with Fleet. A workspace or Volume Skill with a bundled name is ignored with a warning.
 BUNDLED_SKILLS_DIR = Path(__file__).parent / "bundled_skills"
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
@@ -34,14 +34,34 @@ MAX_REQUIRED_SKILLS = 3
 MAX_PRELOADED_SKILL_CHARS = 20_000
 MAX_PRELOADED_TOTAL_CHARS = 60_000
 
-SANDBOX_SKILL_HELPERS_CODE = r'''
-import ast, json, os, re, subprocess
+
+def bundled_skill_names(bundled_dir: Path | None = BUNDLED_SKILLS_DIR) -> frozenset[str]:
+    """Return subdirectory names containing ``SKILL.md`` under ``bundled_dir``."""
+    if bundled_dir is None or not bundled_dir.is_dir():
+        return frozenset()
+    return frozenset(child.name for child in bundled_dir.iterdir() if child.is_dir() and (child / "SKILL.md").is_file())
+
+
+SANDBOX_SKILL_HELPERS_CODE = (
+    r'''
+import ast, importlib.util, json, os, re, subprocess, sys, types
 from pathlib import Path
 
 SKILL_ROOT = Path("/workspace/skills")
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_SKILL_BYTES = __FLEET_SKILL_BYTES__
 _MAX_SKILL_FILES = __FLEET_SKILL_FILES__
+_BUNDLED_SKILL_NAMES = frozenset(__FLEET_BUNDLED_SKILLS__)
+# Skill modules imported in this REPL read the reserved names from here (see skill-creator's skill_tools.py).
+os.environ["FLEET_BUNDLED_SKILLS"] = ",".join(sorted(_BUNDLED_SKILL_NAMES))
+_LOADED_SKILL_MODULES = {}
+
+class _CallableSkillModule(types.ModuleType):
+    def __call__(self, *args, **kwargs):
+        run_fn = getattr(self, "run", None)
+        if callable(run_fn):
+            return run_fn(*args, **kwargs)
+        raise TypeError(f"Skill module {self.__name__!r} is not callable (missing run())")
 
 def _skill_dir(name):
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
@@ -70,6 +90,29 @@ def _safe_resource_file(base, rel_path, folders):
     if not any(os.path.commonpath((str(root), str(target))) == str(root) for root in allowed):
         raise ValueError("Skill resource is outside its allowed folders")
     return target
+
+def _resolve_skill_script(base, script_rel_path, allowed_suffixes, suffix_error):
+    if (
+        not isinstance(script_rel_path, str)
+        or not script_rel_path
+        or "\\" in script_rel_path
+        or "\x00" in script_rel_path
+    ):
+        raise ValueError("Invalid Skill script path")
+    relative = Path(script_rel_path)
+    if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("Invalid Skill script path")
+    script_path = relative.as_posix()
+    if relative.parts[0] != "scripts":
+        script_path = "scripts/" + script_path
+    target = _safe_resource_file(base, script_path, ("scripts",))
+    if target.suffix not in allowed_suffixes:
+        raise ValueError(suffix_error)
+    if not target.is_file():
+        raise FileNotFoundError("Skill script is unavailable")
+    if target.stat().st_size > _MAX_SKILL_BYTES:
+        raise ValueError("Skill script exceeds the size limit")
+    return script_path, target
 
 def _parse_frontmatter(raw_text):
     match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", raw_text, re.DOTALL)
@@ -129,8 +172,14 @@ def use_skill(name):
         if path.is_dir():
             entries = []
             for parent, dirs, files in os.walk(path, followlinks=False):
-                dirs[:] = sorted(name for name in dirs if not os.path.islink(os.path.join(parent, name)))
+                dirs[:] = sorted(
+                    dirname
+                    for dirname in dirs
+                    if dirname != "__pycache__" and not os.path.islink(os.path.join(parent, dirname))
+                )
                 for filename in sorted(files):
+                    if filename.endswith((".pyc", ".pyo")):
+                        continue
                     candidate = Path(parent) / filename
                     if candidate.is_symlink() or not candidate.is_file():
                         continue
@@ -159,22 +208,77 @@ def read_skill_reference(name, rel_path):
         raise ValueError("Skill resource exceeds the size limit")
     return target.read_text(encoding="utf-8")
 
+def load_skill_module(name, script_rel_path=None):
+    """Import a Python script from a Skill's scripts/ directory as a callable module."""
+    base = _skill_dir(name)
+    if not base.is_dir():
+        raise FileNotFoundError(f"Skill {name!r} is unavailable")
+    if script_rel_path is None:
+        scripts_dir = base / "scripts"
+        if scripts_dir.is_symlink():
+            raise ValueError("Skill resource directories may not be symbolic links")
+        if not scripts_dir.is_dir():
+            raise FileNotFoundError(f"Skill {name!r} has no scripts directory")
+        py_files = [
+            entry
+            for entry in sorted(scripts_dir.iterdir())
+            if not entry.is_symlink() and entry.is_file() and entry.suffix == ".py" and entry.name != "__init__.py"
+        ]
+        preferred_name = name.replace("-", "_") + ".py"
+        if any(entry.name == preferred_name for entry in py_files):
+            script_rel_path = "scripts/" + preferred_name
+        elif len(py_files) == 1:
+            script_rel_path = "scripts/" + py_files[0].name
+        elif len(py_files) > 1:
+            raise ValueError(f"Skill {name!r} has multiple Python scripts; pass script_rel_path")
+        else:
+            raise FileNotFoundError(f"Skill {name!r} has no Python scripts")
+    script_path, target = _resolve_skill_script(
+        base,
+        script_rel_path,
+        {".py"},
+        "Skill modules must be Python files",
+    )
+    stat_info = target.stat()
+    rel_posix = target.relative_to(base).as_posix()
+    cache_key = (name, rel_posix, stat_info.st_mtime_ns)
+    cached = _LOADED_SKILL_MODULES.get(cache_key)
+    if cached is not None:
+        return cached
+    module_name = f"_fleet_skill_{name.replace('-', '_')}_{target.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, target)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load Skill module {script_path!r}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    prev_dont_write = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    finally:
+        sys.dont_write_bytecode = prev_dont_write
+    run_fn = getattr(module, "run", None)
+    if callable(run_fn):
+        module.__class__ = _CallableSkillModule
+        if not (module.__doc__ or "").strip() and getattr(run_fn, "__doc__", None):
+            module.__doc__ = run_fn.__doc__
+    for stale_key in [key for key in _LOADED_SKILL_MODULES if key[0] == name and key[1] == rel_posix]:
+        _LOADED_SKILL_MODULES.pop(stale_key, None)
+    _LOADED_SKILL_MODULES[cache_key] = module
+    return module
+
 def run_skill_script(name, script_rel_path, args=None):
     """Run a bounded script from this Skill's scripts/ directory."""
     base = _skill_dir(name)
-    if not isinstance(script_rel_path, str) or "\\" in script_rel_path or "\x00" in script_rel_path:
-        raise ValueError("Invalid Skill script path")
-    relative = Path(script_rel_path)
-    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
-        raise ValueError("Invalid Skill script path")
-    script_path = relative.as_posix()
-    if relative.parts[0] != "scripts":
-        script_path = "scripts/" + script_path
-    target = _safe_resource_file(base, script_path, ("scripts",))
-    if target.suffix not in {".py", ".sh"}:
-        raise ValueError("Skill scripts must be Python or shell files")
-    if not target.is_file() or target.stat().st_size > _MAX_SKILL_BYTES:
-        raise FileNotFoundError("Skill script is unavailable")
+    script_path, target = _resolve_skill_script(
+        base,
+        script_rel_path,
+        {".py", ".sh"},
+        "Skill scripts must be Python or shell files",
+    )
     command = ["python3", str(target)] if target.suffix == ".py" else ["bash", str(target)]
     if args is not None:
         if not isinstance(args, list) or len(args) > 20:
@@ -186,14 +290,26 @@ def run_skill_script(name, script_rel_path, args=None):
                 raise ValueError("Skill script argument is invalid or too large")
             normalized_args.append(value)
         command.extend(normalized_args)
-    result = subprocess.run(command, cwd=str(base), capture_output=True, text=True, timeout=60, check=False)
+    workspace_dir = SKILL_ROOT.parent
+    env = dict(os.environ)
+    env["FLEET_WORKSPACE"] = str(workspace_dir)
+    env["FLEET_SKILL_DIR"] = str(base)
+    cwd = str(workspace_dir) if workspace_dir.is_dir() else str(base)
+    result = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, timeout=60, check=False)
     output = result.stdout + ("\n[stderr]\n" + result.stderr if result.stderr else "")
+    if result.returncode != 0:
+        # Keep the tail: tracebacks and the final error line are printed last.
+        raise RuntimeError(
+            f"Skill script {script_path} exited with code {result.returncode}: {output.strip()[-2000:]}"
+        )
     return output[-20000:]
 
 def save_skill(name, description, instructions_md, scripts=None, references=None):
     """Create/update a Skill in this session's isolated Volume."""
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name) or len(name) > 64:
         raise ValueError("Invalid skill name")
+    if name in _BUNDLED_SKILL_NAMES:
+        raise ValueError(f"Cannot overwrite bundled skill {name!r}; choose a new skill name")
     if not isinstance(description, str) or not description.strip() or len(description) > 1024:
         raise ValueError("Skill description must contain 1-1024 characters")
     if (
@@ -247,7 +363,10 @@ def save_skill(name, description, instructions_md, scripts=None, references=None
             raise ValueError("Skill resource cannot replace a symbolic link")
         destination.write_text(content, encoding="utf-8")
     return "Saved Skill " + name
-'''.replace("__FLEET_SKILL_BYTES__", str(MAX_SKILL_FILE_BYTES)).replace("__FLEET_SKILL_FILES__", str(MAX_SKILL_FILES))
+'''.replace("__FLEET_SKILL_BYTES__", str(MAX_SKILL_FILE_BYTES))
+    .replace("__FLEET_SKILL_FILES__", str(MAX_SKILL_FILES))
+    .replace("__FLEET_BUNDLED_SKILLS__", repr(sorted(bundled_skill_names())))
+)
 
 
 def parse_and_validate_skill_md(folder_name: str, raw_text: str) -> tuple[dict[str, str], str]:
@@ -328,6 +447,13 @@ def captured_required_skill(name: str, source: str, files: tuple[tuple[str, byte
     return RequiredSkill(name, source, digest, text, files)
 
 
+def _is_skill_bytecode_relpath(rel_path: str | PurePath) -> bool:
+    """Return True if a Skill-relative path targets ``__pycache__`` or ``.pyc``/``.pyo`` files."""
+    posix = rel_path.as_posix() if isinstance(rel_path, PurePath) else rel_path.replace("\\", "/")
+    parts = PurePosixPath(posix).parts
+    return "__pycache__" in parts or (bool(parts) and parts[-1].endswith((".pyc", ".pyo")))
+
+
 @dataclass(slots=True)
 class SkillManager:
     """Synchronize trusted local Skills with one session's private Volume path."""
@@ -336,21 +462,28 @@ class SkillManager:
     local_skills_dir: Path = Path(".fleet/skills")
     bundled_skills_dir: Path | None = BUNDLED_SKILLS_DIR
 
+    def bundled_skill_names(self) -> frozenset[str]:
+        """Return canonical bundled Skill names for this manager."""
+        return bundled_skill_names(self.bundled_skills_dir)
+
     def _skill_dirs(self) -> dict[str, Path]:
-        """Bundled Skills, then local ones; a local Skill replaces a bundled Skill of the same name."""
+        """Collect bundled Skills, then workspace Skills; a workspace Skill with a bundled name is skipped."""
         selected: dict[str, Path] = {}
-        for root in (self.bundled_skills_dir, self.local_skills_dir):
-            if root is None:
-                continue
-            if root.is_symlink():
+        if self.bundled_skills_dir is not None:
+            if self.bundled_skills_dir.is_symlink():
                 raise ValueError("A Skills directory may not be a symbolic link")
-            if not root.is_dir():
-                continue
-            for skill_md in sorted(root.glob("*/SKILL.md")):
-                name = skill_md.parent.name
-                if name in selected:
-                    _LOGGER.info("Local Skill %s replaces the bundled Skill of the same name", name)
-                selected[name] = skill_md.parent
+            selected = {name: self.bundled_skills_dir / name for name in self.bundled_skill_names()}
+        bundled_names = frozenset(selected)
+        if self.local_skills_dir is not None:
+            if self.local_skills_dir.is_symlink():
+                raise ValueError("A Skills directory may not be a symbolic link")
+            if self.local_skills_dir.is_dir():
+                for skill_md in sorted(self.local_skills_dir.glob("*/SKILL.md")):
+                    name = skill_md.parent.name
+                    if name in bundled_names:
+                        _LOGGER.warning("Ignoring local Skill %r: bundled Skill names are reserved", name)
+                        continue
+                    selected[name] = skill_md.parent
         return selected
 
     def resolve_required(self, names: tuple[str, ...]) -> tuple[RequiredSkill, ...]:
@@ -365,6 +498,8 @@ class SkillManager:
         def capture(directory: int, prefix: str = "") -> None:
             nonlocal captured_bytes
             for entry in sorted(os.listdir(directory)):
+                if entry == "__pycache__" or entry.endswith((".pyc", ".pyo")):
+                    continue
                 path = prefix + entry
                 info = os.stat(entry, dir_fd=directory, follow_symlinks=False)
                 flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
@@ -441,6 +576,8 @@ class SkillManager:
                 raise ValueError("Too many local Skills to synchronize")
             file_count = 0
             for file_path in sorted(skill_dir.rglob("*")):
+                if _is_skill_bytecode_relpath(file_path.relative_to(skill_dir)):
+                    continue
                 if file_path.is_symlink():
                     raise ValueError(f"Skill resources may not be symbolic links: {file_path}")
                 if not file_path.is_file():
@@ -504,6 +641,22 @@ class SkillManager:
         conflicts = sorted(changed - bundled_paths)
         if conflicts:
             raise ValueError("Skill sync conflicts with existing session files: " + ", ".join(conflicts))
+        reserved_names = self.bundled_skill_names() | {
+            skill.name for skill in required_skills if skill.source == "bundled"
+        }
+        stale = sorted(
+            path
+            for path in remote_files
+            if path.startswith("skills/")
+            and len(path.split("/")) >= 3
+            and path.split("/")[1] in reserved_names
+            and path not in bundled_paths
+        )
+        if stale:
+            affected = sorted({path.split("/")[1] for path in stale})
+            _LOGGER.warning("Removing stale bundled Skill files for: %s", ", ".join(affected))
+            for relative in stale:
+                self.sandbox_mgr.delete_workspace_file(relative)
         for relative in sorted(changed):
             _LOGGER.info("Updating bundled Skill file %s in the session workspace", relative)
         # One validated batch upload instead of a check and an upload per file.
@@ -519,7 +672,25 @@ class SkillManager:
 
     def export_volume_skills_to_local(self) -> list[str]:
         """Pull runtime-authored Skills into the separate local Fleet Skills folder."""
-        skill_paths = sorted(path for path in self.sandbox_mgr.list_workspace_files() if path.startswith("skills/"))
+        bundled_names = self.bundled_skill_names()
+        volume_paths = sorted(
+            path
+            for path in self.sandbox_mgr.list_workspace_files()
+            if path.startswith("skills/") and not _is_skill_bytecode_relpath(path.removeprefix("skills/"))
+        )
+        reserved = {path for path in volume_paths if path.split("/")[1] in bundled_names}
+        # Every sync re-uploads the canonical bundle, so only files the bundle does not ship signal a clash.
+        root = self.bundled_skills_dir
+        shadowed = sorted(
+            {
+                path.split("/")[1]
+                for path in reserved
+                if root is None or not (root / path.removeprefix("skills/")).is_file()
+            }
+        )
+        if shadowed:
+            _LOGGER.warning("Skipping Volume Skill files that shadow bundled Skill names: %s", ", ".join(shadowed))
+        skill_paths = [path for path in volume_paths if path not in reserved]
         if len(skill_paths) > MAX_SKILL_FILES:
             raise ValueError("Exported Skills exceed the synchronization bounds")
         try:

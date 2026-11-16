@@ -21,6 +21,9 @@ from fleet_rlm.tui.render import (
     _format_tool_payload,
     _is_omitted_payload,
     confidence_bar_text,
+    format_repl_output_text,
+    is_ungrounded_submit_rejection,
+    repl_output_status_label,
 )
 
 if TYPE_CHECKING:
@@ -221,7 +224,10 @@ class _StepWidget(Static):
         item = self.item
         arrow = "▾" if item.expanded else "▸"
         header = Text()
-        if item.error:
+        is_submit_rejected = is_ungrounded_submit_rejection(item.error, item.outcome)
+        if is_submit_rejected:
+            arrow_color = "bold #fbbf24"
+        elif item.error:
             arrow_color = "bold #f87171"
         elif item.status in {"running", "cancelled", "interrupted"}:
             arrow_color = "bold #fbbf24"
@@ -246,6 +252,8 @@ class _StepWidget(Static):
             header.append("   running…", style="#fbbf24")
         elif item.status in {"cancelled", "interrupted"}:
             header.append(f"   {item.status}", style="#fbbf24")
+        elif is_submit_rejected:
+            header.append("   SUBMIT rejected (ungrounded figures)", style="bold #fbbf24")
         elif item.error:
             err = f" ({item.error_type})" if item.error_type else ""
             header.append(f"   failed{err}", style="bold #f87171")
@@ -265,6 +273,7 @@ class _StepWidget(Static):
 
         parts: list[RenderableType] = [header]
         if item.kind == "repl":
+            step_border = "#fbbf24" if is_submit_rejected else ("#f87171" if item.error else "#3f3f46")
             if item.code:
                 parts.append(
                     Panel(
@@ -278,18 +287,23 @@ class _StepWidget(Static):
                         ),
                         title=f"Python · Daytona · {item.phase}",
                         title_align="left",
-                        border_style="#3f3f46" if not item.error else "#f87171",
+                        border_style=step_border,
                         padding=(0, 1),
                     )
                 )
             if item.status != "running" or item.stdout or item.stderr or item.value:
-                out_text = item.stdout + item.stderr
-                if item.value not in (None, "null", ""):
-                    out_text += ("\n" if out_text else "") + f"Return value: {item.value}"
-                status_label = (
-                    f"failed ({item.error_type or 'Python error'})"
-                    if item.error
-                    else ("running" if item.status == "running" else "completed")
+                out_text = format_repl_output_text(
+                    item.stdout,
+                    item.stderr,
+                    item.value,
+                    outcome=item.outcome,
+                    error=item.error,
+                )
+                status_label = repl_output_status_label(
+                    error=item.error,
+                    error_type=item.error_type,
+                    outcome=item.outcome,
+                    running=item.status == "running",
                 )
                 duration_part = f" · {item.duration_ms} ms" if item.duration_ms is not None else ""
                 parts.append(
@@ -297,7 +311,7 @@ class _StepWidget(Static):
                         Text(out_text[-20000:] or "(no output)", style="#e4e4e7"),
                         title=f"Output · {status_label}{duration_part}",
                         title_align="left",
-                        border_style="#f87171" if item.error else "#3f3f46",
+                        border_style=step_border,
                         padding=(0, 1),
                     )
                 )

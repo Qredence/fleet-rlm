@@ -1,39 +1,54 @@
 ---
 name: long-context-search
-description: Find, count, or summarize evidence in a large selected text, log, or document file that is too big to read at once, using streaming lines or chunks, keyword search, and (when needed) batched sub-LLM reading with cited line numbers.
+description: Find and cite evidence in large workspace text files, logs, or transcripts. Use when bounded line or overlapping chunk searches are needed.
 ---
 
 # Long-context search
 
-Use this when a selected dataset is too large to print or the answer depends on
-scattered passages in that file, such as a log, transcript, or long document. For
-other workspace files, inspect `workspace.tree()` and read the relevant files in
-bounded pieces; the `context` methods apply only when a dataset was selected.
+Use this when a selected `context` dataset or workspace file is too large to
+print, or when evidence is scattered across a large log, transcript, or document.
 
 ## Steps
 
-1. Measure first: `workspace.stat(path)` gives the size; `workspace.tree()` lists the files.
-2. A selected dataset arrives as `context`. Use `context.preview()`,
-   `context.lines()`, `context.chunks(chunk_bytes)` and `context.search(query, limit)`.
-   `search` returns `(line_number, line)` pairs.
-3. Narrow with code before using models. Use exact keyword or regex filters,
-   and do counts and group-bys in Python. Print the counts.
-4. For semantic judgments over many passages, batch them:
+1. Load the search module and probe file size/line bounds before reading:
 
    ```python
-   prompts = [f"Does this line report a failed payment? Answer yes or no.\n{line}" for _, line in hits]
-   answers = llm_query_batched(prompts)
+   lcs = load_skill_module("long-context-search")
+   path = context.path if "context" in globals() and hasattr(context, "path") else "/workspace/files/app.log"
+   print(lcs.probe_files([path]))
    ```
 
-   For a fixed set of labels per item, `jev_decide_batched(items, question, choices)`
-   returns one typed decision per item.
-5. Keep evidence: store `(line_number, excerpt)` for every claim and cite the
-   line numbers in the answer.
-6. Count and aggregate in code from the decisions, print the totals, then
-   SUBMIT from those variables.
+2. Narrow candidates in Python first (auto-switches to overlapping chunks on
+   >1 MB lines or minified files):
 
-## Pitfalls
+   ```python
+   res = lcs.search_windows(path, r"payment\s+failed|timeout", context_lines=4, max_hits=50)
+   print(res["mode"], res["hit_count"], res["truncated"])
+   ```
 
-- Do not print a whole large file; it is truncated and wastes iterations.
-- `lines()` raises on lines over 1 MB; use `chunks()` for binary or minified files.
-- Sub-LLM calls share the Turn budget; filter first, then ask.
+   `hit_count` counts returned matching lines or chunk matches, not necessarily
+   all occurrences. If `truncated` is true, do not report it as a corpus total.
+   Overlapping chunks detect boundary matches up to the configured overlap;
+   use enough overlap for the evidence sought. Cite character offsets in chunk mode.
+   Use `lcs.read_line_range(path, start_line, end_line)` to expand specific
+   passages around a line-mode hit.
+
+3. For semantic classification over matched windows, build bounded batches
+   (<= 100 items/call) and call `jev_decide_batched` or `llm_query_batched`:
+
+   ```python
+   batches = lcs.build_jev_batches(res["hits"], "Does this passage report a failed payment?")
+   matched = []
+   for batch in batches:
+       decisions = jev_decide_batched(batch["items"], batch["question"])
+       for row, meta in zip(decisions, batch["metadata"]):
+           if row["decision"] is True:
+               matched.append(meta)
+   print(len(matched), matched[:10])
+   ```
+
+4. Read `read_skill_reference("long-context-search", "references/batch-reading-patterns.md")`
+   for variable-space bounds and batching guidance.
+
+5. Print final counts and cited `(line_number)` / offset provenance, then `SUBMIT`
+   from those variables.

@@ -19,7 +19,7 @@ preserve the contracts below.
 - Use native DSPy directly. Do not duplicate its mechanisms, add speculative
   abstractions, or introduce compatibility aliases.
 - Live Daytona, model-provider, database, and evaluation runs require explicit authorization.
-- User Skills live in `.fleet/skills/`; `.agents/skills/` is developer guidance and must not be synced.
+- User Skills live in `.fleet/skills/`; `.agents/skills/` is developer guidance and must not be synced. Bundled Skill names are reserved: a local or Volume copy with a bundled name is ignored with a warning.
 - Never commit credentials or `.env` files. Treat traces and artifacts as sensitive.
 - Commit, push, publish, and deploy only with explicit authorization. Use
   conventional commit prefixes.
@@ -33,6 +33,7 @@ preserve the contracts below.
 - Execute generated Python in Daytona; keep credentials and host-mediated tools
   on the server. Preserve shared Turn budgets, isolated child sandboxes,
   success-only artifact promotion, and provenance.
+- Host-mediated `web_search` keeps Serper and You.com keys on the server; search keys never enter the sandbox.
 - Use scoped `dspy.context` and preserve native tracing, evaluation, and
   serialization. Validate pinned integration contracts on dependency upgrades.
 - **Exception:** evaluate rescore/synthetic jobs set `dspy.configure` callbacks

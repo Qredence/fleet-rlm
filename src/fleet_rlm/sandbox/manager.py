@@ -104,6 +104,8 @@ class DaytonaSandboxManager(WorkspaceIOMixin, SandboxBudgetMixin, SandboxLifecyc
     sub_adapter: dspy.Adapter | None = None
     sub_lm: dspy.LM | None = None
     jev_lm: Any | None = None
+    serper_api_key: str = field(default="", repr=False)
+    you_api_key: str = field(default="", repr=False)
     max_llm_calls: int = 150
     max_depth: int = 3
     max_children: int = 8
@@ -146,12 +148,16 @@ class DaytonaSandboxManager(WorkspaceIOMixin, SandboxBudgetMixin, SandboxLifecyc
     _sandbox_errors: int = field(default=0, init=False, repr=False)
     _submit_rejections: int = field(default=0, init=False, repr=False)
     _budget_breakdown: dict[str, int] = field(
-        default_factory=lambda: dict.fromkeys(("generation_query", "routing", "skill_selection", "other_decisions"), 0),
+        default_factory=lambda: dict.fromkeys(
+            ("generation_query", "routing", "skill_selection", "other_decisions", "web_search"), 0
+        ),
         init=False,
         repr=False,
     )
     _environment_reported: bool = field(default=False, init=False, repr=False)
     _child_receipts: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
+    _skill_activity: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    _skill_activity_truncated: bool = field(default=False, init=False, repr=False)
     _interpreters: dict[str, DaytonaInterpreter] = field(default_factory=dict, init=False, repr=False)
     _contexts: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _creation_pending: bool = field(default=False, init=False, repr=False)
@@ -215,16 +221,32 @@ class DaytonaSandboxManager(WorkspaceIOMixin, SandboxBudgetMixin, SandboxLifecyc
             raise failure
 
     def _remote_exec(
-        self, sandbox: Any, code: str, *, timeout: int | None = None, retry: bool = True, retry_span: Any = None
+        self,
+        sandbox: Any,
+        code: str,
+        *,
+        timeout: int | None = None,
+        retry: bool = True,
+        retry_span: Any = None,
+        turn_bound: bool = True,
     ) -> str:
         encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
         command = (
             "python3 -c 'import base64; exec(compile(base64.b64decode(\"" + encoded + '"), "<fleet-remote>", "exec"))\''
         )
-        if retry:
-            result = with_retries(lambda: sandbox.process.exec(command, timeout=timeout), span=retry_span)
-        else:
-            result = sandbox.process.exec(command, timeout=timeout)
+
+        def execute() -> Any:
+            effective_timeout = timeout
+            if turn_bound:
+                remaining = self.admit_execution()
+                if remaining is not None:
+                    effective_timeout = min(timeout, int(remaining)) if timeout is not None else int(remaining)
+            result = sandbox.process.exec(command, timeout=effective_timeout)
+            if turn_bound:
+                self.check_turn()
+            return result
+
+        result = with_retries(execute, span=retry_span) if retry else execute()
         if getattr(result, "exit_code", 0) != 0:
             raise RuntimeError("Remote Daytona command failed")
         return getattr(result, "result", "") or ""
@@ -347,6 +369,10 @@ class DaytonaSandboxManager(WorkspaceIOMixin, SandboxBudgetMixin, SandboxLifecyc
             "use workspace.read_text(context['path']) or WorkspaceDatasetView(context) for file access. "
             "workspace.load_image('files/...') loads bounded workspace images as dspy.Image for multimodal "
             "llm_query or dspy.Predict. "
+            "Skills expose use_skill(name), load_skill_module(name, script_rel_path=None) for direct Python imports, "
+            "run_skill_script(name, script_rel_path, args=None), read_skill_reference(name, ref_rel_path), "
+            "and save_skill(name, description, body, scripts=None, references=None). "
+            "web_search(query, max_results=5) is host-mediated keyed search; it fails when no server key is set. "
             "Use workspace.write_artifact(name, content) for results. "
             "Artifact names are relative to artifacts/ (e.g. 'result.txt'); use the helper's returned path. "
             "Nested DSPy code agents allocate fresh child sandboxes; files/ and skills/ inputs are copied, while "

@@ -109,6 +109,45 @@ def _identity_text(event: dict[str, Any]) -> str:
     )
 
 
+def is_ungrounded_submit_rejection(error: bool, outcome: str | None) -> bool:
+    """Return True when a REPL cell failed due to host grounding rejection of SUBMIT."""
+    return bool(error and outcome == "ungrounded_submit_rejected")
+
+
+def repl_output_status_label(
+    *,
+    error: bool,
+    error_type: str | None = None,
+    outcome: str | None = None,
+    running: bool = False,
+) -> str:
+    """Return the human-readable status suffix for one REPL output panel or header."""
+    if is_ungrounded_submit_rejection(error, outcome):
+        return "SUBMIT rejected (ungrounded figures)"
+    if error:
+        return f"failed ({error_type or 'Python error'})"
+    return "running" if running else "completed"
+
+
+def format_repl_output_text(
+    stdout: str,
+    stderr: str,
+    value: str | None,
+    *,
+    outcome: str | None = None,
+    error: bool = False,
+) -> str:
+    """Combine stdout, stderr, and non-rejected return value with clean line breaks."""
+    out_text = stdout
+    if stderr:
+        if out_text and not out_text.endswith("\n"):
+            out_text += "\n"
+        out_text += stderr
+    if value not in (None, "null", "") and not is_ungrounded_submit_rejection(error, outcome):
+        out_text += ("\n" if out_text and not out_text.endswith("\n") else "") + f"Return value: {value}"
+    return out_text
+
+
 @dataclass(slots=True)
 class CollapsibleItem:
     """One interactive REPL cell, Thinking block, or Tool invocation that can expand and collapse."""
@@ -131,6 +170,7 @@ class CollapsibleItem:
     value: str | None = None
     error: bool = False
     error_type: str | None = None
+    outcome: str | None = None
     reasoning: str = ""
     tool_inputs: str | None = None
     tool_output: str | None = None
@@ -410,6 +450,7 @@ class TurnTracker:
                 self.items.append(item)
             has_error = bool(event.get("error"))
             item.error = has_error
+            item.outcome = str(event["outcome"]) if event.get("outcome") else None
             item.error_type = str(event.get("error_type") or "Python error") if has_error else None
             item.status = "failed" if has_error else "completed"
             if isinstance(event.get("duration_ms"), int):
@@ -790,16 +831,28 @@ def render_event(event: dict[str, Any]) -> None:
                 Text(f"  ✓ Bootstrap completed · {event.get('duration_ms', '?')} ms · {identity}", style="dim")
             )
         else:
-            text = str(event.get("stdout", "")) + str(event.get("stderr", ""))
-            if event.get("value") not in (None, "null"):
-                text += f"\nReturn value: {event['value']}"
-            status = f"failed ({event.get('error_type') or 'Python error'})" if event.get("error") else "completed"
+            has_error = bool(event.get("error"))
+            outcome = str(event["outcome"]) if event.get("outcome") else None
+            is_submit_rejected = is_ungrounded_submit_rejection(has_error, outcome)
+            text = format_repl_output_text(
+                str(event.get("stdout", "")),
+                str(event.get("stderr", "")),
+                str(event["value"]) if event.get("value") not in (None, "null") else None,
+                outcome=outcome,
+                error=has_error,
+            )
+            status = repl_output_status_label(
+                error=has_error,
+                error_type=event.get("error_type"),
+                outcome=outcome,
+            )
+            border_style = "yellow" if is_submit_rejected else ("red" if has_error else "blue")
             CONSOLE.print(
                 Panel(
                     Text(text[-20000:] or "(no output)"),
                     title=f"Execution {status} · {event.get('duration_ms', '?')} ms",
                     subtitle=Text(identity),
-                    border_style="red" if event.get("error") else "blue",
+                    border_style=border_style,
                 )
             )
     elif event_type == "triage_decision":

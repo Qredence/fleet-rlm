@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 # Distinguishes "the caller supplied no Turn policy" from an explicit `None` (deadline-free).
 _UNSET = object()
+# Bounds the skill-helper receipts kept for one Turn across the whole sandbox tree.
+MAX_TURN_SKILL_RECEIPTS = 20
 
 
 class SandboxBudgetMixin:
@@ -162,6 +164,8 @@ class SandboxBudgetMixin:
                 root._budget_breakdown = dict.fromkeys(root._budget_breakdown, 0)
                 root._allocations = 0
                 root._child_receipts.clear()
+                root._skill_activity.clear()
+                root._skill_activity_truncated = False
                 root._cancelled.clear()
                 root._turn_generation += 1
                 root._turn_active = True
@@ -259,3 +263,23 @@ class SandboxBudgetMixin:
         root = self.root
         with root._budget_lock:
             return self._usage_unlocked()
+
+    def record_skill_activity(self: DaytonaSandboxManager, receipts: Any, *, truncated: bool = False) -> None:
+        """Keep the Turn's first skill-helper receipts from any sandbox in the agent tree, capped in total."""
+        if not isinstance(receipts, list):
+            return
+        root = self.root
+        with root._budget_lock:
+            room = max(MAX_TURN_SKILL_RECEIPTS - len(root._skill_activity), 0)
+            root._skill_activity.extend(receipts[:room])
+            if truncated or len(receipts) > room:
+                root._skill_activity_truncated = True
+
+    def turn_skill_activity(self: DaytonaSandboxManager) -> dict[str, Any]:
+        """The Turn's bounded skill-helper receipts, for the durable Turn record."""
+        root = self.root
+        with root._budget_lock:
+            return {
+                "skill_activity": list(root._skill_activity),
+                "skill_activity_truncated": root._skill_activity_truncated,
+            }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import hashlib
 import io
@@ -144,20 +145,20 @@ def test_invalid_compiled_program_leaves_the_running_program_unchanged(tmp_path:
     assert engine.program.reasoning.flex.module_src == json.loads(known_good)["state"]["reasoning.flex"]["module_src"]
 
 
-@pytest.mark.parametrize("schema", ["fleet-program-a1", "fleet-program-b1", "unknown"])
+@pytest.mark.parametrize("schema", ["fleet-program-a1", "fleet-program-b1", "fleet-program-b2", "unknown"])
 def test_incompatible_selected_program_refuses_without_mutating_or_selecting_baseline(tmp_path, schema):
     manager = DaytonaSandboxManager("key", "org", "volume", "schema-migration")
     path = tmp_path / "selected.json"
     engine = _engine(manager, compiled_path=str(path), baseline=True)
     content = json.loads(program_envelope(engine.program))
-    assert content["program_schema"] == "fleet-program-b2"
+    assert content["program_schema"] == "fleet-program-b3"
     path.write_text(json.dumps(content))
     engine.compiled.reload_if_changed(engine.program)
     before = deepcopy(engine.program.dump_state())
     content["program_schema"] = schema
     content["state"]["routing.predict"]["signature"]["instructions"] = "Obsolete policy"
     path.write_text(json.dumps(content))
-    with pytest.raises(ValueError, match="fleet-program-b2"):
+    with pytest.raises(ValueError, match="fleet-program-b3"):
         engine.compiled.reload_if_changed(engine.program)
     assert engine.program.dump_state() == before
     path.unlink()
@@ -641,6 +642,11 @@ def _selecting_engine(monkeypatch, relevant: set[str], *, jev: bool = True) -> t
     monkeypatch.setattr(DaytonaSandboxManager, "emit", lambda _self, _event, **payload: seen["events"].append(payload))
     engine = _engine(manager, jev_lm=SimpleNamespace(model="jev-test") if jev else None)
     monkeypatch.setattr(engine.program.skill_selection.predict, "batch", batch)
+    monkeypatch.setattr(
+        engine.program.skill_selection.verify,
+        "forward",
+        lambda **_kwargs: SimpleNamespace(slot_0=True, slot_1=True, slot_2=True),
+    )
     seen["route"] = Route
     return engine, seen
 
@@ -655,7 +661,7 @@ def test_skill_selection_preloads_only_skills_jev_marks_relevant(monkeypatch) ->
 
     catalog = _selected_catalog(engine, task="Total revenue per region in files/sales.csv")
 
-    assert seen["batched"] == ["tabular-analysis", "delegation"] and seen["budget"] == 2
+    assert seen["batched"] == ["tabular-analysis", "delegation"] and seen["budget"] == 5
     assert catalog.startswith(CATALOG)
     assert '<preloaded_skill name="tabular-analysis">' in catalog and "Use csv.DictReader." in catalog
     assert 'name="delegation">' not in catalog.removeprefix(CATALOG)
@@ -686,7 +692,7 @@ def test_three_required_skills_allow_three_optional_within_character_budget(monk
     )
     loaded = engine.workspace.load_skills(catalog, selected, required_skills=required).removeprefix(catalog)
     assert seen["batched"] == ([] if full else optional[:20])
-    assert seen["budget"] == (0 if full else 20)
+    assert seen["budget"] == (0 if full else 23)
     assert selected == ([] if full else optional[:3])
     assert loaded.startswith(f'\n<preloaded_skill name="third">\n{required[0].skill_md}\n</preloaded_skill>')
     assert loaded.count("<preloaded_skill ") == (3 if full else 6)
@@ -1453,7 +1459,7 @@ def test_dspy35_capability_d_multiturn_history_on_rlm() -> None:
 
 
 # =========================================================================
-# (e) fleet-program-b2 ReAnchor roundtrip
+# (e) fleet-program-b3 ReAnchor roundtrip
 # =========================================================================
 def test_dspy35_capability_e_fleet_program_b2_reanchor_roundtrip() -> None:
     manager = DaytonaSandboxManager("k", "o", "v", "b2-test")
@@ -1465,7 +1471,7 @@ def test_dspy35_capability_e_fleet_program_b2_reanchor_roundtrip() -> None:
 
     envelope_bytes = program_envelope(runtime.program)
     data = json.loads(envelope_bytes)
-    assert data["program_schema"] == "fleet-program-b2"
+    assert data["program_schema"] == "fleet-program-b3"
     assert data["program_schema"] == PROGRAM_SCHEMA
 
     # Inspect tunable components includes ReAnchor calibration
@@ -1855,6 +1861,8 @@ def test_public_configuration_omits_credentials_and_tracks_session_override():
         fleet_database_url="postgresql://credential-marker",
         fleet_daytona_api_key="credential-marker",
         typesafe_api_key="credential-marker",
+        serper_api_key="credential-marker",
+        you_api_key="credential-marker",
     )
     public = settings.configuration()
     assert "credential-marker" not in str(public)
@@ -1864,6 +1872,16 @@ def test_public_configuration_omits_credentials_and_tracks_session_override():
     assert settings.configuration()["digest"] == public["digest"]
     assert changed["file_changes_require_restart"] is True
     assert settings.configuration({"execution_mode": settings.execution_mode})["sources"]["execution_mode"] == "session"
+
+
+@pytest.mark.usefixtures("isolated_settings")
+@pytest.mark.parametrize("name", ["SERPER_API_KEY", "FLEET_SERPER_API_KEY", "YOU_API_KEY", "FLEET_YOU_API_KEY"])
+def test_search_keys_load_from_both_aliases_and_stay_out_of_public_configuration(monkeypatch, name):
+    monkeypatch.setenv(name, "search-marker")
+    settings = FleetSettings(_env_file=None)
+    field = "serper_api_key" if "SERPER" in name else "you_api_key"
+    assert getattr(settings, field).get_secret_value() == "search-marker"
+    assert "search-marker" not in str(settings.configuration())
 
 
 @pytest.mark.usefixtures("isolated_settings")
@@ -5069,24 +5087,35 @@ def test_local_catalog_matches_the_synced_skill_metadata(tmp_path: Path) -> None
     )
 
 
-def test_local_skill_files_stage_bundled_and_local_resources_with_workspace_paths(tmp_path: Path) -> None:
+def test_local_skill_files_stage_bundled_and_local_resources_with_workspace_paths(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     bundled = tmp_path / "bundled"
     local = tmp_path / "local"
     (bundled / "shared-skill").mkdir(parents=True)
-    (bundled / "shared-skill" / "SKILL.md").write_text(
-        "---\nname: shared-skill\ndescription: Bundled copy.\n---\n\nBundled.\n", encoding="utf-8"
-    )
-    (local / "shared-skill" / "references").mkdir(parents=True)
-    skill_md = b"---\nname: shared-skill\ndescription: Local override.\n---\n\nLocal.\n"
+    bundled_md = b"---\nname: shared-skill\ndescription: Bundled copy.\n---\n\nBundled.\n"
+    (bundled / "shared-skill" / "SKILL.md").write_bytes(bundled_md)
+    (local / "local-skill" / "references").mkdir(parents=True)
+    skill_md = b"---\nname: local-skill\ndescription: Local skill.\n---\n\nLocal.\n"
     ref_md = b"Reference policy.\n"
-    (local / "shared-skill" / "SKILL.md").write_bytes(skill_md)
-    (local / "shared-skill" / "references" / "policy.md").write_bytes(ref_md)
+    (local / "local-skill" / "SKILL.md").write_bytes(skill_md)
+    (local / "local-skill" / "references" / "policy.md").write_bytes(ref_md)
 
     manager = SkillManager(object(), local, bundled)  # type: ignore[arg-type]
     assert manager.local_skill_files() == {
-        "skills/shared-skill/SKILL.md": skill_md,
-        "skills/shared-skill/references/policy.md": ref_md,
+        "skills/shared-skill/SKILL.md": bundled_md,
+        "skills/local-skill/SKILL.md": skill_md,
+        "skills/local-skill/references/policy.md": ref_md,
     }
+
+    (local / "shared-skill").mkdir(parents=True)
+    (local / "shared-skill" / "SKILL.md").write_bytes(
+        b"---\nname: shared-skill\ndescription: Local override.\n---\n\nLocal.\n"
+    )
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.skills"):
+        staged = manager.local_skill_files()
+    assert staged["skills/shared-skill/SKILL.md"] == bundled_md
+    assert "Ignoring local Skill 'shared-skill'" in caplog.text
 
 
 def test_stage_local_skills_returns_catalog_and_files_in_one_scan(tmp_path: Path, monkeypatch) -> None:
@@ -5112,20 +5141,20 @@ def test_stage_local_skills_returns_catalog_and_files_in_one_scan(tmp_path: Path
 
 
 def test_bundled_skill_discovery_and_activation_do_not_install_packages(tmp_path: Path, monkeypatch) -> None:
-    bundled_skills = (
-        "delegation",
-        "long-context-search",
-        "repository-inspection",
-        "skill-creator",
-        "tabular-analysis",
-    )
+    from fleet_rlm.skills import bundled_skill_names
+
+    bundled_skills = tuple(sorted(bundled_skill_names()))
     root = tmp_path / "skills"
     shutil.copytree(BUNDLED_SKILLS_DIR, root)
     helpers: dict = {}
+    # The preamble exports reserved names to skill modules; setenv restores the variable after this test.
+    monkeypatch.setenv("FLEET_BUNDLED_SKILLS", "")
     exec(SANDBOX_SKILL_HELPERS_CODE.replace('Path("/workspace/skills")', f"Path({str(root)!r})"), helpers)
+    assert helpers["_BUNDLED_SKILL_NAMES"] == frozenset(bundled_skills)
+    assert os.environ["FLEET_BUNDLED_SKILLS"] == ",".join(bundled_skills)
 
     def unexpected_process(*_args, **_kwargs):
-        pytest.fail("Discovering or activating a Skill must not launch a process")
+        pytest.fail("Discovering, activating, or importing a Skill must not launch a process")
 
     monkeypatch.setattr(helpers["subprocess"], "run", unexpected_process)
     catalog = {item["name"] for item in helpers["list_skills"]()}
@@ -5133,6 +5162,10 @@ def test_bundled_skill_discovery_and_activation_do_not_install_packages(tmp_path
     for name in bundled_skills:
         activated = helpers["use_skill"](name)
         assert f"# Skill: {name}" in activated
+        module = helpers["load_skill_module"](name)
+        assert callable(module)
+        assert callable(getattr(module, "run", None))
+        assert (module.__doc__ or "").strip()
 
 
 # Skill synchronization
@@ -5142,27 +5175,40 @@ def _skill(name: str, instructions: str = "Instructions.") -> bytes:
     return f"---\nname: {name}\ndescription: test skill\n---\n\n{instructions}\n".encode()
 
 
-def test_required_capture_preserves_complete_bytes_overrides_and_does_not_reread(tmp_path):
+def test_required_capture_preserves_complete_bytes_overrides_and_does_not_reread(tmp_path, caplog):
+    from fleet_rlm.contracts import SkillAdmissionError
+
     local, bundled = tmp_path / "local", tmp_path / "bundled"
-    for root in (local, bundled):
-        (root / "ledger-audit").mkdir(parents=True)
-        (root / "ledger-audit" / "SKILL.md").write_bytes(_skill("ledger-audit", str(root)))
+    (bundled / "canonical-skill").mkdir(parents=True)
+    (bundled / "canonical-skill" / "SKILL.md").write_bytes(_skill("canonical-skill", "Canonical bundled skill."))
+    (local / "ledger-audit").mkdir(parents=True)
     raw = _skill("ledger-audit", "Count café € exactly.\r\n").replace(b"\n", b"\r\n")
     raw += b"x" * (20_000 - len(raw.decode("utf-8")))
     (local / "ledger-audit" / "SKILL.md").write_bytes(raw)
     (local / "ledger-audit" / "script.py").write_bytes(b"print(42)")
     volume = _VolumeDouble()
     manager = SkillManager(volume, local, bundled)
-    required = manager.resolve_required(("ledger-audit",))
+    required = manager.resolve_required(("ledger-audit", "canonical-skill"))
     assert required[0].source == "workspace" and required[0].skill_md == raw.decode("utf-8")
     assert len(required[0].skill_md) == 20_000
+    assert required[1].source == "bundled"
     (local / "ledger-audit" / "SKILL.md").write_bytes(raw + b"x")
-    from fleet_rlm.contracts import SkillAdmissionError
 
     with pytest.raises(SkillAdmissionError, match="documented limits"):
         manager.resolve_required(("ledger-audit",))
     manager.sync_local_skills_to_volume(required_skills=required)
-    assert volume.writes == {"skills/ledger-audit/" + path: content for path, content in required[0].files}
+    assert volume.writes == {
+        f"skills/{skill.name}/{path}": content for skill in required for path, content in skill.files
+    }
+
+    (local / "ledger-audit" / "SKILL.md").write_bytes(raw)
+    (local / "canonical-skill").mkdir(parents=True)
+    (local / "canonical-skill" / "SKILL.md").write_bytes(_skill("canonical-skill", "Attempted local override."))
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.skills"):
+        (clashing,) = manager.resolve_required(("canonical-skill",))
+    assert clashing.source == "bundled"
+    assert clashing.skill_md == _skill("canonical-skill", "Canonical bundled skill.").decode()
+    assert "Ignoring local Skill 'canonical-skill'" in caplog.text
 
 
 @pytest.mark.parametrize("link", ["ancestor", "directory", "instructions", "resource"])
@@ -5308,29 +5354,302 @@ class _VolumeDouble:
         self.writes.update(files)
 
 
-def test_bundled_skills_ship_valid_and_sync_with_local_overrides(tmp_path: Path) -> None:
-    from fleet_rlm.skills import BUNDLED_SKILLS_DIR, parse_and_validate_skill_md
+def test_bundled_skills_ship_valid_and_sync_with_local_overrides(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from fleet_rlm.skills import BUNDLED_SKILLS_DIR, bundled_skill_names, parse_and_validate_skill_md
 
     bundled = sorted(path.parent.name for path in BUNDLED_SKILLS_DIR.glob("*/SKILL.md"))
-    assert bundled == [
-        "delegation",
-        "long-context-search",
-        "repository-inspection",
-        "skill-creator",
-        "tabular-analysis",
-    ]
+    assert bundled == sorted(bundled_skill_names())
+    assert "skill-creator" in bundled  # guards against an empty or misplaced bundle
+    expected_bundled_files: set[str] = set()
     for name in bundled:
-        parse_and_validate_skill_md(name, (BUNDLED_SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8"))
+        skill_dir = BUNDLED_SKILLS_DIR / name
+        parse_and_validate_skill_md(name, (skill_dir / "SKILL.md").read_text(encoding="utf-8"))
+        expected_bundled_files.add(f"skills/{name}/SKILL.md")
+        scripts = sorted((skill_dir / "scripts").glob("*.py"))
+        assert scripts, f"{name} must ship at least one script"
+        for script in scripts:
+            ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
+            expected_bundled_files.add(f"skills/{name}/scripts/{script.name}")
+        references = sorted((skill_dir / "references").glob("*.md"))
+        assert references, f"{name} must ship at least one reference"
+        for reference in references:
+            assert reference.read_text(encoding="utf-8").strip()
+            expected_bundled_files.add(f"skills/{name}/references/{reference.name}")
 
     local = tmp_path / "skills"
-    (local / "delegation").mkdir(parents=True)
-    override = _skill("delegation", "Local delegation rules.")
-    (local / "delegation" / "SKILL.md").write_bytes(override)
+    (local / "custom-skill").mkdir(parents=True)
+    custom = _skill("custom-skill", "Custom local skill.")
+    (local / "custom-skill" / "SKILL.md").write_bytes(custom)
     sandbox = _VolumeDouble()
 
-    assert SkillManager(sandbox, local).sync_local_skills_to_volume() == 5  # type: ignore[arg-type]
-    assert sorted(sandbox.writes) == [f"skills/{name}/SKILL.md" for name in bundled]
-    assert sandbox.writes["skills/delegation/SKILL.md"] == override
+    assert SkillManager(sandbox, local).sync_local_skills_to_volume() == len(bundled) + 1  # type: ignore[arg-type]
+    assert sorted(sandbox.writes) == sorted([*expected_bundled_files, "skills/custom-skill/SKILL.md"])
+    assert sandbox.writes["skills/custom-skill/SKILL.md"] == custom
+
+    (local / "delegation").mkdir(parents=True)
+    (local / "delegation" / "SKILL.md").write_bytes(_skill("delegation", "Local delegation rules."))
+    clash = _VolumeDouble()
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.skills"):
+        assert SkillManager(clash, local).sync_local_skills_to_volume() == len(bundled) + 1  # type: ignore[arg-type]
+    assert clash.writes["skills/delegation/SKILL.md"] == (BUNDLED_SKILLS_DIR / "delegation" / "SKILL.md").read_bytes()
+    assert "Ignoring local Skill 'delegation'" in caplog.text
+
+
+def test_export_volume_skills_skips_bundled_skills_and_exports_custom_only(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    local = tmp_path / "skills"
+    local.mkdir()
+    remote_files = {
+        "skills/delegation/SKILL.md": _skill("delegation", "Bundled delegation."),
+        "skills/delegation/scripts/delegation_tools.py": b"def run(): pass\n",
+        "skills/delegation/scripts/rogue.py": b"print('shadow')\n",
+        "skills/tabular-analysis/SKILL.md": _skill("tabular-analysis", "Bundled tabular."),
+        "skills/custom-report/SKILL.md": _skill("custom-report", "Custom workspace skill."),
+        "skills/custom-report/references/notes.md": b"Custom notes.\n",
+    }
+    read_requests: list[list[str]] = []
+
+    class RecordingSandbox:
+        def list_workspace_files(self) -> list[str]:
+            return sorted(remote_files)
+
+        def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
+            read_requests.append(list(paths))
+            return {path: remote_files[path] for path in paths if path in remote_files}
+
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.skills"):
+        exported = SkillManager(RecordingSandbox(), local).export_volume_skills_to_local()  # type: ignore[arg-type]
+    assert exported == ["custom-report"]
+    assert read_requests == [["skills/custom-report/SKILL.md", "skills/custom-report/references/notes.md"]]
+    assert (local / "custom-report" / "SKILL.md").read_bytes() == remote_files["skills/custom-report/SKILL.md"]
+    assert (local / "custom-report" / "references" / "notes.md").read_bytes() == b"Custom notes.\n"
+    assert not (local / "delegation").exists()
+    assert not (local / "tabular-analysis").exists()
+    # Canonical bundled copies are skipped silently; only the rogue file that the bundle does not ship warns.
+    assert "Skipping Volume Skill files that shadow bundled Skill names: delegation" in caplog.text
+    assert "tabular-analysis" not in caplog.text
+
+
+def test_curated_proposer_skills_ignores_bundled_name_collision(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from fleet_rlm.optimize.runner import _curated_proposer_skills
+
+    skills_dir = tmp_path / "skills"
+    for name in ("alpha-skill", "beta-skill"):
+        (skills_dir / name).mkdir(parents=True)
+        (skills_dir / name / "SKILL.md").write_bytes(_skill(name))
+
+    found = _curated_proposer_skills(skills_dir)
+    assert [path.name for path in found] == ["alpha-skill", "beta-skill"]
+
+    (skills_dir / "tabular-analysis").mkdir(parents=True)
+    (skills_dir / "tabular-analysis" / "SKILL.md").write_bytes(_skill("tabular-analysis"))
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.optimize.runner"):
+        found = _curated_proposer_skills(skills_dir)
+    assert [path.name for path in found] == ["alpha-skill", "beta-skill"]
+    assert "Ignoring local Skill 'tabular-analysis'" in caplog.text
+
+
+def test_workspace_inputs_load_skills_appends_resources_only_when_present(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from fleet_rlm.engine.invocation import WorkspaceInputs
+    from fleet_rlm.skills import captured_required_skill
+
+    manager = DaytonaSandboxManager("key", "org", "volume", "session-resources")
+    workspace_inputs = WorkspaceInputs(manager)
+
+    req_with_res = captured_required_skill(
+        "req-with-res",
+        "workspace",
+        (
+            ("SKILL.md", _skill("req-with-res", "With resources.")),
+            ("references/guide.md", b"Guide."),
+            ("scripts/run.py", b"def run(): pass\n"),
+        ),
+    )
+    req_plain = captured_required_skill("req-plain", "workspace", (("SKILL.md", _skill("req-plain", "Plain.")),))
+
+    remote_files = {
+        "skills/tabular-analysis/SKILL.md": (BUNDLED_SKILLS_DIR / "tabular-analysis" / "SKILL.md").read_bytes(),
+        "skills/opt-with-res/SKILL.md": _skill("opt-with-res", "Optional with resources."),
+        "skills/opt-plain/SKILL.md": _skill("opt-plain", "Optional plain."),
+    }
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_file",
+        lambda _self, path, **_kw: remote_files[path],
+    )
+    list_calls = 0
+
+    def forbid_list(_self: DaytonaSandboxManager) -> list[str]:
+        nonlocal list_calls
+        list_calls += 1
+        return []
+
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", forbid_list)
+
+    loaded_offline = workspace_inputs.load_skills(
+        "<available_skills/>",
+        ["tabular-analysis", "opt-plain"],
+        required_skills=(req_with_res, req_plain),
+    )
+    assert list_calls == 0
+    assert (
+        '<preloaded_skill name="req-with-res">\n'
+        f"{req_with_res.skill_md}\n"
+        'Resources: {"scripts": ["scripts/run.py"], "references": ["references/guide.md"]}\n'
+        "</preloaded_skill>"
+    ) in loaded_offline
+    assert f'<preloaded_skill name="req-plain">\n{req_plain.skill_md}\n</preloaded_skill>' in loaded_offline
+    assert (
+        'Resources: {"scripts": ["scripts/tabular_tools.py"], "references": ["references/formulas-and-verifiers.md"]}'
+        in loaded_offline
+    )
+    assert (
+        f'<preloaded_skill name="opt-plain">\n{remote_files["skills/opt-plain/SKILL.md"].decode()}\n</preloaded_skill>'
+        in loaded_offline
+    )
+
+    # When a sandbox is attached, optional non-bundled skills inspect workspace files once.
+    manager._sandbox = object()  # type: ignore[assignment]
+    workspace_listing = [
+        "skills/opt-with-res/SKILL.md",
+        "skills/opt-with-res/scripts/helper.py",
+        "skills/opt-with-res/assets/schema.json",
+        "skills/opt-plain/SKILL.md",
+    ]
+    list_calls = 0
+
+    def list_once(_self: DaytonaSandboxManager) -> list[str]:
+        nonlocal list_calls
+        list_calls += 1
+        return workspace_listing
+
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", list_once)
+    loaded_live = workspace_inputs.load_skills("<available_skills/>", ["opt-with-res", "opt-plain"])
+    assert list_calls == 1
+    assert (
+        'Resources: {"scripts": ["scripts/helper.py"], "assets": ["assets/schema.json"]}\n</preloaded_skill>'
+        in loaded_live
+    )
+    assert (
+        f'<preloaded_skill name="opt-plain">\n{remote_files["skills/opt-plain/SKILL.md"].decode()}\n</preloaded_skill>'
+        in loaded_live
+    )
+
+    # A failed resource listing is logged and degrades to a body without a Resources line.
+    def fail_list(_self: DaytonaSandboxManager) -> list[str]:
+        raise OSError("listing unavailable")
+
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", fail_list)
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.engine.invocation"):
+        loaded_degraded = workspace_inputs.load_skills("<available_skills/>", ["opt-with-res"])
+    assert "Workspace Skill resource listing failed (OSError); resources omitted" in caplog.text
+    opt_body = remote_files["skills/opt-with-res/SKILL.md"].decode()
+    assert f'<preloaded_skill name="opt-with-res">\n{opt_body}\n</preloaded_skill>' in loaded_degraded
+    assert "Resources:" not in loaded_degraded
+
+
+def test_skill_bytecode_artifacts_are_ignored_everywhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.skills as fleet_skills
+    from fleet_rlm.engine.invocation import WorkspaceInputs
+    from fleet_rlm.skills import RequiredSkill
+
+    bundled = tmp_path / "bundled"
+    local = tmp_path / "local"
+    for root_dir, skill_name in ((bundled, "canonical-skill"), (local, "custom-skill")):
+        skill_dir = root_dir / skill_name
+        (skill_dir / "scripts" / "__pycache__").mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_bytes(_skill(skill_name, f"{skill_name} desc."))
+        (skill_dir / "scripts" / "helper.py").write_bytes(b"def run(): return 1\n")
+        (skill_dir / "scripts" / "__pycache__" / "helper.cpython-313.pyc").write_bytes(b"pyc")
+        (skill_dir / "scripts" / "stale.pyc").write_bytes(b"pyc")
+        (skill_dir / "scripts" / "stale.pyo").write_bytes(b"pyo")
+
+    # 1. SkillManager.resolve_required ignores __pycache__, .pyc, and .pyo.
+    manager_for_sync = SkillManager(_VolumeDouble(), local, bundled)  # type: ignore[arg-type]
+    resolved = manager_for_sync.resolve_required(("canonical-skill", "custom-skill"))
+    assert [[path for path, _ in skill.files] for skill in resolved] == [
+        ["SKILL.md", "scripts/helper.py"],
+        ["SKILL.md", "scripts/helper.py"],
+    ]
+
+    # 2. SkillManager._stage_local_skills / local_skill_files / sync_local_skills_to_volume ignore bytecode.
+    staged = manager_for_sync.local_skill_files()
+    assert sorted(staged) == [
+        "skills/canonical-skill/SKILL.md",
+        "skills/canonical-skill/scripts/helper.py",
+        "skills/custom-skill/SKILL.md",
+        "skills/custom-skill/scripts/helper.py",
+    ]
+    volume = _VolumeDouble()
+    assert SkillManager(volume, local, bundled).sync_local_skills_to_volume() == 2  # type: ignore[arg-type]
+    assert sorted(volume.writes) == sorted(staged)
+
+    # 3. SkillManager.export_volume_skills_to_local skips bytecode in remote skills/.
+    remote_files = {
+        "skills/canonical-skill/SKILL.md": (bundled / "canonical-skill" / "SKILL.md").read_bytes(),
+        "skills/custom-skill/SKILL.md": (local / "custom-skill" / "SKILL.md").read_bytes(),
+        "skills/custom-skill/scripts/helper.py": b"def run(): return 1\n",
+        "skills/custom-skill/scripts/__pycache__/helper.cpython-313.pyc": b"pyc",
+        "skills/custom-skill/scripts/stale.pyc": b"pyc",
+        "skills/custom-skill/scripts/stale.pyo": b"pyo",
+    }
+    read_requests: list[list[str]] = []
+
+    class RecordingSandbox:
+        def list_workspace_files(self) -> list[str]:
+            return sorted(remote_files)
+
+        def read_workspace_files(self, paths: list[str], **_kwargs: Any) -> dict[str, bytes]:
+            read_requests.append(list(paths))
+            return {path: remote_files[path] for path in paths}
+
+    export_dest = tmp_path / "exported"
+    exported = SkillManager(RecordingSandbox(), export_dest, bundled).export_volume_skills_to_local()  # type: ignore[arg-type]
+    assert exported == ["custom-skill"]
+    assert read_requests == [["skills/custom-skill/SKILL.md", "skills/custom-skill/scripts/helper.py"]]
+    assert not (export_dest / "custom-skill" / "scripts" / "__pycache__").exists()
+    assert not (export_dest / "custom-skill" / "scripts" / "stale.pyc").exists()
+    assert not (export_dest / "custom-skill" / "scripts" / "stale.pyo").exists()
+
+    # 4. WorkspaceInputs.load_skills excludes bytecode across required, bundled local, and remote optional skills.
+    monkeypatch.setattr(fleet_skills, "BUNDLED_SKILLS_DIR", bundled)
+    daytona = DaytonaSandboxManager("key", "org", "volume", "session-bytecode")
+    daytona._sandbox = object()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        DaytonaSandboxManager,
+        "read_workspace_file",
+        lambda _self, path, **_kw: remote_files[path],
+    )
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: sorted(remote_files))
+    req_with_bytecode = RequiredSkill(
+        name="req-skill",
+        source="workspace",
+        sha256="d" * 64,
+        skill_md=_skill("req-skill", "Required.").decode("utf-8"),
+        files=(
+            ("SKILL.md", _skill("req-skill", "Required.")),
+            ("scripts/__pycache__/run.cpython-313.pyc", b"pyc"),
+            ("scripts/run.py", b"def run(): pass\n"),
+            ("scripts/stale.pyo", b"pyo"),
+        ),
+    )
+    loaded = WorkspaceInputs(daytona).load_skills(
+        "<available_skills/>",
+        ["canonical-skill", "custom-skill"],
+        required_skills=(req_with_bytecode,),
+    )
+    assert loaded.count('Resources: {"scripts": ["scripts/run.py"]}') == 1
+    assert loaded.count('Resources: {"scripts": ["scripts/helper.py"]}') == 2
+    assert "__pycache__" not in loaded
+    assert ".pyc" not in loaded
+    assert ".pyo" not in loaded
 
 
 def test_a_changed_bundled_skill_replaces_the_session_copy_but_user_edits_still_conflict(tmp_path: Path) -> None:
@@ -5347,7 +5666,7 @@ def test_a_changed_bundled_skill_replaces_the_session_copy_but_user_edits_still_
     assert SkillManager(sandbox, local, bundled).sync_local_skills_to_volume() == 2  # type: ignore[arg-type]
     assert sandbox.writes["skills/tabular-analysis/SKILL.md"] == new_version
 
-    sandbox = _VolumeDouble({"skills/mine/SKILL.md": stale})
+    sandbox = _VolumeDouble({"skills/mine/SKILL.md": stale, "skills/tabular-analysis/scripts/stale.py": stale})
     with pytest.raises(ValueError, match=r"skills/mine/SKILL\.md"):
         SkillManager(sandbox, local, bundled).sync_local_skills_to_volume()  # type: ignore[arg-type]
     assert sandbox.writes == {}
@@ -5727,3 +6046,199 @@ def test_registry_reserves_capacity_while_a_session_builds(monkeypatch):
     assert served == [runtime]
     assert registry.peek("first") is runtime
     assert len(registry._session_gates) == 0
+
+
+def test_bundled_sync_removes_stale_scripts_before_default_loading(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = tmp_path / "skills"
+    stale = {
+        "skills/delegation/scripts/delegation.py": b"raise AssertionError('stale module')",
+        "skills/delegation/scripts/extra.py": b"raise AssertionError('extra module')",
+    }
+    preserved = {"skills/custom/scripts/tool.py": b"custom", "files/notes.txt": b"notes"}
+
+    class DiskVolume(_VolumeDouble):
+        def write_workspace_files(self, files: dict[str, bytes]) -> None:
+            super().write_workspace_files(files)
+            self.existing.update(files)
+            for path, content in files.items():
+                target = tmp_path / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+
+        def delete_workspace_file(self, path: str) -> None:
+            del self.existing[path]
+            (tmp_path / path).unlink()
+
+    volume = DiskVolume({**stale, **preserved})
+    volume.write_workspace_files(volume.existing.copy())
+    manager = SkillManager(volume, None)  # type: ignore[arg-type]
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.skills"):
+        manager.sync_local_skills_to_volume()
+    assert "Removing stale bundled Skill files for: delegation" in caplog.text
+    assert all(path not in volume.existing for path in stale)
+    assert all(volume.existing[path] == content for path, content in preserved.items())
+    helpers: dict[str, Any] = {}
+    exec(SANDBOX_SKILL_HELPERS_CODE.replace('Path("/workspace/skills")', f"Path({str(root)!r})"), helpers)
+    module = helpers["load_skill_module"]("delegation")
+    assert Path(module.__file__).name == "delegation_tools.py"
+    assert callable(module.run)
+    with pytest.raises(FileNotFoundError):
+        helpers["load_skill_module"]("delegation", "scripts/delegation.py")
+    before = volume.existing.copy()
+    manager.sync_local_skills_to_volume()
+    assert volume.existing == before
+
+
+def test_bundled_sync_uses_captured_required_files_and_propagates_deletion_failure() -> None:
+    from fleet_rlm.skills import captured_required_skill
+
+    required = captured_required_skill(
+        "delegation",
+        "bundled",
+        (("SKILL.md", _skill("delegation")), ("scripts/captured.py", b"captured")),
+    )
+    stale_path = "skills/delegation/scripts/delegation_tools.py"
+
+    class DeletingVolume(_VolumeDouble):
+        def delete_workspace_file(self, path: str) -> None:
+            if fail:
+                raise OSError("deletion failed")
+            del self.existing[path]
+
+    volume = DeletingVolume({stale_path: b"newer shipped version"})
+    manager = SkillManager(volume, None)  # type: ignore[arg-type]
+    fail = True
+    with pytest.raises(OSError, match="deletion failed"):
+        manager.sync_local_skills_to_volume(required_skills=(required,))
+    assert volume.writes == {} and stale_path in volume.existing
+    fail = False
+    manager.sync_local_skills_to_volume(required_skills=(required,))
+    assert stale_path not in volume.existing
+    assert volume.writes["skills/delegation/scripts/captured.py"] == b"captured"
+    assert "skills/delegation/scripts/delegation_tools.py" not in volume.writes
+
+
+@pytest.mark.parametrize("approved", [(True, False), (False, True), (False, False), (True, True)])
+def test_contextual_skill_verification_is_one_request(monkeypatch, approved):
+    engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis", "delegation"})
+    calls = []
+
+    def verify(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(slot_0=approved[0], slot_1=approved[1], slot_2=True)
+
+    monkeypatch.setattr(engine.program.skill_selection.verify, "forward", verify)
+    selected = engine.program.skill_selection(
+        task="Analyze that file",
+        skills_catalog=CATALOG,
+        route=Route.RLM,
+        session_history="old" * 2000 + "latest.csv",
+        workspace_manifest="files/latest.csv" + "x" * 5000,
+    )
+    assert selected == [name for name, ok in zip(["tabular-analysis", "delegation"], approved, strict=True) if ok]
+    assert len(calls) == 1 and seen["budget"] == 5
+    context = json.loads(calls[0]["selection_context"])
+    assert len(context["recent_history"]) == 4000 and context["recent_history"].endswith("latest.csv")
+    assert len(context["workspace_manifest"]) == 4000
+    assert context["history_truncated"] and context["workspace_truncated"]
+    assert seen["events"][-1]["selected"] == selected
+    assert all("instructions" in candidate for candidate in json.loads(calls[0]["candidates"]))
+
+
+def test_verification_failure_and_unreadable_skills_use_catalog(monkeypatch):
+    engine, seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
+
+    def broken(**_kwargs):
+        raise ValueError("provider failed")
+
+    monkeypatch.setattr(engine.program.skill_selection.verify, "forward", broken)
+    assert _selected_catalog(engine) == CATALOG
+    assert seen["events"][-1]["fallback_reason"] == "ValueError"
+
+    def unreadable(_path):
+        raise FileNotFoundError("missing")
+
+    monkeypatch.setattr(engine.program.skill_selection, "_read_instructions", unreadable)
+    before = seen["budget"]
+    assert _selected_catalog(engine) == CATALOG
+    assert seen["budget"] - before == 2
+
+
+def test_empty_shortlist_skips_verifier_and_verifier_is_native_state(monkeypatch):
+    engine, _seen = _selecting_engine(monkeypatch, set())
+    monkeypatch.setattr(engine.program.skill_selection.verify, "forward", lambda **_kw: pytest.fail("empty shortlist"))
+    assert _selected_catalog(engine) == CATALOG
+    state = engine.program.dump_state()
+    assert "skill_selection.verify" in state
+    engine.program.load_state(state)
+    incomplete = deepcopy(state)
+    incomplete.pop("skill_selection.verify")
+    with pytest.raises(ValueError, match="exactly"):
+        engine.program.load_state(incomplete)
+    assert engine.program.dump_state() == state
+
+
+def test_verifier_clips_instructions_and_propagates_budget_exhaustion(monkeypatch):
+    engine, _seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
+    monkeypatch.setattr(engine.program.skill_selection, "_read_instructions", lambda _path: b"x" * 5000)
+    calls = []
+
+    def verify(**kwargs):
+        calls.append(json.loads(kwargs["candidates"]))
+        return SimpleNamespace(slot_0=True, slot_1=True, slot_2=True)
+
+    monkeypatch.setattr(engine.program.skill_selection.verify, "forward", verify)
+    assert engine.program.skill_selection(task="task", skills_catalog=CATALOG, route=Route.RLM) == ["tabular-analysis"]
+    assert calls == [[{"name": "tabular-analysis", "instructions": "x" * 4000, "truncated": True}]]
+
+    def charge(_count, *, category):
+        if category == "skill_selection" and _count == 3:
+            raise RuntimeError("Shared RLM budget exhausted (3 calls)")
+
+    monkeypatch.setattr(engine.program.skill_selection, "_consume_budget", charge)
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        _selected_catalog(engine)
+    assert len(calls) == 1
+
+
+def test_skill_selection_qualification_cases_are_balanced():
+    from collections import Counter
+
+    from fleet_rlm.skills import bundled_skill_names
+
+    cases = json.loads((Path(__file__).parents[1] / "skill_selection_cases.json").read_text())
+    assert len(cases) == len({case["id"] for case in cases}) == 60
+    assert Counter(case["split"] for case in cases) == {"development": 40, "holdout": 20}
+    for category in ("single", "multi", "none", "context"):
+        assert sum(case["category"] == category and case["split"] == "holdout" for case in cases) == 5
+    assert all(set(case["expected_skills"]) <= bundled_skill_names() for case in cases)
+
+
+def test_instruction_read_propagates_turn_end(monkeypatch):
+    engine, _seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
+
+    def ended(_path):
+        raise RuntimeError("Shared RLM budget exhausted (3 calls)")
+
+    monkeypatch.setattr(engine.program.skill_selection, "_read_instructions", ended)
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        _selected_catalog(engine)
+
+
+def test_should_verify_skills_using_the_production_budget_ledger(monkeypatch):
+    from fleet_rlm.sandbox.budget import SandboxBudgetMixin
+
+    engine, _seen = _selecting_engine(monkeypatch, {"tabular-analysis"})
+    manager = engine.sandbox_mgr
+    monkeypatch.setattr(
+        engine.program.skill_selection,
+        "_consume_budget",
+        lambda count, *, category: SandboxBudgetMixin.consume_budget(manager, count, category=category),
+    )
+    selected = engine.program.skill_selection(task="Analyze sales", skills_catalog=CATALOG, route=Route.RLM)
+    assert selected == ["tabular-analysis"]
+    usage = manager.turn_usage()
+    assert usage["lm_calls"] == 5
+    assert usage["budget_breakdown"]["skill_selection"] == 5

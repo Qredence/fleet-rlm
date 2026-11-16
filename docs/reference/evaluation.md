@@ -344,7 +344,7 @@ of optimization using DSPy's native `ReAnchor` (`dspy.experimental.ReAnchor`).
 It fits only on the training split; the dev split reports before/after scores and
 permits adoption only without regression. Holdout remains outside search and calibration.
 Calibrated decision fields are integrated directly into candidate artifacts
-(`fleet-program-b2`, approval evidence version 3) and checked by paired validation before promotion.
+(`fleet-program-b3`, approval evidence version 3) and checked by paired validation before promotion.
 
 ### Trace regression boundary
 
@@ -516,7 +516,7 @@ Turn budget. No constructor adapter, source rewriting, or second state load is u
 DSPy support is pinned to the tested 3.5.0 release because this facade protocol is internal. JSON state preserves optimized instructions,
 Flex source, and ReAnchor calibrated decision fields; the host reconstructs the Daytona interpreter and current
 credentials. Installation requires a complete host envelope with
-`format="fleet-program"`, `format_version=2`, `program_schema="fleet-program-b2"`,
+`format="fleet-program"`, `format_version=3`, `program_schema="fleet-program-b3"`,
 `child_policy_contract=1`, canonical unwrapped native `state`, and string-valued
 `metadata`. The exporter deliberately reads the isolated wrapper's `.program`;
 native `.save()` output is not an installation artifact. Missing/extra parameters,
@@ -677,7 +677,7 @@ errors remain visible to the caller.
 
 Root, sub and Jev model roles, execution mode and Turn budgets come from the
 current deployment constructors. All non-null learned predictor/Flex LM bindings
-are rejected. Published candidates use the complete `fleet-program-b2` envelope,
+are rejected. Published candidates use the complete `fleet-program-b3` envelope,
 manifest/digest approval and the bounded serving loader described above. Historical
 bare state, `program.` wrapper keys and `fleet_child_policy_version` markers are
 not accepted for installation. This code/schema change invalidates prior approval
@@ -849,3 +849,25 @@ Token caps use reported generative usage and cooperative safe-point checks, with
 metric-call budgets are separate and do not establish a dollar ceiling.
 The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
 Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.
+
+
+### Contextual Skill selector qualification
+
+The b3 native graph adds `skill_selection.verify`; b2 states cannot be installed or
+merged with verifier defaults. Regenerate candidates and recheck approval evidence.
+No installed program or approval ledger is changed by this code update.
+
+The offline case set is `tests/skill_selection_cases.json`: 40 development cases
+and 20 held-out cases, balanced across single-skill, multi-skill, no-skill, and
+conversation-dependent requests. Keep expected skill sets outside predictor inputs.
+Freeze the baseline source/dependency digests before changing the selector. A local
+baseline for this change is preserved under ignored `.fleet/skill-selection-baseline/`.
+
+Provider evaluation requires separate authorization. Compare baseline and candidate
+using identical model/configuration identities and inputs. Report exact-set accuracy,
+unnecessary-load rate, needed-skill misses, request counts, usage, and median/p95
+latency separately for development and held-out cases. Enable the candidate only if
+held-out exact-set accuracy improves, unnecessary loads and needed-skill misses do
+not increase, required-skill handling is preserved, and verification adds at most one
+provider request. Review measured latency and usage before rollout. Offline tests
+validate contracts, not selection quality.

@@ -1,57 +1,51 @@
 ---
 name: delegation
-description: Split a task into independent child agents with spawn_agents or spawn_agent, pass each child exactly the workspace files it needs (files/, skills/, or earlier artifacts/), stay within child limits, and combine their promoted artifacts.
+description: Split independent work across child sandboxes and combine promoted artifacts. Use when subtasks need isolated files or code execution.
 ---
 
 # Delegation with child agents
 
-Use this when a task has independent parts (for example "for each region...",
-or three unrelated questions), or when one part needs a fresh, isolated
-investigation.
+Use local Python for deterministic work, batched Jev for fixed-label decisions,
+batched queries for free-form reading, or `dspy.Predict` for structured synthesis.
+Reserve `spawn_agents` / `spawn_agent` for independent parts needing isolated
+sandboxes, file scopes, or parallel code execution.
 
-## Calls
+## Workflow
 
-Use keyword arguments only:
+1. Load the helper module and choose a mechanism matching the task:
 
-```python
-results = spawn_agents(
-    subtasks=[
-        "For region north, find the best-selling product by ok-revenue. Write artifacts/north.json with keys product, revenue.",
-        "Count orders per status. Write artifacts/status.json mapping status to count.",
-    ],
-    input_paths=[["files/sales.csv"], ["files/sales.csv"]],
-    max_iters=8,
-    max_llm_calls=10,
-)
-for result in results:
-    print(result.get("error"), result["findings"][:300], result["artifacts"])
-```
+   ```python
+   del_tools = load_skill_module("delegation")
+   plan = del_tools.choose_mechanism(item_count=3, needs_isolated_files_or_code_exec=True)
+   print(plan["mechanism"], plan["batches_needed"])
+   ```
 
-- Limits per child: `max_iters` from 1 to 8, `max_llm_calls` from 1 to 25, and
-  at most 8 subtasks per `spawn_agents` call. Values outside these ranges are
-  rejected before any child starts.
-- `input_paths` copies the listed files. Paths may be under `files/`,
-  `skills/`, or `artifacts/` (a previous Turn's report, for example). Every
-  child also receives the Session's Skills under `skills/`; `artifacts/` starts
-  empty inside a child unless specific `artifacts/...` paths are requested in
-  `input_paths`, and it sees nothing else from the parent.
-- `spawn_agents` returns an error result `{findings: "", error, artifacts: []}` for
-  ordinary child failures. Direct `spawn_agent` returns that shape for a reply
-  parsing failure; other ordinary errors may propagate to the caller. Handle
-  both cases and do not assume a child succeeded.
+2. Validate prompts and `input_paths` before launching any child (`max_iters` in
+   `1..8`, `max_llm_calls` in `1..25`, `<= 8` subtasks per `spawn_agents` call).
+   Every child receives the Session's Skills under `skills/`, while
+   `artifacts/` starts empty inside a child unless specific `artifacts/...`
+   paths are requested in `input_paths`:
 
-## Combining results
+   ```python
+   spec = del_tools.build_child_specs(
+       [
+           {"prompt": "For north, compute revenue. Write artifacts/north.json.", "input_paths": ["files/sales.csv"]},
+           {"prompt": "For south, compute revenue. Write artifacts/south.json.", "input_paths": ["files/sales.csv"]},
+       ]
+   )
+   results = spawn_agents(subtasks=spec["subtasks"], input_paths=spec["input_paths"], max_iters=8, max_llm_calls=12)
+   ```
 
-- Each child's output files are promoted to `artifacts/<agent-id>/...`; the
-  paths are in `result["artifacts"]`. Read them with
-  `workspace.read_text(path)` and `json.loads` rather than trusting findings
-  text.
-- Name the exact output file and its JSON keys in each subtask so you can
-  parse them.
-- Print the combined values, then write the summary (for example
-  `workspace.write_artifact("summary.md", table)`) and SUBMIT from variables.
+3. Combine promoted outputs (`artifacts/<agent-id>/...`) with structured parsing
+   and inspect `errors` for partial-failure recovery:
 
-## When not to delegate
+   ```python
+   collected = del_tools.collect_child_outputs(results, parse_json_artifacts=True)
+   print(collected["succeeded_count"], collected["failed_count"], collected["parsed_json"])
+   ```
 
-A single short computation is faster in your own sandbox. Delegate only for
-independent parts or when isolation matters.
+4. Read `read_skill_reference("delegation", "references/delegation-patterns.md")`
+   for JSON schemas, partial child failure recovery, and budget bounds.
+
+5. Write combined deliverables with `workspace.write_artifact(...)`, print the
+   final figures, and `SUBMIT` from variables.

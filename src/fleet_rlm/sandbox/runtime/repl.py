@@ -46,11 +46,20 @@ RESERVED_NAMES = {
     "use_skill",
     "read_skill_reference",
     "run_skill_script",
+    "load_skill_module",
     "save_skill",
+    "web_search",
 }
-# DSPy RLM and Flex register these built-in interpreter APIs in payload["tools"].
-REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched"}
-SKILL_HELPERS = ("list_skills", "use_skill", "read_skill_reference", "run_skill_script", "save_skill")
+# Host-bridged builtins that may appear in payload["tools"]; DSPy RLM and Flex register the llm_query pair.
+REGISTERED_BUILTIN_TOOLS = {"llm_query", "llm_query_batched", "jev_decide_batched", "web_search"}
+SKILL_HELPERS = (
+    "list_skills",
+    "use_skill",
+    "read_skill_reference",
+    "run_skill_script",
+    "load_skill_module",
+    "save_skill",
+)
 MAX_SKILL_RECEIPTS = 20
 DEFAULT_EXEC_TIMEOUT_SECONDS = 60.0
 
@@ -380,6 +389,9 @@ class _ReceiptWorkspace:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._workspace, name)
 
+    def __dir__(self) -> list[str]:
+        return sorted(set(object.__dir__(self)) | set(dir(self._workspace)))
+
     def __repr__(self) -> str:
         return repr(self._workspace)
 
@@ -420,6 +432,10 @@ def _jev_decide_batched(items: Any, question: Any, choices: Any = None) -> Any:
     return _bridge_call("jev_decide_batched", [list(items), question, choice_list], {})
 
 
+def _web_search(query: Any, max_results: Any = 5) -> Any:
+    return _bridge_call("web_search", [query, max_results], {})
+
+
 def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
     """Create the module-backed execution globals with workspace helpers and registered host tools."""
     module = types.ModuleType("__fleet_repl__")
@@ -434,6 +450,7 @@ def _make_namespace(tool_names: list[str]) -> dict[str, Any]:
             "llm_query": _make_tool("llm_query"),
             "llm_query_batched": _make_tool("llm_query_batched"),
             "jev_decide_batched": _jev_decide_batched,
+            "web_search": _web_search,
             "SUBMIT": _submit,
         }
     )
@@ -506,6 +523,7 @@ def _run(code: str, variables: dict[str, Any], tools: list[str], outputs: Any = 
     namespace["llm_query"] = _make_tool("llm_query")
     namespace["llm_query_batched"] = _make_tool("llm_query_batched")
     namespace["jev_decide_batched"] = _jev_decide_batched
+    namespace["web_search"] = _web_search
     namespace["SUBMIT"] = _typed_submit(outputs) if outputs else _submit
     protected = RESERVED_NAMES | set(tools)
     for name in current_dynamic:

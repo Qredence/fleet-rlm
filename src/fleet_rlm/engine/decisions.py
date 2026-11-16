@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -21,7 +22,7 @@ from fleet_rlm.contracts import (
     parse_route,
     turn_is_over,
 )
-from fleet_rlm.engine.signatures import SkillRelevance, TurnTriage
+from fleet_rlm.engine.signatures import SkillRelevance, SkillVerification, TurnTriage
 from fleet_rlm.observability import activity_text, evidence_span, typed_decision_scope
 from fleet_rlm.skills import MAX_PRELOADED_TOTAL_CHARS
 
@@ -58,6 +59,7 @@ def _safe_route_error(exc: Exception, route_lm: Any) -> str:
 def select_skills(
     *,
     skill_selector: dspy.Predict,
+    selection_context: str = "",
     consume_budget: Callable[..., Any],
     emit: Callable[..., Any],
     jev_lm: Any | None,
@@ -81,9 +83,9 @@ def select_skills(
     try:
         consume_budget(len(skills), category="skill_selection")
         examples = [
-            dspy.Example(task=task, skill_name=name, skill_description=description).with_inputs(
-                "task", "skill_name", "skill_description"
-            )
+            dspy.Example(
+                task=task, selection_context=selection_context, skill_name=name, skill_description=description
+            ).with_inputs("task", "selection_context", "skill_name", "skill_description")
             for name, description in skills
         ]
         with evidence_span(
@@ -123,6 +125,7 @@ def select_skills(
         if turn_is_over(exc):
             raise
         _LOGGER.warning("Optional Skill selection failed (%s); using the catalog only", type(exc).__name__)
+        emit("skill_selection", selected=[], decisions=[], fallback_reason=type(exc).__name__)
         return []
     emit("skill_selection", selected=selected, decisions=decisions)
     return selected
@@ -250,22 +253,90 @@ class Routing(dspy.Module):
 class SkillSelection(dspy.Module):
     """Own native batched relevance prediction over host-supplied catalog metadata."""
 
-    def __init__(self, jev_lm: Any, consume_budget: Any, emit: Any) -> None:
+    def __init__(self, jev_lm: Any, consume_budget: Any, emit: Any, read_instructions: Any) -> None:
         super().__init__()
         self.predict = dspy.Predict(SkillRelevance)
+        self.verify = dspy.Predict(SkillVerification)
+        self._read_instructions = read_instructions
         self._jev_lm, self._consume_budget, self._emit = jev_lm, consume_budget, emit
 
     def forward(
-        self, task: str, skills_catalog: str, route: Route, required_skills: tuple[RequiredSkill, ...] = ()
+        self,
+        task: str,
+        skills_catalog: str,
+        route: Route,
+        required_skills: tuple[RequiredSkill, ...] = (),
+        session_history: str = "",
+        workspace_manifest: str = "",
     ) -> list[str]:
-        """Select catalog identities without loading or activating their bytes."""
-        return select_skills(
+        """Screen metadata, then verify instruction fit without activating candidate code."""
+        context = json.dumps(
+            {
+                "recent_history": session_history[-4000:],
+                "history_truncated": len(session_history) > 4000,
+                "workspace_manifest": workspace_manifest[:4000],
+                "workspace_truncated": len(workspace_manifest) > 4000,
+            }
+        )
+        screening: dict[str, Any] = {}
+        selected = select_skills(
             skill_selector=self.predict,
+            selection_context=context,
             consume_budget=self._consume_budget,
-            emit=self._emit,
+            emit=lambda _event, **payload: screening.update(payload),
             jev_lm=self._jev_lm,
             task=task,
             skills_catalog=skills_catalog,
             route=route,
             required_skills=required_skills,
         )
+        candidates: list[dict[str, Any]] = []
+        for name in selected:
+            try:
+                text = self._read_instructions(f"skills/{name}/SKILL.md").decode("utf-8")
+            except (OSError, ValueError, RuntimeError, UnicodeError) as exc:
+                if turn_is_over(exc):
+                    raise
+                continue
+            candidates.append({"name": name, "instructions": text[:4000], "truncated": len(text) > 4000})
+        accepted: list[str] = []
+        if candidates:
+            try:
+                self._consume_budget(3, category="skill_selection")
+                with evidence_span("typesafe_skill_verification", inputs={"candidates": candidates}) as span:
+                    with typed_decision_scope(lm=self._jev_lm, span=span, typesafe=True):
+                        prediction = self.verify(
+                            task=task, selection_context=context, candidates=json.dumps(candidates)
+                        )
+                    decisions = []
+                    for index, candidate in enumerate(candidates):
+                        decision = getattr(prediction, f"slot_{index}")
+                        value = getattr(decision, "value", decision)
+                        relevant = value is True or value == "relevant"
+                        decisions.append(
+                            {"skill": candidate["name"], "decision": relevant}
+                            | decision_evidence(decision, self._jev_lm)
+                        )
+                        if relevant:
+                            accepted.append(candidate["name"])
+                    span.set_outputs({"selected": accepted, "decisions": decisions})
+            except Exception as exc:
+                if turn_is_over(exc):
+                    raise
+                accepted = []
+                _LOGGER.warning("Optional Skill verification failed (%s); using catalog only", type(exc).__name__)
+                self._emit(
+                    "skill_selection",
+                    selected=[],
+                    decisions=screening.get("decisions", []),
+                    fallback_reason=type(exc).__name__,
+                )
+                return []
+        if screening:
+            self._emit(
+                "skill_selection",
+                selected=accepted,
+                decisions=screening.get("decisions", []),
+                **({"fallback_reason": screening["fallback_reason"]} if "fallback_reason" in screening else {}),
+            )
+        return accepted

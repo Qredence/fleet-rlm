@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Host-mediated `web_search(query, max_results=5)` builtin in the sandbox REPL,
+  backed by Serper (`SERPER_API_KEY`) or You.com (`YOU_API_KEY`). Keys stay on the
+  host, results are bounded, and each call charges one `web_search` budget unit.
+
+### Changed
+
+- The web-research Skill's `auto` search tries the host `web_search` first. Its
+  in-sandbox `serper` and `eco` providers are removed.
+- `fetch_json` refuses non-public destinations, as `fetch_page` already did.
+
+- Bundled Skill names are reserved across every Skill source. A `.fleet/skills/`
+  or Volume Skill with a bundled name is ignored with a warning, and required
+  Skills resolve to the bundled copy.
+
+### Fixed
+
+- A `.fleet/skills/` Skill named like a bundled Skill no longer fails every
+  non-Direct Turn, GEPA proposer load, or Skill sync.
+- Optimizer code identity ignores bytecode caches under bundled Skills, and a
+  failed Skill resource listing is logged instead of silently dropped.
+
 ## [0.13.0] - 2026-11-14
 
 ### Features

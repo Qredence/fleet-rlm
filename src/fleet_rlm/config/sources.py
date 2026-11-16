@@ -21,6 +21,8 @@ _SECRET_FIELDS = {
     "databricks_token",
     "fleet_llm_api_key",
     "typesafe_api_key",
+    "serper_api_key",
+    "you_api_key",
 }
 _TOML_FIELDS: dict[str, dict[str, str]] = {
     "runtime": {

@@ -32,6 +32,8 @@ source control.
 | `FLEET_LLM_MODEL_TYPE` | `auto` | Shared model type: `auto` (default), `chat`, or `responses`. OpenAI routes (`openai/...`) with a configured non-`api.openai.com` endpoint auto-route to `chat`. Role-specific overrides apply. |
 | `FLEET_TYPESAFE_MODEL` | `jev-1.14.0` | TypeSafe route-selection model. Passed explicitly; the TypeSafe client default is not used. |
 | `FLEET_TYPESAFE_API_KEY` | empty | Optional TypeSafe route model credential. `TYPESAFE_API_KEY` is also accepted. |
+| `SERPER_API_KEY` | empty | Optional host-side Serper credential for the sandbox `web_search` builtin; checked first. `FLEET_SERPER_API_KEY` is also accepted. Never enters the sandbox. |
+| `YOU_API_KEY` | empty | Optional host-side You.com credential for `web_search` when no Serper key is set. `FLEET_YOU_API_KEY` is also accepted. Never enters the sandbox. |
 | `FLEET_MAX_LLM_CALLS_PER_TURN` | `150` | Model-call budget (1–10,000). |
 | `FLEET_EXECUTION_MODE` | `hybrid` | Strict `direct`, strict `flex`, strict `rlm`, or routed `hybrid`; sessions can override and persist the selection. Strict `direct` folds the Session's `files/` into one prompt, because that route has no workspace access; the inlined size is recorded as `direct_context_chars` and a clipped prompt as `direct_context_truncated`. |
 | `FLEET_MAX_AGENT_DEPTH` | `3` | Maximum recursive child depth (root is zero). |
@@ -183,7 +185,7 @@ compiled programs. A standalone consumer loading native LM JSON outside
 Fleet must first construct a Fleet LM for that endpoint to register its
 native declaration, then provide its credential separately. Historical native LM
 JSON remains inspectable, but Fleet installation requires the complete
-`fleet-program-b2` envelope described in [evaluation](evaluation.md). Learned state
+`fleet-program-b3` envelope described in [evaluation](evaluation.md). Learned state
 must not contain non-null LM bindings: current role models, credentials, adapters
 and budget accounting are supplied by the runtime. Legacy compiled predictor paths
 are not translated or partially loaded.
@@ -337,7 +339,7 @@ Leave optional non-secret overrides commented out rather than inserting blank
 values that shadow TOML.
 
 Credentials (`DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`,
-`FLEET_TYPESAFE_API_KEY`, `FLEET_DATABASE_URL`, and
+`FLEET_TYPESAFE_API_KEY`, `SERPER_API_KEY`, `YOU_API_KEY`, `FLEET_DATABASE_URL`, and
 `FLEET_DATABASE_MIGRATION_URL`) are environment/.env only. Local MLflow Gateway
 encryption settings (`MLFLOW_CRYPTO_KEK_PASSPHRASE` and `MLFLOW_CRYPTO_KEK_VERSION`)
 follow the same environment/.env precedence and are forwarded to managed local

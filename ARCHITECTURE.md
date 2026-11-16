@@ -53,8 +53,8 @@ flowchart LR
   dataset admission, native invocation, callbacks and authoritative evidence between
   serving and freshly reconstructed isolated rollouts. Outer Turn/Session owners
   retain persistence, cancellation arbitration and teardown.
-- `engine/compiled.py` accepts only complete `fleet-program-b2` envelopes. Legacy
-  native JSON and `fleet-program-b1` envelopes remain inspectable, not installable;
+- `engine/compiled.py` accepts only complete `fleet-program-b3` envelopes. Legacy
+  native JSON, `fleet-program-b1`, and `fleet-program-b2` envelopes remain inspectable, not installable;
   there is no old-root alias or key conversion. There is one global installed
   program, `fleet.json`; an absent file means baseline only while no global job
   was ever approved. The ledger (`Store.approved_program`) is checked at runtime
@@ -192,7 +192,14 @@ Deadlines:
   handles; forwarded views carry only JSON metadata. Guest codec reconstruction never runs on the host.
   `workspace.load_image` supplies native DSPy images.
 - Both RLM and Flex can delegate.
-- Optional Jev Skill selection preloads up to three instructions using `Noul` relevance and consumes shared budget.
+- Optional Jev Skill selection screens at most 20 catalog entries with native `Noul` relevance.
+  Screening and verification receive the current task, the last 4,000 history characters, and the first
+  4,000 workspace-metadata characters, with clipping flags. No additional file contents enter screening.
+  A single native prediction independently verifies up to three candidates against their first 4,000
+  instruction characters. Its three fixed decisions consume three shared budget units, even for a partial
+  shortlist. Empty shortlists skip verification. Only approved candidates are automatically preloaded.
+  Explicitly required Skills retain their separate admission contract. Missing instruction files are omitted.
+  This candidate behavior requires paired measurement before deployment; no accuracy gain is established.
 - Ordinary Skill selection failures retain the catalog.
 - DSPy overrides use scoped `dspy.context`. Pinned bridges need upgrade validation.
 
@@ -250,7 +257,7 @@ Progress events:
   Stage 2 executes native `dspy.experimental.ReAnchor` when a decision LM is configured,
   fitting triage `Choice` weights and Skill `Noul` thresholds on training examples only.
   Changed calibrated state is adopted when validation does not regress, before paired validation
-  and holdout gates (`fleet-program-b2`, approval evidence version 3).
+  and holdout gates (`fleet-program-b3`, approval evidence version 3).
 - Search uses approved immutable replays grouped by lineage in isolated runtimes.
   Nonempty train/dev/holdout splits and critical holdout are required before native search.
 - Gold stays outside program inputs. Host receipts support artifact and delegation scoring.

@@ -1839,7 +1839,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
     # The worker counts finished validation rollouts: 2 stages x 3 passes x (1 dev + 1 holdout).
     progress = store.records["s1-run"]["progress"]
     assert (progress["validation_done"], progress["validation_total"]) == (12, 12)
-    assert manifest["evaluation"]["candidate"]["components_total"] == 8
+    assert manifest["evaluation"]["candidate"]["components_total"] == 9
     assert "Candidate diffs" in comparison_md.read_text()
     assert active.read_bytes() and digest_bytes(active.read_bytes()) == digest
 
@@ -3436,6 +3436,7 @@ def test_exact_native_tree_has_one_owner_per_parameter():
     expected = {
         "routing.predict",
         "skill_selection.predict",
+        "skill_selection.verify",
         "reasoning.direct.predict",
         "reasoning.rlm.generate_action",
         "reasoning.rlm.extract",
@@ -3445,7 +3446,7 @@ def test_exact_native_tree_has_one_owner_per_parameter():
     }
     parameters = runtime.program.named_parameters()
     assert {name for name, _ in parameters} == expected
-    assert len({id(value) for _, value in parameters}) == 8
+    assert len({id(value) for _, value in parameters}) == 9
     assert {name for name, _ in runtime.program.named_predictors()} == expected - {"reasoning.flex"}
     assert not isinstance(runtime, dspy.Module)
 
@@ -3510,6 +3511,7 @@ def test_invalid_artifacts_leave_incumbent_and_digest_unchanged(tmp_path, invali
     [
         "routing.predict",
         "skill_selection.predict",
+        "skill_selection.verify",
         "reasoning.direct.predict",
         "reasoning.rlm.generate_action",
         "reasoning.rlm.extract",
@@ -4543,7 +4545,15 @@ def test_presentation_is_excluded_from_execution_identity(tmp_path, monkeypatch)
     owner.write_text("# identity owner\n")
     monkeypatch.setattr(artifacts, "__file__", str(owner))
     before = artifacts.optimization_code_digest()
-    for name in ("api/schemas.py", "tui/app.py", "setup.py", "README.md"):
+    # Bytecode caches are rebuilt by imports, so they never change Skill identity.
+    for name in (
+        "api/schemas.py",
+        "tui/app.py",
+        "setup.py",
+        "README.md",
+        "bundled_skills/example/scripts/__pycache__/helper.cpython-313.pyc",
+        "bundled_skills/example/scripts/stale.pyc",
+    ):
         path = package / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("presentation-only fixture")
