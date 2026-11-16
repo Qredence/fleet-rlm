@@ -6538,3 +6538,33 @@ def test_workspace_preparation_bounds_volume_metadata_round_trips(monkeypatch, t
     # Each metadata lookup is a Volume round trip: the 24-file cold sync must
     # stay below 100, including root resolution, rather than hundreds of repeats.
     assert len(calls) <= 100, f"Cold skill preparation used {len(calls)} metadata lookups"
+
+
+def test_metadata_parent_swap_cannot_escape_volume(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from fleet_rlm.workspace import workspace_files_metadata_code
+
+    root = tmp_path / "volume"
+    root.mkdir()
+    (root / "files").mkdir()
+    (root / "files" / "a").write_bytes(b"safe")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a").write_bytes(b"secret")
+    original = os.open
+    swapped = False
+
+    def open_and_swap(path, flags, *args, **kwargs):
+        nonlocal swapped
+        result = original(path, flags, *args, **kwargs)
+        if path == "files" and not swapped:
+            swapped = True
+            (root / "files").rename(root / "old")
+            (root / "files").symlink_to(outside)
+        return result
+
+    monkeypatch.setattr(os, "open", open_and_swap)
+    code = workspace_files_metadata_code(["files/a"], create_parents=False, include_digest=True)
+    exec(code.replace("os.path.realpath('/workspace')", repr(str(root))), {})
+    assert json.loads(capsys.readouterr().out) == [{"size": 4, "sha256": hashlib.sha256(b"safe").hexdigest()}]

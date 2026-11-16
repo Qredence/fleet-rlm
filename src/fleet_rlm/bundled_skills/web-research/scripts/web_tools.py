@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import html
+import http.client
 import importlib
 import ipaddress
 import json
@@ -65,7 +66,7 @@ def _charset_from_content_type(content_type: str) -> str:
     return match.group(1).strip() if match else "utf-8"
 
 
-def _require_public_destination(url: str) -> None:
+def _require_public_destination(url: str) -> list[Any]:
     """Reject URLs whose host resolves to any address that is not globally routable.
 
     Loopback, private, link-local, reserved, multicast, unspecified, and shared (CGNAT)
@@ -84,6 +85,9 @@ def _require_public_destination(url: str) -> None:
             address = address.ipv4_mapped
         if address.is_multicast or not address.is_global:
             raise ValueError(f"Refusing to fetch {host!r}: resolves to non-public address {address}")
+    if not infos:
+        raise ValueError("Destination has no addresses")
+    return infos
 
 
 class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -106,7 +110,60 @@ class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
         _validate_http_url(newurl)
         if self._public_only:
             _require_public_destination(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+
+        def origin(url: str) -> tuple[str, str | None, int]:
+            parts = urllib.parse.urlsplit(url)
+            return parts.scheme, parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
+
+        if redirected is not None and origin(req.full_url) != origin(newurl):
+            for name in ("Authorization", "Cookie", "Cookie2", "Proxy-Authorization"):
+                redirected.remove_header(name)
+        return redirected
+
+
+def _pinned_connection(connection_type: Any, url: str) -> Any:
+    """Create connections using validated socket addresses with the original TLS/HTTP host."""
+    infos = _require_public_destination(url)
+
+    def factory(host: str, **kwargs: Any) -> Any:
+        connection = connection_type(host, **kwargs)
+
+        def connect(address: Any, timeout: Any, source_address: Any = None) -> socket.socket:
+            last_error = None
+            for family, socktype, proto, _, sockaddr in infos:
+                sock = socket.socket(family, socktype, proto)
+                try:
+                    sock.settimeout(timeout)
+                    if source_address is not None:
+                        sock.bind(source_address)
+                    sock.connect((sockaddr[0], address[1], *sockaddr[2:]))
+                    return sock
+                except OSError as exc:
+                    sock.close()
+                    last_error = exc
+            raise OSError("Could not connect to validated destination") from last_error
+
+        connection._create_connection = connect
+        return connection
+
+    return factory
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    """Disable connection-time DNS for public HTTP requests."""
+
+    def http_open(self, req: urllib.request.Request) -> Any:
+        """Open an HTTP connection to a validated address."""
+        return self.do_open(_pinned_connection(http.client.HTTPConnection, req.full_url), req)
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    """Disable connection-time DNS while keeping TLS hostname verification."""
+
+    def https_open(self, req: urllib.request.Request) -> Any:
+        """Open an HTTPS connection to a validated address."""
+        return self.do_open(_pinned_connection(http.client.HTTPSConnection, req.full_url), req)
 
 
 def _http_request(
@@ -138,7 +195,10 @@ def _http_request(
         data = json.dumps(json_body).encode("utf-8")
         req_headers.setdefault("Content-Type", "application/json")
     request = urllib.request.Request(target_url, data=data, headers=req_headers, method=method)
-    opener = urllib.request.build_opener(_GuardedRedirectHandler(public_only=public_only))
+    handlers: list[Any] = [_GuardedRedirectHandler(public_only=public_only)]
+    if public_only:
+        handlers.extend([urllib.request.ProxyHandler({}), _PinnedHTTPHandler(), _PinnedHTTPSHandler()])
+    opener = urllib.request.build_opener(*handlers)
     byte_truncated = False
     try:
         with opener.open(request, timeout=timeout) as resp:

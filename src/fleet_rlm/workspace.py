@@ -108,68 +108,47 @@ def workspace_files_metadata_code(
 ) -> str:
     """Build the remote Python script to validate paths, optionally create parent directories, and stat/digest files."""
     paths_b64 = base64.b64encode(json.dumps(rel_paths).encode("utf-8")).decode("ascii")
-    create_clause = (
-        "   os.mkdir(parent)\n" if create_parents else "   raise FileNotFoundError('workspace parent is unavailable')\n"
-    )
-    read_clause = (
-        " if info is None or not stat.S_ISREG(info.st_mode): raise FileNotFoundError('workspace file is unavailable')\n"
-    )
-    if create_parents:
-        read_clause = (
-            " if info is not None and not stat.S_ISREG(info.st_mode): "
-            "raise ValueError('workspace target is not a file')\n"
-        )
-    size_clause = " size=info.st_size if info is not None else None\n"
-    if max_bytes is not None:
-        size_clause += (
-            f" if size is not None and size>{max_bytes}: raise ValueError('workspace file exceeds size limit')\n"
-        )
-    result_clause = " return {'size':size}\n"
-    if include_digest:
-        result_clause = (
-            " digest=hashlib.sha256()\n"
-            " count=0\n"
-            " with open(target,'rb') as handle:\n"
-            "  before=os.fstat(handle.fileno())\n"
-            "  for block in iter(lambda: handle.read(1048576),b''):\n"
-            "   count+=len(block)\n"
-            "   if count>size: raise ValueError('workspace file changed while inspected')\n"
-            "   digest.update(block)\n"
-            "  after=os.fstat(handle.fileno())\n"
-            " if count!=size or before.st_size!=size or "
-            "(before.st_mtime_ns,before.st_ctime_ns)!=(after.st_mtime_ns,after.st_ctime_ns):\n"
-            "  raise ValueError('workspace file changed while inspected')\n"
-            " return {'size':size,'sha256':digest.hexdigest()}\n"
-        )
-    return (
-        "import base64,hashlib,json,os,stat\n"
-        "root=os.path.realpath('/workspace')\n"
-        "checked_dirs={root}\n"
-        "def check(relative):\n"
-        " parts=relative.split('/')\n"
-        " if any(part in ('','.','..') for part in parts): raise ValueError('invalid workspace path')\n"
-        " parent=root\n"
-        " for part in parts[:-1]:\n"
-        "  parent=os.path.join(parent,part)\n"
-        "  if parent in checked_dirs: continue\n"
-        "  try: directory=os.lstat(parent)\n"
-        "  except FileNotFoundError:\n" + create_clause + "  else:\n"
-        "   if stat.S_ISLNK(directory.st_mode): raise ValueError('workspace path may not traverse symbolic links')\n"
-        "   if not stat.S_ISDIR(directory.st_mode): raise ValueError('workspace parent is not a directory')\n"
-        "  checked_dirs.add(parent)\n"
-        " target=os.path.join(parent,parts[-1])\n"
-        " try: info=os.lstat(target)\n"
-        " except FileNotFoundError: info=None\n"
-        " if info is not None and stat.S_ISLNK(info.st_mode): "
-        "raise ValueError('workspace target may not be a symbolic link')\n"
-        + read_clause
-        + size_clause
-        + result_clause
-        + "relatives=json.loads(base64.b64decode('"
-        + paths_b64
-        + "').decode('utf-8'))\n"
-        "print(json.dumps([check(relative) for relative in relatives]))"
-    )
+    return f"""import base64,hashlib,json,os,stat
+root=os.path.realpath('/workspace')
+def check(relative):
+ parts=relative.split('/')
+ if any(part in ('','.','..') for part in parts): raise ValueError('invalid workspace path')
+ parent=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:
+  for part in parts[:-1]:
+   try: child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+   except FileNotFoundError:
+    if not {create_parents!r}: raise FileNotFoundError('workspace parent is unavailable')
+    os.mkdir(part,dir_fd=parent)
+    child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+   except OSError as exc: raise ValueError("workspace path may not traverse symbolic links or non-directories") from exc
+   os.close(parent)
+   parent=child
+  try: target=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+  except FileNotFoundError:
+   if {create_parents!r}: return {{'size':None}}
+   raise FileNotFoundError('workspace file is unavailable')
+  except OSError as exc: raise ValueError("workspace target may not be a symbolic link") from exc
+  with os.fdopen(target,'rb') as handle:
+   before=os.fstat(handle.fileno())
+   if not stat.S_ISREG(before.st_mode): raise ValueError('workspace target is not a file')
+   size=before.st_size
+   if {max_bytes!r} is not None and size>{max_bytes!r}: raise ValueError('workspace file exceeds size limit')
+   if not {include_digest!r}: return {{'size':size}}
+   digest=hashlib.sha256()
+   count=0
+   for block in iter(lambda: handle.read(1048576),b''):
+    count+=len(block)
+    if count>size: raise ValueError('workspace file changed while inspected')
+    digest.update(block)
+   after=os.fstat(handle.fileno())
+   if count!=size or (before.st_mtime_ns,before.st_ctime_ns)!=(after.st_mtime_ns,after.st_ctime_ns):
+    raise ValueError('workspace file changed while inspected')
+   return {{'size':size,'sha256':digest.hexdigest()}}
+ finally: os.close(parent)
+relatives=json.loads(base64.b64decode('{paths_b64}').decode('utf-8'))
+print(json.dumps([check(relative) for relative in relatives]))
+"""
 
 
 def verify_python_artifact_code(path: str, *, digest: str, timeout: int) -> str:

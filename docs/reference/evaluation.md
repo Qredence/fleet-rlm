@@ -526,9 +526,14 @@ are preserved and validated by DSPy, not translated by Fleet.
 
 Earlier envelopes (`fleet-program-a1`, `fleet-program-b1`) are incompatible with the
 3-way automatic route contract (`Choice` across `direct`, `flex`, `rlm`) and ReAnchor calibration.
-They remain inspectable, not installable. Explicit baseline selection or a newly
-reviewed/revalidated B2 artifact is required; there is no automatic transplant of old
-instructions, demos, or decision criteria. Native parameter paths and `child_policy_contract=1`
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:87639c4355609af554cd0e994fe1041c917d1d44c3678b1675f8991c98555a7e -->
+
+They remain inspectable, not installable. A newly reviewed and revalidated b3 artifact
+is required; there is no automatic transplant of old instructions, demos, or decision criteria.
+
+<!-- /coderabbit-ai-generated:v1 --> Native parameter paths and `child_policy_contract=1`
 are unchanged. Automatic triage uses 3-way `Choice` across `direct`, `flex`, and `rlm`.
 Route assessments use `jev-route-v3` / `fleet-trace-assessments-v9`: bounded code, file and Skill work
 can reasonably use RLM or Flex; the independent route judge evaluates `Choice` over `direct`, `flex`,
@@ -542,7 +547,33 @@ baseline. After a global approval a baseline reset is unsupported: an approved j
 cannot be rejected and the ledger requires exactly the file it installed, so deleting
 the artifact makes Turns refuse. Restore the approved artifact or approve a new
 candidate. No new selection endpoint, ledger operation or automatic rollback is added by Gate A.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:d4540c577d88c7d9a67829df05eb19d83c272718eb79a8e3709b7ef794f5de76 -->
+
+### Upgrading an installation with a b2 program
+
+The b3 loader rejects a b2 `fleet.json`; changing its schema label is not a migration.
+Before upgrading, stop serving traffic and back up the compiled directory and approval
+ledger together. Preserve the old release and its configuration for recovery.
+
+If no global job has ever been approved, archive the b2 `fleet.json` outside the active
+compiled directory, then start b3 with that file absent. This selects baseline; create,
+evaluate and approve a fresh b3 candidate through the normal workflow.
+
+If a global job has been approved, do not delete its file or reset its ledger. There is
+no supported in-place b2-to-b3 migration: the optimizer also loads the installed program
+as its template, and approval evidence is tied to the incumbent, code and dependencies.
+Restore the old release with its matching b2 artifact and ledger to recover service.
+For a b3 deployment, provision a separate installation with a fresh database, compiled
+directory and workspace Volume; start from baseline, curate approved replay inputs,
+then create, evaluate and approve a new b3 candidate before moving traffic. Historical
+sessions and approvals remain in the old installation; copying them is not a migration.
+Do not reuse old approval evidence or claim live compatibility from offline tests.
+
 An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
+
+<!-- /coderabbit-ai-generated:v1 -->
 While no global job was ever approved, an absent `fleet.json` means baseline; once one
 was, the ledger requires exactly the file it installed and refuses Turns otherwise.
 A present one is the program every Session

@@ -128,6 +128,9 @@ def _serve_urllib(
     monkeypatch.setattr(urllib.request, "getproxies", dict)
     monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", fake_open)
     monkeypatch.setattr(urllib.request.HTTPHandler, "http_open", fake_open)
+    mod = _load_bundled_script("web-research", "web_tools.py")
+    monkeypatch.setattr(mod._PinnedHTTPHandler, "http_open", fake_open)
+    monkeypatch.setattr(mod._PinnedHTTPSHandler, "https_open", fake_open)
     return requested
 
 
@@ -1622,3 +1625,132 @@ def test_should_replace_image_without_truncating_existing_artifact(tmp_path, mon
         assert result["output_path"] == str(destination)
         assert destination.read_bytes() == b"resized"
     assert set(tmp_path.iterdir()) == {source, destination}
+
+
+def test_page_range_rejects_before_expansion() -> None:
+    mod = _load_bundled_script("document-extraction", "doc_tools.py")
+    with pytest.raises(ValueError, match="out of bounds"):
+        mod._parse_pages("1-1000000000", 1)
+    assert mod._parse_pages("1-3,2", 3) == [1, 2, 3]
+
+
+def test_xlsx_fallback_ignores_markitdown(tmp_path, monkeypatch) -> None:
+    mod = _load_bundled_script("document-extraction", "doc_tools.py")
+    path = tmp_path / "table.xlsx"
+    path.touch()
+    monkeypatch.setattr(mod, "_try_import", lambda _name: None)
+    monkeypatch.setattr(mod, "_extract_with_markitdown", lambda *_args: pytest.fail("unbounded fallback"))
+    monkeypatch.setattr(mod, "_extract_xlsx_zip", lambda target, limit: {"path": target, "limit": limit})
+    assert mod.extract_office(path, max_rows_per_sheet=2) == {"path": path, "limit": 2}
+
+
+@pytest.mark.parametrize("mode", ["lines", "chunks"])
+def test_jev_crop_retains_late_match(tmp_path, mode) -> None:
+    mod = _load_bundled_script("long-context-search", "context_search.py")
+    path = tmp_path / "late.txt"
+    path.write_text("x" * 3500 + "NEEDLE" + "x" * 494)
+    if mode == "chunks":
+        path.write_text(path.read_text() + "x" * 20000)
+    hits = mod.search_windows(path, "NEEDLE")
+    assert hits["mode"] == mode
+    batch = mod.build_jev_batches(hits, "Evidence?")[0]
+    assert "NEEDLE" in batch["items"][0]
+    assert len(batch["items"][0]) <= 3000
+    meta = batch["metadata"][0]
+    assert meta["excerpt_start"] > 0
+    if mode == "chunks":
+        assert meta["start_offset"] == meta["excerpt_start"]
+        assert meta["end_offset"] == meta["excerpt_end"]
+        assert f"offsets {meta['start_offset']}-{meta['end_offset']}" in batch["items"][0]
+
+
+@pytest.mark.parametrize("size_limit", [False, True])
+def test_archive_limits_stop_member_iteration(tmp_path, monkeypatch, size_limit) -> None:
+    mod = _load_bundled_script("repository-inspection", "fetch_repo.py")
+    path = tmp_path / "many.tar.gz"
+    _make_tar_gz(path, [(f"repo/{i}", b"abc", "file") for i in range(10)])
+    original = tarfile.TarFile.next
+    calls = []
+
+    def next_member(self):
+        calls.append(1)
+        assert len(calls) <= 4, "archive scanned beyond rejection"
+        return original(self)
+
+    monkeypatch.setattr(tarfile.TarFile, "next", next_member)
+    with pytest.raises(ValueError, match="exceeds limit"):
+        mod._inspect_and_extract_tar(path, tmp_path / "out", max_entries=2, max_unpacked_bytes=2 if size_limit else 100)
+
+
+def test_git_output_is_retained_as_bounded_prefix() -> None:
+    mod = _load_bundled_script("repository-inspection", "fetch_repo.py")
+    text, count = mod._run_git_bounded([sys.executable, "-c", "print('x'*1000000, end='')"], timeout=10, max_chars=37)
+    assert text == "x" * 37
+    assert count == 1000000
+
+
+@pytest.fixture
+def dated_xlsx(tmp_path):
+    import datetime
+
+    openpyxl = pytest.importorskip("openpyxl")
+
+    path = tmp_path / "dated.xlsx"
+    workbook = openpyxl.Workbook()
+    workbook.active.append(["date", "value"])
+    workbook.active.append([datetime.datetime(2026, 1, 2), 7])
+    workbook.active["A2"].number_format = "yyyy-mm-dd"
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
+def test_tabular_cli_serializes_xlsx_dates(dated_xlsx, capsys) -> None:
+    mod = _load_bundled_script("tabular-analysis", "tabular_tools.py")
+    assert mod.main([str(dated_xlsx)]) == 0
+    assert "2026-01-02T00:00:00" in capsys.readouterr().out
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        json.dumps(object(), default=mod._json_default)
+
+
+@pytest.mark.parametrize(
+    "destination,kept",
+    [("https://example.com/next", True), ("https://other.example/", False), ("http://example.com/", False)],
+)
+def test_redirect_credentials_are_origin_scoped(destination, kept) -> None:
+    mod = _load_bundled_script("web-research", "web_tools.py")
+    req = urllib.request.Request("https://example.com/start", headers={"Authorization": "synthetic", "Cookie": "a=b"})
+    redirected = mod._GuardedRedirectHandler(public_only=False).redirect_request(
+        req, None, 302, "Found", {}, destination
+    )
+    assert bool(redirected.get_header("Authorization")) is kept
+    assert bool(redirected.get_header("Cookie")) is kept
+
+
+def test_pinned_connection_uses_validated_address(monkeypatch) -> None:
+    mod = _load_bundled_script("web-research", "web_tools.py")
+    calls = []
+
+    def resolve(*_args, **_kwargs):
+        calls.append("resolve")
+        assert calls.count("resolve") == 1
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    class FakeSocket:
+        def __init__(self, *_args):
+            pass
+
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, address):
+            calls.append(address)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(socket, "socket", FakeSocket)
+    connection = mod._pinned_connection(mod.http.client.HTTPSConnection, "https://example.com/")(
+        "example.com", timeout=2
+    )
+    assert connection.host == "example.com"
+    connection._create_connection(("example.com", 443), 2)
+    assert calls == ["resolve", ("93.184.216.34", 443)]

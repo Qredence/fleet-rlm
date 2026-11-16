@@ -180,6 +180,12 @@ def _search_lines_iter(
                 "start_line": window[0][0],
                 "target_end": line_no + context_lines,
                 "match": match.group(0),
+                "match_start": sum(len(f"{ln}: {txt}") + 1 for ln, txt in window[:-1])
+                + len(f"{line_no}: ")
+                + match.start(),
+                "match_end": sum(len(f"{ln}: {txt}") + 1 for ln, txt in window[:-1])
+                + len(f"{line_no}: ")
+                + match.end(),
                 "window": window,
             }
             if context_lines == 0:
@@ -196,6 +202,8 @@ def _search_lines_iter(
             "start_line": item["start_line"],
             "end_line": item["window"][-1][0],
             "match": item["match"],
+            "match_start": item["match_start"],
+            "match_end": item["match_end"],
             "excerpt": "\n".join(f"{ln}: {txt}" for ln, txt in item["window"]),
         }
         for item in finished[:max_hits]
@@ -236,6 +244,9 @@ def _search_chunks_stream(
                     "end_offset": base_offset + match.end(),
                     "match": match.group(0),
                     "excerpt": window,
+                    "excerpt_start_offset": base_offset,
+                    "match_start": match.start(),
+                    "match_end": match.end(),
                 }
             )
         return False
@@ -419,7 +430,35 @@ def build_jev_batches(
             else:
                 header = ""
                 meta = {"index": idx}
-            item_text = (header + excerpt)[:max_chars_per_item]
+            match_start = int(entry.get("match_start", 0))
+            match_end = int(entry.get("match_end", match_start))
+            # Reserve header space, then converge on the actual displayed source range.
+            available = max_chars_per_item
+            while True:
+                available = min(available, max_chars_per_item - len(header))
+                if available < max(1, match_end - match_start):
+                    raise ValueError("max_chars_per_item cannot fit the match and provenance")
+                crop_start = min(max(0, match_end - available), match_start)
+                crop_end = min(len(excerpt), crop_start + available)
+                meta["excerpt_start"] = crop_start
+                meta["excerpt_end"] = crop_end
+                if "chunk_index" in entry:
+                    base = int(entry.get("excerpt_start_offset", 0))
+                    meta.update(start_offset=base + crop_start, end_offset=base + crop_end)
+                    new_header = f"[chunk {entry['chunk_index']} | offsets {base + crop_start}-{base + crop_end}]\n"
+                elif "line_number" in entry:
+                    first = int(entry.get("start_line", entry["line_number"]))
+                    meta.update(
+                        start_line=first + excerpt[:crop_start].count("\n"),
+                        end_line=first + excerpt[: max(crop_start, crop_end - 1)].count("\n"),
+                    )
+                    new_header = f"[lines {meta['start_line']}-{meta['end_line']} | hit line {entry['line_number']}]\n"
+                else:
+                    new_header = header
+                if new_header == header:
+                    break
+                header = new_header
+            item_text = header + excerpt[crop_start:crop_end]
         else:
             raise TypeError(f"Window entry at index {idx} must be a mapping or string")
 

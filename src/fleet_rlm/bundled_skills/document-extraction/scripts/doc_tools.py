@@ -151,6 +151,8 @@ def _parse_pages(pages: list[int] | tuple[int, ...] | range | str | None, total_
                 start, end = int(start_s), int(end_s)
                 if start > end:
                     raise ValueError(f"Invalid page range {token!r}")
+                if start < 1 or end > total_pages:
+                    raise ValueError(f"Page range {token!r} out of bounds for {total_pages}-page PDF")
                 selected.extend(range(start, end + 1))
             else:
                 selected.append(int(token))
@@ -746,7 +748,7 @@ def extract_office(path: str | Path, *, max_rows_per_sheet: int = 500) -> dict[s
         finally:
             wb.close()
         return {"path": str(target), "format": "xlsx", "extractor": "openpyxl", "sheets": sheets}
-    return _extract_with_markitdown(target, doc_fmt) or _extract_xlsx_zip(target, max_rows_per_sheet)
+    return _extract_xlsx_zip(target, max_rows_per_sheet)
 
 
 def run(

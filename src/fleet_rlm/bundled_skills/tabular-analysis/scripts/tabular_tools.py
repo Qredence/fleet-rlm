@@ -386,6 +386,14 @@ def run(
     return result
 
 
+def _json_default(value: Any) -> str:
+    """Encode ISO date/time values rejected by the standard encoder."""
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for profiling and aggregating tabular datasets."""
     parser = argparse.ArgumentParser(description="Profile and aggregate a tabular dataset.")
@@ -402,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.metrics:
                 raise ValueError("--metrics is required when --group-by is specified")
             output["aggregation"] = aggregate_groups(args.path, args.group_by, args.metrics)
-        sys.stdout.write(json.dumps(output, indent=2) + "\n")
+        sys.stdout.write(json.dumps(output, indent=2, default=_json_default) + "\n")
         return 0
     except Exception as exc:
         sys.stderr.write(f"Error: {exc}\n")

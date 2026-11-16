@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import urllib.request
 from collections import Counter
 from pathlib import Path, PurePosixPath
@@ -147,15 +148,13 @@ def _inspect_and_extract_tar(
 ) -> tuple[int, int, Path]:
     """Verify tar member bounds and extract safely using filter='data'."""
     with tarfile.open(archive_path, mode="r:gz") as tar:
-        members = tar.getmembers()
-        if not members:
-            raise ValueError("Downloaded archive is empty")
-        if len(members) > max_entries:
-            raise ValueError(f"Archive entry count {len(members)} exceeds limit {max_entries}")
-
+        members = []
         top_levels: set[str] = set()
         unpacked_bytes = 0
-        for member in members:
+        for member in tar:
+            members.append(member)
+            if len(members) > max_entries:
+                raise ValueError(f"Archive entry count exceeds limit {max_entries}")
             name = member.name
             if not name or "\x00" in name or "\\" in name or name.startswith("/"):
                 raise ValueError(f"Unsafe archive member path: {name!r}")
@@ -172,6 +171,8 @@ def _inspect_and_extract_tar(
                 if unpacked_bytes > max_unpacked_bytes:
                     raise ValueError(f"Unpacked archive size exceeds limit {max_unpacked_bytes} bytes")
 
+        if not members:
+            raise ValueError("Downloaded archive is empty")
         if len(top_levels) != 1:
             raise ValueError(f"Expected a single top-level directory, found {sorted(top_levels)!r}")
         top_name = next(iter(top_levels))
@@ -409,6 +410,35 @@ def git_log(
     return records
 
 
+def _run_git_bounded(cmd: list[str], *, timeout: int, max_chars: int) -> tuple[str, int]:
+    """Drain output in fixed chunks, retaining a bounded prefix and enforcing the deadline."""
+    with (
+        tempfile.TemporaryFile(mode="w+t") as errors,
+        subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=errors, text=True, stdin=subprocess.DEVNULL, env=_git_env()
+        ) as proc,
+    ):
+        timer = threading.Timer(timeout, proc.kill)
+        timer.start()
+        try:
+            assert proc.stdout is not None
+            chunks = []
+            retained = total = 0
+            while chunk := proc.stdout.read(65536):
+                total += len(chunk)
+                prefix = chunk[: max_chars - retained]
+                if prefix:
+                    chunks.append(prefix)
+                retained += len(prefix)
+            proc.wait()
+            if proc.returncode:
+                errors.seek(0)
+                raise RuntimeError(f"git diff failed: {errors.read(300) or proc.returncode}")
+            return "".join(chunks), total
+        finally:
+            timer.cancel()
+
+
 def git_diff(
     repo_dir: str | Path,
     rev_a: str,
@@ -427,25 +457,24 @@ def git_diff(
     rel_path = _validate_rel_repo_path(path)
 
     suffix = ["--", rel_path] if rel_path is not None else []
-    stat_proc = _run_git(["git", "-C", str(root), "diff", "--stat", clean_a, clean_b, *suffix], timeout=timeout)
-    if stat_proc.returncode != 0:
-        detail = (stat_proc.stderr or stat_proc.stdout).strip()[:300]
-        raise RuntimeError(f"git diff --stat failed: {detail or stat_proc.returncode}")
-
-    diff_proc = _run_git(["git", "-C", str(root), "diff", clean_a, clean_b, *suffix], timeout=timeout)
-    if diff_proc.returncode != 0:
-        detail = (diff_proc.stderr or diff_proc.stdout).strip()[:300]
-        raise RuntimeError(f"git diff failed: {detail or diff_proc.returncode}")
-
-    raw_diff = diff_proc.stdout
+    stat_text, _ = _run_git_bounded(
+        ["git", "-C", str(root), "diff", "--stat", clean_a, clean_b, *suffix],
+        timeout=timeout,
+        max_chars=max_chars,
+    )
+    raw_diff, total_chars = _run_git_bounded(
+        ["git", "-C", str(root), "diff", clean_a, clean_b, *suffix],
+        timeout=timeout,
+        max_chars=max_chars,
+    )
     return {
         "rev_a": clean_a,
         "rev_b": clean_b,
         "path": rel_path,
-        "stat": stat_proc.stdout.strip(),
+        "stat": stat_text.strip(),
         "diff": raw_diff[:max_chars],
-        "truncated": len(raw_diff) > max_chars,
-        "total_chars": len(raw_diff),
+        "truncated": total_chars > max_chars,
+        "total_chars": total_chars,
     }
 
 
