@@ -23,6 +23,7 @@ import mlflow
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.engine.compiled import PROGRAM_SCHEMA, CompiledProgramFile, load_program_envelope
 from fleet_rlm.engine.programs import FleetProgram
+from fleet_rlm.skills import _is_skill_bytecode_relpath
 
 _FLEX_TYPE = cast(type[dspy.Module], dspy.Flex)
 
@@ -55,7 +56,11 @@ def optimization_code_digest() -> str:
     paths |= set((package / "optimize").rglob("*.py"))
     paths |= set((package / "sandbox").rglob("*.py"))
     paths |= set((package / "sandbox").rglob("snapshot-requirements.txt"))
-    paths |= {path for path in (package / "bundled_skills").rglob("*") if path.is_file()}
+    paths |= {
+        path
+        for path in (package / "bundled_skills").rglob("*")
+        if path.is_file() and not _is_skill_bytecode_relpath(path.relative_to(package))
+    }
     material = [
         (path.relative_to(package).as_posix(), digest_bytes(path.read_bytes()))
         for path in sorted(paths)

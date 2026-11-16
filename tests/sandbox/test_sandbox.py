@@ -754,7 +754,8 @@ def test_sandbox_skill_receipts_survive_later_cell_failure(sandbox, monkeypatch)
     monkeypatch.setattr(
         interpreter_module.mlflow, "start_span", lambda name, span_type: recording_span(recorded, name, span_type)
     )
-    interpreter = DaytonaInterpreter(manager_on(sandbox))
+    manager = manager_on(sandbox)
+    interpreter = DaytonaInterpreter(manager)
     interpreter.execute("save_skill('example', 'Use for examples', 'Example instructions')")
     # A helper returning successfully remains visible even if later code in the cell fails.
     with pytest.raises(CodeExecutionError):
@@ -770,6 +771,33 @@ def test_sandbox_skill_receipts_survive_later_cell_failure(sandbox, monkeypatch)
     activity = [trace_object(span.outputs)["skill_activity"] for span in spans]
     assert [receipts[0]["helper"] for receipts in activity] == ["save_skill", "use_skill"]
     assert all(receipts[0]["completed"] is True for receipts in activity)
+    # The Turn keeps receipts from every execution, caps them at 20 in total, and a new Turn clears them.
+    turn = manager.turn_skill_activity()
+    assert [receipt["helper"] for receipt in turn["skill_activity"]] == ["save_skill", "use_skill"]
+    assert turn["skill_activity_truncated"] is False
+    interpreter.execute("for _ in range(25): use_skill('example')")
+    capped = manager.turn_skill_activity()
+    assert len(capped["skill_activity"]) == 20 and capped["skill_activity_truncated"] is True
+    manager.reset_turn_budget(deadline_seconds=None)
+    assert manager.turn_skill_activity() == {"skill_activity": [], "skill_activity_truncated": False}
+
+
+def test_receipt_workspace_exposes_all_workspace_methods_via_dir(sandbox):
+    interpreter = DaytonaInterpreter(manager_on(sandbox))
+    methods = interpreter.execute("[m for m in dir(workspace) if not m.startswith('_')]")
+    assert {
+        "append",
+        "delete",
+        "diff",
+        "load_image",
+        "read",
+        "read_text",
+        "remember",
+        "stat",
+        "tree",
+        "write",
+        "write_artifact",
+    } <= set(methods)
 
 
 def test_bridge_and_execution_events_show_evidence_and_hide_secrets(sandbox):
@@ -927,7 +955,8 @@ from dspy import CodeExecutionError
 mlflow.set_experiment('execution-test')
 manager = SimpleNamespace(run_namespace=lambda *_a: {
     'error': True, 'error_type': 'ValueError', 'stderr': 'ValueError: verification_probe'},
-    check_turn=lambda: None, emit=lambda *_a, **_kw: None, record_sandbox_error=lambda: None)
+    check_turn=lambda: None, emit=lambda *_a, **_kw: None, record_sandbox_error=lambda: None,
+    record_skill_activity=lambda activities, *, truncated=False: None)
 interpreter = DaytonaInterpreter(manager)
 interpreter.start = lambda: None
 with mlflow.start_span(name='execution-test') as root:
@@ -1014,11 +1043,14 @@ def test_should_accept_note_constants_without_weakening_substantive_grounding(sa
     assert warning["field"] == "learned_skill_note" and warning["figures"] == ["10005", "200"]
     assert manager.turn_usage()["submit_rejections"] == 0
     with pytest.raises(CodeExecutionError, match="SUBMIT rejected"):
-        interpreter.execute("SUBMIT(findings='unverified 426880', learned_skill_note='')")
+        interpreter.execute("print('partial check')\nSUBMIT(findings='unverified 426880', learned_skill_note='')")
     assert manager.turn_usage()["submit_rejections"] == 1
     assert manager.turn_usage()["sandbox_errors"] == 0
     [output] = [event for event in events if event["event"] == "repl_output" and event.get("error")]
     assert output["outcome"] == "ungrounded_submit_rejected"
+    assert output["stdout"].strip() == "partial check"
+    assert "SUBMIT rejected" in output["stderr"] and "426880" in output["stderr"]
+    assert output["value"] in (None, "null")
     assert interpreter._ungrounded_rejections == 1
     with pytest.raises(CodeExecutionError, match="ValueError"):
         interpreter.execute("raise ValueError('remote failure')")
@@ -1773,6 +1805,153 @@ def test_skill_receipts_are_bounded_and_preserved_by_submit(sandbox):
     assert result["skill_activity_truncated"] is True
 
 
+def test_load_skill_module_run_skill_script_and_bundled_save_protection(sandbox):
+    context = repl.create_context(sandbox)
+
+    # save_skill rejects canonical bundled names and records completed=False.
+    for bundled_name in ("tabular-analysis", "web-research", "delegation", "file-editing"):
+        blocked = run(
+            sandbox,
+            context,
+            f"save_skill({bundled_name!r}, 'Attempt overwrite', 'Should fail.')",
+        )
+        assert blocked["error"] is True
+        assert blocked["error_type"] == "ValueError"
+        assert "Cannot overwrite bundled skill" in blocked["stderr"]
+        assert blocked["skill_activity"] == [{"helper": "save_skill", "skill": bundled_name, "completed": False}]
+
+    # save_skill with a distinct name + dual-mode script + reference succeeds, and load_skill_module works.
+    saved = run(
+        sandbox,
+        context,
+        "save_skill('env-probe', 'Inspect script env and module calls', 'Run helper.', "
+        "scripts={"
+        "'env_probe.py': "
+        "'import json, os, sys\\n"
+        "def run(x):\\n"
+        '    """Double input."""\\n'
+        '    return {"x": x, "double": x * 2}\\n'
+        'if __name__ == "__main__":\\n'
+        '    if "--fail" in sys.argv:\\n'
+        '        sys.stderr.write("boom on stderr\\\\n")\\n'
+        "        raise SystemExit(3)\\n"
+        '    print(json.dumps({"cwd": os.getcwd(), "ws": os.environ.get("FLEET_WORKSPACE"), '
+        '"skill": os.environ.get("FLEET_SKILL_DIR"), "args": sys.argv[1:]}))\\n\', '
+        "'plain.py': 'VALUE = 9\\n'"
+        "}, references={'note.md': 'Check cwd.'})",
+    )
+    assert saved.get("error") is not True
+    assert saved["skill_activity"] == [{"helper": "save_skill", "skill": "env-probe", "completed": True}]
+
+    # 1-arg auto-resolution prefers scripts/<name_with_underscores>.py and makes module callable.
+    loaded = run(
+        sandbox,
+        context,
+        "mod = load_skill_module('env-probe')\n"
+        "mod_cached = load_skill_module('env-probe')\n"
+        "res = mod(21)\n"
+        "(mod is mod_cached, res, 'Double input.' in (mod.__doc__ or ''))",
+    )
+    assert loaded.get("error") is not True
+    assert loaded["value"] == [True, {"x": 21, "double": 42}, True]
+    assert loaded["skill_activity"] == [
+        {"helper": "load_skill_module", "skill": "env-probe", "completed": True},
+        {"helper": "load_skill_module", "skill": "env-probe", "completed": True},
+    ]
+
+    # Updating the script mtime invalidates the cache; non-callable module raises TypeError on call.
+    script_path = Path(sandbox.code_interpreter.translate("/workspace/skills/env-probe/scripts/env_probe.py"))
+    assert not (script_path.parent / "__pycache__").exists()
+    assert not list(script_path.parent.glob("*.py[co]"))
+    old_mtime = script_path.stat().st_mtime_ns
+    script_path.write_text(
+        script_path.read_text(encoding="utf-8").replace("x * 2", "x * 3"),
+        encoding="utf-8",
+    )
+    os.utime(script_path, ns=(old_mtime + 1_000_000_000, old_mtime + 1_000_000_000))
+    reloaded = run(
+        sandbox,
+        context,
+        "mod2 = load_skill_module('env-probe')\n"
+        "plain = load_skill_module('env-probe', 'plain.py')\n"
+        "(mod2(10)['double'], plain.VALUE)",
+    )
+    assert reloaded["value"] == [30, 9]
+    assert not (script_path.parent / "__pycache__").exists()
+    assert not list(script_path.parent.glob("*.py[co]"))
+
+    # Pre-existing __pycache__/*.pyc and .pyo files must not leak into use_skill Resources:.
+    pycache_dir = script_path.parent / "__pycache__"
+    pycache_dir.mkdir(parents=True, exist_ok=True)
+    (pycache_dir / "env_probe.cpython-313.pyc").write_bytes(b"bytecode")
+    (script_path.parent / "legacy.pyc").write_bytes(b"bytecode")
+    (script_path.parent / "legacy.pyo").write_bytes(b"bytecode")
+    activated = run(sandbox, context, "use_skill('env-probe')")
+    assert activated.get("error") is not True
+    assert (
+        'Resources: {"scripts": ["scripts/env_probe.py", "scripts/plain.py"], "references": ["references/note.md"]}'
+        in activated["value"]
+    )
+    assert "__pycache__" not in activated["value"]
+    assert ".pyc" not in activated["value"]
+    assert ".pyo" not in activated["value"]
+
+    non_callable = run(sandbox, context, "plain()")
+    assert non_callable["error"] is True and non_callable["error_type"] == "TypeError"
+
+    # Missing skill or script records completed=False in skill_activity.
+    missing = run(sandbox, context, "load_skill_module('no-such-skill')")
+    assert missing["error"] is True and missing["error_type"] == "FileNotFoundError"
+    assert missing["skill_activity"] == [{"helper": "load_skill_module", "skill": "no-such-skill", "completed": False}]
+
+    # Ambiguous multi-script skill without preferred name raises ValueError and records completed=False.
+    run(
+        sandbox,
+        context,
+        "save_skill('multi-script', 'Two scripts', 'Use one.', scripts={'a.py': 'X=1\\n', 'b.py': 'Y=2\\n'})",
+    )
+    ambiguous = run(sandbox, context, "load_skill_module('multi-script')")
+    assert ambiguous["error"] is True and ambiguous["error_type"] == "ValueError"
+    assert ambiguous["skill_activity"] == [{"helper": "load_skill_module", "skill": "multi-script", "completed": False}]
+
+    # run_skill_script runs with cwd=/workspace and FLEET_WORKSPACE/FLEET_SKILL_DIR env.
+    ok_script = run(sandbox, context, "run_skill_script('env-probe', 'scripts/env_probe.py', ['arg1'])")
+    assert ok_script.get("error") is not True
+    payload = json.loads(ok_script["value"])
+    expected_ws = str(Path(sandbox.code_interpreter.translate("/workspace")).resolve())
+    expected_skill = str(Path(sandbox.code_interpreter.translate("/workspace/skills/env-probe")).resolve())
+    assert Path(payload["cwd"]).resolve() == Path(expected_ws)
+    assert Path(payload["ws"]).resolve() == Path(expected_ws)
+    assert Path(payload["skill"]).resolve() == Path(expected_skill)
+    assert payload["args"] == ["arg1"]
+    assert ok_script["skill_activity"] == [{"helper": "run_skill_script", "skill": "env-probe", "completed": True}]
+
+    # Non-zero exit raises RuntimeError and records completed=False in skill_activity.
+    failed_script = run(sandbox, context, "run_skill_script('env-probe', 'scripts/env_probe.py', ['--fail'])")
+    assert failed_script["error"] is True
+    assert failed_script["error_type"] == "RuntimeError"
+    assert "exited with code 3" in failed_script["stderr"]
+    assert "boom on stderr" in failed_script["stderr"]
+    assert failed_script["skill_activity"] == [{"helper": "run_skill_script", "skill": "env-probe", "completed": False}]
+
+    # Long stdout must not push the final traceback line out of the error message; the output tail is kept.
+    long_probe = Path(sandbox.code_interpreter.translate("/workspace/skills/env-probe/scripts/long_probe.py"))
+    long_probe.write_text("print('x' * 5000)\nraise ValueError('final-tail-marker')\n", encoding="utf-8")
+    long_failed = run(sandbox, context, "run_skill_script('env-probe', 'scripts/long_probe.py')")
+    assert long_failed["error"] is True and long_failed["error_type"] == "RuntimeError"
+    assert "exited with code 1" in long_failed["stderr"]
+    assert "final-tail-marker" in long_failed["stderr"]
+
+
+def test_daytona_interpreter_reserves_load_skill_module(sandbox):
+    manager = manager_on(sandbox)
+    with pytest.raises(ValueError, match="unreserved"):
+        DaytonaInterpreter(manager, tools={"load_skill_module": lambda: None})
+
+    interpreter = DaytonaInterpreter(manager)
+    assert interpreter.execute("callable(load_skill_module)", variables={"load_skill_module": "shadow"}) is True
+
+
 @pytest.mark.parametrize(
     "code,expected",
     [
@@ -1999,6 +2178,107 @@ def test_registered_dspy_builtin_tools_keep_their_bridge(sandbox):
 def test_invalid_bindings_are_refused_before_running(sandbox):
     result = run(sandbox, repl.create_context(sandbox), "1", tools=["SUBMIT"])
     assert result["error"] is True and "invalid execution bindings" in result["stderr"]
+
+
+def test_web_search_builtin_bridges_from_the_repl_and_stays_reserved(sandbox):
+    calls = []
+
+    def host(call):
+        calls.append(call)
+        return {"value": [{"title": "Hit", "url": "https://example.com", "snippet": "s", "provider": "serper"}]}
+
+    result = run(sandbox, repl.create_context(sandbox), "web_search('dspy rlm', max_results=2)", on_call=host)
+    assert result["value"][0]["provider"] == "serper"
+    assert calls[0]["tool"] == "web_search" and calls[0]["args"] == ["dspy rlm", 2]
+    with pytest.raises(ValueError, match="unreserved"):
+        DaytonaInterpreter(DaytonaSandboxManager("key", "org", "vol", "web-reserved"), tools={"web_search": len})
+    assert "web_search(query, max_results=5)" in (
+        DaytonaSandboxManager("key", "org", "vol", "web-doc").interpreter_factory().execution_instructions
+    )
+
+
+def test_web_search_is_bounded_budgeted_and_never_echoes_the_key(monkeypatch):
+    import httpx
+
+    seen = []
+
+    def serper(method, url, **kwargs):
+        seen.append((method, url, kwargs))
+        rows = [{"title": "T" * 500, "link": f"https://example.com/{i}", "snippet": "S" * 900} for i in range(12)]
+        rows.insert(0, {"title": "unsafe", "link": "javascript:alert(1)", "snippet": "x"})
+        return httpx.Response(200, json={"organic": rows})
+
+    monkeypatch.setattr(httpx, "request", serper)
+    manager = DaytonaSandboxManager(
+        "key", "org", "volume", "web-bounded", serper_api_key="serper-secret", max_llm_calls=2
+    )
+    interpreter = DaytonaInterpreter(manager)
+    hits = interpreter._web_search(["  dspy  ", 10], {})
+    assert len(hits) == 10 and all(hit["url"].startswith("https://") for hit in hits)
+    assert max(len(hit["title"]) for hit in hits) == 200 and max(len(hit["snippet"]) for hit in hits) == 600
+    assert {hit["provider"] for hit in hits} == {"serper"}
+    method, url, kwargs = seen[0]
+    assert (method, url) == ("POST", "https://google.serper.dev/search")
+    assert kwargs["headers"]["X-API-KEY"] == "serper-secret" and kwargs["json"] == {"q": "dspy", "num": 10}
+    assert "serper-secret" not in str(hits)
+    assert manager.turn_usage()["budget_breakdown"]["web_search"] == 1
+
+    interpreter._web_search(["second", 1], {})
+    seen.clear()
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        interpreter._web_search(["third", 1], {})
+    assert seen == []
+
+
+def test_web_search_refuses_when_unconfigured_and_sanitizes_provider_errors(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(httpx, "request", lambda *_a, **_k: pytest.fail("the provider must not be called"))
+    unconfigured = DaytonaSandboxManager("key", "org", "volume", "web-off")
+    with pytest.raises(RuntimeError, match="web_search not configured"):
+        DaytonaInterpreter(unconfigured)._web_search(["q", 3], {})
+    assert unconfigured.turn_usage()["budget_breakdown"]["web_search"] == 0
+
+    seen = []
+
+    def failing(method, url, **kwargs):
+        seen.append((method, url, kwargs))
+        raise httpx.ConnectError(f"refused {kwargs['headers']['X-API-Key']}")
+
+    monkeypatch.setattr(httpx, "request", failing)
+    manager = DaytonaSandboxManager("key", "org", "volume", "web-you", you_api_key="you-secret")
+    interpreter = DaytonaInterpreter(manager)
+    with pytest.raises(RuntimeError, match=r"You\.com search request failed") as error:
+        interpreter._web_search(["q", 3], {})
+    assert "you-secret" not in str(error.value)
+    assert seen[0][1] == "https://api.ydc-index.io/search"
+    assert seen[0][2]["params"] == {"query": "q", "num_web_results": 3}
+
+    monkeypatch.setattr(httpx, "request", lambda *_a, **_k: httpx.Response(401, json={"error": "denied"}))
+    with pytest.raises(RuntimeError, match="HTTP 401") as error:
+        interpreter._web_search(["q", 3], {})
+    assert "you-secret" not in str(error.value)
+    for bad in (["", 3], ["q", 0], ["q", 11], ["q", True], ["q"], ["q", 3, 4]):
+        with pytest.raises(ValueError):
+            interpreter._web_search(bad, {})
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_web_search_keys_reach_child_sandboxes_and_charge_the_root(monkeypatch):
+    import httpx
+
+    root = DaytonaSandboxManager("key", "org", "volume", "web-child", serper_api_key="serper-secret")
+    monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: None)
+    monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
+    monkeypatch.setattr(
+        httpx,
+        "request",
+        lambda *_a, **_k: httpx.Response(200, json={"organic": [{"title": "C", "link": "https://c.example"}]}),
+    )
+    child = root._allocate_child()
+    assert child.serper_api_key == "serper-secret"
+    assert DaytonaInterpreter(child)._web_search(["q", 1], {})[0]["url"] == "https://c.example"
+    assert root.turn_usage()["budget_breakdown"]["web_search"] == 1
 
 
 def test_namespace_imports_stay_bound_to_their_own_facade(sandbox):
@@ -3130,7 +3410,7 @@ def test_workspace_file_transfer_handles_uploads_larger_than_exec_limit(monkeypa
     def remote_exec(_self: DaytonaSandboxManager, sandbox_arg: Any, code: str, **_kwargs) -> str:
         assert sandbox_arg is sandbox
         assert len(code.encode("utf-8")) < 10_000
-        if "if not os.path.isfile(target)" in code:
+        if "raise FileNotFoundError('workspace file is unavailable')" in code:
             return json.dumps([{"size": len(content)}])
         return json.dumps([{"size": None}])
 
@@ -3936,7 +4216,13 @@ def test_should_share_budget_categories_and_recoveries_across_children():
         "lm_calls": 10,
         "sandbox_errors": 1,
         "submit_rejections": 1,
-        "budget_breakdown": {"generation_query": 6, "routing": 1, "skill_selection": 3, "other_decisions": 0},
+        "budget_breakdown": {
+            "generation_query": 6,
+            "routing": 1,
+            "skill_selection": 3,
+            "other_decisions": 0,
+            "web_search": 0,
+        },
     }
     with pytest.raises(RuntimeError, match="budget exhausted"):
         child.consume_budget()
@@ -4217,7 +4503,6 @@ def test_batched_transfer_uses_one_check_and_one_transfer_per_side(monkeypatch) 
     assert contents == files
     assert len(checks) == 2 and len(filesystem.downloads) == 1 and len(filesystem.uploads) == 1
     assert filesystem.uploads[0] == [(f"/workspace/{path}", data) for path, data in files.items()]
-    assert "os.makedirs(parent,exist_ok=True)" in checks[1] and "os.makedirs" not in checks[0]
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
@@ -4240,8 +4525,9 @@ def test_batched_read_refuses_the_quota_before_downloading(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("bad", ["files/link.txt", "linked-dir/secret.txt"])
+@pytest.mark.parametrize("create_parents", [False, True], ids=["read", "write"])
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
-def test_batched_metadata_check_refuses_symbolic_links(monkeypatch, tmp_path, bad) -> None:
+def test_batched_metadata_check_refuses_symbolic_links(monkeypatch, tmp_path, bad, create_parents) -> None:
     import contextlib
     import io
 
@@ -4263,7 +4549,7 @@ def test_batched_metadata_check_refuses_symbolic_links(monkeypatch, tmp_path, ba
 
     assert manager._workspace_files_metadata(object(), ["files/ok.txt"], create_parents=False) == [{"size": 2}]
     with pytest.raises(ValueError, match="symbolic link"):
-        manager._workspace_files_metadata(object(), ["files/ok.txt", bad], create_parents=False)
+        manager._workspace_files_metadata(object(), ["files/ok.txt", bad], create_parents=create_parents)
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
@@ -6128,6 +6414,14 @@ def test_workspace_skill_reads_emit_bounded_skill_activity_and_docs_note_artifac
     assert "artifacts/" in skill_doc and "starts empty inside a child" in skill_doc
     instructions = DaytonaSandboxManager("key", "org", "vol", "sess-doc").interpreter_factory().execution_instructions
     assert "artifacts/ starts empty inside a child" in instructions
+    for helper_name in (
+        "use_skill",
+        "load_skill_module",
+        "run_skill_script",
+        "read_skill_reference",
+        "save_skill",
+    ):
+        assert helper_name in instructions
 
 
 @pytest.fixture
@@ -6148,3 +6442,129 @@ def test_bootstrap_marker_cannot_hide_a_task_or_side_effect():
     assert not _is_bootstrap_code('x = "__dspy_values.decode(__import__(\\"json\\").loads("; SUBMIT(answer="x")')
     assert not _is_bootstrap_code('context = __dspy_values.decode(__import__("json").loads(side_effect()))')
     assert not _is_bootstrap_code("x = " + "+".join("1" for _ in range(1_500)))
+
+
+def test_remote_maintenance_refuses_retry_after_turn_cancellation(monkeypatch):
+    manager = DaytonaSandboxManager("key", "org", "volume", "maintenance-cancel")
+    attempts = []
+
+    def execute(_command, *, timeout):
+        attempts.append(timeout)
+        manager._cancelled.set()
+        raise DaytonaConnectionError("gateway interrupted")
+
+    monkeypatch.setattr(repl.time, "sleep", lambda _delay: None)
+    sandbox = SimpleNamespace(process=SimpleNamespace(exec=execute))
+    with pytest.raises(RuntimeError, match="Turn cancelled"):
+        manager._remote_exec(sandbox, "print('ready')")
+    assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("explicit_timeout", [None, 60], ids=["turn-bound", "explicit-bound"])
+def test_remote_maintenance_resamples_remaining_deadline_on_retry(monkeypatch, explicit_timeout):
+    manager = DaytonaSandboxManager("key", "org", "volume", "maintenance-deadline")
+    remaining = iter([12.9, 7.9])
+    monkeypatch.setattr(DaytonaSandboxManager, "admit_execution", lambda _self: next(remaining))
+    monkeypatch.setattr(repl.time, "sleep", lambda _delay: None)
+    attempts = []
+
+    def execute(_command, *, timeout):
+        attempts.append(timeout)
+        if len(attempts) == 1:
+            raise DaytonaConnectionError("gateway interrupted")
+        return SimpleNamespace(exit_code=0, result="ready")
+
+    sandbox = SimpleNamespace(process=SimpleNamespace(exec=execute))
+    assert manager._remote_exec(sandbox, "print('ready')", timeout=explicit_timeout) == "ready"
+    assert attempts == [12, 7]
+
+
+def test_remote_cleanup_remains_available_after_turn_cancellation():
+    manager = DaytonaSandboxManager("key", "org", "volume", "maintenance-cleanup")
+    manager._cancelled.set()
+    timeouts = []
+
+    def execute(_command, *, timeout):
+        timeouts.append(timeout)
+        return SimpleNamespace(exit_code=0, result="cleaned")
+
+    sandbox = SimpleNamespace(process=SimpleNamespace(exec=execute))
+    assert manager._remote_exec(sandbox, "pass", timeout=60, turn_bound=False) == "cleaned"
+    assert timeouts == [60]
+
+
+def test_remote_maintenance_refuses_results_after_cancellation():
+    manager = DaytonaSandboxManager("key", "org", "volume", "maintenance-result")
+
+    def execute(_command, *, timeout):
+        assert timeout is None
+        manager._cancelled.set()
+        return SimpleNamespace(exit_code=0, result="late result")
+
+    sandbox = SimpleNamespace(process=SimpleNamespace(exec=execute))
+    with pytest.raises(RuntimeError, match="Turn cancelled"):
+        manager._remote_exec(sandbox, "pass")
+
+
+def test_workspace_preparation_bounds_volume_metadata_round_trips(monkeypatch, tmp_path):
+    import contextlib
+    import io
+
+    from fleet_rlm.workspace import workspace_files_metadata_code
+
+    paths = [
+        f"skills/skill-{i}/{leaf}" for i in range(8) for leaf in ["SKILL.md", "scripts/tool.py", "references/guide.md"]
+    ]
+    calls = []
+    original_stat, original_lstat = os.stat, os.lstat
+
+    def stat_path(*args, **kwargs):
+        calls.append("stat")
+        return original_stat(*args, **kwargs)
+
+    def lstat_path(*args, **kwargs):
+        calls.append("lstat")
+        return original_lstat(*args, **kwargs)
+
+    code = workspace_files_metadata_code(paths, create_parents=True)
+    code = code.replace("os.path.realpath('/workspace')", f"os.path.realpath({str(tmp_path)!r})")
+    output = io.StringIO()
+    with monkeypatch.context() as patch, contextlib.redirect_stdout(output):
+        patch.setattr(os, "stat", stat_path)
+        patch.setattr(os, "lstat", lstat_path)
+        exec(code, {})
+    assert json.loads(output.getvalue()) == [{"size": None}] * len(paths)
+    assert all((tmp_path / path).parent.is_dir() for path in paths)
+    # Each metadata lookup is a Volume round trip: the 24-file cold sync must
+    # stay below 100, including root resolution, rather than hundreds of repeats.
+    assert len(calls) <= 100, f"Cold skill preparation used {len(calls)} metadata lookups"
+
+
+def test_metadata_parent_swap_cannot_escape_volume(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from fleet_rlm.workspace import workspace_files_metadata_code
+
+    root = tmp_path / "volume"
+    root.mkdir()
+    (root / "files").mkdir()
+    (root / "files" / "a").write_bytes(b"safe")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a").write_bytes(b"secret")
+    original = os.open
+    swapped = False
+
+    def open_and_swap(path, flags, *args, **kwargs):
+        nonlocal swapped
+        result = original(path, flags, *args, **kwargs)
+        if path == "files" and not swapped:
+            swapped = True
+            (root / "files").rename(root / "old")
+            (root / "files").symlink_to(outside)
+        return result
+
+    monkeypatch.setattr(os, "open", open_and_swap)
+    code = workspace_files_metadata_code(["files/a"], create_parents=False, include_digest=True)
+    exec(code.replace("os.path.realpath('/workspace')", repr(str(root))), {})
+    assert json.loads(capsys.readouterr().out) == [{"size": 4, "sha256": hashlib.sha256(b"safe").hexdigest()}]

@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 
 from fleet_rlm.config import FleetSettings
+from fleet_rlm.sandbox.repl import runtime_digest
 
 MLFLOW_HOST = "127.0.0.1"
 STATE_DIR = Path(".fleet")
@@ -152,6 +153,18 @@ def verify_api_destination(url: str, expected: dict) -> None:
             f"({expected['experiment_name']}); server reports {actual.get('mode')} "
             f"({actual.get('experiment_name')}). Stop that server or select another FLEET_PORT. "
             "For evaluation, configure the server runtime experiment and trace prefix for evaluation."
+        )
+    actual_digest = payload.get("runtime_digest")
+    expected_digest = runtime_digest()
+    if actual_digest is None:
+        raise LaunchError(
+            f"API server at {url} predates runtime digest; restart `fleet serve` "
+            "(stop the old server or select another FLEET_PORT)."
+        )
+    if actual_digest != expected_digest:
+        raise LaunchError(
+            f"API runtime mismatch at {url}: running server has stale sandbox helpers/runtime "
+            f"({actual_digest} != {expected_digest}). Stop that server or select another FLEET_PORT."
         )
 
 

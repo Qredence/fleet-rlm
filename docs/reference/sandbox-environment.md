@@ -46,6 +46,14 @@ The finer spans distinguish slow path checks from slow transfers before choosing
 an optimization. File validation, child isolation, and success-only input receipts
 still apply. Ambiguous generated-code execution is never retried.
 
+Remote maintenance commands, including workspace preparation, resample the Turn's
+remaining deadline before each attempt and refuse retries or results after
+cancellation. Deadline-free Turns keep deadline-free maintenance calls. Teardown
+uses its separate cleanup timeout so cancellation cannot prevent cleanup.
+Batch path validation checks each shared ancestor once and uses one `lstat` per
+target, retaining symlink, file-type, and size checks without repeating Volume
+metadata round trips for every path component of every file.
+
 Local computation timers must include materializing lazy values, representation
 conversion, and answer extraction. They measure a different interval from a
 host-observed sandbox execution or a full Turn. The DSPy RLM/Flex program generates
@@ -60,6 +68,13 @@ Results remain in input order and worker exceptions propagate. Skill relevance
 batches use native DSPy boolean `Noul` classification with `timeout=0` to disable
 speculative straggler resubmission; Fleet's independent Turn deadline still applies.
 These logical budget units differ from observable model requests and token usage.
+
+`web_search(query, max_results=5)` is a host-mediated keyed search builtin. The host
+tries Serper (`SERPER_API_KEY`) first, then You.com (`YOU_API_KEY`); keys never enter
+the sandbox. It returns at most 10 bounded `{title, url, snippet, provider}` dicts,
+charges one `web_search` budget unit before the provider request, and raises
+`web_search not configured` when no key is set. The web-research Skill's `auto`
+search tries it first and falls back to keyless providers.
 
 Flex/RLM and explicit children use native `XMLAdapter` execution by default (with
 `ChatAdapter` and `JSONAdapter` available via configuration) and native wire serialization.
@@ -90,22 +105,63 @@ byte-for-byte reproducible OS image.
 ## Optional capabilities through Skills
 
 Bundled Skills use the existing catalog, activation, resource readers, and
-session synchronization. A user Skill with the same name in `.fleet/skills/`
-continues to override the bundled version; `.agents/skills/` is excluded.
-Discovery and activation do not install packages.
+session synchronization. Bundled Skills are canonical: a `.fleet/skills/` Skill
+with a bundled name is ignored with a warning, so the bundled Skill stays active;
+runtime `save_skill` rejects bundled names; and `/skills pull` never exports over
+bundled Skills (Volume files under a bundled name that the bundle does not ship
+are skipped with a warning). `.agents/skills/` stays excluded. Discovery and
+activation do not install packages.
 
 ## Bundled task Skills
 
-Fleet bundles a small set of Skills that guide common file-analysis and agent
-workflows: [tabular analysis](../../src/fleet_rlm/bundled_skills/tabular-analysis/SKILL.md),
+Fleet bundles eight Skills that guide common file-analysis, research, editing,
+and agent workflows:
+[tabular analysis](../../src/fleet_rlm/bundled_skills/tabular-analysis/SKILL.md),
 [long-context search](../../src/fleet_rlm/bundled_skills/long-context-search/SKILL.md),
 [delegation](../../src/fleet_rlm/bundled_skills/delegation/SKILL.md),
-[Skill authoring](../../src/fleet_rlm/bundled_skills/skill-creator/SKILL.md), and
-[public repository inspection](../../src/fleet_rlm/bundled_skills/repository-inspection/SKILL.md).
-They are instructions and optional resources, not server-side tools or automatic
-package installers. User Skills in `.fleet/skills/` can extend them and override
-a bundled Skill by name. `.agents/skills/` remains developer guidance and is not
-synchronized.
+[Skill authoring](../../src/fleet_rlm/bundled_skills/skill-creator/SKILL.md),
+[public repository inspection](../../src/fleet_rlm/bundled_skills/repository-inspection/SKILL.md),
+[web research](../../src/fleet_rlm/bundled_skills/web-research/SKILL.md),
+[document extraction](../../src/fleet_rlm/bundled_skills/document-extraction/SKILL.md), and
+[file editing](../../src/fleet_rlm/bundled_skills/file-editing/SKILL.md).
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:915d60434322a3e83e695f723fdef7d3c3f002ba39ab3fd72e535f219e1416f3 -->
+
+Each bundled Skill ships concise `SKILL.md` instructions alongside executable
+`scripts/` modules and Stage-3 `references/` material, rather than server-side
+tools or automatic package installers.
+
+These helpers execute with the guest Python process's existing filesystem and
+process permissions. Their CLI arguments are local sandbox input, not HTTP
+request parameters handled by the Fleet server. Reading a selected dataset,
+editing a selected file, or using temporary repository storage does not grant
+additional host permissions; the Daytona sandbox provides that isolation.
+Do not import or expose these helpers as privileged server tools. Host-mediated
+workspace transfers have their own path validation and lease checks.
+Repository downloads use private `mkdtemp` acquisition directories beneath the
+selected temporary-storage parent; `/tmp` itself is never an acquisition directory
+or an allowed cleanup target.
+
+<!-- /coderabbit-ai-generated:v1 --> In the sandbox REPL,
+`load_skill_module(name, script_rel_path=None)` imports a Skill's Python helper
+module into REPL variable space (exposing a callable module bound to `run(...)`
+plus named helpers), `run_skill_script(name, script_rel_path, args=None)` runs a
+Skill's Python or shell script in a bounded subprocess, and
+`read_skill_reference(name, ref_rel_path)` reads files under `references/` or
+`assets/`. User Skills in `.fleet/skills/` must use distinct names (a bundled name
+is ignored with a warning), and `.agents/skills/` remains developer guidance that
+is not synchronized.
+
+`run_skill_script` starts a `.py` script with `python3` or a `.sh` script with
+`bash`, with the working directory set to `/workspace` (the Skill directory is used
+only when `/workspace` is absent). The child environment sets `FLEET_WORKSPACE` to
+`/workspace` and `FLEET_SKILL_DIR` to the Skill's directory. Each run has a 60-second
+timeout and accepts at most 20 arguments of 4,096 bytes each. A nonzero exit raises
+`RuntimeError`, and its message ends with the last 2,000 characters of stdout, then
+stderr after a `[stderr]` marker, so the final traceback line is kept. A successful
+run returns the last 20,000 characters of the same combined output.
 
 The repository inspection Skill uses a commit-pinned GitHub source archive in
 temporary sandbox storage. Its measured comparison with Daytona Git acquisition

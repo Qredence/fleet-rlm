@@ -8,6 +8,7 @@ own threads so the websocket keeps reading, and replies go back through ``fs.upl
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
@@ -17,15 +18,6 @@ from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 from typing import Any, TypeVar
-
-from daytona.common.errors import (
-    DaytonaConnectionError,
-    DaytonaError,
-    DaytonaNotFoundError,
-    DaytonaRateLimitError,
-    DaytonaTimeoutError,
-    DaytonaValidationError,
-)
 
 _LOGGER = logging.getLogger(__name__)
 CALL_MARK = "\x1eFLEET_CALL "
@@ -41,6 +33,8 @@ _T = TypeVar("_T")
 
 def is_transient(exc: BaseException) -> bool:
     """Daytona transport, timeout, rate-limit, and 5xx failures; everything else is a real answer."""
+    from daytona.common.errors import DaytonaConnectionError, DaytonaError, DaytonaRateLimitError, DaytonaTimeoutError
+
     if isinstance(exc, (DaytonaConnectionError, DaytonaTimeoutError, DaytonaRateLimitError)):
         return True
     status = exc.status_code if isinstance(exc, DaytonaError) else None
@@ -49,6 +43,8 @@ def is_transient(exc: BaseException) -> bool:
 
 def is_definitive_client_error(exc: BaseException) -> bool:
     """Return True when Daytona rejected the create request outright (no sandbox allocated)."""
+    from daytona.common.errors import DaytonaError, DaytonaValidationError
+
     if isinstance(exc, DaytonaValidationError):
         return True
     return isinstance(exc, DaytonaError) and exc.status_code in _DEFINITIVE_CLIENT_STATUS_CODES
@@ -60,6 +56,8 @@ def provider_not_found(exc: BaseException) -> bool:
     A resource the provider has already forgotten cannot still write, so cleanup callers treat
     this as confirmed absence rather than as an unresolved operation.
     """
+    from daytona.common.errors import DaytonaNotFoundError
+
     if isinstance(exc, DaytonaNotFoundError):
         return True
     for attr in ("status", "status_code", "http_status"):
@@ -147,6 +145,12 @@ def preamble() -> str:
 
     runtime = (Path(__file__).parent / "runtime" / "repl.py").read_text(encoding="utf-8")
     return "\n".join([SANDBOX_SKILL_HELPERS_CODE, WORKSPACE_CODE, runtime])
+
+
+@cache
+def runtime_digest() -> str:
+    """Return a stable 16-character digest of the sandbox REPL runtime preamble."""
+    return hashlib.sha256(preamble().encode("utf-8")).hexdigest()[:16]
 
 
 def create_context(sandbox: Any) -> Any:

@@ -115,7 +115,7 @@ A selected dataset prevents Hybrid from choosing a context-free direct answer. R
 | Manage Skills             | `/skills`, `/skills require <names...>`, `/skills clear`                    |
 | Review and improve        | `/improve`                                                                  |
 
-Bundled Skills and user Skills in `.fleet/skills/` are available in Session workspaces. A user Skill with the same name replaces a bundled Skill.
+Bundled Skills and user Skills in `.fleet/skills/` are available in Session workspaces. A user Skill with a bundled name is ignored with a warning; the bundled Skill stays active.
 
 <div align="center">
 

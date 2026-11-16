@@ -344,7 +344,7 @@ of optimization using DSPy's native `ReAnchor` (`dspy.experimental.ReAnchor`).
 It fits only on the training split; the dev split reports before/after scores and
 permits adoption only without regression. Holdout remains outside search and calibration.
 Calibrated decision fields are integrated directly into candidate artifacts
-(`fleet-program-b2`, approval evidence version 3) and checked by paired validation before promotion.
+(`fleet-program-b3`, approval evidence version 3) and checked by paired validation before promotion.
 
 ### Trace regression boundary
 
@@ -516,7 +516,7 @@ Turn budget. No constructor adapter, source rewriting, or second state load is u
 DSPy support is pinned to the tested 3.5.0 release because this facade protocol is internal. JSON state preserves optimized instructions,
 Flex source, and ReAnchor calibrated decision fields; the host reconstructs the Daytona interpreter and current
 credentials. Installation requires a complete host envelope with
-`format="fleet-program"`, `format_version=2`, `program_schema="fleet-program-b2"`,
+`format="fleet-program"`, `format_version=3`, `program_schema="fleet-program-b3"`,
 `child_policy_contract=1`, canonical unwrapped native `state`, and string-valued
 `metadata`. The exporter deliberately reads the isolated wrapper's `.program`;
 native `.save()` output is not an installation artifact. Missing/extra parameters,
@@ -526,9 +526,14 @@ are preserved and validated by DSPy, not translated by Fleet.
 
 Earlier envelopes (`fleet-program-a1`, `fleet-program-b1`) are incompatible with the
 3-way automatic route contract (`Choice` across `direct`, `flex`, `rlm`) and ReAnchor calibration.
-They remain inspectable, not installable. Explicit baseline selection or a newly
-reviewed/revalidated B2 artifact is required; there is no automatic transplant of old
-instructions, demos, or decision criteria. Native parameter paths and `child_policy_contract=1`
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:87639c4355609af554cd0e994fe1041c917d1d44c3678b1675f8991c98555a7e -->
+
+They remain inspectable, not installable. A newly reviewed and revalidated b3 artifact
+is required; there is no automatic transplant of old instructions, demos, or decision criteria.
+
+<!-- /coderabbit-ai-generated:v1 --> Native parameter paths and `child_policy_contract=1`
 are unchanged. Automatic triage uses 3-way `Choice` across `direct`, `flex`, and `rlm`.
 Route assessments use `jev-route-v3` / `fleet-trace-assessments-v9`: bounded code, file and Skill work
 can reasonably use RLM or Flex; the independent route judge evaluates `Choice` over `direct`, `flex`,
@@ -542,7 +547,33 @@ baseline. After a global approval a baseline reset is unsupported: an approved j
 cannot be rejected and the ledger requires exactly the file it installed, so deleting
 the artifact makes Turns refuse. Restore the approved artifact or approve a new
 candidate. No new selection endpoint, ledger operation or automatic rollback is added by Gate A.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:d4540c577d88c7d9a67829df05eb19d83c272718eb79a8e3709b7ef794f5de76 -->
+
+### Upgrading an installation with a b2 program
+
+The b3 loader rejects a b2 `fleet.json`; changing its schema label is not a migration.
+Before upgrading, stop serving traffic and back up the compiled directory and approval
+ledger together. Preserve the old release and its configuration for recovery.
+
+If no global job has ever been approved, archive the b2 `fleet.json` outside the active
+compiled directory, then start b3 with that file absent. This selects baseline; create,
+evaluate and approve a fresh b3 candidate through the normal workflow.
+
+If a global job has been approved, do not delete its file or reset its ledger. There is
+no supported in-place b2-to-b3 migration: the optimizer also loads the installed program
+as its template, and approval evidence is tied to the incumbent, code and dependencies.
+Restore the old release with its matching b2 artifact and ledger to recover service.
+For a b3 deployment, provision a separate installation with a fresh database, compiled
+directory and workspace Volume; start from baseline, curate approved replay inputs,
+then create, evaluate and approve a new b3 candidate before moving traffic. Historical
+sessions and approvals remain in the old installation; copying them is not a migration.
+Do not reuse old approval evidence or claim live compatibility from offline tests.
+
 An unconfigured library runtime (`compiled_path=None`) explicitly uses baseline.
+
+<!-- /coderabbit-ai-generated:v1 -->
 While no global job was ever approved, an absent `fleet.json` means baseline; once one
 was, the ledger requires exactly the file it installed and refuses Turns otherwise.
 A present one is the program every Session
@@ -677,7 +708,7 @@ errors remain visible to the caller.
 
 Root, sub and Jev model roles, execution mode and Turn budgets come from the
 current deployment constructors. All non-null learned predictor/Flex LM bindings
-are rejected. Published candidates use the complete `fleet-program-b2` envelope,
+are rejected. Published candidates use the complete `fleet-program-b3` envelope,
 manifest/digest approval and the bounded serving loader described above. Historical
 bare state, `program.` wrapper keys and `fleet_child_policy_version` markers are
 not accepted for installation. This code/schema change invalidates prior approval
@@ -849,3 +880,25 @@ Token caps use reported generative usage and cooperative safe-point checks, with
 metric-call budgets are separate and do not establish a dollar ceiling.
 The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
 Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.
+
+
+### Contextual Skill selector qualification
+
+The b3 native graph adds `skill_selection.verify`; b2 states cannot be installed or
+merged with verifier defaults. Regenerate candidates and recheck approval evidence.
+No installed program or approval ledger is changed by this code update.
+
+The offline case set is `tests/skill_selection_cases.json`: 40 development cases
+and 20 held-out cases, balanced across single-skill, multi-skill, no-skill, and
+conversation-dependent requests. Keep expected skill sets outside predictor inputs.
+Freeze the baseline source/dependency digests before changing the selector. A local
+baseline for this change is preserved under ignored `.fleet/skill-selection-baseline/`.
+
+Provider evaluation requires separate authorization. Compare baseline and candidate
+using identical model/configuration identities and inputs. Report exact-set accuracy,
+unnecessary-load rate, needed-skill misses, request counts, usage, and median/p95
+latency separately for development and held-out cases. Enable the candidate only if
+held-out exact-set accuracy improves, unnecessary loads and needed-skill misses do
+not increase, required-skill handling is preserved, and verification adds at most one
+provider request. Review measured latency and usage before rollout. Offline tests
+validate contracts, not selection quality.

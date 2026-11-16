@@ -164,11 +164,12 @@ class MlflowHealth(BaseModel):
 
 
 class Health(BaseModel):
-    """Service status, version, and effective MLflow destination."""
+    """Service status, version, runtime digest, and effective MLflow destination."""
 
     status: str
     version: str
     mlflow: MlflowHealth | None
+    runtime_digest: str
 
 
 class SessionSummary(BaseModel):

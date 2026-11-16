@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
-from collections.abc import Callable, Mapping
+import os
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
+from pathlib import Path
 from typing import Any, cast
 
 import dspy
 from dspy.primitives.facade import SandboxLM
 
+from fleet_rlm import skills as fleet_skills
 from fleet_rlm.contracts import OptimizationInputs, RequiredSkill, Route, SkillAdmissionError, turn_is_over
 from fleet_rlm.engine.children import ChildPolicies
 from fleet_rlm.engine.compiled import CompiledProgramFile, installed_program_error
@@ -78,7 +82,7 @@ class FleetRuntime:
                 sandbox_mgr.consume_budget,
                 sandbox_mgr.emit,
             ),
-            SkillSelection(jev_lm, sandbox_mgr.consume_budget, sandbox_mgr.emit),
+            SkillSelection(jev_lm, sandbox_mgr.consume_budget, sandbox_mgr.emit, sandbox_mgr.read_workspace_file),
             Reasoning(
                 root_lm=self._metered_root,
                 sub_lm=self._metered_sub,
@@ -185,6 +189,40 @@ class FleetRuntime:
         return {**evidence, "python": verifications}
 
 
+def _resource_summary_from_paths(paths: Iterable[str]) -> dict[str, list[str]]:
+    """Group skill-relative resource paths under scripts/, references/, and assets/, omitting empty folders."""
+    grouped: dict[str, list[str]] = {}
+    unique_paths = {path for path in paths if not fleet_skills._is_skill_bytecode_relpath(path)}
+    for folder in ("scripts", "references", "assets"):
+        prefix = folder + "/"
+        entries = sorted(path for path in unique_paths if path.startswith(prefix))
+        if entries:
+            grouped[folder] = entries
+    return grouped
+
+
+def _local_skill_resources(skill_dir: Path) -> dict[str, list[str]]:
+    """Collect regular non-symlink resource paths under a local bundled Skill directory."""
+    if skill_dir.is_symlink() or not skill_dir.is_dir():
+        return {}
+    paths: list[str] = []
+    for folder in ("scripts", "references", "assets"):
+        root = skill_dir / folder
+        if root.is_symlink() or not root.is_dir():
+            continue
+        for parent, dirs, files in os.walk(root, followlinks=False):
+            dirs[:] = sorted(
+                name for name in dirs if name != "__pycache__" and not os.path.islink(os.path.join(parent, name))
+            )
+            for filename in sorted(files):
+                if filename.endswith((".pyc", ".pyo")):
+                    continue
+                candidate = Path(parent) / filename
+                if not candidate.is_symlink() and candidate.is_file():
+                    paths.append(candidate.relative_to(skill_dir).as_posix())
+    return _resource_summary_from_paths(paths)
+
+
 class WorkspaceInputs:
     """Bounded byte readers, with no reference back to the learned graph or invocation."""
 
@@ -193,11 +231,22 @@ class WorkspaceInputs:
 
     def load_skills(self, catalog: str, selected: list[str], *, required_skills: tuple[RequiredSkill, ...] = ()) -> str:
         """Resolve selected metadata identities through the existing bounded host reader."""
-        preloaded = [
-            f'<preloaded_skill name="{skill.name}">\n{skill.skill_md}\n</preloaded_skill>' for skill in required_skills
-        ]
-        remaining = MAX_PRELOADED_TOTAL_CHARS - sum(len(skill.skill_md) for skill in required_skills)
+        preloaded: list[str] = []
+        remaining = MAX_PRELOADED_TOTAL_CHARS
+        for skill in required_skills:
+            resources = _resource_summary_from_paths(path for path, _ in skill.files)
+            resources_suffix = (
+                f"\nResources: {json.dumps(resources, ensure_ascii=False)}".replace("</preloaded_skill>", "")
+                if resources
+                else ""
+            )
+            remaining -= len(skill.skill_md) + len(resources_suffix)
+            preloaded.append(
+                f'<preloaded_skill name="{skill.name}">\n{skill.skill_md}{resources_suffix}\n</preloaded_skill>'
+            )
         required_names = {skill.name for skill in required_skills}
+        bundled_names = fleet_skills.bundled_skill_names(fleet_skills.BUNDLED_SKILLS_DIR)
+        workspace_files: list[str] | None = None
         for name in [name for name in selected if name not in required_names][:3]:
             if remaining <= 0:
                 break
@@ -205,9 +254,38 @@ class WorkspaceInputs:
                 text = self.sandbox_mgr.read_workspace_file(f"skills/{name}/SKILL.md").decode("utf-8")
             except (OSError, ValueError, RuntimeError, UnicodeError):
                 continue
-            body = text[: min(MAX_PRELOADED_SKILL_CHARS, remaining)].replace("</preloaded_skill>", "")
-            remaining -= len(body)
-            preloaded.append(f'<preloaded_skill name="{name}">\n{body}\n</preloaded_skill>')
+            if name in bundled_names:
+                resources = _local_skill_resources(fleet_skills.BUNDLED_SKILLS_DIR / name)
+            else:
+                if workspace_files is None:
+                    if getattr(self.sandbox_mgr, "_sandbox", None) is not None:
+                        try:
+                            workspace_files = self.sandbox_mgr.list_workspace_files()
+                        except (OSError, ValueError, RuntimeError) as exc:
+                            _LOGGER.warning(
+                                "Workspace Skill resource listing failed (%s); resources omitted", type(exc).__name__
+                            )
+                            workspace_files = []
+                    else:
+                        workspace_files = []
+                prefix = f"skills/{name}/"
+                resources = _resource_summary_from_paths(
+                    path.removeprefix(prefix) for path in workspace_files if path.startswith(prefix)
+                )
+            resources_suffix = (
+                f"\nResources: {json.dumps(resources, ensure_ascii=False)}".replace("</preloaded_skill>", "")
+                if resources
+                else ""
+            )
+            if resources_suffix and remaining > len(resources_suffix):
+                body_limit = min(MAX_PRELOADED_SKILL_CHARS, remaining - len(resources_suffix))
+                body = text[:body_limit].replace("</preloaded_skill>", "")
+                remaining -= len(body) + len(resources_suffix)
+            else:
+                resources_suffix = ""
+                body = text[: min(MAX_PRELOADED_SKILL_CHARS, remaining)].replace("</preloaded_skill>", "")
+                remaining -= len(body)
+            preloaded.append(f'<preloaded_skill name="{name}">\n{body}{resources_suffix}\n</preloaded_skill>')
         return "\n".join([catalog, *preloaded])
 
     def inline_context(self, task: str, workspace_manifest: str) -> tuple[str, int, bool]:

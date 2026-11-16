@@ -15,7 +15,7 @@ src/fleet_rlm/
 ├── execution_evidence.py # Gold schema plus bounded host-collected artifact/child evidence
 ├── replay.py          # Encoding and integrity checks for bounded immutable replay snapshots
 ├── skills.py          # Bundled/user Skill validation, sync, and catalog
-├── bundled_skills/    # Packaged default Skills (delegation, long-context-search, repository-inspection, skill-creator, tabular-analysis)
+├── bundled_skills/    # Packaged default Skills (delegation, document-extraction, file-editing, long-context-search, repository-inspection, skill-creator, tabular-analysis, web-research)
 ├── doctor.py          # Read-only diagnostics (`fleet doctor`) and snapshot CLI subcommands
 ├── sandbox/
 │   ├── manager.py     # Daytona root/child sandboxes, lifecycle, and workspace coordination
@@ -36,7 +36,7 @@ src/fleet_rlm/
 │   ├── decisions.py   # Routing and optional Skill selection modules/predictors
 │   ├── reasoning.py   # Native Direct/RLM/Flex and route input/output projection
 │   ├── invocation.py  # Shared host construction, admission, invocation and evidence
-│   ├── compiled.py    # Strict fleet-program-b2 envelope and bounded atomic state loading
+│   ├── compiled.py    # Strict fleet-program-b3 envelope and bounded atomic state loading
 │   ├── turn.py        # One Turn end to end: orchestrates claim, prepare, run, commit, report
 │   ├── turn_prepare.py # Workspace sync, dataset validation, snapshot preflight, replay capture
 │   ├── turn_commit.py # Outcome assembly, Store transaction, learned notes, MLflow tracing

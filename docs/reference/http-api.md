@@ -26,7 +26,7 @@ Fleet exposes a FastAPI application with the following routes:
 | `GET`, `PUT` | `/improve/settings` | Auto-run switch, its thresholds and budgets, and the default token cap. |
 | `GET`, `PUT` | `/sessions/{session_id}/mode` | Read/change persisted `direct`, `flex`, `rlm`, or `hybrid` mode. |
 | `PUT`, `DELETE` | `/sessions/{session_id}/context` | Select a content-addressed dataset or clear the selection. |
-| `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. |
+| `GET` | `/sessions/{session_id}/history` | Read bounded committed turn history directly from Postgres; no runtime lease. Each Turn record carries `skill_activity` (up to 20 skill-helper receipts `{helper, skill, completed}` across the Turn's sandbox tree) and `skill_activity_truncated`; records committed before this change omit both keys. |
 | `GET` | `/sessions/{session_id}/turns/{turn_id}` | Recover a durable running/terminal turn outcome directly from Postgres without replaying it; available while another worker owns the Session. |
 | `GET` | `/sessions/{session_id}/workspace/tree` | List workspace paths. |
 | `GET` | `/sessions/{session_id}/workspace/stat/{rel_path}` | Get a file's size and SHA-256. |
@@ -35,10 +35,13 @@ Fleet exposes a FastAPI application with the following routes:
 | `PUT`, `DELETE` | `/sessions/{session_id}/memory/{memory_id}` | Create/review/update/delete memories. |
 | `POST` | `/skills/push?session_id=...` | Synchronize validated local user Skills. |
 
-The `/health` MLflow metadata includes `workspace_host`, the resolved non-secret
+The `/health` response always includes `runtime_digest` (the active sandbox REPL runtime
+fingerprint) and `mlflow.workspace_host`, the resolved non-secret
 Databricks tracking workspace URL (`null` for local tracking). API reuse and
-evaluation preflight compare it along with the experiment and trace destination.
-Named tracking profiles resolve their own workspace rather than the model gateway host.
+evaluation preflight compare MLflow destinations and require a `runtime_digest` that
+matches the caller's runtime. A mismatched or absent digest is treated as stale, so a
+server that predates the field is not reused silently. Named tracking profiles resolve
+their own workspace rather than the model gateway host.
 
 Workspace listings and Turn input inventories include regular files beneath
 `files/`, `artifacts/`, `memory/`, `skills/`, `buffers/`, and `sessions/` only.
@@ -225,8 +228,9 @@ The JSON request has one required `task` string:
 order (lowercase single-hyphen-separated words, 1–64 characters). Omitted and `[]`
 are equivalent; invalid names, duplicates, non-string items and excess names return
 `422`. Paths, digests and approval assertions are not request inputs.
-Required Skills resolve only from configured host user Skills (overriding bundled
-Skills), never from remote-only authored Skills. Fleet captures their validated
+Required Skills resolve only from configured host user Skills, never from remote-only
+authored Skills. A host user Skill with a bundled name is ignored with a warning, so
+the bundled Skill resolves. Fleet captures their validated
 files once before remote work and preloads the entire UTF-8-decoded `SKILL.md`
 from those exact bytes, without newline normalization or clipping. Full instructions
 including frontmatter must fit 20,000 Unicode characters each; required plus optional
@@ -456,7 +460,8 @@ New completion events and their persisted idempotent outcomes also include
 host-owned `lm_calls`, `sandbox_errors`, `submit_rejections`, and
 `budget_breakdown`. The legacy `lm_calls` name means shared budget units rather
 than visible model requests. Breakdown keys are `generation_query`, `routing`,
-`skill_selection`, and `other_decisions`; their values sum to `lm_calls`.
+`skill_selection`, `other_decisions`, and `web_search` (host-mediated search calls
+that reach a configured provider); their values sum to `lm_calls`.
 `sandbox_errors` counts remote Python failures, while `submit_rejections` counts
 blocking host rejections. Missing counters in historical outcomes remain unknown.
 `budget_update` events include the same current counters and breakdown.

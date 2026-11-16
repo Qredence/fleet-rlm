@@ -541,6 +541,8 @@ class SessionRuntimeRegistry:
             auto_stop_minutes=settings.daytona_auto_stop_minutes,
             sub_lm=self.sub_lm,
             jev_lm=self.jev_lm,
+            serper_api_key=settings.serper_api_key.get_secret_value(),
+            you_api_key=settings.you_api_key.get_secret_value(),
             max_llm_calls=settings.max_llm_calls_per_turn,
             max_depth=settings.max_agent_depth,
             max_children=settings.max_child_sandboxes,

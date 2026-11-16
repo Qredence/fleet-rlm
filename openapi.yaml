@@ -1556,13 +1556,17 @@ components:
           anyOf:
           - $ref: '#/components/schemas/MlflowHealth'
           - type: 'null'
+        runtime_digest:
+          type: string
+          title: Runtime Digest
       type: object
       required:
       - status
       - version
       - mlflow
+      - runtime_digest
       title: Health
-      description: Service status, version, and effective MLflow destination.
+      description: Service status, version, runtime digest, and effective MLflow destination.
     History:
       properties:
         session_id:

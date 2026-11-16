@@ -366,6 +366,7 @@ def run_turn(
                     **usage,
                     **direct_context,
                     **environment,
+                    **manager.turn_skill_activity(),
                     "context_files": inputs["context_files"],
                     "artifact_capture": artifact_capture,
                     "artifact_changes": artifact_changes,

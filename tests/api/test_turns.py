@@ -89,6 +89,7 @@ class FakeManager(SimpleNamespace):
             "reset_turn_budget": lambda: None,
             "end_turn": lambda: None,
             "cancel_turn": lambda: None,
+            "turn_skill_activity": lambda: {"skill_activity": [], "skill_activity_truncated": False},
         }
         super().__init__(**{**defaults, **overrides})
         if "request_cancellation" not in overrides:
@@ -1433,6 +1434,10 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
                 "digests": {path: hashlib.sha256(data).hexdigest() for path, data in files.items()},
                 "environment": environment,
             },
+            turn_skill_activity=lambda: {
+                "skill_activity": [{"helper": "use_skill", "skill": "example", "completed": True}],
+                "skill_activity_truncated": False,
+            },
         ),
         commit_turn=lambda **kwargs: (
             persisted.append(kwargs) or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
@@ -1457,6 +1462,8 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
     snapshot = decode_snapshot(digest, compressed)
     assert turn_record["replay_snapshot_selected"] is True
     assert turn_record["replay_snapshot_sha256"] == digest
+    assert turn_record["skill_activity"] == [{"helper": "use_skill", "skill": "example", "completed": True}]
+    assert turn_record["skill_activity_truncated"] is False
     assert deserialize_rlm_history(snapshot["rlm_history"]) == prior_history
     assert snapshot["session_id"] == "session-a"
     assert snapshot["task"] == "sum the values"
@@ -4228,8 +4235,18 @@ def test_workspace_write_schema_xor_matches_runtime(body, valid):
     ids=["pre-provenance", "recorded-provenance"],
 )
 def test_turn_status_and_history_read_durable_store_without_runtime(turn_id, result, expected_result):
+    # Records committed before skill receipts existed omit both keys and still read back unchanged.
+    stored = [
+        {"turn_id": "turn-0", "answer": "legacy"},
+        {
+            "turn_id": "turn-1",
+            "answer": "stored",
+            "skill_activity": [{"helper": "use_skill", "skill": "example", "completed": True}],
+            "skill_activity_truncated": False,
+        },
+    ]
     store = store_with(
-        history=lambda _session: [{"turn_id": "turn-1", "answer": "stored"}],
+        history=lambda _session: stored,
         turn_status=lambda _session, requested_id: (
             {
                 "turn_id": requested_id,
@@ -4250,7 +4267,7 @@ def test_turn_status_and_history_read_durable_store_without_runtime(turn_id, res
     assert history.status_code == 200
     assert history.json() == {
         "session_id": "session-1",
-        "turns": [{"turn_id": "turn-1", "answer": "stored"}],
+        "turns": stored,
     }
     assert status.status_code == 200
     assert status.json() == {

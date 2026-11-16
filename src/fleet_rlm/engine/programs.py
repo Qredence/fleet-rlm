@@ -85,7 +85,12 @@ class FleetProgram(dspy.Module):
             has_required_skills=bool(required_skills),
         )
         selected = self.skill_selection(
-            task=task, skills_catalog=skills_catalog, route=route, required_skills=required_skills
+            task=task,
+            skills_catalog=skills_catalog,
+            route=route,
+            required_skills=required_skills,
+            session_history=session_history,
+            workspace_manifest=workspace_manifest,
         )
         return self.reasoning(
             route=route,

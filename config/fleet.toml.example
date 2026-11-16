@@ -2,7 +2,7 @@
 # Fleet non-secret process defaults. Environment/.env override this file.
 # Values are a provisional baseline, not performance-tuned defaults.
 # Credentials: DATABRICKS_TOKEN, FLEET_DAYTONA_API_KEY,
-# FLEET_TYPESAFE_API_KEY and FLEET_DATABASE_URL belong in .env/environment.
+# FLEET_TYPESAFE_API_KEY, SERPER_API_KEY, YOU_API_KEY and FLEET_DATABASE_URL belong in .env/environment.
 # FLEET_DATABASE_MIGRATION_URL is an optional secret-only DDL-role DSN.
 [config]
 schema_version = 5

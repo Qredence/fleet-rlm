@@ -1,58 +1,56 @@
 ---
 name: tabular-analysis
-description: Aggregate, filter, join, and compare CSV or JSON data in /workspace (totals, rates, group-bys, quarter or period comparisons, counterfactuals), write a JSON report and a verify script under artifacts/, and answer with figures taken from executed code.
+description: Profile and aggregate CSV, TSV, JSONL, or XLSX data and verify report figures. Use when totals, grouped comparisons, or rates must come from executed calculations.
 ---
 
 # Tabular analysis
 
-Use this for questions answered by computing over rows: sums, averages, rates,
-group-bys, rankings, period-over-period changes, and "what if" recomputations.
-
-Use the snapshot's installed Python packages and the task project's own dependency
-manifest when one applies. Do not install packages into the shared snapshot during
-a task. If a required dependency is unavailable, explain the limitation or ask
-whether an isolated optional environment is acceptable.
+Use this for totals, averages, weighted rates, group-bys, rankings, period
+comparisons, and counterfactuals over structured datasets. Use pre-installed
+snapshot packages and do not install packages during a task.
 
 ## Steps
 
-1. Inspect before computing. Print the header, the row count, a few rows, and
-   the distinct values of the columns you will group or filter on:
+1. Load the module and profile the table first (schema, row count, distinct values).
+   Helpers load rows into memory; bound inputs accordingly. XLSX reads the active
+   sheet using `openpyxl` and cached formula values, without recalculation:
+
 
    ```python
-   import csv
-
-   rows = list(csv.DictReader(open("/workspace/files/sales.csv", newline="")))
-   print(len(rows), list(rows[0]))
-   print(sorted({r["status"] for r in rows}))
+   tab = load_skill_module("tabular-analysis")
+   profile = tab.profile_table("/workspace/files/sales.csv")
+   print(profile["row_count"], profile["columns"], profile["column_stats"])
    ```
 
-2. Convert types explicitly (`int(...)`, `float(...)`) and state every filter in
-   code, for example `status == "ok"`. Keep the result in variables such as
-   `totals`, `rates` or `report`.
-3. Print every figure you will report. Round only for display, for example
-   `round(x, 2)` for money and `round(x, 4)` for rates.
-4. Write results with `workspace.write_artifact("report.json", json.dumps(report, indent=2, sort_keys=True))`.
-   It returns the path, which is relative to `artifacts/`.
-5. When the task asks for verification, write an independent check (another
-   filter path, or a standalone `verify_report.py` that reloads the CSV and
-   compares it with the JSON), run it with `subprocess.run(["python", path])`,
-   and require that it prints OK.
-6. SUBMIT from variables, never from retyped numbers:
+2. Filter and aggregate with explicit columns and `Decimal` arithmetic:
 
    ```python
-   answer = f"Highest revenue: {top} (${totals[top]:,.2f})."
-   SUBMIT(answer=answer, learned_skill_note=note)
+   agg = tab.aggregate_groups(
+       "/workspace/files/sales.csv",
+       group_cols=["region"],
+       metric_cols=["revenue"],
+       filters={"status": "ok"},
+   )
+   rate = tab.rate_of_totals(refunded_rows, "amount", all_rows, "amount", scale="percent", places=2)
+   print(agg["totals"], agg["groups"], rate["formatted"])
    ```
 
-   Fleet rejects a SUBMIT whose figures were typed into the code but never
-   printed by an execution.
+3. Compute figures in variables and print key results for verification before
+   `SUBMIT(...)`. Fleet checks numeric literals against observed inputs and
+   execution output; computed values submitted from variables are also allowed.
 
-## Pitfalls
+4. Write JSON reports to `artifacts/` and verify them before submitting
+   (`required_phrases` checks exact case-sensitive substrings in the written file):
 
-- Rates need an explicit denominator ("refunded / all orders in the region,
-  any status" is not the same as "refunded / ok orders").
-- Quarters are `(month - 1) // 3 + 1`.
-- For a counterfactual ("if refunded orders had been ok"), add the refunded
-  revenue to the computed base. Do not reuse a total from another filter.
-- Prior-turn reports are under `artifacts/`. If one is missing in this
-  sandbox, recompute from `files/` instead of recalling numbers.
+   ```python
+   report_path = workspace.write_artifact("report.json", json.dumps(report, indent=2, sort_keys=True))
+   check = tab.verify_report_numbers(report_path, expected_numbers)
+   print(check)
+   assert check["ok"], check
+   ```
+
+5. Read `read_skill_reference("tabular-analysis", "references/formulas-and-verifiers.md")`
+   for quarter math, weighted rates, counterfactual rules, and `ROUND_HALF_UP`.
+
+6. `SUBMIT(answer=answer, learned_skill_note=note)` from computed variables. Prior
+   reports live under `artifacts/`; recompute from `files/` if missing.

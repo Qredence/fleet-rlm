@@ -20,6 +20,7 @@ from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.experiments import ExperimentManager
 from fleet_rlm.launcher import mlflow_is_healthy
 from fleet_rlm.observability import MlflowTraceDestinationMismatchError, configure_mlflow_observability
+from fleet_rlm.sandbox.repl import runtime_digest
 from fleet_rlm.session import SessionRuntimeRegistry
 from fleet_rlm.store import Store
 
@@ -143,6 +144,7 @@ def create_app(
         return Health(
             status="ok",
             version=VERSION,
+            runtime_digest=runtime_digest(),
             mlflow={
                 **resolved.mlflow_descriptor(),
                 "experiment_id": app.state.mlflow_experiment_id,
