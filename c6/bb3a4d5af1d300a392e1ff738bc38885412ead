@@ -1,0 +1,129 @@
+ARCHITECTURE.md
+  s_dd3d14551a466a::t_693acb07f9f7db 73,80
+README.md
+  s_dd3d14551a466a::t_8576995ec85a99 32
+docs/reference/database.md
+  s_dd3d14551a466a::t_da3b6b5f5b0b1b 3-112
+src/fleet_rlm/workspace.py
+  s_df78afed8a4ff8::t_cb527d17b6bf33 113,137
+tests/api/test_turns.py
+  s_dd3d14551a466a::t_013d0a751064da 359,380,1134,1320,2212,2316,4655,6507-6614
+.env.example
+  s_94fdcd3f5499ce::t_1a04d82937d946 6,61-74
+docs/reference/configuration.md
+  s_94fdcd3f5499ce::t_87f30018aafa55 65-70
+docs/reference/http-api.md
+  s_f17194f29830a3::t_ecb5034aafc69d 48-50,521-545
+docs/reference/source-layout.md
+  s_d0c5a43056db72::t_ff8b9b78f8f6bf 46,48,50
+openapi.yaml
+  s_f17194f29830a3::t_2786396ce4e66d 25-249,1633-1642,2317-2370,2509-2569,2667-2749,2910-2945,3039-3082
+pyproject.toml
+  s_d0c5a43056db72::t_27e675d22a9040 39
+src/fleet_rlm/api/app.py
+  s_d0c5a43056db72::t_098de8da28b4da 17,102-110,155
+src/fleet_rlm/api/routes/chat.py
+  s_d1fc5cd716d4cd::t_0ac7eb5b3d89c0 1-153
+src/fleet_rlm/api/routes/turns.py
+  s_f17194f29830a3::t_47399e328b8edd 99-129,154
+src/fleet_rlm/api/routes/workspace.py
+  s_d0c5a43056db72::t_80d90ae68d69fe 43-44
+src/fleet_rlm/api/schemas.py
+  s_d1fc5cd716d4cd::t_cf7c54fcc6416c 5,35-39,473-557
+src/fleet_rlm/config/settings.py
+  s_d0c5a43056db72::t_29b048d4f99093 242-243,245-252,642-649
+src/fleet_rlm/config/sources.py
+  s_d0c5a43056db72::t_206d99fd11a574 18-20
+src/fleet_rlm/doctor.py
+  s_d0c5a43056db72::t_cfc753f0734e8c 79,92,96,100
+src/fleet_rlm/engine/turn.py
+  s_f17194f29830a3::t_0ceb3f5f2df78c 12,119,126,200-202,218,221,236-252,405-431
+src/fleet_rlm/launcher.py
+  s_d0c5a43056db72::t_383a20c215be25 106-110,200-203,320-329
+src/fleet_rlm/object_storage.py
+  s_d0c5a43056db72::t_85c4ab304ba02a 1-136
+src/fleet_rlm/session.py
+  s_f17194f29830a3::t_66768cf3c87bc8 11,81-82,154,157-160,163,172-180,246,254,339-372,374-384,676
+src/fleet_rlm/store/__init__.py
+  s_d0c5a43056db72::t_3be1edac337b47 15,65,164-171,173,187
+src/fleet_rlm/store/chat.py
+  s_d1fc5cd716d4cd::t_fd7f0f209f1989 1-166
+src/fleet_rlm/store/leases.py
+  s_d0c5a43056db72::t_d60ae9d4b0bb1d 67,179,187,334,337,341-343,377,386,390,392-393,411,417,427,447
+src/fleet_rlm/store/optimization.py
+  s_d0c5a43056db72::t_c3e409f368e7c7 44,78,88,111,120,159,193,200,218,227,243
+src/fleet_rlm/store/replays.py
+  s_d0c5a43056db72::t_9878d1cc606139 27,32,37,63,107,114,175-176,216,244-245,247,271-272,288,313,316,319,330,333,336,341
+src/fleet_rlm/store/schema.py
+  s_d0c5a43056db72::t_46f22a0bd50a56 12,22,191-289
+src/fleet_rlm/store/sessions.py
+  s_d0c5a43056db72::t_e28c1f684f4767 6,22-23,30,40,51,65,89,97,102,110,144,156,166,181,197,200,211,227,230,244,264,285,298,307,315,320,337,360,366,374,393,406,422,429,451,470,474,482,488,502,510,522-544
+tests/api/test_chat.py
+  s_d1fc5cd716d4cd::t_93e09fed81ada5 1-57
+tests/engine/test_runtime.py
+  s_d0c5a43056db72::t_05de7bc4e5d795 3149,3244
+tests/fixtures.json
+  s_d0c5a43056db72::t_f7f7aeab887568 230-231
+tests/sandbox/test_sandbox.py
+  s_d0c5a43056db72::t_2a1f41c2fce99c 6543-6553
+tests/store/test_store.py
+  s_d1fc5cd716d4cd::t_486b49f2fcdf09 12,41-44,98-105,113,142,158-159,182,188,243,260,262-263,265-268,288,345-347,377,379,397,399,423,432,442,455,478-482,621,624,717,754,777,878,1045,1055,1110-1111,1135-1136,1138,1160-1164,1375-1574
+uv.lock
+  s_d0c5a43056db72::t_c5c96e72511714 1295,1338
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6bb3a4d5af1d300a392e1ff738bc38885412ead",
+  "prompts": {},
+  "sessions": {
+    "s_94fdcd3f5499ce": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e42e-bdf7-74a1-87a1-b8db2e256106",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_d0c5a43056db72": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2e6-b3f5-7e31-9641-40f22861e2fb",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_d1fc5cd716d4cd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e3d7-8709-7a63-8572-c2fc78b5b960",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_dd3d14551a466a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f4ba8716-5212-4fcd-9725-04d479db8c40",
+        "model": "deepseek/deepseek-v4.1-flash"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_df78afed8a4ff8": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1e384-994a-73de-8a2a-13639c099744",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_f17194f29830a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e453-0f04-7de3-8c64-0980fd776f4a",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
