@@ -1,65 +1,27 @@
 # Fleet CLI
 
-The `fleet` command has these modes:
+Run `uv run fleet --help` or `uv run fleet <command> --help` for exact flags.
 
-`cli` starts the API server, waits for readiness, opens the terminal client,
-and stops services it owns when the client exits. `web` starts the same local
-services and serves the Textual client in a browser through Textual Serve; pass
-`--url` to connect to an existing API without starting services. Both commands
-verify the API's MLflow destination before connecting.
-
-The web listener defaults to `127.0.0.1:8080`; its `--host` and `--port` are
-separate from the API's configured host and port. Each browser connection gets
-its own Session by default. `--session` explicitly makes browser clients share
-one Session. Use `--public-url` when a reverse proxy or wildcard bind needs a
-browser-facing URL (including the WebSocket scheme/path). Binding the web
-listener to a non-loopback interface requires
-`FLEET_ALLOW_NON_LOOPBACK_BIND=true` and `FLEET_WEB_AUTH_TOKEN`, an environment-only
-secret of at least 32 non-whitespace characters. Generate a random secret for each
-launch and configure an authenticated TLS reverse proxy to replace the WebSocket
-`Authorization` header with `Bearer <secret>` after authenticating the visitor.
-The listener validates this secret before starting a terminal process. Keep the
-listener reachable only by the proxy, and never expose the secret in browser URLs
-or client commands. Loopback listeners do not require this header.
-
-Terminal WebSockets require an Origin matching `--public-url`, or the generated
-listener URL when that option is omitted. Missing and foreign origins are
-rejected before a terminal process starts. Reverse proxies must preserve the
-public Host header; forwarded headers do not authorize connections. Use the
-configured browser-facing hostname and port when opening the client.
-
-Textual Serve presents the terminal UI, not a browser file picker. `/attach`,
-`/put`, and `/get` use paths on the host running `fleet web`; they do not read
-from or download to the visitor's computer. Stage files on the server or use
-workspace files already present in the Session.
-
-For example:
+| Command | Purpose |
+| --- | --- |
+| `cli` | Start owned API/local MLflow services, open the terminal client, stop owned services on exit |
+| `web` | Start the same services and expose the Textual client through Textual Serve |
+| `serve` | Start only the FastAPI server |
+| `doctor` | Inspect configuration and service readiness; `--probe-models` adds live inference |
+| `snapshot preflight\|build\|activate` | Inspect or explicitly manage the Daytona snapshot |
+| `eval dataset\|run\|label\|score` | Prepare cases, collect execution, label gold or score saved traces |
+| `optimize` | Check readiness, run GEPA, evaluate or approve a candidate |
+| `trace` | Inspect recorded traces |
 
 ```bash
+uv run fleet cli
 uv run fleet web
-# Then open http://127.0.0.1:8080
+# Open http://127.0.0.1:8080
 ```
 
-Both `cli` and `web` launch directly into the single-mode FastAPI server (and local
-MLflow when selected); Textual Serve is only a client transport and does not own
-runtime Turns.
-
-Managed service behavior for `cli` and `web`:
-
-## Diagnostics and snapshot management
-
-Before starting a Session or deploying a configuration change, run:
-
-Configuration and `.env` / `config/fleet.toml` edits belong to the host operator and take
-effect when services restart.
-
-Non-TTY input never prompts for credentials or consumes task input as setup answers.
-
-Standalone `serve`, `eval`, `optimize`, and `trace` commands connect to an
-existing tracking server. For local operation, keep `fleet cli` running or
-start MLflow separately using the same port/storage configuration (load `.env`
-with `--env-file .env` if `MLFLOW_CRYPTO_KEK_PASSPHRASE` / `MLFLOW_CRYPTO_KEK_VERSION`
-or custom scorers are needed):
+`cli` and `web` verify the API's MLflow destination. Pass `--url` to connect to an
+existing API. Standalone `serve`, `eval`, `optimize`, and `trace` use an existing
+tracking server. For a separate local MLflow process:
 
 ```bash
 mkdir -p .fleet/mlflow
@@ -69,247 +31,103 @@ MLFLOW_SERVER_ENABLE_CUSTOM_SCORERS=true uv run --env-file .env mlflow server \
   --default-artifact-root "$PWD/.fleet/mlflow/artifacts"
 ```
 
-Local MLflow changes tracking and artifact storage. Models, Daytona, judges,
-and PostgreSQL retain their separately configured services and credentials.
+Local MLflow changes tracking/storage only. Models, Daytona and PostgreSQL retain
+their configured connections. Edit host `.env`/`config/fleet.toml` and restart to
+apply process settings. Non-TTY input never prompts for credentials.
 
-`serve` starts only the FastAPI server. If `--session` is omitted, the client generates
-a short session ID.
+## Terminal tasks and commands
 
-When MLflow tracing is configured, the client prints a trace ID delivered
-with the completed Turn. The Textual Turn card and the non-TTY Rich fallback
-also print `Turn persisted to Session history.` after the server commits the
-Turn. `/trace` looks for an ID in the saved `/history` records, and
-`/turn <turn-id>` reads the durable Turn status. Older or untraced turns may
-have no ID; the client reports that explicitly. A completed Turn is reported
-as persisted only after the server has successfully synchronized it to Session
-history.
+Enter a task and press Enter. The client renders routing, model/tool activity,
+Python code/output, child sandboxes, budgets and the final outcome. Code panels
+collapse after success; click disclosure rows or use `Ctrl+O` to toggle them.
+`Ctrl+C` clears a draft or requests cancellation while streaming; `/exit` exits.
+A lost connection can leave a completed Turn: check `/history` or `/turn` before
+retrying. Persistence is reported only after the server commits.
 
-Commands include `/help`, `/attach <path>`, `/files`, `/artifacts`, `/skills`,
-`/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm`, `/context`, `/mode`,
-`/memory [query]`, `/history`, `/trace`, `/turn [turn-id]`, `/replay [on|off]`,
-`/timeout <seconds|off|default>`, `/sessions`, `/improve` (also `/experiments`), `/optimize`, `/config`,
-`/settings`, `/models`, `/model`, and `/exit`.
-`/skills require tabular-analysis delegation` sets ordered required Skill names for
-subsequent Turns in this client; `/skills clear` removes them. At most three exact
-trusted names are accepted. Hybrid forces RLM, explicit RLM/Flex stays explicit,
-and Direct refuses required intent. Required instructions load completely, with up
-to three additional optional preloads sharing the 60,000-character limit; required
-files remain subject to host admission and do not grant tool permissions. See the
-[HTTP contract](http-api.md#run-a-turn) for source trust, limits and replay semantics.
-`/memory [query]` reads this Session's saved memories, optionally
-filtered by query. `/turn [turn-id]` inspects the durable status and outcome of
-the latest or specified Turn (`GET /sessions/{session_id}/turns/{turn_id}`).
-`/improve` (and `/experiments`) opens the Improve screen, a pure client of the `/improve/*`
-API, with four tabs:
+| Commands | Use |
+| --- | --- |
+| `/help`, `/sessions`, `/history`, `/turn [id]`, `/trace` | Help and durable Session/Turn inspection |
+| `/attach <path>`, `/files`, `/artifacts`, `/tree`, `/cat`, `/stat`, `/put`, `/get`, `/rm` | Upload, inspect and transfer workspace files |
+| `/context`, `/memory [query]` | Select a dataset or retrieve Session memories |
+| `/mode`, `/models`, `/model`, `/config`, `/settings` | Inspect/change supported Session settings |
+| `/skills`, `/skills require <names...>`, `/skills clear` | Inspect Skills and set ordered required intent (up to three names) |
+| `/replay on\|off` | Control immutable input capture for subsequent Turns; default on |
+| `/timeout <seconds\|off\|default>` | Set a request deadline or inherit configuration |
+| `/improve`, `/experiments`, `/optimize` | Open Improve; bare `/optimize` opens Runs |
 
-- **Review** pages through replay-captured Turns from every Session, 50 at a time, using Newer/Older.
-  Selecting one shows its task and
-  answer and the answer's figures as pre-checked boxes, plus inputs for the expected answer
-  (prefilled with the answer; blank when the preview was truncated), extra values, a critical
-  toggle, and a group. `✓ Approve` saves the checked figures and extras as the approved gold.
-  `✗ Reject` rejects the Turn; if you first edit the expected answer, it saves the correction
-  as approved gold (with the correction's own figures) instead.
-- **Readiness** shows the counts, groups, critical cases, split sizes, each missing
-  requirement in plain words, and the new labels since the last run.
-- **Runs** lists jobs with status. The selected job shows its stage stepper
-  (preparing, search, validation, finalization), metric-call and token bars, best score with a
-  score-trajectory sparkline, and elapsed time. `Run optimize` asks for confirmation (budget and
-  token cap) before it submits; `Cancel` requests a cooperative stop.
-- **Results** shows the selected completed job: dev and holdout baseline-to-candidate means,
-  the promotion gate and its reasons, component before/after diffs, a per-example table
-  (baseline, candidate, delta; largest gain first), and the installed holdout trend from
-  `/improve/history`. `Approve` and `Reject` follow the review rules below.
+Required Skills force Hybrid to RLM, preserve explicit RLM/Flex, and are refused
+in Direct. See [Turn admission](http-api.md#run-a-turn) for source and size limits.
+Root/sub model, mode and context choices persist across restarts. Busy Sessions
+reject changes. Reflection/judge roles, secrets and resource ceilings remain
+operator configuration.
 
-After a Turn whose replay snapshot was captured, the composer shows `label: ctrl+l ✓ / ctrl+n ✗`
-until you type. `ctrl+l` approves that Turn with its answer and figures; `ctrl+n` opens Review at
-it. The status bar shows `ready to optimize` when `/improve/readiness` is green.
+Type `/` to browse commands. Up/Down selects, Tab fills, Enter completes missing
+arguments or runs a complete command, and Escape closes the menu. With the menu
+closed, Up/Down at the composer's first/last line browses input history and
+restores the unsent draft after the newest entry.
 
-In the fullscreen TUI, `/optimize` without arguments opens the Runs tab, where `Run optimize` asks
-for confirmation. In the non-TTY fallback, `/optimize` without arguments only prints guidance;
-with explicit arguments it submits a job using server defaults for controls not supplied.
-`/optimize [args]` runs `fleet optimize [args]` over the curated labels from every Session.
-It submits an API-owned job and inherits the server's effective settings;
-the CLI uses the same controls but remains a standalone synchronous workflow.
-Client disconnect does not cancel API-owned work. Use the Improve screen's
-explicit cancel action for cooperative stopping. The API allows one active
-job or review and rejects concurrent requests without queueing.
-It compiles and gates a GEPA candidate from self-contained, explicitly selected
-Turn snapshots with approved gold labels; it does not automatically score
-historical traces. Traces without a matching immutable Lakebase snapshot are
-skipped. It requires at least 8 examples from 3 source groups, as well as the
-corresponding model, Daytona, database, and tracking services. It never installs
-a candidate.
-`/optimize --approve <version>` (or `fleet optimize --approve <version>`) installs one, as the
-single `fleet.json` every Session serves, only when
-the current incumbent, configuration, code, and dependencies match the
-candidate's recorded identities. Old manifests, and candidates from the per-Session
-era, require reevaluation. Each Session loads the installed program at the start of
-its next Turn; without `fleet.json` they run the baseline.
+### Local file and directory mentions
 
-`fleet eval label <trace-id> --answer "..." [--value V ...] [--route R] [--critical]`
-writes gold labels onto a trace; partial updates preserve existing expectations.
-`--critical` requires at least one supplied or previously saved expected value and pins the complete source group
-to GEPA holdout; a candidate must achieve quality 1 for every critical case in
-each of three paired validation passes. Search fails during preparation, before GEPA compilation, if no critical
-holdout case is labeled. `--status` defaults to
-`approved` for a new label; updates preserve status and source group unless supplied.
-A new source group defaults to the trace's session id. The trace ID is printed after
-each Turn and by `/trace`. The HTTP `POST /improve/labels` runs the same labelling by
-`turn_id`.
+Type `@` to browse local paths and cached workspace files. Relative, absolute and
+`~/` paths work; nested bare-name search refreshes in one-minute windows. Tab,
+Enter and mouse selection do not upload. Submission uploads selected local paths
+and rewrites mentions to workspace paths. Cached workspace mentions reuse files;
+`@./files/report.csv` explicitly selects a local file. Spaces are quoted.
 
-`fleet eval score [--execution-diagnostics-only | --scorer-experiment-id ID --registered-scorer NAME ...] <trace-id>...`
-scores already collected, labelled traces with the configured judge in the evaluation
-experiment, without running their Turns again. `--execution-diagnostics-only` runs only
-the validated `execution_evidence_diagnostics` scorer; `--scorer-experiment-id` and
-repeatable `--registered-scorer` must be supplied together (and cannot be combined with
-`--execution-diagnostics-only`) to load trusted registered scorers from that source
-experiment while recording the run in the configured evaluation experiment.
+Directory uploads skip hidden, symlink and Git-ignored paths, including tracked
+files matching ignore rules. Git ignore-check failures block uploads. Limits are
+1,000 files and 100 MB per submission, plus server per-file limits; empty or
+oversized selections are refused. Upload failure preserves the draft and sends
+no Turn; completed uploads remain. The Rich fallback uses `/attach` instead.
 
-`fleet optimize --check` prints readiness as JSON (`ready`, `examples`, `groups`,
-`critical`, `split_sizes`, `missing`) and exits non-zero when dataset readiness fails
-or the installed `fleet.json` contradicts the approval ledger. It reads PostgreSQL,
-MLflow and the local program file only; it does not check model or Daytona availability.
+## Improve and evaluation
 
-`fleet optimize` flags: `--gepa-budget light|medium|heavy` (default `light`) or
-`--max-metric-calls N` for the GEPA search metric-call budget, `--threads`,
-`--validation-ratio` (inclusive 0.1–0.5, default 0.35), `--max-total-tokens N` (stop
-with `budget_exhausted` after N generative LM tokens; `0` is unlimited; default
-`FLEET_JOB_MAX_TOKENS`), `--evaluate rescore|replay|synthetic` (measure the installed program
-instead of optimizing; no candidate is created), and `--approve VERSION`. Reflection calls and the three paired
-final validation passes are additional work, not covered by the search budget.
-Native GEPA checks the metric-call budget between batches, so it may overshoot.
-`--reflection-minibatch-size N` (default 3) sets the native reflection batch size;
-`--max-candidate-proposals N` optionally limits native proposal iterations. A
-three-example dev set with minibatch size 1 and one proposal needs at most eight
-search metric calls, including seed scoring and full candidate validation.
-`--trace-search` opts into search-rollout traces; it is off by default. Final
-paired validation per-case traces are recorded in the optimization MLflow run.
-Optimization lifecycle state is stored in PostgreSQL. Runs recorded before the
-program became global keep their Session as `legacy_session_id`; they stay readable
-but cannot be approved.
+Improve has four tabs: **Review** labels captured Turns, **Readiness** lists
+missing data, **Runs** starts/cancels jobs, and **Results** compares and reviews
+candidates. After a captured Turn, `Ctrl+L` approves its answer/figures as gold;
+`Ctrl+N` opens Review for correction. Inspect gold before approving it.
 
-## Interactive tasks, settings, and model selection
+```bash
+uv run fleet eval label TRACE_ID --answer 'Reviewed answer' --value 22.2 --critical
+uv run fleet eval score TRACE_ID
+uv run fleet optimize --check
+```
 
-Enter any free-form task without a leading slash and press Enter. The client
-renders live server events (routing, tools, Python code/output, child sandboxes,
-budgets, final answer, errors, and cancellation). Activity includes model/module
-start/end status, correlated call IDs, elapsed milliseconds, and bounded tool
-arguments/results. Sandbox bridge and DSPy tool events identify their source;
-they can describe nested layers of the same operation, not extra model calls.
-Python panels distinguish DSPy bootstrap from task code and include expression
-results and execution failures, even when no stdout was produced. In an
-interactive terminal, task REPL cells expand while executing and collapse to a
-one-line summary on clean completion (failed cells stay expanded); click any
-`▸`/`▾` disclosure row or press `Ctrl+O` (`e` while streaming), `Alt+A` (`a` to
-toggle all), `Ctrl+T` (`t` for Thinking blocks), or `Alt+1`–`Alt+9` (`1`–`9`
-while streaming) to expand or collapse code, outputs, tool calls, and thinking
-blocks in place. Routing panels provide factual decision summaries, not private
-model thoughts or chain-of-thought.
-The answer panel preserves literal line breaks and markup; learned notes are
-separate from the answer. Activity previews redact sensitive dictionary keys
-and labelled credentials, limit depth/size, and omit predictor payloads. This is
-best-effort redaction, not a guarantee against unlabelled secrets in free text;
-only stream trusted workspace content to authorized operators.
+`--check` reads PostgreSQL, MLflow and the installed file, without probing models
+or Daytona. Optimization requires grouped approved replays, nonempty train/dev/
+holdout splits, minimum dev/holdout sizes and a critical holdout. See
+[evaluation](evaluation.md) for the metric, budgets, native state and promotion gates.
 
-Each submission has an idempotency
-key. Ctrl+C while editing clears input; Ctrl+C while streaming closes the stream
-and the server requests remote cancellation. A lost connection is not proof of
-rollback: check `/history` before retrying. An incomplete stream is labeled unknown,
-not persisted. EOF or `/exit` exits.
+Useful optimize flags are `--gepa-budget light|medium|heavy` or
+`--max-metric-calls N`, `--threads`, `--validation-ratio` (0.1–0.5, default 0.35),
+`--max-total-tokens N`, `--reflection-minibatch-size N`,
+`--max-candidate-proposals N`, and `--trace-search`. Reflection and final paired
+validation add work beyond the search budget; token caps are cooperative and may
+overshoot. `--evaluate rescore` judges saved executions; `--evaluate replay`
+measures the installed program. Synthetic jobs are currently refused.
 
-### Command menu and input history
+API-owned jobs continue after client disconnect; use explicit cancel. One job or
+review runs at a time. A candidate needs separate approval:
+`uv run fleet optimize --approve VERSION`. Once approved, every Session serves it
+at its next Turn. A missing/changed installed file after approval refuses execution.
 
-In the Textual client, type `/` to browse all commands or keep typing to filter them.
-Up/Down wraps through suggestions; PageUp/PageDown moves by a page. The list scrolls
-with its highlighted item, including in an 80-column terminal. Tab or clicking an
-item fills it without running it. Enter accepts an incomplete highlighted command
-or argument first; Enter on an explicitly complete command executes it. For example,
-`/ti` → Enter fills `/timeout `, another Enter chooses `off`, and a final Enter runs
-`/timeout off`. Fully typed commands such as `/config` still run directly on Enter.
-Escape closes the menu without clearing the draft; editing or Tab enables suggestions
-again. The footer shows the active menu keys and the menu shows the selection count.
+For saved diagnostics use `eval score --execution-diagnostics-only TRACE_ID`.
+To select trusted registered definitions, supply both `--scorer-experiment-id ID`
+and repeatable `--registered-scorer NAME`; these cannot be combined with
+`--execution-diagnostics-only`. Neither workflow reruns Turns.
 
-Argument menus include nested choices such as `/config mode rlm` and
-`/settings mode flex`, model roles, Skills actions, replay, timeout, and optimization
-flags. Model identifiers and arbitrary numeric/text arguments remain free-form;
-choosing a completion never starts optimization or another command by itself.
-`/attach` and `/put` suggest local paths and descend into directories. Workspace-path
-commands use the cached inventory populated by `/files`, `/tree`, `/attach`, and
-`/put`; `/context clear` is available even with no cached files. Enter preserves
-fully specified workspace paths and free-form transfer destinations; use Tab or
-click to explicitly expand a destination suggestion.
-`/put` and `/get` quote suggested paths containing spaces and accept quoted source
-and destination arguments. The Rich / Prompt Toolkit fallback keeps Tab completion.
+## Browser transport and exposure
 
-#### Local file and directory mentions
+The web listener defaults to `127.0.0.1:8080`, separately from the API's
+`127.0.0.1:8000`. Each browser gets a Session unless `--session` shares one.
+`/attach`, `/put`, and `/get` use paths on the server host, not the visitor's computer.
 
-Type `@` at a word boundary to open local and cached workspace suggestions.
-The menu follows the cursor, including when returning to an earlier mention.
-Bare names search nested paths: `@fleet_rlm` finds `@./src/fleet_rlm`.
-Relative paths start at the client's working directory; absolute and `~/` paths
-also work. Nested name matching is case-insensitive and uses a bounded,
-best-effort index refreshed on demand in one-minute windows. New nested files
-may take up to a minute to appear in bare-name search. Explicit paths remain
-available immediately and when a large tree exceeds the search window.
+Use `--public-url` for the browser-facing URL behind a reverse proxy. WebSockets
+require a matching Origin and public Host header. A non-loopback listener requires
+`FLEET_ALLOW_NON_LOOPBACK_BIND=true` and an environment-only `FLEET_WEB_AUTH_TOKEN`
+of at least 32 non-whitespace characters. An authenticated TLS proxy must replace
+the WebSocket Authorization header with `Bearer <secret>` and be the only route to
+the listener. Never put the secret in URLs or client commands.
 
-Choose a directory's **attach on submit** entry to select it, or its trailing-`/`
-**browse** entry to open it. Tab, Enter, and mouse selection do not upload content.
-Submitting uploads local mentions before starting the Turn and rewrites them to
-`@files/...` workspace paths. Directory uploads preserve the selected directory's
-name and subtree under a unique workspace root. Standalone files get unique names;
-repeated and overlapping mentions share uploads within a submission.
-
-Directory uploads and nested search skip hidden paths, symlinks, and Git-ignored
-files, including tracked files matching ignore rules. Git working trees require
-Git; ignore-check failures block uploads. Outside Git, hidden paths and symlinks
-are still skipped. Immediate-folder browsing shows hidden names only when their
-typed prefix starts with `.`. Directory uploads refuse empty or fully excluded
-selections and selections above 1,000 files or 100 MB combined per submission;
-the server's per-file limits also apply. Selections are never silently truncated.
-
-Paths with spaces or quotes are quoted automatically: `@"./quarter report.csv"`.
-Typed existing local paths work too. Exact cached workspace mentions are reused
-without upload; use `@./files/report.csv` to distinguish a local file from cached
-`@files/report.csv`. Email addresses do not trigger mentions.
-
-Only submit files you intend to upload. Browsing reads no file contents.
-Upload failure or cancellation before the Turn preserves the draft and sends no
-Turn; completed uploads remain in the workspace. Cancellation does not interrupt
-an in-flight upload. The Rich / Prompt Toolkit fallback requires `/attach`
-instead of automatically attaching local `@` mentions.
-
-With the menu closed, Up at the first composer line browses older input and Down at
-the last line browses newer input. Returning past the newest history entry restores
-the unsent draft. Down on a fresh draft does not clear it. History recall does not
-reopen the menu; editing the recalled text or requesting Tab completion does.
-
-Use `/replay on` to opt in to bounded immutable snapshot capture for subsequent
-Turns in this client process; `/replay off` disables it. Capture is off by default.
-
-Root/sub selections are validated by the server, isolated to this session, applied
-at turn boundaries, and persisted across restarts alongside mode/context. Busy
-sessions reject model changes rather than silently changing a running turn.
-Discovery does not guarantee inference capacity; an inference failure is still
-reported as a turn error. Reflection/judge models, credentials, deployment policy,
-and resource ceilings remain operator configuration, not TUI-editable secrets.
-
-The server defaults to `127.0.0.1:8000`. A non-loopback bind is rejected unless
-`FLEET_ALLOW_NON_LOOPBACK_BIND=true` is configured. The API has no caller
-authentication, so non-loopback binding must only be used behind a separately
-authenticated trusted boundary.
-
-Configuration fields and defaults are listed in the
-[configuration reference](configuration.md). Live Daytona execution requires
-valid API key, org ID, and Volume ID. No Daytona connectivity is asserted by
-this reference.
-
-
-Synthetic jobs are deferred until isolated evaluation and complete serving/judge
-usage accounting are supported. API and CLI requests are refused before a worker starts; the TUI
-shows Synthetic disabled. Historical Synthetic job records remain readable.
-Rescore judges saved historical executions and does not measure the current installed program;
-its results are excluded from program-version trends. Replay measures the installed program.
-Token caps use reported generative usage and cooperative safe-point checks, with in-flight overshoot;
-metric-call budgets are separate and do not establish a dollar ceiling.
-The readiness badge indicates readiness; counts and missing requirements appear in the Readiness tab.
-Bare `/optimize` opens Runs in fullscreen mode; the fallback prints guidance without starting a job.
+The API has no caller authentication. Non-loopback API binding also requires
+explicit opt-in and a separately secured boundary. See [configuration](configuration.md).

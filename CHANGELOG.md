@@ -220,7 +220,7 @@ All notable changes to this project are documented in this file.
   lives with engine assembly; usage callbacks live with observability. Store, setup,
   and snapshots are single modules; release checks live in the repository script.
   SessionRuntime directly owns memory/history/Turn-record policies using a shared Store.
-  See [Python import changes](docs/reference/source-layout.md#python-import-changes).
+  See [source layout](docs/reference/source-layout.md).
 - Retain native DSPy signatures, traversal, GEPA, evaluation, and explicit RLM children.
   Isolated replay construction/execution, artifact identity/reporting, and dataset
   identity now live with their respective owners. No SQL or saved-state key changes.
