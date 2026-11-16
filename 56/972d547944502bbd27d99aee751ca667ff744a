@@ -1,0 +1,21 @@
+tests/api/test_turns.py
+  s_92e78b4269eb3b::t_63e6f15d4609fb 1488,2591,2604
+tests/store/test_store.py
+  s_92e78b4269eb3b::t_dd0624c7242246 723-724,1416,1544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "56972d547944502bbd27d99aee751ca667ff744a",
+  "prompts": {},
+  "sessions": {
+    "s_92e78b4269eb3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4ac-a6ab-7431-acab-d7d980a4e3c5",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
