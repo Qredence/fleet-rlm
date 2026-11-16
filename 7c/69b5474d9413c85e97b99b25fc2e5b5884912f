@@ -1,0 +1,19 @@
+.gitignore
+  s_642bf6d0f7c5e9::t_d6822673ab5c93 204-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7c69b5474d9413c85e97b99b25fc2e5b5884912f",
+  "prompts": {},
+  "sessions": {
+    "s_642bf6d0f7c5e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e463-ba29-77e1-8b5f-c112e6540f07",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
