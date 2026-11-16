@@ -1,0 +1,27 @@
+src/fleet_rlm/engine/turn.py
+  s_92e78b4269eb3b::t_3ed655f3d0f538 22,49,285
+src/fleet_rlm/engine/turn_prepare.py
+  s_92e78b4269eb3b::t_99ef8ffbc0be82 14,18,81,164,231
+src/fleet_rlm/store/__init__.py
+  s_92e78b4269eb3b::t_155ab8c60b38d7 34
+tests/api/test_turns.py
+  s_92e78b4269eb3b::t_a4c7a99bc9afaf 37,39,1489,2592,2605,2640
+tests/store/test_store.py
+  s_92e78b4269eb3b::t_8e5fdfc4713a8c 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "269c5f5f1a5247119dc2cab4fcca2cd5f34c7931",
+  "prompts": {},
+  "sessions": {
+    "s_92e78b4269eb3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4ac-a6ab-7431-acab-d7d980a4e3c5",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
