@@ -127,55 +127,21 @@ def check_mlflow(settings: FleetSettings) -> dict[str, Any]:
     from fleet_rlm import launcher
 
     target = settings.mlflow_target()
-    if target.mode == "local":
-        reachable = launcher.mlflow_is_healthy(target.tracking_uri)
-        issue = launcher.local_mlflow_kek_issue(
-            settings,
-            mlflow_url=target.tracking_uri,
-            reachable=reachable,
-        )
-        if issue:
-            return {
-                "status": "blocked",
-                "message": issue,
-            }
-        detail = "reachable" if reachable else "not currently running (managed automatically by fleet cli/web)"
-        return {
-            "status": "ready",
-            "message": f"Local MLflow configured at {target.tracking_uri} ({detail}).",
-        }
-
-    from databricks.sdk import WorkspaceClient
-    from databricks.sdk.core import Config
-    from databricks.sdk.errors import NotFound
-
-    if target.tracking_uri.startswith("databricks://"):
-        config = Config(
-            profile=target.tracking_uri.removeprefix("databricks://"),
-            http_timeout_seconds=20,
-            retry_timeout_seconds=20,
-        )
-    else:
-        config = Config(
-            host=settings.databricks_host,
-            token=settings.databricks_token.get_secret_value(),
-            auth_type="pat",
-            http_timeout_seconds=20,
-            retry_timeout_seconds=20,
-        )
-    try:
-        experiment = WorkspaceClient(config=config).experiments.get_by_name(target.experiment_name).experiment
-    except NotFound:
-        experiment = None
-    except Exception as exc:
+    reachable = launcher.mlflow_is_healthy(target.tracking_uri)
+    issue = launcher.local_mlflow_kek_issue(
+        settings,
+        mlflow_url=target.tracking_uri,
+        reachable=reachable,
+    )
+    if issue:
         return {
             "status": "blocked",
-            "message": f"Databricks MLflow check failed ({type(exc).__name__}).",
+            "message": issue,
         }
+    detail = "reachable" if reachable else "not currently running (managed automatically by fleet cli/web)"
     return {
         "status": "ready",
-        "message": "Databricks MLflow is accessible.",
-        "experiment_exists": experiment is not None,
+        "message": f"Local MLflow configured at {target.tracking_uri} ({detail}).",
     }
 
 
@@ -237,7 +203,6 @@ def _secret_values(settings: FleetSettings) -> list[str]:
             None,
             [
                 settings.fleet_daytona_api_key,
-                settings.databricks_token.get_secret_value(),
                 settings.fleet_database_url,
                 settings.fleet_database_migration_url,
                 settings.typesafe_api_key,
@@ -268,7 +233,7 @@ def run_doctor(
         out.print(table)
         return 1
 
-    table.add_row("Configuration", "[green]ready[/green]", f"schema v{SCHEMA_VERSION} ({settings.mlflow_mode} MLflow)")
+    table.add_row("Configuration", "[green]ready[/green]", f"schema v{SCHEMA_VERSION} (local MLflow)")
     probe = bool(getattr(args, "probe_models", False))
     checks = [
         ("Models", check_models, {"probe_models": probe}),

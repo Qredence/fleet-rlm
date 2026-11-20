@@ -319,7 +319,7 @@ def test_store_open_scopes_runtime_and_migration_pools_to_the_configured_schema(
         "postgresql://migrator@db.example/fleet",
     ]
     assert all(pool.kwargs["kwargs"]["options"] == "-c search_path=fleet_rlm_lite" for pool in opened)
-    # Pooled connections are recycled before a one-hour Lakebase credential expires and checked on checkout.
+    # Pooled connections are recycled before short-lived database credentials expire and checked on checkout.
     for pool in opened:
         assert pool.kwargs["max_lifetime"] < 60 * 60 and pool.kwargs["max_idle"] <= pool.kwargs["max_lifetime"]
         assert callable(pool.kwargs["check"])
@@ -1198,13 +1198,13 @@ def test_schema_v1_on_real_postgres_bootstraps_and_round_trips():
             admin.execute(f"DROP SCHEMA {schema} CASCADE")
 
 
-# Opt-in live Lakebase privileges
+# Opt-in live PostgreSQL privileges
 
-_ENABLED = os.environ.get("FLEET_RUN_LAKEBASE_ROLE_TESTS") == "1"
+_ENABLED = os.environ.get("FLEET_RUN_POSTGRES_ROLE_TESTS") == "1"
 
 
-@pytest.mark.skipif(not _ENABLED, reason="explicit Lakebase role-test opt-in required")
-def test_fresh_lakebase_role_split_and_default_privileges() -> None:
+@pytest.mark.skipif(not _ENABLED, reason="explicit PostgreSQL role-test opt-in required")
+def test_fresh_postgresql_role_split_and_default_privileges() -> None:
     runtime_url = os.environ.get("FLEET_ROLE_TEST_RUNTIME_URL")
     migration_url = os.environ.get("FLEET_ROLE_TEST_MIGRATION_URL")
     if not runtime_url or not migration_url:

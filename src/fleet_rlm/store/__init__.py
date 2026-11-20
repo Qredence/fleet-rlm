@@ -1,4 +1,4 @@
-"""PostgreSQL / Lakebase persistence package for Fleet-RLM Lite."""
+"""PostgreSQL persistence package for Fleet-RLM Lite."""
 
 from __future__ import annotations
 

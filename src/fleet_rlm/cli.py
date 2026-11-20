@@ -61,12 +61,6 @@ def _configuration_error(exc: ValueError) -> str:
     return str(exc)
 
 
-def _uc_trace_location(location: Any) -> Any:
-    """Return the Unity Catalog location across MLflow TraceLocation API shapes."""
-    nested = getattr(location, "uc_table_prefix", None)
-    return nested if nested is not None else location
-
-
 def _label_command(args: argparse.Namespace, settings: Any) -> None:
     """Label one trace through the same function the HTTP route uses."""
     from fleet_rlm.optimize.evaluation import EvaluationError, label_turn
@@ -178,26 +172,18 @@ def _eval_command(args: argparse.Namespace, settings: Any) -> None:
         except launcher.LaunchError as exc:
             raise SystemExit(str(exc)) from None
     mlflow.set_tracking_uri(target.tracking_uri)
-    if target.mode == "databricks":
-        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
     if args.eval_command == "label":
         _label_command(args, settings)
         return
     if not target.eval_experiment_name:
-        raise SystemExit(f"set FLEET_MLFLOW_{target.mode.upper()}_EVAL_EXPERIMENT_NAME to the evaluation experiment")
+        raise SystemExit("set FLEET_MLFLOW_LOCAL_EVAL_EXPERIMENT_NAME to the evaluation experiment")
     experiment = evaluation.evaluation_experiment(settings)
     if args.eval_command == "score":
         _score_command(args, settings, experiment.experiment_id)
         return
     cases = evaluation.synthetic_cases(seed=args.seed)
     if args.eval_command == "dataset":
-        name = args.name or (
-            f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.fleet_rlm_eval_cases"
-            if target.mode == "databricks"
-            else "fleet_rlm_eval_cases"
-        )
-        from fleet_rlm.optimize import evaluation
-
+        name = args.name or "fleet_rlm_eval_cases"
         if args.long_context:
             cases += evaluation.long_context_cases()
         dataset = evaluation.build_dataset(name, experiment.experiment_id, cases)
@@ -225,72 +211,32 @@ def _trace_verify_command(args: argparse.Namespace, settings: Any) -> None:
     import mlflow
 
     target = settings.mlflow_target()
-    experiments = {
-        "runtime": (target.experiment_name, settings.mlflow_trace_schema, settings.mlflow_trace_table_prefix),
-        "evaluation": (
-            target.eval_experiment_name,
-            settings.mlflow_trace_schema,
-            settings.mlflow_eval_trace_table_prefix,
-        ),
-        "optimization": (
-            target.optimization_experiment_name,
-            settings.mlflow_optimization_trace_schema,
-            settings.mlflow_optimization_trace_table_prefix,
-        ),
-    }
-    experiment_name, schema, table_prefix = experiments[args.scope]
+    experiment_name = {
+        "runtime": target.experiment_name,
+        "evaluation": target.eval_experiment_name,
+        "optimization": target.optimization_experiment_name,
+    }[args.scope]
     mlflow.set_tracking_uri(target.tracking_uri)
-    if target.mode == "databricks":
-        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
     try:
         experiment = mlflow.get_experiment_by_name(experiment_name)
     except Exception as exc:
         raise SystemExit(f"Could not read MLflow experiment ({type(exc).__name__})") from None
     if experiment is None:
         raise SystemExit(f"MLflow experiment {experiment_name!r} was not found")
-    destination = target.tracking_uri
-    expected_location = None
-    if target.mode == "databricks":
-        from mlflow.entities.trace_location import UnityCatalog
-
-        location = experiment.trace_location
-        expected = (settings.mlflow_trace_catalog, schema, table_prefix)
-        actual = (
-            getattr(location, "catalog_name", None),
-            getattr(location, "schema_name", None),
-            getattr(location, "table_prefix", None),
-        )
-        is_unity_catalog = (
-            location is not None
-            and type(location).__module__ == UnityCatalog.__module__
-            and type(location).__name__ == "UnityCatalog"
-        )
-        if not is_unity_catalog or actual != expected:
-            raise SystemExit(
-                f"MLflow experiment trace destination mismatch for {args.scope}: "
-                f"expected {expected[0]}.{expected[1]} prefix {expected[2]!r}"
-            )
-        expected_location = expected
-        destination = f"{actual[0]}.{actual[1]}.{actual[2]}"
     try:
         trace = mlflow.get_trace(args.trace_id, silent=True, flush=True)
     except Exception as exc:
         raise SystemExit(f"Trace readback failed ({type(exc).__name__})") from None
     if trace is None:
         raise SystemExit(f"Trace {args.trace_id!r} was not found after flushing pending exports")
-    if expected_location is not None:
-        location = _uc_trace_location(trace.info.trace_location)
-        actual_location = (
-            getattr(location, "catalog_name", None),
-            getattr(location, "schema_name", None),
-            getattr(location, "table_prefix", None),
-        )
-        if actual_location != expected_location:
-            raise SystemExit(f"Trace {args.trace_id!r} is stored outside the configured destination")
+    location = trace.info.trace_location
+    location = getattr(location, "mlflow_experiment", None) or location
+    if str(getattr(location, "experiment_id", "")) != str(experiment.experiment_id):
+        raise SystemExit(f"Trace {args.trace_id!r} is stored outside the configured experiment")
     span_count = len(trace.data.spans)
     if span_count == 0:
         raise SystemExit(f"Trace {args.trace_id!r} was found but contains no spans")
-    _CONSOLE.print(f"Trace export verified: {args.trace_id} ({span_count} spans; {destination})")
+    _CONSOLE.print(f"Trace export verified: {args.trace_id} ({span_count} spans; {target.tracking_uri})")
 
 
 def _run_client(args: argparse.Namespace, settings: Any, parser: argparse.ArgumentParser) -> None:
@@ -319,10 +265,7 @@ def _run_client(args: argparse.Namespace, settings: Any, parser: argparse.Argume
     try:
         if settings is None:
             url = validate_api_url(args.url)
-            metadata = launcher.verify_api_destination(url)
-            selected = getattr(args, "backend", None) or args.mlflow
-            if selected is not None and metadata["mode"] != selected:
-                parser.error("Selected MLflow backend does not match the connected server")
+            launcher.verify_api_destination(url)
             if args.mlflow_port is not None or args.mlflow_experiment is not None:
                 parser.error("MLflow launch options cannot configure an explicit --url server")
             services = nullcontext()
@@ -341,7 +284,7 @@ def _run_client(args: argparse.Namespace, settings: Any, parser: argparse.Argume
             )
         with services:
             if settings is not None:
-                metadata = launcher.verify_api_destination(url, settings.mlflow_descriptor())
+                launcher.verify_api_destination(url, settings.mlflow_descriptor())
             if web:
                 browser_url = args.public_url or f"http://{args.host}:{args.port}"
                 _CONSOLE.print(f"Fleet RLM Lite web app: {browser_url}", markup=False)
@@ -352,7 +295,6 @@ def _run_client(args: argparse.Namespace, settings: Any, parser: argparse.Argume
                 run_interactive_cli(
                     base_url=url,
                     session_id=getattr(args, "session", f"sess_{uuid.uuid4().hex[:8]}"),
-                    mlflow_mode=metadata["mode"],
                 )
     except KeyboardInterrupt:
         raise SystemExit(130) from None
@@ -404,7 +346,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     cli.add_argument("--url", default=None, help="connect to this server only; do not start anything")
     cli.add_argument("--session", default=f"sess_{uuid.uuid4().hex[:8]}")
-    cli.add_argument("backend", nargs="?", choices=("databricks",), help="use Databricks managed MLflow")
     cli.add_argument("--mlflow-port", type=int, default=None)
     cli.add_argument("--mlflow-experiment", default=None)
     cli.add_argument("--startup-timeout", type=float, default=180.0, help="seconds to wait for each service")
@@ -417,9 +358,7 @@ def main(argv: list[str] | None = None) -> None:
     evaluate = commands.add_parser("eval", help="evaluation datasets, gold labels, and runs")
     eval_commands = evaluate.add_subparsers(dest="eval_command", required=True)
     dataset = eval_commands.add_parser("dataset", help="create the synthetic evaluation dataset")
-    dataset.add_argument(
-        "--name", default="", help="dataset name (databricks mode: catalog.schema.table from the trace settings)"
-    )
+    dataset.add_argument("--name", default="", help="dataset name")
     dataset.add_argument("--seed", type=int, default=7)
     dataset.add_argument("--long-context", action="store_true", help="add synthetic 20K-200K character log cases")
     run = eval_commands.add_parser("run", help="run synthetic cases against a live server and score them")
@@ -462,7 +401,7 @@ def main(argv: list[str] | None = None) -> None:
     trace = commands.add_parser("trace", help="inspect and verify MLflow trace delivery")
     trace_commands = trace.add_subparsers(dest="trace_command", required=True)
     verify = trace_commands.add_parser("verify", help="flush pending exports and read one stored trace")
-    verify.add_argument("trace_id", help="trace ID; use its fully qualified trace:/ reference for Unity Catalog")
+    verify.add_argument("trace_id", help="trace ID")
     verify.add_argument("--scope", choices=("runtime", "evaluation", "optimization"), default="runtime")
 
     for command in (
@@ -482,30 +421,20 @@ def main(argv: list[str] | None = None) -> None:
     ):
         command.add_argument(
             "--mlflow",
-            choices=("local", "databricks"),
+            choices=("local",),
             default=None,
-            help="MLflow backend (default: configured setting); replaces the retired --mlflow env option",
+            help="accepted for compatibility with local MLflow commands",
         )
 
     args = parser.parse_args(argv)
-    if getattr(args, "backend", None) and args.mlflow == "local":
-        parser.error("cli databricks conflicts with --mlflow local")
-    backend = getattr(args, "backend", None) or getattr(args, "mlflow", None)
     managed_settings = None
     if args.command == "optimize" and getattr(args, "managed_run_id", None):
         try:
             managed_settings = read_worker_settings(sys.stdin)
         except (ValueError, TypeError):
             parser.error("invalid private worker configuration")
-        if backend is None:
-            backend = managed_settings.mlflow_mode
-        if managed_settings.mlflow_mode != backend:
-            parser.error("worker MLflow backend does not match its server configuration")
-    if getattr(args, "mlflow_port", None) is not None:
-        if backend == "databricks":
-            parser.error("--mlflow-port is only supported with local MLflow")
-        if not 1 <= args.mlflow_port <= 65535:
-            parser.error("--mlflow-port must be between 1 and 65535")
+    if getattr(args, "mlflow_port", None) is not None and not 1 <= args.mlflow_port <= 65535:
+        parser.error("--mlflow-port must be between 1 and 65535")
 
     if args.command in {None, "cli", "web"} and getattr(args, "url", None):
         _run_client(args, None, parser)
@@ -517,32 +446,24 @@ def main(argv: list[str] | None = None) -> None:
     config_error: str | None = None
     if settings is None:
         try:
-            settings = get_settings(backend)
+            settings = get_settings()
         except (ValidationError, ValueError) as exc:
             config_error = _configuration_error(exc)
             if args.command != "doctor":
                 parser.error(f"invalid configuration: {config_error} (run `fleet doctor` for details)")
 
     if args.command == "doctor":
-        if settings is not None and not config_error:
-            try:
-                settings.prepare_mlflow_auth()
-            except (ValidationError, ValueError) as exc:
-                config_error = _configuration_error(exc)
         from fleet_rlm.doctor import run_doctor
 
         raise SystemExit(run_doctor(args, settings, config_error=config_error, console=_CONSOLE))
 
     assert settings is not None
     try:
-        backend = settings.mlflow_mode
-        if getattr(args, "mlflow_port", None) is not None and backend != "local":
-            parser.error("--mlflow-port is only supported with local MLflow")
         overrides = {}
         if getattr(args, "mlflow_port", None) is not None:
             overrides["mlflow_local_port"] = args.mlflow_port
         if getattr(args, "mlflow_experiment", None) is not None:
-            overrides[f"mlflow_{backend}_experiment_name"] = args.mlflow_experiment
+            overrides["mlflow_local_experiment_name"] = args.mlflow_experiment
         if args.command == "serve":
             if args.host is not None:
                 overrides["host"] = args.host
@@ -552,8 +473,6 @@ def main(argv: list[str] | None = None) -> None:
             settings = settings.with_explicit_overrides(**overrides)
     except (ValidationError, ValueError) as exc:
         parser.error(f"invalid configuration: {_configuration_error(exc)} (run `fleet doctor` for details)")
-    if args.command not in {None, "cli", "snapshot"}:
-        settings.prepare_mlflow_auth()
     if args.command == "snapshot":
         from fleet_rlm.doctor import run_snapshot
 
@@ -565,7 +484,6 @@ def main(argv: list[str] | None = None) -> None:
     if (
         args.command in {"eval", "trace", "optimize"}
         and not getattr(args, "approve", None)
-        and target.mode == "local"
         and not launcher.mlflow_is_healthy(target.tracking_uri)
     ):
         parser.error(

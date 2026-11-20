@@ -31,11 +31,10 @@ router = APIRouter(prefix="/sessions/{session_id}", tags=["chat"])
 
 
 def _trace_links(rows: list[dict[str, Any]], request: Request, settings: Any) -> list[dict[str, Any]]:
-    descriptor = settings.mlflow_descriptor()
-    base = descriptor.get("workspace_host") if settings.mlflow_mode == "databricks" else descriptor.get("tracking_uri")
+    base = settings.mlflow_descriptor().get("tracking_uri")
     experiment = getattr(request.app.state, "mlflow_experiment_id", None)
     if base and str(base).startswith(("http://", "https://")) and experiment:
-        prefix = str(base).rstrip("/") + ("/ml" if settings.mlflow_mode == "databricks" else "/#")
+        prefix = str(base).rstrip("/") + "/#"
         for row in rows:
             if row.get("trace_id"):
                 row["trace_url"] = (

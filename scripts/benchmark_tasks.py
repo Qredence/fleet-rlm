@@ -495,8 +495,6 @@ def run_comparison_pilot(
     from fleet_rlm.optimize.artifacts import optimization_code_digest
 
     target = settings.mlflow_target()
-    if target.mode != "local":
-        raise ValueError("The authorized pilot uses the local MLflow destination only")
     if os.environ.get("MLFLOW_TRACKING_URI") and os.environ.get("MLFLOW_EXPERIMENT_ID"):
         import mlflow
 
@@ -546,10 +544,6 @@ def run_comparison_pilot(
         experiment_id = configure_mlflow_observability(
             target.experiment_name,
             target.tracking_uri,
-            trace_catalog=settings.mlflow_trace_catalog,
-            trace_schema=settings.mlflow_trace_schema,
-            trace_table_prefix=settings.mlflow_trace_table_prefix,
-            tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
         )
         if experiment_id is None:
             raise RuntimeError("Benchmark tracing experiment is unavailable")
@@ -638,11 +632,10 @@ def score_tasks(bundle_dir: Path, run_dir: Path, official_score: Callable[[dict,
             row["truncated"] = False if reasons and all(reasons) else None
         row["trace_id"] = receipt.get("output", {}).get("trace_id")
         destination = run.get("service", {}).get("mlflow", {})
-        host = destination.get("workspace_host") or destination.get("tracking_uri", "")
-        if row["trace_id"] and host.startswith(("http://", "https://")):
-            page = "/ml/experiments/" if destination.get("mode") == "databricks" else "/#/experiments/"
+        host = destination.get("tracking_uri", "")
+        if destination.get("mode") == "local" and row["trace_id"] and host.startswith(("http://", "https://")):
             row["trace_url"] = (
-                f"{host.rstrip('/')}{page}{destination['experiment_id']}/traces"
+                f"{host.rstrip('/')}/#/experiments/{destination['experiment_id']}/traces"
                 f"?selectedTraceId={quote(row['trace_id'], safe='')}"
             )
         if receipt["status"] == "completed":
@@ -765,30 +758,19 @@ def evaluate_saved_tasks(
         raise ValueError("Notebook tracking settings differ from the recorded Fleet destination")
     if not target.eval_experiment_name:
         raise ValueError("Configure Fleet's evaluation experiment first")
-    settings.prepare_mlflow_auth()
     experiment_id = configure_mlflow_observability(
         target.eval_experiment_name + ("-official-benchmark" if official_only else ""),
         target.tracking_uri,
-        trace_catalog=settings.mlflow_trace_catalog,
-        trace_schema=settings.mlflow_trace_schema,
-        trace_table_prefix=settings.mlflow_eval_trace_table_prefix,
-        tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
     )
     if not official_only:
         for name, value in settings.judge_environment().items():
             os.environ[name] = value
     cases = {case["case_id"]: case for case in bundle["cases"]}
-    trace_location = descriptor.get("trace_location")
-    uc_location = (
-        tuple(trace_location[key] for key in ("catalog", "schema", "table_prefix")) if trace_location else None
-    )
     evaluation_rows = []
     for row in scored["cases"]:
         if "official_score" not in row:
             continue
-        read_evaluation_trace(
-            row["trace_id"], experiment_id=run["service"]["mlflow"]["experiment_id"], uc_location=uc_location
-        )
+        read_evaluation_trace(row["trace_id"], experiment_id=run["service"]["mlflow"]["experiment_id"])
         case = cases[row["case_id"]]
         label_trace(
             row["trace_id"],
@@ -801,7 +783,6 @@ def evaluate_saved_tasks(
         trace = read_evaluation_trace(
             row["trace_id"],
             experiment_id=run["service"]["mlflow"]["experiment_id"],
-            uc_location=uc_location,
             expected_labels={
                 key: value
                 for key, value in {

@@ -1857,7 +1857,6 @@ def test_explicit_shared_model_still_overrides_root_and_sub_defaults(source, mon
 def test_public_configuration_omits_credentials_and_tracks_session_override():
     settings = FleetSettings(
         _env_file=None,
-        databricks_token="credential-marker",
         fleet_database_url="postgresql://credential-marker",
         fleet_daytona_api_key="credential-marker",
         typesafe_api_key="credential-marker",
@@ -1979,14 +1978,6 @@ def test_validation_errors_hide_input_values():
 
 
 @pytest.mark.usefixtures("isolated_settings")
-@pytest.mark.parametrize("field", ["databricks_host", "fleet_llm_api_base", "mlflow_databricks_tracking_uri"])
-def test_public_urls_cannot_expose_credentials(field):
-    with pytest.raises(ValidationError) as error:
-        FleetSettings(_env_file=None, **{field: "https://user:credential-marker@example.invalid"})
-    assert "credential-marker" not in str(error.value)
-
-
-@pytest.mark.usefixtures("isolated_settings")
 def test_explicit_cli_copy_is_validated_and_does_not_mutate_original():
     toml("[server]\nport=8001\n")
     settings = FleetSettings(_env_file=None)
@@ -2051,14 +2042,6 @@ def test_cli_reports_invalid_configuration_without_traceback(monkeypatch, capsys
 
 
 @pytest.mark.usefixtures("isolated_settings")
-def test_local_mlflow_mode_ignores_databricks_targets(monkeypatch):
-    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACKING_URI", "databricks://profile")
-    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME", "/Users/someone/fleet")
-    target = FleetSettings(_env_file=None).mlflow_target()
-    assert target == ("local", "http://127.0.0.1:5001", "fleet-rlm-dev", "fleet-rlm-eval", "fleet-rlm-gepa")
-
-
-@pytest.mark.usefixtures("isolated_settings")
 def test_local_mlflow_mode_keeps_local_targets(monkeypatch):
     monkeypatch.setenv("FLEET_MLFLOW_LOCAL_PORT", "5002")
     monkeypatch.setenv("FLEET_MLFLOW_LOCAL_EXPERIMENT_NAME", "mine")
@@ -2067,35 +2050,13 @@ def test_local_mlflow_mode_keeps_local_targets(monkeypatch):
 
 
 @pytest.mark.usefixtures("isolated_settings")
-def test_databricks_mlflow_mode_is_validated_only_when_selected(monkeypatch):
-    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", "")
-    assert FleetSettings(_env_file=None).mlflow_target().mode == "local"
-    with pytest.raises(ValidationError, match="Unity Catalog"):
-        FleetSettings(_env_file=None, mlflow_mode="databricks")
-    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG")
-    monkeypatch.setenv("FLEET_MLFLOW_DATABRICKS_TRACKING_URI", "http://127.0.0.1:5001")
-    with pytest.raises(ValidationError, match="databricks tracking URI"):
-        FleetSettings(_env_file=None, mlflow_mode="databricks")
-
-
-@pytest.mark.usefixtures("isolated_settings")
-def test_configuration_defaults_to_local_and_keeps_databricks_available():
-    assert FleetSettings(_env_file=None).mlflow_target().mode == "local"
-    target = FleetSettings(_env_file=None, mlflow_mode="databricks").mlflow_target()
-    assert target.mode == "databricks"
-    assert target.experiment_name.startswith("/")
-    assert target.optimization_experiment_name.startswith("/")
-
-
-@pytest.mark.usefixtures("isolated_settings")
 def test_judge_environment_exports_inherited_openai_gateway_endpoint():
     settings = FleetSettings(
         _env_file=None,
         fleet_llm_api_base="https://workspace.example/ai-gateway/mlflow/v1",
-        databricks_token="token",
     )
     assert settings.judge_environment() == {"OPENAI_API_BASE": "https://workspace.example/ai-gateway/mlflow/v1"}
-    assert FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint").judge_environment() == {}
+    assert FleetSettings(_env_file=None, fleet_judge_model="anthropic:/example").judge_environment() == {}
     with pytest.raises(ValidationError, match="provider"):
         FleetSettings(_env_file=None, fleet_judge_model="deepseek")
 
@@ -2148,22 +2109,6 @@ def test_native_chat_policy_does_not_force_provider_capabilities():
 
 
 @pytest.mark.usefixtures("isolated_settings")
-def test_databricks_requires_explicit_deployment_identifiers(monkeypatch):
-    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG", raising=False)
-    monkeypatch.delenv("FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID", raising=False)
-    assert FleetSettings(_env_file=None).mlflow_mode == "local"
-    with pytest.raises(ValueError, match="SQL warehouse ID"):
-        FleetSettings(_env_file=None, mlflow_mode="databricks")
-    configured = FleetSettings(
-        _env_file=None,
-        mlflow_mode="databricks",
-        mlflow_databricks_trace_catalog="example_catalog",
-        mlflow_databricks_tracing_sql_warehouse_id="example-warehouse",
-    )
-    assert configured.mlflow_tracking_uri == "databricks"
-
-
-@pytest.mark.usefixtures("isolated_settings")
 def test_shared_discovery_uses_default_connection_when_root_has_an_override(monkeypatch):
     from contextlib import nullcontext
 
@@ -2205,7 +2150,7 @@ def test_an_explicit_judge_pairs_the_mlflow_openai_scorers_with_its_own_endpoint
     assert settings.resolved_model("judge").api_base == "https://api.commandcode.ai/provider/v1"
     assert settings.resolved_model("judge").api_key.get_secret_value() == "judge-key"
     # Other providers use their native environment even when the judge role is explicit.
-    other = FleetSettings(_env_file=None, fleet_judge_model="databricks:/endpoint", **judge)
+    other = FleetSettings(_env_file=None, fleet_judge_model="anthropic:/example", **judge)
     assert other.judge_environment() == {}
 
 
@@ -2227,34 +2172,13 @@ def test_inherited_judge_connection_exports_resolved_credential(monkeypatch):
 # Gateway model resolution
 
 
-def test_databricks_mlflow_configuration_requires_governed_trace_storage() -> None:
-    with pytest.raises(ValueError, match="Unity Catalog"):
-        FleetSettings(
-            mlflow_mode="databricks",
-            mlflow_databricks_tracking_uri="databricks",
-            mlflow_databricks_trace_catalog="",
-            mlflow_databricks_trace_schema="",
-            mlflow_databricks_tracing_sql_warehouse_id="",
-        )
-
-    configured = FleetSettings(
-        mlflow_mode="databricks",
-        mlflow_databricks_tracking_uri="databricks",
-        mlflow_databricks_experiment_name="/Shared/fleet-rlm",
-        mlflow_databricks_trace_catalog="fleet",
-        mlflow_databricks_trace_schema="traces",
-        mlflow_databricks_tracing_sql_warehouse_id="warehouse-id",
-    )
-    assert configured.mlflow_experiment_name == "/Shared/fleet-rlm"
-
-
 def test_profile_specific_mlflow_environment_ignores_sdk_destination(monkeypatch) -> None:
     monkeypatch.setenv("FLEET_MLFLOW_LOCAL_PORT", "5002")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://unrelated.invalid")
     monkeypatch.setenv("FLEET_MLFLOW_LOCAL_EXPERIMENT_NAME", "fleet-test")
     settings = FleetSettings(_env_file=None)
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5002"
-    assert settings.mlflow_experiment_name == "fleet-test"
+    assert settings.mlflow_local_experiment_name == "fleet-test"
 
 
 def test_default_model_and_independent_role_connection(monkeypatch):
@@ -3011,7 +2935,7 @@ def test_dependency_fingerprint_changes_when_installed_version_changes(monkeypat
 
 
 def test_worker_snapshot_retains_effective_settings_and_sources_without_rereading_configuration(monkeypatch, tmp_path):
-    settings = FleetSettings(_env_file=None, databricks_token="private-worker-token").with_explicit_overrides(
+    settings = FleetSettings(_env_file=None, serper_api_key="private-worker-token").with_explicit_overrides(
         turn_timeout_seconds=123
     )
     snapshot = worker_settings_payload(settings)
@@ -3020,7 +2944,7 @@ def test_worker_snapshot_retains_effective_settings_and_sources_without_rereadin
     monkeypatch.setenv("FLEET_TURN_TIMEOUT_SECONDS", "invalid-env-must-not-be-read")
     received = read_worker_settings(io.StringIO(snapshot.decode()))
     assert received.configuration() == settings.configuration()
-    assert received.databricks_token.get_secret_value() == "private-worker-token"
+    assert received.serper_api_key.get_secret_value() == "private-worker-token"
     assert received.configuration_source("turn_timeout_seconds") == "explicit"
     assert "private-worker-token" not in json.dumps(received.configuration())
 
@@ -3059,7 +2983,7 @@ def test_ratio_bounds_agree_across_entry_points(ratio, monkeypatch):
     assert payload["validation_ratio"] == ratio and review is None
     monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: [])
     with pytest.raises(ValueError, match="approved gold-labeled examples"):
-        dataset.curate_dataset(None, "offline", validation_ratio=ratio)
+        dataset.curate_dataset(None, validation_ratio=ratio)
 
 
 @pytest.mark.parametrize("ratio", [0, 0.09, 0.51, 1, float("nan"), float("inf")])
@@ -3069,7 +2993,7 @@ def test_invalid_ratio_rejected_by_shared_and_direct_contract(ratio):
     with pytest.raises(ValidationError):
         ExperimentOptions(validation_ratio=ratio)
     with pytest.raises(ValueError, match="validation_ratio"):
-        curate_dataset(None, "offline", validation_ratio=ratio)
+        curate_dataset(None, validation_ratio=ratio)
 
 
 def test_cli_and_http_search_controls_have_one_validated_contract():
@@ -4715,79 +4639,6 @@ def test_stream_callbacks_append_without_reordering():
 
 
 # Redaction and tracing
-
-
-@pytest.mark.parametrize("destination", [None, "", "catalog.schema.prefix"])
-def test_databricks_trace_experiment_preserves_native_activation(monkeypatch, destination):
-    from fleet_rlm import observability
-
-    experiment = (
-        None
-        if destination is None
-        else SimpleNamespace(tags={"mlflow.experiment.databricksTraceDestinationPath": destination})
-    )
-    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
-    calls = []
-    monkeypatch.setattr(
-        observability.mlflow, "set_experiment", lambda name, **kwargs: calls.append((name, kwargs)) or experiment
-    )
-    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
-
-    assert (
-        observability.set_mlflow_trace_experiment(
-            "/Shared/runtime",
-            databricks=True,
-            trace_catalog="catalog",
-            trace_schema="schema",
-            trace_table_prefix="prefix",
-            tracing_sql_warehouse_id="warehouse",
-        )
-        is experiment
-    )
-    assert len(calls) == 1
-    assert calls[0][0] == "/Shared/runtime"
-    assert calls[0][1]["trace_location"].full_table_prefix == "catalog.schema.prefix"
-
-
-@pytest.mark.parametrize("prefix", ["requested", ""])
-def test_databricks_trace_destination_mismatch_prevents_activation(monkeypatch, prefix):
-    from fleet_rlm import observability
-
-    experiment = SimpleNamespace(
-        experiment_id="17", tags={"mlflow.experiment.databricksTraceDestinationPath": "catalog.schema.existing"}
-    )
-    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
-    monkeypatch.setattr(
-        observability.mlflow, "set_experiment", lambda *_args, **_kwargs: pytest.fail("must not activate")
-    )
-    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
-
-    with pytest.raises(observability.MlflowTraceDestinationMismatchError, match="trace destination mismatch"):
-        observability.set_mlflow_trace_experiment(
-            "/Shared/runtime",
-            databricks=True,
-            trace_catalog="catalog",
-            trace_schema="schema",
-            trace_table_prefix=prefix,
-        )
-
-
-def test_databricks_trace_experiment_omitted_prefix_uses_native_experiment_id(monkeypatch):
-    from fleet_rlm import observability
-
-    experiment = SimpleNamespace(
-        experiment_id="17", tags={"mlflow.experiment.databricksTraceDestinationPath": "catalog.schema.17"}
-    )
-    monkeypatch.setattr(observability.mlflow, "get_experiment_by_name", lambda _name: experiment)
-    monkeypatch.setattr(observability.mlflow, "set_experiment", lambda *_args, **_kwargs: experiment)
-    monkeypatch.setenv("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "prior-warehouse")
-
-    assert (
-        observability.set_mlflow_trace_experiment(
-            "/Shared/runtime", databricks=True, trace_catalog="catalog", trace_schema="schema"
-        )
-        is experiment
-    )
 
 
 def test_mlflow_autolog_traces_runtime_inference_only(monkeypatch: pytest.MonkeyPatch) -> None:

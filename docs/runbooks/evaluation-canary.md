@@ -28,7 +28,7 @@ trace IDs, answer, route and persistence confirmation. Check `/history` and
 ## Label and score the saved trace
 
 Confirm the trace is complete and belongs to the intended destination. Use the
-fully qualified `trace:/...` reference when supplied by the client.
+trace identifier returned by Fleet.
 
 ```bash
 uv run fleet eval label TRACE_ID --answer '22.2 degrees Celsius' --value 22.2 --route flex

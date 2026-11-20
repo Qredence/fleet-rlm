@@ -1226,7 +1226,7 @@ def test_environment_incomplete_event_emits_nothing_when_the_durable_marker_is_a
 def test_host_format_failure_is_classified_only_when_it_escapes(sandbox, scenario):
     from dspy.utils.exceptions import AdapterParseError
 
-    from fleet_rlm.engine.turn import _failure_message
+    from fleet_rlm.engine.turn_commit import _failure_message
 
     def broken():
         raise AdapterParseError(
@@ -1258,7 +1258,7 @@ def test_host_format_failure_is_classified_only_when_it_escapes(sandbox, scenari
 def test_native_agent_parse_failure_survives_nested_bridge(sandbox, route, monkeypatch):
     from fleet_rlm.contracts import Route
     from fleet_rlm.engine.invocation import FleetRuntime
-    from fleet_rlm.engine.turn import _failure_message
+    from fleet_rlm.engine.turn_commit import _failure_message
 
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
     lm = dspy.utils.DummyLM([{"reasoning": "missing code"}])
@@ -1289,7 +1289,7 @@ def test_native_agent_parse_failure_survives_nested_bridge(sandbox, route, monke
 
 @pytest.mark.parametrize("mismatch", ["receipt", "call", "execution"])
 def test_unverified_remote_format_receipts_remain_generic(sandbox, mismatch, monkeypatch):
-    from fleet_rlm.engine.turn import _failure_message
+    from fleet_rlm.engine.turn_commit import _failure_message
 
     def broken():
         raise dspy.AdapterParseError(

@@ -1,4 +1,4 @@
-"""Squashed PostgreSQL schema definitions, retry helpers, and Lakebase row helpers."""
+"""Squashed PostgreSQL schema definitions and retry helpers."""
 
 from __future__ import annotations
 

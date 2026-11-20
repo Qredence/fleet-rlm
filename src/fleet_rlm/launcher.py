@@ -53,7 +53,6 @@ class LaunchPlan:
     start_api: bool = False
     start_mlflow: bool = False
     mlflow_url: str | None = None
-    mlflow_mode: str = "local"
     mlflow_data_dir: str = ".fleet/mlflow"
     api_env: dict[str, str] = field(default_factory=dict)
     mlflow_env: dict[str, str] = field(default_factory=dict, repr=False)
@@ -145,7 +144,7 @@ def verify_api_destination(url: str, expected: dict | None = None) -> dict:
         not isinstance(payload, dict)
         or payload.get("status") != "ok"
         or not isinstance(actual, dict)
-        or actual.get("mode") not in {"local", "databricks"}
+        or actual.get("mode") != "local"
         or actual.get("ready") is not True
         or not actual.get("experiment_id")
     ):
@@ -157,7 +156,7 @@ def verify_api_destination(url: str, expected: dict | None = None) -> dict:
             f"API MLflow destination mismatch at {url}: requested {expected['mode']} "
             f"({expected['experiment_name']}); server reports {actual.get('mode')} "
             f"({actual.get('experiment_name')}). Stop that server or select another FLEET_PORT. "
-            "For evaluation, configure the server runtime experiment and trace prefix for evaluation."
+            "For evaluation, configure the server runtime experiment for evaluation."
         )
     actual_digest = payload.get("runtime_digest")
     expected_digest = runtime_digest()
@@ -193,8 +192,6 @@ def plan_launch(
         verify_api_destination(api_url, settings.mlflow_descriptor())
         return LaunchPlan(api_url=api_url, notes=(f"Reusing the API server already running at {api_url}.",))
     environment = settings.mlflow_environment()
-    if target.mode == "databricks":
-        return LaunchPlan(api_url=api_url, start_api=True, api_env=environment, mlflow_mode="databricks")
     mlflow_url = target.tracking_uri
     try:
         mlflow_env = settings.local_mlflow_server_environment()
@@ -302,8 +299,6 @@ def _api_process(plan: LaunchPlan, host: str, port: int) -> ManagedProcess:
             host,
             "--port",
             str(port),
-            "--mlflow",
-            plan.mlflow_mode,
         ],
         STATE_DIR / "logs" / "server.log",
         env=plan.api_env,

@@ -27,6 +27,13 @@ All notable changes to this project are documented in this file.
 - Optimizer code identity ignores bytecode caches under bundled Skills, and a
   failed Skill resource listing is logged instead of silently dropped.
 
+### Removed
+
+- Fleet now uses local MLflow OSS exclusively. Databricks tracking, Unity Catalog
+  trace binding, and the Databricks launcher selector were removed. Existing local
+  MLflow connection settings still apply. Use external tooling for historical
+  Unity Catalog traces.
+
 ## [0.13.0] - 2026-11-14
 
 ### Features

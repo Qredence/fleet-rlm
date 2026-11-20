@@ -121,7 +121,7 @@ class ExperimentManager:
     async def _recover_stale_runs(self) -> None:
         """Reconcile orphaned ledger rows at most once per interval.
 
-        This is the polled-read entry point: `list`, `detail`, and an accepting `status` each
+        This is the polled-read entry point: `list` and `detail` each
         reach it on every client refresh. Unthrottled, one TUI session cost a connection, the
         global advisory lease, and two ledger scans per second. A failed attempt still counts,
         because the marker is stamped before the body runs: an unreachable database is retried
@@ -336,8 +336,6 @@ class ExperimentManager:
             "--managed-owner-id",
             self.owner_id,
             "--structured-events",
-            "--mlflow",
-            self.settings.mlflow_mode,
             *(["--approve", run_id] if approval else options.cli_arguments()),
         ]
 
@@ -532,26 +530,6 @@ class ExperimentManager:
             owner_id=record["owner_id"],
             expected_statuses=(record["status"],),
         )
-
-    async def begin_drain(self) -> dict[str, Any]:
-        """Fence new starts before taking the active-work snapshot."""
-        async with self._lock:
-            self.accepting = False
-        return await self.status()
-
-    async def status(self) -> dict[str, Any]:
-        """Report admission and live/unfinished worker ownership to the local launcher."""
-        # Poll recovery unless admission is already draining.
-        if not self._lock.locked():
-            # The launcher polls this every second while draining services and must observe
-            # recovery promptly, so a closed admission bypasses the poll throttle.
-            if self.accepting:
-                await self._recover_stale_runs()
-            else:
-                await self._reconcile_stale_runs()
-        records = await asyncio.to_thread(self.store.list_optimization_runs)
-        active = [public_run(record) for record in records if record["status"] in ACTIVE_STATUSES]
-        return {"accepting": self.accepting, "busy": self.busy or bool(active), "experiments": active}
 
     async def close(self) -> None:
         """Gracefully join owned work while its Store and MLflow destination remain available."""

@@ -263,8 +263,8 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
         save_review_labels=lambda *args, **kwargs: saved.append((args, kwargs)),
         close=lambda: None,
     )
-    assert trace_object(json.dumps(json.dumps({"task": task}))) == {"task": task}
-    examples = dataset.load_examples(store, "exp")
+    assert trace_object(json.dumps({"task": task})) == {"task": task}
+    examples = dataset.load_examples(store)
     assert len(examples) == 1 and examples[0].task == task
     assert examples[0].inputs()["session_history"] == "prior conversation"
     monkeypatch.setattr(Store, "open", lambda *_args, **_kw: store)
@@ -272,9 +272,7 @@ def test_sanitized_replay_remains_curatable_and_partial_labels_survive(monkeypat
     monkeypatch.setattr(
         evaluation_module.mlflow, "log_expectation", lambda **kw: labels.update({kw["name"]: kw["value"]})
     )
-    settings = SimpleNamespace(
-        fleet_database_url="postgresql://fake", fleet_database_schema="fleet", fleet_lakebase_endpoint=""
-    )
+    settings = SimpleNamespace(fleet_database_url="postgresql://fake", fleet_database_schema="fleet")
     args = SimpleNamespace(
         trace_id="trace-1",
         status=None,
@@ -336,9 +334,7 @@ def test_label_preflight_and_retry_never_clear_omitted_expectations(monkeypatch,
     args = SimpleNamespace(
         trace_id="tr1", status=None, group=None, answer=None, value=None, route=None, critical=False, reviewer="human"
     )
-    settings = SimpleNamespace(
-        fleet_database_url="postgresql://fake", fleet_lakebase_endpoint="", fleet_database_schema="fleet"
-    )
+    settings = SimpleNamespace(fleet_database_url="postgresql://fake", fleet_database_schema="fleet")
     if failure == "invalid_labels":
         labels.clear()
         args.critical = True
@@ -405,12 +401,12 @@ def test_required_replay_v2_reconstructs_exact_bytes_and_rejects_mismatched_orig
     assert required_skills_from_snapshot(decode_snapshot(*encode_snapshot(historical))) == ()
 
 
-def test_mapping_reads_a_request_that_unity_catalog_double_encoded() -> None:
+def test_mapping_reads_parsed_or_json_encoded_trace_requests() -> None:
     from fleet_rlm.observability import trace_object
 
     request = {"task": "2+2", "workspace_manifest": "/workspace/files (empty)"}
     assert trace_object(json.dumps(request)) == request
-    assert trace_object(json.dumps(json.dumps(request))) == request
+    assert trace_object(request) == request
     assert trace_object("not json") == {}
     assert trace_object(json.dumps("just a string")) == {}
 
@@ -461,7 +457,7 @@ def test_curation_refuses_too_few_examples_and_names_the_label_command(monkeypat
     ]
     monkeypatch.setattr(dataset, "load_examples_from_postgres", lambda *_args: examples)
     with pytest.raises(ValueError, match=r"3 source groups are needed; found 2.*fleet eval label"):
-        dataset.curate_dataset(SimpleNamespace(), "exp")
+        dataset.curate_dataset(SimpleNamespace())
 
 
 @pytest.mark.parametrize("snapshot", ["complete", "missing", "extra", "invalid", "empty"])
@@ -499,7 +495,7 @@ def test_curation_only_accepts_complete_workspace_revisions(snapshot) -> None:
         "replay_snapshot": compressed,
     }
     store = SimpleNamespace(reviewed_examples=lambda *_args: [row])
-    examples = dataset.load_examples(store, "unused")
+    examples = dataset.load_examples(store)
     if snapshot in {"complete", "empty"}:
         assert len(examples) == 1
         assert examples[0].context_files == contexts
@@ -1266,7 +1262,7 @@ def test_managed_approval_leaves_terminal_transition_to_api_parent(
     assert terminal["status"] == expected
 
 
-def test_optimize_opens_store_in_configured_lakebase_schema(monkeypatch, tmp_path, capsys) -> None:
+def test_optimize_opens_store_in_configured_postgresql_schema(monkeypatch, tmp_path, capsys) -> None:
 
     captured = {}
     store = MemoryOptimizationStore()
@@ -1380,7 +1376,7 @@ def test_missing_critical_holdout_refuses_curation_before_search_or_serving_mode
     ]
     monkeypatch.setattr(dataset, "load_examples", lambda *_args: examples)
     with pytest.raises(ValueError, match="critical example is needed to pin the holdout"):
-        dataset.curate_dataset(SimpleNamespace(), "exp")
+        dataset.curate_dataset(SimpleNamespace())
 
 
 def test_readiness_counts_examples_groups_critical_cases_and_the_split_they_would_form() -> None:
@@ -1705,7 +1701,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         max_total_tokens=50 if cancel_after_validation == "token_budget" else None,
     )
     if cancel_after_validation == "unchanged":
-        runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+        runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         # No rollouts are wasted on a candidate identical to the incumbent; the gate names the reason.
         assert measured == []
         manifest = json.loads(next((tmp_path / "candidates").glob("*.manifest.json")).read_text())
@@ -1720,7 +1716,7 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
     if cancel_after_validation == "lease_loss":
         with pytest.raises(RuntimeError, match="lease was lost"):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert measured.count(False) == measured.count(True) == 3
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
@@ -1728,15 +1724,13 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
     if cancel_after_validation == "token_budget":
         with pytest.raises(progress_mod.BudgetExhaustedError):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert measured == [] and not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
         return
     if cancel_after_validation == "cleanup_late":
         with ThreadPoolExecutor(max_workers=2) as pool:
-            result = pool.submit(
-                runner_mod._compile, args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner"
-            )
+            result = pool.submit(runner_mod._compile, args, settings, store, "s1-run", owner_id="owner")
             try:
                 assert late_entered.wait(timeout=10)
                 with pytest.raises(TimeoutError):
@@ -1753,14 +1747,14 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
     if cancel_after_validation in {"cleanup_search", "cleanup_incumbent", "cleanup_candidate"}:
         with pytest.raises(validation.RolloutCleanupError, match="evidence is invalid"):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
         assert "candidate_path" not in store.records["s1-run"]
         return
     if cancel_after_validation == "cleanup_cancel":
         with pytest.raises(progress_mod.OptimizationCancelledError) as raised:
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert any("cleanup is unconfirmed" in note for note in raised.value.__notes__)
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert not measured
@@ -1786,19 +1780,19 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         return
     if cancel_after_validation in {"callback_failure", "validation_write_failure", "owner_loss"}:
         with pytest.raises(progress_mod.OptimizationPersistenceError):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert not measured
         assert not list((tmp_path / "candidates").glob("*.json"))
         return
     if cancel_after_validation == "db_cancel":
         with pytest.raises(progress_mod.OptimizationCancelledError):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert not measured
         assert not list((tmp_path / "candidates").glob("*.json"))
         return
     if cancel_after_validation == "evidence_change":
         with pytest.raises(RuntimeError, match="evidence changed during the run"):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert searched and len(measured) == 6
         assert not list((tmp_path / "candidates").glob("*.json"))
         assert digest_bytes(active.read_bytes()) == digest
@@ -1810,13 +1804,13 @@ def test_compile_targets_incumbent_and_validates_holdout_only_after_search(
         "optional_narration",
     }:
         with pytest.raises(progress_mod.OptimizationCancelledError, match="stop requested"):
-            runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+            runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
         assert len(measured) == 6
         assert (tmp_path / "candidates").exists() is (cancel_after_validation == "finalization")
         assert digest_bytes(active.read_bytes()) == digest
         return
 
-    runner_mod._compile(args, settings, store, settings.mlflow_target(), "s1-run", owner_id="owner")
+    runner_mod._compile(args, settings, store, "s1-run", owner_id="owner")
     if cancel_after_validation == "optional_narration":
         assert narration_budgets and narration_budgets[0].used == 2
     assert run_tags["fleet.optimization.run_id"] == "s1-run"
@@ -2495,7 +2489,7 @@ def test_required_writes_fail_run_without_eligible_success(tmp_path, monkeypatch
 
     store.update_optimization_run = update
 
-    def compile_stub(_args, _settings, _store, _target, run_id, *, owner_id):
+    def compile_stub(_args, _settings, _store, run_id, *, owner_id):
         reporter = progress_mod.GEPAProgressReporter(run_id, store=store, owner_id=owner_id)
         if failure_at == "ownership":
             store.records[run_id]["owner_id"] = "replacement"
@@ -2615,7 +2609,6 @@ def test_compile_warns_for_resolved_serving_and_reflection_models(monkeypatch, t
             SimpleNamespace(validation_ratio=0.2),
             settings,
             store,
-            settings.mlflow_target(),
             "run",
             owner_id="owner",
         )
@@ -2765,7 +2758,7 @@ def test_check_and_compile_refuse_an_installed_program_that_contradicts_the_ledg
     report = json.loads(capsys.readouterr().out)
     assert report["ready"] is False and any("fleet.json" in item for item in report["missing"])
     with pytest.raises(ValueError, match=r"fleet\.json"):
-        runner_mod._compile(parser.parse_args([]), settings, store, SimpleNamespace(), "optimize-x")
+        runner_mod._compile(parser.parse_args([]), settings, store, "optimize-x")
 
 
 def test_token_budget_counts_rollout_usage_once_through_the_turn_callback_composition() -> None:
@@ -2806,8 +2799,7 @@ def test_evaluate_kinds_share_the_job_lifecycle_and_persist_per_split_results(tm
     store = MemoryOptimizationStore()
     _patched_worker(monkeypatch, store)
     splits = _split_results()
-    for body in ("_replay", "_synthetic"):
-        monkeypatch.setattr(runner_mod, body, lambda *_args, **_kw: splits)
+    monkeypatch.setattr(runner_mod, "_replay", lambda *_args, **_kw: splits)
     monkeypatch.setattr(runner_mod, "_rescore", lambda *_args, **_kw: (splits, 2))
     monkeypatch.setattr(cli_mod, "_compile", lambda *_args, **_kw: pytest.fail("evaluation must not optimize"))
     parser = _optimization_parser()
@@ -2874,7 +2866,7 @@ def test_replay_scores_the_installed_program_on_the_optimization_split(tmp_path,
         return SimpleNamespace(scores=[1.0, 0.5], critical_scores=critical, errors=1)
 
     monkeypatch.setattr(runner_mod, "score_split", score)
-    splits = runner_mod._replay(args, settings, store, settings.mlflow_target(), guard)
+    splits = runner_mod._replay(args, settings, store, guard)
     assert scored == [train, dev, holdout]
     assert not factories[0].fleet_root_cache and not factories[0].fleet_sub_cache
     assert splits["holdout"] == {"n": 2, "mean": 0.75, "errors": 1, "critical": {"passed": 1, "n": 2}}
@@ -2924,7 +2916,7 @@ def test_rescore_uses_the_optimization_split_and_counts_examples_without_a_label
 
     monkeypatch.setattr(evaluation, "score_evaluation_traces", score)
     monkeypatch.setattr(evaluation, "evaluate_cases", lambda *_a, **_k: pytest.fail("Turns must not run again"))
-    splits, excluded = runner_mod._rescore(args, settings, store, settings.mlflow_target(), guard)
+    splits, excluded = runner_mod._rescore(args, settings, store, guard)
     # tr-2 is not approved in MLflow, tr-5 is a PostgreSQL-only label, turn-6 has no trace at all.
     assert judged == [["tr-0", "tr-1"], ["tr-3", "tr-4"], ["tr-7"]]
     assert excluded == 3
@@ -2946,7 +2938,7 @@ def test_a_postgres_label_whose_trace_carries_gold_is_rescored_in_its_split(tmp_
     frame = pd.DataFrame({"fleet_metric/value": [0.25], "expectations": [{}]})
     monkeypatch.setattr(evaluation, "score_evaluation_traces", lambda *_a, **_k: SimpleNamespace(result_df=frame))
     store = SimpleNamespace(turn_reference=lambda turn_id: {"trace_id": "tr-1"} if turn_id == "turn-1" else None)
-    splits, excluded = runner_mod._rescore(args, settings, store, settings.mlflow_target(), guard)
+    splits, excluded = runner_mod._rescore(args, settings, store, guard)
     assert excluded == 0 and splits == {"train": {"n": 1, "mean": 0.25, "errors": 0, "critical": {"passed": 0, "n": 0}}}
 
 
@@ -2968,14 +2960,15 @@ def test_evaluation_work_is_scored_in_chunks_so_the_token_cap_overshoots_by_at_m
 
     monkeypatch.setattr(runner_mod, "score_split", score)
     with pytest.raises(progress_mod.BudgetExhaustedError):
-        runner_mod._replay(args, settings, store, settings.mlflow_target(), guard)
+        runner_mod._replay(args, settings, store, guard)
     assert sizes == [8, 8]  # stopped before the third chunk of 4; never a whole split
 
 
 def test_synthetic_jobs_are_deferred_before_live_work(tmp_path, monkeypatch):
-    settings, _store, _args, guard = _guarded(tmp_path, monkeypatch)
+    settings, store, args, _guard = _guarded(tmp_path, monkeypatch)
+    args.evaluate = "synthetic"
     with pytest.raises(ValueError, match="deferred"):
-        runner_mod._synthetic(settings, guard)
+        runner_mod._evaluate(args, settings, store, "run-1")
 
 
 def test_the_token_cap_applies_to_evaluate_jobs_and_keeps_the_partial_result_out_of_history(tmp_path, monkeypatch):
@@ -2993,7 +2986,7 @@ def test_the_token_cap_applies_to_evaluate_jobs_and_keeps_the_partial_result_out
     before = list(dspy.settings.callbacks)
     monkeypatch.setattr(runner_mod, "OptimizationStopPolicy", lambda *_a, **_k: guard)
     with pytest.raises(progress_mod.BudgetExhaustedError):
-        runner_mod._evaluate(args, settings, store, settings.mlflow_target(), "run-1", owner_id="owner")
+        runner_mod._evaluate(args, settings, store, "run-1", owner_id="owner")
     assert seen == {"calls": 1} and dspy.settings.callbacks == before
     assert "splits" not in store.get_optimization_run("run-1")["evaluation"]
 
@@ -3221,7 +3214,7 @@ def test_readiness_requires_the_minimum_examples_in_dev_and_holdout_in_one_place
     # Curation, `--check`, and the HTTP report all call this same function, so a run refuses the same way.
     monkeypatch.setattr(dataset, "load_examples", lambda *_a: examples)
     with pytest.raises(ValueError, match="dev would have 6 examples; need 7"):
-        dataset.curate_dataset(SimpleNamespace(), "exp", min_split_examples=7)
+        dataset.curate_dataset(SimpleNamespace(), min_split_examples=7)
 
 
 def test_labelling_an_unselected_trace_never_opens_the_database_and_edits_are_serialized(monkeypatch):

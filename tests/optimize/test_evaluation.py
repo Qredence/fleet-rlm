@@ -24,11 +24,9 @@ import dspy
 import httpx
 import pandas as pd
 import pytest
-from databricks.sdk.errors import NotFound
 from dspy.utils import DummyLM
 from mlflow.entities import SpanType
 from mlflow.exceptions import MlflowException
-from mlflow.protos.databricks_pb2 import RESOURCE_DOES_NOT_EXIST
 
 from fleet_rlm.execution_evidence import validate_structured, verification_entries
 from fleet_rlm.optimize import evaluation
@@ -47,7 +45,6 @@ from fleet_rlm.optimize.objectives import (
     expected_values_metric,
     missing_values,
     route_metric,
-    routing_efficiency,
 )
 from fleet_rlm.optimize.scorers import (
     JEV_ROUTE_THRESHOLD,
@@ -71,38 +68,16 @@ def _rows(content: str) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(content)))
 
 
-def test_build_dataset_uses_databricks_dataset_integration(monkeypatch):
-    import databricks.agents.datasets as agents_datasets
-    import mlflow.genai.datasets as datasets
-
-    calls = []
-    dataset = SimpleNamespace(merge_records=lambda records: calls.append(records))
-    monkeypatch.setattr(datasets, "get_tracking_uri", lambda: "databricks://test-profile")
-    monkeypatch.setattr(datasets, "_databricks_profile_env", nullcontext)
-    monkeypatch.setattr(datasets, "EvaluationDataset", lambda value: value)
-    monkeypatch.setattr(agents_datasets, "get_dataset", lambda _name: dataset)
+def test_build_dataset_creates_and_reuses_an_oss_dataset(tmp_path):
+    mlflow = evaluation.mlflow
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'datasets.db'}")
+    experiment_id = mlflow.create_experiment("local-evaluation-dataset")
     case = EvalCase("c1", "task", ("42",), "direct", "group")
+    first = evaluation.build_dataset("local_cases", experiment_id, [case])
+    second = evaluation.build_dataset("local_cases", experiment_id, [case])
 
-    assert evaluation.build_dataset("catalog.schema.cases", "123", [case]) is dataset
-    assert calls == [[case.record()]]
-
-
-@pytest.mark.parametrize("error", [NotFound("missing"), MlflowException("missing", RESOURCE_DOES_NOT_EXIST)])
-def test_build_dataset_creates_only_when_missing(monkeypatch, error):
-    calls = []
-    dataset = SimpleNamespace(merge_records=lambda records: calls.append(records))
-
-    def missing(**_kwargs):
-        raise error
-
-    monkeypatch.setattr(evaluation.mlflow.genai.datasets, "get_dataset", missing)
-    monkeypatch.setattr(
-        evaluation.mlflow.genai.datasets,
-        "create_dataset",
-        lambda **kwargs: calls.append(kwargs) or dataset,
-    )
-    assert evaluation.build_dataset("catalog.schema.cases", "123", []) is dataset
-    assert calls == [{"name": "catalog.schema.cases", "experiment_id": "123"}, []]
+    assert first.dataset_id == second.dataset_id
+    assert second.to_df().iloc[0]["inputs"]["task"] == "task"
 
 
 @pytest.mark.parametrize("error", [PermissionError("denied"), MlflowException("denied", "PERMISSION_DENIED")])
@@ -117,7 +92,7 @@ def test_build_dataset_does_not_create_on_lookup_failure(monkeypatch, error):
         lambda **_kwargs: pytest.fail("must not create a dataset after a failed lookup"),
     )
     with pytest.raises(type(error), match="denied"):
-        evaluation.build_dataset("catalog.schema.cases", "123", [])
+        evaluation.build_dataset("local_cases", "123", [])
 
 
 def test_synthetic_cases_are_deterministic_and_grouped():
@@ -351,18 +326,6 @@ def _evaluation_trace(location, *, state="OK", spans=None):
         info=SimpleNamespace(trace_location=location, state=state),
         data=SimpleNamespace(spans=[object()] if spans is None else spans),
     )
-
-
-@pytest.mark.parametrize("wrapped", [False, True])
-def test_evaluation_trace_readback_checks_exact_uc_destination(monkeypatch, wrapped):
-    location = SimpleNamespace(catalog_name="c", schema_name="s", table_prefix="eval")
-    trace = _evaluation_trace(SimpleNamespace(uc_table_prefix=location) if wrapped else location)
-    reads = []
-    monkeypatch.setattr(evaluation.mlflow, "get_trace", lambda *args, **kwargs: reads.append((args, kwargs)) or trace)
-    assert evaluation.read_evaluation_trace("tr-1", experiment_id="e1", uc_location=("c", "s", "eval")) is trace
-    assert reads == [(("tr-1",), {"silent": True, "flush": True})]
-    with pytest.raises(evaluation.EvaluationError, match="outside the configured"):
-        evaluation.read_evaluation_trace("tr-1", experiment_id="e1", uc_location=("c", "s", "runtime"))
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
@@ -1285,7 +1248,11 @@ def test_tracking_profile_mismatch_prevents_runtime_creation_and_paid_calls(tmp_
             run_dir,
             base_url="http://fleet",
             allow_live=True,
-            expected_destination={"mode": "databricks", "tracking_uri": "databricks", "experiment_name": "runtime"},
+            expected_destination={
+                "mode": "local",
+                "tracking_uri": "http://different.invalid",
+                "experiment_name": "runtime",
+            },
         )
     assert [request.url.path for request in requests] == ["/health"]
     assert not turns
@@ -1293,14 +1260,11 @@ def test_tracking_profile_mismatch_prevents_runtime_creation_and_paid_calls(tmp_
     assert receipt["status"] == "preflight_failed" and "destination differs" in receipt["error"]
 
 
-@pytest.mark.parametrize("backend", ["local", "databricks"])
-@pytest.mark.parametrize(
-    "judge_model", ["openai:/configured-judge", "databricks:/configured-judge", "anthropic:/judge"]
-)
+@pytest.mark.parametrize("judge_model", ["openai:/configured-judge", "anthropic:/judge"])
 @pytest.mark.parametrize("scoring_error", [False, True])
 @pytest.mark.parametrize("partial", [False, True])
 def test_evaluates_saved_traces_in_configured_experiment_without_turns(
-    tmp_path, monkeypatch, backend, judge_model, scoring_error, partial
+    tmp_path, monkeypatch, judge_model, scoring_error, partial
 ):
     import mlflow
     import pandas as pd
@@ -1318,13 +1282,7 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
         return 1
 
     bench.score_tasks(bundle, run_dir, verifier)
-    descriptor = {
-        "mode": backend,
-        "tracking_uri": "databricks" if backend == "databricks" else "http://tracking",
-        "trace_location": {"catalog": "catalog", "schema": "runtime", "table_prefix": "traces"}
-        if backend == "databricks"
-        else None,
-    }
+    descriptor = {"mode": "local", "tracking_uri": "http://tracking"}
     run = json.loads((run_dir / "run.json").read_text())
     run["service"]["mlflow"].update(descriptor)
     bench.save_json(run_dir / "run.json", run)
@@ -1338,16 +1296,11 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
             eval_experiment_name="configured-eval", tracking_uri=descriptor["tracking_uri"]
         ),
         mlflow_descriptor=lambda: descriptor,
-        prepare_mlflow_auth=lambda: None,
         judge_environment=lambda: {},
         build_judge_lm=build_judge_lm,
         resolved_model=lambda role: SimpleNamespace(build_adapter=lambda: "judge-adapter") if role == "judge" else None,
         build_jev_lm=lambda: "native-jev-lm",
         fleet_judge_model=judge_model,
-        mlflow_trace_catalog="catalog",
-        mlflow_trace_schema="runtime",
-        mlflow_eval_trace_table_prefix="evaluations",
-        mlflow_tracing_sql_warehouse_id="warehouse",
     )
     trace = SimpleNamespace(info=SimpleNamespace(trace_id="trace-1"))
     monkeypatch.setattr(
@@ -1386,10 +1339,9 @@ def test_evaluates_saved_traces_in_configured_experiment_without_turns(
         assert bench.evaluate_saved_tasks(bundle, run_dir, settings, allow_judges=True).run_id == "saved-eval"
     assert len(turns) == (2 if partial else 1)  # Evaluation never sends another Turn.
     assert configured[0][0] == ("configured-eval", descriptor["tracking_uri"])
-    assert configured[0][1]["trace_table_prefix"] == "evaluations"
+    assert configured[0][1] == {}
     assert reads[-1][1]["expected_labels"]["review_status"] == "benchmark"
     assert reads[-1][1]["expected_labels"]["expected_answer"] == "secret-gold"
-    assert reads[-1][1]["uc_location"] == (("catalog", "runtime", "traces") if backend == "databricks" else None)
     assert labels[0][1]["review_status"] == "benchmark"
     assert inputs[0][0][0] == [
         {"case_id": case["case_id"], "task": case["task"]} for case in bench.load_tasks(bundle)["cases"]
@@ -1438,7 +1390,6 @@ def test_official_scores_survive_real_mlflow_cross_experiment_cloning(
             eval_experiment_name="benchmark-evaluation", tracking_uri=mlflow_test_uri
         ),
         mlflow_descriptor=lambda: descriptor,
-        prepare_mlflow_auth=lambda: None,
         judge_environment=lambda: (
             pytest.fail("Official-only scoring must not prepare judge credentials") if official_only else {}
         ),
@@ -1446,10 +1397,6 @@ def test_official_scores_survive_real_mlflow_cross_experiment_cloning(
         resolved_model=lambda _role: SimpleNamespace(build_adapter=lambda: None),
         build_jev_lm=lambda: None,
         fleet_judge_model="unused",
-        mlflow_trace_catalog="",
-        mlflow_trace_schema="",
-        mlflow_eval_trace_table_prefix="",
-        mlflow_tracing_sql_warehouse_id="",
     )
 
     # Exercise native trace readback, labeling, cloning and scoring without model judges.
@@ -1610,7 +1557,7 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
 
     from fleet_rlm.config import FleetSettings
 
-    monkeypatch.setenv("DATABRICKS_TOKEN", "test-only")
+    monkeypatch.setenv("TEST_GATEWAY_TOKEN", "test-only")
     requests = []
 
     @asynccontextmanager
@@ -1650,8 +1597,7 @@ def test_direct_uses_native_request_and_response_without_gold(tmp_path, monkeypa
     monkeypatch.setattr(StdlibAsyncTransport, "stream", transport)
     settings = FleetSettings(
         fleet_root_api_base="https://gateway.invalid/ai-gateway/mlflow/v1",
-        fleet_root_api_key_env="DATABRICKS_TOKEN",
-        databricks_token="test-only",
+        fleet_root_api_key_env="TEST_GATEWAY_TOKEN",
         fleet_root_model="openai/system.ai.deepseek-v4-1-flash-1017",
         fleet_root_max_tokens=16384,
         fleet_root_temperature=0.2,
@@ -1739,10 +1685,6 @@ def test_pilot_is_gated_rotates_arms_and_never_exceeds_ten_slots(tmp_path, monke
         mlflow_target=lambda: SimpleNamespace(mode="local", experiment_name="runtime", tracking_uri="http://tracking"),
         mlflow_descriptor=lambda: DESTINATION,
         configuration=lambda: {"digest": "settings", "values": values},
-        mlflow_trace_catalog="",
-        mlflow_trace_schema="",
-        mlflow_trace_table_prefix="",
-        mlflow_tracing_sql_warehouse_id="",
     )
     monkeypatch.setattr(bench, "build_lm", lambda _settings, _model_id, _role: lm, raising=False)
     slots = []
@@ -2366,7 +2308,7 @@ def test_trace_readers_require_one_host_root_and_ignore_nested_turns(root_count)
     from fleet_rlm.optimize.scorers import ScorerEvidenceError, _trace_evidence_context
 
     outputs = {"answer": "Done", "lm_calls": 3, "sandbox_errors": 0, "submit_rejections": 0}
-    roots = [_span("fleet_turn", outputs=json.dumps(json.dumps(outputs))) for _ in range(root_count)]
+    roots = [_span("fleet_turn", outputs=json.dumps(outputs)) for _ in range(root_count)]
     nested = _span("fleet_turn", outputs={"lm_calls": 999}, parent_id="parent")
     trace = _trace(*roots, nested)
     if root_count == 1:
@@ -2383,7 +2325,7 @@ def test_route_correctness_matches_gold_label():
 
 
 def test_scorer_suite_includes_route_correctness():
-    suite = build_mlflow_scorer_suite("databricks:/test-judge")
+    suite = build_mlflow_scorer_suite("openai:/test-judge")
     names = [item.name for item in suite]
     assert set(names) == {
         "relevance_to_query",
@@ -2401,7 +2343,7 @@ def _route_trace(**overrides):
 
 
 def _route_judge(jev_lm="jev-sentinel"):
-    return {item.name: item for item in build_mlflow_scorer_suite("databricks:/test-judge", jev_lm=jev_lm)}[
+    return {item.name: item for item in build_mlflow_scorer_suite("openai:/test-judge", jev_lm=jev_lm)}[
         "jev_routing_efficiency_judge"
     ]
 
@@ -2483,7 +2425,7 @@ def test_jev_route_judge_falls_back_to_generative_judge_without_typesafe_key(mon
         {"inputs": {"task": "Inspect the file"}, "outputs": {"route": "flex", "lm_calls": 4, "sandbox_errors": 0}},
     )
     definition = calls.definitions["jev_routing_efficiency_judge"]
-    assert definition["model"] == "databricks:/test-judge"
+    assert definition["model"] == "openai:/test-judge"
     assert "{{ trace }}" not in definition["instructions"]
 
 
@@ -2958,15 +2900,14 @@ def test_route_suitability_judge_is_separate_from_deterministic_budget_efficienc
     route_scorer = _scorer("jev_routing_efficiency_judge")
     trace = _pi_execution_trace()
     assert route_scorer(trace=trace).value is True
-    assert routing_efficiency(True, 6)[0] == 0.95
     route_call = next(context for name, context in calls if name == "jev_routing_efficiency_judge")
     assert route_call["outputs"] == {"route": "flex", "lm_calls": 6, "sandbox_errors": 0}
 
 
-def test_uc_wrapped_outputs_preserve_answer_route_and_execution_counts():
-    inputs = json.dumps(json.dumps({"task": "Convert temperature"}))
+def test_json_outputs_preserve_answer_route_and_execution_counts():
+    inputs = json.dumps({"task": "Convert temperature"})
     outputs = json.dumps(
-        json.dumps({"answer": "22.2", "route": "flex", "lm_calls": 6, "sandbox_errors": 0, "submit_rejections": 0})
+        {"answer": "22.2", "route": "flex", "lm_calls": 6, "sandbox_errors": 0, "submit_rejections": 0}
     )
     expectations = {"expected_answer": "22.2", "expected_values": ["22.2"], "route": "direct"}
     assert expected_values_present(outputs=outputs, expectations=expectations).value is True
@@ -3152,28 +3093,6 @@ def test_execution_identity_uses_explicit_worker_run_in_scorer_threads(monkeypat
 
 
 # Optimization objectives
-
-
-@pytest.mark.parametrize("used_rlm", [False, True])
-def test_routing_efficiency_never_rewards_more_budget_units(used_rlm):
-    scores = [routing_efficiency(used_rlm, calls)[0] for calls in range(0, 40)]
-    assert scores == sorted(scores, reverse=True)
-
-
-def test_routing_efficiency_keeps_its_bands():
-    assert routing_efficiency(False, 1) == (1.0, "Fast path completed in 1 budget units.")
-    assert routing_efficiency(True, 10) == (0.95, "Bounded RLM/Flex execution used 10 budget units.")
-
-
-@pytest.mark.parametrize("calls,expected", [(2, 1.0), (3, 0.98), (15, 0.74)])
-def test_direct_route_is_penalised_after_its_allowance_instead_of_scoring_one(calls, expected):
-    # The previous fall-through scored any non-RLM Turn with 3-15 units as 1.0.
-    assert routing_efficiency(False, calls)[0] == pytest.approx(expected)
-
-
-@pytest.mark.parametrize("used_rlm", [False, True])
-def test_routing_efficiency_floors_instead_of_going_negative(used_rlm):
-    assert routing_efficiency(used_rlm, 10_000)[0] == 0.2
 
 
 def test_efficiency_penalties_and_availability():

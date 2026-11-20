@@ -8,7 +8,7 @@ help:
 	@echo "  make serve        Start the local FastAPI SSE server"
 	@echo "  make web          Serve the Textual client in a browser on loopback"
 	@echo "  make cli          Show terminal client help"
-	@echo "  make eval-dataset Create the synthetic evaluation dataset (writes to Unity Catalog)"
+	@echo "  make eval-dataset Create the synthetic evaluation dataset"
 	@echo "  make eval         Run synthetic cases against a live server (live model and sandbox cost)"
 	@echo "  make optimize [ARGS=--check]  Run GEPA over all labelled Turns (live, explicit approval only); --check prints readiness"
 	@echo "  make test         Run non-live unit and boundary tests"

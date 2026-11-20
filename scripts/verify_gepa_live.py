@@ -73,7 +73,6 @@ def main() -> None:
     settings = FleetSettings(
         fleet_database_url="postgresql://unused.invalid/gepa-canary",
         fleet_database_migration_url="",
-        mlflow_mode="local",
     ).with_explicit_overrides(
         fleet_root_max_tokens=512,
         fleet_sub_max_tokens=512,

@@ -566,7 +566,7 @@ def build_mlflow_scorer_suite(
     @scorer(name="retrieval_groundedness")
     def retrieval_groundedness(trace: Any) -> list[Feedback] | None:
         # MLflow's built-in raises on non-retrieval tasks. An absent metric is inapplicable,
-        # not a failed judge and not null feedback (which Databricks rejects without an error).
+        # not a failed judge and not null feedback.
         if trace is None or not any(span.span_type == SpanType.RETRIEVER for span in trace.search_spans()):
             return None
         return groundedness(trace=trace)
