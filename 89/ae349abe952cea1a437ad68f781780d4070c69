@@ -1,0 +1,18 @@
+src/fleet_rlm/sandbox/lifecycle.py
+  h_f276322eb5eb9f 355,358,536,538
+src/fleet_rlm/sandbox/manager.py
+  h_f276322eb5eb9f 175-179
+tests/sandbox/test_sandbox.py
+  h_f276322eb5eb9f 3771-3783
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "89ae349abe952cea1a437ad68f781780d4070c69",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
