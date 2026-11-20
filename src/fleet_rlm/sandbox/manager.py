@@ -172,6 +172,11 @@ class DaytonaSandboxManager(WorkspaceIOMixin, SandboxBudgetMixin, SandboxLifecyc
             raise ValueError("max_llm_calls must be positive")
         validate_shared_notes_subpath(self.shared_notes_subpath)
 
+    def _adopt_allocated_sandbox(self, sandbox: Any) -> None:
+        """Record the recovered handle and clear the pending allocation while holding the sandbox lock."""
+        self._sandbox = sandbox
+        self._creation_pending = False
+
     def emit(self, event: str, **payload: Any) -> None:
         """Send one lifecycle event, tagged with agent lineage, to the root's callback."""
         callback = self.root.event_callback

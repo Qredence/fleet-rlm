@@ -352,10 +352,10 @@ class SandboxLifecycleMixin:
             if self._sandbox is None:
                 self.check_turn()
                 if self._creation_pending:
-                    self._sandbox = self._find_allocated_sandbox(
+                    sandbox = self._find_allocated_sandbox(
                         self._client, self.agent_id, on_uncertain="; refusing a duplicate create"
                     )
-                    self._creation_pending = False
+                    self._adopt_allocated_sandbox(sandbox)
                     return self.ensure_sandbox()
                 child = self.parent is not None
                 root_sandbox = self.root.ensure_sandbox() if child else None
@@ -533,10 +533,9 @@ class SandboxLifecycleMixin:
                 self._persist_ownership_resource("create", None)
                 if client is None:
                     raise RuntimeError("Pending allocation has no provider client")
-                allocated = self._find_allocated_sandbox(client, self.agent_id)
+                sandbox = self._find_allocated_sandbox(client, self.agent_id)
                 with self._lock:
-                    self._sandbox = sandbox = allocated
-                    self._creation_pending = False
+                    self._adopt_allocated_sandbox(sandbox)
             if sandbox is not None:
                 if client is None:
                     raise RuntimeError("Sandbox cleanup has no provider client")

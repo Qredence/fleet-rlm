@@ -3769,6 +3769,19 @@ def test_create_rejection_clears_only_definitive_allocation_intent(monkeypatch, 
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+def test_ensure_sandbox_reuses_the_handle_from_an_ambiguous_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(manager_module, "preflight", lambda *_args, **_kwargs: object())
+    manager = DaytonaSandboxManager("key", "org", "volume", "uncertain-create")
+    sandbox = SimpleNamespace(id="allocated-before-ack", state="started")
+    manager._creation_pending = True
+    manager._client = SimpleNamespace(snapshot=object(), list=lambda _query: [sandbox])
+
+    assert manager.ensure_sandbox() is sandbox
+    assert manager.live_sandbox_id == sandbox.id
+    assert manager._creation_pending is False
+
+
+@pytest.mark.usefixtures("clear_snapshot_preflight_cache")
 def test_shutdown_preserves_ambiguous_create_until_a_resource_can_be_stopped() -> None:
     manager = DaytonaSandboxManager("key", "org", "volume", "uncertain-create")
     manager._creation_pending = True
