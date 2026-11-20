@@ -12,7 +12,7 @@ import re
 import subprocess
 import threading
 from collections.abc import Generator
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import contextmanager, suppress
 from importlib.metadata import distributions
 from itertools import islice
 from pathlib import Path
@@ -369,35 +369,14 @@ class LMUsageCallback(FleetCallbackBase):
         self.finish_usage(call_id)
 
 
-def usage_callbacks(callbacks: list[Any]) -> list[Any]:
-    """Reuse the stream collector when present, otherwise collect for non-streaming evaluation."""
-    collectors = [callback for callback in callbacks if isinstance(callback, LMUsageCallback)]
-    collector = collectors[0] if collectors else LMUsageCallback()
-    return [collector, *(callback for callback in callbacks if not isinstance(callback, LMUsageCallback))]
-
-
-def ambient_callbacks() -> list[Any]:
-    """The ambient callback list; `dspy.context` replaces callbacks, so a scope must re-spread them."""
-    return list(dspy.settings.callbacks)
-
-
-def turn_callbacks(*extra: Any) -> list[Any]:
-    """Turn callbacks with the numeric usage collector, reused when the caller already supplies one."""
-    return usage_callbacks([*ambient_callbacks(), *extra])
-
-
-def stream_callbacks(*extra: Any) -> list[Any]:
-    """Ambient callbacks with a caller's collector appended, keeping the caller's order.
-
-    `dspy.context` replaces the list, so any scope that needs the ambient callbacks must re-spread
-    them; this is the one place that does it for a streaming collector that is not a usage collector.
-    """
-    return [*ambient_callbacks(), *extra]
-
-
-def typesafe_callbacks() -> list[Any]:
-    """Ambient callbacks without MLflow's DSPy hook, for typed decisions that emit their own spans."""
-    return without_mlflow_dspy_callback(ambient_callbacks())
+def turn_callbacks() -> list[Any]:
+    """Keep one numeric usage collector ahead of the ambient tracing callbacks."""
+    callbacks = dspy.settings.callbacks
+    collector = next((item for item in callbacks if isinstance(item, LMUsageCallback)), None)
+    return [
+        collector if collector is not None else LMUsageCallback(),
+        *(item for item in callbacks if not isinstance(item, LMUsageCallback)),
+    ]
 
 
 @contextmanager
@@ -406,20 +385,20 @@ def typed_decision_scope(
 ) -> Generator[None, None, None]:
     """One typed decision's scope: no LM history, the right callbacks, and usage on its own span.
 
-    TypeSafe clients emit their own usage, so only they are metered here; a generative backend
-    already reports usage through the LM callback and must keep the MLflow hook off.
+    TypeSafe calls use a dedicated span and usage collector. Generative decisions inherit
+    the usual LM callbacks.
     """
-    adapter_options = {} if typesafe else {"adapter": adapter or dspy.XMLAdapter(use_native_function_calling=True)}
-    with (
-        dspy.context(
+    if typesafe:
+        callbacks = [callback for callback in dspy.settings.callbacks if isinstance(callback, FleetCallbackBase)]
+        with dspy.context(lm=lm, disable_history=True, callbacks=callbacks), decision_usage(span):
+            yield
+    else:
+        with dspy.context(
             lm=lm,
             disable_history=True,
-            callbacks=typesafe_callbacks() if typesafe else ambient_callbacks(),
-            **adapter_options,
-        ),
-        decision_usage(span) if typesafe else nullcontext(),
-    ):
-        yield
+            adapter=adapter or dspy.XMLAdapter(use_native_function_calling=True),
+        ):
+            yield
 
 
 _CREDENTIAL_KEY = r"password|secret|token|authorization|cookie|api.?key|credential"
@@ -432,11 +411,6 @@ _CREDENTIAL = re.compile(
 )
 _TRACE_STRING_LIMIT = 20_000
 _TRACE_NODE_LIMIT = 200
-
-
-def without_mlflow_dspy_callback(callbacks: list[Any]) -> list[Any]:
-    """Keep only Fleet callbacks in TypeSafe decision scopes; third-party hooks are excluded."""
-    return [callback for callback in callbacks if isinstance(callback, FleetCallbackBase)]
 
 
 @contextmanager

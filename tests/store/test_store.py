@@ -514,7 +514,8 @@ def test_snapshot_provenance_round_trips_into_the_turn_status_payload():
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **SNAPSHOT_PROVENANCE}
-    _runtime(store, []).commit_turn("s1", turn_record)
+    turn_record["artifact_capture"] = {"complete": True, "paths": []}
+    _runtime(store).commit_turn("s1", turn_record)
     (session_id,), kwargs = calls[0]
     assert session_id == "s1"
     turn_id, result = kwargs["completion"]
@@ -532,7 +533,8 @@ def test_turn_metadata_round_trips_into_the_stored_turn_and_status_payload(field
     calls = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", field: value}
-    _runtime(store, []).commit_turn("s1", turn_record)
+    turn_record["artifact_capture"] = {"complete": True, "paths": []}
+    _runtime(store).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -554,7 +556,8 @@ def test_one_turn_joins_its_status_payload_to_the_stored_record_with_null_preser
         "cleanup": "not_required",
         **SNAPSHOT_PROVENANCE,
     }
-    _runtime(store, []).commit_turn("s1", turn_record)
+    turn_record["artifact_capture"] = {"complete": True, "paths": []}
+    _runtime(store).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -583,7 +586,8 @@ def test_provider_bounds_round_trip_into_the_stored_turn_and_status_payload():
         "provider_owned": True,
     }
     turn_record = {"turn_id": "t1", "answer": "5", "route": "flex", **bounds}
-    _runtime(store, []).commit_turn("s1", turn_record)
+    turn_record["artifact_capture"] = {"complete": True, "paths": []}
+    _runtime(store).commit_turn("s1", turn_record)
 
     turn_id, result = calls[0][1]["completion"]
     assert turn_id == "t1"
@@ -691,18 +695,17 @@ def test_replay_without_snapshot_provenance_is_readable(deadline_fields, expecte
     assert encode_snapshot(historical) == (digest, compressed)
 
 
-def _runtime(store: Any, files: list[str]) -> SessionRuntime:
-    sandbox = SimpleNamespace(session_id="s1", list_workspace_files=lambda: list(files))
+def _runtime(store: Any) -> SessionRuntime:
+    sandbox = SimpleNamespace(session_id="s1")
     return SessionRuntime(sandbox_mgr=sandbox, store=store, skill_mgr=None, engine=None)
 
 
 @pytest.mark.parametrize("paths", [["../escape"], ["outside/a"], ["files/a\\b"], ["files/a\nb"], [1], {}, "", None])
-def test_runtime_rejects_an_invalid_workspace_listing_before_any_sql_runs(paths):
+def test_runtime_rejects_invalid_captured_paths_before_any_sql_runs(paths):
     store, pool = make_store()
-    runtime = _runtime(store, [])
-    runtime.sandbox_mgr.list_workspace_files = lambda: paths
+    runtime = _runtime(store)
     with pytest.raises(ValueError, match="invalid relative path"):
-        runtime.commit_turn("s1", {"turn_id": "t1"})
+        runtime.commit_turn("s1", {"turn_id": "t1", "artifact_capture": {"complete": True, "paths": paths}})
     assert pool.borrowed == 0
 
 
@@ -715,8 +718,16 @@ def test_runtime_reports_artifacts_and_records_the_completion_without_reading_fi
         "submit_rejections": 2,
         "budget_breakdown": {"generation_query": 3, "routing": 1, "skill_selection": 0, "other_decisions": 0},
     }
-    completion = _runtime(store, ["files/in.txt", "artifacts/out.txt"]).commit_turn(
-        "s1", {"turn_id": "t1", "answer": "a", "route": "flex", "trace_id": "tr-1", **usage}
+    completion = _runtime(store).commit_turn(
+        "s1",
+        {
+            "turn_id": "t1",
+            "answer": "a",
+            "route": "flex",
+            "trace_id": "tr-1",
+            "artifact_capture": {"complete": True, "paths": ["artifacts/out.txt"]},
+            **usage,
+        },
     )
     assert completion["artifacts"] == ["artifacts/out.txt"]
     (session_id,), kwargs = calls[0]
@@ -732,7 +743,7 @@ def test_claim_turn_refuses_a_key_reused_for_another_task():
     prior = {"turn_id": "t0", "task_sha256": "other", "status": "running", "result": {}}
     store = SimpleNamespace(claim_turn=lambda *_args, **_kwargs: prior)
     with pytest.raises(IdempotencyConflictError, match="another task"):
-        _runtime(store, []).claim_turn("t1", "key", "task")
+        _runtime(store).claim_turn("t1", "key", "task")
 
 
 def test_a_dropped_idle_connection_is_retried_once_after_a_pause(monkeypatch):
@@ -780,7 +791,7 @@ def test_runtime_rejects_a_turn_record_without_a_turn_id_before_any_sql_runs():
     calls: list = []
     store = SimpleNamespace(commit_turn=lambda *args, **kwargs: calls.append((args, kwargs)))
     with pytest.raises(ValueError, match="turn_id"):
-        _runtime(store, []).commit_turn("s1", {"answer": "42"})
+        _runtime(store).commit_turn("s1", {"answer": "42"})
     assert calls == []
 
 
@@ -1441,7 +1452,6 @@ def test_real_postgres_chat_integrity_and_ledger_handoff():
             connection.execute("INSERT INTO fleet_lite_schema_migrations VALUES (1)")
         store.initialize()
         store.initialize()
-        store.ensure_session("chat")
         with store.acquire_session_lease("chat") as lease:
             assert (
                 store.claim_turn("chat", "first", "request", "digest", task="hello", ownership_epoch=lease.epoch)
@@ -1557,7 +1567,7 @@ def test_artifact_publication_refuses_changed_evidence_or_expired_turn(monkeypat
     from fleet_rlm.config import FleetSettings
 
     committed = []
-    runtime = _runtime(SimpleNamespace(commit_turn=lambda *_args, **kwargs: committed.append(kwargs)), [])
+    runtime = _runtime(SimpleNamespace(commit_turn=lambda *_args, **kwargs: committed.append(kwargs)))
     runtime.storage_settings = FleetSettings(_env_file=None, fleet_storage_bucket="private")
     expected = hashlib.sha256(b"verified").hexdigest()
     runtime.sandbox_mgr.read_workspace_file_to_path = lambda _remote, path, **_kwargs: Path(path).write_bytes(
@@ -1584,10 +1594,10 @@ def test_artifact_publication_refuses_changed_evidence_or_expired_turn(monkeypat
                 "turn_id": "t1",
                 "task": "task",
                 "answer": "answer",
+                "artifact_capture": {"complete": True, "paths": ["artifacts/report.txt"]},
                 "artifact_changes": {
                     "files": {"artifacts/report.txt": {"state": "created", "sha256": expected}},
                 },
             },
-            artifact_paths=["artifacts/report.txt"],
         )
     assert not committed

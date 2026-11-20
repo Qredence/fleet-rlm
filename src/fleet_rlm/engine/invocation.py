@@ -128,19 +128,50 @@ class FleetRuntime:
         rlm_history: dspy.History | None = None,
     ) -> dspy.Prediction:
         """Use the same host path for ordinary Turns and reconstructed evaluation rollouts."""
-        return invoke_program(
-            self,
-            workspace_manifest=workspace_manifest,
-            memory_summary=memory_summary,
-            task=task,
-            skills_catalog=skills_catalog,
-            session_history=session_history,
-            context=context,
-            execution_mode=execution_mode or self.execution_mode,
-            required_skills=required_skills,
-            selected_route=selected_route,
-            rlm_history=rlm_history,
-        )
+        preview_generation = self._preview_turn_generation
+        self._preview_turn_generation = None
+        active_generation = _active_turn_generation(self.sandbox_mgr)
+        if selected_route is None or active_generation is None or preview_generation != active_generation:
+            self.reload_program()
+        source = "artifact" if self.compiled.digest else "baseline"
+        manager = self.sandbox_mgr
+        mode = execution_mode or self.execution_mode
+        if mode not in {"direct", "flex", "rlm", "hybrid"}:
+            raise ValueError("Invalid execution mode")
+        if required_skills and mode == "direct":
+            raise SkillAdmissionError("Direct mode cannot use required Skills; select Hybrid, RLM or Flex")
+        with manager.turn_scope():
+            manager.check_turn()
+            for skill in required_skills:
+                for path, content in skill.files:
+                    if (
+                        manager.stat_workspace_file(f"skills/{skill.name}/{path}")["sha256"]
+                        != hashlib.sha256(content).hexdigest()
+                    ):
+                        raise SkillAdmissionError("Required Skill files changed before execution")
+            if isinstance(context, WorkspaceDataset):
+                metadata = manager.stat_workspace_file(context.workspace_path)
+                if context.sha256 and metadata["sha256"] != context.sha256:
+                    raise ValueError("Dataset source changed; select the new revision")
+            self.delegation.bind_policies(self.program.child_policies.snapshot())
+            manager.emit("program_selection", source=source, digest=self.compiled.digest)
+            with dspy.context(callbacks=turn_callbacks()):
+                prediction = self.program(
+                    workspace_manifest=workspace_manifest,
+                    memory_summary=memory_summary,
+                    task=task,
+                    skills_catalog=skills_catalog,
+                    session_history=session_history,
+                    context=context,
+                    execution_mode=mode,
+                    required_skills=required_skills,
+                    selected_route=selected_route,
+                    rlm_history=rlm_history,
+                )
+            prediction["execution_evidence"] = self.execution_evidence()
+            for name, value in manager.turn_usage().items():
+                prediction[name] = value
+            return prediction
 
     def preview_route(self, *, task: str, workspace_manifest: str, skills_catalog: str) -> Route:
         """Run the existing native router once when authoritative state proves the workspace empty."""
@@ -311,42 +342,3 @@ class WorkspaceInputs:
             inlined += len(text)
         prompt = "<workspace_files>\n" + "\n".join(blocks) + "\n</workspace_files>\n\n" + task if blocks else task
         return prompt, inlined, truncated
-
-
-def invoke_program(runtime: FleetRuntime, **inputs: Any) -> dspy.Prediction:
-    """Admit, invoke natively and certify once; outer owners retain persistence and teardown."""
-    preview_generation = runtime._preview_turn_generation
-    runtime._preview_turn_generation = None
-    active_generation = _active_turn_generation(runtime.sandbox_mgr)
-    if inputs.get("selected_route") is None or active_generation is None or preview_generation != active_generation:
-        runtime.reload_program()
-    source = "artifact" if runtime.compiled.digest else "baseline"
-    manager = runtime.sandbox_mgr
-    mode = inputs["execution_mode"]
-    if mode not in {"direct", "flex", "rlm", "hybrid"}:
-        raise ValueError("Invalid execution mode")
-    required = inputs.get("required_skills", ())
-    if required and mode == "direct":
-        raise SkillAdmissionError("Direct mode cannot use required Skills; select Hybrid, RLM or Flex")
-    with manager.turn_scope():
-        manager.check_turn()
-        for skill in required:
-            for path, content in skill.files:
-                if (
-                    manager.stat_workspace_file(f"skills/{skill.name}/{path}")["sha256"]
-                    != hashlib.sha256(content).hexdigest()
-                ):
-                    raise SkillAdmissionError("Required Skill files changed before execution")
-        context = inputs.get("context")
-        if isinstance(context, WorkspaceDataset):
-            metadata = manager.stat_workspace_file(context.workspace_path)
-            if context.sha256 and metadata["sha256"] != context.sha256:
-                raise ValueError("Dataset source changed; select the new revision")
-        runtime.delegation.bind_policies(runtime.program.child_policies.snapshot())
-        manager.emit("program_selection", source=source, digest=runtime.compiled.digest)
-        with dspy.context(callbacks=turn_callbacks()):
-            prediction = runtime.program(**inputs)
-        prediction["execution_evidence"] = runtime.execution_evidence()
-        for name, value in manager.turn_usage().items():
-            prediction[name] = value
-        return prediction

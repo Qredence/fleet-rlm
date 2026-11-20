@@ -70,7 +70,7 @@ class SessionRuntime:
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
     context: WorkspaceDataset | None = None
     workspace_state: str = "unknown"
-    lease: PooledLease | Any | None = None
+    lease: PooledLease | None = None
     ownership_epoch: int | None = None
     configuration_overrides: dict[str, Any] = field(default_factory=dict)
     lease_lost: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -87,10 +87,6 @@ class SessionRuntime:
     def session_id(self) -> str:
         """Return the Session ID owned by the sandbox manager."""
         return self.sandbox_mgr.session_id
-
-    def ensure_session(self, session_id: str) -> bool:
-        """Create the Session row after validating its ID and report whether it was new."""
-        return self.store.ensure_session(validate_session_id(session_id))
 
     def set_workspace_state(self, value: str) -> None:
         """Persist whether this Session's workspace is still known to be empty."""
@@ -216,10 +212,6 @@ class SessionRuntime:
             raise IdempotencyConflictError("Idempotency key already belongs to another task")
         return prior
 
-    def turn_status(self, turn_id: str) -> dict[str, Any] | None:
-        """Return one Turn's status after validating its ID."""
-        return self.store.turn_status(self.session_id, validate_session_id(turn_id))
-
     def load_context(self, session_id: str) -> SessionContext:
         """Load the Session's memory summary, bounded rendered history, and deserialized RLM history."""
         session_id = validate_session_id(session_id)
@@ -269,24 +261,22 @@ class SessionRuntime:
         new_memory_note: str = "",
         replay_snapshot: tuple[str, bytes] | None = None,
         *,
-        artifact_paths: list[str] | None = None,
         commit_guard: AbstractContextManager[None] | None = None,
     ) -> dict[str, Any]:
         """Commit and return the canonical completion, including the current artifact inventory.
 
         Commits the record, memory note, completion payload, and optional immutable replay
         together. `replay_snapshot` is the digest and compressed bytes selected by the record.
-        `artifact_paths` optionally supplies a captured workspace view; by default the
-        current workspace is listed. Both paths use the same validation and sorting.
+        The Turn record carries the validated artifact inventory.
         `commit_guard` arbitrates cancellation around persistence after remote publication.
 
         Raises:
             ValueError: Replay selection metadata or digest is inconsistent, the Turn ID is
-                missing, the Session ID is invalid, the record is oversized, or a workspace
-                path is invalid.
+                missing, the Session ID is invalid, the record is oversized, or the captured
+                artifact inventory is invalid.
 
         The returned payload owns its nested values independently of the record and Store.
-        Serialization, workspace listing, and storage errors propagate.
+        Serialization and storage errors propagate.
         """
         if bool(turn_record.get("replay_snapshot_selected")) != (replay_snapshot is not None):
             raise ValueError("Selected replay metadata and immutable snapshot must be committed together")
@@ -299,17 +289,17 @@ class SessionRuntime:
         record_json = json.dumps(turn_record, ensure_ascii=False, separators=(",", ":"))
         if len(record_json.encode("utf-8")) > _MAX_TURN_RECORD_BYTES:
             raise ValueError("Turn record exceeds the persistence size limit")
-        paths = self.sandbox_mgr.list_workspace_files() if artifact_paths is None else artifact_paths
-        if not isinstance(paths, list) or any(not self._valid_vfs_path(path) for path in paths):
-            raise ValueError("Workspace listing returned an invalid relative path")
-        artifacts = sorted({path for path in paths if path.startswith("artifacts/")})
         capture = turn_record.get("artifact_capture")
-        if capture is not None and (
-            not isinstance(capture, dict)
-            or not isinstance(capture.get("complete"), bool)
-            or capture.get("paths") != artifacts
+        if not isinstance(capture, dict) or not isinstance(capture.get("complete"), bool):
+            raise ValueError("Turn record requires an artifact capture")
+        artifacts = capture.get("paths")
+        if not isinstance(artifacts, list) or any(
+            not isinstance(path, str) or not path.startswith("artifacts/") or not self._valid_vfs_path(path)
+            for path in artifacts
         ):
-            raise ValueError("Canonical artifact inventory does not match its captured view")
+            raise ValueError("Artifact capture contains an invalid relative path")
+        if artifacts != sorted(set(artifacts)):
+            raise ValueError("Artifact capture paths must be sorted and unique")
         from fleet_rlm.sandbox.snapshots import PROVENANCE_KEYS
 
         result = {
@@ -366,7 +356,7 @@ class SessionRuntime:
         result["assistant_message_id"] = f"{turn_record['turn_id']}_assistant"
         published_files = []
         # The runtime registry installs host storage configuration; no credentials enter Daytona.
-        storage_settings = getattr(self, "storage_settings", None)
+        storage_settings = self.storage_settings
         if storage_settings is not None and storage_settings.fleet_storage_bucket:
             import tempfile
             from pathlib import Path
@@ -424,29 +414,19 @@ class SessionRuntime:
             raise RuntimeError("Session ownership lease was lost; runtime must be rebuilt")
 
     def start_lease_monitor(self) -> None:
-        """Register this Session's pooled lease with Store's shared heartbeat daemon.
-
-        Calls are no-ops when the lease is a simple mock without epoch/owner metadata or when
-        the Store does not provide a `heartbeat` service.
-        """
+        """Register this Session's pooled lease with Store's shared heartbeat daemon."""
         lease = self.lease
-        heartbeat = getattr(self.store, "heartbeat", None)
-        if lease is None or heartbeat is None:
-            return
-        epoch = getattr(lease, "epoch", None)
-        owner_id = getattr(lease, "owner_id", None)
-        if epoch is None or owner_id is None:
-            return
+        assert lease is not None
 
         def on_lost() -> None:
             self.lease_lost.set()
             with suppress(Exception):
                 self.sandbox_mgr.request_cancellation()
 
-        heartbeat.register_session(
+        self.store.heartbeat.register_session(
             self.sandbox_mgr.session_id,
-            epoch,
-            owner_id=owner_id,
+            lease.epoch,
+            owner_id=lease.owner_id,
             on_lost=on_lost,
         )
 
@@ -609,56 +589,54 @@ class SessionRuntimeRegistry:
         store = self.store
         compiled_path = Path(settings.compiled_program_dir) / "fleet.json"
 
-        sandbox_mgr = DaytonaSandboxManager(
-            api_key=settings.fleet_daytona_api_key,
-            org_id=settings.fleet_daytona_org_id,
-            volume_id=settings.fleet_daytona_volume_id,
-            shared_notes_subpath=settings.fleet_shared_notes_subpath,
-            session_id=session_id,
-            auto_stop_minutes=settings.daytona_auto_stop_minutes,
-            sub_lm=self.sub_lm,
-            jev_lm=self.jev_lm,
-            serper_api_key=settings.serper_api_key.get_secret_value(),
-            you_api_key=settings.you_api_key.get_secret_value(),
-            max_llm_calls=settings.max_llm_calls_per_turn,
-            max_depth=settings.max_agent_depth,
-            max_children=settings.max_child_sandboxes,
-            max_active_children=settings.max_active_children,
-            turn_timeout_seconds=settings.turn_timeout_seconds,
-            linked_children=settings.linked_children,
-            environment_report_claim=store.claim_environment_report,
-        )
-        runtime = SessionRuntime(
-            sandbox_mgr=sandbox_mgr,
-            store=store,
-            skill_mgr=SkillManager(sandbox_mgr, Path(settings.local_skills_dir)),
-            engine=FleetRuntime(
-                sandbox_mgr=sandbox_mgr,
-                root_lm=self.root_lm,
-                sub_lm=self.sub_lm,
-                jev_lm=self.jev_lm,
-                compiled_path=str(compiled_path),
-                baseline=not (compiled_path.exists() or compiled_path.is_symlink()),
-                installed_program=store.approved_program,
-                execution_mode=settings.execution_mode,
-                root_adapter=settings.resolved_model("root").build_adapter(),
-                sub_adapter=settings.resolved_model("sub").build_adapter(),
-            ),
-        )
         lease = store.acquire_session_lease(session_id)
-        runtime.lease = lease
         try:
-            lease_created = getattr(lease, "created", None)
-            lease_epoch = getattr(lease, "epoch", None)
-            if lease_created is not None and lease_epoch is not None:
-                created = bool(lease_created)
-                ownership_epoch: int | None = int(lease_epoch)
-                saved = store.runtime_settings(session_id)
-            else:
-                created = runtime.ensure_session(session_id)
-                saved = store.runtime_settings(session_id)
-                ownership_epoch = store.advance_sandbox_ownership_epoch(session_id)
-            if created:
+            saved = store.runtime_settings(session_id)
+            effective = settings.for_session(saved)
+            root_lm, sub_lm = self.root_lm, self.sub_lm
+            if saved.get("models"):
+                root_lm = build_lm(effective, effective.fleet_root_model, "root")
+                sub_lm = build_lm(effective, effective.fleet_sub_model, "sub")
+            sandbox_mgr = DaytonaSandboxManager(
+                api_key=settings.fleet_daytona_api_key,
+                org_id=settings.fleet_daytona_org_id,
+                volume_id=settings.fleet_daytona_volume_id,
+                shared_notes_subpath=settings.fleet_shared_notes_subpath,
+                session_id=session_id,
+                auto_stop_minutes=settings.daytona_auto_stop_minutes,
+                sub_lm=sub_lm,
+                jev_lm=self.jev_lm,
+                serper_api_key=settings.serper_api_key.get_secret_value(),
+                you_api_key=settings.you_api_key.get_secret_value(),
+                max_llm_calls=settings.max_llm_calls_per_turn,
+                max_depth=settings.max_agent_depth,
+                max_children=settings.max_child_sandboxes,
+                max_active_children=settings.max_active_children,
+                turn_timeout_seconds=settings.turn_timeout_seconds,
+                linked_children=settings.linked_children,
+                environment_report_claim=store.claim_environment_report,
+            )
+            runtime = SessionRuntime(
+                sandbox_mgr=sandbox_mgr,
+                store=store,
+                skill_mgr=SkillManager(sandbox_mgr, Path(settings.local_skills_dir)),
+                engine=FleetRuntime(
+                    sandbox_mgr=sandbox_mgr,
+                    root_lm=root_lm,
+                    sub_lm=sub_lm,
+                    jev_lm=self.jev_lm,
+                    compiled_path=str(compiled_path),
+                    baseline=not (compiled_path.exists() or compiled_path.is_symlink()),
+                    installed_program=store.approved_program,
+                    execution_mode=effective.execution_mode,
+                    root_adapter=effective.resolved_model("root").build_adapter(),
+                    sub_adapter=effective.resolved_model("sub").build_adapter(),
+                ),
+                lease=lease,
+                ownership_epoch=lease.epoch,
+                storage_settings=settings,
+            )
+            if lease.created:
                 # The insert does not list the Volume. A new schema must not reuse a Volume
                 # that already holds this Session's subtree; see ARCHITECTURE.md.
                 saved["workspace_state"] = "known_empty"
@@ -666,11 +644,6 @@ class SessionRuntimeRegistry:
             runtime.workspace_state = saved.get("workspace_state", "unknown")
             if runtime.workspace_state not in {"known_empty", "unknown"}:
                 runtime.workspace_state = "unknown"
-            if ownership_epoch is None:
-                raise RuntimeError(
-                    "Session sandbox ownership is unknown; reconcile legacy resources before writable admission"
-                )
-            runtime.ownership_epoch = ownership_epoch
             ownership = store.sandbox_ownership(session_id)
             if ownership is None:
                 raise RuntimeError(
@@ -690,18 +663,20 @@ class SessionRuntimeRegistry:
 
             sandbox_mgr.ownership_resource_mutate = mutate_sandbox_resource
             sandbox_mgr.reconcile_sandbox_ownership(ownership["resources"])
-            store.fail_interrupted_turns(session_id, ownership_epoch)
+            store.fail_interrupted_turns(session_id, lease.epoch)
             runtime.engine.reload_program()
             if "mode" in saved:
-                runtime.set_mode(settings.for_session(saved).execution_mode)
+                runtime.configuration_overrides["execution_mode"] = effective.execution_mode
             if saved.get("models"):
-                runtime.set_engine(self.engine_for_models(runtime, saved["models"]))
+                runtime.configuration_overrides.update(
+                    fleet_root_model=root_lm.model,
+                    fleet_sub_model=sub_lm.model,
+                )
             if saved.get("context"):
                 runtime.context = WorkspaceDataset(**saved["context"])
-            runtime.storage_settings = self.settings
             runtime.start_lease_monitor()
         except BaseException:
-            runtime.close_lease()
+            lease.close()
             raise
         return runtime
 

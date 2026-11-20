@@ -14,7 +14,7 @@ import mlflow
 from fleet_rlm import replay
 from fleet_rlm.contracts import RequiredSkill, Route, SkillAdmissionError
 from fleet_rlm.engine.reasoning import _MAX_RLM_STORED_TURN_EVENTS, serialize_rlm_turn_history
-from fleet_rlm.observability import phase_span, stream_callbacks
+from fleet_rlm.observability import phase_span
 from fleet_rlm.replay import ReplaySizeError, encode_snapshot
 from fleet_rlm.sandbox.manager import SANDBOX_TRANSPORT
 
@@ -99,7 +99,6 @@ def _prepare_empty_direct_inputs(
     callback: Any,
     record_replay: bool,
     required_skills: tuple[RequiredSkill, ...],
-    dspy_module: Any = dspy,
 ) -> tuple[dict[str, Any] | None, Route | None]:
     """Preview the route on a known-empty workspace and assemble local inputs on Direct."""
     can_route_empty = (
@@ -117,7 +116,7 @@ def _prepare_empty_direct_inputs(
     with phase_span("turn.skill_catalog", source="local") as skill_phase:
         skill_phase.set_outputs({"chars": len(local_catalog)})
     empty_manifest = ", ".join(f"/workspace/{path}" for path in sorted(local_files)) or "/workspace/files (empty)"
-    with dspy_module.context(callbacks=stream_callbacks(callback), disable_history=True):
+    with dspy.context(callbacks=[*dspy.settings.callbacks, callback], disable_history=True):
         selected_route = runtime.engine.preview_route(
             task=task, workspace_manifest=empty_manifest, skills_catalog=local_catalog
         )
@@ -261,7 +260,6 @@ def _capture_replay_snapshot(
     requested_skills: tuple[str, ...],
     skill_intent: dict[str, Any],
     emit: Any,
-    encoder: Any = encode_snapshot,
 ) -> tuple[str, bytes] | None:
     """Build and encode the immutable replay snapshot, emitting `replay_skipped` if oversized."""
     from fleet_rlm.session import runtime_configuration
@@ -313,7 +311,7 @@ def _capture_replay_snapshot(
             "provenance": {"fleet_rlm_version": version("fleet-rlm")},
         }
         try:
-            replay_snapshot = encoder(snapshot)
+            replay_snapshot = encode_snapshot(snapshot)
         except ReplaySizeError as error:
             inputs["replay_selected"] = False
             emit({"event": "replay_skipped", "bytes": error.size, "limit": error.limit})

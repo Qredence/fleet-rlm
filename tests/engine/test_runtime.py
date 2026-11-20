@@ -71,7 +71,7 @@ from fleet_rlm.engine.reasoning import (
 )
 from fleet_rlm.engine.signatures import FleetTask, TurnTriage
 from fleet_rlm.models import ResolvedModel, build_lm, complete_text
-from fleet_rlm.observability import LMUsageCallback, _usage_summary, decision_usage, usage_callbacks
+from fleet_rlm.observability import LMUsageCallback, _usage_summary, decision_usage, turn_callbacks
 from fleet_rlm.optimization_runs import (
     ExperimentOptions,
     add_optimization_arguments,
@@ -3124,10 +3124,15 @@ def test_required_claim_binds_ordered_intent_but_completed_receipts_survive_sour
 def test_committed_completion_owns_nested_values_separately_from_record_and_store() -> None:
     saved = []
     runtime = _runtime(
-        sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: ["artifacts/out.txt", "artifacts/out.txt"]),
+        sandbox_mgr=SimpleNamespace(),
         store=SimpleNamespace(commit_turn=lambda *_args, **kw: saved.append(kw)),
     )
-    record = {"turn_id": "t1", "answer": "verified", "budget_breakdown": {"routing": 1}}
+    record = {
+        "turn_id": "t1",
+        "answer": "verified",
+        "budget_breakdown": {"routing": 1},
+        "artifact_capture": {"complete": True, "paths": ["artifacts/out.txt"]},
+    }
     result = runtime.commit_turn("s1", record)
     stored = saved[0]["completion"][1]
     assert result == stored and result["turn_id"] == "t1"
@@ -3147,7 +3152,7 @@ def test_commit_does_not_return_a_completion_when_storage_raises() -> None:
         store=SimpleNamespace(commit_turn=fail),
     )
     with pytest.raises(ConnectionError):
-        runtime.commit_turn("s1", {"turn_id": "t1"})
+        runtime.commit_turn("s1", {"turn_id": "t1", "artifact_capture": {"complete": True, "paths": []}})
 
 
 def test_turn_intent_and_completion_are_fenced_by_the_runtime_ownership_epoch() -> None:
@@ -3163,26 +3168,27 @@ def test_turn_intent_and_completion_are_fenced_by_the_runtime_ownership_epoch() 
     )
 
     runtime.claim_turn("turn-1", "key-1", "task")
-    runtime.commit_turn("s1", {"turn_id": "turn-1"})
+    runtime.commit_turn("s1", {"turn_id": "turn-1", "artifact_capture": {"complete": True, "paths": []}})
 
     assert claims[0][1] == {"ownership_epoch": 12, "task": "task"}
     assert commits[0][1]["ownership_epoch"] == 12
 
 
-@pytest.mark.parametrize("paths", [[], ["files/input.txt", "artifacts/out.txt", "artifacts/out.txt"], ["../escape"]])
+@pytest.mark.parametrize("paths", [[], ["artifacts/out.txt"], ["../escape"]])
 def test_captured_artifact_view_uses_existing_path_validation_without_relisting(paths) -> None:
     saved = []
     runtime = _runtime(
         sandbox_mgr=SimpleNamespace(list_workspace_files=lambda: pytest.fail("captured view must not be relisted")),
         store=SimpleNamespace(commit_turn=lambda *_args, **kw: saved.append(kw)),
     )
+    record = {"turn_id": "t1", "artifact_capture": {"complete": False, "paths": paths}}
     if "../escape" in paths:
         with pytest.raises(ValueError, match="invalid relative path"):
-            runtime.commit_turn("s1", {"turn_id": "t1"}, artifact_paths=paths)
+            runtime.commit_turn("s1", record)
         assert saved == []
     else:
-        result = runtime.commit_turn("s1", {"turn_id": "t1"}, artifact_paths=paths)
-        assert result["artifacts"] == sorted({p for p in paths if p.startswith("artifacts/")})
+        result = runtime.commit_turn("s1", record)
+        assert result["artifacts"] == paths
 
 
 def test_lost_session_lease_cancels_remote_work_and_fences_runtime() -> None:
@@ -3641,20 +3647,22 @@ def test_build_wires_the_durable_environment_marker_into_the_sandbox_manager(mon
     class RecordingManager:
         def __init__(self, *_args: object, **kwargs: object) -> None:
             captured.update(kwargs)
+            self.session_id = kwargs["session_id"]
             self.reconcile_sandbox_ownership = lambda _resources: calls.append("reconcile")
 
     def claim(_session_id: str) -> bool:
         return True
 
     store = SimpleNamespace(
-        ensure_session=lambda _session_id: None,
-        acquire_session_lease=lambda _session_id: SimpleNamespace(execute=lambda _statement: None, close=lambda: None),
-        advance_sandbox_ownership_epoch=lambda _session_id: 1,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(
+            created=False, epoch=1, owner_id="owner", close=lambda: None
+        ),
         sandbox_ownership=lambda _session_id: {"epoch": 1, "resources": []},
         fail_interrupted_turns=lambda _session_id, epoch: calls.append(("fail-interrupted", epoch)) or ["old-turn"],
         runtime_settings=lambda _session_id: {},
         save_runtime_settings=lambda _session_id, value: calls.append(value),
         claim_environment_report=claim,
+        heartbeat=SimpleNamespace(register_session=lambda *_args, **_kwargs: None),
         approved_program=lambda: {"approved": None, "approving": []},
     )
     monkeypatch.setattr(session_module, "DaytonaSandboxManager", RecordingManager)
@@ -3679,9 +3687,9 @@ def _global_program_registry(tmp_path, monkeypatch):
     saved = {}
     ledger = {"approved": None, "approving": []}
     store = SimpleNamespace(
-        ensure_session=lambda _session_id: None,
-        acquire_session_lease=lambda _session_id: SimpleNamespace(close=lambda: None),
-        advance_sandbox_ownership_epoch=lambda _session_id: 1,
+        acquire_session_lease=lambda _session_id: SimpleNamespace(
+            created=False, epoch=1, owner_id="owner", close=lambda: None
+        ),
         sandbox_ownership=lambda _session_id: {"epoch": 1, "resources": []},
         fail_interrupted_turns=lambda *_args: [],
         runtime_settings=lambda _session_id: dict(saved),
@@ -3705,6 +3713,45 @@ def _global_program_registry(tmp_path, monkeypatch):
     registry.root_lm = registry.sub_lm = dspy.LM("openai/offline")
     registry.ledger = ledger
     return registry, saved
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_build_constructs_one_engine_with_saved_models_and_mode(tmp_path, monkeypatch, fails):
+    from fleet_rlm import session as session_module
+
+    registry, saved = _global_program_registry(tmp_path, monkeypatch)
+    saved.update(mode="flex", models={"root": "openai/saved-root", "sub": "openai/saved-sub"})
+    closed = []
+    registry.store.acquire_session_lease = lambda _sid: SimpleNamespace(
+        created=False, epoch=1, owner_id="owner", close=lambda: closed.append(True)
+    )
+    monkeypatch.setattr(session_module, "build_lm", lambda _settings, model, _role: SimpleNamespace(model=model))
+    built = []
+
+    def build_engine(**kwargs):
+        built.append(kwargs)
+        if fails:
+            raise ValueError("invalid installed program")
+        return SimpleNamespace(reload_program=lambda: None)
+
+    monkeypatch.setattr(session_module, "FleetRuntime", build_engine)
+    if fails:
+        with pytest.raises(ValueError, match="invalid installed program"):
+            registry._build("s1")
+        assert closed == [True]
+    else:
+        runtime = registry._build("s1")
+        assert runtime.configuration_overrides == {
+            "execution_mode": "flex",
+            "fleet_root_model": "openai/saved-root",
+            "fleet_sub_model": "openai/saved-sub",
+        }
+        assert runtime.sandbox_mgr.sub_lm is built[0]["sub_lm"]
+        assert not closed
+        runtime.close_lease()
+    (engine,) = built
+    assert engine["execution_mode"] == "flex"
+    assert (engine["root_lm"].model, engine["sub_lm"].model) == ("openai/saved-root", "openai/saved-sub")
 
 
 def test_global_program_file_is_the_only_selection_for_every_session(tmp_path, monkeypatch) -> None:
@@ -3818,14 +3865,13 @@ def test_concurrent_approval_is_served_without_any_per_session_selection(tmp_pat
     if approval_at == "startup":
         runtime.close_lease()
 
-        def approve() -> None:
-            path.write_bytes(content)
+        acquire_lease = registry.store.acquire_session_lease
 
-        monkeypatch.setattr(
-            registry.store,
-            "acquire_session_lease",
-            lambda _session_id: approve() or SimpleNamespace(close=lambda: None),
-        )
+        def acquire_during_approval(session_id):
+            path.write_bytes(content)
+            return acquire_lease(session_id)
+
+        monkeypatch.setattr(registry.store, "acquire_session_lease", acquire_during_approval)
 
         def admit():
             return registry._build("s1")
@@ -3874,12 +3920,11 @@ def test_build_does_not_terminalize_running_turns_when_resource_reconciliation_f
             self.reconcile_sandbox_ownership = fail_reconcile
 
     store = SimpleNamespace(
-        ensure_session=lambda _session_id: None,
         acquire_session_lease=lambda _session_id: SimpleNamespace(
-            execute=lambda _statement: None,
+            created=False,
+            epoch=2,
             close=lambda: calls.append("lease-close"),
         ),
-        advance_sandbox_ownership_epoch=lambda _session_id: 2,
         sandbox_ownership=lambda _session_id: {"epoch": 2, "resources": [{"action": "stop"}]},
         fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
         runtime_settings=lambda _session_id: {},
@@ -3897,16 +3942,7 @@ def test_build_does_not_terminalize_running_turns_when_resource_reconciliation_f
     assert calls == ["reconcile", "lease-close"]
 
 
-@pytest.mark.parametrize(
-    ("epoch", "ownership", "message"),
-    [
-        (None, None, "ownership is unknown"),
-        (4, None, "cleanup is unresolved"),
-    ],
-)
-def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
-    monkeypatch, epoch: int | None, ownership: dict | None, message: str
-) -> None:
+def test_build_refuses_a_session_without_reconciled_sandbox_ownership(monkeypatch) -> None:
     """A Session predating the ownership record is fenced, not treated as having no compute."""
     from fleet_rlm import session as session_module
     from fleet_rlm.config import FleetSettings
@@ -3920,13 +3956,12 @@ def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
             self.reconcile_sandbox_ownership = lambda _resources: calls.append("reconcile")
 
     store = SimpleNamespace(
-        ensure_session=lambda _session_id: None,
         acquire_session_lease=lambda _session_id: SimpleNamespace(
-            execute=lambda _statement: None,
+            created=False,
+            epoch=2,
             close=lambda: calls.append("lease-close"),
         ),
-        advance_sandbox_ownership_epoch=lambda _session_id: epoch,
-        sandbox_ownership=lambda _session_id: ownership,
+        sandbox_ownership=lambda _session_id: None,
         fail_interrupted_turns=lambda *_args: calls.append("fail-interrupted"),
         runtime_settings=lambda _session_id: {},
         claim_environment_report=lambda _session_id: True,
@@ -3937,7 +3972,7 @@ def test_build_refuses_a_session_without_reconciled_sandbox_ownership(
     monkeypatch.setattr(session_module, "FleetRuntime", lambda **_kwargs: SimpleNamespace())
     registry = SessionRuntimeRegistry(FleetSettings(_env_file=None), store)  # type: ignore[arg-type]
 
-    with pytest.raises(RuntimeError, match=message):
+    with pytest.raises(RuntimeError, match="cleanup is unresolved"):
         registry._build("s1")
 
     assert calls == ["lease-close"]
@@ -3970,16 +4005,15 @@ def test_build_initializes_and_refreshes_workspace_state_after_acquiring_the_lea
         events.append("acquire_lease")
         if handoff_state is not None:
             saved["workspace_state"] = handoff_state
-        return SimpleNamespace(execute=lambda _statement: None, close=lambda: events.append("lease-close"))
+        return SimpleNamespace(created=created, epoch=1, owner_id="owner", close=lambda: events.append("lease-close"))
 
     store = SimpleNamespace(
         acquire_session_lease=acquire,
-        ensure_session=lambda _session_id: events.append("ensure_session") or created,
+        heartbeat=SimpleNamespace(register_session=lambda *_args, **_kwargs: None),
         runtime_settings=lambda _session_id: events.append("runtime_settings") or dict(saved),
         save_runtime_settings=lambda _session_id, value: (
             events.append(f"save:{value['workspace_state']}") or saved.update(value)
         ),
-        advance_sandbox_ownership_epoch=lambda _session_id: 1,
         sandbox_ownership=lambda _session_id: {"epoch": 1, "resources": resources},
         fail_interrupted_turns=lambda *_args: [],
         claim_environment_report=lambda _session_id: True,
@@ -3998,7 +4032,7 @@ def test_build_initializes_and_refreshes_workspace_state_after_acquiring_the_lea
 
     runtime = registry._build("s1")
     try:
-        assert events[:3] == ["acquire_lease", "ensure_session", "runtime_settings"]
+        assert events[:2] == ["acquire_lease", "runtime_settings"]
         assert events.count("runtime_settings") == 1
         assert runtime.workspace_state == saved["workspace_state"] == expected
     finally:
@@ -4435,7 +4469,6 @@ def test_should_restore_parent_usage_context_on_async_completion(fails):
     asyncio.run(call())
     assert parent.get_total_tokens()["model"]["total_tokens"] == 9
     assert collector._usage_scopes == {}
-    assert usage_callbacks([object(), collector])[0] is collector
 
 
 def test_should_ignore_decision_usage_and_omit_missing_generation_usage():
@@ -4518,7 +4551,7 @@ from fleet_rlm.observability import configure_mlflow_observability
 import fleet_rlm.engine.decisions as decisions
 from fleet_rlm.engine.invocation import FleetRuntime
 from fleet_rlm.contracts import Route
-from fleet_rlm.observability import decision_usage, usage_callbacks
+from fleet_rlm.observability import decision_usage, turn_callbacks
 from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 def refuse_sandbox(*_args, **_kwargs):
@@ -4564,7 +4597,7 @@ with mlflow.start_span(name="fleet_turn") as root:
     with dspy.context(disable_history=True, track_usage=True):
         result = engine(workspace_manifest="", memory_summary="", task="return five")
     assert result.answer == "5" and result.lm_calls == 1
-    with dspy.context(lm=lm, callbacks=usage_callbacks(list(dspy.settings.callbacks)),
+    with dspy.context(lm=lm, callbacks=turn_callbacks(),
                       adapter=dspy.ChatAdapter(), disable_history=True, track_usage=True):
         repaired = dspy.Predict("task -> answer")(task="return five")
     assert repaired.answer == "5"
@@ -4603,39 +4636,33 @@ print(f"Verified offline trace {trace_id}: {len(trace.data.spans)} spans, 3 mode
 def test_turn_callbacks_compose_ambient_callbacks_with_one_usage_collector():
     import dspy
 
-    from fleet_rlm.observability import LMUsageCallback, ambient_callbacks, turn_callbacks
+    from fleet_rlm.observability import LMUsageCallback
 
     marker = object()
     with dspy.context(callbacks=[marker]):
         composed = turn_callbacks()
-        assert marker in ambient_callbacks()
         assert sum(isinstance(item, LMUsageCallback) for item in composed) == 1
         assert len(composed) == 2
         # dspy.context replaces the callback list, so re-spreading the ambient list is mandatory.
-        assert marker in composed
+        assert composed[1] is marker
+    existing = LMUsageCallback()
+    with dspy.context(callbacks=[marker, existing, LMUsageCallback()]):
+        assert turn_callbacks() == [existing, marker]
 
 
 def test_typesafe_callbacks_drop_the_mlflow_dspy_hook():
     import dspy
 
-    from fleet_rlm.observability import FleetCallbackBase, LMUsageCallback, typesafe_callbacks
+    from fleet_rlm.observability import LMUsageCallback, typed_decision_scope
 
     usage = LMUsageCallback()
     external = type("ExternalCallback", (dspy.utils.callback.BaseCallback,), {})()
+    span = SimpleNamespace(set_attribute=lambda *_args: None)
     with dspy.context(callbacks=[external, usage]):
-        assert typesafe_callbacks() == [usage]
-    assert isinstance(usage, FleetCallbackBase)
-
-
-def test_stream_callbacks_append_without_reordering():
-    import dspy
-
-    from fleet_rlm.observability import stream_callbacks
-
-    marker, collector = object(), object()
-    with dspy.context(callbacks=[marker]):
-        # The Turn's stream collector must stay last: it is the API's terminal-event owner.
-        assert stream_callbacks(collector) == [marker, collector]
+        with typed_decision_scope(lm=None, span=span, typesafe=True):
+            assert dspy.settings.callbacks[0] is usage
+            assert external not in dspy.settings.callbacks
+        assert dspy.settings.callbacks == [external, usage]
 
 
 # Redaction and tracing
@@ -4726,20 +4753,6 @@ def test_trace_shows_reasoning_text_but_streams_still_redact_it() -> None:
     )
     assert cleaned == {"reasoning_content": "Plan: use api_key=[redacted]", "api_key": "[redacted]"}
     assert '"reasoning_content": "[redacted]"' in memory_and_eval.activity_preview({"reasoning_content": "private"})
-
-
-def test_typesafe_route_filters_the_incompatible_mlflow_callback() -> None:
-    from fleet_rlm.observability import FleetCallbackBase, LMUsageCallback, without_mlflow_dspy_callback
-
-    class CustomFleetCallback(FleetCallbackBase):
-        pass
-
-    fleet_cb = CustomFleetCallback()
-    usage_cb = LMUsageCallback()
-    third_party = object()
-    impostor = type("MlflowCallback", (), {"__module__": "mlflow.dspy.callback"})()
-
-    assert without_mlflow_dspy_callback([third_party, fleet_cb, impostor, usage_cb]) == [fleet_cb, usage_cb]
 
 
 def test_snapshot_provenance_is_written_to_the_turn_span(monkeypatch: pytest.MonkeyPatch) -> None:

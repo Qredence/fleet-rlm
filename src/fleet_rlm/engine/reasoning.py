@@ -216,11 +216,6 @@ class Reasoning(dspy.Module):
             )
 
         agent = self.flex if route is Route.FLEX else self.rlm
-        prior_rlm = (
-            rlm_history_processor(rlm_history)
-            if route is Route.RLM and isinstance(rlm_history, dspy.History) and rlm_history.messages
-            else None
-        )
         call_kwargs: dict[str, Any] = {
             "workspace_manifest": workspace_manifest,
             "skills_catalog": skills_catalog,
@@ -230,8 +225,8 @@ class Reasoning(dspy.Module):
             "task": task,
             "context": context if context is not None else "",
         }
-        if prior_rlm is not None:
-            call_kwargs["history"] = prior_rlm
+        if route is Route.RLM and rlm_history is not None:
+            call_kwargs["history"] = rlm_history
         with dspy.context(lm=self._root_lm, adapter=self._adapter):
             prediction = agent(**call_kwargs)
         self._check_turn()
