@@ -47,7 +47,6 @@ class SessionContext:
 _MAX_TURN_RECORD_BYTES = 1_000_000
 _SESSION_HISTORY_TURNS = 8
 _SESSION_HISTORY_CHARS = 16_000
-_MAX_STORED_TURNS = 200
 
 
 def _required_intent_digest(task: str, names: tuple[str, ...]) -> str:
@@ -101,6 +100,34 @@ class SessionRuntime:
         if self.workspace_state != value:
             self.store.save_runtime_settings(self.session_id, {"workspace_state": value})
             self.workspace_state = value
+
+    def select_context(self, session_id: str, path: str, description: str) -> WorkspaceDataset:
+        """Select a workspace dataset by metadata while the caller holds the Session lock."""
+        metadata = self.sandbox_mgr.stat_workspace_file(path)
+        context = WorkspaceDataset(
+            workspace_path=path,
+            description=description,
+            size_bytes=metadata["size_bytes"],
+            sha256=metadata["sha256"],
+        )
+        self._save_context(session_id, context)
+        return context
+
+    def clear_context(self, session_id: str) -> None:
+        """Clear selected context while retaining the current workspace state."""
+        self._save_context(session_id, None)
+
+    def _save_context(self, session_id: str, context: WorkspaceDataset | None) -> None:
+        saved = {
+            "mode": self.engine.execution_mode,
+            "context": context.to_descriptor() if context is not None else None,
+        }
+        if context is not None:
+            saved["workspace_state"] = "unknown"
+        self.store.save_runtime_settings(session_id, saved)
+        if context is not None:
+            self.workspace_state = "unknown"
+        self.context = context
 
     def save_memory(
         self,
@@ -375,7 +402,6 @@ class SessionRuntime:
             self.store.commit_turn(
                 session_id,
                 turn_record_json=record_json,
-                max_turns=_MAX_STORED_TURNS,
                 memory_note=new_memory_note,
                 completion=completion,
                 replay_snapshot=replay_snapshot,
@@ -456,12 +482,11 @@ def runtime_configuration(
     settings: FleetSettings,
     runtime: Any | None = None,
     *,
-    saved_settings: dict[str, Any] | None = None,
+    effective_settings: FleetSettings | None = None,
 ) -> dict[str, Any]:
     """The resolved configuration with this Session's model and mode overrides applied."""
     if runtime is None:
-        saved = saved_settings or {}
-        effective = settings.for_session(saved) if ("mode" in saved or saved.get("models")) else settings
+        effective = effective_settings if effective_settings is not None else settings
         overrides: dict[str, Any] = {}
         for role in ("root", "sub"):
             model = effective.resolved_model(role).model
@@ -797,3 +822,31 @@ class SessionRuntimeRegistry:
                     unresolved = True
         if unresolved:
             raise RuntimeError("Session sandbox cleanup is unconfirmed; runtimes retained for cleanup retry")
+
+
+def update_runtime_preferences(
+    runtime: SessionRuntime,
+    registry: SessionRuntimeRegistry,
+    session_id: str,
+    *,
+    mode: str | None = None,
+    model: str | None = None,
+    role: str = "root",
+    persist_context: bool = False,
+) -> None:
+    """Build, save, and apply preferences while the caller holds the Session lock."""
+    saved: dict[str, Any] = {}
+    engine = None
+    if model is not None:
+        models = {"root": runtime.engine.root_lm.model, "sub": runtime.engine.sub_lm.model, role: model}
+        engine = registry.engine_for_models(runtime, models)
+        saved["models"] = models
+    if mode is not None:
+        saved["mode"] = mode
+        if persist_context:
+            saved["context"] = runtime.context.to_descriptor() if runtime.context else None
+    runtime.store.save_runtime_settings(session_id, saved)
+    if engine is not None:
+        runtime.set_engine(engine)
+    if mode is not None:
+        runtime.set_mode(mode)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -352,16 +352,12 @@ class SessionStoreMixin:
         ownership_epoch: int | None = None,
     ) -> None:
         """Set a Turn's terminal status and result unless it is already completed."""
-        with self.pool.connection() as connection:
+        with (
+            self.pool.connection() as connection,
+            connection.transaction() if ownership_epoch is not None else nullcontext(),
+        ):
             if ownership_epoch is not None:
-                with connection.transaction():
-                    self._assert_ownership_epoch(connection, session_id, ownership_epoch)
-                    connection.execute(
-                        "UPDATE turns SET status = %s, result = %s::jsonb, updated_at = NOW() "
-                        "WHERE session_id = %s AND turn_id = %s AND status <> 'completed'",
-                        (status, json.dumps(result), session_id, turn_id),
-                    )
-                return
+                self._assert_ownership_epoch(connection, session_id, ownership_epoch)
             connection.execute(
                 "UPDATE turns SET status = %s, result = %s::jsonb, updated_at = NOW() "
                 "WHERE session_id = %s AND turn_id = %s AND status <> 'completed'",
@@ -444,7 +440,6 @@ class SessionStoreMixin:
         session_id: str,
         *,
         turn_record_json: str,
-        max_turns: int = 200,
         memory_note: str = "",
         completion: tuple[str, dict[str, Any]] | None = None,
         replay_snapshot: tuple[str, bytes] | None = None,
@@ -452,7 +447,6 @@ class SessionStoreMixin:
         ownership_epoch: int | None = None,
     ) -> None:
         """In one transaction: record Turn completion, memory note, optional deduplicated replay, and turn count."""
-        del max_turns
         if replay_snapshot is not None and completion is None:
             raise ValueError("A replay snapshot can only be committed with a completed Turn")
         turn_record: dict[str, Any] = {}

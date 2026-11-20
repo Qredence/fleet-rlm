@@ -5038,7 +5038,7 @@ def test_local_catalog_matches_the_synced_skill_metadata(tmp_path: Path) -> None
     )
     manager = SkillManager(object(), root, None)  # type: ignore[arg-type]
 
-    assert manager.build_local_catalog_xml() == (
+    assert manager.stage_local_skills()[0] == (
         "<available_skills>\n"
         '  <skill name="ledger-audit">Audits ledger totals: on request.</skill>\n'
         "</available_skills>"
@@ -5060,7 +5060,7 @@ def test_local_skill_files_stage_bundled_and_local_resources_with_workspace_path
     (local / "local-skill" / "references" / "policy.md").write_bytes(ref_md)
 
     manager = SkillManager(object(), local, bundled)  # type: ignore[arg-type]
-    assert manager.local_skill_files() == {
+    assert manager.stage_local_skills()[1] == {
         "skills/shared-skill/SKILL.md": bundled_md,
         "skills/local-skill/SKILL.md": skill_md,
         "skills/local-skill/references/policy.md": ref_md,
@@ -5071,7 +5071,7 @@ def test_local_skill_files_stage_bundled_and_local_resources_with_workspace_path
         b"---\nname: shared-skill\ndescription: Local override.\n---\n\nLocal.\n"
     )
     with caplog.at_level(logging.WARNING, logger="fleet_rlm.skills"):
-        staged = manager.local_skill_files()
+        staged = manager.stage_local_skills()[1]
     assert staged["skills/shared-skill/SKILL.md"] == bundled_md
     assert "Ignoring local Skill 'shared-skill'" in caplog.text
 
@@ -5537,8 +5537,8 @@ def test_skill_bytecode_artifacts_are_ignored_everywhere(tmp_path: Path, monkeyp
         ["SKILL.md", "scripts/helper.py"],
     ]
 
-    # 2. SkillManager._stage_local_skills / local_skill_files / sync_local_skills_to_volume ignore bytecode.
-    staged = manager_for_sync.local_skill_files()
+    # 2. SkillManager._stage_local_skills / stage_local_skills / sync_local_skills_to_volume ignore bytecode.
+    staged = manager_for_sync.stage_local_skills()[1]
     assert sorted(staged) == [
         "skills/canonical-skill/SKILL.md",
         "skills/canonical-skill/scripts/helper.py",

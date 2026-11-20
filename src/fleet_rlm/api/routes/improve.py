@@ -314,16 +314,16 @@ async def save_label(body: LabelRequest, store: StoreDep, settings: Settings, ma
     return saved
 
 
+def _job_envelope(record: dict[str, Any]) -> JobEnvelope:
+    """Expose the public job snapshot for submission, cancellation, and review."""
+    return JobEnvelope(job=Job.model_validate(public_run(record)))
+
+
 @router.get("/jobs", response_model=JobList, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
 async def list_jobs(manager: Experiments) -> JobList:
     """List persisted history and the active job."""
     with _job_errors():
-        listing = await manager.list()
-        return JobList(
-            jobs=[Job.model_validate(item) for item in listing["jobs"]],
-            active_run_id=listing["active_run_id"],
-            accepting=listing["accepting"],
-        )
+        return JobList.model_validate(await manager.list())
 
 
 @router.post(
@@ -342,7 +342,7 @@ async def start_job(body: StartJob, manager: Experiments, store: StoreDep, setti
             "max_total_tokens", (await asyncio.to_thread(_improve_settings, store, settings))["max_total_tokens"]
         )
         options = ExperimentOptions.model_validate(values)
-        return JobEnvelope(job=Job.model_validate(public_run(await manager.start(body.request_id, options, body.kind))))
+        return _job_envelope(await manager.start(body.request_id, options, body.kind))
 
 
 @router.get("/jobs/{run_id}", response_model=JobDetail, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)
@@ -367,7 +367,7 @@ async def job_detail(run_id: str, manager: Experiments) -> JobDetail:
 async def cancel_job(run_id: str, manager: Experiments) -> JobEnvelope:
     """Request a cooperative stop; terminal status follows actual worker cleanup."""
     with _job_errors():
-        return JobEnvelope(job=Job.model_validate(public_run(await manager.cancel(run_id))))
+        return _job_envelope(await manager.cancel(run_id))
 
 
 @router.post(
@@ -381,7 +381,7 @@ async def review_job(run_id: str, body: ReviewJob, manager: Experiments) -> JobE
     """Approve through the evidence-checking worker, or persist an explicit rejection."""
     with _job_errors():
         run = await manager.review(run_id, body.decision, body.request_id)
-    return JobEnvelope(job=Job.model_validate(public_run(run)))
+    return _job_envelope(run)
 
 
 @router.get("/history", response_model=ImproveHistory, response_model_exclude_unset=True, responses=_ERROR_RESPONSES)

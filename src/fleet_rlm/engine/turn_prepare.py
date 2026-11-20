@@ -125,20 +125,9 @@ def _prepare_empty_direct_inputs(
     )
     if not can_route_empty:
         return None, None
-    local_files: dict[str, bytes] = {}
     try:
-        if callable(stage_local := getattr(runtime.skill_mgr, "stage_local_skills", None)):
-            local_catalog, local_files = stage_local()
-        else:
-            local_catalog = runtime.skill_mgr.build_local_catalog_xml()
-            local_files = (
-                local_files_fn()
-                if callable(local_files_fn := getattr(runtime.skill_mgr, "local_skill_files", None))
-                else {}
-            )
+        local_catalog, local_files = runtime.skill_mgr.stage_local_skills()
     except (OSError, UnicodeError, ValueError):
-        local_catalog = None
-    if local_catalog is None:
         return None, None
     with phase_span("turn.skill_catalog", source="local") as skill_phase:
         skill_phase.set_outputs({"chars": len(local_catalog)})

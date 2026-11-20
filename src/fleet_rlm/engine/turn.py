@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from copy import deepcopy
 from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
@@ -101,6 +101,21 @@ def _validate_skill_intent(
     return required_skills, admission_error, skill_intent
 
 
+class TurnCompletion:
+    """Synchronize disconnect intent and durable completion across the stream and worker."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.committed = Event()
+        self.disconnected = Event()
+
+    def cancel_uncommitted(self, runtime: SessionRuntime) -> None:
+        """Request teardown only while execution is active and success is uncommitted."""
+        with self.lock:
+            if not self.committed.is_set() and runtime.sandbox_mgr.turn_active:
+                runtime.sandbox_mgr.request_cancellation()
+
+
 def run_turn(
     runtime: SessionRuntime,
     settings: FleetSettings,
@@ -116,11 +131,10 @@ def run_turn(
     requested_skills: tuple[str, ...] = (),
     submission: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
-    completion_committed: Event | None = None,
-    completion_lock: Lock | None = None,
-    cancellation_requested: Event | None = None,
+    completion: TurnCompletion | None = None,
 ) -> None:
     """Run one Turn for a Session, claiming its id and emitting progress events through emit."""
+    completion = completion if completion is not None else TurnCompletion()
     submission_options: dict[str, Any] = {"submission": submission} if submission else {}
     manager = runtime.sandbox_mgr
     started_at = time.monotonic()
@@ -170,8 +184,7 @@ def run_turn(
                     uncertain = True
                 elif prior["status"] == "completed":
                     committed = _replayed(prior)
-                    if completion_committed is not None:
-                        completion_committed.set()
+                    completion.committed.set()
                     end_execution()
         if committed is not None or terminal_event is not None:
             _LOGGER.warning("Turn %s observation failed (%s)", turn_id, type(exc).__name__)
@@ -193,7 +206,7 @@ def run_turn(
     try:
         runtime.assert_lease_held()
         manager.event_callback = emit
-        with completion_lock if completion_lock is not None else nullcontext():
+        with completion.lock:
             prior = (
                 runtime.completed_turn(idempotency_key or turn_id, task, requested_skills)
                 if requested_skills and not submission
@@ -201,8 +214,7 @@ def run_turn(
             )
             if prior is not None:
                 committed = {**_replayed(prior), "turn_id": prior["turn_id"]}
-                if completion_committed is not None:
-                    completion_committed.set()
+                completion.committed.set()
                 return
             required_skills, admission_error, skill_intent = _validate_skill_intent(runtime, requested_skills)
             if requested_skills:
@@ -221,12 +233,11 @@ def run_turn(
                 terminal_event = {**_replayed(prior), "turn_id": prior["turn_id"]}
                 if prior["status"] == "completed":
                     committed, terminal_event = terminal_event, None
-                    if completion_committed is not None:
-                        completion_committed.set()
+                    completion.committed.set()
                 return
             manager.reset_turn_budget(deadline_seconds=policy.effective_seconds, deadline_source=policy.source)
             runtime.assert_lease_held()
-            if cancellation_requested is not None and cancellation_requested.is_set():
+            if completion.disconnected.is_set():
                 manager.request_cancellation()
                 raise RuntimeError("Turn cancelled")
         if admission_error is not None:
@@ -404,10 +415,8 @@ def run_turn(
                     @contextmanager
                     def commit_guard():
                         nonlocal commit_attempted
-                        with completion_lock if completion_lock is not None else nullcontext():
-                            if manager._cancelled.is_set() or (
-                                cancellation_requested is not None and cancellation_requested.is_set()
-                            ):
+                        with completion.lock:
+                            if manager._cancelled.is_set() or completion.disconnected.is_set():
                                 raise RuntimeError("Turn was cancelled before commit")
                             runtime.assert_lease_held()
                             commit_attempted = True
@@ -416,8 +425,7 @@ def run_turn(
                             except Exception as exc:
                                 resolve_exception(exc)
                                 raise
-                            if completion_committed is not None:
-                                completion_committed.set()
+                            completion.committed.set()
 
                     committed = runtime.commit_turn(
                         session_id=session_id,
@@ -427,7 +435,7 @@ def run_turn(
                         artifact_paths=artifact_capture["paths"],
                         commit_guard=commit_guard(),
                     )
-                    with completion_lock if completion_lock is not None else nullcontext():
+                    with completion.lock:
                         end_execution()
                     phase.set_outputs({"artifacts": len(committed["artifacts"])})
                 _write_learned_note(runtime, turn_id, learned_note, trace_id)

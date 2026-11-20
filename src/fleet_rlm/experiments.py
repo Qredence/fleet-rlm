@@ -38,7 +38,6 @@ _WORKER_COMMANDS: dict[str, tuple[str, ...]] = {
     "optimize": ("optimize",),
     "evaluate_rescore": ("optimize", "--evaluate", "rescore"),
     "evaluate_replay": ("optimize", "--evaluate", "replay"),
-    "evaluate_synthetic": ("optimize", "--evaluate", "synthetic"),
 }
 
 
@@ -157,10 +156,9 @@ class ExperimentManager:
                     ):
                         continue
                     try:
-                        await asyncio.to_thread(self.store.request_optimization_stop, record["run_id"])
-                    except ValueError:
+                        await self._request_stop(record["run_id"])
+                    except ExperimentBusyError:
                         continue
-                    await asyncio.to_thread(request_run_stop, self.root, record["run_id"])
                 return
             try:
                 await asyncio.to_thread(reconcile_abandoned_running_runs, self.store, inactive_owner_id=self.owner_id)
@@ -224,15 +222,16 @@ class ExperimentManager:
         self, request_id: str, options: ExperimentOptions, kind: str = "optimize", *, trigger: str = "manual"
     ) -> dict[str, Any]:
         """Persist an idempotent intent, and what started it, before spawning any paid work."""
-        if kind == "evaluate_synthetic" or kind not in _WORKER_COMMANDS:
+        if kind not in _WORKER_COMMANDS:
             raise ValueError(f"{kind} jobs are not available")
         await self._reconcile_stale_runs()
         async with self._lock:
-            for prior in await asyncio.to_thread(self.store.list_optimization_runs):
-                if prior["request_id"] == request_id:
-                    if prior["options"] != options.model_dump() or prior["kind"] != kind:
-                        raise ExperimentBusyError("Request ID was already used with different options")
-                    return prior
+            values = options.model_dump()
+            prior = await asyncio.to_thread(self.store.get_optimization_run_by_request_id, request_id)
+            if prior is not None:
+                if prior["options"] != values or prior["kind"] != kind:
+                    raise ExperimentBusyError("Request ID was already used with different options")
+                return prior
             await self._available()
             run_id = kind.replace("_", "-") + "-" + uuid.uuid4().hex
             try:
@@ -240,7 +239,7 @@ class ExperimentManager:
                     self.store.create_optimization_run,
                     run_id,
                     request_id,
-                    options.model_dump(),
+                    values,
                     self.owner_id,
                     kind=kind,
                     managed=True,
@@ -258,7 +257,11 @@ class ExperimentManager:
             return record
         if record["status"] != "running":
             raise ExperimentBusyError("Only a running job can be cancelled")
-        # Persist intent first. The worker also checks this flag, so a marker write failure
+        return await self._request_stop(run_id)
+
+    async def _request_stop(self, run_id: str) -> dict[str, Any]:
+        """Persist the cooperative stop before writing the worker's stop marker."""
+        # The worker also checks the database flag, so a marker write failure
         # cannot silently lose an accepted request or authorize a completed candidate.
         try:
             record = await asyncio.to_thread(self.store.request_optimization_stop, run_id)
@@ -282,8 +285,6 @@ class ExperimentManager:
                     record = await self.get(run_id)
                     if record["status"] == "approving":
                         raise ExperimentBusyError("Approval recovery is still in progress")
-                if record["status"] in {"approved", "rejected"}:
-                    return record
                 # A retry after an API restart may resume an approval whose worker ended
                 # while the API owner was unavailable.
                 if decision != "approved" or record["status"] != "completed":

@@ -767,16 +767,6 @@ class SkillManager:
         skills, staged_files, _ = self._stage_local_skills()
         return catalog_xml(skills), dict(staged_files)
 
-    def build_local_catalog_xml(self) -> str:
-        """Build the synchronized Stage-1 catalog from trusted local Skill sources."""
-        catalog, _ = self.stage_local_skills()
-        return catalog
-
-    def local_skill_files(self) -> dict[str, bytes]:
-        """Return validated workspace-relative bytes (`skills/...`) for bundled and local Skills."""
-        _, staged_files = self.stage_local_skills()
-        return staged_files
-
 
 def catalog_xml(skills: list[dict[str, Any]]) -> str:
     """Render a stable and XML-escaped Stage-1 catalog."""

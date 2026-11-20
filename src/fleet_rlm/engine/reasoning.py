@@ -159,8 +159,7 @@ class Reasoning(dspy.Module):
         sub_lm: Any,
         adapter: dspy.Adapter,
         tools: list[Any],
-        rlm_factory: Any,
-        flex_factory: Any,
+        interpreter_factory: Any,
         max_llm_calls: int,
         inline_context: Any,
         emit: Any,
@@ -172,7 +171,7 @@ class Reasoning(dspy.Module):
             FleetTask,
             tools=tools,
             sub_lm=sub_lm,
-            interpreter_factory=rlm_factory,
+            interpreter_factory=interpreter_factory,
             max_iters=16,
             max_llm_calls=max_llm_calls,
             history_processor=rlm_history_processor,
@@ -180,7 +179,7 @@ class Reasoning(dspy.Module):
         self.flex = dspy.Flex(
             FleetTask,
             tools=tools,
-            interpreter_factory=flex_factory,
+            interpreter_factory=interpreter_factory,
             max_predictor_calls=max_llm_calls,
         )
         self._root_lm, self._adapter = root_lm, adapter

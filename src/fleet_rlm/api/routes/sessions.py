@@ -39,7 +39,7 @@ from fleet_rlm.api.schemas import (
     Status,
     TurnStatus,
 )
-from fleet_rlm.session import SessionRuntime, memory_search_query, runtime_configuration
+from fleet_rlm.session import SessionRuntime, memory_search_query, runtime_configuration, update_runtime_preferences
 from fleet_rlm.workspace import WorkspaceDataset, validate_session_id
 
 
@@ -118,7 +118,7 @@ def session_config(request: Request, session_id: str, settings: Settings, regist
                 ),
             )
         saved = request.app.state.store.runtime_settings(session_id)
-        effective = settings.for_session(saved) if ("mode" in saved or saved.get("models")) else settings
+        effective = settings.for_session(saved)
         raw_context = saved.get("context")
         context = WorkspaceDataset(**raw_context).to_descriptor() if isinstance(raw_context, dict) else None
         return SessionConfig(
@@ -128,7 +128,7 @@ def session_config(request: Request, session_id: str, settings: Settings, regist
                 "sub": effective.resolved_model("sub").model,
             },
             context=context,
-            configuration=runtime_configuration(settings, saved_settings=saved),
+            configuration=runtime_configuration(settings, effective_settings=effective),
             limits=Limits(
                 lm_calls=settings.max_llm_calls_per_turn,
                 depth=settings.max_agent_depth,
@@ -147,14 +147,7 @@ def select_model(session_id: str, body: ModelRequest, runtime: Runtime, registry
     """
     unavailable = "Model selection is unavailable; configuration unchanged"
     with translate(unavailable, invalid="Invalid session or model configuration"), session_lock(runtime):
-        models = {
-            "root": runtime.engine.root_lm.model,
-            "sub": runtime.engine.sub_lm.model,
-            body.role: body.model,
-        }
-        engine = registry.engine_for_models(runtime, models)
-        runtime.store.save_runtime_settings(session_id, {"models": models})
-        runtime.set_engine(engine)
+        update_runtime_preferences(runtime, registry, session_id, model=body.model, role=body.role)
     return ModelSelection(role=body.role, model=body.model)
 
 
@@ -167,20 +160,18 @@ def get_mode(request: Request, session_id: str, settings: Settings, registry: Re
         if runtime is not None:
             return Mode(mode=runtime.engine.execution_mode)
         saved = request.app.state.store.runtime_settings(session_id)
-        effective = settings.for_session(saved) if ("mode" in saved or saved.get("models")) else settings
+        effective = settings.for_session(saved)
         return Mode(mode=effective.execution_mode)
 
 
 @router.put("/sessions/{session_id}/mode", responses=LOCKED)
-def set_mode(session_id: str, body: ModeRequest, runtime: LockedRuntime) -> Mode:
+def set_mode(session_id: str, body: ModeRequest, runtime: LockedRuntime, registry: Registry) -> Mode:
     """Persist a new execution mode and apply it to the Session runtime.
 
     The current context is saved with the mode.
     """
     with translate("Session runtime is unavailable", invalid="Invalid Session ID or mode"):
-        context = runtime.context.to_descriptor() if runtime.context else None
-        runtime.store.save_runtime_settings(session_id, {"mode": body.mode, "context": context})
-        runtime.set_mode(body.mode)
+        update_runtime_preferences(runtime, registry, session_id, mode=body.mode, persist_context=True)
     return Mode(mode=body.mode)
 
 
@@ -223,23 +214,7 @@ def select_context(session_id: str, body: ContextRequest, runtime: LockedRuntime
     The response reports the file's size and SHA-256 digest.
     """
     with translate("Context selection is unavailable", invalid="Invalid context selection"):
-        metadata = runtime.sandbox_mgr.stat_workspace_file(body.path)
-        context = WorkspaceDataset(
-            workspace_path=body.path,
-            description=body.description,
-            size_bytes=metadata["size_bytes"],
-            sha256=metadata["sha256"],
-        )
-        runtime.store.save_runtime_settings(
-            session_id,
-            {
-                "mode": runtime.engine.execution_mode,
-                "context": context.to_descriptor(),
-                "workspace_state": "unknown",
-            },
-        )
-        runtime.workspace_state = "unknown"
-        runtime.context = context
+        context = runtime.select_context(session_id, body.path, body.description)
     return ContextSelected(path=body.path, size_bytes=context.size_bytes, sha256=context.sha256)
 
 
@@ -247,8 +222,7 @@ def select_context(session_id: str, body: ContextRequest, runtime: LockedRuntime
 def clear_context(session_id: str, runtime: LockedRuntime) -> Status:
     """Clear the Session's selected context and persist the change."""
     with translate("Context selection is unavailable"):
-        runtime.store.save_runtime_settings(session_id, {"mode": runtime.engine.execution_mode, "context": None})
-        runtime.context = None
+        runtime.clear_context(session_id)
     return Status(status="cleared")
 
 

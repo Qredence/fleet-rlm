@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import threading
 from typing import TYPE_CHECKING, Any
@@ -15,6 +14,8 @@ from fleet_rlm.sandbox.snapshots import SnapshotIdentity
 from fleet_rlm.workspace import _child_input_path, _workspace_relative_path, session_volume_subpath
 
 if TYPE_CHECKING:
+    from daytona import Daytona
+
     from fleet_rlm.sandbox.manager import DaytonaSandboxManager
 
 CLEAR_WORKSPACE_CODE = (
@@ -161,11 +162,6 @@ class SandboxLifecycleMixin:
             )
             root._children[child.agent_id] = child
             root._allocations += 1
-        child._deadline = root._deadline
-        child._deadline_source = root._deadline_source
-        child._effective_deadline_seconds = root._effective_deadline_seconds
-        child._turn_generation = root._turn_generation
-        child._turn_active = root._turn_active
         spawn_inputs = [path for path in selected_paths if path not in ambient_skills] if selected_paths else []
         child.emit("agent_spawn", depth=child.depth, **({"input_paths": spawn_inputs} if spawn_inputs else {}))
         with root._budget_lock:
@@ -356,12 +352,10 @@ class SandboxLifecycleMixin:
             if self._sandbox is None:
                 self.check_turn()
                 if self._creation_pending:
-                    query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
-                    matches = _mgr.with_retries(functools.partial(self._list_sandboxes, query))
-                    if len(matches) != 1:
-                        raise RuntimeError("Sandbox allocation outcome is uncertain; refusing a duplicate create")
-                    self._sandbox = matches[0]
-                    self._creation_pending = False
+                    sandbox = self._find_allocated_sandbox(
+                        self._client, self.agent_id, on_uncertain="; refusing a duplicate create"
+                    )
+                    self._adopt_allocated_sandbox(sandbox)
                     return self.ensure_sandbox()
                 child = self.parent is not None
                 root_sandbox = self.root.ensure_sandbox() if child else None
@@ -399,9 +393,17 @@ class SandboxLifecycleMixin:
                 self._resume_if_needed()
             return self._sandbox
 
-    def _list_sandboxes(self: DaytonaSandboxManager, query: ListSandboxesQuery) -> list[Any]:
-        assert self._client is not None
-        return list(self._client.list(query))
+    def _find_allocated_sandbox(
+        self: DaytonaSandboxManager, client: Daytona, allocation_nonce: str, *, on_uncertain: str = ""
+    ) -> Any:
+        """Resolve an ambiguous create only when exactly one sandbox has the allocation labels."""
+        from fleet_rlm.sandbox import manager as _mgr
+
+        query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": allocation_nonce})
+        matches = _mgr.with_retries(lambda: list(client.list(query)))
+        if len(matches) != 1:
+            raise RuntimeError(f"Sandbox allocation outcome is uncertain{on_uncertain}")
+        return matches[0]
 
     def _persist_ownership_resource(self: DaytonaSandboxManager, action: str, provider_id: str | None) -> None:
         """Persist this agent's cleanup intent before remote work, fenced by the Session epoch."""
@@ -449,11 +451,9 @@ class SandboxLifecycleMixin:
                 raise RuntimeError("Stored sandbox ownership record is invalid")
             try:
                 if not isinstance(provider_id, str) or not provider_id:
-                    query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": nonce})
-                    matches = _mgr.with_retries(functools.partial(lambda q: list(client.list(q)), query))
-                    if len(matches) != 1:
-                        raise RuntimeError("Sandbox allocation outcome is uncertain; Session admission remains fenced")
-                    sandbox = matches[0]
+                    sandbox = self._find_allocated_sandbox(
+                        client, nonce, on_uncertain="; Session admission remains fenced"
+                    )
                     provider_id = getattr(sandbox, "id", None)
                     if not isinstance(provider_id, str) or not provider_id:
                         raise RuntimeError("Labeled sandbox has no provider identity")
@@ -533,13 +533,9 @@ class SandboxLifecycleMixin:
                 self._persist_ownership_resource("create", None)
                 if client is None:
                     raise RuntimeError("Pending allocation has no provider client")
-                query = ListSandboxesQuery(labels={"fleet_session": self.session_id, "fleet_agent": self.agent_id})
-                matches = _mgr.with_retries(functools.partial(self._list_sandboxes, query))
-                if len(matches) != 1:
-                    raise RuntimeError("Sandbox allocation outcome is uncertain")
+                sandbox = self._find_allocated_sandbox(client, self.agent_id)
                 with self._lock:
-                    self._sandbox = sandbox = matches[0]
-                    self._creation_pending = False
+                    self._adopt_allocated_sandbox(sandbox)
             if sandbox is not None:
                 if client is None:
                     raise RuntimeError("Sandbox cleanup has no provider client")
