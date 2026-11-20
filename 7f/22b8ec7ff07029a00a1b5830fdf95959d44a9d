@@ -1,0 +1,14 @@
+src/fleet_rlm/launcher.py
+  h_f276322eb5eb9f 189-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7f22b8ec7ff07029a00a1b5830fdf95959d44a9d",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
