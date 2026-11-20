@@ -1,0 +1,43 @@
+src/fleet_rlm/cli.py
+  s_0d13acc2b2adb9::t_96b9f62cf7f13a 275
+src/fleet_rlm/engine/invocation.py
+  s_0d13acc2b2adb9::t_a2eb795d3ababd 131-174
+src/fleet_rlm/engine/reasoning.py
+  s_0d13acc2b2adb9::t_1f08fc4921db7a 228-229
+src/fleet_rlm/engine/turn.py
+  s_0d13acc2b2adb9::t_e1ff89b12ed6c3 43,315
+src/fleet_rlm/engine/turn_prepare.py
+  s_0d13acc2b2adb9::t_a24c4ede16e01a 17,119,314
+src/fleet_rlm/launcher.py
+  s_0d13acc2b2adb9::t_9a4f8f4d595ef4 185,189-190
+src/fleet_rlm/observability.py
+  s_0d13acc2b2adb9::t_0558541987bf79 15,372-379,388-389,391-396,399-401
+src/fleet_rlm/optimize/validation.py
+  s_0d13acc2b2adb9::t_6fcb53d15908d8 152
+src/fleet_rlm/session.py
+  s_0d13acc2b2adb9::t_7dfe55aba026e4 73,270,275-276,279,293-298,300-302,359,417,419,426,428-429,594-639,666,669,671-674,679
+tests/api/test_turns.py
+  s_0d13acc2b2adb9::t_50b05b0ef4df85 249-250,972,1056-1058,1061,1106,1233,1288,1595,1964
+tests/engine/test_runtime.py
+  s_0d13acc2b2adb9::t_710efd54609c9a 74,3127,3130-3135,3155,3171,3177,3184,3187,3190-3191,3650,3657-3659,3665,3690-3692,3718-3756,3868-3870,3872,3874,3924-3925,3945,3960-3961,3964,3975,4008,4012,4035,4554,4600,4639,4647-4650,4656,4660,4662-4665
+tests/store/test_store.py
+  s_0d13acc2b2adb9::t_d9e7acd0f8816f 517-518,536-537,559-560,589-590,698-699,704,706,708,721-730,746,794,1570,1597
+tests/tui/test_clients.py
+  s_0d13acc2b2adb9::t_81dc9e5a0a8ab4 3577,3792-3793,3797-3804,3807-3810
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "646d459bc0429d8b7b280b589d43ccdeca2d2c5a",
+  "prompts": {},
+  "sessions": {
+    "s_0d13acc2b2adb9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1fa63-8c07-78e0-b2a7-236bd8bcb2a3",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
