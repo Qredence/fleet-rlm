@@ -9,7 +9,6 @@ import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, suppress
-from threading import Event, Lock
 from typing import Annotated, Any
 
 import anyio
@@ -21,8 +20,8 @@ from fleet_rlm.api.deps import LOCKED, Runtime, Settings
 from fleet_rlm.api.events import Envelope, SSERuntimeCallback
 from fleet_rlm.api.schemas import TurnRequest
 from fleet_rlm.api.stream_contracts import frame_envelope
-from fleet_rlm.engine.turn import run_turn
-from fleet_rlm.session import SessionRuntime
+from fleet_rlm.engine.turn import TurnCompletion, run_turn
+from fleet_rlm.session import SessionRuntime, update_runtime_preferences
 
 router = APIRouter(tags=["turns"])
 _LOGGER = logging.getLogger("fleet_rlm.api")
@@ -110,20 +109,7 @@ async def stream_turn(
                 else None
             )
             if prior is None and (req.mode is not None or req.model is not None):
-                saved = {}
-                engine = None
-                if req.mode is not None:
-                    saved["mode"] = req.mode
-                if req.model is not None:
-                    registry = get_registry(request)
-                    models = {"root": req.model, "sub": runtime.engine.sub_lm.model}
-                    engine = registry.engine_for_models(runtime, models)
-                    saved["models"] = models
-                runtime.store.save_runtime_settings(session_id, saved)
-                if engine is not None:
-                    runtime.set_engine(engine)
-                if req.mode is not None:
-                    runtime.set_mode(req.mode)
+                update_runtime_preferences(runtime, get_registry(request), session_id, mode=req.mode, model=req.model)
 
     if req.mode is not None or req.model is not None:
         await anyio.to_thread.run_sync(configure)
@@ -135,9 +121,7 @@ async def stream_turn(
     # Executors do not copy contextvars (unlike asyncio.to_thread); DSPy and MLflow keep per-call state
     # in them, so the Turn runs in a copy of the request's context.
     context = contextvars.copy_context()
-    completion_committed = Event()
-    completion_lock = Lock()
-    cancellation_requested = Event()
+    completion = TurnCompletion()
     job = executor.submit(
         context.run,
         run_turn,
@@ -154,9 +138,7 @@ async def stream_turn(
         **({"submission": submission} if any(submission.values()) else {}),
         requested_skills=tuple(req.requested_skills),
         timeout_seconds=req.timeout_seconds,
-        completion_committed=completion_committed,
-        completion_lock=completion_lock,
-        cancellation_requested=cancellation_requested,
+        completion=completion,
     )
     worker = asyncio.wrap_future(job)
     # The wrapper owns a separate exception notification. Always retrieve it, even
@@ -177,7 +159,7 @@ async def stream_turn(
         with anyio.CancelScope(shield=True):
             if not job.cancel() and not job.done():
                 if not finished and not reported:
-                    await _cancel(runtime, completion_committed, completion_lock, cancellation_requested)
+                    await _cancel(runtime, completion)
                 await asyncio.wait({worker})
         _log_failure(job, turn_id)
 
@@ -202,7 +184,7 @@ async def stream_turn(
                 if connected and await request.is_disconnected():
                     connected = False
                     if not reported:
-                        await _cancel(runtime, completion_committed, completion_lock, cancellation_requested)
+                        await _cancel(runtime, completion)
                 continue
             getter = None
             if event is None:
@@ -218,7 +200,7 @@ async def stream_turn(
             if connected and await request.is_disconnected():
                 connected = False
                 if not reported:
-                    await _cancel(runtime, completion_committed, completion_lock, cancellation_requested)
+                    await _cancel(runtime, completion)
             if connected:
                 yield framed
             if event.get("event") == "done":
@@ -226,7 +208,7 @@ async def stream_turn(
                 # consuming it, so an HTTP client can tell a clean termination from a dropped stream.
                 finished = True
                 break
-        if connected and not reported and not completion_committed.is_set():
+        if connected and not reported and not completion.committed.is_set():
             failure = envelope.wrap(
                 {"event": "error", "request_id": turn_id, "error": f"The Turn failed (request {turn_id})."}
             )
@@ -247,21 +229,11 @@ async def _acquire(runtime: SessionRuntime) -> bool:
     return True
 
 
-async def _cancel(
-    runtime: SessionRuntime, completion_committed: Event, completion_lock: Lock, cancellation_requested: Event
-) -> None:
-    """Claim the disconnected Turn's one teardown; a racing terminal branch joins it instead."""
-    # Record disconnect before waiting on source/receipt admission, so a new claim cannot
-    # start execution when the waiting canceller has not acquired the lock yet.
-    cancellation_requested.set()
-
-    def cancel_uncommitted() -> None:
-        with completion_lock:
-            if not completion_committed.is_set() and runtime.sandbox_mgr.turn_active:
-                runtime.sandbox_mgr.request_cancellation()
-
+async def _cancel(runtime: SessionRuntime, completion: TurnCompletion) -> None:
+    """Record disconnect before waiting for admission or commit to release the lock."""
+    completion.disconnected.set()
     with suppress(Exception):
-        await asyncio.to_thread(cancel_uncommitted)
+        await asyncio.to_thread(completion.cancel_uncommitted, runtime)
 
 
 def _log_failure(job: Any, turn_id: str) -> None:

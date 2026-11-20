@@ -114,6 +114,16 @@ class OptimizationStoreMixin:
         return self._optimization_run_record(row) if row is not None else None
 
     @_retry_once
+    def get_optimization_run_by_request_id(self, request_id: str) -> dict[str, Any] | None:
+        """Find an existing submission using the ledger's unique request ID."""
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE request_id = %s",
+                (request_id,),
+            ).fetchone()
+        return self._optimization_run_record(row) if row is not None else None
+
+    @_retry_once
     def list_optimization_runs(self) -> list[dict[str, Any]]:
         """List the job history, newest update first."""
         with self.pool.connection() as connection:

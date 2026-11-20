@@ -207,6 +207,8 @@ class FleetSettings(BaseSettings):
             overrides["execution_mode"] = saved["mode"]
         if saved.get("models"):
             overrides.update({f"fleet_{role}_model": saved["models"][role] for role in ("root", "sub")})
+        if not overrides:
+            return self
         updated = self.model_copy(update=overrides)
         updated._resolved_lms = dict(self._resolved_lms)
         updated._configuration_sources = dict(self._configuration_sources)

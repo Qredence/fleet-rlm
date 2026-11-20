@@ -411,6 +411,25 @@ def test_interrupted_running_turns_are_failed_only_under_the_current_ownership_e
     assert sql[-1] == "COMMIT"
 
 
+@pytest.mark.parametrize("ownership_epoch", [None, 8])
+def test_finish_turn_preserves_completed_results_and_checks_epoch_when_supplied(ownership_epoch):
+    results = [[(8,)]] if ownership_epoch is not None else []
+    store, pool = make_store(*results)
+
+    store.finish_turn("s1", "turn-1", "failed", {"event": "error"}, ownership_epoch=ownership_epoch)
+
+    statements = pool.conn.statements
+    update, parameters = next((sql, params) for sql, params in statements if sql.startswith("UPDATE turns"))
+    assert "AND status <> 'completed'" in update
+    assert parameters == ("failed", '{"event": "error"}', "s1", "turn-1")
+    if ownership_epoch is not None:
+        assert statements[0][0] == "BEGIN"
+        assert statements[1][0].endswith("FOR UPDATE")
+        assert statements[-1][0] == "COMMIT"
+    else:
+        assert len(statements) == 1
+
+
 def test_stale_ownership_epoch_cannot_finalize_a_turn():
     store, pool = make_store([("9",)])
 
@@ -883,6 +902,16 @@ def test_get_and_list_optimization_runs_are_global_and_canonical():
     assert pool.borrowed == 2
     assert "WHERE run_id = %s" in pool.conn.statements[0][0]
     assert "ORDER BY updated_at DESC" in pool.conn.statements[1][0]
+
+
+def test_get_optimization_run_by_request_id_returns_the_canonical_record_or_none():
+    row = run_row(request_id="submit-1", status="cancelled", metadata={"status": "spoofed"})
+    store, pool = make_store([row], [])
+
+    record = store.get_optimization_run_by_request_id("submit-1")
+    assert record is not None and record["status"] == "cancelled"
+    assert store.get_optimization_run_by_request_id("missing") is None
+    assert pool.conn.statements[0] == ("SELECT * FROM jobs WHERE request_id = %s", ("submit-1",))
 
 
 def test_a_legacy_run_keeps_its_session_only_as_metadata():

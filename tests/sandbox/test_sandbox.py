@@ -3071,10 +3071,12 @@ def test_empty_ownership_never_builds_a_provider_client(monkeypatch: pytest.Monk
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
+@pytest.mark.parametrize("match_count", [0, 2])
 def test_persisted_ambiguous_create_stays_fenced_when_labels_do_not_resolve(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, match_count: int
 ) -> None:
-    client = SimpleNamespace(list=lambda _query: [])
+    matches = [SimpleNamespace(id=f"sandbox-{index}") for index in range(match_count)]
+    client = SimpleNamespace(list=lambda _query: matches)
     monkeypatch.setattr(manager_module, "_shared_daytona_client", lambda *_args: client)
     manager = DaytonaSandboxManager("key", "org", "volume", "session-a")
     manager.ownership_epoch = 8
@@ -3778,6 +3780,11 @@ def test_shutdown_preserves_ambiguous_create_until_a_resource_can_be_stopped() -
     )
     assert manager.shutdown() is False, "an empty lookup is not confirmed absence"
     assert manager._creation_pending is True
+    matches.extend([SimpleNamespace(id="sandbox-a"), SimpleNamespace(id="sandbox-b")])
+    assert manager.shutdown() is False
+    assert manager._creation_pending is True
+    assert stopped == []
+    matches.clear()
     manager.reset_turn_budget()
     manager.end_turn()
     with pytest.raises(RuntimeError, match="cleanup is unconfirmed"):
@@ -5351,19 +5358,29 @@ def test_a_deadline_free_turn_arms_no_watchdog_and_owns_no_deadline() -> None:
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")
 def test_child_deadline_inherits_the_parents_absolute_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = _ready_manager(deadline=time.monotonic() + 120)
+    manager = _ready_manager(deadline=None)
+    manager.reset_turn_budget(deadline_seconds=120, deadline_source="request")
     monkeypatch.setattr(DaytonaSandboxManager, "ensure_sandbox", lambda _self: None)
     monkeypatch.setattr(DaytonaSandboxManager, "list_workspace_files", lambda _self: [])
 
-    child = manager._allocate_child()
-    grandchild = child._allocate_child()
+    try:
+        child = manager._allocate_child()
+        grandchild = child._allocate_child()
+        for descendant in (child, grandchild):
+            assert descendant.turn_active
+            assert descendant.remaining_turn_seconds() == pytest.approx(manager.remaining_turn_seconds(), abs=0.1)
+            assert descendant.deadline_provenance() == {"deadline_source": "request", "effective_seconds": 120}
+    finally:
+        manager.end_turn()
 
-    assert child._deadline == manager._deadline, "a child never receives a longer deadline"
-    assert grandchild._deadline == manager._deadline
-
-    manager._deadline = None
-    deadline_free_child = manager._allocate_child()
-    assert deadline_free_child._deadline is None
+    manager.reset_turn_budget(deadline_seconds=0, deadline_source="request")
+    try:
+        deadline_free_child = manager._allocate_child()
+        assert deadline_free_child.turn_active
+        assert deadline_free_child.remaining_turn_seconds() is None
+        assert deadline_free_child.deadline_provenance() == {"deadline_source": "request", "effective_seconds": None}
+    finally:
+        manager.end_turn()
 
 
 @pytest.mark.usefixtures("clear_snapshot_preflight_cache")

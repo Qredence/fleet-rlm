@@ -2390,7 +2390,7 @@ def test_known_empty_session_routes_before_preparing_workspace(monkeypatch) -> N
             )
 
     runtime.engine = Engine()
-    runtime.skill_mgr = SimpleNamespace(build_local_catalog_xml=lambda: "<available_skills />")
+    runtime.skill_mgr = SimpleNamespace(stage_local_skills=lambda: ("<available_skills />", {}))
     monkeypatch.setattr(
         turn_module,
         "_prepare_inputs",
@@ -2530,7 +2530,7 @@ def test_known_empty_execution_route_invalidates_state_before_preparation(monkey
             )
 
     runtime.engine = Engine()
-    runtime.skill_mgr = SimpleNamespace(build_local_catalog_xml=lambda: "<available_skills />")
+    runtime.skill_mgr = SimpleNamespace(stage_local_skills=lambda: ("<available_skills />", {}))
     runtime.load_context = lambda _session_id: pytest.fail("known-empty RLM preview should not pre-load context")
     runtime.memories = lambda *_args, **_kwargs: pytest.fail("known-empty RLM preview should not pre-load memories")
     prepared = {
@@ -2886,11 +2886,11 @@ async def test_blocked_send_disconnect_drains_before_unlock_even_when_generator_
         manager._sandbox = None
         cleanup_started.set()
 
-    def work(*_args, emit, completion_committed, **_kwargs):
+    def work(*_args, emit, completion, **_kwargs):
         try:
             manager.reset_turn_budget()
             if committed:
-                completion_committed.set()
+                completion.committed.set()
             for value in range(12):
                 emit({"event": "budget_update", "lm_calls": value})
             assert release.wait(10), "the test must release the draining worker"
@@ -3957,6 +3957,10 @@ def test_readonly_session_endpoints_read_store_without_materializing_cold_runtim
     assert config.status_code == 200
     assert config.json()["mode"] == "rlm"
     assert config.json()["models"] == saved_settings["models"]
+    provenance = config.json()["configuration"]
+    assert provenance["sources"]["execution_mode"] == "session"
+    assert provenance["sources"]["fleet_root_model"] == "session"
+    assert provenance["values"]["fleet_root_model"] == saved_settings["models"]["root"]
     assert config.json()["context"] == {**saved_settings["context"], "size_bytes": 0, "sha256": ""}
     assert mode.status_code == 200 and mode.json()["mode"] == "rlm"
     assert memory.status_code == 200 and memory.json() == {"memories": saved_memories}
@@ -4003,7 +4007,8 @@ def test_session_settings_only_change_after_successful_persistence(operation, fa
 
 
 @pytest.mark.parametrize("failure", [None, "busy", "persistence"])
-def test_model_selection_is_validated_atomic_and_secret_free(failure):
+@pytest.mark.parametrize("role", ["root", "sub"])
+def test_model_selection_is_validated_atomic_and_secret_free(failure, role):
     saved: dict = {}
     old_engine = engine_with("openai/system.ai.old", "openai/system.ai.child")
 
@@ -4030,7 +4035,7 @@ def test_model_selection_is_validated_atomic_and_secret_free(failure):
     with client:
         before = client.get("/sessions/s1/config").json()
         assert before["models"]["sub"] == "openai/system.ai.child"
-        response = client.put("/sessions/s1/model", json={"role": "root", "model": "openai/system.ai.new"})
+        response = client.put("/sessions/s1/model", json={"role": role, "model": "openai/system.ai.new"})
         after = client.get("/sessions/s1/config").json()
     expected = {None: 200, "unlisted": 422, "busy": 409, "persistence": 503}[failure]
     assert response.status_code == expected
@@ -4041,7 +4046,8 @@ def test_model_selection_is_validated_atomic_and_secret_free(failure):
     assert "fleet_database_url" not in after["configuration"]["values"]
     assert "databricks_token" not in after["configuration"]["values"]
     if failure is None:
-        assert after["configuration"]["sources"]["fleet_root_model"] == "session"
+        assert saved["models"] == {**before["models"], role: "openai/system.ai.new"}
+        assert after["configuration"]["sources"][f"fleet_{role}_model"] == "session"
     else:
         assert runtime.engine is old_engine and saved == {}
     if failure == "busy":
@@ -4928,6 +4934,10 @@ class MemoryStore:
             row = self.rows.get(run_id)
             return dict(row) if row else None
 
+    def get_optimization_run_by_request_id(self, request_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            return next((dict(row) for row in self.rows.values() if row["request_id"] == request_id), None)
+
     def list_optimization_runs(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(row) for row in self.rows.values()]
@@ -5640,6 +5650,9 @@ def test_experiment_routes_keep_run_after_response_and_cancel_only_by_request(
         repeated = client.post("/improve/jobs", json=request)
         assert repeated.status_code == 202
         assert repeated.json()["job"]["run_id"] == run_id
+        changed_retry = client.post("/improve/jobs", json={**request, "max_metric_calls": 3})
+        assert changed_retry.status_code == 409
+        assert changed_retry.json()["detail"] == "Request ID was already used with different options"
         conflict = client.post("/improve/jobs", json={"request_id": "other", "max_metric_calls": 3})
         assert conflict.status_code == 409
         invalid = client.post("/improve/jobs", json={"request_id": "bad", "unknown": "field"})
@@ -5666,6 +5679,9 @@ def test_experiment_routes_keep_run_after_response_and_cancel_only_by_request(
                 break
             time.sleep(0.01)
         assert latest["status"] == "cancelled"
+        repeated_cancel = client.post(f"/improve/jobs/{run_id}/cancel")
+        assert repeated_cancel.status_code == 202
+        assert repeated_cancel.json()["job"] == latest
         assert (tmp_path / "runs" / run_id / "gepa.stop").is_file()
 
 
@@ -6566,17 +6582,16 @@ async def test_turn_configuration_runs_off_loop_and_binds_submission(monkeypatch
 @pytest.mark.usefixtures("traced")
 def test_disconnect_during_artifact_publication_prevents_commit(monkeypatch):
     runtime, state = durable_runtime()
-    disconnected = threading.Event()
-    lock = threading.Lock()
+    completion = turn_module.TurnCompletion()
     runtime.sandbox_mgr.turn_inputs = lambda: {"digests": {}, "environment": ""}
     runtime.storage_settings = SimpleNamespace(fleet_storage_bucket="test")
     runtime.sandbox_mgr.read_workspace_file_to_path = lambda *_args, **_kwargs: None
     runtime.sandbox_mgr.check_turn = lambda: None
 
     def upload(*_args, **_kwargs):
-        assert lock.acquire(blocking=False), "publication must leave cancellation free to acquire the lock"
-        lock.release()
-        disconnected.set()
+        assert completion.lock.acquire(blocking=False), "publication must leave cancellation free to acquire the lock"
+        completion.lock.release()
+        completion.disconnected.set()
         return {"sha256": hashlib.sha256(b"").hexdigest()}
 
     monkeypatch.setattr("fleet_rlm.object_storage.ObjectStorage", lambda _settings: SimpleNamespace(upload=upload))
@@ -6592,10 +6607,9 @@ def test_disconnect_during_artifact_publication_prevents_commit(monkeypatch):
         mlflow_experiment_id=None,
         callback=None,
         emit=emitted.append,
-        completion_lock=lock,
-        cancellation_requested=disconnected,
+        completion=completion,
     )
-    assert disconnected.is_set()
+    assert completion.disconnected.is_set()
     assert state.commits == []
     assert state.cancellations
     assert not any(event["event"] == "turn_complete" for event in emitted)
