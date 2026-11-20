@@ -1,0 +1,115 @@
+tests/sandbox/test_sandbox.py
+  s_0305d7b9ad554a::t_3953795fcf1090 1229,1261,1292
+tests/api/test_chat.py
+  s_0305d7b9ad554a::t_6b20ca08e90f44 31,71,94,106
+.vscode/settings.json
+  s_0d13acc2b2adb9::t_5d750f89bb54f6 37
+AGENTS.md
+  s_0d13acc2b2adb9::t_29215947d5139d 1,3-7,9,12-21,25-40,44-47,49-69,73-75,77-79
+ARCHITECTURE.md
+  s_0305d7b9ad554a::t_41c88d608ac65f 3-6,10-19,23-117
+CHANGELOG.md
+  s_0305d7b9ad554a::t_cc443f2b2f27ee 30-36
+Makefile
+  s_0d13acc2b2adb9::t_18668dc5c81abe 11
+docs/reference/http-api.md
+  s_0d13acc2b2adb9::t_eb262703bfb66b 32-36
+docs/runbooks/evaluation-canary.md
+  s_0d13acc2b2adb9::t_6e939374e09e44 31
+notebooks/longcot_benchmark.ipynb
+  s_0d13acc2b2adb9::t_1c71c99b1485f0 68
+notebooks/oolong_benchmark.ipynb
+  s_0d13acc2b2adb9::t_dd8aa02249b1c4 59,220
+openapi.yaml
+  s_0d13acc2b2adb9::t_9f170bd9e50d66 11-12,2371
+pyproject.toml
+  s_0d13acc2b2adb9::t_512e0d6c646c87 37
+scripts/benchmark_tasks.py
+  s_0d13acc2b2adb9::t_67f20a190ebea1 635-636,638,773
+src/fleet_rlm/api/app.py
+  s_0d13acc2b2adb9::t_7b10231942dae7 22,138,165,171,174
+src/fleet_rlm/api/routes/chat.py
+  s_0d13acc2b2adb9::t_a75ac1c41345be 34,37
+src/fleet_rlm/api/routes/improve.py
+  s_0d13acc2b2adb9::t_a72d1c331eb7f9 120
+src/fleet_rlm/api/schemas.py
+  s_0d13acc2b2adb9::t_5b1679aee139af 153
+src/fleet_rlm/cli.py
+  s_0d13acc2b2adb9::t_a4d70fd4e4c41c 179,186,214-218,232-235,239,268,287,361,404,424,426,436-437,449,466
+src/fleet_rlm/config/settings.py
+  s_0305d7b9ad554a::t_196509518e42a8 146,465-466,478,481-483,488-489,492-495,531,533,535,560,562
+src/fleet_rlm/config/sources.py
+  s_0d13acc2b2adb9::t_588f989bea357f 89-92,158,196-197
+src/fleet_rlm/doctor.py
+  s_0d13acc2b2adb9::t_c68571d9eebf5d 130-136,139,141,144,236
+src/fleet_rlm/engine/turn.py
+  s_0d13acc2b2adb9::t_5018cb88634f61 348
+src/fleet_rlm/engine/turn_prepare.py
+  s_0d13acc2b2adb9::t_df4b2ea25bfa52 129-132,153-154,172-173,241,243-244
+src/fleet_rlm/experiments.py
+  s_0d13acc2b2adb9::t_19bdcebd0e7e6e 124
+src/fleet_rlm/launcher.py
+  s_0d13acc2b2adb9::t_f2e863272a2811 147,159
+src/fleet_rlm/observability.py
+  s_0d13acc2b2adb9::t_ccbe373354e0d5 464-465,638
+src/fleet_rlm/optimize/cli_commands.py
+  s_0d13acc2b2adb9::t_3bdc008e5d6678 76,477
+src/fleet_rlm/optimize/dataset.py
+  s_0d13acc2b2adb9::t_2b80c8e828871d 155,196-204,221,239,250
+src/fleet_rlm/optimize/evaluation.py
+  s_0d13acc2b2adb9::t_c71a2508a85041 175,178-179,319,364,408-409,457,483,539
+src/fleet_rlm/optimize/runner.py
+  s_0d13acc2b2adb9::t_ab773f0fbb76d5 256,265,267
+src/fleet_rlm/optimize/scorers.py
+  s_0d13acc2b2adb9::t_265304e4949eb8 569
+src/fleet_rlm/store/__init__.py
+  s_0d13acc2b2adb9::t_577371c8c2010c 1
+src/fleet_rlm/store/leases.py
+  s_0d13acc2b2adb9::t_f0f00ff64c6c38 1
+src/fleet_rlm/store/schema.py
+  s_0d13acc2b2adb9::t_9737ecf02802ef 1
+src/fleet_rlm/tui/app.py
+  s_0d13acc2b2adb9::t_8246aa7d27f0ce 1363,1368
+src/fleet_rlm/tui/commands.py
+  s_0d13acc2b2adb9::t_dc85120df07d8f 542
+src/fleet_rlm/tui/improve.py
+  s_0d13acc2b2adb9::t_3b9905a20001a4 879
+src/fleet_rlm/tui/web_client.py
+  s_0d13acc2b2adb9::t_6952858d37b561 27-28
+tests/api/test_turns.py
+  s_0d13acc2b2adb9::t_e771fc2d37ccc4 18,20,48,59,227,232-241,278,909-928,1139,1457,1682,1983,2671,5121-5123,5127,5447,6136,6142
+tests/optimize/test_evaluation.py
+  s_0d13acc2b2adb9::t_68d1a0c8c57ea7 71-74,76-77,79-80,95,1251-1255,1263,1267,1285,1342,1560,1600,2311,2328,2346,2428,2907-2908,2910
+tests/optimize/test_optimization.py
+  s_0d13acc2b2adb9::t_c63dee8a1d7dd2 266-267,275,337,404,409,460,498,1265,1379,1704,1719,1727,1733,1750,1757,1783,1789,1795,1807,1813,2492,2761,2802,2869,2919,2941,2963,2968-2969,2971,2989,3217
+tests/store/test_store.py
+  s_0d13acc2b2adb9::t_70088bedefc6c9 322,1201,1203,1206-1207
+tests/tui/test_clients.py
+  s_0d13acc2b2adb9::t_f72f34b7dd7687 1584,2979,2981-2982,2985,2996,3004,3010,3046,3053,3061,3065,3068,3074,3087,3089,3137,3144,3205,3207,3215,3225,3236-3246,3252,3256-3259,3444,3446,3927-3930,3932-3943,3950,3963,3966,3974-3975,3996,4001-4002,4004-4005,4007-4012,4065-4067,4111,4339,4341,4345-4346
+uv.lock
+  s_0d13acc2b2adb9::t_6bad5480c647bc 1219,1261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eab7d90ca3f842836fd715feed81d19e6eee26b0",
+  "prompts": {},
+  "sessions": {
+    "s_0305d7b9ad554a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2dccf1d5-044a-4645-b70e-ce37b3eae25b",
+        "model": "deepseek/deepseek-v4.1-flash"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_0d13acc2b2adb9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1fa63-8c07-78e0-b2a7-236bd8bcb2a3",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
