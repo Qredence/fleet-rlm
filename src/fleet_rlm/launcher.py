@@ -186,7 +186,8 @@ def plan_launch(
     target = settings.mlflow_target()
     api_healthy = api_healthy or api_is_healthy
     mlflow_healthy = mlflow_healthy or mlflow_is_healthy
-    api_url = f"http://{host}:{port}"
+    # Managed Uvicorn listens over HTTP. The CLI defaults to loopback and requires opt-in for external binds.
+    api_url = f"http://{host}:{port}"  # NOSONAR (S5332)
     if api_healthy(api_url):
         return LaunchPlan(api_url=api_url, notes=(f"Reusing the API server already running at {api_url}.",))
     environment = settings.mlflow_environment()
