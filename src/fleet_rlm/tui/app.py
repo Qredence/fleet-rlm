@@ -1360,11 +1360,11 @@ class FleetTextualApp(App[str | None]):
         threading.Thread(target=worker, name="fleet-textual-turn", daemon=True).start()
 
 
-def run_interactive_cli(base_url: str, session_id: str, *, mlflow_mode: str = "local") -> str | None:
+def run_interactive_cli(base_url: str, session_id: str) -> str | None:
     """Run the terminal Textual client; browser clients use the same app directly."""
     if not sys.stdin.isatty() or not CONSOLE.is_terminal:
         raise SystemExit("fleet cli requires an interactive terminal; use fleet web or the HTTP API")
     validate_session_id(session_id)
-    state = SessionState(mlflow_mode=mlflow_mode)
+    state = SessionState()
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(300.0, connect=10.0)) as client:
         return FleetTextualApp(client, session_id, state).run()

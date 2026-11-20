@@ -28,7 +28,7 @@ def client_for(store: Any, *, settings: Any = None) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.state.settings = settings or SimpleNamespace(
-        mlflow_mode="local", mlflow_descriptor=lambda: {"tracking_uri": "http://mlflow.test"}, max_upload_bytes=4
+        mlflow_descriptor=lambda: {"tracking_uri": "http://mlflow.test"}, max_upload_bytes=4
     )
     app.state.mlflow_experiment_id = "experiment"
     app.dependency_overrides[get_store] = lambda: store
@@ -68,7 +68,7 @@ def test_activity_rejects_missing_or_invalid_message_and_oversized_payloads():
     )
 
 
-@pytest.mark.parametrize("mode", ["local", "databricks", "unconfigured"])
+@pytest.mark.parametrize("mode", ["local", "unconfigured"])
 def test_message_pages_preserve_cursor_and_build_safe_trace_links(mode):
     rows = [
         dict(
@@ -91,12 +91,7 @@ def test_message_pages_preserve_cursor_and_build_safe_trace_links(mode):
         return rows
 
     settings = SimpleNamespace(
-        mlflow_mode=mode,
-        mlflow_descriptor=lambda: (
-            {}
-            if mode == "unconfigured"
-            else {"tracking_uri": "http://mlflow.test", "workspace_host": "https://workspace.test"}
-        ),
+        mlflow_descriptor=lambda: {"tracking_uri": "http://mlflow.test"} if mode == "local" else {},
     )
     client = client_for(SimpleNamespace(messages=messages), settings=settings)
     response = client.get("/sessions/session-a/messages?before=9&limit=2")
@@ -108,8 +103,7 @@ def test_message_pages_preserve_cursor_and_build_safe_trace_links(mode):
     if mode == "unconfigured":
         assert link is None
     else:
-        base = "https://workspace.test/ml" if mode == "databricks" else "http://mlflow.test/#"
-        assert link == base + "/experiments/experiment/traces?selectedTraceId=tr%3A%2Ftrace"
+        assert link == "http://mlflow.test/#/experiments/experiment/traces?selectedTraceId=tr%3A%2Ftrace"
     rows.clear()
     assert client.get("/sessions/session-a/messages").json() == {"messages": [], "next_before": None}
     assert client.get("/sessions/session-a/messages?limit=0").status_code == 422

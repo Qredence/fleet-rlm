@@ -29,6 +29,11 @@ Paths below use `/sessions/{id}` as the Session prefix.
 | GET | `/skills?session_id=...` | Skill catalog |
 | POST | `/skills/push`, `/skills/pull` | Sync local user Skills or export sandbox Skills |
 
+The `/health` response identifies the local MLflow OSS server with
+`mlflow.mode = "local"`, the tracking URI, experiment names, readiness, and the
+initialized runtime experiment ID. Clients also check the runtime digest before
+reusing the API.
+
 Mutating operations and workspace reads share the Session lock with execution;
 busy requests return 409 after two seconds. A PostgreSQL lease prevents concurrent
 runtime owners. Managed roots are `files`, `artifacts`, `memory`, `skills`,

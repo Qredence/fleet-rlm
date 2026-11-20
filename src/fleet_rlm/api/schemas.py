@@ -147,24 +147,14 @@ class LabelRequest(_Request):
 # Responses
 
 
-class MlflowTraceLocation(BaseModel):
-    """Unity Catalog location associated with the runtime experiment."""
-
-    catalog: str
-    schema_: str = Field(alias="schema")
-    table_prefix: str
-
-
 class MlflowHealth(BaseModel):
     """Non-secret, initialized tracking destination for process reuse checks."""
 
-    mode: Literal["local", "databricks"]
+    mode: Literal["local"]
     tracking_uri: str
-    workspace_host: str | None = None
     experiment_name: str
     eval_experiment_name: str
     optimization_experiment_name: str
-    trace_location: MlflowTraceLocation | None = None
     experiment_id: str | None = None
     ready: bool
 

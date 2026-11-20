@@ -10,7 +10,6 @@ from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 import dspy
 from dotenv import dotenv_values
@@ -144,10 +143,7 @@ class FleetSettings(BaseSettings):
                     )
                     if retired:
                         raise ValueError(
-                            "Retired MLflow settings: "
-                            + ", ".join(retired)
-                            + "; migrate to FLEET_MLFLOW_LOCAL_* or FLEET_MLFLOW_DATABRICKS_*; "
-                            "select the backend with --mlflow local|databricks"
+                            "Retired MLflow settings: " + ", ".join(retired) + "; use FLEET_MLFLOW_LOCAL_*"
                         )
                 values = {aliases.get(key, key): value for key, value in source().items()}
                 if label == "dotenv":
@@ -262,8 +258,6 @@ class FleetSettings(BaseSettings):
         validation_alias="FLEET_SHARED_NOTES_SUBPATH",
         description="Volume subpath mounted at /learned on root sandboxes; empty disables shared notes.",
     )
-    databricks_host: str = Field(default="", validation_alias="DATABRICKS_HOST")
-    databricks_token: SecretStr = Field(default=SecretStr(""), validation_alias="DATABRICKS_TOKEN")
     daytona_auto_stop_minutes: int = Field(
         default=30,
         ge=1,
@@ -390,7 +384,6 @@ class FleetSettings(BaseSettings):
         validation_alias=AliasChoices("FLEET_LOCAL_SKILLS_DIR", "LOCAL_SKILLS_DIR"),
     )
 
-    mlflow_mode: Literal["local", "databricks"] = Field(default="local", validation_alias="_fleet_selected_mlflow")
     mlflow_local_port: int = Field(default=5001, ge=1, le=65535, validation_alias="FLEET_MLFLOW_LOCAL_PORT")
     mlflow_local_data_dir: str = Field(
         default=".fleet/mlflow", min_length=1, validation_alias="FLEET_MLFLOW_LOCAL_DATA_DIR"
@@ -404,41 +397,6 @@ class FleetSettings(BaseSettings):
     mlflow_local_optimization_experiment_name: str = Field(
         default="fleet-rlm-gepa", min_length=1, validation_alias="FLEET_MLFLOW_LOCAL_OPTIMIZATION_EXPERIMENT_NAME"
     )
-    mlflow_databricks_tracking_uri: str = Field(
-        default="databricks",
-        validation_alias="FLEET_MLFLOW_DATABRICKS_TRACKING_URI",
-    )
-    mlflow_databricks_experiment_name: str = Field(
-        default="/Shared/fleet-rlm-runtime",
-        validation_alias="FLEET_MLFLOW_DATABRICKS_EXPERIMENT_NAME",
-    )
-    mlflow_databricks_eval_experiment_name: str = Field(
-        default="/Shared/fleet-rlm-eval", validation_alias="FLEET_MLFLOW_DATABRICKS_EVAL_EXPERIMENT_NAME"
-    )
-    mlflow_databricks_optimization_experiment_name: str = Field(
-        default="/Shared/fleet-rlm-gepa", validation_alias="FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_EXPERIMENT_NAME"
-    )
-    mlflow_databricks_trace_catalog: str = Field(default="", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG")
-    mlflow_databricks_trace_schema: str = Field(
-        default="fleet_observability", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_SCHEMA"
-    )
-    mlflow_databricks_trace_table_prefix: str = Field(
-        default="fleet_rlm_runtime", validation_alias="FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX"
-    )
-    mlflow_databricks_tracing_sql_warehouse_id: str = Field(
-        default="",
-        validation_alias="FLEET_MLFLOW_DATABRICKS_TRACING_SQL_WAREHOUSE_ID",
-    )
-    mlflow_databricks_optimization_trace_schema: str = Field(
-        default="fleet_gepa", validation_alias="FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_TRACE_SCHEMA"
-    )
-    mlflow_databricks_optimization_trace_table_prefix: str = Field(
-        default="fleet_rlm_gepa", validation_alias="FLEET_MLFLOW_DATABRICKS_OPTIMIZATION_TRACE_TABLE_PREFIX"
-    )
-    mlflow_databricks_eval_trace_table_prefix: str = Field(
-        default="fleet_rlm_eval", validation_alias="FLEET_MLFLOW_DATABRICKS_EVAL_TRACE_TABLE_PREFIX"
-    )
-
     host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("FLEET_HOST", "HOST"))
     port: int = Field(
         default=8000,
@@ -479,17 +437,6 @@ class FleetSettings(BaseSettings):
             raise ValueError("TypeSafe route model must not be empty")
         return normalized
 
-    @field_validator("databricks_host", "mlflow_databricks_tracking_uri")
-    @classmethod
-    def public_urls_do_not_contain_credentials(cls, value: str) -> str:
-        """Reject URLs that embed credentials or carry HTTP query strings and fragments."""
-        parsed = urlsplit(value if "://" in value else "https://" + value)
-        if parsed.username is not None or parsed.password is not None:
-            raise ValueError("Configuration URLs cannot contain credentials; use environment credentials")
-        if parsed.scheme in {"http", "https"} and (parsed.query or parsed.fragment):
-            raise ValueError("Configuration HTTP URLs cannot contain query credentials or fragments")
-        return value
-
     @field_validator("fleet_shared_notes_subpath")
     @classmethod
     def shared_notes_subpath_is_relative(cls, value: str) -> str:
@@ -515,11 +462,8 @@ class FleetSettings(BaseSettings):
         return value.strip()
 
     @model_validator(mode="after")
-    def databricks_tracking_requires_governed_trace_storage(self) -> FleetSettings:
-        """Cross-check database, Lakebase, and Databricks MLflow settings for consistency.
-
-        Databricks tracking needs Unity Catalog trace storage and absolute experiment paths.
-        """
+    def migration_targets_runtime_database(self) -> FleetSettings:
+        """Keep the migration and runtime connections on the same PostgreSQL database."""
         if self.fleet_database_migration_url:
             from psycopg.conninfo import conninfo_to_dict
 
@@ -528,114 +472,28 @@ class FleetSettings(BaseSettings):
             for key, default in (("host", ""), ("port", "5432"), ("dbname", "")):
                 if migration_database.get(key, default) != runtime_database.get(key, default):
                     raise ValueError("FLEET_DATABASE_MIGRATION_URL must target the runtime database")
-        if self.mlflow_mode == "databricks":
-            if not self.mlflow_tracking_uri.startswith("databricks"):
-                raise ValueError("Databricks mode requires a databricks tracking URI")
-            required = (
-                self.mlflow_trace_catalog,
-                self.mlflow_trace_schema,
-                self.mlflow_tracing_sql_warehouse_id,
-                self.mlflow_trace_table_prefix,
-                self.mlflow_eval_trace_table_prefix,
-                self.mlflow_optimization_trace_schema,
-                self.mlflow_optimization_trace_table_prefix,
-            )
-            if not all(item and item.strip() for item in required):
-                raise ValueError(
-                    "Databricks MLflow tracing requires Unity Catalog catalog, schemas, trace prefixes, "
-                    "and SQL warehouse ID"
-                )
-            if not self.mlflow_tracking_uri.startswith("databricks://") and self.mlflow_tracking_uri != "databricks":
-                raise ValueError("Databricks MLflow tracking URI must be 'databricks' or 'databricks://<profile>'")
-            if not self.mlflow_experiment_name.startswith("/"):
-                raise ValueError("Databricks MLflow experiment names must be absolute workspace paths")
-            if not self.mlflow_eval_experiment_name.startswith("/"):
-                raise ValueError("Databricks MLflow eval experiment names must be absolute workspace paths")
-            if not self.mlflow_optimization_experiment_name.startswith("/"):
-                raise ValueError("Databricks MLflow optimization experiment names must be absolute workspace paths")
         return self
 
     def mlflow_target(self) -> MlflowTarget:
-        """Resolve one isolated backend, never borrowing values from the other."""
-        prefix = f"mlflow_{self.mlflow_mode}_"
+        """Return the local tracking destination and Fleet experiment names."""
         return MlflowTarget(
-            self.mlflow_mode,
             self.mlflow_tracking_uri,
-            *(
-                getattr(self, prefix + name)
-                for name in ("experiment_name", "eval_experiment_name", "optimization_experiment_name")
-            ),
+            self.mlflow_local_experiment_name,
+            self.mlflow_local_eval_experiment_name,
+            self.mlflow_local_optimization_experiment_name,
         )
 
     @property
     def mlflow_tracking_uri(self) -> str:
-        """Resolved tracking uri for the selected backend."""
-        return (
-            f"http://127.0.0.1:{self.mlflow_local_port}"
-            if self.mlflow_mode == "local"
-            else self.mlflow_databricks_tracking_uri
-        )
-
-    @property
-    def mlflow_experiment_name(self) -> str:
-        """Resolved experiment name for the selected backend."""
-        return getattr(self, f"mlflow_{self.mlflow_mode}_experiment_name")
-
-    @property
-    def mlflow_eval_experiment_name(self) -> str:
-        """Resolved eval experiment name for the selected backend."""
-        return getattr(self, f"mlflow_{self.mlflow_mode}_eval_experiment_name")
-
-    @property
-    def mlflow_optimization_experiment_name(self) -> str:
-        """Resolved optimization experiment name for the selected backend."""
-        return getattr(self, f"mlflow_{self.mlflow_mode}_optimization_experiment_name")
-
-    @property
-    def mlflow_trace_catalog(self) -> str:
-        """Resolved trace catalog for the selected backend."""
-        return self.mlflow_databricks_trace_catalog if self.mlflow_mode == "databricks" else ""
-
-    @property
-    def mlflow_trace_schema(self) -> str:
-        """Resolved trace schema for the selected backend."""
-        return self.mlflow_databricks_trace_schema if self.mlflow_mode == "databricks" else ""
-
-    @property
-    def mlflow_trace_table_prefix(self) -> str:
-        """Resolved trace table prefix for the selected backend."""
-        return self.mlflow_databricks_trace_table_prefix if self.mlflow_mode == "databricks" else ""
-
-    @property
-    def mlflow_tracing_sql_warehouse_id(self) -> str:
-        """Resolved tracing sql warehouse id for the selected backend."""
-        return self.mlflow_databricks_tracing_sql_warehouse_id if self.mlflow_mode == "databricks" else ""
-
-    @property
-    def mlflow_optimization_trace_schema(self) -> str:
-        """Resolved optimization trace schema for the selected backend."""
-        return self.mlflow_databricks_optimization_trace_schema if self.mlflow_mode == "databricks" else ""
-
-    @property
-    def mlflow_optimization_trace_table_prefix(self) -> str:
-        """Resolved optimization trace table prefix for the selected backend."""
-        return self.mlflow_databricks_optimization_trace_table_prefix if self.mlflow_mode == "databricks" else ""
-
-    @property
-    def mlflow_eval_trace_table_prefix(self) -> str:
-        """Resolved eval trace table prefix for the selected backend."""
-        return self.mlflow_databricks_eval_trace_table_prefix if self.mlflow_mode == "databricks" else ""
+        """Return the loopback URI of the local MLflow server."""
+        return f"http://127.0.0.1:{self.mlflow_local_port}"
 
     def mlflow_environment(self) -> dict[str, str]:
-        """Profile overrides for a subprocess; secrets continue through the existing environment/.env."""
-        profile = self.mlflow_mode
-        environment = {
-            f"FLEET_MLFLOW_{profile.upper()}_{key.upper()}": str(getattr(self, field))
-            for key, field in _TOML_FIELDS[f"mlflow.{profile}"].items()
+        """Pass local MLflow settings to the managed API subprocess."""
+        return {
+            f"FLEET_MLFLOW_LOCAL_{key.upper()}": str(getattr(self, field))
+            for key, field in _TOML_FIELDS["mlflow.local"].items()
         }
-        if profile == "databricks" and self.mlflow_tracking_uri.startswith("databricks://"):
-            environment["DATABRICKS_CONFIG_PROFILE"] = self.mlflow_tracking_uri.removeprefix("databricks://")
-        return environment
 
     def local_mlflow_server_environment(self) -> dict[str, str]:
         """Resolve MLflow KEK variables from process env or `.env` for a managed local MLflow server."""
@@ -669,43 +527,12 @@ class FleetSettings(BaseSettings):
                 raise ValueError("MLFLOW_CRYPTO_KEK_VERSION must be a positive integer")
         return resolved
 
-    def prepare_mlflow_auth(self) -> None:
-        """Make .env credentials available to MLflow's default Databricks SDK authentication."""
-        if self.mlflow_mode != "databricks":
-            return
-        if self.mlflow_tracking_uri.startswith("databricks://"):
-            os.environ["DATABRICKS_CONFIG_PROFILE"] = self.mlflow_tracking_uri.removeprefix("databricks://")
-        elif self.mlflow_tracking_uri == "databricks":
-            if self.databricks_host:
-                os.environ["DATABRICKS_HOST"] = self.databricks_host
-            if self.databricks_token.get_secret_value():
-                os.environ["DATABRICKS_TOKEN"] = self.databricks_token.get_secret_value()
-
     def mlflow_descriptor(self, *, evaluation: bool = False) -> dict[str, Any]:
-        """Safe process destination identity used before reusing a server or submitting evaluation work."""
+        """Return the public destination used for API reuse and evaluation checks."""
         target = self.mlflow_target()._asdict()
-        target["trace_location"] = None
-        target["workspace_host"] = None
+        target["mode"] = "local"
         if evaluation:
-            target["experiment_name"] = self.mlflow_eval_experiment_name
-        if self.mlflow_mode == "databricks":
-            host = self.databricks_host if self.mlflow_tracking_uri == "databricks" else ""
-            if not host:
-                from mlflow.utils.databricks_utils import get_databricks_host_creds
-
-                try:
-                    host = get_databricks_host_creds(self.mlflow_tracking_uri).host
-                except Exception:
-                    raise ValueError("Could not resolve the Databricks tracking workspace identity") from None
-            parsed = urlsplit(host if "://" in host else "https://" + host)
-            if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-                raise ValueError("Databricks tracking workspace must be a non-secret host URL")
-            target["workspace_host"] = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}".rstrip("/")
-            target["trace_location"] = {
-                "catalog": self.mlflow_trace_catalog,
-                "schema": self.mlflow_trace_schema,
-                "table_prefix": self.mlflow_eval_trace_table_prefix if evaluation else self.mlflow_trace_table_prefix,
-            }
+            target["experiment_name"] = self.mlflow_local_eval_experiment_name
         return target
 
     def judge_environment(self) -> dict[str, str]:
@@ -730,6 +557,6 @@ class FleetSettings(BaseSettings):
 
 
 @lru_cache(maxsize=1)
-def get_settings(mlflow_mode: Literal["local", "databricks"] | None = None) -> FleetSettings:
+def get_settings() -> FleetSettings:
     """Load and cache process settings."""
-    return FleetSettings(**({"mlflow_mode": mlflow_mode} if mlflow_mode is not None else {}))
+    return FleetSettings()

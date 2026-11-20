@@ -59,21 +59,6 @@ def _turn_environment(manager: Any) -> dict[str, Any]:
     }
 
 
-def _unpack_context(runtime: Any, session_id: str, *, include_rlm: bool = False) -> tuple[str, str, Any]:
-    """Read `(memory_summary, session_history, rlm_history)` from SessionContext or legacy tuple mocks."""
-    loaded = runtime.load_context(session_id)
-    if isinstance(loaded, tuple):
-        memory_summary, session_history = loaded
-        if include_rlm and callable(load_rlm := getattr(runtime, "load_rlm_history", None)):
-            return str(memory_summary), str(session_history), load_rlm(session_id)
-        return str(memory_summary), str(session_history), None
-    return (
-        str(loaded.memory_summary),
-        str(loaded.session_history),
-        loaded.rlm_history if include_rlm else None,
-    )
-
-
 def _format_reviewed_memories(memories: list[dict[str, Any]]) -> str:
     """Format reviewed Session memories as clean Markdown bullets bounded to 12,000 characters."""
     if not memories:
@@ -141,8 +126,10 @@ def _prepare_empty_direct_inputs(
         runtime.set_workspace_state("unknown")
         return None, selected_route
     with phase_span("turn.load_context", session_id=session_id) as context_phase:
-        memory_summary, session_history, _rlm_history = _unpack_context(runtime, session_id)
-        context_phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
+        context = runtime.load_context(session_id)
+        context_phase.set_outputs(
+            {"memory_chars": len(context.memory_summary), "history_chars": len(context.session_history)}
+        )
     with phase_span("turn.reviewed_memories", task_chars=len(task)) as memory_phase:
         memories = runtime.memories(task, reviewed_only=True)
         memory_phase.set_outputs({"memories": len(memories)})
@@ -163,8 +150,8 @@ def _prepare_empty_direct_inputs(
         "manifest": empty_manifest,
         "context_files": {path: hashlib.sha256(content).hexdigest() for path, content in sorted(local_files.items())},
         "skills_catalog": local_catalog,
-        "memory_summary": _join_memory_sections(memory_summary, _format_reviewed_memories(memories)),
-        "session_history": session_history,
+        "memory_summary": _join_memory_sections(context.memory_summary, _format_reviewed_memories(memories)),
+        "session_history": context.session_history,
         "replay_files": replay_files,
         "replay_selected": replay_selected,
         "replay_skipped_bytes": replay_skipped_bytes,
@@ -182,8 +169,8 @@ def _prepare_inputs(
 ) -> dict[str, Any]:
     """Sync Skills and assemble workspace digests, memory, history, and the Skill catalog."""
     with phase_span("turn.load_context", session_id=session_id) as phase:
-        memory_summary, session_history, rlm_history = _unpack_context(runtime, session_id, include_rlm=True)
-        phase.set_outputs({"memory_chars": len(memory_summary), "history_chars": len(session_history)})
+        context = runtime.load_context(session_id)
+        phase.set_outputs({"memory_chars": len(context.memory_summary), "history_chars": len(context.session_history)})
     # Sync can partially write even on failure; invalidate before touching the Volume.
     runtime.set_workspace_state("unknown")
     # Skills land first so their files are hashed; everything else remote arrives in one exec.
@@ -251,10 +238,10 @@ def _prepare_inputs(
         "context_files": context_files,
         "skills_catalog": skills_catalog,
         "memory_summary": _join_memory_sections(
-            memory_summary, remote["environment"], _format_reviewed_memories(memories)
+            context.memory_summary, remote["environment"], _format_reviewed_memories(memories)
         ),
-        "session_history": session_history,
-        "rlm_history": rlm_history,
+        "session_history": context.session_history,
+        "rlm_history": context.rlm_history,
         "replay_files": replay_files,
         "replay_selected": replay_selected,
         "replay_skipped_bytes": replay_skipped_bytes,

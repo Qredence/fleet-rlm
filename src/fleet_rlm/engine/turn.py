@@ -26,9 +26,7 @@ from fleet_rlm.engine.turn_commit import (
     _CLEANUP_ATTRIBUTE,
     _artifact_changes,
     _capture_artifact_view,
-    _failure_message,
     _replayed,
-    _stop_terminal_turn,
     _terminal_failure,
     _write_learned_note,
 )
@@ -37,13 +35,10 @@ from fleet_rlm.engine.turn_prepare import (
     _TRACE_PREVIEW_CHARS,
     _capture_replay_snapshot,
     _describe_turn,
-    _format_reviewed_memories,
-    _join_memory_sections,
     _prepare_empty_direct_inputs,
     _prepare_inputs,
     _provider_bounds_attribute,
     _turn_environment,
-    _unpack_context,
 )
 from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
 from fleet_rlm.replay import encode_snapshot
@@ -54,25 +49,6 @@ from fleet_rlm.store import IdempotencyConflictError
 if TYPE_CHECKING:
     from fleet_rlm.config import FleetSettings
     from fleet_rlm.session import SessionRuntime
-
-__all__ = [
-    "_CLEANUP_ATTRIBUTE",
-    "_ROOT_SANDBOX_ATTRIBUTE",
-    "Emit",
-    "_artifact_changes",
-    "_capture_artifact_view",
-    "_describe_turn",
-    "_failure_message",
-    "_format_reviewed_memories",
-    "_join_memory_sections",
-    "_prepare_inputs",
-    "_replayed",
-    "_stop_terminal_turn",
-    "_terminal_failure",
-    "_unpack_context",
-    "_write_learned_note",
-    "run_turn",
-]
 
 _LOGGER = logging.getLogger(__name__)
 Emit = Callable[[dict[str, Any]], None]
@@ -369,9 +345,7 @@ def run_turn(
                 }
                 learned_note = str(getattr(prediction, "learned_skill_note", ""))[:10_000]
                 route = str(getattr(prediction, "route", Route.RLM.value))
-                evidence = deepcopy(getattr(prediction, "execution_evidence", {}))
-                if not evidence and callable(getattr(manager, "execution_evidence", None)):
-                    evidence = deepcopy(manager.execution_evidence())
+                evidence = deepcopy(getattr(prediction, "execution_evidence", None))
                 artifact_capture = _capture_artifact_view(evidence)
                 artifact_changes = _artifact_changes(inputs["context_files"], artifact_capture)
                 runtime.assert_lease_held()

@@ -247,14 +247,13 @@ def _evaluate(
     args: argparse.Namespace,
     settings: FleetSettings,
     store: Store,
-    target: Any,
     run_id: str,
     *,
     owner_id: str | None = None,
 ) -> None:
     """Measure the installed global program (the baseline when none is installed) and store per-split results."""
     kind = args.evaluate
-    if kind == "synthetic":
+    if kind not in {"rescore", "replay"}:
         raise ValueError("Synthetic jobs are deferred until isolation and complete token accounting are supported")
     guard = OptimizationStopPolicy(args, settings, store, run_id, owner_id)
     guard.set_stage("preparing")
@@ -263,11 +262,9 @@ def _evaluate(
     excluded = 0
     with _counting(guard.tokens, inherited=kind == "replay"):
         if kind == "rescore":
-            splits, excluded = _rescore(args, settings, store, target, guard)
-        elif kind == "replay":
-            splits = _replay(args, settings, store, target, guard)
+            splits, excluded = _rescore(args, settings, store, guard)
         else:
-            splits = _synthetic(settings, guard)
+            splits = _replay(args, settings, store, guard)
     guard.check_boundary()
     guard.reporter.update(
         evaluation=jobs.evaluation_result(kind, splits, program, excluded=excluded),
@@ -293,7 +290,6 @@ def _rescore(
     args: argparse.Namespace,
     settings: FleetSettings,
     store: Store,
-    target: Any,
     guard: OptimizationStopPolicy,
 ) -> tuple[dict[str, dict[str, Any]], int]:
     """Re-judge labelled traces with the current judges; no Turn runs again."""
@@ -301,9 +297,7 @@ def _rescore(
 
     partitions = curate_dataset(
         store,
-        target.experiment_name,
         validation_ratio=args.validation_ratio,
-        evaluation_experiment_name=target.eval_experiment_name,
         min_split_examples=settings.min_split_examples,
     )
     scorers = [
@@ -342,15 +336,12 @@ def _replay(
     args: argparse.Namespace,
     settings: FleetSettings,
     store: Store,
-    target: Any,
     guard: OptimizationStopPolicy,
 ) -> dict[str, dict[str, Any]]:
     """Run the labelled examples against the installed program in isolated rollouts, scored per split."""
     trainset, devset, holdout = curate_dataset(
         store,
-        target.experiment_name,
         validation_ratio=args.validation_ratio,
-        evaluation_experiment_name=target.eval_experiment_name,
         min_split_examples=settings.min_split_examples,
     )
     examples = [*trainset, *devset, *holdout]
@@ -378,13 +369,6 @@ def _replay(
                 guard.check_boundary()
             splits[name] = jobs.split_summary(scores, critical, errors=errors)
     return splits
-
-
-def _synthetic(_settings: FleetSettings, _guard: OptimizationStopPolicy) -> dict[str, dict[str, Any]]:
-    """Run the generated cases against this server (`fleet eval run`); they are one unsplit set."""
-    raise ValueError(
-        "Synthetic jobs are deferred until isolated evaluation and complete token accounting are supported"
-    )
 
 
 def _calibrate_with_reanchor(
@@ -527,7 +511,6 @@ def _compile(
     args: argparse.Namespace,
     settings: FleetSettings,
     store: Store,
-    target: Any,
     run_id: str,
     *,
     owner_id: str | None = None,
@@ -545,9 +528,7 @@ def _compile(
     judge_lm = settings.build_judge_lm()
     trainset, devset, holdout = curate_dataset(
         store,
-        target.experiment_name,
         validation_ratio=args.validation_ratio,
-        evaluation_experiment_name=target.eval_experiment_name,
         min_split_examples=settings.min_split_examples,
     )
     examples = [*trainset, *devset, *holdout]

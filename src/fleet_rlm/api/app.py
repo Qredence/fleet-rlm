@@ -19,7 +19,7 @@ from fleet_rlm.api.schemas import Health
 from fleet_rlm.config import FleetSettings, get_settings
 from fleet_rlm.experiments import ExperimentManager
 from fleet_rlm.launcher import mlflow_is_healthy
-from fleet_rlm.observability import MlflowTraceDestinationMismatchError, configure_mlflow_observability
+from fleet_rlm.observability import configure_mlflow_observability
 from fleet_rlm.sandbox.repl import runtime_digest
 from fleet_rlm.session import SessionRuntimeRegistry
 from fleet_rlm.store import Store
@@ -135,11 +135,7 @@ def create_app(
 
     @app.get("/health", tags=["health"])
     def health() -> Health:
-        """Return the API version and initialized MLflow configuration.
-
-        MLflow readiness reflects whether an experiment ID was initialized.
-        Databricks workspace identity errors propagate as ValueError.
-        """
+        """Return the API version and initialized MLflow configuration. Readiness requires an initialized experiment."""
         return Health(
             status="ok",
             version=VERSION,
@@ -166,31 +162,16 @@ def create_app(
 
 def _configure_tracing(settings: FleetSettings) -> str:
     target = settings.mlflow_target()
-    settings.prepare_mlflow_auth()
-    if target.mode == "local" and not mlflow_is_healthy(target.tracking_uri):
+    if not mlflow_is_healthy(target.tracking_uri):
         raise RuntimeError(
             f"Local MLflow is not reachable at {target.tracking_uri}; start it with `fleet cli` "
             "or start an MLflow server separately before using `fleet serve`."
         )
     try:
-        experiment_id = configure_mlflow_observability(
-            target.experiment_name,
-            target.tracking_uri,
-            trace_catalog=settings.mlflow_trace_catalog,
-            trace_schema=settings.mlflow_trace_schema,
-            trace_table_prefix=settings.mlflow_trace_table_prefix,
-            tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
-        )
-    except MlflowTraceDestinationMismatchError:
-        raise RuntimeError(
-            "Databricks MLflow trace destination mismatch: the experiment is already linked to a "
-            "different Unity Catalog destination. Check FLEET_MLFLOW_DATABRICKS_TRACE_CATALOG, "
-            "FLEET_MLFLOW_DATABRICKS_TRACE_SCHEMA, and FLEET_MLFLOW_DATABRICKS_TRACE_TABLE_PREFIX, "
-            "including .env overrides, and align them with the experiment's existing binding."
-        ) from None
+        experiment_id = configure_mlflow_observability(target.experiment_name, target.tracking_uri)
     except Exception as exc:
         raise RuntimeError(
-            f"Could not initialize {target.mode} MLflow experiment {target.experiment_name!r} "
+            f"Could not initialize local MLflow experiment {target.experiment_name!r} "
             f"({type(exc).__name__}); check tracking access and experiment configuration."
         ) from None
     if not experiment_id:

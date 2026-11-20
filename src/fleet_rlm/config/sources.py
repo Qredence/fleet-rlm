@@ -21,7 +21,6 @@ _SECRET_FIELDS = {
     "fleet_database_url",
     "fleet_database_migration_url",
     "fleet_daytona_api_key",
-    "databricks_token",
     "fleet_llm_api_key",
     "typesafe_api_key",
     "serper_api_key",
@@ -39,7 +38,6 @@ _TOML_FIELDS: dict[str, dict[str, str]] = {
         "job_max_tokens": "job_max_tokens",
         "linked_children": "linked_children",
     },
-    "gateway": {"host": "databricks_host"},
     "llm": {
         "model": "fleet_llm_model",
         "api_base": "fleet_llm_api_base",
@@ -65,23 +63,6 @@ _TOML_FIELDS: dict[str, dict[str, str]] = {
         key: f"mlflow_local_{key}"
         for key in ("port", "data_dir", "experiment_name", "eval_experiment_name", "optimization_experiment_name")
     },
-    "mlflow": {"mode": "mlflow_mode"},
-    "mlflow.databricks": {
-        key: f"mlflow_databricks_{key}"
-        for key in (
-            "tracking_uri",
-            "experiment_name",
-            "eval_experiment_name",
-            "optimization_experiment_name",
-            "trace_catalog",
-            "trace_schema",
-            "trace_table_prefix",
-            "tracing_sql_warehouse_id",
-            "optimization_trace_schema",
-            "optimization_trace_table_prefix",
-            "eval_trace_table_prefix",
-        )
-    },
     "evaluation": {"judge_model": "fleet_judge_model"},
     "server": {"host": "host", "port": "port", "allow_non_loopback_bind": "allow_non_loopback_bind"},
 }
@@ -105,9 +86,12 @@ _TOML_FIELDS["llm"].update(
 )
 RETIRED_MLFLOW_ENV = {
     "FLEET_MLFLOW_MODE",
+    "FLEET_MLFLOW_TRACKING_URI",
+    "FLEET_MLFLOW_EXPERIMENT_NAME",
+    "FLEET_MLFLOW_EVAL_EXPERIMENT_NAME",
+    "FLEET_MLFLOW_OPTIMIZATION_EXPERIMENT_NAME",
     "MLFLOW_TRACKING_URI",
     "MLFLOW_EXPERIMENT_NAME",
-    *(f"FLEET_MLFLOW_{key.upper()}" for key in _TOML_FIELDS["mlflow.databricks"]),
 }
 # The shipped Fleet deadline: none. A Turn runs to its model-call budget unless a Session
 # configures a finite deadline, so a legitimate long Turn is never cut off by a default.
@@ -171,9 +155,8 @@ def resolve_turn_deadline(
 
 
 class MlflowTarget(NamedTuple):
-    """Where traces, eval runs, and optimizer runs go for the selected MLflow mode."""
+    """Where traces, eval runs, and optimizer runs go on the local MLflow server."""
 
-    mode: str
     tracking_uri: str
     experiment_name: str
     eval_experiment_name: str
@@ -210,8 +193,8 @@ def _toml_settings(settings_cls: type[BaseSettings]) -> dict[str, Any]:
         children = tables.pop(parent)
         if not isinstance(children, dict):
             raise ValueError(f"Fleet TOML {parent} must be a table")
-        if parent == "mlflow" and "mode" in children:
-            tables["mlflow"] = {"mode": children.pop("mode")}
+        if parent == "mlflow" and children.pop("mode", "local") != "local":
+            raise ValueError("Fleet supports only local MLflow")
         if parent == "llm":
             defaults = {name: children.pop(name) for name in list(children) if not isinstance(children[name], dict)}
             if defaults:

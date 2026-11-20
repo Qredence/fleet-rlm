@@ -23,14 +23,6 @@ from fleet_rlm.execution_evidence import MAX_ARTIFACT_BYTES, validate_structured
 # Each metric returns (score, detail), or None when it does not apply to the example.
 Metric = tuple[float, str] | None
 
-# Routing-budget gauge constants. The first bound is the direct-path allowance; the second is
-# the bounded-execution allowance; past it, each extra unit costs the same 0.02.
-_DIRECT_BUDGET_UNITS = 2
-_BOUNDED_BUDGET_UNITS = 15
-_BOUNDED_ROUTE_SCORE = 0.95
-_UNIT_PENALTY = 0.02
-_ROUTE_FLOOR = 0.2
-
 
 def efficiency(lm_calls: int, sandbox_errors: int, submit_rejections: int) -> float:
     """Budget units beyond three cost 0.015; each remote error or blocking rejection costs 0.15."""
@@ -106,31 +98,6 @@ def efficiency_metric(pred: Any) -> Metric:
     return efficiency(lm_calls, sandbox_errors, submit_rejections), (
         f"{lm_calls} budget units, {sandbox_errors} remote Python errors, {submit_rejections} submission rejections"
     )
-
-
-def routing_efficiency(used_rlm_or_flex: bool, lm_calls: int) -> tuple[float, str]:
-    """Score the route's budget use, monotonically in lm_calls for both route classes.
-
-    A direct Turn is expected to stay inside the small allowance; a Flex/RLM Turn is allowed
-    the bounded allowance. Past either bound, every extra unit costs the same penalty.
-    """
-    if used_rlm_or_flex:
-        excess = max(0, lm_calls - _BOUNDED_BUDGET_UNITS)
-        score = _BOUNDED_ROUTE_SCORE - _UNIT_PENALTY * excess
-        detail = (
-            f"Bounded RLM/Flex execution used {lm_calls} budget units."
-            if not excess
-            else f"Heavy route used {lm_calls} budget units."
-        )
-    else:
-        excess = max(0, lm_calls - _DIRECT_BUDGET_UNITS)
-        score = 1.0 - _UNIT_PENALTY * excess
-        detail = (
-            f"Fast path completed in {lm_calls} budget units."
-            if not excess
-            else f"Direct route used {lm_calls} budget units."
-        )
-    return round(max(_ROUTE_FLOOR, score), 3), detail
 
 
 def _equal(actual: Any, expected: Any, tolerance: float, *, csv_numbers: bool = False) -> bool:

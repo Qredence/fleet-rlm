@@ -59,6 +59,11 @@ restart after edits. `/config` reports safe values, sources and a digest.
 | `FLEET_ALLOW_NON_LOOPBACK_BIND` | `false` | Must be true to explicitly permit a non-loopback server bind. |
 | `FLEET_WEB_AUTH_TOKEN` | unset | Non-loopback web proxy secret; see [CLI](cli.md#browser-transport-and-exposure). |
 
+Fleet uses the loopback MLflow OSS server for runtime, evaluation, and GEPA
+experiments. Keep their names under `[mlflow.local]` or set the corresponding
+`FLEET_MLFLOW_LOCAL_*` variables. An existing `[mlflow] mode = "local"` entry is
+optional.
+
 ## Model roles
 
 `[llm]` supplies the shared connection. `[llm.root]`, `[llm.sub]`,

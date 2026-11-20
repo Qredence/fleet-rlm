@@ -24,7 +24,8 @@ def main(argv: list[str] | None = None) -> None:
     args.url = validate_api_url(args.url)
     session_id = args.session or f"sess_web_{uuid.uuid4().hex[:12]}"
     validate_session_id(session_id)
-    state = SessionState(mlflow_mode=verify_api_destination(args.url)["mode"])
+    verify_api_destination(args.url)
+    state = SessionState()
     with httpx.Client(
         base_url=args.url,
         timeout=httpx.Timeout(300.0, connect=10.0),

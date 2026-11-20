@@ -8,12 +8,8 @@ paths:
       tags:
       - health
       summary: Health
-      description: 'Return the API version and initialized MLflow configuration.
-
-
-        MLflow readiness reflects whether an experiment ID was initialized.
-
-        Databricks workspace identity errors propagate as ValueError.'
+      description: Return the API version and initialized MLflow configuration. Readiness requires an
+        initialized experiment.
       operationId: health_health_get
       responses:
         '200':
@@ -2372,18 +2368,11 @@ components:
       properties:
         mode:
           type: string
-          enum:
-          - local
-          - databricks
+          const: local
           title: Mode
         tracking_uri:
           type: string
           title: Tracking Uri
-        workspace_host:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Workspace Host
         experiment_name:
           type: string
           title: Experiment Name
@@ -2393,10 +2382,6 @@ components:
         optimization_experiment_name:
           type: string
           title: Optimization Experiment Name
-        trace_location:
-          anyOf:
-          - $ref: '#/components/schemas/MlflowTraceLocation'
-          - type: 'null'
         experiment_id:
           anyOf:
           - type: string
@@ -2415,24 +2400,6 @@ components:
       - ready
       title: MlflowHealth
       description: Non-secret, initialized tracking destination for process reuse checks.
-    MlflowTraceLocation:
-      properties:
-        catalog:
-          type: string
-          title: Catalog
-        schema:
-          type: string
-          title: Schema
-        table_prefix:
-          type: string
-          title: Table Prefix
-      type: object
-      required:
-      - catalog
-      - schema
-      - table_prefix
-      title: MlflowTraceLocation
-      description: Unity Catalog location associated with the runtime experiment.
     Mode:
       properties:
         mode:

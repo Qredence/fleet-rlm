@@ -71,11 +71,9 @@ def _active_program_path(settings: FleetSettings) -> str:
 
 def _check_readiness(settings: FleetSettings, options: ExperimentOptions) -> None:
     """Print what the labelled examples support, then exit non-zero when a run would refuse to start."""
-    target = settings.mlflow_target()
-    mlflow.set_tracking_uri(target.tracking_uri)
     store = _open_optimization_store(settings, initialize=False)
     try:
-        examples = load_examples(store, target.experiment_name, target.eval_experiment_name)
+        examples = load_examples(store)
         problem = installed_program_problem(_active_program_path(settings), store.approved_program())
     finally:
         store.close()
@@ -466,18 +464,6 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 configure_mlflow_observability,
                 target.optimization_experiment_name,
                 target.tracking_uri,
-                trace_catalog=settings.mlflow_trace_catalog,
-                trace_schema=(
-                    settings.mlflow_optimization_trace_schema
-                    if target.mode == "databricks"
-                    else settings.mlflow_trace_schema
-                ),
-                trace_table_prefix=(
-                    settings.mlflow_optimization_trace_table_prefix
-                    if target.mode == "databricks"
-                    else settings.mlflow_trace_table_prefix
-                ),
-                tracing_sql_warehouse_id=settings.mlflow_tracing_sql_warehouse_id,
             )
             if experiment_id:
                 _optional_mlflow(mlflow.set_experiment, experiment_id=experiment_id)
@@ -488,7 +474,7 @@ def run(args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Fle
                 log_traces_from_eval=options_dict["trace_search"],
                 log_compiles=True,
             )
-            (_evaluate if evaluate else _compile)(args, settings, store, target, run_id, owner_id=owner_id)
+            (_evaluate if evaluate else _compile)(args, settings, store, run_id, owner_id=owner_id)
             status = "completed"
         except BudgetExhaustedError:
             status = "budget_exhausted"

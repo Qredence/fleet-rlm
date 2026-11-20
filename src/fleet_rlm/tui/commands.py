@@ -32,7 +32,6 @@ MODES = ("direct", "flex", "rlm", "hybrid")
 class SessionState:
     """Client-side view of the active Session's mode, models, context, replay flag, and latest Turn."""
 
-    mlflow_mode: str = "local"
     mode: str = "hybrid"
     root_model: str = ""
     sub_model: str = ""
@@ -540,7 +539,7 @@ def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], 
     parser = argparse.ArgumentParser(prog="/optimize", add_help=False, exit_on_error=False)
     add_search_arguments(parser)
     parser.add_argument("--approve")
-    parser.add_argument("--mlflow", choices=("local", "databricks"))
+    parser.add_argument("--mlflow", choices=("local",))
     try:
         args = parser.parse_args(extra)
     except (argparse.ArgumentError, SystemExit) as exc:
@@ -550,10 +549,6 @@ def _parse_optimizer_arguments(ctx: Context, arg: str) -> tuple[dict[str, Any], 
         options = ExperimentOptions.from_namespace(args).model_dump()
     except ValueError as exc:
         _out(ctx).print(f"[red]Invalid /optimize options:[/red] {exc}")
-        return None
-    backend = ctx.state.mlflow_mode
-    if args.mlflow is not None and args.mlflow != backend:
-        _out(ctx).print("[red]/optimize must use the session's MLflow backend.[/red]")
         return None
     if args.approve:
         return {}, args.approve

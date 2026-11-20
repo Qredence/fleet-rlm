@@ -76,9 +76,6 @@ EVALUATIONS = {
     "No Turn runs again; this calls the judge models.",
     "evaluate_replay": "Replay every labelled Turn against the installed program?\n\n"
     "Each example runs in an isolated rollout and is judged. This calls the model provider and Daytona.",
-    "evaluate_synthetic": "Run the generated synthetic cases against this server?\n\n"
-    "This runs real Turns and judges them, so it calls the model provider and Daytona. The server must export "
-    "traces to the evaluation experiment.",
 }
 
 
@@ -309,11 +306,6 @@ class ImproveScreen(ModalScreen[None]):
                         yield Static("Evaluate ▸", id="evaluate-label")
                         yield Button("Rescore", id="evaluate_rescore")
                         yield Button("Replay", id="evaluate_replay")
-                        yield Button(
-                            "Synthetic",
-                            id="evaluate_synthetic",
-                            tooltip="Deferred: isolated evaluation and complete usage accounting are required",
-                        )
                 with TabPane("Results", id="results"):
                     with VerticalScroll(id="results-scroll", classes="pane-body"):
                         yield Static("Select a run in Runs to inspect its evidence.", id="results-text")
@@ -884,7 +876,7 @@ class ImproveScreen(ModalScreen[None]):
         idle = self.accepting and self.active_run_id is None
         self.query_one("#job-run", Button).disabled = not idle
         for kind in EVALUATIONS:
-            self.query_one(f"#{kind}", Button).disabled = not idle or kind == "evaluate_synthetic"
+            self.query_one(f"#{kind}", Button).disabled = not idle
 
     # Events
 

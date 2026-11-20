@@ -23,7 +23,6 @@ from typing import Any
 
 import httpx
 import mlflow
-from databricks.sdk.errors import NotFound
 from mlflow.entities import AssessmentSource, AssessmentSourceType
 from mlflow.exceptions import MlflowException
 
@@ -173,11 +172,11 @@ def synthetic_cases(seed: int = 7, per_category: int = 8) -> list[EvalCase]:
 
 
 def build_dataset(name: str, experiment_id: str, cases: list[EvalCase]) -> Any:
-    """Create an MLflow evaluation dataset (Unity Catalog table on Databricks) and add the cases."""
+    """Create an MLflow evaluation dataset and add the cases."""
     try:
         dataset = mlflow.genai.datasets.get_dataset(name=name)
-    except (NotFound, MlflowException) as exc:
-        if isinstance(exc, MlflowException) and exc.error_code != "RESOURCE_DOES_NOT_EXIST":
+    except MlflowException as exc:
+        if exc.error_code != "RESOURCE_DOES_NOT_EXIST":
             raise
         dataset = mlflow.genai.datasets.create_dataset(name=name, experiment_id=experiment_id)
     dataset.merge_records([case.record() for case in cases])
@@ -317,7 +316,7 @@ def label_turn(
     except Exception as exc:
         if mlflow_saved:
             raise EvaluationError(
-                f"MLflow labels were saved, but Lakebase curation failed ({type(exc).__name__}); "
+                f"MLflow labels were saved, but PostgreSQL curation failed ({type(exc).__name__}); "
                 "rerun this label command to retry"
             ) from None
         raise EvaluationError(
@@ -357,18 +356,16 @@ def read_evaluation_trace(
     trace_id: str,
     *,
     experiment_id: str,
-    uc_location: tuple[str, str, str] | None = None,
     wait_seconds: float = 180.0,
     expected_labels: dict[str, Any] | None = None,
     allow_error: bool = False,
     require_model_id: bool = False,
 ) -> Any:
-    """Wait for one completed trace in the intended destination, including cold warehouse startup.
+    """Wait for one completed trace in the intended destination.
 
     Require a successful trace with spans and matching expected_labels when supplied.
     Comparisons may opt into error traces to retain failed observations without replay.
     require_model_id waits for native association metadata, which can arrive after spans.
-    uc_location selects the Unity Catalog destination check instead of experiment_id.
     wait_seconds bounds the polling window; a blocked SDK read may finish after the
     caller stops waiting.
 
@@ -408,15 +405,8 @@ def read_evaluation_trace(
             trace = latest.get("trace")
             if trace is not None:
                 location = trace.info.trace_location
-                if uc_location is not None:
-                    location = getattr(location, "uc_table_prefix", None) or location
-                    actual = tuple(
-                        getattr(location, key, None) for key in ("catalog_name", "schema_name", "table_prefix")
-                    )
-                    matches = actual == uc_location
-                else:
-                    location = getattr(location, "mlflow_experiment", None) or location
-                    matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
+                location = getattr(location, "mlflow_experiment", None) or location
+                matches = str(getattr(location, "experiment_id", "")) == str(experiment_id)
                 if not matches:
                     raise EvaluationError(f"Trace {trace_id} is outside the configured evaluation destination")
                 state = str(trace.info.state)
@@ -452,7 +442,6 @@ def evaluate_cases(
     judge_adapter: Any = None,
     jev_lm: Any = None,
     experiment_id: str,
-    uc_location: tuple[str, str, str] | None = None,
     session_prefix: str | None = None,
     timeout: float = 600.0,
     collect_only: bool = False,
@@ -465,8 +454,7 @@ def evaluate_cases(
 
     Otherwise return the MLflow evaluation result. ``judge_lm`` enables the shared Fleet metric;
     ``jev_lm`` selects TypeSafe route judging, with generative judging used when it is None.
-    ``timeout`` is the HTTP timeout in seconds. ``uc_location`` is the expected trace
-    catalog, schema, and table prefix; when omitted, traces must match ``experiment_id``.
+    The HTTP timeout is in seconds. Traces must match the configured experiment ID.
 
     Raises:
         EvaluationError: Case transport or execution fails, a trace or its labels cannot be
@@ -492,7 +480,7 @@ def evaluate_cases(
             if outputs.get("error") or not trace_id:
                 raise EvaluationError(f"Case {case.case_id} failed or returned no trace; inspect Session {session_id}")
             readback_deadline = time.monotonic() + 180.0
-            read_evaluation_trace(trace_id, experiment_id=experiment_id, uc_location=uc_location)
+            read_evaluation_trace(trace_id, experiment_id=experiment_id)
             labels = case.record()["expectations"]
             # A single value is the reference answer; several values are judged by the values check,
             # never by their joined text, which would fabricate a gold answer nobody wrote.
@@ -524,7 +512,6 @@ def evaluate_cases(
             trace = read_evaluation_trace(
                 trace_id,
                 experiment_id=experiment_id,
-                uc_location=uc_location,
                 wait_seconds=max(0.0, readback_deadline - time.monotonic()),
                 expected_labels=expected,
             )
@@ -549,17 +536,7 @@ def evaluate_cases(
 
 def evaluation_experiment(settings: Any) -> Any:
     """Select the configured evaluation experiment, where synthetic Turn traces are read back and scored."""
-    from fleet_rlm.observability import set_mlflow_trace_experiment
-
-    target = settings.mlflow_target()
-    return set_mlflow_trace_experiment(
-        target.eval_experiment_name,
-        databricks=target.mode == "databricks",
-        trace_catalog=getattr(settings, "mlflow_trace_catalog", ""),
-        trace_schema=getattr(settings, "mlflow_trace_schema", ""),
-        trace_table_prefix=getattr(settings, "mlflow_eval_trace_table_prefix", ""),
-        tracing_sql_warehouse_id=getattr(settings, "mlflow_tracing_sql_warehouse_id", ""),
-    )
+    return mlflow.set_experiment(settings.mlflow_target().eval_experiment_name)
 
 
 def apply_judge_environment(settings: Any) -> None:
@@ -608,7 +585,6 @@ def run_cases(
 ) -> Any:
     """Run cases against a live server with the configured judges; the `fleet eval run` path and synthetic jobs."""
     apply_judge_environment(settings)
-    target = settings.mlflow_target()
     return evaluate_cases(
         cases,
         base_url=base_url,
@@ -618,11 +594,6 @@ def run_cases(
         jev_lm=None if collect_only else settings.build_jev_lm(),
         collect_only=collect_only,
         experiment_id=experiment_id,
-        uc_location=(
-            (settings.mlflow_trace_catalog, settings.mlflow_trace_schema, settings.mlflow_eval_trace_table_prefix)
-            if target.mode == "databricks"
-            else None
-        ),
         report=report,
     )
 

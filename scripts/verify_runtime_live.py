@@ -102,7 +102,6 @@ def main() -> None:
         fleet_database_schema=schema,
         compiled_program_dir=str(run_dir / "compiled"),
         local_skills_dir=str(run_dir / "skills"),
-        mlflow_mode="local",
         mlflow_local_experiment_name=f"runtime-acceptance-{uuid.uuid4().hex[:12]}",
         typesafe_api_key="",
         execution_mode="rlm",

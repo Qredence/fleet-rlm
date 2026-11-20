@@ -152,11 +152,7 @@ def labels_of(trace: Any) -> dict[str, Any]:
     return {item.name: item.value for item in items}
 
 
-def load_examples(
-    store: Store,
-    experiment_name: str = "",  # noqa: ARG001 - retained for signature compatibility
-    evaluation_experiment_name: str | None = None,  # noqa: ARG001 - retained for signature compatibility
-) -> list[dspy.Example]:
+def load_examples(store: Store) -> list[dspy.Example]:
     """Every approved gold-labeled replay from PostgreSQL, deduplicated per immutable replay."""
     deduplicated: dict[tuple[str, str, str], dspy.Example] = {}
     for example in load_examples_from_postgres(store):
@@ -197,13 +193,21 @@ def readiness(
     validation_ratio: float = VALIDATION_RATIO_DEFAULT,
     min_split_examples: int = MIN_SPLIT_EXAMPLES,
 ) -> Readiness:
+    """Report whether the reviewed examples support optimization."""
+    _check_ratio(validation_ratio)
+    status, _ = _check_curation(examples, validation_ratio, min_split_examples)
+    return status
+
+
+def _check_curation(
+    examples: list[dspy.Example], validation_ratio: float, min_split_examples: int
+) -> tuple[Readiness, dict[str, list[dspy.Example]]]:
     """Check the requirements for a run once; curation, `--check`, and the HTTP report all rely on this.
 
     Dev and holdout each need `min_split_examples` examples, so the total is at least what the dev share of the
     split needs to reach that, and never below `MIN_EXAMPLES`. Splits are by source group, so more Sessions may
     be needed than the arithmetic alone suggests.
     """
-    _check_ratio(validation_ratio)
     groups = {_lineage(example) for example in examples}
     critical = sum(getattr(example, "critical", False) is True for example in examples)
     missing = []
@@ -214,6 +218,7 @@ def readiness(
         missing.append(f"examples from {MIN_GROUPS} source groups are needed; found {len(groups)}")
     if not critical:
         missing.append("at least one critical example is needed to pin the holdout; critical needs expected values")
+    splits: dict[str, list[dspy.Example]] = {}
     sizes: dict[str, int] = {}
     if not missing:
         try:
@@ -231,28 +236,24 @@ def readiness(
                 for name in ("dev", "holdout")
                 if sizes[name] and sizes[name] < min_split_examples
             ]
-    return Readiness(len(examples), len(groups), critical, sizes, missing, min_split_examples)
+    return Readiness(len(examples), len(groups), critical, sizes, missing, min_split_examples), splits
 
 
 def curate_dataset(
     store: Store,
-    experiment_name: str,
     *,
     validation_ratio: float = VALIDATION_RATIO_DEFAULT,
-    evaluation_experiment_name: str | None = None,
     min_split_examples: int = MIN_SPLIT_EXAMPLES,
 ) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
     """Return train/dev/holdout from reviewed examples; refuse to optimize until `readiness` passes."""
     _check_ratio(validation_ratio)
-    examples = load_examples(store, experiment_name, evaluation_experiment_name)
-    status = readiness(examples, validation_ratio=validation_ratio, min_split_examples=min_split_examples)
+    status, splits = _check_curation(load_examples(store), validation_ratio, min_split_examples)
     if not status.ready:
         raise ValueError(
             "GEPA is not ready: "
             + "; ".join(status.missing)
             + '. Label more Turns (`fleet eval label <trace-id> --answer "..."`).'
         )
-    splits = grouped_split(examples, train_ratio=1.0 - validation_ratio - 0.2, dev_ratio=validation_ratio)
     print(
         f"[dataset] {status.examples} reviewed examples from {status.groups} groups; "
         f"{len(splits['train'])} train, {len(splits['dev'])} dev, {len(splits['holdout'])} holdout."

@@ -15,8 +15,9 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
-from types import SimpleNamespace
+from types import FunctionType, SimpleNamespace
 from typing import Any
 
 import dspy
@@ -44,6 +45,7 @@ from fleet_rlm.api.schemas import TurnRequest, WorkspaceWriteRequest
 from fleet_rlm.api.stream_contracts import FleetEnvelope, frame_envelope
 from fleet_rlm.config import FleetSettings
 from fleet_rlm.contracts import Route
+from fleet_rlm.engine.turn_prepare import _format_reviewed_memories
 from fleet_rlm.experiments import (
     _RECOVERY_INTERVAL_SECONDS,
     ExperimentBusyError,
@@ -54,7 +56,7 @@ from fleet_rlm.optimization_runs import ExperimentOptions
 from fleet_rlm.replay import decode_snapshot
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.sandbox.repl import ExecutionOutcomeUnknownError
-from fleet_rlm.session import SessionRuntime, SessionRuntimeRegistry
+from fleet_rlm.session import SessionContext, SessionRuntime, SessionRuntimeRegistry
 from fleet_rlm.store import IdempotencyConflictError
 from fleet_rlm.tui.commands import SessionState
 from fleet_rlm.tui.render import TurnTracker
@@ -201,7 +203,6 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "claim_turn",
             "memories",
             "load_context",
-            "load_rlm_history",
             "commit_turn",
             "turn_status",
             "save_memory",
@@ -223,12 +224,21 @@ def runtime_with(**parts: Any) -> SessionRuntime:
         defaults = {
             "claim_turn": lambda *_args: None,
             "memories": lambda *_args, **_kwargs: [],
-            "load_context": lambda _session: ("", ""),
-            "load_rlm_history": lambda _session: None,
+            "load_context": lambda _session: SessionContext("", ""),
             "turn_status": lambda _turn: None,
         }
         for name, method in (defaults | policy).items():
             setattr(runtime, name, method)
+    if isinstance(engine, FunctionType):
+
+        @wraps(engine)
+        def invoke(**inputs):
+            prediction = engine(**inputs)
+            if not hasattr(prediction, "execution_evidence"):
+                prediction.execution_evidence = runtime.sandbox_mgr.execution_evidence()
+            return prediction
+
+        runtime.engine = invoke
     return runtime
 
 
@@ -265,11 +275,7 @@ class FakeRegistry:
 
 
 def api_settings(**values: Any) -> FleetSettings:
-    return FleetSettings(
-        _env_file=None,
-        databricks_token="test-token",
-        **values,
-    )
+    return FleetSettings(_env_file=None, **values)
 
 
 @contextmanager
@@ -900,6 +906,26 @@ def test_large_session_inventory_keeps_success_and_replay_without_claiming_compl
     assert {item["state"] for item in record["artifact_changes"]["files"].values()} == {"unknown"}
 
 
+@pytest.mark.parametrize("evidence", [None, {}])
+def test_turn_refuses_success_without_evidence_from_invocation(evidence):
+    cancelled = []
+    manager = FakeManager(
+        execution_evidence=lambda: pytest.fail("Turn must not recapture evidence"),
+        cancel_turn=lambda: cancelled.append(True),
+    )
+    runtime = runtime_with(
+        sandbox_mgr=manager,
+        engine=lambda **_kwargs: SimpleNamespace(answer="unverified", execution_evidence=evidence),
+        commit_turn=lambda **_kwargs: pytest.fail("Missing evidence must not commit success"),
+    )
+
+    with opened_client(runtime) as (client, _app):
+        response = client.post("/sessions/session-a/turn", json={"task": "test"})
+
+    assert [event["event"] for event in events_of(response)][-2:] == ["error", "done"]
+    assert cancelled == [True]
+
+
 def test_artifact_capture_accepts_the_full_workspace_artifact_set() -> None:
     """33 artifacts and a 300 KB file are ordinary Turns, not invalid captures."""
     from fleet_rlm.execution_evidence import MAX_ARTIFACTS
@@ -1110,7 +1136,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
             },
             write_learned_note=write_note,
         ),
-        load_context=lambda _session: ("summary", "prior history"),
+        load_context=lambda _session: SessionContext("summary", "prior history"),
         commit_turn=persist,
         engine=run_engine,
         context=WorkspaceDataset("files/input.txt"),
@@ -1428,7 +1454,7 @@ def test_selected_replay_persists_the_exact_pre_turn_inputs(traced, environment)
     files = {"files/input.csv": content}
     persisted: list[dict[str, Any]] = []
     runtime = runtime_with(
-        load_rlm_history=lambda _sid: prior_history,
+        load_context=lambda _sid: SessionContext("", "", prior_history),
         sandbox_mgr=FakeManager(
             list_workspace_files=lambda: list(files),
             read_workspace_file=lambda path: files[path],
@@ -1653,7 +1679,7 @@ def test_a_failed_turn_reports_an_error_with_its_own_trace_id(traced, fail_prepa
     def hydrate(_session):
         if fail_preparation:
             raise RuntimeError("preparation failed")
-        return "summary", "history"
+        return SessionContext("summary", "history")
 
     def failing_engine(**_kwargs):
         raise AdapterParseError(adapter_name="JSONAdapter", signature=dspy.Signature("a -> b"), lm_response="[[")
@@ -1954,7 +1980,7 @@ def test_turn_associates_actual_engine_before_root_closes(monkeypatch, failure):
     def load(_session):
         if failure == "preparation":
             raise RuntimeError("prepare failed")
-        return "", ""
+        return SessionContext("", "")
 
     def engine(**_kwargs):
         if failure == "generation":
@@ -2642,7 +2668,7 @@ def test_format_reviewed_memories_renders_bounded_markdown_bullets(monkeypatch):
         {"kind": "preference", "content": "Report percentages to 2 decimal places."},
         {"kind": "note", "content": "x" * 200},
     ]
-    rendered = turn_module._format_reviewed_memories(items)
+    rendered = _format_reviewed_memories(items)
     lines = rendered.splitlines()
     assert lines[0] == "- [fact] Workspace dataset uses UTF-8 CSV."
     assert lines[1] == "- [preference] Report percentages to 2 decimal places."
@@ -4044,7 +4070,6 @@ def test_model_selection_is_validated_atomic_and_secret_free(failure, role):
     assert "private" not in response.text
     assert set(after) == {"models", "mode", "context", "limits", "configuration"}
     assert "fleet_database_url" not in after["configuration"]["values"]
-    assert "databricks_token" not in after["configuration"]["values"]
     if failure is None:
         assert saved["models"] == {**before["models"], role: "openai/system.ai.new"}
         assert after["configuration"]["sources"][f"fleet_{role}_model"] == "session"
@@ -5093,12 +5118,13 @@ def test_api_owned_run_is_idempotent_global_and_drain_fences_admission(tmp_path:
         with pytest.raises(ExperimentBusyError):
             await manager.start("request-2", options)
 
-        draining = await manager.begin_drain()
-        assert draining["accepting"] is False and draining["busy"] is True
+        closing = asyncio.create_task(manager.close())
+        await asyncio.sleep(0)
+        assert not manager.accepting and manager.busy
         with pytest.raises(ExperimentBusyError):
             await manager.start("request-3", options)
         finish.set()
-        await manager.close()
+        await closing
         final = await manager.get(first["run_id"])
         assert final["status"] == "completed"
         assert manager.busy is False
@@ -5418,7 +5444,7 @@ def test_managed_subprocess_drains_noisy_output_without_replaying_progress(
 ) -> None:
     async def scenario() -> None:
         store = MemoryStore()
-        settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path), databricks_token="secret-token")
+        settings = FleetSettings(_env_file=None, compiled_program_dir=str(tmp_path), serper_api_key="secret-token")
         manager = ExperimentManager(settings, store)  # type: ignore[arg-type]
         command: list[str] = []
         captured: dict[str, Any] = {}
@@ -5876,25 +5902,6 @@ def test_failed_recovery_still_counts_toward_the_interval(tmp_path: Path, monkey
     asyncio.run(scenario())
 
 
-def test_drain_bypasses_the_poll_throttle_so_shutdown_is_not_delayed(tmp_path: Path, monkeypatch) -> None:
-    """A closed admission keeps reconciling on every status call during launcher drain."""
-
-    async def scenario() -> None:
-        _store, manager = _manager_with_store(tmp_path)
-        calls: list[int] = []
-
-        async def counted(*_args) -> None:
-            calls.append(1)
-
-        monkeypatch.setattr(ExperimentManager, "_reconcile_stale_runs", counted)
-        await manager.begin_drain()
-        await manager.status()
-        await manager.status()
-        assert len(calls) == 3
-
-    asyncio.run(scenario())
-
-
 def test_admission_reconciles_without_consuming_the_poll_interval(tmp_path: Path, monkeypatch) -> None:
     """start() bypasses the poll throttle. Admission is refused so no worker is spawned."""
 
@@ -6126,13 +6133,13 @@ def test_label_route_reports_a_failed_synchronization_with_its_recovery_hint(
     store.references["turn-1"] = {"session_id": "sess_a", "turn_id": "turn-1", "trace_id": "tr-1"}
 
     def fail(*_args: Any, **_kwargs: Any) -> None:
-        raise EvaluationError("MLflow labels were saved, but Lakebase curation failed (OperationalError)")
+        raise EvaluationError("MLflow labels were saved, but PostgreSQL curation failed (OperationalError)")
 
     monkeypatch.setattr("fleet_rlm.optimize.evaluation.label_turn", fail)
     _app, client = _app_client(tmp_path, store)
     with client:
         response = client.post("/improve/labels", json={"turn_id": "turn-1"})
-    assert response.status_code == 503 and "Lakebase curation failed" in response.text
+    assert response.status_code == 503 and "PostgreSQL curation failed" in response.text
 
 
 def test_history_lists_approved_versions_and_completed_evaluations(tmp_path: Path) -> None:

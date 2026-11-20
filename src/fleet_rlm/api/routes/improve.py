@@ -116,9 +116,8 @@ def _readiness(store: Store, settings: FleetSettings) -> tuple[dict[str, Any], s
     from fleet_rlm.engine.compiled import installed_program_problem
     from fleet_rlm.optimize.dataset import load_examples, readiness
 
-    target = settings.mlflow_target()
     report = readiness(
-        load_examples(store, target.experiment_name, target.eval_experiment_name),
+        load_examples(store),
         min_split_examples=settings.min_split_examples,
     ).as_dict()
     # An installed program that contradicts the ledger would make every Turn refuse, so a job

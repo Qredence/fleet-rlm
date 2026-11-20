@@ -461,12 +461,8 @@ def phase_span(name: str, **inputs: Any) -> Generator[Any, None, None]:
 
 
 def trace_object(value: Any) -> dict[str, Any]:
-    """Decode a trace object, including Unity Catalog's extra JSON string wrapper."""
-    for _ in range(2):
-        if isinstance(value, dict):
-            return value
-        if not isinstance(value, str):
-            return {}
+    """Decode a trace object from parsed or JSON-encoded metadata."""
+    if isinstance(value, str):
         try:
             value = json.loads(value)
         except json.JSONDecodeError:
@@ -629,56 +625,9 @@ def sanitize_trace_span(span: Any) -> None:
                 setattr_fn(cleaned)
 
 
-class MlflowTraceDestinationMismatchError(ValueError):
-    """The requested Unity Catalog destination conflicts with an existing experiment binding."""
-
-
-def set_mlflow_trace_experiment(
-    experiment_name: str,
-    *,
-    databricks: bool = False,
-    trace_catalog: str = "",
-    trace_schema: str = "",
-    trace_table_prefix: str = "",
-    tracing_sql_warehouse_id: str = "",
-) -> Any:
-    """Activate an MLflow experiment, binding Unity Catalog trace storage when targeting Databricks."""
-    if not databricks:
-        return mlflow.set_experiment(experiment_name)
-    from mlflow.entities.trace_location import UnityCatalog
-    from mlflow.utils.mlflow_tags import MLFLOW_EXPERIMENT_DATABRICKS_TRACE_DESTINATION_PATH
-
-    experiment = mlflow.get_experiment_by_name(experiment_name)
-    if trace_table_prefix:
-        trace_location = UnityCatalog(
-            catalog_name=trace_catalog,
-            schema_name=trace_schema,
-            table_prefix=trace_table_prefix,
-        )
-    else:
-        trace_location = UnityCatalog(catalog_name=trace_catalog, schema_name=trace_schema)
-    if experiment is not None:
-        destination = experiment.tags.get(MLFLOW_EXPERIMENT_DATABRICKS_TRACE_DESTINATION_PATH)
-        # Native MLflow uses the experiment ID when no custom table prefix is supplied.
-        requested_destination = (
-            trace_location.full_table_prefix
-            if trace_table_prefix
-            else f"{trace_catalog}.{trace_schema}.{experiment.experiment_id}"
-        )
-        if destination and destination != requested_destination:
-            raise MlflowTraceDestinationMismatchError("MLflow trace destination mismatch")
-    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = tracing_sql_warehouse_id
-    return mlflow.set_experiment(experiment_name, trace_location=trace_location)
-
-
 def configure_mlflow_observability(
     experiment_name: str = "fleet-rlm-production",
     tracking_uri: str = "sqlite:///mlflow.db",
-    *,
-    trace_catalog: str = "",
-    trace_schema: str = "",
-    trace_table_prefix: str = "",
-    tracing_sql_warehouse_id: str = "",
 ) -> str | None:
     """Configure the MLflow destination and DSPy tracing, returning the initialized experiment ID."""
     capture_serving_snapshot()
@@ -686,14 +635,7 @@ def configure_mlflow_observability(
         mlflow.set_tracking_uri(tracking_uri)
     # DSPy autolog captures nested prompts and tool payloads; sanitize those spans before export.
     mlflow.tracing.configure(span_processors=[sanitize_trace_span])
-    set_mlflow_trace_experiment(
-        experiment_name,
-        databricks=tracking_uri.startswith("databricks"),
-        trace_catalog=trace_catalog,
-        trace_schema=trace_schema,
-        trace_table_prefix=trace_table_prefix,
-        tracing_sql_warehouse_id=tracing_sql_warehouse_id,
-    )
+    mlflow.set_experiment(experiment_name)
     mlflow.dspy.autolog(log_traces=True, log_traces_from_compile=False, log_traces_from_eval=False)
     experiment = mlflow.get_experiment_by_name(experiment_name)
     return experiment.experiment_id if experiment is not None else None

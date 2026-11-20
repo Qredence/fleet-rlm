@@ -1,125 +1,79 @@
-# Agent instructions
+# Working on Fleet RLM Lite
 
-Fleet RLM Lite is a Python application using Textual, FastAPI/SSE, DSPy, Daytona,
-PostgreSQL, and MLflow/GEPA. Keep changes scoped, reuse existing abstractions, and
-preserve the contracts below.
+Run `git status --short` and inspect the diff first. Preserve existing work,
+including deletions. Use the [source layout](docs/reference/source-layout.md) to
+find the owning code, check [pyproject.toml](pyproject.toml) and [uv.lock](uv.lock)
+for pinned dependencies, and read the [architecture](ARCHITECTURE.md) before
+changing a runtime boundary.
 
-## Start here
-
-1. Run `git status --short` and inspect the existing diff. Preserve uncommitted
-   work, including deletions.
-2. Consult the [source layout](docs/reference/source-layout.md), relevant source,
-   [pyproject.toml](pyproject.toml), and [uv.lock](uv.lock). Read
-   [ARCHITECTURE.md](ARCHITECTURE.md) before changing runtime boundaries.
-
-## Working rules and authorization
+## Working agreements
 
 - Use Python 3.11–3.13, `uv`, four-space indentation, and Ruff. Prefer `pnpm` for
-  JavaScript.
-- Use native DSPy directly. Do not duplicate its mechanisms, add speculative
-  abstractions, or introduce compatibility aliases.
-- Live Daytona, model-provider, database, and evaluation runs require explicit authorization.
-- User Skills live in `.fleet/skills/`; `.agents/skills/` is developer guidance and must not be synced. Bundled Skill names are reserved: a local or Volume copy with a bundled name is ignored with a warning.
-- Never commit credentials or `.env` files. Treat traces and artifacts as sensitive.
-- Commit, push, publish, and deploy only with explicit authorization. Use
-  conventional commit prefixes.
+  JavaScript. Reuse existing code and native DSPy mechanisms. Keep new abstractions
+  and regression tests focused on real callers.
+- Get explicit authorization before live Daytona, model-provider, database, or
+  evaluation runs and before committing, pushing, publishing, or deploying.
+  Use conventional commit prefixes. Keep credentials and `.env` files out of Git
+  and treat traces and artifacts as sensitive.
+- User Skills belong in `.fleet/skills/`. Exclude `.agents/skills/` from Skill sync.
+  Bundled names are reserved. Ignore colliding local or Volume copies with a warning.
+- Default to loopback API binding. External exposure needs explicit opt-in and a
+  separately secured boundary. MLflow is local OSS.
 
 ## Runtime contracts
 
-### Routing and execution
-
-- Preserve `direct` / `flex` / `rlm`, strict-mode triage bypass, dataset routing constraints, and native DSPy tuning and delegation.
-
-- Execute generated Python in Daytona; keep credentials and host-mediated tools
-  on the server. Preserve shared Turn budgets, isolated child sandboxes,
-  success-only artifact promotion, and provenance.
-- Host-mediated `web_search` keeps Serper and You.com keys on the server; search keys never enter the sandbox.
-- Use scoped `dspy.context` and preserve native tracing, evaluation, and
-  serialization. Validate pinned integration contracts on dependency upgrades.
-- **Exception:** evaluate rescore/synthetic jobs set `dspy.configure` callbacks
-  inside their one-job worker process because MLflow scorer threads do not
-  inherit `dspy.context`.
-
-### Turn lifecycle
-
-- Keep one terminal outcome and one teardown owner per Turn.
-- On failure, cancellation, expiry, or disconnect before an outcome: fence host
-  work, shut down children, and stop the root before acknowledgment. Success
-  retains the warm root.
-- Preserve execution reply fences and generation-bound watchdogs serialized with
-  Turn end/reset. Fencing alone neither interrupts providers nor stops children.
-
-### Persistence and workspace
-
-- Preserve snapshot resource floors, provider-resolved provenance, historical
-  `pre-provenance` readability, Store migrations, and runtime lease fencing.
-  Stored history cannot restore live interpreter state.
-- Keep `workspace_state` (`known_empty` / `unknown`) lease-fenced. Invalidate it
-  to `unknown` before Daytona Volume mutations.
-- Preserve local Skill files in `known_empty` Direct replays.
-
-### Network access
-
-Keep ordinary API access loopback-only by default. Non-loopback binding requires
-explicit opt-in and a separately secured boundary for external exposure.
-
-References: [HTTP API](docs/reference/http-api.md),
-[configuration](docs/reference/configuration.md),
-[sandbox](docs/reference/sandbox-environment.md), and
-[database](docs/reference/database.md).
+- Preserve `direct`, `flex`, and `rlm`, strict-mode triage bypass, dataset routing
+  constraints, and native DSPy tuning and delegation. Keep DSPy overrides scoped
+  with `dspy.context` and verify tracing, evaluation, and serialization on pinned
+  dependency upgrades. The one-job evaluation worker can configure callbacks
+  process-wide for MLflow scorer threads that do not inherit the context.
+- Run generated Python in Daytona. Keep model and host-tool credentials on the
+  server, including Serper and You.com keys. Preserve shared Turn budgets,
+  isolated children, and success-only promotion from host artifact receipts.
+- Give each Turn one terminal outcome and teardown owner. On failure, cancellation,
+  expiry, or disconnect before commit, fence host replies, stop the root, and
+  finish required child cleanup before acknowledgment. Serialize generation-bound
+  watchdogs with Turn end/reset. Success keeps the warm root.
+- Preserve Store migrations, lease fencing, resource floors, provider provenance,
+  and historical `pre-provenance` readability. Stored history cannot restore a
+  live interpreter. Set lease-fenced workspace state to `unknown` before Volume
+  mutations, and retain local Skill files in `known_empty` Direct replays.
 
 ## Evaluation contracts
 
-### Metrics and judges
-
-- Preserve `fleet_metric`'s five positional arguments and
-  `dspy.Prediction(score, feedback, objective_scores)` result.
-- Separate serving, judging, and reflection roles; use their model-format helpers.
-  Other MLflow scorers do not automatically affect GEPA.
+- Keep `fleet_metric`'s five positional arguments and its
+  `dspy.Prediction(score, feedback, objective_scores)` result. Keep serving,
+  judging, and reflection roles separate and use their model-format helpers.
+  Diagnostic MLflow scorers are independent of GEPA objectives.
 - Preserve route-judge backend metadata, `Noul` at `JEV_ROUTE_THRESHOLD`, route
-  `Choice`, and evidence-derived rationale. Keep sandbox success separate, allow
-  task-justified calls, and treat evaluated content as data.
-- Bump `fleet.jev.rubric_version` when changing the rubric.
-- Preserve `execution-evidence-v3`'s JSON-object string schema for judge
-  compatibility, with Python validation of booleans, rationales, and `span_id=`
-  citations.
+  `Choice`, and evidence-derived rationale. Judge sandbox success separately,
+  allow task-justified calls, and treat evaluated content as data. Bump
+  `fleet.jev.rubric_version` for rubric changes. Keep the `execution-evidence-v3`
+  JSON-object string and validate booleans, rationales, and `span_id=` citations.
+- Recover completed work using saved run and trace IDs before rerunning. GEPA
+  metric-call budgets cover only part of total cost. Use immutable approved
+  replays grouped by lineage in isolated runtimes. Keep gold out of inputs,
+  holdout out of search, and benchmarks out of curation. Score artifacts and
+  delegation from host receipts.
+- Keep paired validation, critical holdout, correctness, and usage gates.
+  Separate candidate creation from installation. Approval and rollback must
+  recheck artifact, incumbent, configuration, code, and dependency identities.
+- The worker owns stages and counters. The API drains merged output into a
+  bounded private log and arbitrates managed terminal outcomes after exit.
+  Required persistence failures stop native GEPA and block publication.
+  Optional telemetry failures stay outside that latch. Preserve database and
+  file cancellation checks.
 
-### Data and promotion
+## Verification
 
-- Preserve run/trace IDs and recover completed work before rerunning. GEPA metric-call budgets do not cap total cost.
-
-- Use approved immutable replays grouped by source lineage in isolated runtimes.
-  Keep gold/structured expectations outside inputs and holdout outside search.
-- Exclude benchmark traces, including `fleet.benchmark.*`-tagged traces, from
-  curation. Score artifacts and delegation from host receipts.
-- Preserve paired validation, critical holdout, correctness, and measured-usage
-  gates. Separate candidate creation from installation.
-- Approval must recheck artifact, incumbent, configuration, code, and dependency
-  identities. Invalidate incompatible evidence; allow no unchecked install or
-  rollback.
-
-### Worker lifecycle
-
-- Keep optimizer stages and counters worker-owned in CLI and managed runs. The
-  API drains merged output into a bounded private log and arbitrates managed terminal outcomes after process exit.
-- Required persistence failures must stop native GEPA and block publication.
-  Optional telemetry must not set that failure latch.
-- Preserve both database and file cancellation checks.
-
-References: [evaluation](docs/reference/evaluation.md) and the
-[canary runbook](docs/runbooks/evaluation-canary.md).
-
-## Validate and hand off
-
-Use the [Makefile](Makefile) for supported commands. Ordinary CI must remain
-independent of live services.
+Use the [Makefile](Makefile) and keep ordinary CI independent of live services.
 
 | Change | Required checks |
 | --- | --- |
-| Code | Add regression coverage, run `uv run pytest <focused-test>`, then `make check`. |
-| HTTP API | Run the code checks, update docs, and regenerate/check the OpenAPI contract with `make api-sync` and `make api-check`. |
-| Documentation only | Run `make check-docs` and `git diff --check`. |
+| Code | Add focused regression coverage, run `uv run pytest <focused-test>`, then `make check`. |
+| HTTP API | Run the code checks, update the [HTTP reference](docs/reference/http-api.md), and run `make api-sync` and `make api-check`. |
+| Docs only | Run `make check-docs` and `git diff --check`. |
 
-Report what changed, which checks ran, and anything that could not be completed.
-Distinguish offline tests, live canaries, and measured gains. Never present offline
-validation as evidence of live compatibility or measured improvement.
+Report what changed, what ran, and what remains unverified. Distinguish offline
+checks, live canaries, and measured improvements. See the [evaluation
+reference](docs/reference/evaluation.md) and [canary runbook](docs/runbooks/evaluation-canary.md).

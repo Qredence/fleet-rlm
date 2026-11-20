@@ -1,4 +1,4 @@
-"""Pooled PostgreSQL table leases, batched heartbeat renewal, and Lakebase OAuth caching."""
+"""Pooled PostgreSQL table leases, batched heartbeat renewal."""
 
 from __future__ import annotations
 
