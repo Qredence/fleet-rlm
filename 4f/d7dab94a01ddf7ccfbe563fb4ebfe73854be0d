@@ -1,0 +1,51 @@
+src/fleet_rlm/api/routes/improve.py
+  s_6256845c39f7dc::t_2c1d9014a7c9ef 317-321,326,345,370,384
+src/fleet_rlm/api/routes/sessions.py
+  s_6256845c39f7dc::t_5d83eda901e365 42,121,131,150,163,168,174,217,225
+src/fleet_rlm/api/routes/turns.py
+  s_6256845c39f7dc::t_3cd6e3252101f7 23-24,112,124,141,162,187,203,211,232-234,236
+src/fleet_rlm/config/settings.py
+  s_6256845c39f7dc::t_9358412a2ae0cd 210-211
+src/fleet_rlm/engine/invocation.py
+  s_6256845c39f7dc::t_46dd6731cc6f75 91
+src/fleet_rlm/engine/reasoning.py
+  s_6256845c39f7dc::t_0bf13184e5151a 162,174,182
+src/fleet_rlm/engine/turn.py
+  s_6256845c39f7dc::t_76bc96849e2c40 12,104-118,134,137,187,209,217,236,240,418-419,428,438
+src/fleet_rlm/engine/turn_prepare.py
+  s_6256845c39f7dc::t_a3907158cbc14d 129
+src/fleet_rlm/experiments.py
+  s_6256845c39f7dc::t_b47d7121379b2f 159-160,225,229-234,242,260-264
+src/fleet_rlm/sandbox/lifecycle.py
+  s_6256845c39f7dc::t_17905c53765372 17-18,355-357,396-406,454-456,536,538
+src/fleet_rlm/session.py
+  s_6256845c39f7dc::t_ed2a167594f0ec 104-131,485,489,825-852
+src/fleet_rlm/store/optimization.py
+  s_6256845c39f7dc::t_effba0c187c897 116-125
+src/fleet_rlm/store/sessions.py
+  s_6256845c39f7dc::t_39a1f6c1c23dc7 7,355-358,360
+tests/api/test_turns.py
+  s_6256845c39f7dc::t_753298494b81c8 2393,2533,2889,2893,3960-3963,4010-4011,4038,4049-4050,4937-4940,5653-5655,5682-5684,6585,6592-6594,6610,6612
+tests/engine/test_runtime.py
+  s_6256845c39f7dc::t_f40dd7a3c78840 5041,5063,5074,5540-5541
+tests/sandbox/test_sandbox.py
+  s_6256845c39f7dc::t_faf59db06e69e1 3074,3076,3078-3079,3783-3787,5361-5362,5366-5374,5376-5383
+tests/store/test_store.py
+  s_6256845c39f7dc::t_71b07d6fb640c4 414-432,907-916
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4fd7dab94a01ddf7ccfbe563fb4ebfe73854be0d",
+  "prompts": {},
+  "sessions": {
+    "s_6256845c39f7dc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f70b-16ae-7680-98b5-f5ea730fa491",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
