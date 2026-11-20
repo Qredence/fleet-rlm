@@ -176,20 +176,18 @@ def verify_api_destination(url: str, expected: dict | None = None) -> dict:
 
 def plan_launch(
     *,
-    url: str | None,
     host: str,
     port: int,
     settings: FleetSettings,
     api_healthy: Callable[[str], bool] | None = None,
     mlflow_healthy: Callable[[str], bool] | None = None,
 ) -> LaunchPlan:
-    """Start owned services, or reuse an API only after checking its destination."""
+    """Plan which local services the client needs to start."""
     target = settings.mlflow_target()
     api_healthy = api_healthy or api_is_healthy
     mlflow_healthy = mlflow_healthy or mlflow_is_healthy
-    api_url = url.rstrip("/") if url else f"http://{host}:{port}"
-    if url or api_healthy(api_url):
-        verify_api_destination(api_url, settings.mlflow_descriptor())
+    api_url = f"http://{host}:{port}"
+    if api_healthy(api_url):
         return LaunchPlan(api_url=api_url, notes=(f"Reusing the API server already running at {api_url}.",))
     environment = settings.mlflow_environment()
     mlflow_url = target.tracking_uri

@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 EVENT_PREFIX = "FLEET_EVENT "
 ACTIVE_STATUSES = frozenset({"running", "approving"})
 # One job system: `kind` selects the worker body inside the same subprocess and ledger.
-JOB_KINDS = ("optimize", "evaluate_rescore", "evaluate_replay", "evaluate_synthetic")
 # What GEPA can rewrite, in plain words. Names match `tunable_components`.
 COMPONENT_DESCRIPTIONS = {
     "routing": "Chooses direct, flex, or rlm for a task.",

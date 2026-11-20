@@ -23,27 +23,6 @@ class SessionStoreMixin:
     _save_file: Callable[..., None]
 
     @_retry_once
-    def ensure_session(self, session_id: str) -> bool:
-        """Create a Session row if absent and report whether it was newly inserted."""
-        with self.pool.connection() as connection:
-            created = connection.execute(
-                "INSERT INTO sessions (session_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING session_id",
-                (session_id,),
-            ).fetchone()
-        return created is not None
-
-    @_retry_once
-    def advance_sandbox_ownership_epoch(self, session_id: str) -> int | None:
-        """Advance the current Session's sandbox ownership epoch."""
-        with self.pool.connection() as connection, connection.transaction():
-            row = connection.execute(
-                "UPDATE sessions SET ownership_epoch = ownership_epoch + 1, updated_at = NOW() "
-                "WHERE session_id = %s RETURNING ownership_epoch",
-                (session_id,),
-            ).fetchone()
-        return int(_row_value(row, "ownership_epoch", 0)) if row else None
-
-    @_retry_once
     def sandbox_ownership(self, session_id: str) -> dict[str, Any] | None:
         """Read normalized sandbox ownership state and bounded resource records."""
         with self.pool.connection() as connection:

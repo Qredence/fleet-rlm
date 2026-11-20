@@ -40,8 +40,7 @@ from fleet_rlm.engine.turn_prepare import (
     _provider_bounds_attribute,
     _turn_environment,
 )
-from fleet_rlm.observability import associate_turn_agent, phase_span, stream_callbacks
-from fleet_rlm.replay import encode_snapshot
+from fleet_rlm.observability import associate_turn_agent, phase_span
 from fleet_rlm.sandbox.manager import CLEANUP_NOT_REQUIRED
 from fleet_rlm.skills import validate_requested_skills
 from fleet_rlm.store import IdempotencyConflictError
@@ -258,7 +257,6 @@ def run_turn(
                         callback=callback,
                         record_replay=record_replay,
                         required_skills=required_skills,
-                        dspy_module=dspy,
                     )
                     if inputs is None:
                         inputs = _prepare_inputs(
@@ -298,7 +296,6 @@ def run_turn(
                         requested_skills=requested_skills,
                         skill_intent=skill_intent,
                         emit=emit,
-                        encoder=encode_snapshot,
                     )
                     if inputs["replay_selected"]
                     else None
@@ -315,7 +312,7 @@ def run_turn(
                     replay_snapshot,
                     skill_intent=skill_intent,
                 )
-                with dspy.context(callbacks=stream_callbacks(callback), disable_history=True):
+                with dspy.context(callbacks=[*dspy.settings.callbacks, callback], disable_history=True):
                     execution_options: dict[str, Any] = {}
                     if selected_route is not None:
                         execution_options["selected_route"] = selected_route
@@ -406,7 +403,6 @@ def run_turn(
                         turn_record=turn_record,
                         new_memory_note=learned_note,
                         replay_snapshot=replay_snapshot,
-                        artifact_paths=artifact_capture["paths"],
                         commit_guard=commit_guard(),
                     )
                     with completion.lock:

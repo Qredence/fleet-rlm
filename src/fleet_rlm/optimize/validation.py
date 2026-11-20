@@ -149,7 +149,7 @@ class IsolatedFleetProgram(dspy.Module):
             # Native Parameter students (such as Flex) serialize under `program`, not dotted fields.
             super().load_state(state, allow_unsafe_lm_state=allow_unsafe_lm_state)
             return
-        if set(state) != {f"program.{key}" for key in self.program.dump_state()}:
+        if any(not isinstance(key, str) or not key.startswith("program.") for key in state):
             raise ValueError("Isolated candidate requires complete native program-prefixed state")
         self.program.load_state(
             {key.removeprefix("program."): value for key, value in state.items()},

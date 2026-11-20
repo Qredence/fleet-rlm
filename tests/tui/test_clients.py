@@ -3565,7 +3565,6 @@ def test_registered_score_rejects_incomplete_or_conflicting_selection(monkeypatc
 
 def _plan(**overrides: Any) -> LaunchPlan:
     options: dict[str, Any] = {
-        "url": None,
         "host": "127.0.0.1",
         "port": 8000,
         "settings": FleetSettings(_env_file=None),
@@ -3575,14 +3574,7 @@ def _plan(**overrides: Any) -> LaunchPlan:
     return plan_launch(**{**options, **overrides})
 
 
-def test_explicit_url_starts_nothing(monkeypatch) -> None:
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
-    plan = _plan(url="http://example.test:9000/")
-    assert (plan.api_url, plan.start_api, plan.start_mlflow) == ("http://example.test:9000", False, False)
-
-
-def test_a_healthy_api_is_reused_and_nothing_is_started(monkeypatch) -> None:
-    monkeypatch.setattr(launcher, "verify_api_destination", lambda *_args: {"mode": "local"})
+def test_a_healthy_api_is_reused_and_nothing_is_started() -> None:
     plan = _plan(api_healthy=lambda _url: True)
     assert not plan.start_api and not plan.start_mlflow and plan.api_env == {}
     assert any("Reusing the API server" in note for note in plan.notes)
@@ -3797,15 +3789,25 @@ def _stub_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return seen
 
 
-def test_fleet_cli_starts_services_then_runs_the_client_against_the_api(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("reuse", [False, True])
+def test_fleet_cli_verifies_the_api_once_before_opening_the_client(monkeypatch, reuse):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     seen = _stub_cli(monkeypatch)
+    verified = []
+
+    def verify(url, expected):
+        assert "ran" not in seen
+        verified.append((url, expected["mode"]))
+
+    monkeypatch.setattr(launcher, "api_is_healthy", lambda _url: reuse)
+    monkeypatch.setattr(launcher, "verify_api_destination", verify)
     cli.main(["cli", "--session", "s1"])
     plan = seen["plan"]
-    assert plan.start_api and plan.start_mlflow and seen["exited"]
-    assert seen["ran"]["base_url"] == plan.api_url
-    assert seen["ran"]["session_id"] == "s1"
+    assert plan.start_api is plan.start_mlflow is not reuse
+    assert seen["exited"]
+    assert verified == [(plan.api_url, "local")]
+    assert seen["ran"] == {"base_url": plan.api_url, "session_id": "s1"}
 
 
 def test_fleet_cli_with_an_explicit_url_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4038,13 +4040,6 @@ def _respond(monkeypatch, payload):
             200, json=payload, request=httpx.Request("GET", "http://fleet.test/health")
         ),
     )
-
-
-def test_reuse_checks_metadata_without_creating_a_session(monkeypatch):
-    settings = FleetSettings(_env_file=None)
-    _respond(monkeypatch, _health(settings))
-    plan = launcher.plan_launch(url="http://fleet.test", host="127.0.0.1", port=8000, settings=settings)
-    assert not plan.start_api and not plan.start_mlflow
 
 
 @pytest.mark.parametrize(

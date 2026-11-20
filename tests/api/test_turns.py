@@ -204,7 +204,6 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "memories",
             "load_context",
             "commit_turn",
-            "turn_status",
             "save_memory",
             "delete_memory",
         )
@@ -225,7 +224,6 @@ def runtime_with(**parts: Any) -> SessionRuntime:
             "claim_turn": lambda *_args: None,
             "memories": lambda *_args, **_kwargs: [],
             "load_context": lambda _session: SessionContext("", ""),
-            "turn_status": lambda _turn: None,
         }
         for name, method in (defaults | policy).items():
             setattr(runtime, name, method)
@@ -244,14 +242,12 @@ def runtime_with(**parts: Any) -> SessionRuntime:
 
 def completion_for(
     turn_record: dict[str, Any],
-    artifacts: list[str] | None = None,
     *,
     replay_snapshot: tuple[str, bytes] | None = None,
 ) -> dict[str, Any]:
     """Use the real canonical writer for tests replacing the commit boundary."""
-    runtime = runtime_with(sandbox_mgr=FakeManager(list_workspace_files=lambda: artifacts or []))
-    captured_paths = turn_record.get("artifact_capture", {}).get("paths")
-    return runtime.commit_turn("session-a", turn_record, replay_snapshot=replay_snapshot, artifact_paths=captured_paths)
+    runtime = runtime_with()
+    return runtime.commit_turn("session-a", turn_record, replay_snapshot=replay_snapshot)
 
 
 class FakeRegistry:
@@ -973,9 +969,7 @@ def test_artifact_heavy_span_keeps_route_usage_and_cleanup_after_sanitization(tr
     paths = sorted(files)
     runtime = runtime_with(
         sandbox_mgr=FakeManager(list_workspace_files=lambda: paths, read_workspace_file=lambda _path: payload),
-        commit_turn=lambda **kwargs: completion_for(
-            kwargs["turn_record"], paths, replay_snapshot=kwargs["replay_snapshot"]
-        ),
+        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"]),
         engine=lambda **_kwargs: SimpleNamespace(
             answer="Done",
             route="rlm",
@@ -1059,10 +1053,12 @@ def traced(monkeypatch):
         yield
 
     seen["global_callback"] = object()
-    fake_dspy = SimpleNamespace(settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context)
+    fake_dspy = SimpleNamespace(
+        settings=SimpleNamespace(callbacks=[seen["global_callback"]]), context=context, History=dspy.History
+    )
     monkeypatch.setattr(turn_module, "dspy", fake_dspy)
-    # Callback composition lives in observability, so the same ambient list must be visible there.
     monkeypatch.setattr(observability, "dspy", fake_dspy)
+    monkeypatch.setattr("fleet_rlm.engine.turn_prepare.dspy", fake_dspy)
     # The phase-span helper lives in observability, so the same recorder must be visible there.
     monkeypatch.setattr(observability.mlflow, "start_span", span)
     monkeypatch.setattr(turn_module.mlflow, "start_span", span)
@@ -1107,9 +1103,7 @@ def test_a_turn_persists_then_writes_its_note_and_streams_one_completion(traced,
     def persist(**kwargs):
         records.append(kwargs["turn_record"])
         order.append("sync")
-        return completion_for(
-            kwargs["turn_record"], ["artifacts/result.csv"], replay_snapshot=kwargs["replay_snapshot"]
-        )
+        return completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
 
     def write_note(turn_id, note, trace_id=None):
         order.append("write")
@@ -1236,7 +1230,7 @@ def test_turn_persists_retained_artifact_provenance_on_root_trace(traced):
         sandbox_mgr=FakeManager(list_workspace_files=lambda: [path], read_workspace_file=lambda _path: raw),
         commit_turn=lambda **kwargs: (
             records.append(kwargs["turn_record"])
-            or completion_for(kwargs["turn_record"], [path], replay_snapshot=kwargs["replay_snapshot"])
+            or completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"])
         ),
         engine=lambda **_kwargs: SimpleNamespace(answer="5", route="flex", execution_evidence=evidence),
     )
@@ -1291,9 +1285,7 @@ def test_artifact_heavy_turn_preserves_execution_evidence_after_trace_sanitizati
             list_workspace_files=lambda: paths,
             read_workspace_file=lambda _path: raw,
         ),
-        commit_turn=lambda **kwargs: completion_for(
-            kwargs["turn_record"], paths, replay_snapshot=kwargs["replay_snapshot"]
-        ),
+        commit_turn=lambda **kwargs: completion_for(kwargs["turn_record"], replay_snapshot=kwargs["replay_snapshot"]),
         engine=lambda **_kwargs: SimpleNamespace(answer="Done", route="flex", execution_evidence=evidence, **usage),
     )
     with opened_client(runtime) as (client, _app):
@@ -1600,7 +1592,7 @@ def test_snapshot_provenance_survives_a_preparation_failure_after_preflight(trac
         raise ValueError("Replay snapshot exceeds the 8 MB limit")
 
     manager.turn_inputs = resolve
-    monkeypatch.setattr(turn_module, "encode_snapshot", oversized_replay)
+    monkeypatch.setattr("fleet_rlm.engine.turn_prepare.encode_snapshot", oversized_replay)
     runtime = runtime_with(
         sandbox_mgr=manager,
         store=store_with(finish_turn=lambda _session, *args: finished.append(args)),
@@ -1969,7 +1961,7 @@ def test_required_admission_refusal_is_durable_and_caller_safe(tmp_path, mode):
     assert str(tmp_path) not in failure["error"]
     assert state.rows["refused"]["status"] == "failed" and state.executions == []
     assert state.rows["refused"]["result"]["requested_skills"] == ["missing"]
-    assert runtime.turn_status(failure["turn_id"])["status"] == "failed"
+    assert runtime.store.turn_status("session-a", failure["turn_id"])["status"] == "failed"
 
 
 @pytest.mark.usefixtures("traced")

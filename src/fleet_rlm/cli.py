@@ -272,7 +272,7 @@ def _run_client(args: argparse.Namespace, settings: Any, parser: argparse.Argume
         else:
             if not settings.allow_non_loopback_bind and not _is_loopback(settings.host):
                 parser.error("non-loopback binding requires FLEET_ALLOW_NON_LOOPBACK_BIND=true")
-            plan = launcher.plan_launch(url=None, host=settings.host, port=settings.port, settings=settings)
+            plan = launcher.plan_launch(host=settings.host, port=settings.port, settings=settings)
             url = plan.api_url
             services = launcher.running_services(
                 plan,
