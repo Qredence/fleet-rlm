@@ -1,0 +1,27 @@
+config/daytona-snapshot-requirements.in
+  s_991c8322618981::t_904d3110e98d38 13,16-17
+src/fleet_rlm/sandbox/snapshot-requirements.txt
+  s_991c8322618981::t_63297617eb515f 1068-1070,1426-1428
+tests/engine/test_runtime.py
+  s_991c8322618981::t_fec2d42553ae53 2899
+tests/sandbox/test_sandbox.py
+  s_991c8322618981::t_6b2060d1c90edf 1669
+uv.lock
+  s_991c8322618981::t_b6e953d81f1e1c 2146,2151,2153,4547,4556,4558
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ff092f0932a58fece2968ffe28269a4474fe0bb0",
+  "prompts": {},
+  "sessions": {
+    "s_991c8322618981": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1fba6-c367-7f13-a533-d277585b02c8",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
