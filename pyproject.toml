@@ -37,7 +37,7 @@ dependencies = [
     "mlflow==3.18.0",
     "boto3>=1.42,<2",
     "psycopg[binary]>=3.3.6,<4",
-    "fastapi[standard]==0.162.0",
+    "fastapi[standard]==0.163.2",
     "python-multipart>=0.0.12",
     "uvicorn[standard]>=0.54.0,<1",
     "pydantic>=2.13.5,<3",
