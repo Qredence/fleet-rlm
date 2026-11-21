@@ -132,6 +132,75 @@ def test_jev_selector_shortlists_and_applies_calibration(settings, tmp_path, mon
     assert select_skills(settings, registry, "Inspect data").active_skills == ()
 
 
+def test_single_skill_selector_omits_choice_and_reloads_state(settings, tmp_path, monkeypatch):
+    single_dir = tmp_path / "single"
+    single_dir.mkdir()
+    _skill(single_dir, "data-analysis", "Inspect tabular CSV datasets")
+    registry = SkillRegistry.load(single_dir)
+
+    selector = build_skill_selector(registry.skills)
+    assert set(selector.signature.output_fields) == {"needs_skill"}
+    criteria = selector.signature.output_fields["needs_skill"].annotation.criteria()
+    assert "data-analysis" in criteria["true"]
+    assert "Inspect tabular CSV datasets" in criteria["true"]
+    assert "data-analysis" in criteria["false"]
+
+    selector.fields = {"needs_skill": {"threshold": 0.7}}
+    single_state_path = tmp_path / "single_selector.json"
+    selector.save(single_state_path)
+
+    # Also verify loading a multi-skill JSON strips primary_skill cleanly.
+    multi_dir = tmp_path / "multi"
+    multi_dir.mkdir()
+    _skill(multi_dir, "data-analysis", "Inspect tabular CSV datasets")
+    _skill(multi_dir, "charts", "Render charts")
+    multi_selector = build_skill_selector(SkillRegistry.load(multi_dir).skills)
+    multi_selector.fields = {
+        "needs_skill": {"threshold": 0.75},
+        "primary_skill": {"weights": {"data-analysis": 2.0, "charts": 1.0}},
+    }
+    multi_state_path = tmp_path / "multi_selector.json"
+    multi_selector.save(multi_state_path)
+
+    reloaded_from_multi = build_skill_selector(registry.skills, multi_state_path)
+    assert set(reloaded_from_multi.signature.output_fields) == {"needs_skill"}
+    assert reloaded_from_multi.fields == {"needs_skill": {"threshold": 0.75}}
+
+    settings = settings.model_copy(update={"skill_selector_path": single_state_path})
+
+    def decide(self, *, task, lm):
+        assert lm.model == "typesafe:jev-latest"
+        assert set(self.signature.output_fields) == {"needs_skill"}
+        threshold = self.fields["needs_skill"]["threshold"]
+        if task == "No probability true":
+            return SimpleNamespace(needs_skill=SimpleNamespace(value=True))
+        if task == "No probability false":
+            return SimpleNamespace(needs_skill=SimpleNamespace(value=False))
+        prob = 0.85 if "CSV" in task else 0.60
+        return SimpleNamespace(
+            needs_skill=SimpleNamespace(value=prob >= threshold, probability=prob)
+        )
+
+    monkeypatch.setattr(dspy.Predict, "forward", decide)
+    selected = select_skills(settings, registry, "Analyze CSV totals")
+    assert [skill.name for skill in selected.active_skills] == ["data-analysis"]
+    assert selected.scores == {"data-analysis": 0.85}
+    assert selected.allowed_tools == ("inspect_csv", "retrieve")
+
+    skipped = select_skills(settings, registry, "Say hello")
+    assert skipped.active_skills == ()
+    assert skipped.scores == {"data-analysis": 0.60}
+    assert skipped.allowed_tools == ()
+
+    fallback_true = select_skills(settings, registry, "No probability true")
+    assert [skill.name for skill in fallback_true.active_skills] == ["data-analysis"]
+    assert fallback_true.scores == {"data-analysis": 1.0}
+
+    fallback_false = select_skills(settings, registry, "No probability false")
+    assert fallback_false.active_skills == ()
+    assert fallback_false.scores == {"data-analysis": 0.0}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("value", "action", "probability", "scope", "saved_action", "approved"),

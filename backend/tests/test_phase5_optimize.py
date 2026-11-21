@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 
 import dspy
 import pytest
+from dspy.clients.base_lm import BaseLM
+from dspy.experimental import ReAnchor
 
 from fleet_rlm import agent, db, optimize, skills
 from fleet_rlm.config import Settings
@@ -140,6 +142,42 @@ def test_metrics_cover_exact_partial_and_decision_cases() -> None:
                 needs_skill=SimpleNamespace(value=True),
                 primary_skill=SimpleNamespace(value="charts"),
             ),
+        )
+        == 0.0
+    )
+    # 1-skill selector predictions omit primary_skill entirely.
+    assert (
+        optimize.skill_metric(
+            gold_skill,
+            dspy.Prediction(needs_skill=SimpleNamespace(value=True)),
+        )
+        == 1.0
+    )
+    assert (
+        optimize.skill_metric(
+            gold_skill,
+            dspy.Prediction(needs_skill=SimpleNamespace(value=False)),
+        )
+        == 0.0
+    )
+    assert (
+        optimize.skill_metric(
+            dspy.Example(needs_skill=False, expected_skill=None),
+            dspy.Prediction(needs_skill=SimpleNamespace(value=False)),
+        )
+        == 1.0
+    )
+    assert (
+        optimize.skill_metric(
+            dspy.Example(needs_skill=False, expected_skill=None),
+            dspy.Prediction(needs_skill=SimpleNamespace(value=True)),
+        )
+        == 0.0
+    )
+    assert (
+        optimize.skill_metric(
+            gold_skill,
+            SimpleNamespace(needs_skill=SimpleNamespace(value=True), primary_skill=None),
         )
         == 0.0
     )
@@ -408,6 +446,122 @@ def test_optimize_skills_reanchor_and_cli_reminder(
     stdout = capsys.readouterr().out
     assert "FLEET_DECISION_MODEL" in stdout
     assert "typesafe:jev-latest" in stdout
+
+
+def test_optimize_single_skill_real_reanchor(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    single_skills_dir = tmp_path / "single-skills"
+    skill_dir = single_skills_dir / "data-analysis"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: data-analysis\ndescription: Analyze tabular CSV data\n---\nInspect CSV.\n",
+        encoding="utf-8",
+    )
+    single_settings = settings.model_copy(update={"skills_dir": single_skills_dir})
+    registry = skills.SkillRegistry.load(single_skills_dir)
+    assert len(registry.skills) == 1
+
+    probabilities = {
+        "csv-1": 0.92,
+        "csv-2": 0.88,
+        "csv-3": 0.84,
+        "csv-4": 0.80,
+        "csv-5": 0.78,
+        "csv-6": 0.86,
+        "chat-1": 0.64,
+        "chat-2": 0.62,
+        "chat-3": 0.60,
+        "chat-4": 0.58,
+        "chat-5": 0.56,
+        "chat-6": 0.61,
+    }
+
+    class FakeDecisionLM(BaseLM):
+        supports_decision_requests = True
+
+        def __init__(self) -> None:
+            super().__init__(model="typesafe:jev-fake", cache=True)
+
+        def __call__(self, request, **kwargs):
+            task = request.messages[0].parts[0].value["inputs"]["task"]
+            assert set(request.config.extensions["questions"]) == {"needs_skill"}
+            return SimpleNamespace(
+                provider_data={
+                    "typesafe": {"answers": {"needs_skill": {"noul": probabilities[task]}}}
+                }
+            )
+
+    fake_lm = FakeDecisionLM()
+
+    # 1. Direct real ReAnchor.compile on a 1-skill selector must not crash in _fit_weights.
+    selector = skills.build_skill_selector(registry.skills)
+    assert set(selector.signature.output_fields) == {"needs_skill"}
+    trainset = [
+        dspy.Example(
+            task=f"csv-{index}", needs_skill=True, expected_skill="data-analysis"
+        ).with_inputs("task")
+        for index in range(1, 6)
+    ] + [
+        dspy.Example(task=f"chat-{index}", needs_skill=False, expected_skill=None).with_inputs(
+            "task"
+        )
+        for index in range(1, 6)
+    ]
+    valset = [
+        dspy.Example(task="csv-6", needs_skill=True, expected_skill="data-analysis").with_inputs(
+            "task"
+        ),
+        dspy.Example(task="chat-6", needs_skill=False, expected_skill=None).with_inputs("task"),
+    ]
+    with dspy.context(lm=fake_lm):
+        reanchor = ReAnchor(optimize.skill_metric, require_cache=False)
+        compiled = reanchor.compile(selector, trainset=trainset, valset=valset)
+    threshold = compiled.fields["needs_skill"]["threshold"]
+    assert 0.64 < threshold < 0.78
+    assert reanchor.report["train_score_before"] == 0.5
+    assert reanchor.report["train_score"] == 1.0
+    assert reanchor.report["val_score_before"] == 0.5
+    assert reanchor.report["val_score"] == 1.0
+
+    # 2. Full optimize_skills -> save -> reload -> select_skills round-trip with real ReAnchor.
+    dataset = _write_jsonl(
+        tmp_path / "single-skills.jsonl",
+        [
+            {"task": task, "expected_skill": "data-analysis" if task.startswith("csv") else None}
+            for task in probabilities
+        ],
+    )
+    output_path = tmp_path / "single_skill_selector.json"
+    monkeypatch.setattr(optimize.dspy, "LM", lambda _model: fake_lm)
+    result = optimize.optimize_skills(
+        single_settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=output_path,
+        seed=0,
+        require_cache=False,
+    )
+    assert result.saved is True
+    assert result.optimized_score == 1.0
+    assert output_path.is_file()
+    saved_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved_payload["lm"] is None
+    assert "primary_skill" not in saved_payload.get("fields", {})
+
+    reloaded = skills.build_skill_selector(registry.skills, output_path)
+    calibrated_threshold = reloaded.fields["needs_skill"]["threshold"]
+    assert 0.64 < calibrated_threshold < 0.78
+
+    monkeypatch.setattr(skills.dspy, "LM", lambda _model: fake_lm)
+    runtime_settings = single_settings.model_copy(update={"skill_selector_path": output_path})
+    positive = skills.select_skills(runtime_settings, registry, "csv-6")
+    assert [skill.name for skill in positive.active_skills] == ["data-analysis"]
+    assert positive.scores == {"data-analysis": 0.86}
+
+    negative = skills.select_skills(runtime_settings, registry, "chat-6")
+    assert negative.active_skills == ()
+    assert negative.scores == {"data-analysis": 0.61}
 
 
 def test_optimize_memory_reanchor_and_cli_reminder(

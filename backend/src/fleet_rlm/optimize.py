@@ -353,17 +353,23 @@ def rlm_metric(
     )
 
 
+_MISSING = object()
+
+
 def _decision_value(value: Any) -> Any:
     return getattr(value, "value", value)
 
 
 def skill_metric(gold: dspy.Example, pred: Any, trace: Any = None) -> float:
-    """Binary accuracy for SkillSelector (needs_skill + primary_skill)."""
+    """Binary accuracy for SkillSelector (needs_skill, plus primary_skill when present)."""
     pred_needs = bool(_decision_value(getattr(pred, "needs_skill", False)))
     gold_needs = bool(getattr(gold, "needs_skill", True))
     if not gold_needs:
         return 1.0 if not pred_needs else 0.0
-    pred_skill = _decision_value(getattr(pred, "primary_skill", None))
+    raw_primary = getattr(pred, "primary_skill", _MISSING)
+    if raw_primary is _MISSING:
+        return 1.0 if pred_needs else 0.0
+    pred_skill = _decision_value(raw_primary)
     if isinstance(pred_skill, str):
         pred_skill = pred_skill.removeprefix("@").strip()
     return 1.0 if pred_needs and pred_skill == getattr(gold, "expected_skill", None) else 0.0
