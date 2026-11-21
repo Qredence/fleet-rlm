@@ -34,17 +34,22 @@ _MIB = 1024 * 1024
 
 class OfflineStore:
     def __init__(self):
+        now = datetime.now(UTC)
         self.session_id = uuid4()
         self.session = db.Session(
             id=self.session_id,
             title="Test session",
             history_json={"messages": []},
             daytona_sandbox_id="test-sandbox",
+            model_override=None,
+            created_at=now,
+            updated_at=now,
         )
         self.active = None
         self.checkouts = 0
         self.files = {}
         self.statements = []
+        self.workspace_overrides = {}
 
     @asynccontextmanager
     async def __call__(self):
@@ -71,6 +76,16 @@ class OfflineStore:
         pass
 
     async def scalar(self, query):
+        if getattr(query, "is_update", False):
+            params = query.compile().params
+            if params.get("id_1") != self.session_id:
+                return None
+            if "title" in params:
+                self.session.title = params["title"]
+            if "model_override" in params:
+                self.session.model_override = params["model_override"]
+            self.session.updated_at = datetime.now(UTC)
+            return self.session
         if query.column_descriptions[0]["entity"] is db.Run:
             return self.active
         file = self.files.get(query.compile().params["path_1"])
@@ -105,6 +120,24 @@ class OfflineStore:
                 if status == "completed":
                     self.session.history_json = details["history_json"]
             return True
+
+    async def get_workspace_overrides(self, _sessionmaker):
+        async with self():
+            return dict(self.workspace_overrides)
+
+    async def update_workspace_overrides(self, _sessionmaker, changes):
+        async with self():
+            for key, value in changes.items():
+                if value is None:
+                    self.workspace_overrides.pop(key, None)
+                else:
+                    self.workspace_overrides[key] = value
+            return dict(self.workspace_overrides)
+
+    async def reset_workspace_overrides(self, _sessionmaker):
+        async with self():
+            self.workspace_overrides.clear()
+            return {}
 
 
 @pytest_asyncio.fixture
@@ -169,6 +202,9 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "list_session_files", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "upsert_file_record", upsert_artifact)
+    monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
+    monkeypatch.setattr(db, "update_workspace_settings_overrides", store.update_workspace_overrides)
+    monkeypatch.setattr(db, "reset_workspace_settings_overrides", store.reset_workspace_overrides)
     monkeypatch.setattr(api, "list_new_artifacts", AsyncMock(return_value=[artifact]))
     memory = AsyncMock(side_effect=RuntimeError("Optional memory gate failed"))
     monkeypatch.setattr(api.agent, "consolidate_memory", memory)
@@ -628,3 +664,260 @@ async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
     assert offline.store.active is None and offline.store.checkouts == 0
     assert not any(b"[DONE]" in message.get("body", b"") for message in sent)
     offline.memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_patch_session_edits_title_and_model_override(offline):
+    unauth = await offline.client.patch(
+        offline.base, json={"title": "Blocked"}, headers={"Authorization": ""}
+    )
+    assert unauth.status_code == 401
+
+    assert (await offline.client.patch(offline.base, json={})).status_code == 422
+    assert (await offline.client.patch(offline.base, json={"title": None})).status_code == 422
+    assert (await offline.client.patch(offline.base, json={"title": "   "})).status_code == 422
+    assert (await offline.client.patch(offline.base, json={"title": "x" * 201})).status_code == 422
+    assert (
+        await offline.client.patch(f"/api/sessions/{uuid4()}", json={"title": "Missing"})
+    ).status_code == 404
+
+    updated = await offline.client.patch(
+        offline.base,
+        json={"title": "  Quarterly analysis  ", "model_override": "  openai/gpt-4.1  "},
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert set(body) == {
+        "id",
+        "title",
+        "model_override",
+        "daytona_sandbox_id",
+        "created_at",
+        "updated_at",
+    }
+    assert body["id"] == str(offline.store.session_id)
+    assert body["title"] == "Quarterly analysis"
+    assert body["model_override"] == "openai/gpt-4.1"
+    assert body["daytona_sandbox_id"] == "test-sandbox"
+
+    cleared_null = await offline.client.patch(offline.base, json={"model_override": None})
+    assert cleared_null.status_code == 200
+    assert cleared_null.json()["model_override"] is None
+    assert cleared_null.json()["title"] == "Quarterly analysis"
+
+    re_set = await offline.client.patch(offline.base, json={"model_override": "anthropic/claude"})
+    assert re_set.status_code == 200
+    assert re_set.json()["model_override"] == "anthropic/claude"
+
+    cleared_empty = await offline.client.patch(offline.base, json={"model_override": "   "})
+    assert cleared_empty.status_code == 200
+    assert cleared_empty.json()["model_override"] is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_settings_crud_validation_and_secret_safety(offline):
+    for method in ("GET", "PATCH", "DELETE"):
+        kwargs = {"json": {"rlm_max_iters": 12}} if method == "PATCH" else {}
+        response = await offline.client.request(
+            method, "/api/settings", headers={"Authorization": ""}, **kwargs
+        )
+        assert response.status_code == 401
+
+    initial = await offline.client.get("/api/settings")
+    assert initial.status_code == 200
+    data = initial.json()
+    raw_text = json.dumps(data)
+    for forbidden_value in ("offline-token", "postgresql://"):
+        assert forbidden_value not in raw_text
+    for forbidden_key in (
+        "database_url",
+        "database_direct_url",
+        "daytona_api_key",
+        "llm_api_key",
+        "api_bearer_token",
+    ):
+        assert f'"{forbidden_key}"' not in raw_text
+    assert data["overrides"] == {}
+    assert data["effective"] == data["defaults"]
+    assert data["status"] == {
+        "database_configured": True,
+        "daytona_configured": True,
+        "daytona_volume_id": "offline",
+        "llm_api_key_configured": True,
+        "bearer_auth_enabled": True,
+        "mlflow_tracking_uri": None,
+        "optimized_program_path": None,
+        "skill_selector_path": None,
+        "memory_gate_path": None,
+        "skills_count": 1,
+    }
+    assert set(data["effective"]) == {
+        "llm_model",
+        "sub_llm_model",
+        "decision_model",
+        "llm_base_url",
+        "rlm_max_iters",
+        "rlm_max_llm_calls",
+        "rlm_max_depth",
+        "rlm_max_output_chars",
+        "history_max_turns",
+        "history_max_chars",
+        "daytona_snapshot",
+        "daytona_target",
+        "daytona_auto_stop_minutes",
+        "daytona_exec_timeout_seconds",
+        "mlflow_experiment",
+    }
+
+    for invalid_payload in (
+        {"llm_api_key": "injected"},
+        {"daytona_api_key": "injected"},
+        {"database_url": "postgresql://attacker/db"},
+        {"api_bearer_token": "override"},
+        {"rlm_max_iters": 0},
+        {"rlm_max_iters": 101},
+        {"rlm_max_llm_calls": 0},
+        {"rlm_max_llm_calls": 501},
+        {"rlm_max_depth": 0},
+        {"rlm_max_depth": 9},
+        {"rlm_max_output_chars": 499},
+        {"rlm_max_output_chars": 200_001},
+        {"history_max_turns": -1},
+        {"history_max_turns": 101},
+        {"history_max_chars": 999},
+        {"history_max_chars": 200_001},
+        {"daytona_auto_stop_minutes": 0},
+        {"daytona_auto_stop_minutes": 1441},
+        {"daytona_exec_timeout_seconds": 4},
+        {"daytona_exec_timeout_seconds": 601},
+        {"llm_model": "   "},
+        {"mlflow_experiment": ""},
+    ):
+        rejected = await offline.client.patch("/api/settings", json=invalid_payload)
+        assert rejected.status_code == 422, invalid_payload
+
+    patched = await offline.client.patch(
+        "/api/settings",
+        json={
+            "llm_model": "openai/gpt-4.1",
+            "llm_base_url": "https://gateway.example/v1",
+            "rlm_max_iters": 12,
+            "daytona_target": "eu",
+            "daytona_exec_timeout_seconds": 45,
+        },
+    )
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["overrides"] == {
+        "llm_model": "openai/gpt-4.1",
+        "llm_base_url": "https://gateway.example/v1",
+        "rlm_max_iters": 12,
+        "daytona_target": "eu",
+        "daytona_exec_timeout_seconds": 45,
+    }
+    assert body["effective"]["llm_model"] == "openai/gpt-4.1"
+    assert body["effective"]["llm_base_url"] == "https://gateway.example/v1"
+    assert body["effective"]["rlm_max_iters"] == 12
+    assert body["effective"]["daytona_target"] == "eu"
+    assert body["effective"]["daytona_exec_timeout_seconds"] == 45
+    assert body["defaults"]["llm_model"] == "openai/gpt-4o-mini"
+    assert body["defaults"]["rlm_max_iters"] == 20
+
+    cleared = await offline.client.patch(
+        "/api/settings",
+        json={"rlm_max_iters": None, "llm_base_url": "", "daytona_target": "   "},
+    )
+    assert cleared.status_code == 200
+    cleared_body = cleared.json()
+    assert cleared_body["overrides"] == {
+        "llm_model": "openai/gpt-4.1",
+        "daytona_exec_timeout_seconds": 45,
+    }
+    assert cleared_body["effective"]["rlm_max_iters"] == 20
+    assert cleared_body["effective"]["llm_base_url"] is None
+    assert cleared_body["effective"]["daytona_target"] is None
+
+    reset = await offline.client.delete("/api/settings")
+    assert reset.status_code == 200
+    reset_body = reset.json()
+    assert reset_body["overrides"] == {}
+    assert reset_body["effective"] == reset_body["defaults"]
+
+
+@pytest.mark.asyncio
+async def test_run_turn_and_files_apply_neon_settings_overrides(offline, monkeypatch):
+    runtime = api.app.state.runtime
+    startup_lm = runtime.lm
+    startup_sub_lm = runtime.program.sub_lm
+    startup_decision_lm = runtime.decision_lm
+
+    created_models: list[tuple[str, str | None]] = []
+    created_decision_models: list[str] = []
+
+    def fake_model(settings, name):
+        created_models.append((name, settings.llm_base_url))
+        return DummyLM([{"plan": "Override", "code": "SUBMIT('Done', [])"}])
+
+    def fake_decision_lm(name):
+        created_decision_models.append(name)
+        return DummyLM([])
+
+    monkeypatch.setattr(api.agent, "_model", fake_model)
+    monkeypatch.setattr(api.dspy, "LM", fake_decision_lm)
+
+    patch_resp = await offline.client.patch(
+        "/api/settings",
+        json={
+            "llm_model": "openai/gpt-4.1",
+            "sub_llm_model": "openai/gpt-4.1-mini",
+            "decision_model": "typesafe:jev-2026-01",
+            "llm_base_url": "https://override.example/v1",
+            "rlm_max_iters": 7,
+            "daytona_exec_timeout_seconds": 33,
+        },
+    )
+    assert patch_resp.status_code == 200
+
+    observed: dict[str, object] = {}
+
+    async def capture_turn(settings, *, model_override, sub_lm, run_id, emit, **_):
+        observed["settings"] = settings
+        observed["model_override"] = model_override
+        observed["sub_lm"] = sub_lm
+        await emit(run_id, api.agent.RunStartedEvent("workspace"))
+        await emit(run_id, api.agent.RunResultEvent("Overridden"))
+        return dspy.Prediction(answer="Overridden", history=dspy.History(messages=[]))
+
+    monkeypatch.setattr(api.agent, "run_workspace_task", capture_turn)
+
+    response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
+    assert response.status_code == 200
+    assert "Overridden" in response.text
+
+    effective = observed["settings"]
+    assert isinstance(effective, Settings)
+    assert effective.llm_model == "openai/gpt-4.1"
+    assert effective.sub_llm_model == "openai/gpt-4.1-mini"
+    assert effective.decision_model == "typesafe:jev-2026-01"
+    assert effective.llm_base_url == "https://override.example/v1"
+    assert effective.rlm_max_iters == 7
+    assert effective.daytona_exec_timeout_seconds == 33
+    assert observed["model_override"] is not startup_lm
+    assert observed["sub_lm"] is not startup_sub_lm
+    assert created_models == [
+        ("openai/gpt-4.1", "https://override.example/v1"),
+        ("openai/gpt-4.1-mini", "https://override.example/v1"),
+    ]
+    assert created_decision_models == ["typesafe:jev-2026-01", "typesafe:jev-2026-01"]
+    assert offline.memory.await_args.args[0].decision_model == "typesafe:jev-2026-01"
+    # Startup runtime remains immutable across requests.
+    assert runtime.settings.rlm_max_iters == 20
+    assert runtime.lm is startup_lm
+    assert runtime.program.sub_lm is startup_sub_lm
+    assert runtime.decision_lm is startup_decision_lm
+
+    file_path = "artifacts/report.txt"
+    offline.store.add(db.File(path=file_path))
+    download = await offline.client.get(f"{offline.base}/files/{file_path}")
+    assert download.status_code == 200
+    offline.sandbox.fs.download_file.assert_awaited_once_with(f"/workspace/{file_path}", 33)

@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -29,7 +29,7 @@ from fastapi import File as Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -170,12 +170,111 @@ class SessionCreate(BaseModel):
     title: str = Field(default="New session", min_length=1)
 
 
+class SessionEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    model_override: str | None = None
+
+
 class SessionView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     title: str
+    model_override: str | None = None
+    daytona_sandbox_id: str | None = None
     created_at: datetime
+    updated_at: datetime
+
+
+_NON_EMPTY_SETTINGS_FIELDS = (
+    "llm_model",
+    "sub_llm_model",
+    "decision_model",
+    "daytona_snapshot",
+    "mlflow_experiment",
+)
+_NULLABLE_SETTINGS_FIELDS = ("llm_base_url", "daytona_target")
+
+
+class WorkspaceSettingsFields(BaseModel):
+    llm_model: str = Field(min_length=1)
+    sub_llm_model: str = Field(min_length=1)
+    decision_model: str = Field(min_length=1)
+    llm_base_url: str | None = None
+    rlm_max_iters: int = Field(ge=1, le=100)
+    rlm_max_llm_calls: int = Field(ge=1, le=500)
+    rlm_max_depth: int = Field(ge=1, le=8)
+    rlm_max_output_chars: int = Field(ge=500, le=200_000)
+    history_max_turns: int = Field(ge=0, le=100)
+    history_max_chars: int = Field(ge=1_000, le=200_000)
+    daytona_snapshot: str = Field(min_length=1)
+    daytona_target: str | None = None
+    daytona_auto_stop_minutes: int = Field(ge=1, le=1440)
+    daytona_exec_timeout_seconds: int = Field(ge=5, le=600)
+    mlflow_experiment: str = Field(min_length=1)
+
+
+_EDITABLE_SETTINGS_FIELDS = frozenset(WorkspaceSettingsFields.model_fields)
+
+
+class WorkspaceSettingsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    llm_model: str | None = None
+    sub_llm_model: str | None = None
+    decision_model: str | None = None
+    llm_base_url: str | None = None
+    rlm_max_iters: int | None = Field(default=None, ge=1, le=100)
+    rlm_max_llm_calls: int | None = Field(default=None, ge=1, le=500)
+    rlm_max_depth: int | None = Field(default=None, ge=1, le=8)
+    rlm_max_output_chars: int | None = Field(default=None, ge=500, le=200_000)
+    history_max_turns: int | None = Field(default=None, ge=0, le=100)
+    history_max_chars: int | None = Field(default=None, ge=1_000, le=200_000)
+    daytona_snapshot: str | None = None
+    daytona_target: str | None = None
+    daytona_auto_stop_minutes: int | None = Field(default=None, ge=1, le=1440)
+    daytona_exec_timeout_seconds: int | None = Field(default=None, ge=5, le=600)
+    mlflow_experiment: str | None = None
+
+    @field_validator(*_NON_EMPTY_SETTINGS_FIELDS)
+    @classmethod
+    def validate_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Must not be empty")
+        return cleaned
+
+    @field_validator(*_NULLABLE_SETTINGS_FIELDS)
+    @classmethod
+    def normalize_nullable(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class WorkspaceSettingsStatus(BaseModel):
+    database_configured: bool
+    daytona_configured: bool
+    daytona_volume_id: str
+    llm_api_key_configured: bool
+    bearer_auth_enabled: bool
+    mlflow_tracking_uri: str | None
+    optimized_program_path: str | None
+    skill_selector_path: str | None
+    memory_gate_path: str | None
+    skills_count: int
+
+
+class WorkspaceSettingsView(BaseModel):
+    effective: WorkspaceSettingsFields
+    defaults: WorkspaceSettingsFields
+    overrides: dict[str, Any]
+    status: WorkspaceSettingsStatus
 
 
 class FileView(BaseModel):
@@ -297,6 +396,137 @@ async def list_sessions(db: DbDep) -> list[SessionView]:
     return [SessionView.model_validate(session) for session in sessions]
 
 
+@app.patch("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
+async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> SessionView:
+    if not payload.model_fields_set:
+        raise HTTPException(422, "At least one field to update is required")
+    changes: dict[str, Any] = {}
+    if "title" in payload.model_fields_set:
+        if payload.title is None:
+            raise HTTPException(422, "Session title cannot be null")
+        title = payload.title.strip()
+        if not 1 <= len(title) <= 200:
+            raise HTTPException(422, "Session title must be between 1 and 200 characters")
+        changes["title"] = title
+    if "model_override" in payload.model_fields_set:
+        override = payload.model_override.strip() if payload.model_override is not None else ""
+        changes["model_override"] = override or None
+    async with db.begin():
+        session = await db.scalar(
+            update(store.Session)
+            .where(store.Session.id == session_id)
+            .values(**changes, updated_at=func.now())
+            .returning(store.Session)
+        )
+        if session is None:
+            raise store.SessionNotFoundError(session_id)
+    return SessionView.model_validate(session)
+
+
+def _sanitize_overrides(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in raw.items()
+        if key in _EDITABLE_SETTINGS_FIELDS and value is not None
+    }
+
+
+def _settings_fields(settings: Settings) -> WorkspaceSettingsFields:
+    return WorkspaceSettingsFields(
+        **{field: getattr(settings, field) for field in _EDITABLE_SETTINGS_FIELDS}
+    )
+
+
+def _merge_settings(base: Settings, overrides: dict[str, Any]) -> Settings:
+    clean = _sanitize_overrides(overrides)
+    return base.model_copy(update=clean) if clean else base
+
+
+async def _effective_settings(runtime: Runtime) -> Settings:
+    overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
+    return _merge_settings(runtime.settings, overrides)
+
+
+def _workspace_settings_view(
+    runtime: Runtime, raw_overrides: dict[str, Any]
+) -> WorkspaceSettingsView:
+    overrides = _sanitize_overrides(raw_overrides)
+    base = runtime.settings
+    effective = _merge_settings(base, overrides)
+    return WorkspaceSettingsView(
+        effective=_settings_fields(effective),
+        defaults=_settings_fields(base),
+        overrides=overrides,
+        status=WorkspaceSettingsStatus(
+            database_configured=bool(base.database_url),
+            daytona_configured=bool(base.daytona_api_key.get_secret_value()),
+            daytona_volume_id=base.daytona_volume_id,
+            llm_api_key_configured=bool(base.llm_api_key.get_secret_value()),
+            bearer_auth_enabled=base.api_bearer_token is not None
+            and bool(base.api_bearer_token.get_secret_value()),
+            mlflow_tracking_uri=base.mlflow_tracking_uri,
+            optimized_program_path=str(base.optimized_program_path)
+            if base.optimized_program_path is not None
+            else None,
+            skill_selector_path=str(base.skill_selector_path)
+            if base.skill_selector_path is not None
+            else None,
+            memory_gate_path=str(base.memory_gate_path)
+            if base.memory_gate_path is not None
+            else None,
+            skills_count=len(runtime.skills.skills),
+        ),
+    )
+
+
+def _request_root_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
+    if (
+        effective.llm_model != runtime.settings.llm_model
+        or effective.llm_base_url != runtime.settings.llm_base_url
+    ):
+        return agent._model(effective, effective.llm_model)
+    return runtime.lm
+
+
+def _request_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
+    if (
+        effective.sub_llm_model != runtime.settings.sub_llm_model
+        or effective.llm_base_url != runtime.settings.llm_base_url
+    ):
+        return agent._model(effective, effective.sub_llm_model)
+    return runtime.program.sub_lm
+
+
+def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
+    if effective.decision_model != runtime.settings.decision_model:
+        return dspy.LM(effective.decision_model)
+    return runtime.decision_lm
+
+
+@app.get("/api/settings", dependencies=[Depends(require_auth)])
+async def get_settings(runtime: RuntimeDep) -> WorkspaceSettingsView:
+    overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
+    return _workspace_settings_view(runtime, overrides)
+
+
+@app.patch("/api/settings", dependencies=[Depends(require_auth)])
+async def patch_settings(
+    payload: WorkspaceSettingsPatch, runtime: RuntimeDep
+) -> WorkspaceSettingsView:
+    changes = {field: getattr(payload, field) for field in payload.model_fields_set}
+    if changes:
+        overrides = await store.update_workspace_settings_overrides(runtime.sessionmaker, changes)
+    else:
+        overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
+    return _workspace_settings_view(runtime, overrides)
+
+
+@app.delete("/api/settings", dependencies=[Depends(require_auth)])
+async def reset_settings(runtime: RuntimeDep) -> WorkspaceSettingsView:
+    overrides = await store.reset_workspace_settings_overrides(runtime.sessionmaker)
+    return _workspace_settings_view(runtime, overrides)
+
+
 @app.delete("/api/sessions/{session_id}", status_code=204, dependencies=[Depends(require_auth)])
 async def delete_session(session_id: UUID, runtime: RuntimeDep, db: DbDep) -> None:
     async with db.begin():
@@ -347,9 +577,10 @@ async def upload_file(
     name = file.filename or ""
     if not _safe_component(name):
         raise HTTPException(400, "Invalid filename")
+    effective = await _effective_settings(runtime)
     path = f"files/{name}"
     temporary = f"{WORKSPACE}/files/.{uuid4().hex}.upload"
-    timeout = runtime.settings.daytona_exec_timeout_seconds
+    timeout = effective.daytona_exec_timeout_seconds
     digest = hashlib.sha256()
     size = 0
 
@@ -366,7 +597,7 @@ async def upload_file(
         async with db.begin():
             session = await _editable_session(db, session_id)
             sandbox, sandbox_id, created = await ensure_session_sandbox(
-                runtime.daytona, runtime.settings, session_id, session.daytona_sandbox_id
+                runtime.daytona, effective, session_id, session.daytona_sandbox_id
             )
             session.daytona_sandbox_id = sandbox_id
             try:
@@ -421,12 +652,13 @@ async def download_file(
     if file_id is None or sandbox_id is None:
         raise HTTPException(404, "File not found")
     await db.rollback()
+    effective = await _effective_settings(runtime)
     try:
         sandbox, _, _ = await ensure_session_sandbox(
-            runtime.daytona, runtime.settings, session_id, sandbox_id
+            runtime.daytona, effective, session_id, sandbox_id
         )
         content = await sandbox.fs.download_file(
-            f"{WORKSPACE}/{file_path}", runtime.settings.daytona_exec_timeout_seconds
+            f"{WORKSPACE}/{file_path}", effective.daytona_exec_timeout_seconds
         )
     except DaytonaError as error:
         if error.status_code == 404:
@@ -570,9 +802,12 @@ async def _prepare_turn(
             await _finish_root(sessionmaker, turn, "cancelled")
 
 
-async def _chat_sandbox(runtime: Runtime, session: store.Session) -> AsyncSandbox:
+async def _chat_sandbox(
+    runtime: Runtime, session: store.Session, settings: Settings | None = None
+) -> AsyncSandbox:
+    effective = settings if settings is not None else await _effective_settings(runtime)
     sandbox, sandbox_id, created = await ensure_session_sandbox(
-        runtime.daytona, runtime.settings, session.id, session.daytona_sandbox_id
+        runtime.daytona, effective, session.id, session.daytona_sandbox_id
     )
     if created:
         try:
@@ -609,10 +844,9 @@ async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list
         )
 
     try:
-        with dspy.context(lm=runtime.decision_lm):
-            await agent.consolidate_memory(
-                runtime.settings, turn.prompt, answer, memories, on_save=save
-            )
+        effective = await _effective_settings(runtime)
+        with dspy.context(lm=_request_decision_lm(runtime, effective)):
+            await agent.consolidate_memory(effective, turn.prompt, answer, memories, on_save=save)
     except Exception as error:
         _LOG.warning("Memory consolidation failed for %s (%s)", turn.run_id, type(error).__name__)
 
@@ -669,10 +903,11 @@ async def _run_turn(
             stream.discard_child(child.id)
 
     try:
+        effective = await _effective_settings(runtime)
         # Read history after acquiring the root so it includes the previous completed turn.
         async with sessionmaker() as db:
             session = await _session(db, turn.session_id)
-        sandbox = await _chat_sandbox(runtime, session)
+        sandbox = await _chat_sandbox(runtime, session, effective)
         files = await store.list_session_files(sessionmaker, turn.session_id)
         records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
         memories = [
@@ -692,9 +927,9 @@ async def _run_turn(
                     artifacts.append({**artifact, "path": path, "kind": "artifact"})
             return sorted([*manifest, *artifacts], key=lambda file: file["path"])
 
-        with dspy.context(lm=runtime.decision_lm):
+        with dspy.context(lm=_request_decision_lm(runtime, effective)):
             selection = await asyncio.to_thread(
-                select_skills, runtime.settings, runtime.skills, turn.prompt, turn.pinned_skills
+                select_skills, effective, runtime.skills, turn.prompt, turn.pinned_skills
             )
 
         async def emit(run_id: str, event: agent.RunEvent) -> None:
@@ -712,19 +947,19 @@ async def _run_turn(
                 await stream.files(run_id, manifest)
 
         result = await agent.run_workspace_task(
-            runtime.settings,
+            effective,
             task=turn.prompt,
             files_manifest=manifest,
             memories=[memory["content"] for memory in memories],
             interpreter_factory=make_interpreter_factory(
-                sandbox, runtime.settings, asyncio.get_running_loop()
+                sandbox, effective, asyncio.get_running_loop()
             ),
             run_id=root_id,
             emit=emit,
             history=dspy.History.model_validate(session.history_json),
             selection=selection,
-            model_override=session.model_override or runtime.lm,
-            sub_lm=runtime.program.sub_lm,
+            model_override=session.model_override or _request_root_lm(runtime, effective),
+            sub_lm=_request_sub_lm(runtime, effective),
             callbacks=agent.ChildCallbacks(start_child, finish_child),
         )
         if await request.is_disconnected():

@@ -3,7 +3,15 @@ import type { FleetMessage, WorkspaceFileEntry } from './messages'
 export interface Session {
   id: string
   title: string
+  model_override: string | null
+  daytona_sandbox_id: string | null
   created_at: string
+  updated_at: string
+}
+
+export interface SessionUpdate {
+  title?: string
+  model_override?: string | null
 }
 
 export interface WorkspaceFile extends WorkspaceFileEntry {
@@ -21,9 +29,48 @@ export interface Memory {
 }
 
 export type MemoryEdit = { content: string; approved?: boolean } | { approved: boolean }
+
 export interface Skill {
   name: string
   description: string
+}
+
+export interface WorkspaceSettingsFields {
+  llm_model: string
+  sub_llm_model: string
+  decision_model: string
+  llm_base_url: string | null
+  rlm_max_iters: number
+  rlm_max_llm_calls: number
+  rlm_max_depth: number
+  rlm_max_output_chars: number
+  history_max_turns: number
+  history_max_chars: number
+  daytona_snapshot: string
+  daytona_target: string | null
+  daytona_auto_stop_minutes: number
+  daytona_exec_timeout_seconds: number
+  mlflow_experiment: string
+}
+
+export interface WorkspaceSettingsStatus {
+  database_configured: boolean
+  daytona_configured: boolean
+  daytona_volume_id: string
+  llm_api_key_configured: boolean
+  bearer_auth_enabled: boolean
+  mlflow_tracking_uri: string | null
+  optimized_program_path: string | null
+  skill_selector_path: string | null
+  memory_gate_path: string | null
+  skills_count: number
+}
+
+export interface WorkspaceSettingsView {
+  effective: WorkspaceSettingsFields
+  defaults: WorkspaceSettingsFields
+  overrides: Partial<WorkspaceSettingsFields>
+  status: WorkspaceSettingsStatus
 }
 
 export class ApiError extends Error {
@@ -41,6 +88,7 @@ export function bearerHeaders(token?: string) {
 }
 
 export const sessionsPath = '/api/sessions'
+export const settingsPath = '/api/settings'
 export const sessionPath = (id: string) => `${sessionsPath}/${encodeURIComponent(id)}`
 export const chatPath = (id: string) => `${sessionPath(id)}/chat`
 
@@ -87,6 +135,8 @@ export function createApi(token?: string) {
     readiness: (signal?: AbortSignal) => json<{ status: 'ok' }>('/readyz', { signal }, false),
     listSessions: (signal?: AbortSignal) => json<Session[]>(sessionsPath, { signal }),
     createSession: (title?: string) => json<Session>(sessionsPath, writeJson('POST', { title })),
+    updateSession: (id: string, changes: SessionUpdate) =>
+      json<Session>(sessionPath(id), writeJson('PATCH', changes)),
     async deleteSession(id: string) {
       await request(sessionPath(id), { method: 'DELETE' })
     },
@@ -121,6 +171,10 @@ export function createApi(token?: string) {
       await request(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' })
     },
     listSkills: (signal?: AbortSignal) => json<Skill[]>('/api/skills', { signal }),
+    getSettings: (signal?: AbortSignal) => json<WorkspaceSettingsView>(settingsPath, { signal }),
+    updateSettings: (changes: Partial<WorkspaceSettingsFields>) =>
+      json<WorkspaceSettingsView>(settingsPath, writeJson('PATCH', changes)),
+    resetSettings: () => json<WorkspaceSettingsView>(settingsPath, { method: 'DELETE' }),
   }
 }
 

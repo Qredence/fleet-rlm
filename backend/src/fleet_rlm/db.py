@@ -129,6 +129,17 @@ class Memory(Base):
 Index("idx_memories_search_tsv", Memory.search_tsv, postgresql_using="gin")
 
 
+class WorkspaceSettings(Base):
+    __tablename__ = "workspace_settings"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_workspace_settings_singleton"),)
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)
+    overrides_json: Mapped[JsonObject] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SessionNotFoundError(LookupError):
     pass
 
@@ -387,3 +398,47 @@ async def save_or_update_memory(
             if memory is None:
                 raise LookupError(f"Memory {memory_id} does not exist in this scope")
     return memory
+
+
+async def get_workspace_settings_overrides(db: SessionFactory) -> dict[str, Any]:
+    async with db() as connection:
+        row = await connection.get(WorkspaceSettings, 1)
+        if row is None or not row.overrides_json:
+            return {}
+        return dict(row.overrides_json)
+
+
+async def update_workspace_settings_overrides(
+    db: SessionFactory, changes: dict[str, Any]
+) -> dict[str, Any]:
+    async with db.begin() as connection:
+        await connection.execute(
+            insert(WorkspaceSettings)
+            .values(id=1, overrides_json={})
+            .on_conflict_do_nothing(index_elements=[WorkspaceSettings.id])
+        )
+        row = await connection.get(WorkspaceSettings, 1, with_for_update=True)
+        if row is None:
+            raise RuntimeError("Workspace settings singleton row could not be initialized")
+        merged = dict(row.overrides_json or {})
+        for key, value in changes.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        row.overrides_json = merged
+    return dict(merged)
+
+
+async def reset_workspace_settings_overrides(db: SessionFactory) -> dict[str, Any]:
+    statement = (
+        insert(WorkspaceSettings)
+        .values(id=1, overrides_json={})
+        .on_conflict_do_update(
+            index_elements=[WorkspaceSettings.id],
+            set_={"overrides_json": {}, "updated_at": func.now()},
+        )
+    )
+    async with db.begin() as connection:
+        await connection.execute(statement)
+    return {}
