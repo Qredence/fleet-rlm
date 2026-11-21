@@ -91,3 +91,12 @@ uv run pytest tests/test_phase2_engine.py
   1. Unit tests verify `UiPartAccumulator` outputs valid AI SDK v1 frame sequences (including nested `preliminary: true` subagent updates) and lossless `ui_parts` snapshots.
   2. Unit tests verify `SkillRegistry` frontmatter parsing, `@skill` override, and Jev selector gating (mocked + live optional marker).
   3. End-to-end integration test runs a 2-turn RLM conversation over a sample CSV in Daytona with 1 recursive `spawn_agent` call, verifies `dspy.History` JSON reload across fresh `InterpreterContext`s, verifies `MemoryGate` decision output, and logs a trace to local MLflow 3.18.
+
+## Implementation status
+
+- Implemented the Daytona adapter, immutable Skill registry and Jev selector, native DSPy RLM with recursive lifecycle callbacks, AI SDK v1 UI parts, and the two-stage memory gate. The data-analysis Skill and opt-in two-turn CSV scenario are included.
+- Daytona 0.232.0 `run_code` ignores stdout callback return values and exposes no input channel. Tool requests use private stdout records. Responses use execution-scoped files published by atomic rename inside the sandbox. Recursive workspace runs use `spawn_agent` so they share the depth limit and lifecycle callbacks.
+- Unapproved memory updates are saved as separate candidates to preserve the approved row during review. The Phase 1 schema updates existing rows in place and has no supersession field.
+- `uv sync --python 3.13`, `uv run ruff check .`, and `uv run lint-imports` passed. `uv run pytest tests/test_phase2_engine.py` passed 13 offline cases and skipped the live scenario. AI SDK 7.0.179 replayed the v1 chunks into identical persisted parts. Local MLflow 3.18.0 recorded RLM spans from both offline turns.
+- Repository-wide `make check` stopped in `check-docs` on the existing broken documentation links.
+- Live Daytona, generative-model, Jev, and two-turn MLflow trace verification are pending. Live Neon migration and locking verification are still pending because the pooled and direct URLs are absent. The CSV scenario uses a temporary local MLflow 3.18 SQLite store and runs with `FLEET_RUN_PHASE2_LIVE=1` when authorized and configured.

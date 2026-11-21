@@ -4,9 +4,11 @@ import asyncio
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
@@ -31,7 +33,14 @@ async def db() -> AsyncIterator[SessionFactory]:
     if not Path(".env").is_file() and "FLEET_DATABASE_URL" not in os.environ:
         pytest.skip("Configure backend/.env with a migrated Neon Postgres 18 branch")
 
-    engine, factory = create_db(Settings())
+    try:
+        settings = Settings()
+    except ValidationError:
+        pytest.skip("Configure backend/.env with a migrated Neon Postgres 18 branch")
+    if (urlparse(settings.database_url).hostname or "").startswith("ep-example"):
+        pytest.skip("Configure backend/.env with a real Neon Postgres 18 branch URL")
+
+    engine, factory = create_db(settings)
     try:
         yield factory
     finally:

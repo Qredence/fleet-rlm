@@ -2,7 +2,7 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.18.0
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:5001:5000"
     volumes:
       - mlflow-data:/mlflow
     command:

@@ -48,8 +48,9 @@ root_package = "fleet_rlm"
 name = "Backend dependency layers"
 type = "layers"
 layers = [
-    "(fleet_rlm.api)",
-    "(fleet_rlm.agent) | (fleet_rlm.skills) | (fleet_rlm.interpreter) | fleet_rlm.db",
+    "fleet_rlm.api | fleet_rlm.optimize",
+    "fleet_rlm.ui_stream",
+    "fleet_rlm.agent | fleet_rlm.skills | fleet_rlm.interpreter | fleet_rlm.db",
     "fleet_rlm.config",
 ]
 
@@ -58,3 +59,16 @@ name = "Database, interpreter, and skills are independent"
 # A single layer of independent siblings supports modules that arrive in Phase 2.
 type = "layers"
 layers = ["fleet_rlm.db | (fleet_rlm.interpreter) | (fleet_rlm.skills)"]
+
+[[tool.importlinter.contracts]]
+name = "Only the API imports the UI stream mapper"
+type = "protected"
+protected_modules = ["fleet_rlm.ui_stream"]
+allowed_importers = ["fleet_rlm.api"]
+as_packages = false
+
+[[tool.importlinter.contracts]]
+name = "Offline optimizer never imports the API or UI stream"
+type = "forbidden"
+source_modules = ["fleet_rlm.optimize"]
+forbidden_modules = ["fleet_rlm.api", "fleet_rlm.ui_stream"]

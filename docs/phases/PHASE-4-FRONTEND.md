@@ -39,7 +39,7 @@ const { messages, sendMessage, stop, status, error } = useChat({
   }),
 })
 ```
-- Clicking **Stop** calls `stop()`, which aborts the `fetch` request -> FastAPI detects `request.is_disconnected()` -> Daytona `InterpreterContext` is deleted and Neon unlocks immediately.
+- Clicking **Stop** calls `stop()`, which aborts the stream. FastAPI handles the disconnect and tears down the Daytona interpreter context asynchronously. The Neon lock stays held until cleanup finishes.
 
 ### 2. Part-to-Component Mapping (`MessageParts.tsx`)
 Render `message.parts` strictly by `part.type`:
@@ -63,4 +63,4 @@ pnpm build
   1. Upload a CSV via `WorkspaceSidebar` -> appears immediately in `File Tree`.
   2. Submit a multi-step prompt that triggers a Skill (`Badge`), Python execution (`Code Block`), and a recursive `spawn_agent` (`SubagentTrace` with nested `Trace` steps) — all stream live with zero console errors.
   3. Hard-refresh the browser tab: `GET /api/sessions/{id}/messages` restores the exact same messages, code blocks, skill badges, and nested subagent traces from Neon `runs.ui_parts`.
-  4. Clicking **Stop** mid-run aborts cleanly and allows submitting a new prompt immediately.
+  4. Clicking **Stop** mid-run aborts the stream cleanly. Submitting the next prompt briefly retries transient `409 Conflict` responses while Daytona and Neon finish cleanup, then runs the prompt.
