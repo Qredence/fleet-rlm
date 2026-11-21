@@ -1,0 +1,24 @@
+docs/PRD.md
+  h_f276322eb5eb9f 1-115
+docs/phases/PHASE-1-FOUNDATION.md
+  h_f276322eb5eb9f 1-69
+docs/phases/PHASE-2-CORE-ENGINE.md
+  h_f276322eb5eb9f 1-83,85-88,90-93
+docs/phases/PHASE-3-FASTAPI.md
+  h_f276322eb5eb9f 1-74
+docs/phases/PHASE-4-FRONTEND.md
+  h_f276322eb5eb9f 1-66
+docs/phases/PHASE-5-OPTIMIZE-CUTOVER.md
+  h_f276322eb5eb9f 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "728935893adaefbd9cf4c593851c18f53a0c20ed",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
