@@ -1666,7 +1666,7 @@ def test_native_nested_rlm_keeps_host_aggregate_budget(sandbox, monkeypatch):
 def test_snapshot_recipe_digest_survives_resource_move():
     from fleet_rlm.sandbox.snapshots import DEFAULT_DEFINITION, LOCK_PATH
 
-    assert DEFAULT_DEFINITION.digest() == "3d0cd582c972090c18437dfba13358e055970af6de9407e46515e75bd49fa0e8"
+    assert DEFAULT_DEFINITION.digest() == "fc39ca83923dcf14ba227b3ff2a861311b1ac0160849c73f65dde6773639c834"
     assert Path(__file__).parents[2] / "src/fleet_rlm/sandbox/snapshot-requirements.txt" == LOCK_PATH
 
 

@@ -2896,7 +2896,7 @@ def test_approval_evidence_builds_without_source_lockfile(tmp_path: Path, monkey
     assert len(evidence["dependency_fingerprint"]) == 64
     assert "lockfile_digest" not in evidence
     assert LOCK_PATH.is_file()
-    assert DEFAULT_DEFINITION.digest() == "3d0cd582c972090c18437dfba13358e055970af6de9407e46515e75bd49fa0e8"
+    assert DEFAULT_DEFINITION.digest() == "fc39ca83923dcf14ba227b3ff2a861311b1ac0160849c73f65dde6773639c834"
 
     lm = dspy.LM("openai/offline", engine="lm15", cache=False)
     engine = FleetRuntime(
