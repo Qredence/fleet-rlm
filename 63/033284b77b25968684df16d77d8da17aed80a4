@@ -1,0 +1,21 @@
+pyproject.toml
+  s_991c8322618981::t_697bb5e5f3bfba 102,111-112,114
+uv.lock
+  s_991c8322618981::t_c64865d05172b7 18,20,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "63033284b77b25968684df16d77d8da17aed80a4",
+  "prompts": {},
+  "sessions": {
+    "s_991c8322618981": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1fba6-c367-7f13-a533-d277585b02c8",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
