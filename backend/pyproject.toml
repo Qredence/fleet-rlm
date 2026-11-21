@@ -1,0 +1,60 @@
+[project]
+name = "fleet-rlm"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi[standard]>=0.165.0",
+    "dspy==3.5.0",
+    "daytona==0.232.0",
+    "sqlalchemy[asyncio]>=2.1.9",
+    "alembic>=1.20.1",
+    "psycopg[binary]>=3.3.9",
+    "pydantic-settings>=2.16.3",
+    "pyyaml>=6.0.2",
+    "mlflow>=3.18.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+    "ruff>=0.9.0",
+    "import-linter>=2.1",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.importlinter]
+root_package = "fleet_rlm"
+
+[[tool.importlinter.contracts]]
+name = "Backend dependency layers"
+type = "layers"
+layers = [
+    "(fleet_rlm.api)",
+    "(fleet_rlm.agent) | (fleet_rlm.skills) | (fleet_rlm.interpreter) | fleet_rlm.db",
+    "fleet_rlm.config",
+]
+
+[[tool.importlinter.contracts]]
+name = "Database, interpreter, and skills are independent"
+# A single layer of independent siblings supports modules that arrive in Phase 2.
+type = "layers"
+layers = ["fleet_rlm.db | (fleet_rlm.interpreter) | (fleet_rlm.skills)"]

@@ -67,3 +67,11 @@ uv run lint-imports
 uv run pytest tests/test_phase1_locking.py
 ```
 - **Acceptance criteria:** `test_phase1_locking.py` runs against Neon pooled URL and proves: (a) two concurrent `acquire_root_run` calls yield 1 winner and 1 `TurnConflictError`; (b) parallel `create_child_run` calls succeed while root is running; (c) `finish_run` releases the lock for the next root turn.
+
+## Implementation status
+
+- Implemented the Python 3.13 backend scaffold, flat settings, Postgres models and repository helpers, initial Alembic migration, snapshot definition, and external MLflow Compose service.
+- `uv sync --python 3.13`, Ruff, and both import contracts passed. The adapter contract uses independent siblings with optional modules so it can run before the remaining adapters exist.
+- `uv run alembic upgrade head --sql` generated the four application tables and the expected indexes. Pytest collected the locking integration test. Live migration and locking verification await pooled and direct Neon URLs in `backend/.env`.
+- Docker accepted the Compose configuration and snapshot definition. Building the snapshot image and starting MLflow remain unverified.
+- The repository-wide `make check` reached the documentation check after 2,311 tests passed and four were skipped. Existing broken documentation links stopped the check before the API contract and build targets.
