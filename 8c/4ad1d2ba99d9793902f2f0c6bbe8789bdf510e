@@ -1,0 +1,41 @@
+backend/.env.example
+  s_64e03e53b88ab8::t_ae30b1785f692a 1-39
+backend/alembic.ini
+  s_64e03e53b88ab8::t_cd4ca29273af57 1-2
+backend/alembic/env.py
+  s_64e03e53b88ab8::t_123d9a382c0867 1-32
+backend/alembic/versions/0001_initial_schema.py
+  s_64e03e53b88ab8::t_e9cd467acfaeb8 1-120
+backend/pyproject.toml
+  s_64e03e53b88ab8::t_33fdb053207f26 1-60
+backend/snapshot/Dockerfile
+  s_64e03e53b88ab8::t_4cbc02c3bebd21 1-19
+backend/src/fleet_rlm/__init__.py
+  s_64e03e53b88ab8::t_c5e87b23f49f14 1
+backend/src/fleet_rlm/config.py
+  s_64e03e53b88ab8::t_7854c118278895 1-64
+backend/src/fleet_rlm/db.py
+  s_64e03e53b88ab8::t_b53f32d3f6844e 1-389
+backend/tests/test_phase1_locking.py
+  s_64e03e53b88ab8::t_327d8d8bde4195 1-96
+backend/uv.lock
+  s_64e03e53b88ab8::t_7c635c532f9c33 1-2687
+docker-compose.yml
+  s_64e03e53b88ab8::t_68ce2896c28a3b 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8c4ad1d2ba99d9793902f2f0c6bbe8789bdf510e",
+  "prompts": {},
+  "sessions": {
+    "s_64e03e53b88ab8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1fc8a-69a2-7030-a96e-21c2a4393f51",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
