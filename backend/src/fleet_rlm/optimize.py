@@ -3,13 +3,16 @@
 import argparse
 import asyncio
 import json
+import logging
+import math
 import random
 import sys
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+import threading
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import dspy
@@ -18,8 +21,10 @@ import mlflow.dspy
 from dspy.experimental import ReAnchor
 from sqlalchemy import select
 
-from . import agent, db, skills
+from . import agent, db, interpreter, skills
 from .config import Settings
+
+_LOG = logging.getLogger(__name__)
 
 TargetKind = Literal["rlm", "skills", "memory"]
 ProgramKind = Literal["rlm", "flex"]
@@ -29,6 +34,21 @@ DEFAULT_OUTPUTS: dict[TargetKind, Path] = {
     "skills": Path("artifacts/skill_selector.json"),
     "memory": Path("artifacts/memory_gate.json"),
 }
+
+
+class _MlflowTracking(Protocol):
+    def set_tracking_uri(self, uri: str) -> None: ...
+    def set_experiment(self, experiment_name: str) -> Any: ...
+    def start_run(self, *, run_name: str | None = None) -> AbstractContextManager[Any]: ...
+    def log_params(self, params: dict[str, Any]) -> None: ...
+    def log_metrics(self, metrics: dict[str, float]) -> None: ...
+    def log_artifact(self, local_path: str) -> None: ...
+
+
+def _mlflow_api() -> _MlflowTracking:
+    # MLflow exports tracking helpers conditionally for its tracing-only SDK, so access
+    # the module through a typed protocol while preserving monkeypatchable module lookups.
+    return cast(_MlflowTracking, mlflow)
 
 
 class DatabaseSafetyError(ValueError):
@@ -44,6 +64,7 @@ class OptimizationResult:
     optimized_score: float | None
     train_size: int
     holdout_size: int
+    val_size: int = 0
     reminder: str | None = None
     report: dict[str, Any] = field(default_factory=dict)
 
@@ -100,15 +121,16 @@ def _mlflow_tracking(settings: Settings, target: TargetKind) -> Iterator[bool]:
     if not settings.mlflow_tracking_uri:
         yield False
         return
-    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-    mlflow.set_experiment(settings.mlflow_experiment)
+    tracking = _mlflow_api()
+    tracking.set_tracking_uri(settings.mlflow_tracking_uri)
+    tracking.set_experiment(settings.mlflow_experiment)
     mlflow.dspy.autolog(
         log_compiles=True,
         log_evals=True,
         log_traces_from_compile=True,
     )
     try:
-        with mlflow.start_run(run_name=f"optimize-{target}"):
+        with tracking.start_run(run_name=f"optimize-{target}"):
             yield True
     finally:
         mlflow.dspy.autolog(disable=True)
@@ -144,6 +166,37 @@ def split_examples(
     random.Random(seed).shuffle(items)
     split_at = max(1, min(len(items) - 1, round(len(items) * train_ratio)))
     return items[:split_at], items[split_at:]
+
+
+def split_train_val_holdout(
+    examples: Sequence[dspy.Example],
+    *,
+    train_ratio: float = 0.6,
+    val_ratio: float = 0.2,
+    seed: int = 0,
+) -> tuple[list[dspy.Example], list[dspy.Example], list[dspy.Example]]:
+    """Deterministically split examples into non-empty, disjoint train/val/holdout sets."""
+    if not math.isfinite(train_ratio) or not math.isfinite(val_ratio):
+        raise ValueError("train_ratio and val_ratio must be finite numbers")
+    if train_ratio <= 0.0 or val_ratio <= 0.0 or train_ratio + val_ratio >= 1.0:
+        raise ValueError(
+            "train_ratio and val_ratio must be positive and sum to strictly less than 1"
+        )
+    total = len(examples)
+    if total < 3:
+        raise ValueError(
+            "At least 3 examples are required to split train, validation, and holdout sets"
+        )
+    items = list(examples)
+    random.Random(seed).shuffle(items)
+    train_count = max(1, min(total - 2, round(total * train_ratio)))
+    remaining = total - train_count
+    val_count = max(1, min(remaining - 1, round(total * val_ratio)))
+    return (
+        items[:train_count],
+        items[train_count : train_count + val_count],
+        items[train_count + val_count :],
+    )
 
 
 def load_rlm_dataset(path: Path) -> list[dspy.Example]:
@@ -422,6 +475,106 @@ def _pin_reminder(env_var: str, output_path: Path, decision_model: str) -> str:
     )
 
 
+@contextmanager
+def _ephemeral_daytona_interpreter(
+    settings: Settings,
+) -> Iterator[Callable[..., interpreter.DaytonaCodeInterpreter]]:
+    """Run an ephemeral Daytona sandbox on a background event loop and always delete it."""
+    loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    release_event: asyncio.Event | None = None
+    factory: Callable[..., interpreter.DaytonaCodeInterpreter] | None = None
+    startup_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+
+    async def lifecycle() -> None:
+        nonlocal release_event, factory, startup_error, cleanup_error
+        release_event = asyncio.Event()
+        try:
+            async with (
+                interpreter.make_daytona_client(settings) as daytona,
+                interpreter.ephemeral_sandbox(daytona, settings) as sandbox,
+            ):
+                factory = interpreter.make_interpreter_factory(sandbox, settings, loop)
+                ready.set()
+                await release_event.wait()
+        except BaseException as error:
+            if not ready.is_set():
+                startup_error = error
+                ready.set()
+            else:
+                cleanup_error = error
+
+    def run_loop() -> None:
+        nonlocal startup_error, cleanup_error
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(lifecycle())
+        except BaseException as error:
+            if not ready.is_set():
+                startup_error = error
+            else:
+                cleanup_error = error
+        finally:
+            ready.set()
+            try:
+                with suppress(Exception):
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                with suppress(Exception):
+                    loop.run_until_complete(loop.shutdown_default_executor())
+            finally:
+                loop.close()
+
+    thread = threading.Thread(target=run_loop, name="fleet-optimize-daytona", daemon=True)
+    thread.start()
+    ready.wait()
+    if startup_error is not None:
+        thread.join()
+        raise startup_error
+    if factory is None:
+        thread.join()
+        raise RuntimeError("Failed to initialize ephemeral Daytona interpreter factory")
+
+    body_failed = False
+    try:
+        yield factory
+    except BaseException:
+        body_failed = True
+        raise
+    finally:
+        if release_event is not None and not loop.is_closed():
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(release_event.set)
+        thread.join()
+        if cleanup_error is not None:
+            if body_failed:
+                _LOG.warning(
+                    "Failed to tear down ephemeral Daytona sandbox after optimization error",
+                    exc_info=cleanup_error,
+                )
+            else:
+                raise cleanup_error
+
+
+@contextmanager
+def _rlm_execution_context(
+    settings: Settings,
+    root_lm: dspy.BaseLM,
+    *,
+    program_kind: ProgramKind,
+    local_interpreter: bool,
+) -> Iterator[None]:
+    if program_kind == "rlm" and not local_interpreter:
+        with (
+            _ephemeral_daytona_interpreter(settings) as interpreter_factory,
+            dspy.context(lm=root_lm, interpreter_factory=interpreter_factory),
+        ):
+            yield
+        return
+    with dspy.context(lm=root_lm):
+        yield
+
+
 def optimize_rlm(
     settings: Settings,
     *,
@@ -429,13 +582,15 @@ def optimize_rlm(
     dataset: Path | None = None,
     output_path: Path | None = None,
     program_kind: ProgramKind = "rlm",
-    train_ratio: float = 0.7,
+    train_ratio: float = 0.6,
+    val_ratio: float | None = None,
     seed: int = 0,
     auto: Literal["light", "medium", "heavy"] = "light",
     num_threads: int | None = None,
     limit: int = 200,
     force: bool = False,
     allow_direct: bool = False,
+    local_interpreter: bool = False,
     log_dir: Path | None = None,
 ) -> OptimizationResult:
     """Compile dspy.RLM or dspy.Flex with GEPA and save only if holdout improves (or --force)."""
@@ -447,51 +602,66 @@ def optimize_rlm(
     )
     if not examples:
         raise ValueError("No labeled RLM examples found")
-    trainset, holdout = split_examples(examples, train_ratio=train_ratio, seed=seed)
-
-    student: dspy.Module = (
-        dspy.Flex(agent.WorkspaceTask)
-        if program_kind == "flex"
-        else agent.build_program(settings, [])
+    resolved_val_ratio = val_ratio if val_ratio is not None else (1.0 - train_ratio) / 2.0
+    trainset, valset, holdout = split_train_val_holdout(
+        examples,
+        train_ratio=train_ratio,
+        val_ratio=resolved_val_ratio,
+        seed=seed,
     )
+
     target_path = output_path or DEFAULT_OUTPUTS["rlm"]
     root_lm = agent._model(settings, settings.llm_model)
 
-    with _mlflow_tracking(settings, "rlm") as mlflow_active, dspy.context(lm=root_lm):
-        evaluator = dspy.Evaluate(
-            devset=holdout,
-            metric=rlm_metric,
-            num_threads=num_threads,
-            display_progress=False,
-        )
-        baseline_score = _eval_score(evaluator(student))
-        gepa = dspy.GEPA(
-            metric=rlm_metric,
-            auto=auto,
-            reflection_lm=root_lm,
-            num_threads=num_threads,
-            log_dir=str(log_dir) if log_dir else None,
-            seed=seed,
-        )
-        compiled = gepa.compile(student, trainset=trainset, valset=holdout)
-        optimized_score = _eval_score(evaluator(compiled))
+    with _mlflow_tracking(settings, "rlm") as mlflow_active:
+        with _rlm_execution_context(
+            settings,
+            root_lm,
+            program_kind=program_kind,
+            local_interpreter=local_interpreter,
+        ):
+            student: dspy.Module = (
+                dspy.Flex(agent.WorkspaceTask)
+                if program_kind == "flex"
+                else agent.build_program(settings, [])
+            )
+            evaluator = dspy.Evaluate(
+                devset=holdout,
+                metric=rlm_metric,
+                num_threads=num_threads,
+                display_progress=False,
+            )
+            baseline_score = _eval_score(evaluator(student))
+            gepa = dspy.GEPA(
+                metric=rlm_metric,
+                auto=auto,
+                reflection_lm=root_lm,
+                num_threads=num_threads,
+                log_dir=str(log_dir) if log_dir else None,
+                seed=seed,
+            )
+            compiled = gepa.compile(student, trainset=trainset, valset=valset)
+            optimized_score = _eval_score(evaluator(compiled))
 
         saved = optimized_score > baseline_score or force
         if saved:
             _save_program(compiled, target_path)
 
         if mlflow_active:
-            mlflow.log_params(
+            tracking = _mlflow_api()
+            tracking.log_params(
                 {
                     "target": "rlm",
                     "program_kind": program_kind,
                     "auto": auto,
                     "train_size": len(trainset),
+                    "val_size": len(valset),
                     "holdout_size": len(holdout),
+                    "local_interpreter": local_interpreter,
                     "force": force,
                 }
             )
-            mlflow.log_metrics(
+            tracking.log_metrics(
                 {
                     "baseline_holdout_score": baseline_score,
                     "optimized_holdout_score": optimized_score,
@@ -499,7 +669,7 @@ def optimize_rlm(
                 }
             )
             if saved:
-                mlflow.log_artifact(str(target_path))
+                tracking.log_artifact(str(target_path))
 
     return OptimizationResult(
         target="rlm",
@@ -509,6 +679,7 @@ def optimize_rlm(
         optimized_score=optimized_score,
         train_size=len(trainset),
         holdout_size=len(holdout),
+        val_size=len(valset),
     )
 
 
@@ -553,7 +724,8 @@ def _run_reanchor(
         optimized_score = report.get("val_score", report.get("train_score"))
 
         if mlflow_active:
-            mlflow.log_params(
+            tracking = _mlflow_api()
+            tracking.log_params(
                 {
                     "target": target,
                     "decision_model": settings.decision_model,
@@ -567,8 +739,8 @@ def _run_reanchor(
             if isinstance(optimized_score, (int, float)):
                 metrics["optimized_score"] = float(optimized_score)
             if metrics:
-                mlflow.log_metrics(metrics)
-            mlflow.log_artifact(str(output_path))
+                tracking.log_metrics(metrics)
+            tracking.log_artifact(str(output_path))
 
     return OptimizationResult(
         target=target,
@@ -700,8 +872,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--train-ratio",
         type=float,
-        default=0.7,
-        help="Train split ratio (default: 0.7).",
+        default=None,
+        help="Train split ratio (default: 0.6 for rlm, 0.7 for skills/memory).",
+    )
+    parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=None,
+        help=(
+            "Validation split ratio for --target rlm "
+            "(default: half of remaining examples after --train-ratio)."
+        ),
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed for split/GEPA.")
     parser.add_argument(
@@ -723,6 +904,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Save RLM artifact even if holdout score does not beat baseline.",
     )
     parser.add_argument(
+        "--local-interpreter",
+        action="store_true",
+        help=(
+            "Skip ephemeral Daytona sandbox provisioning for --target rlm --program rlm "
+            "and use DSPy's local interpreter."
+        ),
+    )
+    parser.add_argument(
         "--log-dir",
         type=Path,
         default=None,
@@ -737,44 +926,49 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
     if args.target in {"skills", "memory"} and args.dataset is None:
         parser.error(f"--dataset is required for --target {args.target}")
 
-    resolved_settings = settings or Settings()
+    resolved_settings = settings or Settings.model_validate({})
     try:
         guard_database_url(args.database_url, resolved_settings, allow_direct=args.allow_direct)
         if args.target == "rlm":
+            train_ratio = 0.6 if args.train_ratio is None else args.train_ratio
             result = optimize_rlm(
                 resolved_settings,
                 database_url=args.database_url,
                 dataset=args.dataset,
                 output_path=args.output,
                 program_kind=args.program,
-                train_ratio=args.train_ratio,
+                train_ratio=train_ratio,
+                val_ratio=args.val_ratio,
                 seed=args.seed,
                 auto=args.auto,
                 num_threads=args.num_threads,
                 limit=args.limit,
                 force=args.force,
                 allow_direct=args.allow_direct,
+                local_interpreter=args.local_interpreter,
                 log_dir=args.log_dir,
             )
         elif args.target == "skills":
+            train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
             result = optimize_skills(
                 resolved_settings,
                 database_url=args.database_url,
                 dataset=args.dataset,
                 output_path=args.output,
-                train_ratio=args.train_ratio,
+                train_ratio=train_ratio,
                 seed=args.seed,
                 num_threads=args.num_threads,
                 allow_direct=args.allow_direct,
                 log_dir=args.log_dir,
             )
         else:
+            train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
             result = optimize_memory(
                 resolved_settings,
                 database_url=args.database_url,
                 dataset=args.dataset,
                 output_path=args.output,
-                train_ratio=args.train_ratio,
+                train_ratio=train_ratio,
                 seed=args.seed,
                 num_threads=args.num_threads,
                 allow_direct=args.allow_direct,
@@ -785,8 +979,9 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
         return 2
 
     status = f"saved to {result.output_path}" if result.saved else "discarded (no holdout gain)"
+    val_segment = f" val={result.val_size}" if result.val_size else ""
     print(
-        f"[{result.target}] train={result.train_size} holdout={result.holdout_size} "
+        f"[{result.target}] train={result.train_size}{val_segment} holdout={result.holdout_size} "
         f"baseline={result.baseline_score} optimized={result.optimized_score} -> {status}"
     )
     if result.reminder:

@@ -1,5 +1,6 @@
 """Offline verification for Phase 5 optimization CLI (GEPA, ReAnchor, Neon guard)."""
 
+import asyncio
 import json
 from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
@@ -11,7 +12,7 @@ import pytest
 from dspy.clients.base_lm import BaseLM
 from dspy.experimental import ReAnchor
 
-from fleet_rlm import agent, db, optimize, skills
+from fleet_rlm import agent, db, interpreter, optimize, skills
 from fleet_rlm.config import Settings
 
 _BRANCH_URL = (
@@ -218,6 +219,55 @@ def test_metrics_cover_exact_partial_and_decision_cases() -> None:
     )
 
 
+def test_split_train_val_holdout_properties_and_validation() -> None:
+    examples = [
+        dspy.Example(task=f"Task {index}", answer=f"Ans {index}").with_inputs("task")
+        for index in range(10)
+    ]
+
+    train_a, val_a, holdout_a = optimize.split_train_val_holdout(examples, seed=42)
+    train_b, val_b, holdout_b = optimize.split_train_val_holdout(examples, seed=42)
+    assert (len(train_a), len(val_a), len(holdout_a)) == (6, 2, 2)
+    assert [ex.task for ex in train_a] == [ex.task for ex in train_b]
+    assert [ex.task for ex in val_a] == [ex.task for ex in val_b]
+    assert [ex.task for ex in holdout_a] == [ex.task for ex in holdout_b]
+
+    train_tasks = {ex.task for ex in train_a}
+    val_tasks = {ex.task for ex in val_a}
+    holdout_tasks = {ex.task for ex in holdout_a}
+    assert train_tasks.isdisjoint(val_tasks)
+    assert train_tasks.isdisjoint(holdout_tasks)
+    assert val_tasks.isdisjoint(holdout_tasks)
+    assert train_tasks | val_tasks | holdout_tasks == {ex.task for ex in examples}
+
+    # Minimum dataset size of 3 always yields three non-empty disjoint partitions.
+    for ratios in ((0.6, 0.2), (0.9, 0.05), (0.05, 0.9)):
+        tr, va, ho = optimize.split_train_val_holdout(
+            examples[:3], train_ratio=ratios[0], val_ratio=ratios[1], seed=0
+        )
+        assert (len(tr), len(va), len(ho)) == (1, 1, 1)
+        assert len({tr[0].task, va[0].task, ho[0].task}) == 3
+
+    for bad_len in (0, 1, 2):
+        with pytest.raises(ValueError, match="At least 3 examples"):
+            optimize.split_train_val_holdout(examples[:bad_len])
+
+    for bad_train, bad_val in (
+        (0.0, 0.2),
+        (-0.1, 0.2),
+        (0.6, 0.0),
+        (0.6, -0.1),
+        (0.6, 0.4),
+        (0.7, 0.3),
+        (0.8, 0.3),
+        (1.0, 0.1),
+        (float("nan"), 0.2),
+        (0.6, float("inf")),
+    ):
+        with pytest.raises(ValueError):
+            optimize.split_train_val_holdout(examples, train_ratio=bad_train, val_ratio=bad_val)
+
+
 def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
     settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -242,19 +292,27 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
             return compiled
 
     scores = iter([60.0, 55.0, 60.0, 80.0, 60.0, 50.0, 40.0, 75.0])
+    eval_devsets: list[list[dspy.Example]] = []
 
     class FakeEvaluate:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            eval_devsets.append(list(kwargs["devset"]))
 
         def __call__(self, program):
             return SimpleNamespace(score=next(scores))
 
+    def forbid_daytona(*_args, **_kwargs):
+        raise AssertionError("Daytona must not be initialized for local_interpreter or flex runs")
+
     autolog_calls: list[dict] = []
+    logged_params: list[dict] = []
     logged_artifacts: list[str] = []
     monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
     monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
     monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(optimize.interpreter, "make_daytona_client", forbid_daytona)
+    monkeypatch.setattr(optimize.interpreter, "ephemeral_sandbox", forbid_daytona)
     monkeypatch.setattr(optimize.mlflow, "set_tracking_uri", lambda _uri: None)
     monkeypatch.setattr(optimize.mlflow, "set_experiment", lambda _exp: None)
     monkeypatch.setattr(
@@ -267,7 +325,11 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         "autolog",
         lambda **kwargs: autolog_calls.append(kwargs),
     )
-    monkeypatch.setattr(optimize.mlflow, "log_params", lambda _params: None)
+    monkeypatch.setattr(
+        optimize.mlflow,
+        "log_params",
+        lambda params: logged_params.append(dict(params)),
+    )
     monkeypatch.setattr(optimize.mlflow, "log_metrics", lambda _metrics: None)
     monkeypatch.setattr(
         optimize.mlflow,
@@ -282,11 +344,17 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         database_url=_BRANCH_URL,
         dataset=dataset,
         output_path=rejected_path,
+        local_interpreter=True,
     )
     assert rejected.saved is False
-    assert (rejected.train_size, rejected.holdout_size) == (7, 3)
+    assert (rejected.train_size, rejected.val_size, rejected.holdout_size) == (6, 2, 2)
     assert (rejected.baseline_score, rejected.optimized_score) == (60.0, 55.0)
     assert not rejected_path.exists()
+
+    first_compile = FakeGEPA.instances[0].compile_calls[0]
+    assert {ex.task for ex in first_compile["valset"]}.isdisjoint(
+        {ex.task for ex in eval_devsets[0]}
+    )
 
     # 2. Improvement saves artifact and logs to MLflow when configured
     mlflow_settings = settings.model_copy(update={"mlflow_tracking_uri": "http://127.0.0.1:5001"})
@@ -296,8 +364,10 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         database_url=_BRANCH_URL,
         dataset=dataset,
         output_path=improved_path,
+        local_interpreter=True,
     )
     assert improved.saved is True
+    assert (improved.train_size, improved.val_size, improved.holdout_size) == (6, 2, 2)
     assert improved_path.exists()
     reloaded = agent.build_program(
         settings.model_copy(update={"optimized_program_path": improved_path}), []
@@ -306,6 +376,18 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
     assert autolog_calls == [
         {"log_compiles": True, "log_evals": True, "log_traces_from_compile": True},
         {"disable": True},
+    ]
+    assert logged_params == [
+        {
+            "target": "rlm",
+            "program_kind": "rlm",
+            "auto": "light",
+            "train_size": 6,
+            "val_size": 2,
+            "holdout_size": 2,
+            "local_interpreter": True,
+            "force": False,
+        }
     ]
     assert logged_artifacts == [str(improved_path)]
 
@@ -317,11 +399,12 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         dataset=dataset,
         output_path=forced_path,
         force=True,
+        local_interpreter=True,
     )
     assert forced.saved is True
     assert forced_path.exists()
 
-    # 4. Flex program compiles dspy.Flex
+    # 4. Flex program compiles dspy.Flex and skips Daytona even without local_interpreter
     flex_path = tmp_path / "flex.json"
     flex_result = optimize.optimize_rlm(
         settings,
@@ -331,7 +414,341 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         program_kind="flex",
     )
     assert flex_result.saved is True
+    assert (flex_result.train_size, flex_result.val_size, flex_result.holdout_size) == (6, 2, 2)
     assert isinstance(FakeGEPA.instances[-1].compile_calls[0]["student"], dspy.Flex)
+
+
+def test_optimize_rlm_zero_holdout_leakage_and_ratio_overrides(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm.jsonl",
+        [{"task": f"Task {index}", "answer": f"Ans {index}"} for index in range(10)],
+    )
+    all_tasks = {f"Task {index}" for index in range(10)}
+    recorded: list[dict[str, set[str]]] = []
+
+    class FakeGEPA:
+        def __init__(self, **_kwargs):
+            pass
+
+        def compile(self, student, *, trainset, valset):
+            recorded[-1]["train"] = {ex.task for ex in trainset}
+            recorded[-1]["val"] = {ex.task for ex in valset}
+            return student.deepcopy()
+
+    class FakeEvaluate:
+        def __init__(self, **kwargs):
+            recorded.append({"holdout": {ex.task for ex in kwargs["devset"]}})
+            self.calls = 0
+
+        def __call__(self, _program):
+            self.calls += 1
+            return SimpleNamespace(score=50.0 if self.calls == 1 else 70.0)
+
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+
+    # Default 0.6 / 0.2 / 0.2 split
+    default_result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "default.json",
+        local_interpreter=True,
+    )
+    assert (default_result.train_size, default_result.val_size, default_result.holdout_size) == (
+        6,
+        2,
+        2,
+    )
+
+    # Caller overriding only train_ratio=0.7 splits remaining evenly into non-empty val & holdout
+    override_result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "override.json",
+        train_ratio=0.7,
+        local_interpreter=True,
+    )
+    assert override_result.train_size == 7
+    assert override_result.val_size >= 1
+    assert override_result.holdout_size >= 1
+    assert (
+        override_result.train_size + override_result.val_size + override_result.holdout_size == 10
+    )
+
+    # Caller overriding both train_ratio and val_ratio
+    custom_result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "custom.json",
+        train_ratio=0.5,
+        val_ratio=0.3,
+        local_interpreter=True,
+    )
+    assert (custom_result.train_size, custom_result.val_size, custom_result.holdout_size) == (
+        5,
+        3,
+        2,
+    )
+
+    assert len(recorded) == 3
+    for split in recorded:
+        assert split["train"] and split["val"] and split["holdout"]
+        assert split["train"].isdisjoint(split["val"])
+        assert split["train"].isdisjoint(split["holdout"])
+        assert split["val"].isdisjoint(split["holdout"])
+        assert split["train"] | split["val"] | split["holdout"] == all_tasks
+
+
+def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm.jsonl",
+        [{"task": f"Task {index}", "answer": f"Ans {index}"} for index in range(6)],
+    )
+
+    events: list[dict] = []
+
+    def make_fake_daytona(_settings: Settings):
+        state: dict = {
+            "client_entered": False,
+            "client_exited": False,
+            "sandbox_created": False,
+            "sandbox_deleted": False,
+            "loop": None,
+            "factory": None,
+        }
+        events.append(state)
+
+        class FakeDaytonaClient:
+            async def __aenter__(self):
+                state["client_entered"] = True
+                return self
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                state["client_exited"] = True
+
+        return FakeDaytonaClient()
+
+    @asynccontextmanager
+    async def fake_ephemeral_sandbox(_daytona, _settings: Settings):
+        state = events[-1]
+        state["loop"] = asyncio.get_running_loop()
+        state["sandbox_created"] = True
+        try:
+            yield SimpleNamespace(id="sb-ephemeral")
+        finally:
+            state["sandbox_deleted"] = True
+
+    def fake_make_interpreter_factory(
+        sandbox, _settings: Settings, loop: asyncio.AbstractEventLoop
+    ):
+        state = events[-1]
+        assert sandbox.id == "sb-ephemeral"
+        assert loop is state["loop"]
+
+        class FakeFactory:
+            execution_instructions = interpreter.DaytonaCodeInterpreter.execution_instructions
+
+            def __call__(self):
+                return SimpleNamespace(sandbox=sandbox, loop=loop)
+
+        factory = FakeFactory()
+        state["factory"] = factory
+        return factory
+
+    observed_factories: list[object] = []
+    observed_instructions: list[str] = []
+    fail_mode: dict[str, str | None] = {"where": None}
+
+    async def ping_loop() -> str:
+        return "pong"
+
+    class FakeEvaluate:
+        def __init__(self, **_kwargs):
+            self.calls = 0
+
+        def __call__(self, program):
+            self.calls += 1
+            state = events[-1]
+            observed_factories.append(dspy.settings.interpreter_factory)
+            assert dspy.settings.interpreter_factory is state["factory"]
+            assert state["sandbox_created"] is True
+            assert state["sandbox_deleted"] is False
+            assert (
+                asyncio.run_coroutine_threadsafe(ping_loop(), state["loop"]).result(timeout=5)
+                == "pong"
+            )
+            observed_instructions.append(program.generate_action.signature.instructions)
+            if fail_mode["where"] == "evaluate":
+                raise RuntimeError("evaluate exploded")
+            return SimpleNamespace(score=40.0 if self.calls == 1 else 80.0)
+
+    class FakeGEPA:
+        def __init__(self, **_kwargs):
+            pass
+
+        def compile(self, student, *, trainset, valset):
+            state = events[-1]
+            observed_factories.append(dspy.settings.interpreter_factory)
+            assert dspy.settings.interpreter_factory is state["factory"]
+            assert state["sandbox_created"] is True
+            assert state["sandbox_deleted"] is False
+            if fail_mode["where"] == "compile":
+                raise RuntimeError("compile exploded")
+            return student.deepcopy()
+
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(optimize.interpreter, "make_daytona_client", make_fake_daytona)
+    monkeypatch.setattr(optimize.interpreter, "ephemeral_sandbox", fake_ephemeral_sandbox)
+    monkeypatch.setattr(
+        optimize.interpreter, "make_interpreter_factory", fake_make_interpreter_factory
+    )
+
+    # 1. Success path: sandbox created, factory bound during eval & compile, torn down cleanly
+    output_path = tmp_path / "ephemeral_ok.json"
+    result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=output_path,
+    )
+    assert result.saved is True
+    assert len(observed_factories) == 3
+    assert all(factory is events[0]["factory"] for factory in observed_factories)
+    assert any(
+        interpreter.DaytonaCodeInterpreter.execution_instructions in instr
+        for instr in observed_instructions
+    )
+    assert events[0]["client_entered"] is True
+    assert events[0]["client_exited"] is True
+    assert events[0]["sandbox_created"] is True
+    assert events[0]["sandbox_deleted"] is True
+    assert events[0]["loop"].is_closed() is True
+    assert dspy.settings.interpreter_factory is None
+
+    # 2. Exception during Evaluate still deletes ephemeral sandbox and closes background loop
+    fail_mode["where"] = "evaluate"
+    with pytest.raises(RuntimeError, match="evaluate exploded"):
+        optimize.optimize_rlm(
+            settings,
+            database_url=_BRANCH_URL,
+            dataset=dataset,
+            output_path=tmp_path / "ephemeral_eval_fail.json",
+        )
+    assert events[1]["client_entered"] is True
+    assert events[1]["client_exited"] is True
+    assert events[1]["sandbox_created"] is True
+    assert events[1]["sandbox_deleted"] is True
+    assert events[1]["loop"].is_closed() is True
+    assert dspy.settings.interpreter_factory is None
+
+    # 3. Exception during GEPA.compile still deletes ephemeral sandbox and closes background loop
+    fail_mode["where"] = "compile"
+    with pytest.raises(RuntimeError, match="compile exploded"):
+        optimize.optimize_rlm(
+            settings,
+            database_url=_BRANCH_URL,
+            dataset=dataset,
+            output_path=tmp_path / "ephemeral_compile_fail.json",
+        )
+    assert events[2]["client_entered"] is True
+    assert events[2]["client_exited"] is True
+    assert events[2]["sandbox_created"] is True
+    assert events[2]["sandbox_deleted"] is True
+    assert events[2]["loop"].is_closed() is True
+    assert dspy.settings.interpreter_factory is None
+
+    # 4. CLI default (--target rlm --program rlm without --local-interpreter) uses ephemeral Daytona
+    fail_mode["where"] = None
+    cli_output = tmp_path / "ephemeral_cli.json"
+    exit_code = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--program",
+            "rlm",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(cli_output),
+        ],
+        settings=settings,
+    )
+    assert exit_code == 0
+    assert cli_output.is_file()
+    assert events[3]["sandbox_created"] is True
+    assert events[3]["sandbox_deleted"] is True
+    assert events[3]["client_exited"] is True
+    assert events[3]["loop"].is_closed() is True
+    assert "[rlm] train=4 val=1 holdout=1" in capsys.readouterr().out
+
+
+def test_cli_local_interpreter_skips_daytona_and_reports_val_size(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm.jsonl",
+        [{"task": f"Task {index}", "answer": f"Ans {index}"} for index in range(10)],
+    )
+    seen_factories: list[object] = []
+
+    class FakeEvaluate:
+        def __init__(self, **_kwargs):
+            self.calls = 0
+
+        def __call__(self, _program):
+            self.calls += 1
+            seen_factories.append(dspy.settings.interpreter_factory)
+            return SimpleNamespace(score=45.0 if self.calls == 1 else 75.0)
+
+    class FakeGEPA:
+        def __init__(self, **_kwargs):
+            pass
+
+        def compile(self, student, *, trainset, valset):
+            seen_factories.append(dspy.settings.interpreter_factory)
+            return student.deepcopy()
+
+    def forbid_daytona(*_args, **_kwargs):
+        raise AssertionError("--local-interpreter must skip Daytona client and sandbox creation")
+
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(optimize.interpreter, "make_daytona_client", forbid_daytona)
+    monkeypatch.setattr(optimize.interpreter, "ephemeral_sandbox", forbid_daytona)
+
+    output_path = tmp_path / "cli_local.json"
+    exit_code = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(output_path),
+            "--local-interpreter",
+        ],
+        settings=settings,
+    )
+    assert exit_code == 0
+    assert output_path.is_file()
+    assert seen_factories == [None, None, None]
+    stdout = capsys.readouterr().out
+    assert "[rlm] train=6 val=2 holdout=2" in stdout
 
 
 @pytest.mark.asyncio
