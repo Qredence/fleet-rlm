@@ -7,7 +7,7 @@
 ### Core Architectural Shift
 Fleet-RLM is **not** a local stateful runtime or process daemon.
 - **Compute is stateless:** Any FastAPI worker can handle any request for any session. Zero in-process `SessionRuntime` caches, zero PostgreSQL advisory-lock heartbeats, zero setup HTTP servers, and zero embedded MLflow process supervision.
-- **State is durable and minimal:** Neon Postgres 18 holds conversation history, the recursive execution tree (`runs`), file manifests, and unified memories. Daytona holds workspace files and artifacts.
+- **State is durable and minimal:** Neon Postgres 18 holds 5 tables: conversation history (`sessions`), the recursive execution tree (`runs`), file manifests (`files`), unified memories (`memories`), and workspace setting overrides (`workspace_settings`). Daytona holds workspace files and artifacts.
 - **Native framework primitives only:** Never duplicate what DSPy 3.5.0, FastAPI 0.165.0, Daytona 0.232.0, Neon Postgres 18, MLflow 3.18.0, or shadcn/ui Base UI AI Elements already provide.
 
 ---
@@ -53,7 +53,7 @@ Fleet-RLM is **not** a local stateful runtime or process daemon.
 
 ## 4. Target Repository Structure & Module Boundaries
 
-The entire backend consists of **7 focused Python modules** enforcing a strict one-way DAG (`import-linter` enforced in CI):
+The entire backend consists of **8 focused Python modules** enforcing a strict one-way DAG (`import-linter` enforced in CI):
 
 ```text
 fleet-rlm/
@@ -66,11 +66,12 @@ fleet-rlm/
 │   ├── skills/                        # Agent Skills (SKILL.md folders)
 │   ├── src/fleet_rlm/
 │   │   ├── config.py                  # Flat pydantic-settings (env / .env)
-│   │   ├── db.py                      # Neon Postgres 18 ORM, pooling, run lock, memories
+│   │   ├── db.py                      # Neon Postgres 18 ORM (5 tables), pooling, run lock, memories, workspace_settings
 │   │   ├── interpreter.py             # 100% of Daytona SDK + DSPy CodeInterpreter adapter
 │   │   ├── skills.py                  # SKILL.md loader + TypeSafe Jev selector + tool scoping
-│   │   ├── agent.py                   # DSPy 3.5 RLM, UiPartAccumulator, AI SDK v1 encoder, Jev MemoryGate
-│   │   ├── api.py                     # FastAPI 0.165 app, lifespan, Depends, 7 route groups
+│   │   ├── agent.py                   # DSPy 3.5 RLM, recursive spawn_agent/llm_query, Jev MemoryGate
+│   │   ├── ui_stream.py               # Domain-event-to-AI-SDK-v1 (x-vercel-ai-ui-message-stream: v1) encoder
+│   │   ├── api.py                     # FastAPI 0.165 app, lifespan, Depends, REST + SSE route groups
 │   │   └── optimize.py                # Offline CLI: Neon branch + MLflow 3.18 + GEPA + ReAnchor
 │   └── tests/
 ├── frontend/                          # Vite + React + shadcn/ui Base UI AI Elements
@@ -79,10 +80,10 @@ fleet-rlm/
 
 ### Dependency Rules (Enforced by `import-linter`)
 1. `config.py` imports no internal module.
-2. `db.py`, `interpreter.py`, `skills.py`, and `agent.py` may import `config.py`, and **never** import `fastapi` or `api.py`.
+2. `db.py`, `interpreter.py`, `skills.py`, `agent.py`, and `ui_stream.py` may import `config.py`, and **never** import `fastapi` or `api.py`.
 3. `db.py`, `interpreter.py`, and `skills.py` are strictly independent of one another.
-4. Only `interpreter.py` imports `daytona`. Only `api.py` imports `fastapi`.
-5. `optimize.py` never imports `api.py`.
+4. Only `api.py` imports `ui_stream.py`. Only `interpreter.py` imports `daytona`. Only `api.py` imports `fastapi`.
+5. `optimize.py` never imports `api.py` or `ui_stream.py`.
 
 ---
 
@@ -113,3 +114,6 @@ fleet-rlm/
 7. **No Per-Turn Sandbox Probing:**
    - Compute file SHA-256 hashes at upload ingress in `api.py` and store in Neon `files`.
    - Trust the pinned Daytona snapshot for installed Python packages and `/opt/skills`.
+8. **Read-Only Env Settings Boundary:**
+   - Safe per-workspace overrides (models, RLM/history budgets, Daytona target/timeouts) persist in the singleton Neon `workspace_settings` table via `PATCH /api/settings`.
+   - Infrastructure-bound settings (`llm_base_url`, `daytona_snapshot`, `mlflow_experiment`, credentials, and worker concurrency) remain strictly `.env`-managed and are surfaced only as read-only `status` fields in `GET /api/settings`.

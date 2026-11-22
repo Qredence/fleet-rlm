@@ -3,8 +3,8 @@
 help:
 	@echo "Fleet-RLM targets:"
 	@echo "  make check          Run all backend and frontend checks"
-	@echo "  make check-backend  Run ruff, lint-imports, and pytest"
-	@echo "  make check-frontend Run pnpm lint, typecheck, and build"
+	@echo "  make check-backend  Run ruff check/format, lint-imports, ty, and pytest"
+	@echo "  make check-frontend Run pnpm lint, typecheck, test, and build"
 	@echo "  make dev-backend    Start FastAPI dev server on port 8000"
 	@echo "  make dev-frontend   Start Vite dev server on port 5173"
 	@echo "  make mlflow         Start external MLflow 3.18 server on 127.0.0.1:5001"
@@ -12,10 +12,10 @@ help:
 check: check-backend check-frontend
 
 check-backend:
-	cd backend && uv run ruff check . && uv run lint-imports && uv run pytest
+	cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports && uv run ty check src && uv run pytest
 
 check-frontend:
-	cd frontend && pnpm lint && pnpm typecheck && pnpm build
+	cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 
 dev-backend:
 	cd backend && uv run uvicorn fleet_rlm.api:app --reload --port 8000

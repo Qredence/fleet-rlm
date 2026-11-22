@@ -6,7 +6,7 @@ Fleet-RLM is a stateless, recursive agentic system built on DSPy 3.5.0 `dspy.RLM
 
 - `backend/` — FastAPI 0.165+ + DSPy 3.5.0 backend (`uv`, Python `>=3.13,<3.14`), structured as 8 focused modules under `backend/src/fleet_rlm/`:
   1. `config.py` — Flat `pydantic-settings` (`FLEET_*`) configuration
-  2. `db.py` — Neon Postgres 18 SQLAlchemy 2.1 async models, PgBouncer pool, `uuidv7()`, root-turn partial unique index lock, and `memories`
+  2. `db.py` — Neon Postgres 18 SQLAlchemy 2.1 async models (5 tables: `sessions`, `runs`, `files`, `memories`, `workspace_settings`), PgBouncer pool, `uuidv7()`, and root-turn partial unique index lock
   3. `interpreter.py` — All Daytona 0.232.0 SDK interactions and `DaytonaCodeInterpreter` adapter
   4. `skills.py` — Read-only `SKILL.md` registry and TypeSafe Jev (`Noul` + `Choice`) selector
   5. `agent.py` — DSPy 3.5 `dspy.RLM` runner, recursive `spawn_agent` / `llm_query`, bounded history, and `MemoryGate` consolidation
@@ -19,11 +19,12 @@ Fleet-RLM is a stateless, recursive agentic system built on DSPy 3.5.0 `dspy.RLM
 
 ## Architecture Boundaries (`import-linter`)
 
-Enforced via `uv run lint-imports` in `backend/pyproject.toml` (4 contracts):
+Enforced via `uv run lint-imports` in `backend/pyproject.toml`:
 1. Layer order: `(api | optimize)` → `ui_stream` → `(agent | skills | interpreter | db)` → `config`.
 2. `db`, `interpreter`, and `skills` are mutually independent.
 3. Only `api` may import `ui_stream`.
 4. `optimize` never imports `api` or `ui_stream`.
+5. Only `interpreter` may import `daytona`; only `api` may import `fastapi`.
 
 ## Non-Negotiable Guardrails
 
@@ -34,6 +35,7 @@ Enforced via `uv run lint-imports` in `backend/pyproject.toml` (4 contracts):
 5. **Daytona Isolation:** Keep 100% of `daytona` imports inside `interpreter.py`. Never inject host LLM/DB keys into sandbox env vars.
 6. **Zero Custom Wire Protocols:** Frontend consumes `x-vercel-ai-ui-message-stream: v1` natively via `@ai-sdk/react` `useChat` + `DefaultChatTransport` (no custom SSE parsers, no BFF proxy).
 7. **Offline Optimization Safety:** Always target an isolated Neon branch via `--database-url` and pin the exact TypeSafe Jev snapshot in `FLEET_DECISION_MODEL` when deploying `ReAnchor` artifacts.
+8. **Read-Only Env Settings Boundary:** Infrastructure-bound settings (`llm_base_url`, `daytona_snapshot`, `mlflow_experiment`, credentials, and worker concurrency) are managed strictly via `.env` / environment variables and exposed only as read-only `status` in `GET /api/settings` — never accept them in `PATCH /api/settings` or persist them in `workspace_settings`.
 
 ## Verification
 
@@ -46,6 +48,6 @@ make check
 Or run per-package checks directly:
 
 ```bash
-cd backend && uv run ruff check . && uv run lint-imports && uv run pytest
-cd frontend && pnpm lint && pnpm typecheck && pnpm build
+cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports && uv run ty check src && uv run pytest
+cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
