@@ -1,5 +1,3 @@
-"use client"
-
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
@@ -79,4 +77,5 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent }
+// oxlint-disable react/only-export-components -- The shadcn registry exports helpers alongside these components.
+export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }

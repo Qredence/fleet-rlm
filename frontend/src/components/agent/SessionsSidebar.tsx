@@ -1,12 +1,17 @@
 import { Check, MessageSquare, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { cn } from 'cn'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
+  AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { Session } from '@/lib/api'
+import { errorMessage, type Session } from '@/lib/api'
+import { ResponsivePanel, type PanelPresentation } from './ResponsivePanel'
 
 export interface SessionsSidebarProps {
   session?: Session
@@ -14,9 +19,10 @@ export interface SessionsSidebarProps {
   sessionsLoading: boolean
   changingSessions: boolean
   error: string
+  presentation: PanelPresentation
   onCreate: (title?: string) => Promise<boolean>
   onRename: (id: string, title: string) => Promise<boolean>
-  onDelete: (id: string) => Promise<boolean>
+  onDelete: (id: string) => Promise<void>
   onSelect: (id: string) => void
 }
 
@@ -26,6 +32,7 @@ export function SessionsSidebar({
   sessionsLoading,
   changingSessions,
   error,
+  presentation,
   onCreate,
   onRename,
   onDelete,
@@ -35,6 +42,10 @@ export function SessionsSidebar({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [deletingSession, setDeletingSession] = useState<Session | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null)
+  const newSessionButton = useRef<HTMLButtonElement>(null)
+  const cancelDeleteButton = useRef<HTMLButtonElement>(null)
 
   const filteredSessions = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -61,44 +72,34 @@ export function SessionsSidebar({
   }
 
   return (
-    <aside
-      aria-label="Sessions"
-      className="flex h-full min-h-0 w-full flex-col bg-sidebar text-sidebar-foreground"
-    >
-      <div className="grid shrink-0 gap-2.5 border-b border-sidebar-border p-3">
+    <ResponsivePanel {...presentation} side="left" title="Sessions">
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-sidebar-border p-3">
         <Button
-          size="default"
-          className="h-9 w-full justify-center gap-2 rounded-xl font-medium"
+          ref={newSessionButton}
           disabled={sessionsLoading || changingSessions}
           onClick={() => void onCreate()}
         >
-          <Plus className="size-4" />
+          <Plus data-icon="inline-start" />
           New session
         </Button>
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
+        <InputGroup>
+          <InputGroupInput
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search sessions…"
             aria-label="Filter sessions"
-            className="h-8 rounded-xl bg-background/80 pr-7 pl-8 text-xs"
+            className="[&::-webkit-search-cancel-button]:hidden"
           />
+          <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
           {query && (
-            <button
-              type="button"
-              aria-label="Clear search"
-              onClick={() => setQuery('')}
-              className="absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-0.5 text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-3.5" />
-            </button>
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton size="icon-xs" aria-label="Clear search" onClick={() => setQuery('')}>
+                <X />
+              </InputGroupButton>
+            </InputGroupAddon>
           )}
-        </div>
+        </InputGroup>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -111,42 +112,44 @@ export function SessionsSidebar({
               return (
                 <form
                   key={item.id}
-                  className="flex items-center gap-1 rounded-xl border border-ring/40 bg-background p-1"
                   onSubmit={(event) => {
                     event.preventDefault()
                     void commitRename(item.id)
                   }}
                 >
-                  <Input
-                    value={renameDraft}
-                    autoFocus
-                    aria-label="Rename session"
-                    disabled={changingSessions}
-                    onChange={(event) => setRenameDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') cancelRename()
-                    }}
-                    className="h-7 flex-1 rounded-lg border-0 bg-transparent px-2 text-xs shadow-none focus-visible:ring-0"
-                  />
-                  <Button
-                    type="submit"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Save session name"
-                    disabled={changingSessions || !renameDraft.trim()}
-                  >
-                    <Check />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Cancel rename"
-                    disabled={changingSessions}
-                    onClick={cancelRename}
-                  >
-                    <X />
-                  </Button>
+                  <InputGroup>
+                    <InputGroupInput
+                      value={renameDraft}
+                      autoFocus
+                      aria-label="Rename session"
+                      disabled={changingSessions}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.stopPropagation()
+                          cancelRename()
+                        }
+                      }}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        type="submit"
+                        size="icon-xs"
+                        aria-label="Save session name"
+                        disabled={changingSessions || !renameDraft.trim()}
+                      >
+                        <Check />
+                      </InputGroupButton>
+                      <InputGroupButton
+                        size="icon-xs"
+                        aria-label="Cancel rename"
+                        disabled={changingSessions}
+                        onClick={cancelRename}
+                      >
+                        <X />
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
                 </form>
               )
             }
@@ -154,33 +157,26 @@ export function SessionsSidebar({
             return (
               <div
                 key={item.id}
-                className={`group flex min-w-0 items-center gap-1 rounded-xl px-1.5 py-1 transition-colors ${
-                  active
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'hover:bg-sidebar-accent/60'
-                }`}
+                className="group flex min-w-0 items-center gap-1"
               >
-                <button
+                <Button
                   type="button"
+                  size="sm"
+                  variant={active ? 'secondary' : 'ghost'}
                   aria-current={active ? 'page' : undefined}
                   disabled={changingSessions}
                   onClick={() => onSelect(item.id)}
                   onDoubleClick={() => startRename(item)}
                   title={item.title}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="min-w-0 flex-1 justify-start"
                 >
-                  <MessageSquare
-                    className={`size-3.5 shrink-0 ${active ? 'text-foreground' : 'text-muted-foreground'}`}
-                  />
-                  <span className={`min-w-0 flex-1 truncate ${active ? 'font-medium' : 'font-normal'}`}>
-                    {item.title}
-                  </span>
-                </button>
-                <div
-                  className={`flex shrink-0 items-center gap-0.5 transition-opacity ${
-                    active ? 'opacity-100' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'
-                  }`}
-                >
+                  <MessageSquare data-icon="inline-start" />
+                  <span className="truncate">{item.title}</span>
+                </Button>
+                <div className={cn(
+                  'flex shrink-0 items-center gap-0.5 transition-opacity',
+                  !active && '[@media(hover:hover)]:opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
+                )}>
                   <Button
                     type="button"
                     size="icon-xs"
@@ -197,7 +193,11 @@ export function SessionsSidebar({
                     variant="ghost"
                     aria-label={`Delete ${item.title}`}
                     disabled={changingSessions}
-                    onClick={() => setDeletingSession(item)}
+                    onClick={(event) => {
+                      deleteTrigger.current = event.currentTarget
+                      setDeleteError('')
+                      setDeletingSession(item)
+                    }}
                   >
                     <Trash2 />
                   </Button>
@@ -207,53 +207,65 @@ export function SessionsSidebar({
           })}
 
           {!filteredSessions.length && (
-            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-              {sessionsLoading
-                ? 'Loading sessions…'
-                : sessions.length
-                  ? 'No sessions match your search.'
-                  : 'No sessions yet.'}
-            </p>
+            sessionsLoading ? (
+              <p role="status" className="py-6 text-center text-sm text-muted-foreground">Loading sessions…</p>
+            ) : (
+              <Empty className="p-4">
+                <EmptyHeader>
+                  <EmptyTitle>{sessions.length ? 'No matching sessions' : 'No sessions yet'}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            )
           )}
         </nav>
       </ScrollArea>
 
-      {error && !deletingSession && (
-        <div className="shrink-0 border-t border-sidebar-border px-3 py-2">
-          <p role="alert" className="text-xs text-destructive">{error}</p>
+      {error && (
+        <div className="shrink-0 p-3">
+          <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>
         </div>
       )}
 
-      <Dialog
+      <AlertDialog
         open={deletingSession !== null}
         onOpenChange={(open) => {
-          if (!open) setDeletingSession(null)
+          if (!open && !changingSessions) setDeletingSession(null)
         }}
       >
-        <DialogContent className="rounded-xl">
-          <DialogHeader>
-            <DialogTitle>Delete “{deletingSession?.title}”?</DialogTitle>
-            <DialogDescription>
+        <AlertDialogContent
+          initialFocus={cancelDeleteButton}
+          finalFocus={() => deleteTrigger.current?.isConnected ? deleteTrigger.current : newSessionButton.current}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{deletingSession?.title}”?</AlertDialogTitle>
+            <AlertDialogDescription>
               This permanently deletes the conversation and its workspace files.
-            </DialogDescription>
-          </DialogHeader>
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && (
+            <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel ref={cancelDeleteButton} disabled={changingSessions}>Cancel</AlertDialogCancel>
             <Button
               variant="destructive"
               disabled={changingSessions || !deletingSession}
               onClick={async () => {
-                if (deletingSession && (await onDelete(deletingSession.id))) {
+                if (!deletingSession) return
+                setDeleteError('')
+                try {
+                  await onDelete(deletingSession.id)
                   setDeletingSession(null)
+                } catch (failure) {
+                  setDeleteError(errorMessage(failure))
                 }
               }}
             >
               Delete session
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </aside>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </ResponsivePanel>
   )
 }

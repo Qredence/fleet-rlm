@@ -1,8 +1,8 @@
 import { CircleAlert, Terminal } from 'lucide-react'
 import { useState } from 'react'
-import { CodeBlock, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine } from '@/components/ui/code-block'
+import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine, CodeBlockTitle } from '@/components/ui/code-block'
 import {
-  Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
+  Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceIcon, TraceLine, TraceTitle,
 } from '@/components/ui/trace'
 import { useHighlightedCode } from '@/hooks/use-highlighted-code'
 import type { FleetPart } from '@/lib/messages'
@@ -14,8 +14,8 @@ function PythonCode({ code }: { code: string }) {
   return (
     <CodeBlock size="sm">
       <CodeBlockHeader>
-        <span>Python</span>
-        <CodeBlockCopyButton value={code} />
+        <CodeBlockTitle>Python</CodeBlockTitle>
+        <CodeBlockActions><CodeBlockCopyButton value={code} /></CodeBlockActions>
       </CodeBlockHeader>
       <CodeBlockContent className="max-h-80" aria-label="Python source" data-language="python">
         {lines.map((line, index) => <CodeBlockLine key={index}>{line}</CodeBlockLine>)}
@@ -46,8 +46,8 @@ export function StackTrace({ error }: { error: string }) {
           </TraceLine>
         </TraceCollapsibleTrigger>
         <TraceCollapsibleContent>
-          <CodeBlock size="sm">
-            <CodeBlockContent wrap className="max-h-80 text-destructive" aria-label="Error traceback">{stack}</CodeBlockContent>
+          <CodeBlock size="sm" variant="destructive">
+            <CodeBlockContent wrap className="max-h-80" aria-label="Error traceback">{stack}</CodeBlockContent>
           </CodeBlock>
         </TraceCollapsibleContent>
       </TraceCollapsible>
@@ -66,23 +66,31 @@ export function PythonToolTrace({ part, live }: { part: PythonPart; live: boolea
   const stdout = typeof output === 'string' ? output : JSON.stringify(output, null, 2)
   const title = failed ? 'Python execution failed' : running ? 'Running Python' : pending ? 'Python execution interrupted' : 'Ran Python'
 
+  const line = (
+    <TraceLine status={failed ? 'error' : running ? 'running' : undefined}>
+      <TraceIcon><Terminal /></TraceIcon>
+      <TraceTitle>{title}</TraceTitle>
+      {running && !code && <TraceDescription>Waiting for Python source…</TraceDescription>}
+    </TraceLine>
+  )
+  if (!code && stdout === undefined && !failed) return line
+
   return (
     <TraceCollapsible open={open} onOpenChange={setOpen}>
-      <TraceCollapsibleTrigger>
-        <TraceLine status={failed ? 'error' : running ? 'running' : undefined}>
-          <TraceIcon><Terminal /></TraceIcon>
-          <TraceTitle>{title}</TraceTitle>
-        </TraceLine>
-      </TraceCollapsibleTrigger>
-      <TraceCollapsibleContent className="space-y-2">
-        {code ? <PythonCode code={code} /> : running && <p className="text-xs">Waiting for Python source…</p>}
-        {stdout !== undefined && (
-          <CodeBlock size="sm">
-            <CodeBlockHeader>{typeof output === 'string' ? 'Stdout' : 'Result'}</CodeBlockHeader>
-            <CodeBlockContent className="max-h-80" wrap>{stdout || 'No output'}</CodeBlockContent>
-          </CodeBlock>
-        )}
-        {failed && <StackTrace error={part.errorText} />}
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <div className="flex min-w-0 flex-col gap-2">
+          {code && <PythonCode code={code} />}
+          {stdout !== undefined && (
+            <CodeBlock size="sm">
+              <CodeBlockHeader>
+                <CodeBlockTitle>{typeof output === 'string' ? 'Stdout' : 'Result'}</CodeBlockTitle>
+              </CodeBlockHeader>
+              <CodeBlockContent className="max-h-80" wrap>{stdout || 'No output'}</CodeBlockContent>
+            </CodeBlock>
+          )}
+          {failed && <StackTrace error={part.errorText} />}
+        </div>
       </TraceCollapsibleContent>
     </TraceCollapsible>
   )

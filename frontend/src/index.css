@@ -142,12 +142,8 @@
 }
 
 @layer components {
-    .field {
-        @apply w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30;
-    }
-
     .markdown {
-        @apply space-y-2 text-sm leading-relaxed wrap-break-word;
+        @apply flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-break-word;
     }
 
     .markdown :is(h1, h2, h3, h4) {

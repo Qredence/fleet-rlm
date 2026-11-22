@@ -48,4 +48,5 @@ function Badge({
   })
 }
 
-export { Badge }
+// oxlint-disable react/only-export-components -- The shadcn registry exports helpers alongside these components.
+export { Badge, badgeVariants }

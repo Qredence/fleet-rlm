@@ -1,16 +1,23 @@
 import {
-  Brain, Check, FolderOpen, HardDrive, Pencil, RefreshCw, Trash2, Upload, X,
+  Brain, Check, FolderOpen, HardDrive, Pencil, RefreshCw, Trash2, Upload,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { cn } from 'cn'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia } from '@/components/ui/empty'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Textarea } from '@/components/ui/textarea'
 import {
   errorMessage, type FleetApi, type Memory, type MemoryEdit, type Session, type WorkspaceFile,
 } from '@/lib/api'
 import { FileTree } from './FileTree'
+import { ResponsivePanel, type PanelPresentation } from './ResponsivePanel'
 
 type MemoryFilter = 'all' | 'session' | 'pending'
 
@@ -27,6 +34,7 @@ function MemoryCard({
   api: FleetApi
   onChange: (memory: Memory | null) => void
 }) {
+  const contentId = useId()
   const [draft, setDraft] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [working, setWorking] = useState(false)
@@ -56,82 +64,81 @@ function MemoryCard({
       : 'Session'
 
   return (
-    <article
-      className={`grid gap-2.5 rounded-xl border p-3 transition-colors ${
-        memory.approved ? 'border-border bg-card' : 'border-foreground/20 bg-muted/50'
-      }`}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-1.5">
-        <Badge
-          variant={memory.approved ? 'secondary' : 'outline'}
-          className="rounded-full font-normal"
-        >
+    <Card size="sm" role="article">
+      <CardHeader>
+        <CardTitle>{scopeLabel}</CardTitle>
+        <Badge variant={memory.approved ? 'secondary' : 'outline'} className="w-fit">
           {memory.approved ? 'Approved' : 'Pending review'}
         </Badge>
-        <span className="text-[11px] text-muted-foreground">{scopeLabel}</span>
-      </div>
-
-      {draft !== null ? (
-        <form
-          className="grid gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (draft.trim()) void update({ content: draft.trim() })
-          }}
-        >
-          <Textarea
-            value={draft}
-            aria-label="Memory content"
-            className="min-h-20 rounded-xl text-xs"
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <div className="flex items-center gap-1.5">
-            <Button type="submit" size="xs" disabled={working || !draft.trim()}>Save</Button>
-            <Button type="button" variant="ghost" size="xs" disabled={working} onClick={() => setDraft(null)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <>
-          <p className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
-            {memory.content}
-          </p>
-          {deleting ? (
-            <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">
-              <span className="mr-auto text-xs text-muted-foreground">Delete memory?</span>
-              <Button variant="destructive" size="xs" disabled={working} onClick={() => void update(null)}>
-                Delete
-              </Button>
-              <Button variant="ghost" size="xs" disabled={working} onClick={() => setDeleting(false)}>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {draft !== null ? (
+          <form
+            className="grid gap-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (draft.trim()) void update({ content: draft.trim() })
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={contentId}>Memory content</FieldLabel>
+                <Textarea
+                  id={contentId}
+                  value={draft}
+                  className="min-h-20"
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+              </Field>
+            </FieldGroup>
+            <div className="flex items-center gap-1.5">
+              <Button type="submit" size="xs" disabled={working || !draft.trim()}>Save</Button>
+              <Button type="button" variant="ghost" size="xs" disabled={working} onClick={() => setDraft(null)}>
                 Cancel
               </Button>
             </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-1 pt-0.5">
-              {!memory.approved && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={working}
-                  onClick={() => void update({ approved: true })}
-                >
-                  <Check /> Approve
+          </form>
+        ) : (
+          <>
+            <p className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
+              {memory.content}
+            </p>
+            {deleting ? (
+              <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">
+                <span className="mr-auto text-xs text-muted-foreground">Delete memory?</span>
+                <Button variant="destructive" size="xs" disabled={working} onClick={() => void update(null)}>
+                  Delete
                 </Button>
-              )}
-              <Button size="xs" variant="ghost" disabled={working} onClick={() => setDraft(memory.content)}>
-                <Pencil /> Edit
-              </Button>
-              <Button size="xs" variant="ghost" disabled={working} onClick={() => setDeleting(true)}>
-                <Trash2 /> Delete
-              </Button>
-            </div>
-          )}
-        </>
-      )}
+                <Button variant="ghost" size="xs" disabled={working} onClick={() => setDeleting(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                {!memory.approved && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={working}
+                    onClick={() => void update({ approved: true })}
+                  >
+                    <Check data-icon="inline-start" /> Approve
+                  </Button>
+                )}
+                <Button size="xs" variant="ghost" disabled={working} onClick={() => setDraft(memory.content)}>
+                  <Pencil data-icon="inline-start" /> Edit
+                </Button>
+                <Button size="xs" variant="ghost" disabled={working} onClick={() => setDeleting(true)}>
+                  <Trash2 data-icon="inline-start" /> Delete
+                </Button>
+              </div>
+            )}
+          </>
+        )}
 
-      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-    </article>
+        {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -143,8 +150,7 @@ export interface WorkspaceSidePanelProps {
   uploading: boolean
   fileError: string
   memoryRefreshKey: number
-  open: boolean
-  onClose: () => void
+  presentation: PanelPresentation
   onUpload: (files: File[]) => void
   onDownload: (path: string) => void
 }
@@ -157,8 +163,7 @@ export function WorkspaceSidePanel({
   uploading,
   fileError,
   memoryRefreshKey,
-  open,
-  onClose,
+  presentation,
   onUpload,
   onDownload,
 }: WorkspaceSidePanelProps) {
@@ -246,228 +251,178 @@ export function WorkspaceSidePanel({
   const sandboxId = session?.daytona_sandbox_id ?? null
 
   return (
-    <>
-      {open && (
-        <div
-          aria-hidden="true"
-          className="fixed inset-0 z-20 bg-black/25 backdrop-blur-[1px] lg:hidden"
-          onClick={onClose}
-        />
-      )}
-      <aside
-        aria-label="Workspace panel"
-        className={`${
-          open ? 'flex' : 'hidden'
-        } fixed inset-y-0 right-0 z-30 h-full w-80 max-w-[calc(100vw-2rem)] flex-col border-l bg-sidebar text-sidebar-foreground shadow-xl lg:static lg:z-auto lg:h-auto lg:shrink-0 lg:shadow-none`}
+    <ResponsivePanel {...presentation} side="right" title="Files & Memories">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as 'files' | 'memories')}
+        className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as 'files' | 'memories')}
-          className="flex min-h-0 flex-1 flex-col gap-0"
-        >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-3 py-2.5">
-            <TabsList className="h-8 flex-1 rounded-xl p-0.5">
-              <TabsTrigger value="files" className="gap-1.5 rounded-lg text-xs">
-                <FolderOpen className="size-3.5" />
-                Files
-                <span className="rounded-full bg-muted px-1.5 py-0.2 font-mono text-[10px] tabular-nums text-muted-foreground">
-                  {files.length}
-                </span>
-              </TabsTrigger>
-              <TabsTrigger value="memories" className="gap-1.5 rounded-lg text-xs">
-                <Brain className="size-3.5" />
-                Memories
-                <span className="rounded-full bg-muted px-1.5 py-0.2 font-mono text-[10px] tabular-nums text-muted-foreground">
-                  {pendingCount > 0 ? `${pendingCount}` : (memories?.length ?? 0)}
-                </span>
-              </TabsTrigger>
-            </TabsList>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-3 py-2.5">
+          <TabsList className="w-full">
+            <TabsTrigger value="files">
+              <FolderOpen /> Files
+              <Badge variant="secondary">{files.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="memories">
+              <Brain /> Memories
+              <Badge variant="secondary">{pendingCount || (memories?.length ?? 0)}</Badge>
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="files" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="grid shrink-0 gap-2.5 p-3 pb-2">
+            <Card size="sm">
+              <CardHeader>
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <CardTitle>{sandboxId ? 'Sandbox active' : 'Starts on first run'}</CardTitle>
+                  <Badge variant="outline"><HardDrive data-icon="inline-start" /> /workspace</Badge>
+                </div>
+                <CardDescription className="truncate" title={sandboxId ?? undefined}>
+                  {sandboxId ? `Daytona · ${sandboxId}` : 'Daytona isolated sandbox · persistent volume'}
+                </CardDescription>
+              </CardHeader>
+            </Card>
+
+            <Empty
+              onDragEnter={(event) => {
+                event.preventDefault()
+                if (session && !uploading) setDragging(true)
+              }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                if (session && !uploading) setDragging(true)
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setDragging(false)
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                setDragging(false)
+                if (session && !uploading) handleFileList(event.dataTransfer.files)
+              }}
+              className={cn('gap-3 border border-dashed p-3', dragging && 'border-ring')}
+            >
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><Upload /></EmptyMedia>
+                <EmptyDescription>Drop files to upload to /workspace.</EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!session || uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {uploading ? 'Uploading…' : 'Upload files'}
+                </Button>
+              </EmptyContent>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                aria-label="Upload workspace file"
+                onChange={(event) => {
+                  handleFileList(event.target.files)
+                  event.target.value = ''
+                }}
+              />
+            </Empty>
+
+            {fileError && <Alert variant="destructive"><AlertDescription>{fileError}</AlertDescription></Alert>}
+          </div>
+
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="px-3 pb-3">
+              {files.length ? (
+                <FileTree files={files} download={onDownload} />
+              ) : (
+                <Empty className="border border-dashed p-4">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon"><FolderOpen /></EmptyMedia>
+                    <EmptyDescription role={filesLoading ? 'status' : undefined}>
+                      {filesLoading ? 'Loading files…' : 'No workspace files yet.'}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </div>
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="memories" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 items-center justify-between gap-1.5 px-3 pt-3 pb-2">
+            <ToggleGroup
+              aria-label="Filter memories"
+              size="sm"
+              variant="outline"
+              spacing={1}
+              className="flex-wrap"
+              value={[memoryFilter]}
+              onValueChange={([value]) => { if (value) setMemoryFilter(value as MemoryFilter) }}
+            >
+              <ToggleGroupItem value="all">All</ToggleGroupItem>
+              <ToggleGroupItem value="session" disabled={!session}>This session</ToggleGroupItem>
+              <ToggleGroupItem value="pending">
+                {pendingCount ? `Pending (${pendingCount})` : 'Pending'}
+              </ToggleGroupItem>
+            </ToggleGroup>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon-xs"
               variant="ghost"
-              className="shrink-0 lg:hidden"
-              aria-label="Close workspace panel"
-              onClick={onClose}
+              aria-label="Refresh memories"
+              disabled={memoriesLoading}
+              onClick={loadMemories}
             >
-              <X />
+              <RefreshCw className={memoriesLoading ? 'animate-spin' : ''} />
             </Button>
           </div>
 
-          <TabsContent value="files" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="grid shrink-0 gap-2.5 p-3 pb-2">
-              <div className="grid gap-1.5 rounded-xl border bg-card p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`size-2 shrink-0 rounded-full ${
-                        sandboxId ? 'bg-foreground' : 'bg-muted-foreground/35'
-                      }`}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-xs font-medium text-foreground">
-                      {sandboxId ? 'Sandbox active' : 'Starts on first run'}
-                    </span>
-                  </div>
-                  <Badge variant="outline" className="gap-1 rounded-full font-mono text-[10px]">
-                    <HardDrive className="size-2.5" />
-                    /workspace
-                  </Badge>
-                </div>
-                <p className="truncate font-mono text-[11px] text-muted-foreground" title={sandboxId ?? undefined}>
-                  {sandboxId ? `Daytona · ${sandboxId}` : 'Daytona isolated sandbox · persistent volume'}
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="grid gap-2 px-3 pb-3">
+              {memoryError ? (
+                <Alert variant="destructive"><AlertDescription>{memoryError}</AlertDescription></Alert>
+              ) : memories === null ? (
+                <p role="status" className="px-1 py-4 text-center text-xs text-muted-foreground">
+                  Loading memories…
                 </p>
-              </div>
-
-              <div
-                onDragEnter={(event) => {
-                  event.preventDefault()
-                  if (session && !uploading) setDragging(true)
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault()
-                  if (session && !uploading) setDragging(true)
-                }}
-                onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                    setDragging(false)
-                  }
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  setDragging(false)
-                  if (session && !uploading) handleFileList(event.dataTransfer.files)
-                }}
-                className={`rounded-xl border border-dashed transition-colors ${
-                  dragging
-                    ? 'border-foreground bg-muted/80'
-                    : 'border-border bg-card/60 hover:border-foreground/35 hover:bg-muted/40'
-                }`}
-              >
-                <button
-                  type="button"
-                  disabled={!session || uploading}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex w-full flex-col items-center justify-center gap-1 px-3 py-4 text-center outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Upload className="size-4 text-muted-foreground" />
-                  <span className="text-xs font-medium text-foreground">
-                    {uploading ? 'Uploading…' : 'Drop files or click to upload'}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    Mounted into /workspace for this session
-                  </span>
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  aria-label="Upload workspace file"
-                  onChange={(event) => {
-                    handleFileList(event.target.files)
-                    event.target.value = ''
-                  }}
-                />
-              </div>
-
-              {fileError && <p role="alert" className="text-xs text-destructive">{fileError}</p>}
-            </div>
-
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="px-3 pb-3">
-                {files.length ? (
-                  <FileTree files={files} download={onDownload} />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/70 px-4 py-8 text-center">
-                    <FolderOpen className="size-4 text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">
-                      {filesLoading ? 'Loading files…' : 'No workspace files yet.'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          </TabsContent>
-
-          <TabsContent value="memories" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between gap-1.5 px-3 pt-3 pb-2">
-              <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter memories">
-                {(
-                  [
-                    { id: 'all', label: 'All' },
-                    { id: 'session', label: 'This session', disabled: !session },
-                    { id: 'pending', label: pendingCount > 0 ? `Pending (${pendingCount})` : 'Pending' },
-                  ] as const
-                ).map((pill) => {
-                  const active = memoryFilter === pill.id
-                  return (
-                    <Button
-                      key={pill.id}
-                      type="button"
-                      size="xs"
-                      variant={active ? 'default' : 'outline'}
-                      aria-pressed={active}
-                      disabled={'disabled' in pill && pill.disabled}
-                      className="rounded-full"
-                      onClick={() => setMemoryFilter(pill.id)}
-                    >
-                      {pill.label}
-                    </Button>
-                  )
-                })}
-              </div>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Refresh memories"
-                disabled={memoriesLoading}
-                onClick={loadMemories}
-              >
-                <RefreshCw className={memoriesLoading ? 'animate-spin' : ''} />
-              </Button>
-            </div>
-
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="grid gap-2 px-3 pb-3">
-                {memoryError ? (
-                  <p role="alert" className="text-xs text-destructive">{memoryError}</p>
-                ) : memories === null ? (
-                  <p role="status" className="px-1 py-4 text-center text-xs text-muted-foreground">
-                    Loading memories…
-                  </p>
-                ) : !filteredMemories.length ? (
-                  <div className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/70 px-4 py-8 text-center">
-                    <Brain className="size-4 text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">
+              ) : !filteredMemories.length ? (
+                <Empty className="border border-dashed p-4">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon"><Brain /></EmptyMedia>
+                    <EmptyDescription>
                       {memoryFilter === 'pending'
                         ? 'No pending memory candidates.'
                         : memoryFilter === 'session'
                           ? 'No memories saved for this session.'
                           : 'No memories yet.'}
-                    </p>
-                  </div>
-                ) : (
-                  filteredMemories.map((memory) => (
-                    <MemoryCard
-                      key={memory.id}
-                      memory={memory}
-                      currentSessionId={session?.id}
-                      api={api}
-                      onChange={(updated) => {
-                        setMemories((current) =>
-                          current?.flatMap((item) => (item.id !== memory.id ? [item] : updated ? [updated] : [])) ?? null,
-                        )
-                      }}
-                    />
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </TabsContent>
-        </Tabs>
-      </aside>
-    </>
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                filteredMemories.map((memory) => (
+                  <MemoryCard
+                    key={memory.id}
+                    memory={memory}
+                    currentSessionId={session?.id}
+                    api={api}
+                    onChange={(updated) => {
+                      setMemories((current) =>
+                        current?.flatMap((item) => (item.id !== memory.id ? [item] : updated ? [updated] : [])) ?? null,
+                      )
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </TabsContent>
+      </Tabs>
+    </ResponsivePanel>
   )
 }

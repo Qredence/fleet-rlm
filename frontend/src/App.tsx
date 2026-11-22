@@ -1,17 +1,26 @@
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { ArrowUp, Moon, PanelLeft, PanelRight, Settings, Square, Sun, Terminal } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Moon, PanelLeft, PanelRight, Settings, Sun, Terminal } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import { ChatComposer } from '@/components/agent/ChatComposer'
 import { MessageParts } from '@/components/agent/MessageParts'
-import { SessionsSidebar, type SessionsSidebarProps } from '@/components/agent/SessionsSidebar'
+import type { PanelPresentation } from '@/components/agent/ResponsivePanel'
+import { SessionsSidebar } from '@/components/agent/SessionsSidebar'
 import { SettingsDialog } from '@/components/agent/SettingsDialog'
-import { SkillPicker } from '@/components/agent/SkillPicker'
 import { WorkspaceSidePanel } from '@/components/agent/WorkspaceSidePanel'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Bubble, BubbleContent } from '@/components/ui/bubble'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Message, MessageContent, MessageHeader } from '@/components/ui/message'
+import {
+  MessageScroller, MessageScrollerButton, MessageScrollerContent, MessageScrollerItem,
+  MessageScrollerProvider, MessageScrollerViewport,
+} from '@/components/ui/message-scroller'
 import { Separator } from '@/components/ui/separator'
-import { Textarea } from '@/components/ui/textarea'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useTheme } from '@/hooks/use-theme'
 import {
   bearerHeaders,
@@ -53,8 +62,6 @@ function Chat({
   const [pinned, setPinned] = useState<string[]>([])
   const [waitingForStop, setWaitingForStop] = useState(false)
   const activeRequest = useRef(false)
-  const viewport = useRef<HTMLDivElement>(null)
-  const followMessages = useRef(true)
 
   const consumeRecentStop = useCallback(() => {
     const stoppedAt = recentStops.current.get(session.id)
@@ -84,6 +91,7 @@ function Chat({
     },
   })
   const active = status === 'submitted' || status === 'streaming'
+  const latestPromptIndex = messages.findLastIndex((message) => message.role === 'user')
 
   const stopChat = useCallback(() => {
     recentStops.current.set(session.id, Date.now())
@@ -94,15 +102,8 @@ function Chat({
     if (activeRequest.current) stopChat()
   }, [stopChat])
 
-  useLayoutEffect(() => {
-    const element = viewport.current
-    if (element && followMessages.current) element.scrollTop = element.scrollHeight
-  }, [messages, status])
-
-  async function submit() {
-    const text = prompt.trim()
+  async function submit(text: string) {
     if (!text || active || activeRequest.current) return
-    followMessages.current = true
     setPrompt('')
     activeRequest.current = true
     try {
@@ -114,116 +115,87 @@ function Chat({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background" aria-label="Chat">
-      <div
-        ref={viewport}
-        className="flex-1 overflow-y-auto"
-        onScroll={(event) => {
-          const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
-          followMessages.current = scrollHeight - scrollTop - clientHeight < 56
-        }}
-      >
-        {messages.length ? (
-          <div className="mx-auto grid w-full max-w-3xl gap-7 px-4 py-7 sm:px-8" aria-label="Conversation">
-            {messages.map((message, index) => {
-              const user = message.role === 'user'
-              return (
-                <article
-                  key={message.id}
-                  aria-label={user ? 'You' : 'Fleet'}
-                  className={`min-w-0 ${
-                    user
-                      ? 'ml-auto max-w-[90%] rounded-2xl rounded-br-md border border-border bg-secondary/75 px-4 py-3 text-foreground sm:max-w-[80%]'
-                      : 'w-full'
-                  }`}
-                >
-                  {!user && (
-                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-tight text-foreground">
-                      <span className="inline-flex size-5 items-center justify-center rounded-md border bg-card text-foreground">
-                        <Terminal className="size-3" />
-                      </span>
-                      Fleet
-                    </div>
-                  )}
-                  <MessageParts
-                    parts={message.parts}
-                    live={!user && active && index === messages.length - 1}
-                    download={download}
-                  />
-                </article>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="flex h-full min-h-36 flex-col items-center justify-center gap-3 px-6 text-center">
-            <div className="rounded-2xl border bg-card p-3.5 text-foreground shadow-xs">
-              <Terminal className="size-5" />
-            </div>
-            <h2 className="text-xl font-semibold tracking-tight">Start a conversation</h2>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Ask Fleet a question, pin a skill with @, or drop files into the workspace panel.
-            </p>
-          </div>
-        )}
-      </div>
+      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+        <MessageScroller className="flex-1">
+          <MessageScrollerViewport>
+            <MessageScrollerContent className="mx-auto w-full max-w-3xl px-4 py-7 sm:px-8" aria-label="Conversation">
+              {messages.length ? messages.map((message, index) => {
+                const user = message.role === 'user'
+                return (
+                  <MessageScrollerItem
+                    key={message.id}
+                    messageId={message.id}
+                    scrollAnchor={user}
+                    // Measure the latest turn at its real height before positioning the saved transcript.
+                    className={latestPromptIndex >= 0 && index >= latestPromptIndex ? '[content-visibility:visible]' : undefined}
+                  >
+                    <Message align={user ? 'end' : 'start'} role="article" aria-label={user ? 'You' : 'Fleet'}>
+                      <MessageContent>
+                        {user ? (
+                          <Bubble variant="muted" align="end" className="max-w-[90%] sm:max-w-[80%]">
+                            <BubbleContent>
+                              <MessageParts parts={message.parts} download={download} />
+                            </BubbleContent>
+                          </Bubble>
+                        ) : (
+                          <>
+                            <MessageHeader className="gap-2 px-0">
+                              <Terminal className="size-4" aria-hidden="true" /> Fleet
+                            </MessageHeader>
+                            <MessageParts
+                              parts={message.parts}
+                              live={active && index === messages.length - 1}
+                              download={download}
+                            />
+                          </>
+                        )}
+                      </MessageContent>
+                    </Message>
+                  </MessageScrollerItem>
+                )
+              }) : (
+                <MessageScrollerItem className="flex flex-1 items-center">
+                  <Empty>
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon"><Terminal /></EmptyMedia>
+                      <EmptyTitle>Start a conversation</EmptyTitle>
+                      <EmptyDescription>
+                        Ask Fleet a question or drop files into the workspace panel.
+                        {skills.length > 0 && ' Type @ or open Skills to pin a skill for your next run.'}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                </MessageScrollerItem>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton aria-label="Jump to latest message" />
+        </MessageScroller>
+      </MessageScrollerProvider>
 
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-8 sm:pb-6">
+      <div className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-4 pb-4 sm:px-8 sm:pb-6">
         {error && (
-          <p
-            role="alert"
-            className="mb-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
-            {error.message}
-          </p>
+          <Alert variant="destructive"><AlertDescription>{error.message}</AlertDescription></Alert>
         )}
         {active && (
-          <p role="status" className="mb-2 px-1 text-xs text-muted-foreground">
+          <p role="status" className="px-1 text-xs text-muted-foreground">
             {waitingForStop ? 'Stopping previous run…' : status === 'submitted' ? 'Starting run…' : 'Run in progress…'}
           </p>
         )}
-        <form
-          className="grid gap-2 rounded-2xl border bg-card p-2.5 shadow-xs transition-colors focus-within:border-foreground/30"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submit()
-          }}
-        >
-          <Textarea
-            className="min-h-14 max-h-40 resize-none border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
-            aria-label="Message Fleet"
-            placeholder="Message Fleet…"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                void submit()
-              }
-            }}
-          />
-          <div className="flex min-w-0 items-end justify-between gap-2 px-1 pb-0.5">
-            <SkillPicker skills={skills} selected={pinned} onChange={setPinned} />
-            <div className="ml-auto shrink-0">
-              {active ? (
-                <Button type="button" size="sm" variant="outline" className="rounded-xl" onClick={stopChat}>
-                  <Square /> Stop
-                </Button>
-              ) : (
-                <Button type="submit" size="sm" className="rounded-xl" disabled={!prompt.trim()}>
-                  <ArrowUp /> Send
-                </Button>
-              )}
-            </div>
-          </div>
-        </form>
+        <ChatComposer
+          skills={skills}
+          pinned={pinned}
+          setPinned={setPinned}
+          value={prompt}
+          onValueChange={setPrompt}
+          onSubmit={submit}
+          onStop={stopChat}
+          loading={active}
+        />
       </div>
     </section>
   )
 }
-
-type SessionControls = Pick<
-  SessionsSidebarProps,
-  'sessions' | 'sessionsLoading' | 'changingSessions' | 'onCreate' | 'onRename' | 'onDelete' | 'onSelect'
->
 
 function SessionWorkspace({
   api,
@@ -231,11 +203,10 @@ function SessionWorkspace({
   session,
   skills,
   recentStops,
-  controls,
-  leftSidebarOpen,
-  onCloseLeftSidebar,
-  rightPanelOpen,
-  onCloseRightPanel,
+  sessionsLoading,
+  changingSessions,
+  onCreateSession,
+  workspacePanel,
   workspaceError,
   onRunComplete,
 }: {
@@ -244,11 +215,10 @@ function SessionWorkspace({
   session?: Session
   skills: Skill[]
   recentStops: StopTimes
-  controls: SessionControls
-  leftSidebarOpen: boolean
-  onCloseLeftSidebar: () => void
-  rightPanelOpen: boolean
-  onCloseRightPanel: () => void
+  sessionsLoading: boolean
+  changingSessions: boolean
+  onCreateSession: () => Promise<boolean>
+  workspacePanel: PanelPresentation
   workspaceError: string
   onRunComplete: () => void
 }) {
@@ -352,22 +322,7 @@ function SessionWorkspace({
   }, [refreshFiles, onRunComplete])
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      {leftSidebarOpen && (
-        <div
-          aria-hidden="true"
-          className="fixed inset-0 z-20 bg-black/25 backdrop-blur-[1px] md:hidden"
-          onClick={onCloseLeftSidebar}
-        />
-      )}
-      <div
-        className={`${
-          leftSidebarOpen ? 'flex' : 'hidden'
-        } fixed inset-y-0 left-0 z-30 w-64 border-r shadow-xl md:static md:z-auto md:shrink-0 md:shadow-none`}
-      >
-        <SessionsSidebar {...controls} session={session} error={workspaceError} />
-      </div>
-
+    <>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {session && messages ? (
           <Chat
@@ -382,24 +337,24 @@ function SessionWorkspace({
         ) : (
           <div className="grid flex-1 place-items-center px-5 text-center">
             {workspaceError || chatError ? (
-              <p role="alert" className="text-sm text-destructive">{workspaceError || chatError}</p>
-            ) : session || controls.sessionsLoading ? (
+              <Alert variant="destructive">
+                <AlertDescription>{workspaceError || chatError}</AlertDescription>
+              </Alert>
+            ) : session || sessionsLoading ? (
               <p role="status" className="text-sm text-muted-foreground">Loading workspace…</p>
             ) : (
-              <div className="grid justify-items-center gap-3">
-                <div className="rounded-2xl border bg-card p-3.5 shadow-xs">
-                  <Terminal className="size-5" />
-                </div>
-                <p className="text-sm text-muted-foreground">Create your first session to start running Fleet RLM.</p>
-                <Button
-                  variant="default"
-                  className="rounded-xl"
-                  disabled={controls.changingSessions}
-                  onClick={() => void controls.onCreate()}
-                >
-                  Create a session
-                </Button>
-              </div>
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><Terminal /></EmptyMedia>
+                  <EmptyTitle>Create your first session</EmptyTitle>
+                  <EmptyDescription>Start a session to run Fleet RLM.</EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button disabled={changingSessions} onClick={() => void onCreateSession()}>
+                    Create a session
+                  </Button>
+                </EmptyContent>
+              </Empty>
             )}
           </div>
         )}
@@ -413,12 +368,11 @@ function SessionWorkspace({
         uploading={uploading}
         fileError={fileError}
         memoryRefreshKey={memoryRefreshKey}
-        open={rightPanelOpen}
-        onClose={onCloseRightPanel}
+        presentation={workspacePanel}
         onUpload={(batch) => void uploadFiles(batch)}
         onDownload={download}
       />
-    </div>
+    </>
   )
 }
 
@@ -432,11 +386,26 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
   const [changingSessions, setChangingSessions] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
   const [skillsError, setSkillsError] = useState('')
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(() => window.matchMedia('(min-width: 768px)').matches)
-  const [rightPanelOpen, setRightPanelOpen] = useState(() => window.matchMedia('(min-width: 1024px)').matches)
+  const sessionsInline = useMediaQuery('(min-width: 48rem)')
+  const workspaceInline = useMediaQuery('(min-width: 64rem)')
+  const [sessionsRailOpen, setSessionsRailOpen] = useState(true)
+  const [workspaceRailOpen, setWorkspaceRailOpen] = useState(true)
+  const [mobilePanel, setMobilePanel] = useState<'sessions' | 'workspace' | null>(null)
+  const sessionsTrigger = useRef<HTMLButtonElement>(null)
+  const workspaceTrigger = useRef<HTMLButtonElement>(null)
+  const sessionsOpen = sessionsInline ? sessionsRailOpen : mobilePanel === 'sessions'
+  const workspaceOpen = workspaceInline ? workspaceRailOpen : mobilePanel === 'workspace'
   const [settingsOpen, setSettingsOpen] = useState(false)
   const recentStops = useRef(new Map<string, number>())
   const session = sessions.find((item) => item.id === sessionId)
+
+  if ((sessionsInline && mobilePanel === 'sessions') || (workspaceInline && mobilePanel === 'workspace')) {
+    setMobilePanel(null)
+  }
+
+  function closePanel(panel: 'sessions' | 'workspace') {
+    setMobilePanel((current) => current === panel ? null : current)
+  }
 
   const selectSession = useCallback((id: string) => {
     setSessionId(id)
@@ -488,7 +457,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
       const created = await api.createSession(title)
       setSessions((current) => [created, ...current])
       selectSession(created.id)
-      if (!window.matchMedia('(min-width: 768px)').matches) setLeftSidebarOpen(false)
+      closePanel('sessions')
       return true
     } catch (failure) {
       setWorkspaceError(errorMessage(failure))
@@ -528,10 +497,6 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
       if (sessionId === id) {
         selectSession(remaining[0]?.id ?? '')
       }
-      return true
-    } catch (failure) {
-      setWorkspaceError(errorMessage(failure))
-      return false
     } finally {
       setChangingSessions(false)
     }
@@ -545,10 +510,14 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
             type="button"
             size="icon-sm"
             variant="ghost"
-            className="rounded-xl"
+            ref={sessionsTrigger}
             aria-label="Toggle sessions sidebar"
-            aria-expanded={leftSidebarOpen}
-            onClick={() => setLeftSidebarOpen((open) => !open)}
+            aria-expanded={sessionsOpen}
+            aria-haspopup={sessionsInline ? undefined : 'dialog'}
+            onClick={() => {
+              if (sessionsInline) setSessionsRailOpen((open) => !open)
+              else setMobilePanel('sessions')
+            }}
           >
             <PanelLeft />
           </Button>
@@ -568,7 +537,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
                 {session.model_override && (
                   <Badge
                     variant="outline"
-                    className="max-w-48 truncate rounded-full font-mono text-[11px] font-normal"
+                    className="max-w-48 truncate"
                     title={`Session model override: ${session.model_override}`}
                   >
                     {session.model_override}
@@ -584,7 +553,6 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
             type="button"
             size="icon-sm"
             variant="ghost"
-            className="rounded-xl"
             aria-label={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             onClick={toggleTheme}
@@ -594,12 +562,16 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
           <Button
             type="button"
             size="icon-sm"
-            variant={rightPanelOpen ? 'secondary' : 'ghost'}
-            className="rounded-xl"
+            variant={workspaceOpen ? 'secondary' : 'ghost'}
+            ref={workspaceTrigger}
             aria-label="Toggle workspace panel"
-            aria-expanded={rightPanelOpen}
+            aria-expanded={workspaceOpen}
+            aria-haspopup={workspaceInline ? undefined : 'dialog'}
             title="Toggle Files & Memories panel"
-            onClick={() => setRightPanelOpen((open) => !open)}
+            onClick={() => {
+              if (workspaceInline) setWorkspaceRailOpen((open) => !open)
+              else setMobilePanel('workspace')
+            }}
           >
             <PanelRight />
           </Button>
@@ -607,49 +579,57 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
             type="button"
             size="sm"
             variant="ghost"
-            className="gap-1.5 rounded-xl"
             aria-label="Settings"
             onClick={() => setSettingsOpen(true)}
           >
-            <Settings />
+            <Settings data-icon="inline-start" />
             <span className="hidden sm:inline">Settings</span>
           </Button>
         </div>
       </header>
 
       {skillsError && !workspaceError && (
-        <p role="alert" className="border-b px-4 py-1.5 text-xs text-destructive">
-          {skillsError}
-        </p>
+        <Alert variant="destructive"><AlertDescription>{skillsError}</AlertDescription></Alert>
       )}
 
-      <SessionWorkspace
-        key={session?.id ?? 'empty'}
-        api={api}
-        token={token}
-        session={session}
-        skills={skills}
-        recentStops={recentStops}
-        leftSidebarOpen={leftSidebarOpen}
-        onCloseLeftSidebar={() => setLeftSidebarOpen(false)}
-        rightPanelOpen={rightPanelOpen}
-        onCloseRightPanel={() => setRightPanelOpen(false)}
-        workspaceError={workspaceError}
-        onRunComplete={refreshSessions}
-        controls={{
-          sessions,
-          sessionsLoading,
-          changingSessions,
-          onCreate: createSession,
-          onRename: renameSession,
-          onDelete: deleteSession,
-          onSelect: (id) => {
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <SessionsSidebar
+          session={session}
+          sessions={sessions}
+          sessionsLoading={sessionsLoading}
+          changingSessions={changingSessions}
+          error={workspaceError}
+          presentation={{
+            inline: sessionsInline, open: sessionsOpen,
+            onClose: () => closePanel('sessions'), triggerRef: sessionsTrigger,
+          }}
+          onCreate={createSession}
+          onRename={renameSession}
+          onDelete={deleteSession}
+          onSelect={(id) => {
             setWorkspaceError('')
             selectSession(id)
-            if (!window.matchMedia('(min-width: 768px)').matches) setLeftSidebarOpen(false)
-          },
-        }}
-      />
+            closePanel('sessions')
+          }}
+        />
+        <SessionWorkspace
+          key={session?.id ?? 'empty'}
+          api={api}
+          token={token}
+          session={session}
+          skills={skills}
+          recentStops={recentStops}
+          sessionsLoading={sessionsLoading}
+          changingSessions={changingSessions}
+          onCreateSession={createSession}
+          workspacePanel={{
+            inline: workspaceInline, open: workspaceOpen,
+            onClose: () => closePanel('workspace'), triggerRef: workspaceTrigger,
+          }}
+          workspaceError={workspaceError}
+          onRunComplete={refreshSessions}
+        />
+      </div>
 
       <SettingsDialog
         open={settingsOpen}
