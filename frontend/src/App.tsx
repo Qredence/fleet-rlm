@@ -256,30 +256,39 @@ function SessionWorkspace({
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null)
   const [chatError, setChatError] = useState('')
   const [fileError, setFileError] = useState('')
-  const [uploading, setUploading] = useState(false)
+  const [pendingUploads, setPendingUploads] = useState(0)
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const fileRequest = useRef<AbortController | null>(null)
   const sessionId = session?.id
+  const uploading = pendingUploads > 0
 
   useEffect(() => {
     if (!sessionId) return
     const request = new AbortController()
     void api.getMessages(sessionId, request.signal)
-      .then(setMessages)
+      .then((items) => {
+        if (!request.signal.aborted) {
+          setMessages(items)
+          setChatError('')
+        }
+      })
       .catch((failure) => {
         if (!request.signal.aborted) setChatError(errorMessage(failure))
       })
     return () => request.abort()
   }, [api, sessionId])
 
-  const refreshFiles = useCallback(() => {
+  const refreshFiles = useCallback((options?: { preserveError?: boolean }) => {
     if (!sessionId) return
     fileRequest.current?.abort()
     const request = new AbortController()
     fileRequest.current = request
     void api.listFiles(sessionId, request.signal)
       .then((result) => {
-        if (!request.signal.aborted) setFiles(result)
+        if (!request.signal.aborted) {
+          setFiles(result)
+          if (!options?.preserveError) setFileError('')
+        }
       })
       .catch((failure) => {
         if (!request.signal.aborted) {
@@ -294,18 +303,39 @@ function SessionWorkspace({
     return () => fileRequest.current?.abort()
   }, [refreshFiles])
 
-  async function upload(file: File) {
-    if (!sessionId) return
-    setUploading(true)
+  async function uploadFiles(batch: File[]) {
+    if (!sessionId || batch.length === 0) return
+    setPendingUploads((count) => count + 1)
     setFileError('')
+    let uploadedAny = false
+    let needsSandboxRefresh = !session?.daytona_sandbox_id
+    const errors: string[] = []
     try {
-      const record = await api.uploadFile(sessionId, file)
-      setFiles((current) => [...(current ?? []).filter((item) => item.path !== record.path), record])
-      if (!fileRequest.current?.signal.aborted) refreshFiles()
-    } catch (failure) {
-      setFileError(errorMessage(failure))
+      for (const file of batch) {
+        if (fileRequest.current?.signal.aborted) break
+        try {
+          const record = await api.uploadFile(sessionId, file)
+          uploadedAny = true
+          if (!fileRequest.current?.signal.aborted) {
+            setFiles((current) => [...(current ?? []).filter((item) => item.path !== record.path), record])
+          }
+          if (needsSandboxRefresh) {
+            needsSandboxRefresh = false
+            onRunComplete()
+          }
+        } catch (failure) {
+          const message = errorMessage(failure)
+          errors.push(batch.length > 1 ? `${file.name}: ${message}` : message)
+        }
+      }
+      if (uploadedAny && !fileRequest.current?.signal.aborted) {
+        refreshFiles({ preserveError: errors.length > 0 })
+      }
+      if (errors.length && !fileRequest.current?.signal.aborted) {
+        setFileError(errors.join(' · '))
+      }
     } finally {
-      setUploading(false)
+      setPendingUploads((count) => Math.max(0, count - 1))
     }
   }
 
@@ -385,7 +415,7 @@ function SessionWorkspace({
         memoryRefreshKey={memoryRefreshKey}
         open={rightPanelOpen}
         onClose={onCloseRightPanel}
-        onUpload={(file) => void upload(file)}
+        onUpload={(batch) => void uploadFiles(batch)}
         onDownload={download}
       />
     </div>
@@ -427,6 +457,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
     void api.listSessions(request.signal)
       .then((items) => {
         if (request.signal.aborted) return
+        setWorkspaceError('')
         setSessions(items)
         const saved = localStorage.getItem(sessionKey)
         selectSession(items.find((item) => item.id === saved)?.id ?? items[0]?.id ?? '')
@@ -438,7 +469,12 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
         if (!request.signal.aborted) setSessionsLoading(false)
       })
     void api.listSkills(request.signal)
-      .then(setSkills)
+      .then((items) => {
+        if (!request.signal.aborted) {
+          setSkillsError('')
+          setSkills(items)
+        }
+      })
       .catch((failure) => {
         if (!request.signal.aborted) setSkillsError(`Skills: ${errorMessage(failure)}`)
       })
@@ -620,7 +656,12 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
         onOpenChange={setSettingsOpen}
         api={api}
         token={token}
-        onTokenChange={onTokenChange}
+        onTokenChange={(value) => {
+          setSessionsLoading(true)
+          setWorkspaceError('')
+          setSkillsError('')
+          onTokenChange(value)
+        }}
         theme={theme}
         systemTheme={systemTheme}
         onThemeChange={setTheme}
@@ -635,7 +676,6 @@ export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem(tokenKey) ?? '')
   return (
     <Workspace
-      key={token}
       token={token}
       onTokenChange={(value) => {
         if (value) sessionStorage.setItem(tokenKey, value)

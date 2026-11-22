@@ -1,26 +1,10 @@
 import { ChevronRight, Download, FileText, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { buildFileTree, formatFileSize, type FileTreeNodeData } from '@/lib/file-tree'
 import type { WorkspaceFileEntry } from '@/lib/messages'
 
-type TreeNode =
-  | { type: 'folder'; name: string; children: Map<string, TreeNode> }
-  | { type: 'file'; name: string; path: string; sizeBytes: number }
-
-function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB']
-  let value = bytes / 1024
-  let unitIndex = 0
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`
-}
-
-function FileTreeNode({ node, download }: { node: TreeNode; download: (path: string) => void }) {
+function FileTreeNode({ node, download }: { node: FileTreeNodeData; download: (path: string) => void }) {
   if (node.type === 'file') {
     return (
       <Button
@@ -66,21 +50,7 @@ function FileTreeNode({ node, download }: { node: TreeNode; download: (path: str
 }
 
 export function FileTree({ files, download }: { files: WorkspaceFileEntry[]; download: (path: string) => void }) {
-  const roots = new Map<string, TreeNode>()
-  for (const { path, size_bytes } of files) {
-    const segments = path.split('/')
-    const name = segments.pop()!
-    let level = roots
-    for (const segment of segments) {
-      let folder = level.get(segment)
-      if (folder?.type !== 'folder') {
-        folder = { type: 'folder', name: segment, children: new Map() }
-        level.set(segment, folder)
-      }
-      level = folder.children
-    }
-    level.set(name, { type: 'file', name, path, sizeBytes: size_bytes })
-  }
+  const roots = buildFileTree(files)
   return (
     <div className="grid min-w-0 gap-0.5">
       {[...roots].map(([name, node]) => <FileTreeNode key={name} node={node} download={download} />)}

@@ -39,27 +39,28 @@ export interface WorkspaceSettingsFields {
   llm_model: string
   sub_llm_model: string
   decision_model: string
-  llm_base_url: string | null
   rlm_max_iters: number
   rlm_max_llm_calls: number
   rlm_max_depth: number
   rlm_max_output_chars: number
   history_max_turns: number
   history_max_chars: number
-  daytona_snapshot: string
   daytona_target: string | null
   daytona_auto_stop_minutes: number
   daytona_exec_timeout_seconds: number
-  mlflow_experiment: string
 }
 
 export interface WorkspaceSettingsStatus {
   database_configured: boolean
   daytona_configured: boolean
   daytona_volume_id: string
+  daytona_snapshot: string
   llm_api_key_configured: boolean
+  llm_base_url: string | null
   bearer_auth_enabled: boolean
+  max_concurrent_turns_per_worker: number
   mlflow_tracking_uri: string | null
+  mlflow_experiment: string
   optimized_program_path: string | null
   skill_selector_path: string | null
   memory_gate_path: string | null

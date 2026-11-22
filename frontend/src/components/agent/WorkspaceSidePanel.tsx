@@ -14,6 +14,8 @@ import { FileTree } from './FileTree'
 
 type MemoryFilter = 'all' | 'session' | 'pending'
 
+const MEMORY_FOLLOW_UP_DELAYS_MS = [2500, 6000] as const
+
 function MemoryCard({
   memory,
   currentSessionId,
@@ -143,7 +145,7 @@ export interface WorkspaceSidePanelProps {
   memoryRefreshKey: number
   open: boolean
   onClose: () => void
-  onUpload: (file: File) => void
+  onUpload: (files: File[]) => void
   onDownload: (path: string) => void
 }
 
@@ -168,11 +170,15 @@ export function WorkspaceSidePanel({
   const [memoryFilter, setMemoryFilter] = useState<MemoryFilter>('all')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const memoryRequestRef = useRef<AbortController | null>(null)
+  const sessionId = session?.id
 
   const fetchMemories = useCallback((signal?: AbortSignal) => {
     void api.listMemories({}, signal)
       .then((items) => {
-        if (!signal?.aborted) setMemories(items)
+        if (!signal?.aborted) {
+          setMemories(items)
+          setMemoryError('')
+        }
       })
       .catch((failure) => {
         if (!signal?.aborted) setMemoryError(errorMessage(failure))
@@ -192,12 +198,28 @@ export function WorkspaceSidePanel({
   }, [fetchMemories])
 
   useEffect(() => {
-    memoryRequestRef.current?.abort()
-    const request = new AbortController()
-    memoryRequestRef.current = request
-    fetchMemories(request.signal)
-    return () => request.abort()
-  }, [fetchMemories, memoryRefreshKey])
+    const runRefresh = () => {
+      memoryRequestRef.current?.abort()
+      const request = new AbortController()
+      memoryRequestRef.current = request
+      fetchMemories(request.signal)
+    }
+
+    runRefresh()
+
+    const timers: number[] = []
+    if (memoryRefreshKey > 0) {
+      for (const delay of MEMORY_FOLLOW_UP_DELAYS_MS) {
+        timers.push(window.setTimeout(runRefresh, delay))
+      }
+    }
+
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer)
+      memoryRequestRef.current?.abort()
+      memoryRequestRef.current = null
+    }
+  }, [fetchMemories, memoryRefreshKey, sessionId])
 
   const pendingCount = useMemo(
     () => (memories ?? []).filter((item) => !item.approved).length,
@@ -217,9 +239,8 @@ export function WorkspaceSidePanel({
 
   function handleFileList(list: FileList | null) {
     if (!list || !session) return
-    for (const file of Array.from(list)) {
-      onUpload(file)
-    }
+    const selected = Array.from(list)
+    if (selected.length > 0) onUpload(selected)
   }
 
   const sandboxId = session?.daytona_sandbox_id ?? null
@@ -331,7 +352,7 @@ export function WorkspaceSidePanel({
                 >
                   <Upload className="size-4 text-muted-foreground" />
                   <span className="text-xs font-medium text-foreground">
-                    {uploading ? 'Uploading file…' : 'Drop files or click to upload'}
+                    {uploading ? 'Uploading…' : 'Drop files or click to upload'}
                   </span>
                   <span className="text-[11px] text-muted-foreground">
                     Mounted into /workspace for this session

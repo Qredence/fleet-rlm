@@ -1,7 +1,7 @@
 import {
   Activity, Box, Cpu, Eye, EyeOff, KeyRound, Laptop, Moon, RefreshCw, RotateCcw, SlidersHorizontal, Sun,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,67 +19,15 @@ import {
   type WorkspaceSettingsFields,
   type WorkspaceSettingsView,
 } from '@/lib/api'
+import {
+  buildSettingsPatch,
+  hasDraftChanges,
+  NUMERIC_FIELDS,
+  toDraft,
+  type SettingsDraft,
+} from '@/lib/settings-draft'
 
 type SettingsTab = 'general' | 'models' | 'limits' | 'sandbox'
-
-type NumericFieldKey =
-  | 'rlm_max_iters'
-  | 'rlm_max_llm_calls'
-  | 'rlm_max_depth'
-  | 'rlm_max_output_chars'
-  | 'history_max_turns'
-  | 'history_max_chars'
-  | 'daytona_auto_stop_minutes'
-  | 'daytona_exec_timeout_seconds'
-
-interface SettingsDraft {
-  llm_model: string
-  sub_llm_model: string
-  decision_model: string
-  llm_base_url: string
-  rlm_max_iters: string
-  rlm_max_llm_calls: string
-  rlm_max_depth: string
-  rlm_max_output_chars: string
-  history_max_turns: string
-  history_max_chars: string
-  daytona_snapshot: string
-  daytona_target: string
-  daytona_auto_stop_minutes: string
-  daytona_exec_timeout_seconds: string
-  mlflow_experiment: string
-}
-
-function toDraft(fields: WorkspaceSettingsFields): SettingsDraft {
-  return {
-    llm_model: fields.llm_model,
-    sub_llm_model: fields.sub_llm_model,
-    decision_model: fields.decision_model,
-    llm_base_url: fields.llm_base_url ?? '',
-    rlm_max_iters: String(fields.rlm_max_iters),
-    rlm_max_llm_calls: String(fields.rlm_max_llm_calls),
-    rlm_max_depth: String(fields.rlm_max_depth),
-    rlm_max_output_chars: String(fields.rlm_max_output_chars),
-    history_max_turns: String(fields.history_max_turns),
-    history_max_chars: String(fields.history_max_chars),
-    daytona_snapshot: fields.daytona_snapshot,
-    daytona_target: fields.daytona_target ?? '',
-    daytona_auto_stop_minutes: String(fields.daytona_auto_stop_minutes),
-    daytona_exec_timeout_seconds: String(fields.daytona_exec_timeout_seconds),
-    mlflow_experiment: fields.mlflow_experiment,
-  }
-}
-
-const NUMERIC_FIELDS: { key: NumericFieldKey; label: string; min: number }[] = [
-  { key: 'rlm_max_iters', label: 'Max RLM iterations', min: 1 },
-  { key: 'rlm_max_llm_calls', label: 'Max LLM calls', min: 1 },
-  { key: 'rlm_max_depth', label: 'Max recursion depth', min: 1 },
-  { key: 'rlm_max_output_chars', label: 'Max output chars', min: 100 },
-  { key: 'history_max_turns', label: 'History max turns', min: 1 },
-  { key: 'history_max_chars', label: 'History max chars', min: 500 },
-  { key: 'daytona_auto_stop_minutes', label: 'Sandbox auto-stop (minutes)', min: 1 },
-  { key: 'daytona_exec_timeout_seconds', label: 'Execution timeout (seconds)', min: 5 },
-]
 
 function FieldRow({
   label,
@@ -108,11 +56,23 @@ function FieldRow({
   )
 }
 
-function StatusTile({ label, value, detail }: { label: string; value: string; detail?: string | null }) {
+function StatusTile({
+  label,
+  value,
+  detail,
+  className,
+}: {
+  label: string
+  value: string
+  detail?: string | null
+  className?: string
+}) {
   return (
-    <div className="grid gap-0.5 rounded-xl border bg-card p-3">
+    <div className={`grid min-w-0 gap-0.5 rounded-xl border bg-card p-3${className ? ` ${className}` : ''}`}>
       <span className="text-[11px] text-muted-foreground">{label}</span>
-      <span className="text-xs font-medium text-foreground">{value}</span>
+      <span className="truncate text-xs font-medium text-foreground" title={value}>
+        {value}
+      </span>
       {detail && (
         <span className="truncate font-mono text-[11px] text-muted-foreground" title={detail}>
           {detail}
@@ -148,7 +108,7 @@ function SettingsDialogBody({
   const [tab, setTab] = useState<SettingsTab>('general')
   const [settingsView, setSettingsView] = useState<WorkspaceSettingsView | null>(null)
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
-  const [sessionModelDraft, setSessionModelDraft] = useState(session?.model_override ?? '')
+  const [sessionModelDraft, setSessionModelDraft] = useState<string | null>(null)
   const [tokenDraft, setTokenDraft] = useState(token)
   const [showToken, setShowToken] = useState(false)
   const [readyStatus, setReadyStatus] = useState<'checking' | 'ready' | 'error'>('checking')
@@ -158,27 +118,39 @@ function SettingsDialogBody({
   const [resetting, setResetting] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const settingsRequestRef = useRef<AbortController | null>(null)
+  const effectiveRef = useRef<WorkspaceSettingsFields | null>(null)
+  const sessionModelValue = sessionModelDraft ?? (session?.model_override ?? '')
 
-  const fetchStatusAndSettings = useCallback((signal?: AbortSignal) => {
+  const fetchStatusAndSettings = useCallback((signal: AbortSignal) => {
     void api.getSettings(signal)
       .then((view) => {
-        if (signal?.aborted) return
+        if (signal.aborted) return
+        const previousEffective = effectiveRef.current
+        effectiveRef.current = view.effective
+        setError('')
         setSettingsView(view)
-        setDraft(toDraft(view.effective))
+        setDraft((current) => {
+          if (!current || !previousEffective) return toDraft(view.effective)
+          return hasDraftChanges(previousEffective, current) ? current : toDraft(view.effective)
+        })
       })
       .catch((failure) => {
-        if (!signal?.aborted) setError(errorMessage(failure))
+        if (!signal.aborted) setError(errorMessage(failure))
       })
       .finally(() => {
-        if (!signal?.aborted) setLoading(false)
+        if (!signal.aborted) setLoading(false)
       })
 
     void api.readiness(signal)
       .then(() => {
-        if (!signal?.aborted) setReadyStatus('ready')
+        if (!signal.aborted) {
+          setReadyStatus('ready')
+          setReadyError('')
+        }
       })
       .catch((failure) => {
-        if (!signal?.aborted) {
+        if (!signal.aborted) {
           setReadyStatus('error')
           setReadyError(errorMessage(failure))
         }
@@ -186,17 +158,26 @@ function SettingsDialogBody({
   }, [api])
 
   const loadSettings = useCallback(() => {
+    settingsRequestRef.current?.abort()
+    const request = new AbortController()
+    settingsRequestRef.current = request
     setLoading(true)
     setError('')
     setReadyStatus('checking')
     setReadyError('')
-    fetchStatusAndSettings()
+    fetchStatusAndSettings(request.signal)
   }, [fetchStatusAndSettings])
 
   useEffect(() => {
+    settingsRequestRef.current?.abort()
     const request = new AbortController()
+    settingsRequestRef.current = request
     fetchStatusAndSettings(request.signal)
-    return () => request.abort()
+    return () => {
+      request.abort()
+      settingsRequestRef.current?.abort()
+      settingsRequestRef.current = null
+    }
   }, [fetchStatusAndSettings])
 
   function updateField<K extends keyof SettingsDraft>(key: K, value: string) {
@@ -205,52 +186,13 @@ function SettingsDialogBody({
     setDraft((current) => (current ? { ...current, [key]: value } : current))
   }
 
-  function buildPatch(): { patch: Partial<WorkspaceSettingsFields>; validationError?: string } {
-    if (!settingsView || !draft) return { patch: {} }
-    const eff = settingsView.effective
-    const patch: Partial<WorkspaceSettingsFields> = {}
-
-    const trimmedStringKeys = [
-      'llm_model',
-      'sub_llm_model',
-      'decision_model',
-      'daytona_snapshot',
-      'mlflow_experiment',
-    ] as const
-
-    for (const key of trimmedStringKeys) {
-      const value = draft[key].trim()
-      if (!value) return { patch: {}, validationError: `${key} cannot be empty.` }
-      if (value !== eff[key]) patch[key] = value
-    }
-
-    const nullableStringKeys = ['llm_base_url', 'daytona_target'] as const
-    for (const key of nullableStringKeys) {
-      const trimmed = draft[key].trim()
-      const next = trimmed ? trimmed : null
-      if (next !== eff[key]) patch[key] = next
-    }
-
-    for (const { key, label, min } of NUMERIC_FIELDS) {
-      const parsed = Number(draft[key])
-      if (!Number.isInteger(parsed) || parsed < min) {
-        return { patch: {}, validationError: `${label} must be an integer ≥ ${min}.` }
-      }
-      if (parsed !== eff[key]) patch[key] = parsed
-    }
-
-    return { patch }
-  }
-
   const sessionOverrideChanged = Boolean(
-    session && (sessionModelDraft.trim() || null) !== (session.model_override ?? null),
+    session && (sessionModelValue.trim() || null) !== (session.model_override ?? null),
   )
 
-  const hasSettingsChanges = (() => {
-    if (!settingsView || !draft) return false
-    const eff = toDraft(settingsView.effective)
-    return (Object.keys(eff) as (keyof SettingsDraft)[]).some((key) => eff[key] !== draft[key])
-  })()
+  const hasSettingsChanges = Boolean(
+    settingsView && draft && hasDraftChanges(settingsView.effective, draft),
+  )
 
   const hasChanges = hasSettingsChanges || sessionOverrideChanged
   const hasOverrides = Boolean(settingsView && Object.keys(settingsView.overrides).length > 0)
@@ -261,7 +203,8 @@ function SettingsDialogBody({
     setError('')
     setNotice('')
 
-    const { patch, validationError } = buildPatch()
+    const { patch, validationError } =
+      settingsView && draft ? buildSettingsPatch(settingsView.effective, draft) : { patch: {} }
     if (validationError) {
       setError(validationError)
       return
@@ -271,16 +214,18 @@ function SettingsDialogBody({
     try {
       if (Object.keys(patch).length > 0) {
         const updated = await api.updateSettings(patch)
+        effectiveRef.current = updated.effective
         setSettingsView(updated)
         setDraft(toDraft(updated.effective))
       }
       if (session && sessionOverrideChanged) {
-        const nextOverride = sessionModelDraft.trim() || null
+        const nextOverride = sessionModelValue.trim() || null
         const ok = await onUpdateSession(session.id, { model_override: nextOverride })
         if (!ok) {
           setError('Failed to update session model override.')
           return
         }
+        setSessionModelDraft(null)
       }
       setNotice('Settings saved.')
     } catch (failure) {
@@ -296,6 +241,7 @@ function SettingsDialogBody({
     setNotice('')
     try {
       const reset = await api.resetSettings()
+      effectiveRef.current = reset.effective
       setSettingsView(reset)
       setDraft(toDraft(reset.effective))
       setNotice('Reset workspace settings to .env defaults.')
@@ -431,7 +377,9 @@ function SettingsDialogBody({
                       className="h-9 rounded-xl"
                       disabled={tokenDraft.trim() === token}
                       onClick={() => {
-                        onTokenChange(tokenDraft.trim())
+                        const cleaned = tokenDraft.trim()
+                        setTokenDraft(cleaned)
+                        onTokenChange(cleaned)
                         setNotice('API bearer token updated for this tab.')
                       }}
                     >
@@ -504,6 +452,12 @@ function SettingsDialogBody({
                         label="Registered Skills"
                         value={`${status.skills_count} ${status.skills_count === 1 ? 'skill' : 'skills'}`}
                       />
+                      <StatusTile
+                        label="Max Concurrent Turns / Worker (.env-managed)"
+                        value={`${status.max_concurrent_turns_per_worker} ${status.max_concurrent_turns_per_worker === 1 ? 'turn' : 'turns'}`}
+                        detail="Read-only · FLEET_MAX_CONCURRENT_TURNS_PER_WORKER"
+                        className="sm:col-span-2"
+                      />
                       <div className="grid gap-1.5 rounded-xl border bg-card p-3 sm:col-span-2">
                         <span className="text-[11px] text-muted-foreground">Loaded Optimization Artifacts</span>
                         <dl className="grid gap-1 font-mono text-[11px]">
@@ -537,7 +491,8 @@ function SettingsDialogBody({
                       <div>
                         <h3 className="text-sm font-medium">Global Workspace Models</h3>
                         <p className="text-xs text-muted-foreground">
-                          Persisted in Neon Postgres across workers. Leave blank on optional fields to inherit defaults.
+                          Persisted in Neon Postgres across workers. Endpoint base URL is read-only and managed via{' '}
+                          <code className="font-mono">.env</code>.
                         </p>
                       </div>
                       <FieldRow
@@ -573,18 +528,13 @@ function SettingsDialogBody({
                           className="h-9 rounded-xl font-mono text-xs"
                         />
                       </FieldRow>
-                      <FieldRow
-                        label="LLM Base URL"
-                        hint={`Default: ${defaults.llm_base_url ?? 'None (provider default)'}`}
-                        overridden={'llm_base_url' in overrides}
-                      >
-                        <Input
-                          value={draft.llm_base_url}
-                          placeholder="https://api.example.com/v1 (optional)"
-                          onChange={(event) => updateField('llm_base_url', event.target.value)}
-                          className="h-9 rounded-xl font-mono text-xs"
+                      {status && (
+                        <StatusTile
+                          label="LLM Base URL (.env-managed · read-only)"
+                          value={status.llm_base_url ?? 'Provider default'}
+                          detail="Configured via FLEET_LLM_BASE_URL in .env"
                         />
-                      </FieldRow>
+                      )}
                     </div>
 
                     {session && (
@@ -598,7 +548,7 @@ function SettingsDialogBody({
                                 Overrides the primary LLM only for “{session.title}”.
                               </p>
                             </div>
-                            {sessionModelDraft.trim() && (
+                            {sessionModelValue.trim() && (
                               <Button
                                 type="button"
                                 size="xs"
@@ -615,7 +565,7 @@ function SettingsDialogBody({
                             overridden={Boolean(session.model_override)}
                           >
                             <Input
-                              value={sessionModelDraft}
+                              value={sessionModelValue}
                               placeholder={draft.llm_model}
                               onChange={(event) => {
                                 setNotice('')
@@ -645,16 +595,17 @@ function SettingsDialogBody({
                       </p>
                     </div>
                     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      {NUMERIC_FIELDS.slice(0, 6).map(({ key, label, min }) => (
+                      {NUMERIC_FIELDS.slice(0, 6).map(({ key, label, min, max }) => (
                         <FieldRow
                           key={key}
                           label={label}
-                          hint={`Default: ${defaults[key]}`}
+                          hint={`Default: ${defaults[key]} · Range: ${min}–${max}`}
                           overridden={key in overrides}
                         >
                           <Input
                             type="number"
                             min={min}
+                            max={max}
                             step={1}
                             value={draft[key]}
                             onChange={(event) => updateField(key, event.target.value)}
@@ -677,21 +628,11 @@ function SettingsDialogBody({
                     <div>
                       <h3 className="text-sm font-medium">Daytona Sandbox &amp; MLflow Tracing</h3>
                       <p className="text-xs text-muted-foreground">
-                        Controls newly spawned Daytona sandboxes and the MLflow experiment name.
+                        Controls newly spawned Daytona sandboxes. Snapshot and MLflow experiment are read-only and
+                        managed via <code className="font-mono">.env</code>.
                       </p>
                     </div>
                     <div className="grid gap-3.5">
-                      <FieldRow
-                        label="Daytona Snapshot"
-                        hint={`Default: ${defaults.daytona_snapshot}`}
-                        overridden={'daytona_snapshot' in overrides}
-                      >
-                        <Input
-                          value={draft.daytona_snapshot}
-                          onChange={(event) => updateField('daytona_snapshot', event.target.value)}
-                          className="h-9 rounded-xl font-mono text-xs"
-                        />
-                      </FieldRow>
                       <FieldRow
                         label="Daytona Target Region"
                         hint={`Default: ${defaults.daytona_target ?? 'None (provider default)'}`}
@@ -705,16 +646,17 @@ function SettingsDialogBody({
                         />
                       </FieldRow>
                       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                        {NUMERIC_FIELDS.slice(6).map(({ key, label, min }) => (
+                        {NUMERIC_FIELDS.slice(6).map(({ key, label, min, max }) => (
                           <FieldRow
                             key={key}
                             label={label}
-                            hint={`Default: ${defaults[key]}`}
+                            hint={`Default: ${defaults[key]} · Range: ${min}–${max}`}
                             overridden={key in overrides}
                           >
                             <Input
                               type="number"
                               min={min}
+                              max={max}
                               step={1}
                               value={draft[key]}
                               onChange={(event) => updateField(key, event.target.value)}
@@ -723,17 +665,20 @@ function SettingsDialogBody({
                           </FieldRow>
                         ))}
                       </div>
-                      <FieldRow
-                        label="MLflow Experiment"
-                        hint={`Default: ${defaults.mlflow_experiment}`}
-                        overridden={'mlflow_experiment' in overrides}
-                      >
-                        <Input
-                          value={draft.mlflow_experiment}
-                          onChange={(event) => updateField('mlflow_experiment', event.target.value)}
-                          className="h-9 rounded-xl font-mono text-xs"
-                        />
-                      </FieldRow>
+                      {status && (
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <StatusTile
+                            label="Daytona Snapshot (.env-managed · read-only)"
+                            value={status.daytona_snapshot}
+                            detail="Configured via FLEET_DAYTONA_SNAPSHOT in .env"
+                          />
+                          <StatusTile
+                            label="MLflow Experiment (.env-managed · read-only)"
+                            value={status.mlflow_experiment}
+                            detail="Configured via FLEET_MLFLOW_EXPERIMENT in .env"
+                          />
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (
