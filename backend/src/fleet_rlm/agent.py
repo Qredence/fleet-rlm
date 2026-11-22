@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from itertools import count
 from threading import Lock
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
 import dspy
@@ -57,11 +57,22 @@ def bound_history(history: dspy.History, max_turns: int, max_chars: int) -> dspy
 
 
 def _model(settings: Settings, name: str) -> dspy.LM:
-    return dspy.LM(
-        name,
-        api_key=settings.llm_api_key.get_secret_value(),
-        **({"api_base": settings.llm_base_url} if settings.llm_base_url else {}),
-    )
+    api_key = settings.llm_api_key.get_secret_value()
+    if settings.llm_base_url:
+        return dspy.LM(name, api_key=api_key, api_base=settings.llm_base_url)
+    return dspy.LM(name, api_key=api_key)
+
+
+def _resolve_decision_lm(
+    settings: Settings,
+    decision_lm: dspy.BaseLM | None = None,
+) -> dspy.BaseLM:
+    if decision_lm is not None:
+        return decision_lm
+    current = getattr(dspy.settings, "lm", None)
+    if current is not None and getattr(current, "model", None) == settings.decision_model:
+        return current
+    return dspy.LM(settings.decision_model)
 
 
 def build_program(
@@ -69,13 +80,15 @@ def build_program(
     tools: list[Callable | dspy.Tool],
     *,
     sub_lm: dspy.BaseLM | None = None,
+    optimized_state: dict[str, Any] | None = None,
 ) -> dspy.RLM:
+    resolved_sub_lm = sub_lm if sub_lm is not None else _model(settings, settings.sub_llm_model)
     program = dspy.RLM(
         WorkspaceTask,
         max_iters=settings.rlm_max_iters,
         max_llm_calls=settings.rlm_max_llm_calls,
         max_output_chars=settings.rlm_max_output_chars,
-        sub_lm=sub_lm if sub_lm is not None else _model(settings, settings.sub_llm_model),
+        sub_lm=cast(dspy.LM, resolved_sub_lm),
         tools=tools,
         history_processor=partial(
             bound_history,
@@ -83,7 +96,12 @@ def build_program(
             max_chars=settings.history_max_chars,
         ),
     )
-    if settings.optimized_program_path is not None:
+    if optimized_state is not None:
+        program.load_state(deepcopy(optimized_state))
+        # Keep optimized prompt state, with request-local serving model and endpoint selection.
+        for predictor in program.predictors():
+            predictor.lm = None
+    elif settings.optimized_program_path is not None:
         program.load(settings.optimized_program_path)
         # Keep optimized prompt state, with request-local serving model and endpoint selection.
         for predictor in program.predictors():
@@ -217,6 +235,7 @@ async def run_workspace_task(
     host_tools: Mapping[str, Callable | dspy.Tool] | None = None,
     model_override: str | dspy.BaseLM | None = None,
     sub_lm: dspy.BaseLM | None = None,
+    optimized_state: dict[str, Any] | None = None,
     callbacks: ChildCallbacks | None = None,
 ) -> dspy.Prediction:
     """Execute a turn and its children, reporting domain events and lifecycle changes."""
@@ -377,21 +396,29 @@ async def run_workspace_task(
             )
             return output
 
-        def factory():
-            with registration:
-                if cancelled:
-                    raise CodeInterpreterError("Turn cancelled")
-                interpreter = interpreter_factory(
-                    on_execution=observe_execution, on_tool=observe_tool
-                )
-                interpreters.append(interpreter)
-                return interpreter
+        class _ScopedInterpreterFactory:
+            execution_instructions: str = getattr(interpreter_factory, "execution_instructions", "")
 
-        factory.execution_instructions = getattr(interpreter_factory, "execution_instructions", "")
+            def __call__(self) -> _AbortableInterpreter:
+                with registration:
+                    if cancelled:
+                        raise CodeInterpreterError("Turn cancelled")
+                    interpreter = interpreter_factory(
+                        on_execution=observe_execution, on_tool=observe_tool
+                    )
+                    interpreters.append(interpreter)
+                    return interpreter
+
+        factory = _ScopedInterpreterFactory()
 
         def invoke() -> dspy.Prediction:
             with dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory):
-                program = build_program(settings, [*tools, spawn_agent], sub_lm=sub_lm)
+                program = build_program(
+                    settings,
+                    [*tools, spawn_agent],
+                    sub_lm=sub_lm,
+                    optimized_state=optimized_state,
+                )
                 program.generate_action.callbacks.append(action)
                 return program(
                     task=prompt,
@@ -485,6 +512,7 @@ async def consolidate_memory(
     existing_memories: Sequence[Mapping],
     *,
     on_save: Callable[[MemoryCandidate], Awaitable[None]] | None = None,
+    decision_lm: dspy.BaseLM | None = None,
 ) -> MemoryCandidate:
     """Evaluate a completed root turn and hand any distilled candidate to the caller."""
     recent = [
@@ -499,8 +527,9 @@ async def consolidate_memory(
     gate = dspy.Predict(MemoryGate)
     if settings.memory_gate_path is not None and settings.memory_gate_path.is_file():
         gate.load(settings.memory_gate_path)
-    with dspy.context(lm=dspy.LM(settings.decision_model)):
-        decision = await gate.acall(**inputs, lm=dspy.settings.lm)
+    lm = _resolve_decision_lm(settings, decision_lm)
+    with dspy.context(lm=lm):
+        decision = await gate.acall(**inputs, lm=lm)
     worth_saving = decision.worth_saving.value
     probability = decision.worth_saving.probability
     action, scope = decision.action.value, decision.scope.value

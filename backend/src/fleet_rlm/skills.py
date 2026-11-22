@@ -118,7 +118,7 @@ def build_skill_selector(
                 f"The task can proceed without the '{skill.name}' skill.",
             ),
         ]
-        signature = dspy.Signature(
+        signature = dspy.make_signature(
             {
                 "task": (str, dspy.InputField()),
                 "needs_skill": (
@@ -147,7 +147,7 @@ def build_skill_selector(
         (True, "A listed skill supplies specific instructions needed for the task."),
         (False, "The task can proceed without a listed skill."),
     ]
-    signature = dspy.Signature(
+    signature = dspy.make_signature(
         {
             "task": (str, dspy.InputField()),
             "needs_skill": (needs_skill, dspy.OutputField(desc="Does this task need a skill?")),
@@ -178,6 +178,18 @@ def build_skill_selector(
 _selector = build_skill_selector
 
 
+def _resolve_decision_lm(
+    settings: Settings,
+    decision_lm: dspy.BaseLM | None = None,
+) -> dspy.BaseLM:
+    if decision_lm is not None:
+        return decision_lm
+    current = getattr(dspy.settings, "lm", None)
+    if current is not None and getattr(current, "model", None) == settings.decision_model:
+        return current
+    return dspy.LM(settings.decision_model)
+
+
 def select_skills(
     settings: Settings,
     registry: SkillRegistry,
@@ -185,6 +197,7 @@ def select_skills(
     pinned_skills: list[str] | None = None,
     *,
     threshold: float = 0.25,
+    decision_lm: dspy.BaseLM | None = None,
 ) -> SkillSelection:
     """Resolve explicit pins or select up to two skills using Jev evidence."""
     if pinned_skills:
@@ -198,8 +211,9 @@ def select_skills(
     if not candidates:
         return _selection((), {})
     predictor = build_skill_selector(candidates, settings.skill_selector_path)
-    with dspy.context(lm=dspy.LM(settings.decision_model)):
-        decision = predictor(task=task, lm=dspy.settings.lm)
+    lm = _resolve_decision_lm(settings, decision_lm)
+    with dspy.context(lm=lm):
+        decision = predictor(task=task, lm=lm)
     if len(candidates) == 1:
         (skill,) = candidates
         probability = getattr(decision.needs_skill, "probability", None)
@@ -210,7 +224,7 @@ def select_skills(
         )
         active = (skill,) if decision.needs_skill.value else ()
         return _selection(active, {skill.name: score})
-    probabilities = decision.primary_skill.probabilities or {}
+    probabilities = getattr(decision.primary_skill, "probabilities", None) or {}
     scores = {
         skill.name: probabilities[skill.name] for skill in candidates if skill.name in probabilities
     }
@@ -223,5 +237,14 @@ def select_skills(
             skill.name,
         ),
     )
-    active = tuple(ranked[:2]) if decision.needs_skill.value else ()
+    active: tuple[SkillDefinition, ...] = ()
+    if decision.needs_skill.value:
+        if ranked:
+            active = tuple(ranked[:2])
+        else:
+            by_name = {skill.name: skill for skill in candidates}
+            primary = getattr(decision.primary_skill, "value", None)
+            if isinstance(primary, str) and primary in by_name:
+                active = (by_name[primary],)
+                scores.setdefault(primary, float(probabilities.get(primary, 1.0)))
     return _selection(active, scores)

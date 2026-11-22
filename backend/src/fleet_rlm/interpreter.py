@@ -4,8 +4,8 @@ import asyncio
 import inspect
 import json
 import re
-from collections.abc import Awaitable, Callable, Collection, Coroutine
-from contextlib import suppress
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Mapping
+from contextlib import asynccontextmanager, suppress
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID, uuid4
@@ -15,8 +15,10 @@ from daytona import (
     AsyncSandbox,
     CreateSandboxFromSnapshotParams,
     DaytonaConfig,
+    DaytonaConnectionTimeoutError,
     DaytonaError,
     DaytonaFileNotFoundError,
+    DaytonaTimeoutError,
     OutputMessage,
     SandboxState,
     VolumeMount,
@@ -37,6 +39,45 @@ ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitab
 
 def make_daytona_client(settings: Settings) -> AsyncDaytona:
     return AsyncDaytona(DaytonaConfig(api_key=settings.daytona_api_key.get_secret_value()))
+
+
+def _is_recoverable_timeout(error: BaseException) -> bool:
+    """Return True for recoverable cell timeouts, excluding transport/connection timeouts."""
+    if isinstance(error, BaseExceptionGroup):
+        return bool(error.exceptions) and all(
+            _is_recoverable_timeout(sub) for sub in error.exceptions
+        )
+    if isinstance(error, DaytonaConnectionTimeoutError):
+        return False
+    return isinstance(error, (TimeoutError, DaytonaTimeoutError))
+
+
+@asynccontextmanager
+async def ephemeral_sandbox(
+    daytona: AsyncDaytona,
+    settings: Settings,
+) -> AsyncIterator[AsyncSandbox]:
+    """Create a volume-free Daytona sandbox for offline optimization and always delete it."""
+    sandbox = await daytona.create(
+        CreateSandboxFromSnapshotParams(
+            snapshot=settings.daytona_snapshot,
+            language="python",
+            target=settings.daytona_target,
+            auto_stop_interval=settings.daytona_auto_stop_minutes,
+        )
+    )
+    try:
+        result = await sandbox.process.code_run(
+            "from pathlib import Path\n"
+            "Path('/workspace/files').mkdir(parents=True, exist_ok=True)\n"
+            "Path('/workspace/artifacts').mkdir(parents=True, exist_ok=True)",
+            timeout=settings.daytona_exec_timeout_seconds,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError("Could not initialize the ephemeral Daytona workspace")
+        yield sandbox
+    finally:
+        await daytona.delete(sandbox, wait=True)
 
 
 async def ensure_session_sandbox(
@@ -113,7 +154,7 @@ def __fleet_prelude(mailbox):
         def __getattr__(self, name):
             return getattr(self.stream, name)
 
-    def run(code, values, fields, tools, token, timeout, limit, frame_limit):
+    def run(code, values, fields, tools, token, rpc_timeout, limit, frame_limit):
         stdout = sys.stdout
         active = True
 
@@ -133,7 +174,7 @@ def __fleet_prelude(mailbox):
                 emit({
                     "kind": "call", "id": request_id, "name": name, "args": args, "kwargs": kwargs,
                 })
-                deadline = time.monotonic() + timeout if timeout else float("inf")
+                deadline = time.monotonic() + rpc_timeout if rpc_timeout else float("inf")
                 while True:
                     try:
                         with open(path, encoding="utf-8") as reply:
@@ -364,11 +405,17 @@ class DaytonaCodeInterpreter:
     async def _execute(self, code: str, variables: dict) -> str | FinalOutput:
         token = uuid4().hex
         tools = self.tools.copy()
-        tasks: set[asyncio.Task] = set()
+        tasks: set[asyncio.Task[None]] = set()
         seen: set[str] = set()
         submitted = None
         active = True
         stderr_chars = 0
+        loop = asyncio.get_running_loop()
+        active_elapsed = 0.0
+        active_started_at: float | None = loop.time()
+        sandbox_active = asyncio.Event()
+        sandbox_active.set()
+        timed_out = False
 
         async def reply(request: dict) -> None:
             name, args, kwargs = request["name"], request["args"], request["kwargs"]
@@ -395,7 +442,12 @@ class DaytonaCodeInterpreter:
                     error, CodeExecutionError
                 ):
                     raise
-                message = f"Host tool {name!r} failed ({type(error).__name__})"
+                if isinstance(error, CodeExecutionError):
+                    message = (
+                        str(error)[:512] or f"Host tool {name!r} failed ({type(error).__name__})"
+                    )
+                else:
+                    message = f"Host tool {name!r} failed ({type(error).__name__})"
                 data = json.dumps({"error": message}).encode()
 
             if active and not self._closed:
@@ -406,8 +458,15 @@ class DaytonaCodeInterpreter:
                         f"{path}.tmp", path, request_timeout=self._timeout
                     )
 
+        def on_task_done(done_task: asyncio.Task[None]) -> None:
+            nonlocal active_started_at
+            tasks.discard(done_task)
+            if not tasks and active_started_at is None:
+                active_started_at = loop.time()
+                sandbox_active.set()
+
         def receive(frame: dict) -> None:
-            nonlocal submitted
+            nonlocal submitted, active_elapsed, active_started_at
             if not active or self._closed:
                 return
             if frame["kind"] == "submit":
@@ -425,8 +484,12 @@ class DaytonaCodeInterpreter:
                 raise CodeExecutionError("Invalid interpreter tool request")
             seen.add(request_id)
             task = group.create_task(reply(frame))
+            if not tasks and active_started_at is not None:
+                active_elapsed += loop.time() - active_started_at
+                active_started_at = None
+                sandbox_active.clear()
             tasks.add(task)
-            task.add_done_callback(tasks.discard)
+            task.add_done_callback(on_task_done)
 
         def receive_stderr(message: OutputMessage) -> None:
             nonlocal stderr_chars
@@ -434,34 +497,75 @@ class DaytonaCodeInterpreter:
             if stderr_chars > 8 * _MAX_FRAME:
                 raise CodeExecutionError("Interpreter stderr exceeded the transport limit")
 
+        async def watch(target: asyncio.Task[Any]) -> None:
+            nonlocal timed_out
+            budget = float(self._timeout)
+            while not target.done():
+                await sandbox_active.wait()
+                if target.done():
+                    return
+                elapsed = active_elapsed + (
+                    loop.time() - active_started_at if active_started_at is not None else 0.0
+                )
+                remaining = budget - elapsed
+                if remaining <= 0:
+                    timed_out = True
+                    target.cancel()
+                    return
+                await asyncio.sleep(remaining)
+
         output = _Output(token, self._limit, receive)
         fields = [field["name"] for field in self.output_fields]
         values = json.dumps(variables, allow_nan=False)
+        remote_timeout = max(self._timeout * 4, 600) if self._timeout else 0
         source = (
             f"__fleet_run({code!r}, {values!r}, {fields!r}, {list(tools)!r}, {token!r}, "
-            f"{self._timeout!r}, {self._limit!r}, {_MAX_FRAME!r})"
+            f"{remote_timeout!r}, {self._limit!r}, {_MAX_FRAME!r})"
         )
         try:
-            async with asyncio.timeout(self._timeout or None), asyncio.TaskGroup() as group:
-                try:
-                    result = await self._sandbox.code_interpreter.run_code(
+            async with asyncio.TaskGroup() as group:
+                run_task = asyncio.create_task(
+                    self._sandbox.code_interpreter.run_code(
                         source,
                         context=self._context,
                         on_stdout=output.feed,
                         on_stderr=receive_stderr,
-                        timeout=self._timeout,
+                        timeout=remote_timeout,
                     )
+                )
+                watchdog = asyncio.create_task(watch(run_task)) if self._timeout else None
+                try:
+                    result = await run_task
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if timed_out and not (current is not None and current.cancelling()):
+                        raise TimeoutError from None
+                    raise
                 finally:
                     active = False
+                    if watchdog is not None:
+                        watchdog.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await watchdog
+                    if not run_task.done():
+                        run_task.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await run_task
                     for task in tasks.copy():
                         task.cancel()
-        except TimeoutError as error:
-            await self._delete_context()
-            raise CodeExecutionError(
-                f"Python execution timed out after {self._timeout}s; interpreter context was reset "
-                "(in-memory variables cleared, /workspace files preserved)."
-            ) from error
-        except (ExceptionGroup, DaytonaError) as error:
+        except (TimeoutError, DaytonaError, ExceptionGroup) as error:
+            if _is_recoverable_timeout(error):
+                try:
+                    await self._delete_context()
+                except DaytonaError as cleanup_error:
+                    self._closed = True
+                    raise CodeInterpreterError(
+                        "Daytona execution transport failed or timed out"
+                    ) from cleanup_error
+                raise CodeExecutionError(
+                    f"Python execution timed out after {self._timeout}s; interpreter context was "
+                    "reset (in-memory variables cleared, /workspace files preserved)."
+                ) from error
             self._closed = True
             raise CodeInterpreterError("Daytona execution transport failed or timed out") from error
 
@@ -471,34 +575,61 @@ class DaytonaCodeInterpreter:
         return submitted if submitted is not None else stdout
 
 
-def make_interpreter_factory(
-    sandbox: AsyncSandbox,
-    settings: Settings,
-    loop: asyncio.AbstractEventLoop,
-) -> Callable[..., DaytonaCodeInterpreter]:
-    def factory(
+class _DaytonaInterpreterFactory:
+    execution_instructions: str = DaytonaCodeInterpreter.execution_instructions
+
+    def __init__(
+        self,
+        sandbox: AsyncSandbox,
+        settings: Settings,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        self._sandbox = sandbox
+        self._settings = settings
+        self._loop = loop
+
+    def __call__(
+        self,
         *,
         on_execution: ExecutionObserver | None = None,
         on_tool: ToolObserver | None = None,
     ) -> DaytonaCodeInterpreter:
         return DaytonaCodeInterpreter(
-            sandbox,
-            loop,
-            timeout=settings.daytona_exec_timeout_seconds,
-            max_output_chars=settings.rlm_max_output_chars,
+            self._sandbox,
+            self._loop,
+            timeout=self._settings.daytona_exec_timeout_seconds,
+            max_output_chars=self._settings.rlm_max_output_chars,
             on_execution=on_execution,
             on_tool=on_tool,
         )
 
-    factory.execution_instructions = DaytonaCodeInterpreter.execution_instructions
-    return factory
+
+def make_interpreter_factory(
+    sandbox: AsyncSandbox,
+    settings: Settings,
+    loop: asyncio.AbstractEventLoop,
+) -> Callable[..., DaytonaCodeInterpreter]:
+    return _DaytonaInterpreterFactory(sandbox, settings, loop)
 
 
-async def list_new_artifacts(sandbox: AsyncSandbox, known_paths: Collection[str]) -> list[dict]:
-    """Hash new regular files within the artifact tree without downloading their contents."""
-    known = sorted({str(PurePosixPath(WORKSPACE) / path) for path in known_paths})
+async def list_new_artifacts(
+    sandbox: AsyncSandbox,
+    known_paths: Collection[str] | Mapping[str, tuple[str, int]],
+) -> list[dict]:
+    """Hash new or modified regular files within the artifact tree without downloading contents."""
+    if isinstance(known_paths, Mapping):
+        known_hashes: dict[str, tuple[str, int]] = {}
+        for path, metadata in known_paths.items():
+            if not isinstance(metadata, tuple) or len(metadata) != 2:
+                raise TypeError("Expected (sha256, size_bytes) tuple for known artifact metadata")
+            sha256, size_bytes = metadata
+            known_hashes[str(PurePosixPath(WORKSPACE) / path)] = (str(sha256), int(size_bytes))
+        header = f"root = {ARTIFACTS!r}\nknown_paths = set()\nknown_hashes = {known_hashes!r}\n"
+    else:
+        known = sorted({str(PurePosixPath(WORKSPACE) / path) for path in known_paths})
+        header = f"root = {ARTIFACTS!r}\nknown_paths = set({known!r})\nknown_hashes = None\n"
     result = await sandbox.process.code_run(
-        f"root = {ARTIFACTS!r}\nknown = set({known!r})\n"
+        header
         + """
 import hashlib
 import json
@@ -510,17 +641,23 @@ if os.path.isdir(root) and not os.path.islink(root):
     for directory, _, names, dir_fd in os.fwalk(root, follow_symlinks=False):
         for name in names:
             path = os.path.join(directory, name)
-            if path in known or not stat.S_ISREG(os.stat(
-                name, dir_fd=dir_fd, follow_symlinks=False
-            ).st_mode):
+            if path in known_paths or not stat.S_ISREG(
+                os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
+            ):
                 continue
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
             with os.fdopen(fd, "rb") as data:
                 info = os.fstat(data.fileno())
                 if stat.S_ISREG(info.st_mode):
+                    digest = hashlib.file_digest(data, "sha256").hexdigest()
+                    if known_hashes is not None and known_hashes.get(path) == (
+                        digest,
+                        info.st_size,
+                    ):
+                        continue
                     files.append({
                         "path": path,
-                        "sha256": hashlib.file_digest(data, "sha256").hexdigest(),
+                        "sha256": digest,
                         "size_bytes": info.st_size,
                     })
 print(json.dumps(sorted(files, key=lambda item: item["path"])))

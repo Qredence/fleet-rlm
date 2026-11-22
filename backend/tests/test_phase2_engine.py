@@ -38,8 +38,12 @@ from fleet_rlm.agent import (
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
+    DaytonaConnectionTimeoutError,
     DaytonaError,
+    DaytonaTimeoutError,
+    _is_recoverable_timeout,
     ensure_session_sandbox,
+    ephemeral_sandbox,
     list_new_artifacts,
     make_daytona_client,
     make_interpreter_factory,
@@ -334,6 +338,7 @@ class _LocalSandbox:
         self.contexts = []
         self.deleted = []
         self.uploads = []
+        self.run_code_timeouts = []
         self.state = "started"
         self.id = "test-sandbox"
         self.start = AsyncMock()
@@ -359,6 +364,7 @@ class _LocalSandbox:
         await context.wait()
 
     async def run_code(self, code, *, context, timeout, on_stdout=None, on_stderr=None):
+        self.run_code_timeouts.append(timeout)
         context.stdin.write((json.dumps(code) + "\n").encode())
         await context.stdin.drain()
         error = None
@@ -587,8 +593,8 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
                 "import dspy\n"
                 "try:\n"
                 "    spawn_agent('Exceeds allowed depth')\n"
-                "except RuntimeError:\n"
-                "    pass\n"
+                "except RuntimeError as err:\n"
+                "    assert str(err) == 'Maximum spawn_agent depth reached', str(err)\n"
                 "else:\n"
                 "    raise AssertionError('Depth limit was bypassed')\n"
                 "with open('sales.csv') as f:\n"
@@ -668,6 +674,450 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
     assert (child.id, RunResultEvent("7")) in events
     assert ("root", RunResultEvent("7")) in events
     assert events[-1] == ("followup", RunResultEvent("Still 7"))
+
+
+@pytest.mark.asyncio
+async def test_daytona_timeout_recovery_vs_connection_timeout_fatal(
+    settings, tmp_path, monkeypatch
+):
+    assert _is_recoverable_timeout(TimeoutError("local")) is True
+    assert _is_recoverable_timeout(DaytonaTimeoutError("cell timed out")) is True
+    assert _is_recoverable_timeout(DaytonaConnectionTimeoutError("connect timed out")) is False
+    assert _is_recoverable_timeout(DaytonaError("generic")) is False
+    assert _is_recoverable_timeout(
+        ExceptionGroup("ok", [TimeoutError(), DaytonaTimeoutError("cell")])
+    )
+    assert not _is_recoverable_timeout(
+        ExceptionGroup("mixed", [TimeoutError(), DaytonaConnectionTimeoutError("net")])
+    )
+    assert not _is_recoverable_timeout(ExceptionGroup("mixed", [TimeoutError(), DaytonaError("x")]))
+
+    sandbox = _LocalSandbox(tmp_path)
+    factory = make_interpreter_factory(
+        sandbox,
+        settings.model_copy(update={"daytona_exec_timeout_seconds": 5}),
+        asyncio.get_running_loop(),
+    )
+    interpreter = factory()
+    interpreter.output_fields = [{"name": "answer"}]
+    original_run_code = sandbox.run_code
+
+    try:
+        assert await asyncio.to_thread(interpreter.execute, "x = 1\nprint(x)") == "1\n"
+        first_context = sandbox.contexts[0]
+
+        # Remote DaytonaTimeoutError resets context, keeps interpreter open, and recovers.
+        monkeypatch.setattr(
+            sandbox, "run_code", AsyncMock(side_effect=DaytonaTimeoutError("daemon timeout"))
+        )
+        with pytest.raises(
+            CodeExecutionError,
+            match=r"Python execution timed out after 5s; interpreter context was reset",
+        ):
+            await asyncio.to_thread(interpreter.execute, "print('slow')")
+        assert sandbox.deleted == [first_context]
+        assert interpreter._closed is False
+        assert interpreter._context is None
+
+        monkeypatch.setattr(sandbox, "run_code", original_run_code)
+        assert await asyncio.to_thread(
+            interpreter.execute, "assert 'x' not in globals()\nSUBMIT('after-daytona-timeout')"
+        ) == FinalOutput({"answer": "after-daytona-timeout"})
+        assert len(sandbox.contexts) == 2
+        assert interpreter._closed is False
+
+        # If cleanup fails during recoverable timeout handling, mark fatal CodeInterpreterError.
+        second_context = sandbox.contexts[1]
+        monkeypatch.setattr(
+            sandbox, "run_code", AsyncMock(side_effect=DaytonaTimeoutError("daemon timeout"))
+        )
+        original_delete = sandbox.delete_context
+        failing_delete = AsyncMock(side_effect=DaytonaError("cleanup lost"))
+        monkeypatch.setattr(sandbox, "delete_context", failing_delete)
+        try:
+            with pytest.raises(
+                CodeInterpreterError, match="Daytona execution transport failed or timed out"
+            ) as cleanup_exc:
+                await asyncio.to_thread(interpreter.execute, "print('cleanup-fail')")
+            assert not isinstance(cleanup_exc.value, CodeExecutionError)
+            assert interpreter._closed is True
+            assert failing_delete.await_args.args[0] is second_context
+        finally:
+            monkeypatch.setattr(sandbox, "delete_context", original_delete)
+            monkeypatch.setattr(sandbox, "run_code", original_run_code)
+            await original_delete(second_context, request_timeout=5)
+    finally:
+        await asyncio.to_thread(interpreter.shutdown)
+    assert set(sandbox.contexts) == set(sandbox.deleted)
+
+    # DaytonaConnectionTimeoutError is a transport failure: closes interpreter and raises fatal.
+    for fatal in (
+        DaytonaConnectionTimeoutError("socket connect timed out"),
+        ExceptionGroup(
+            "conn group",
+            [TimeoutError("cell"), DaytonaConnectionTimeoutError("transport timeout")],
+        ),
+    ):
+        broken = factory()
+        try:
+            await asyncio.to_thread(broken.start)
+            monkeypatch.setattr(sandbox, "run_code", AsyncMock(side_effect=fatal))
+            with pytest.raises(
+                CodeInterpreterError, match="Daytona execution transport failed or timed out"
+            ) as exc_info:
+                await asyncio.to_thread(broken.execute, "print('unreachable')")
+            assert not isinstance(exc_info.value, CodeExecutionError)
+            assert broken._closed is True
+        finally:
+            monkeypatch.setattr(sandbox, "run_code", original_run_code)
+            await asyncio.to_thread(broken.shutdown)
+
+
+@pytest.mark.asyncio
+async def test_cell_timer_pauses_during_slow_host_rpc_and_times_out_pure_python(settings, tmp_path):
+    sandbox = _LocalSandbox(tmp_path)
+    short_settings = settings.model_copy(update={"daytona_exec_timeout_seconds": 1})
+    factory = make_interpreter_factory(sandbox, short_settings, asyncio.get_running_loop())
+    interpreter = factory()
+    interpreter.output_fields = [{"name": "answer"}]
+
+    async def slow_rpc() -> str:
+        await asyncio.sleep(1.4)
+        return "rpc-complete"
+
+    interpreter.tools["slow_rpc"] = slow_rpc
+
+    async def execute(code: str) -> str | FinalOutput:
+        return await asyncio.to_thread(interpreter.execute, code)
+
+    try:
+        # Host RPC takes longer than daytona_exec_timeout_seconds (1s), yet succeeds because
+        # the active-time watchdog pauses while tasks are in flight and remote_timeout >= 600.
+        result = await execute("res = slow_rpc()\nprint(res)")
+        assert result == "rpc-complete\n"
+        assert sandbox.run_code_timeouts[-1] == 600
+
+        # Pure Python sleep still trips the 1s active-time watchdog and resets context cleanly.
+        with pytest.raises(
+            CodeExecutionError,
+            match=r"Python execution timed out after 1s; interpreter context was reset",
+        ):
+            await execute("import time\ntime.sleep(3)")
+        assert interpreter._closed is False
+        assert interpreter._context is None
+        assert await execute("SUBMIT('alive')") == FinalOutput({"answer": "alive"})
+    finally:
+        await asyncio.to_thread(interpreter.shutdown)
+    assert set(sandbox.contexts) == set(sandbox.deleted)
+
+    # Also verify a multi-step spawn_agent tree whose total wall time exceeds the 1s parent
+    # cell timeout completes cleanly while each child cell stays under 1s.
+    root_lm = DummyLM(
+        [
+            {
+                "plan": "Delegate to multi-step child",
+                "code": "child = spawn_agent('run two steps')\nSUBMIT(child['answer'], [])",
+            }
+        ]
+    )
+    sub_lm = DummyLM(
+        [
+            {"plan": "First half", "code": "import time\ntime.sleep(0.6)\nprint('step-1')"},
+            {
+                "plan": "Second half",
+                "code": "import time\ntime.sleep(0.6)\nSUBMIT('nested-ok', [])",
+            },
+        ]
+    )
+
+    async def emit(_run_id, _event):
+        return None
+
+    nested = await run_workspace_task(
+        short_settings.model_copy(update={"rlm_max_depth": 1}),
+        task="Delegate slow child",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=factory,
+        run_id="root-pause",
+        emit=emit,
+        model_override=root_lm,
+        sub_lm=sub_lm,
+    )
+    assert nested.answer == "nested-ok"
+    assert set(sandbox.contexts) == set(sandbox.deleted)
+
+
+@pytest.mark.asyncio
+async def test_host_tool_code_execution_error_forwarded_and_other_errors_masked(settings, tmp_path):
+    sandbox = _LocalSandbox(tmp_path)
+    factory = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())
+    interpreter = factory()
+
+    def hit_depth_limit() -> None:
+        raise CodeExecutionError("Maximum spawn_agent depth reached")
+
+    def long_safe_error() -> None:
+        raise CodeExecutionError("A" * 700)
+
+    def leaky_failure() -> None:
+        raise ValueError("secret_api_key=sk-live-99999")
+
+    interpreter.tools["hit_depth_limit"] = hit_depth_limit
+    interpreter.tools["long_safe_error"] = long_safe_error
+    interpreter.tools["leaky_failure"] = leaky_failure
+
+    async def execute(code: str) -> str | FinalOutput:
+        return await asyncio.to_thread(interpreter.execute, code)
+
+    try:
+        out = await execute(
+            "msgs = []\n"
+            "for fn in (hit_depth_limit, long_safe_error, leaky_failure):\n"
+            "    try:\n"
+            "        fn()\n"
+            "    except RuntimeError as exc:\n"
+            "        msgs.append(str(exc))\n"
+            "import json\n"
+            "print(json.dumps(msgs))"
+        )
+        assert isinstance(out, str)
+        messages = json.loads(out)
+        assert messages[0] == "Maximum spawn_agent depth reached"
+        assert messages[1] == "A" * 512
+        assert messages[2] == "Host tool 'leaky_failure' failed (ValueError)"
+        assert "sk-live-99999" not in messages[2]
+    finally:
+        await asyncio.to_thread(interpreter.shutdown)
+
+
+@pytest.mark.asyncio
+async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_compat(
+    tmp_path, monkeypatch
+):
+    sandbox = _LocalSandbox(tmp_path)
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    monkeypatch.setattr("fleet_rlm.interpreter.WORKSPACE", str(tmp_path))
+    monkeypatch.setattr("fleet_rlm.interpreter.ARTIFACTS", str(root))
+
+    unchanged = root / "unchanged.csv"
+    unchanged.write_bytes(b"a,b\n1,2\n")
+    overwritten = root / "overwritten.csv"
+    overwritten.write_bytes(b"v1")
+    same_size = root / "same_size.txt"
+    same_size.write_bytes(b"aaaa")
+    (root / "linked").symlink_to(unchanged)
+
+    known_mapping = {
+        "artifacts/unchanged.csv": (
+            hashlib.sha256(b"a,b\n1,2\n").hexdigest(),
+            len(b"a,b\n1,2\n"),
+        ),
+        "artifacts/overwritten.csv": (hashlib.sha256(b"v1").hexdigest(), 2),
+        str(same_size): (hashlib.sha256(b"aaaa").hexdigest(), 4),
+    }
+
+    assert await list_new_artifacts(sandbox, known_mapping) == []
+
+    # Mutate two existing artifacts and create one brand-new artifact.
+    overwritten.write_bytes(b"version-2-longer")
+    same_size.write_bytes(b"bbbb")
+    brand_new = root / "fresh.json"
+    brand_new.write_bytes(b"{}")
+
+    changed = await list_new_artifacts(sandbox, known_mapping)
+    assert changed == [
+        {
+            "path": str(brand_new),
+            "sha256": hashlib.sha256(b"{}").hexdigest(),
+            "size_bytes": 2,
+        },
+        {
+            "path": str(overwritten),
+            "sha256": hashlib.sha256(b"version-2-longer").hexdigest(),
+            "size_bytes": len(b"version-2-longer"),
+        },
+        {
+            "path": str(same_size),
+            "sha256": hashlib.sha256(b"bbbb").hexdigest(),
+            "size_bytes": 4,
+        },
+    ]
+
+    # Legacy Collection[str] interface skips known paths without hashing them.
+    legacy = await list_new_artifacts(
+        sandbox,
+        {"artifacts/unchanged.csv", "artifacts/overwritten.csv", str(same_size)},
+    )
+    assert legacy == [
+        {
+            "path": str(brand_new),
+            "sha256": hashlib.sha256(b"{}").hexdigest(),
+            "size_bytes": 2,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(settings, tmp_path):
+    sandbox = _LocalSandbox(tmp_path)
+    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
+    daytona = SimpleNamespace(
+        create=AsyncMock(return_value=sandbox),
+        delete=AsyncMock(),
+    )
+    configured = settings.model_copy(
+        update={
+            "daytona_snapshot": "custom-snap",
+            "daytona_target": "us",
+            "daytona_auto_stop_minutes": 7,
+        }
+    )
+
+    async with ephemeral_sandbox(daytona, configured) as yielded:
+        assert yielded is sandbox
+        params = daytona.create.call_args.args[0]
+        assert params.snapshot == "custom-snap"
+        assert params.language == "python"
+        assert params.target == "us"
+        assert params.auto_stop_interval == 7
+        assert params.volumes is None
+        assert params.env_vars is None
+        daytona.delete.assert_not_awaited()
+    daytona.delete.assert_awaited_once_with(sandbox, wait=True)
+
+    # Also cleans up when the caller raises inside the context block.
+    daytona.delete.reset_mock()
+    with pytest.raises(RuntimeError, match="eval crashed"):
+        async with ephemeral_sandbox(daytona, configured):
+            raise RuntimeError("eval crashed")
+    daytona.delete.assert_awaited_once_with(sandbox, wait=True)
+
+    # Also cleans up if workspace directory init fails.
+    daytona.delete.reset_mock()
+    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
+    with pytest.raises(RuntimeError, match="ephemeral Daytona workspace"):
+        async with ephemeral_sandbox(daytona, configured):
+            pytest.fail("must not yield when init fails")
+    daytona.delete.assert_awaited_once_with(sandbox, wait=True)
+
+
+@pytest.mark.asyncio
+async def test_decision_lm_reuse_and_calibrated_primary_fallback(settings, tmp_path, monkeypatch):
+    _skill(tmp_path, "rare-skill", "Handle specialized actuarial tables")
+    _skill(tmp_path, "general-csv", "Analyze tabular CSV files")
+    registry = SkillRegistry.load(tmp_path)
+
+    def fail_lm(*args, **kwargs):
+        pytest.fail("dspy.LM must not be instantiated when a decision LM is already available")
+
+    monkeypatch.setattr(dspy, "LM", fail_lm)
+    provided = DummyLM([{}])
+    provided.model = settings.decision_model
+    seen_lms = []
+
+    def decide_skills(self, *, task, lm):
+        seen_lms.append(lm)
+        if task == "calibrated-low-prob":
+            return SimpleNamespace(
+                needs_skill=SimpleNamespace(value=True),
+                primary_skill=SimpleNamespace(
+                    value="rare-skill",
+                    probabilities={"rare-skill": 0.12, "general-csv": 0.18},
+                ),
+            )
+        return SimpleNamespace(
+            needs_skill=SimpleNamespace(value=False),
+            primary_skill=SimpleNamespace(
+                value="rare-skill",
+                probabilities={"rare-skill": 0.12, "general-csv": 0.18},
+            ),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "forward", decide_skills)
+
+    # Explicit decision_lm + calibrated primary_skill fallback when ranked is empty.
+    selected = select_skills(
+        settings, registry, "calibrated-low-prob", threshold=0.25, decision_lm=provided
+    )
+    assert [skill.name for skill in selected.active_skills] == ["rare-skill"]
+    assert selected.scores["rare-skill"] == 0.12
+    assert seen_lms[-1] is provided
+
+    # Context LM matching settings.decision_model is also reused without calling dspy.LM().
+    with dspy.context(lm=provided):
+        skipped = select_skills(settings, registry, "no-skill-needed", threshold=0.25)
+    assert skipped.active_skills == ()
+    assert seen_lms[-1] is provided
+
+    # consolidate_memory reuses explicit decision_lm and matching context LM without dspy.LM().
+    memory_lms = []
+
+    async def decide_memory(self, **kwargs):
+        memory_lms.append(kwargs["lm"])
+        return SimpleNamespace(
+            worth_saving=SimpleNamespace(value=False, probability=0.1),
+            action=SimpleNamespace(value="skip"),
+            scope=SimpleNamespace(value="session"),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "aforward", decide_memory)
+    first_mem = await consolidate_memory(settings, "task", "answer", [], decision_lm=provided)
+    assert first_mem.action == "skip"
+    assert memory_lms[-1] is provided
+
+    with dspy.context(lm=provided):
+        second_mem = await consolidate_memory(settings, "task", "answer", [])
+    assert second_mem.action == "skip"
+    assert memory_lms[-1] is provided
+
+
+@pytest.mark.asyncio
+async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_lms(
+    settings, tmp_path
+):
+    base_program = build_program(settings, [])
+    base_program.generate_action.signature = (
+        base_program.generate_action.signature.with_instructions(
+            "Preloaded optimized workspace prompt"
+        )
+    )
+    path = tmp_path / "optimized.json"
+    base_program.save(path)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state_snapshot = json.dumps(state, sort_keys=True)
+    # Remove file on disk to prove build_program & run_workspace_task never read from disk.
+    path.unlink()
+    configured = settings.model_copy(update={"optimized_program_path": path})
+
+    restored = build_program(configured, [], optimized_state=state)
+    assert restored.generate_action.signature.instructions == "Preloaded optimized workspace prompt"
+    assert all(predictor.lm is None for predictor in restored.predictors())
+    assert json.dumps(state, sort_keys=True) == state_snapshot
+
+    sandbox = _LocalSandbox(tmp_path)
+    factory = make_interpreter_factory(sandbox, configured, asyncio.get_running_loop())
+    root_lm = DummyLM([{"plan": "Finish", "code": "SUBMIT('ok', [])"}])
+    sub_lm = DummyLM([{"text": "unused"}])
+
+    async def emit(_run_id, _event):
+        return None
+
+    prediction = await run_workspace_task(
+        configured,
+        task="Say ok",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=factory,
+        run_id="root",
+        emit=emit,
+        model_override=root_lm,
+        sub_lm=sub_lm,
+        optimized_state=state,
+    )
+    assert prediction.answer == "ok"
+    assert "Preloaded optimized workspace prompt" in json.dumps(root_lm.get_convo(0)[0])
 
 
 @pytest.mark.skipif(
