@@ -989,7 +989,21 @@ async def _run_turn(
             session = await _session(db, turn.session_id)
         sandbox = await _chat_sandbox(runtime, session, effective)
         files = await store.list_session_files(sessionmaker, turn.session_id)
+        decision_lm = _request_decision_lm(runtime, effective)
+        selection = await asyncio.to_thread(
+            select_skills,
+            effective,
+            runtime.skills,
+            turn.prompt,
+            turn.pinned_skills,
+            decision_lm=decision_lm,
+        )
         records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
+        task_memories = records
+        if any(skill.name == "skill-creator" for skill in selection.active_skills):
+            task_memories = await store.list_approved_session_memories(
+                sessionmaker, turn.session_id
+            )
         memories = [
             {
                 "id": str(record.id),
@@ -1011,16 +1025,6 @@ async def _run_turn(
                     by_path[path] = entry
             return sorted(by_path.values(), key=lambda file: file["path"])
 
-        decision_lm = _request_decision_lm(runtime, effective)
-        selection = await asyncio.to_thread(
-            select_skills,
-            effective,
-            runtime.skills,
-            turn.prompt,
-            turn.pinned_skills,
-            decision_lm=decision_lm,
-        )
-
         async def emit(run_id: str, event: agent.RunEvent) -> None:
             if run_id == root_id and isinstance(event, agent.RunResultEvent):
                 await stream.files(run_id, await refresh_files())
@@ -1039,7 +1043,7 @@ async def _run_turn(
             effective,
             task=turn.prompt,
             files_manifest=manifest,
-            memories=[memory["content"] for memory in memories],
+            memories=[record.content for record in task_memories],
             interpreter_factory=make_interpreter_factory(
                 sandbox, effective, asyncio.get_running_loop()
             ),

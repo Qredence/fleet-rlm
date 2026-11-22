@@ -16,13 +16,14 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    cast,
     func,
     literal,
     select,
     text,
     update,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
+from sqlalchemy.dialects.postgresql import JSONB, TSQUERY, TSVECTOR, insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -406,15 +407,50 @@ async def list_session_files(db: SessionFactory, session_id: UUID) -> list[File]
 async def search_memories(
     db: SessionFactory, session_id: UUID | None, query: str, *, limit: int = 10
 ) -> list[Memory]:
-    search = func.websearch_to_tsquery("english", query)
+    strict_q = func.websearch_to_tsquery("english", query)
+    relaxed_q = cast(
+        func.replace(cast(func.plainto_tsquery("english", query), Text), " & ", " | "),
+        TSQUERY,
+    )
     scope = Memory.session_id.is_(None)
     if session_id is not None:
         scope = scope | (Memory.session_id == session_id)
     async with db() as connection:
+        matches = list(
+            await connection.scalars(
+                select(Memory)
+                .where(scope, Memory.approved.is_(True), Memory.search_tsv.bool_op("@@")(strict_q))
+                .order_by(func.ts_rank(Memory.search_tsv, strict_q).desc(), Memory.id.desc())
+                .limit(limit)
+            )
+        )
+        seen_ids = {memory.id for memory in matches}
+        if len(matches) < limit:
+            relaxed_stmt = (
+                select(Memory)
+                .where(
+                    scope,
+                    Memory.approved.is_(True),
+                    Memory.search_tsv.bool_op("@@")(relaxed_q),
+                )
+                .order_by(func.ts_rank(Memory.search_tsv, relaxed_q).desc(), Memory.id.desc())
+                .limit(limit - len(matches))
+            )
+            if seen_ids:
+                relaxed_stmt = relaxed_stmt.where(Memory.id.not_in(seen_ids))
+            matches.extend(await connection.scalars(relaxed_stmt))
+        return matches
+
+
+async def list_approved_session_memories(
+    db: SessionFactory, session_id: UUID, *, limit: int = 10
+) -> list[Memory]:
+    """Return the most recent approved memories belonging to this session."""
+    async with db() as connection:
         result = await connection.scalars(
             select(Memory)
-            .where(scope, Memory.approved.is_(True), Memory.search_tsv.bool_op("@@")(search))
-            .order_by(func.ts_rank(Memory.search_tsv, search).desc(), Memory.id.desc())
+            .where(Memory.session_id == session_id, Memory.approved.is_(True))
+            .order_by(Memory.id.desc())
             .limit(limit)
         )
         return list(result)

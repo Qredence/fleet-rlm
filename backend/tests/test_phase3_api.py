@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -595,6 +596,48 @@ def test_ui_frames_and_lossless_nested_snapshots():
     assert json.loads(json.dumps(snapshot)) == expected
     snapshot[3]["output"]["parts"][0]["output"]["parts"].clear()
     assert root.snapshot() == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skill_name", ["table", "skill-creator"])
+async def test_chat_supplies_session_only_memories_to_skill_creator(
+    offline, monkeypatch, skill_name
+):
+    runtime = api.app.state.runtime
+    creator = SkillDefinition("skill-creator", "Draft a skill", "Use memories.", Path("SKILL.md"))
+    api.app.state.runtime = replace(
+        runtime, skills=SkillRegistry((*runtime.skills.skills, creator))
+    )
+    global_memory = db.Memory(
+        id=uuid4(), session_id=None, content="Use USD for financial totals", approved=True
+    )
+    session_memory = db.Memory(
+        id=uuid4(),
+        session_id=offline.store.session_id,
+        content="Prefix summaries with COBALT-QA",
+        approved=True,
+    )
+    monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[global_memory]))
+    session_lookup = AsyncMock(return_value=[session_memory])
+    monkeypatch.setattr(db, "list_approved_session_memories", session_lookup)
+    turn = AsyncMock(return_value=dspy.Prediction(answer="Done", history=dspy.History(messages=[])))
+    monkeypatch.setattr(api.agent, "run_workspace_task", turn)
+
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": "Use a skill"}]}],
+            "pinned_skills": [skill_name],
+        },
+    )
+
+    assert response.status_code == 200
+    if skill_name == "skill-creator":
+        session_lookup.assert_awaited_once_with(offline.store, offline.store.session_id)
+        assert turn.await_args.kwargs["memories"] == [session_memory.content]
+    else:
+        session_lookup.assert_not_awaited()
+        assert turn.await_args.kwargs["memories"] == [global_memory.content]
 
 
 @pytest.mark.asyncio

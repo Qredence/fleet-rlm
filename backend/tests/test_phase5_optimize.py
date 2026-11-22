@@ -1059,3 +1059,88 @@ def test_optimize_memory_reanchor_and_cli_reminder(
     stdout = capsys.readouterr().out
     assert "FLEET_DECISION_MODEL" in stdout
     assert "typesafe:jev-latest" in stdout
+
+
+def test_optimize_production_skill_catalog_with_reanchor(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prod_skills_dir = Path(__file__).resolve().parents[1] / "skills"
+    registry = skills.SkillRegistry.load(prod_skills_dir)
+    skill_names = tuple(skill.name for skill in registry.skills)
+    assert skill_names == (
+        "chart-visualization",
+        "data-analysis",
+        "document-extraction",
+        "recursive-synthesis",
+        "scientific-computing",
+        "skill-creator",
+        "spreadsheet-audit",
+    )
+
+    rows = []
+    choice_table: dict[str, tuple[float, dict[str, float]]] = {}
+    for index, skill_name in enumerate(skill_names):
+        for variant in (1, 2):
+            task = f"task-{skill_name}-{variant}"
+            rows.append({"task": task, "expected_skill": skill_name})
+            probs = {
+                candidate: (0.72 if candidate == skill_name else 0.28 / (len(skill_names) - 1))
+                for candidate in skill_names
+            }
+            choice_table[task] = (0.88 - 0.01 * index, probs)
+    for variant in range(1, 7):
+        task = f"smalltalk-{variant}"
+        rows.append({"task": task, "expected_skill": None})
+        uniform = {candidate: 1.0 / len(skill_names) for candidate in skill_names}
+        choice_table[task] = (0.56 + 0.01 * variant, uniform)
+
+    class FakeSixSkillDecisionLM(BaseLM):
+        supports_decision_requests = True
+
+        def __init__(self) -> None:
+            super().__init__(model="typesafe:jev-six-skill", cache=True)
+
+        def __call__(self, request, **kwargs):
+            task = request.messages[0].parts[0].value["inputs"]["task"]
+            assert set(request.config.extensions["questions"]) == {"needs_skill", "primary_skill"}
+            noul_prob, choice_probs = choice_table[task]
+            return SimpleNamespace(
+                provider_data={
+                    "typesafe": {
+                        "answers": {
+                            "needs_skill": {"noul": noul_prob},
+                            "primary_skill": {"probabilities": choice_probs, "confidence": 0.8},
+                        }
+                    }
+                }
+            )
+
+    fake_lm = FakeSixSkillDecisionLM()
+    dataset = _write_jsonl(tmp_path / "six-skills.jsonl", rows)
+    output_path = tmp_path / "six_skill_selector.json"
+    prod_settings = settings.model_copy(update={"skills_dir": prod_skills_dir})
+
+    monkeypatch.setattr(optimize.dspy, "LM", lambda _model: fake_lm)
+    result = optimize.optimize_skills(
+        prod_settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=output_path,
+        seed=0,
+        require_cache=False,
+    )
+    assert result.saved is True
+    assert result.optimized_score == 1.0
+    assert output_path.is_file()
+
+    reloaded = skills.build_skill_selector(registry.skills, output_path)
+    assert set(reloaded.signature.output_fields) == {"needs_skill", "primary_skill"}
+    assert 0.62 < reloaded.fields["needs_skill"]["threshold"] < 0.83
+
+    monkeypatch.setattr(skills.dspy, "LM", lambda _model: fake_lm)
+    runtime_settings = prod_settings.model_copy(update={"skill_selector_path": output_path})
+    for skill_name in skill_names:
+        selected = skills.select_skills(runtime_settings, registry, f"task-{skill_name}-1")
+        assert [s.name for s in selected.active_skills] == [skill_name]
+    skipped = skills.select_skills(runtime_settings, registry, "smalltalk-1")
+    assert skipped.active_skills == ()

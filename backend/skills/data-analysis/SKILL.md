@@ -1,10 +1,6 @@
 ---
 name: data-analysis
-description: Inspect CSV and tabular data, compute verified summaries, and save derived results.
+description: Inspect CSV, Parquet, and tabular datasets, compute verified summaries, and save derived tables.
 ---
 
-Read inputs from the file manifest under `/workspace/files`. Inspect the header,
-types, row count, and missing values before performing calculations. Use Python
-or pandas for aggregation and verify totals against the input rows. State the
-units and any exclusions alongside the result. Keep input files intact and
-write requested derived files under `/workspace/artifacts`.
+Read inputs from `/workspace/files`. Inspect headers, dtypes, row counts, and missing values before computing aggregates. Use `pandas` or `pyarrow` for grouping and cross-check totals against raw input rows with an `assert`. State units, filters, and any excluded rows alongside the final answer. Never mutate input files; write derived tables to `/workspace/artifacts` and return their paths in `SUBMIT`.

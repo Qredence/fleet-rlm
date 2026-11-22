@@ -33,6 +33,7 @@ from fleet_rlm.db import (
     get_session_or_raise,
     get_session_ui_messages,
     get_workspace_settings_overrides,
+    list_approved_session_memories,
     list_session_files,
     reap_stale_runs,
     reset_workspace_settings_overrides,
@@ -402,6 +403,9 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
             content=f"Session B {token} private metric",
             approved=True,
         )
+        await save_or_update_memory(
+            db, session_id=session_a.id, content="Pending calibration proposal", approved=False
+        )
 
         global_hits = await search_memories(db, None, token)
         assert [m.id for m in global_hits] == [global_approved.id]
@@ -409,6 +413,18 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
         session_a_hits = await search_memories(db, session_a.id, token)
         assert {m.id for m in session_a_hits} == {global_approved.id, session_a_mem.id}
         assert session_b_mem.id not in {m.id for m in session_a_hits}
+
+        # Multi-word conversational prompt with extra words still matches via relaxed OR fallback.
+        conversational_hits = await search_memories(
+            db, session_a.id, f"{token} unmatched{uuid4().hex[:8]}"
+        )
+        assert {m.id for m in conversational_hits} == {global_approved.id, session_a_mem.id}
+        assert session_b_mem.id not in {m.id for m in conversational_hits}
+
+        # Ordinary prompts without lexical matches should not receive arbitrary memories.
+        assert await search_memories(db, session_a.id, f"unmatched{uuid4().hex[:8]}") == []
+        synthesis_memories = await list_approved_session_memories(db, session_a.id)
+        assert [memory.id for memory in synthesis_memories] == [session_a_mem.id]
 
         updated_session_a = await save_or_update_memory(
             db,

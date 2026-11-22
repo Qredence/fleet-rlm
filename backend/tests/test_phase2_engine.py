@@ -6,10 +6,12 @@ import json
 import os
 import shutil
 import sys
+from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
+from xml.etree import ElementTree
 
 import dspy
 import pytest
@@ -18,6 +20,7 @@ from dspy.primitives.code_interpreter import (
     CodeInterpreterError,
     FinalOutput,
 )
+from dspy.primitives.repl_types import REPLVariable
 from dspy.utils.dummies import DummyLM
 from pydantic import ValidationError
 
@@ -1231,3 +1234,354 @@ async def test_live_two_turn_csv(tmp_path):
         assert any("RLM" in span.name for trace in traces for span in trace.data.spans)
     finally:
         mlflow.dspy.autolog(disable=True)
+
+
+@pytest.mark.asyncio
+async def test_production_skills_catalog_repl_preview_budget_and_choice_selection(
+    settings, tmp_path, monkeypatch
+):
+    skills_root = Path(__file__).resolve().parents[1] / "skills"
+    registry = SkillRegistry.load(skills_root)
+    expected_names = (
+        "chart-visualization",
+        "data-analysis",
+        "document-extraction",
+        "recursive-synthesis",
+        "scientific-computing",
+        "skill-creator",
+        "spreadsheet-audit",
+    )
+    assert tuple(skill.name for skill in registry.skills) == expected_names
+
+    selector = build_skill_selector(registry.skills)
+    assert set(selector.signature.output_fields) == {"needs_skill", "primary_skill"}
+    choice_criteria = selector.signature.output_fields["primary_skill"].annotation.criteria()
+    assert tuple(sorted(choice_criteria)) == expected_names
+
+    # Verify every single skill and all 21 co-activated 2-skill pairs fit 100% inside DSPy 3.5's
+    # 1,000-char REPLVariable preview without head/tail truncation.
+    for skill in registry.skills:
+        assert len(skill.body) <= 450, f"{skill.name} body exceeds 450 chars"
+        single_text = f"## {skill.name}\n{skill.body}"
+        single_var = REPLVariable.from_value("active_skills", single_text)
+        assert single_var.total_length <= 1000
+        assert single_var.preview == single_text
+
+    for first_skill, second_skill in combinations(registry.skills, 2):
+        combined_text = (
+            f"## {first_skill.name}\n{first_skill.body}\n\n"
+            f"## {second_skill.name}\n{second_skill.body}"
+        )
+        pair_var = REPLVariable.from_value("active_skills", combined_text)
+        assert len(combined_text) <= 1000, f"{first_skill.name}+{second_skill.name} > 1000 chars"
+        assert pair_var.preview == combined_text
+
+    # Verify multi-skill co-activation via Jev and end-to-end RLM execution in _LocalSandbox.
+    def fake_jev_decide(self, *, task, lm):
+        return SimpleNamespace(
+            needs_skill=SimpleNamespace(value=True, probability=0.91),
+            primary_skill=SimpleNamespace(
+                value="chart-visualization",
+                probabilities={
+                    "chart-visualization": 0.58,
+                    "data-analysis": 0.42,
+                    "document-extraction": 0.0,
+                    "recursive-synthesis": 0.0,
+                    "scientific-computing": 0.0,
+                    "skill-creator": 0.0,
+                    "spreadsheet-audit": 0.0,
+                },
+            ),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "forward", fake_jev_decide)
+    prod_settings = settings.model_copy(update={"skills_dir": skills_root})
+    selection = select_skills(
+        prod_settings,
+        registry,
+        "Analyze regional sales CSV and render a verified revenue chart PNG",
+    )
+    assert [skill.name for skill in selection.active_skills] == [
+        "chart-visualization",
+        "data-analysis",
+    ]
+    monkeypatch.undo()
+
+    sandbox = _LocalSandbox(tmp_path)
+    (tmp_path / "files").mkdir()
+    (tmp_path / "artifacts").mkdir()
+    csv_path = tmp_path / "files" / "sales.csv"
+    csv_path.write_text(
+        "region,status,amount_eur\nEU,completed,120\nUS,completed,80\nEU,cancelled,50\n",
+        encoding="utf-8",
+    )
+    factory = make_interpreter_factory(sandbox, prod_settings, asyncio.get_running_loop())
+    root_lm = DummyLM(
+        [
+            {
+                "plan": "Inspect CSV headers, filter cancelled orders, assert totals, and plot PNG",
+                "code": (
+                    "import csv\n"
+                    "assert '## chart-visualization' in active_skills\n"
+                    "assert '## data-analysis' in active_skills\n"
+                    "with open('files/sales.csv', encoding='utf-8') as f:\n"
+                    "    rows = list(csv.DictReader(f))\n"
+                    "comp = [int(r['amount_eur']) for r in rows if r['status'] == 'completed']\n"
+                    "excl = [int(r['amount_eur']) for r in rows if r['status'] != 'completed']\n"
+                    "assert sum(comp) + sum(excl) == sum(int(r['amount_eur']) for r in rows)\n"
+                    "with open('artifacts/summary.csv', 'w', encoding='utf-8') as out:\n"
+                    "    out.write(f'completed_eur,{sum(comp)}\\n')\n"
+                    "print(f'total={sum(comp)} excluded={len(excl)}')\n"
+                ),
+            },
+            {
+                "plan": "Submit verified answer with units, exclusions, and artifact paths",
+                "code": (
+                    "SUBMIT("
+                    "'Completed revenue: 200 EUR (excluded 1 cancelled row of 50 EUR).', "
+                    "['artifacts/summary.csv']"
+                    ")"
+                ),
+            },
+        ]
+    )
+    sub_lm = DummyLM([{"text": "unused"}])
+    events = []
+
+    async def emit(run_id, event):
+        events.append((run_id, event))
+
+    prediction = await run_workspace_task(
+        prod_settings,
+        task="Summarize completed sales in EUR and save a summary artifact",
+        files_manifest=[{"path": "files/sales.csv", "kind": "input"}],
+        memories=[],
+        interpreter_factory=factory,
+        run_id="skill-verify",
+        emit=emit,
+        selection=selection,
+        model_override=root_lm,
+        sub_lm=sub_lm,
+    )
+    assert "200 EUR" in prediction.answer
+    assert "excluded 1 cancelled" in prediction.answer
+    assert prediction.artifact_paths == ["artifacts/summary.csv"]
+    prompt_dump = json.dumps(root_lm.get_convo(0)[0])
+    assert "## chart-visualization" in prompt_dump
+    assert "## data-analysis" in prompt_dump
+    assert "PIL.Image.open()" in prompt_dump
+    assert "Never mutate input files" in prompt_dump
+
+    # Verify @skill-creator synthesizes and validates a SKILL.md artifact from memories.
+    creator_sel = select_skills(prod_settings, registry, "Create a skill", ["@skill-creator"])
+    creator_lm = DummyLM(
+        [
+            {
+                "plan": "Draft and validate SKILL.md from approved session memories",
+                "code": (
+                    "from pathlib import Path\n"
+                    "import yaml\n"
+                    "assert 'Always report revenue in EUR' in memories[0]\n"
+                    "body = 'Report revenue in EUR and exclude cancelled rows.'\n"
+                    "assert 0 < len(body) <= 450\n"
+                    "doc = '---\\nname: eur-revenue\\ndescription: Report EUR revenue.\\n---\\n\\n'"
+                    " + body + '\\n'\n"
+                    "meta = yaml.safe_load(doc.split('---')[1])\n"
+                    "assert meta['name'] == 'eur-revenue' and meta['description']\n"
+                    "out = Path('artifacts/eur-revenue/SKILL.md')\n"
+                    "out.parent.mkdir(parents=True, exist_ok=True)\n"
+                    "out.write_text(doc, encoding='utf-8')\n"
+                    "SUBMIT('Created eur-revenue skill.', ['artifacts/eur-revenue/SKILL.md'])\n"
+                ),
+            }
+        ]
+    )
+    created = await run_workspace_task(
+        prod_settings,
+        task="Create a reusable skill from our session memories",
+        files_manifest=[],
+        memories=["Always report revenue in EUR and exclude cancelled orders."],
+        interpreter_factory=factory,
+        run_id="skill-creator-verify",
+        emit=emit,
+        selection=creator_sel,
+        model_override=creator_lm,
+        sub_lm=sub_lm,
+    )
+    assert created.artifact_paths == ["artifacts/eur-revenue/SKILL.md"]
+    generated_registry = SkillRegistry.load(tmp_path / "artifacts")
+    assert [s.name for s in generated_registry.skills] == ["eur-revenue"]
+
+
+@pytest.mark.skipif(
+    os.environ.get("FLEET_RUN_PHASE2_LIVE") != "1", reason="Requires authorized live services"
+)
+@pytest.mark.asyncio
+async def test_live_skill_selection_and_ab_results():
+    """Verify live Jev routing and compare correct results from both arms in Daytona."""
+
+    class LiveSkillSettings(Settings):
+        database_url: str = "postgresql://localhost/unused"
+        database_direct_url: str = "postgresql://localhost/unused"
+
+    try:
+        live_settings = LiveSkillSettings()
+    except ValidationError:
+        pytest.skip("Configure backend/.env for Daytona and generative models")
+    if not all(
+        value.strip()
+        for value in (
+            live_settings.daytona_api_key.get_secret_value(),
+            live_settings.llm_api_key.get_secret_value(),
+            live_settings.llm_model,
+            live_settings.sub_llm_model,
+        )
+    ):
+        pytest.skip("Configure Daytona and host LLM credentials in backend/.env")
+    if not os.environ.get("TYPESAFE_API_KEY", "").strip():
+        pytest.skip("Configure TYPESAFE_API_KEY for Jev")
+
+    skills_root = Path(__file__).resolve().parents[1] / "skills"
+    live_settings = live_settings.model_copy(
+        update={"skills_dir": skills_root, "rlm_max_iters": 6, "daytona_exec_timeout_seconds": 60}
+    )
+    registry = SkillRegistry.load(skills_root)
+
+    # Verify live TypeSafe Jev routes each skill and co-activates both for a compound task.
+    routing_cases = [
+        (
+            "data-analysis",
+            (
+                "Inspect sales_2026.csv in /workspace/files, group revenue by region excluding "
+                "cancelled orders, and save a summary Parquet table."
+            ),
+        ),
+        (
+            "document-extraction",
+            (
+                "Read quarterly_report.pdf with pypdf and use batched sub-LM queries to extract "
+                "risk factors per page."
+            ),
+        ),
+        (
+            "chart-visualization",
+            (
+                "Create a high-DPI matplotlib bar chart of monthly revenue saved to "
+                "/workspace/artifacts/revenue.png and verify the image with Pillow."
+            ),
+        ),
+        (
+            "spreadsheet-audit",
+            (
+                "Audit the multi-sheet financial_model.xlsx workbook with openpyxl, check formula "
+                "cells vs cached values, and reconcile sheet subtotals."
+            ),
+        ),
+        (
+            "scientific-computing",
+            (
+                "Run a two-sample Welch t-test and curve fit using scipy.stats and numpy, "
+                "verifying the p-value with two independent calculations."
+            ),
+        ),
+        (
+            "recursive-synthesis",
+            (
+                "Decompose this multi-file investigation by delegating isolated workspace "
+                "subtasks with spawn_agent and map-reduce chunks with llm_query_batched."
+            ),
+        ),
+        (
+            "skill-creator",
+            (
+                "Create a reusable Agent Skill (SKILL.md) under /workspace/artifacts from our "
+                "approved session memories and conversation history."
+            ),
+        ),
+    ]
+    for expected_skill, task_prompt in routing_cases:
+        sel = await asyncio.to_thread(select_skills, live_settings, registry, task_prompt)
+        active_names = [s.name for s in sel.active_skills]
+        assert expected_skill in active_names, (
+            f"Expected {expected_skill} in {active_names} (scores={dict(sel.scores)})"
+        )
+
+    compound_prompt = (
+        "Analyze the regional sales CSV dataset and also create a matplotlib chart saved to "
+        "/workspace/artifacts/chart.png"
+    )
+    compound_sel = await asyncio.to_thread(select_skills, live_settings, registry, compound_prompt)
+    compound_names = {s.name for s in compound_sel.active_skills}
+    assert compound_names == {"data-analysis", "chart-visualization"}
+
+    async def run_arm(prompt, filename, data, selection, artifact_path=None):
+        async def noop_emit(_run_id, _event):
+            return None
+
+        async with (
+            make_daytona_client(live_settings) as daytona,
+            ephemeral_sandbox(daytona, live_settings) as sandbox,
+        ):
+            input_path = f"/workspace/files/{filename}"
+            await sandbox.fs.upload_file(data, input_path)
+            prediction = await run_workspace_task(
+                live_settings,
+                task=prompt,
+                files_manifest=[{"path": input_path, "kind": "input"}],
+                memories=[],
+                interpreter_factory=make_interpreter_factory(
+                    sandbox, live_settings, asyncio.get_running_loop()
+                ),
+                run_id=f"ab-{uuid4().hex[:8]}",
+                emit=noop_emit,
+                selection=selection,
+            )
+            answer = json.loads(prediction.answer)
+            if artifact_path is None:
+                return answer, None
+            assert artifact_path in {
+                path.removeprefix("/workspace/") for path in prediction.artifact_paths
+            }
+            artifact = await sandbox.fs.download_file(f"/workspace/{artifact_path}")
+            return answer, artifact
+
+    sales = (
+        b"region,status,revenue_eur\n"
+        b"EMEA,completed,1200\nEMEA,cancelled,450\nAMER,completed,1800\n"
+        b"APAC,completed,950\nAMER,cancelled,300\n"
+    )
+    chart_path = "artifacts/revenue_chart.svg"
+    chart_prompt = (
+        "Analyze files/sales.csv by region, excluding cancelled orders. Create a labeled "
+        f"Matplotlib bar chart at {chart_path} in EUR. Set matplotlib rcParams "
+        "svg.fonttype to 'none' so text is readable in the SVG. Annotate each bar with "
+        "its region and exact total in a single text label formatted REGION NUMBER. "
+        "Return only a JSON object mapping each region to its completed revenue."
+    )
+    expected_totals = {"EMEA": 1200, "AMER": 1800, "APAC": 950}
+    for label, selection in (("baseline", None), ("skill-guided", compound_sel)):
+        totals, svg = await run_arm(chart_prompt, "sales.csv", sales, selection, chart_path)
+        assert totals == expected_totals, label
+        chart = ElementTree.fromstring(svg)
+        assert chart.tag == "{http://www.w3.org/2000/svg}svg", label
+        labels = {"".join(node.itertext()).strip() for node in chart.findall(".//{*}text")}
+        assert {f"{region} {value}" for region, value in expected_totals.items()} <= labels, label
+
+    experiment = (
+        b"control_ms,treatment_ms\n"
+        b"124.2,108.5\n131.0,111.2\n128.4,106.8\n126.9,109.9\n"
+        b"133.5,112.4\n129.1,107.6\n127.8,110.1\n130.2,109.0\n"
+    )
+    stats_prompt = (
+        "Compare control_ms and treatment_ms in files/experiment.csv with a two-sided "
+        "Welch t-test, taking control minus treatment. At alpha 0.05, decide whether "
+        "treatment is significantly faster. Return only a JSON object with numeric "
+        "fields t, df, p and boolean field treatment_is_faster."
+    )
+    stats_selection = select_skills(live_settings, registry, stats_prompt, ["scientific-computing"])
+    for label, selection in (("baseline", None), ("skill-guided", stats_selection)):
+        result, _ = await run_arm(stats_prompt, "experiment.csv", experiment, selection)
+        assert result["treatment_is_faster"] is True, label
+        assert result["t"] == pytest.approx(16.3978, abs=0.01), label
+        assert result["df"] == pytest.approx(12.1326, abs=0.01), label
+        assert 0 < result["p"] < 1e-7, label
