@@ -95,6 +95,12 @@ Index(
     Run.id.desc(),
     postgresql_where=Run.parent_run_id.is_(None),
 )
+Index("idx_runs_session_id", Run.session_id)
+Index(
+    "idx_runs_parent_run_id",
+    Run.parent_run_id,
+    postgresql_where=Run.parent_run_id.is_not(None),
+)
 
 
 class File(Base):
@@ -127,6 +133,7 @@ class Memory(Base):
 
 
 Index("idx_memories_search_tsv", Memory.search_tsv, postgresql_using="gin")
+Index("idx_memories_session_id", Memory.session_id)
 
 
 class WorkspaceSettings(Base):
@@ -178,6 +185,32 @@ async def get_session_or_raise(db: SessionFactory, session_id: UUID) -> Session:
         return session
 
 
+async def bind_session_sandbox_if_unset(
+    db: SessionFactory, session_id: UUID, sandbox_id: str
+) -> tuple[str, bool]:
+    """Bind a sandbox id only if unset, returning (effective_sandbox_id, won)."""
+    async with db.begin() as connection:
+        bound = await connection.scalar(
+            update(Session)
+            .where(Session.id == session_id, Session.daytona_sandbox_id.is_(None))
+            .values(daytona_sandbox_id=sandbox_id, updated_at=func.now())
+            .returning(Session.daytona_sandbox_id)
+        )
+        if bound is not None:
+            return bound, True
+        row = (
+            await connection.execute(
+                select(Session.daytona_sandbox_id).where(Session.id == session_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise SessionNotFoundError(f"Session {session_id} does not exist")
+        existing = row[0]
+        if existing is None:
+            raise RuntimeError(f"Session {session_id} sandbox binding could not be resolved")
+        return existing, False
+
+
 async def acquire_root_run(db: SessionFactory, session_id: UUID, prompt: str) -> Run:
     # One server-generated UUID identifies both the row and its run tree.
     root = select(func.uuidv7(type_=Uuid).label("id")).cte()
@@ -200,7 +233,7 @@ async def acquire_root_run(db: SessionFactory, session_id: UUID, prompt: str) ->
         async with db.begin() as connection:
             return (await connection.scalars(statement)).one()
     except IntegrityError as exc:
-        if exc.orig.diag.constraint_name == _ROOT_LOCK_INDEX:
+        if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) == _ROOT_LOCK_INDEX:
             raise TurnConflictError(f"Session {session_id} already has a running root") from exc
         raise
 
@@ -281,7 +314,12 @@ async def finish_run(
     return True
 
 
-async def reap_stale_runs(db: SessionFactory, timeout_seconds: int) -> int:
+async def reap_stale_runs(
+    db: SessionFactory,
+    timeout_seconds: int,
+    *,
+    session_id: UUID | None = None,
+) -> int:
     """Fail expired runs and running descendants of expired roots in one transaction."""
     cutoff = func.now() - timedelta(seconds=timeout_seconds)
     expired = (
@@ -289,6 +327,8 @@ async def reap_stale_runs(db: SessionFactory, timeout_seconds: int) -> int:
         .where(Run.status == "running")
         .values(status="failed", error="Run expired", finished_at=func.now())
     )
+    if session_id is not None:
+        expired = expired.where(Run.session_id == session_id)
     async with db.begin() as connection:
         roots = (
             await connection.scalars(
@@ -297,13 +337,17 @@ async def reap_stale_runs(db: SessionFactory, timeout_seconds: int) -> int:
                 )
             )
         ).all()
+        child_condition = Run.created_at < cutoff
+        if roots:
+            child_condition = child_condition | Run.root_run_id.in_(roots)
         children = await connection.execute(
             expired.where(
                 Run.parent_run_id.is_not(None),
-                (Run.created_at < cutoff) | Run.root_run_id.in_(roots),
+                child_condition,
             ).execution_options(synchronize_session=False)
         )
-        return len(roots) + children.rowcount
+        reaped_children = max(getattr(children, "rowcount", 0) or 0, 0)
+        return len(roots) + reaped_children
 
 
 async def get_session_ui_messages(db: SessionFactory, session_id: UUID) -> list[JsonObject]:

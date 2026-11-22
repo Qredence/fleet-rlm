@@ -1,31 +1,112 @@
-"""Integration checks for run admission on the configured Neon Postgres branch."""
+"""Integration checks for run admission and Neon Postgres 18 persistence."""
 
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 from pydantic import ValidationError
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.db import (
+    Memory,
     Run,
     Session,
     SessionFactory,
+    SessionNotFoundError,
     TurnConflictError,
+    WorkspaceSettings,
     acquire_root_run,
+    bind_session_sandbox_if_unset,
     create_child_run,
     create_db,
     create_session,
     finish_run,
     get_session_or_raise,
     get_session_ui_messages,
+    get_workspace_settings_overrides,
+    list_session_files,
+    reap_stale_runs,
+    reset_workspace_settings_overrides,
+    save_or_update_memory,
+    search_memories,
+    update_workspace_settings_overrides,
+    upsert_file_record,
 )
+
+
+def _base_settings_kwargs() -> dict[str, object]:
+    return {
+        "_env_file": None,
+        "database_url": "postgresql://localhost/unused",
+        "database_direct_url": "postgresql://localhost/unused",
+        "daytona_api_key": "offline",
+        "daytona_volume_id": "offline",
+        "llm_model": "openai/gpt-4o-mini",
+        "sub_llm_model": "openai/gpt-4o-mini",
+        "llm_api_key": "offline",
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"max_concurrent_turns_per_worker": 0},
+        {"max_concurrent_turns_per_worker": 257},
+        {"stale_run_timeout_seconds": 29},
+        {"stale_run_timeout_seconds": 86_401},
+        {"daytona_auto_stop_minutes": 0},
+        {"daytona_auto_stop_minutes": 1441},
+        {"daytona_exec_timeout_seconds": 4},
+        {"daytona_exec_timeout_seconds": 601},
+        {"rlm_max_iters": 0},
+        {"rlm_max_iters": 101},
+        {"rlm_max_llm_calls": 0},
+        {"rlm_max_llm_calls": 501},
+        {"rlm_max_output_chars": 499},
+        {"rlm_max_output_chars": 200_001},
+        {"rlm_max_depth": 0},
+        {"rlm_max_depth": 8},
+        {"history_max_turns": -1},
+        {"history_max_turns": 101},
+        {"history_max_chars": 999},
+        {"history_max_chars": 200_001},
+    ],
+)
+def test_settings_rejects_out_of_bounds_values(overrides: dict[str, object]) -> None:
+    kwargs = _base_settings_kwargs()
+    kwargs.update(overrides)
+    with pytest.raises(ValidationError):
+        Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_settings_accepts_boundary_values() -> None:
+    kwargs = _base_settings_kwargs()
+    kwargs.update(
+        {
+            "max_concurrent_turns_per_worker": 1,
+            "stale_run_timeout_seconds": 30,
+            "daytona_auto_stop_minutes": 1,
+            "daytona_exec_timeout_seconds": 5,
+            "rlm_max_iters": 1,
+            "rlm_max_llm_calls": 1,
+            "rlm_max_output_chars": 500,
+            "rlm_max_depth": 7,
+            "history_max_turns": 0,
+            "history_max_chars": 1_000,
+        }
+    )
+    settings = Settings(**kwargs)  # type: ignore[arg-type]
+    assert settings.rlm_max_depth == 7
+    assert settings.history_max_turns == 0
 
 
 @pytest_asyncio.fixture
@@ -34,7 +115,7 @@ async def db() -> AsyncIterator[SessionFactory]:
         pytest.skip("Configure backend/.env with a migrated Neon Postgres 18 branch")
 
     try:
-        settings = Settings()
+        settings = Settings()  # type: ignore[call-arg]
     except ValidationError:
         pytest.skip("Configure backend/.env with a migrated Neon Postgres 18 branch")
     if (urlparse(settings.database_url).hostname or "").startswith("ep-example"):
@@ -61,7 +142,10 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
         assert len(winners) == len(conflicts) == 1, contenders
         cause = conflicts[0].__cause__
         assert isinstance(cause, IntegrityError)
-        assert cause.orig.diag.constraint_name == "uq_runs_one_running_root_per_session"
+        assert (
+            getattr(getattr(cause.orig, "diag", None), "constraint_name", None)
+            == "uq_runs_one_running_root_per_session"
+        )
 
         root = winners[0]
         assert root.id.version == 7
@@ -103,3 +187,303 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
     finally:
         async with db.begin() as connection:
             await connection.execute(delete(Session).where(Session.id == session.id))
+
+
+@pytest.mark.asyncio
+async def test_reap_stale_runs_session_scoped_and_global(db: SessionFactory) -> None:
+    session_a = await create_session(db, title="Reap test A")
+    session_b = await create_session(db, title="Reap test B")
+    try:
+        root_a = await acquire_root_run(db, session_a.id, "Stale root A")
+        child_a = await create_child_run(db, root_a.id, kind="subagent", prompt="Fresh child A")
+        grandchild_a = await create_child_run(
+            db, child_a.id, kind="llm_query", prompt="Fresh grandchild A"
+        )
+
+        root_b = await acquire_root_run(db, session_b.id, "Stale root B")
+        child_b = await create_child_run(db, root_b.id, kind="subagent", prompt="Fresh child B")
+
+        # Backdate only the roots; their fresh descendants must still be reaped alongside them.
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Run)
+                .where(Run.id.in_([root_a.id, root_b.id]))
+                .values(created_at=func.now() - timedelta(seconds=600))
+            )
+
+        reaped_a = await reap_stale_runs(db, 300, session_id=session_a.id)
+        assert reaped_a == 3
+
+        async with db() as connection:
+            runs = {
+                row.id: row
+                for row in (
+                    await connection.scalars(
+                        select(Run).where(
+                            Run.id.in_(
+                                [root_a.id, child_a.id, grandchild_a.id, root_b.id, child_b.id]
+                            )
+                        )
+                    )
+                ).all()
+            }
+
+        for run_id in (root_a.id, child_a.id, grandchild_a.id):
+            assert runs[run_id].status == "failed"
+            assert runs[run_id].error == "Run expired"
+            assert runs[run_id].finished_at is not None
+
+        assert runs[root_b.id].status == "running"
+        assert runs[child_b.id].status == "running"
+
+        # Session A's lock is now free; verify a fresh root survives while its stale child reaps.
+        fresh_root_a = await acquire_root_run(db, session_a.id, "Fresh root A")
+        stale_child_a = await create_child_run(
+            db, fresh_root_a.id, kind="llm_query", prompt="Stale child under fresh root"
+        )
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Run)
+                .where(Run.id == stale_child_a.id)
+                .values(created_at=func.now() - timedelta(seconds=600))
+            )
+
+        reaped_child = await reap_stale_runs(db, 300, session_id=session_a.id)
+        assert reaped_child == 1
+
+        reaped_global = await reap_stale_runs(db, 300)
+        assert reaped_global >= 2
+
+        async with db() as connection:
+            after = {
+                row.id: row
+                for row in (
+                    await connection.scalars(
+                        select(Run).where(
+                            Run.id.in_([root_b.id, child_b.id, fresh_root_a.id, stale_child_a.id])
+                        )
+                    )
+                ).all()
+            }
+
+        assert after[stale_child_a.id].status == "failed"
+        assert after[root_b.id].status == "failed"
+        assert after[child_b.id].status == "failed"
+        assert after[fresh_root_a.id].status == "running"
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(
+                delete(Session).where(Session.id.in_([session_a.id, session_b.id]))
+            )
+
+
+@pytest.mark.asyncio
+async def test_bind_session_sandbox_if_unset(db: SessionFactory) -> None:
+    session_single = await create_session(db, title="Sandbox single bind")
+    session_race = await create_session(db, title="Sandbox race bind")
+    try:
+        with pytest.raises(SessionNotFoundError):
+            await bind_session_sandbox_if_unset(db, uuid4(), f"sb-missing-{uuid4().hex}")
+
+        single_id = f"sb-single-{uuid4().hex}"
+        bound_id, won = await bind_session_sandbox_if_unset(db, session_single.id, single_id)
+        assert (bound_id, won) == (single_id, True)
+        assert (await get_session_or_raise(db, session_single.id)).daytona_sandbox_id == single_id
+
+        sb_a = f"sb-race-a-{uuid4().hex}"
+        sb_b = f"sb-race-b-{uuid4().hex}"
+        results = await asyncio.gather(
+            bind_session_sandbox_if_unset(db, session_race.id, sb_a),
+            bind_session_sandbox_if_unset(db, session_race.id, sb_b),
+        )
+        winners = [item for item in results if item[1]]
+        losers = [item for item in results if not item[1]]
+        assert len(winners) == len(losers) == 1
+        winning_id = winners[0][0]
+        assert winning_id in {sb_a, sb_b}
+        assert losers[0] == (winning_id, False)
+        assert (await get_session_or_raise(db, session_race.id)).daytona_sandbox_id == winning_id
+
+        follow_up_id, follow_up_won = await bind_session_sandbox_if_unset(
+            db, session_race.id, f"sb-race-c-{uuid4().hex}"
+        )
+        assert (follow_up_id, follow_up_won) == (winning_id, False)
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(
+                delete(Session).where(Session.id.in_([session_single.id, session_race.id]))
+            )
+
+
+@pytest.mark.asyncio
+async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> None:
+    session = await create_session(db, title="File records test")
+    try:
+        input_file = await upsert_file_record(
+            db,
+            session.id,
+            path="/workspace/inputs/data.csv",
+            sha256="1" * 64,
+            size_bytes=128,
+            kind="input",
+        )
+        artifact_v1 = await upsert_file_record(
+            db,
+            session.id,
+            path="/workspace/artifacts/report.md",
+            sha256="2" * 64,
+            size_bytes=256,
+            kind="artifact",
+        )
+
+        initial = await list_session_files(db, session.id)
+        assert [f.path for f in initial] == [
+            "/workspace/artifacts/report.md",
+            "/workspace/inputs/data.csv",
+        ]
+        assert initial[0].sha256 == "2" * 64
+        assert initial[0].size_bytes == 256
+        assert initial[1].id == input_file.id
+
+        artifact_v2 = await upsert_file_record(
+            db,
+            session.id,
+            path="/workspace/artifacts/report.md",
+            sha256="3" * 64,
+            size_bytes=512,
+            kind="artifact",
+        )
+        assert artifact_v2.id == artifact_v1.id
+        assert artifact_v2.sha256 == "3" * 64
+        assert artifact_v2.size_bytes == 512
+
+        updated = await list_session_files(db, session.id)
+        assert len(updated) == 2
+        assert updated[0].path == "/workspace/artifacts/report.md"
+        assert updated[0].sha256 == "3" * 64
+        assert updated[0].size_bytes == 512
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(delete(Session).where(Session.id == session.id))
+
+
+@pytest.mark.asyncio
+async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> None:
+    session_a = await create_session(db, title="Memory scope A")
+    session_b = await create_session(db, title="Memory scope B")
+    global_ids: list[UUID] = []
+    token = f"nebula{uuid4().hex[:8]}"
+    try:
+        global_approved = await save_or_update_memory(
+            db,
+            session_id=None,
+            content=f"Global {token} guideline for deterministic outputs",
+            approved=True,
+        )
+        global_ids.append(global_approved.id)
+
+        global_draft = await save_or_update_memory(
+            db,
+            session_id=None,
+            content=f"Global {token} unapproved draft note",
+            approved=False,
+        )
+        global_ids.append(global_draft.id)
+
+        session_a_mem = await save_or_update_memory(
+            db,
+            session_id=session_a.id,
+            content=f"Session A {token} calibration result",
+            approved=True,
+        )
+        session_b_mem = await save_or_update_memory(
+            db,
+            session_id=session_b.id,
+            content=f"Session B {token} private metric",
+            approved=True,
+        )
+
+        global_hits = await search_memories(db, None, token)
+        assert [m.id for m in global_hits] == [global_approved.id]
+
+        session_a_hits = await search_memories(db, session_a.id, token)
+        assert {m.id for m in session_a_hits} == {global_approved.id, session_a_mem.id}
+        assert session_b_mem.id not in {m.id for m in session_a_hits}
+
+        updated_session_a = await save_or_update_memory(
+            db,
+            session_id=session_a.id,
+            content=f"Session A {token} revised calibration schema",
+            approved=True,
+            memory_id=session_a_mem.id,
+        )
+        assert updated_session_a.id == session_a_mem.id
+        assert "revised calibration schema" in updated_session_a.content
+
+        promoted_global = await save_or_update_memory(
+            db,
+            session_id=None,
+            content=f"Global {token} approved note",
+            approved=True,
+            memory_id=global_draft.id,
+        )
+        assert promoted_global.id == global_draft.id
+        assert promoted_global.approved is True
+
+        global_hits_after = await search_memories(db, None, token)
+        assert {m.id for m in global_hits_after} == {global_approved.id, global_draft.id}
+
+        with pytest.raises(LookupError):
+            await save_or_update_memory(
+                db,
+                session_id=session_b.id,
+                content="Wrong scope update",
+                approved=True,
+                memory_id=session_a_mem.id,
+            )
+    finally:
+        async with db.begin() as connection:
+            if global_ids:
+                await connection.execute(delete(Memory).where(Memory.id.in_(global_ids)))
+            await connection.execute(
+                delete(Session).where(Session.id.in_([session_a.id, session_b.id]))
+            )
+
+
+@pytest.mark.asyncio
+async def test_workspace_settings_overrides_lifecycle(db: SessionFactory) -> None:
+    async with db() as connection:
+        existing = await connection.get(WorkspaceSettings, 1)
+        prior_exists = existing is not None
+        prior_overrides = dict(existing.overrides_json) if existing is not None else None
+    try:
+        assert await reset_workspace_settings_overrides(db) == {}
+        assert await get_workspace_settings_overrides(db) == {}
+
+        merged = await update_workspace_settings_overrides(
+            db, {"rlm_max_iters": 12, "daytona_target": "us"}
+        )
+        assert merged == {"rlm_max_iters": 12, "daytona_target": "us"}
+        assert await get_workspace_settings_overrides(db) == merged
+
+        patched = await update_workspace_settings_overrides(
+            db, {"rlm_max_depth": 5, "daytona_target": None}
+        )
+        assert patched == {"rlm_max_iters": 12, "rlm_max_depth": 5}
+        assert await get_workspace_settings_overrides(db) == patched
+
+        assert await reset_workspace_settings_overrides(db) == {}
+        assert await get_workspace_settings_overrides(db) == {}
+    finally:
+        async with db.begin() as connection:
+            if not prior_exists:
+                await connection.execute(delete(WorkspaceSettings).where(WorkspaceSettings.id == 1))
+            else:
+                await connection.execute(
+                    insert(WorkspaceSettings)
+                    .values(id=1, overrides_json=prior_overrides or {})
+                    .on_conflict_do_update(
+                        index_elements=[WorkspaceSettings.id],
+                        set_={"overrides_json": prior_overrides or {}, "updated_at": func.now()},
+                    )
+                )
