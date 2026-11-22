@@ -45,9 +45,6 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.ty.environment]
 python-version = "3.13"
 
-[tool.ty.terminal]
-error-on-warning = false
-
 [tool.importlinter]
 root_package = "fleet_rlm"
 include_external_packages = true

@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import json
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Coroutine, Mapping
 from contextlib import asynccontextmanager, suppress
 from pathlib import PurePosixPath
 from typing import Any
@@ -56,7 +56,7 @@ def _is_recoverable_timeout(error: BaseException) -> bool:
 async def ephemeral_sandbox(
     daytona: AsyncDaytona,
     settings: Settings,
-) -> AsyncIterator[AsyncSandbox]:
+) -> AsyncGenerator[AsyncSandbox]:
     """Create a volume-free Daytona sandbox for offline optimization and always delete it."""
     sandbox = await daytona.create(
         CreateSandboxFromSnapshotParams(

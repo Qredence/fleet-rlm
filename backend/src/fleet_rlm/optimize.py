@@ -8,7 +8,7 @@ import math
 import random
 import sys
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +19,7 @@ import dspy
 import mlflow
 import mlflow.dspy
 from dspy.experimental import ReAnchor
+from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 from sqlalchemy import select
 
 from . import agent, db, interpreter, skills
@@ -117,7 +118,7 @@ def guard_database_url(
 
 
 @contextmanager
-def _mlflow_tracking(settings: Settings, target: TargetKind) -> Iterator[bool]:
+def _mlflow_tracking(settings: Settings, target: TargetKind) -> Generator[bool]:
     if not settings.mlflow_tracking_uri:
         yield False
         return
@@ -368,7 +369,7 @@ def rlm_metric(
     pred_name: str | None = None,
     pred_trace: Any = None,
     program_trace: Any = None,
-) -> dspy.Prediction:
+) -> ScoreWithFeedback:
     """GEPA feedback metric comparing normalized answers with token-F1 partial credit."""
     expected_raw = str(getattr(gold, "answer", "") or "").strip()
     actual_raw = str(getattr(pred, "answer", "") or "").strip()
@@ -376,9 +377,9 @@ def rlm_metric(
     actual = _normalize_text(actual_raw)
 
     if expected == actual and expected:
-        return dspy.Prediction(score=1.0, feedback="Exact answer match.")
+        return ScoreWithFeedback(score=1.0, feedback="Exact answer match.")
     if not expected or not actual:
-        return dspy.Prediction(
+        return ScoreWithFeedback(
             score=0.0,
             feedback=f"Expected {expected_raw!r}, got {actual_raw!r} (empty answer).",
         )
@@ -400,7 +401,7 @@ def rlm_metric(
         precision = overlap / len(actual_tokens)
         recall = overlap / len(expected_tokens)
         score = 2 * precision * recall / (precision + recall)
-    return dspy.Prediction(
+    return ScoreWithFeedback(
         score=score,
         feedback=f"Expected {expected_raw!r}, got {actual_raw!r} (token F1={score:.2f}).",
     )
@@ -478,7 +479,7 @@ def _pin_reminder(env_var: str, output_path: Path, decision_model: str) -> str:
 @contextmanager
 def _ephemeral_daytona_interpreter(
     settings: Settings,
-) -> Iterator[Callable[..., interpreter.DaytonaCodeInterpreter]]:
+) -> Generator[Callable[..., interpreter.DaytonaCodeInterpreter]]:
     """Run an ephemeral Daytona sandbox on a background event loop and always delete it."""
     loop = asyncio.new_event_loop()
     ready = threading.Event()
@@ -563,7 +564,7 @@ def _rlm_execution_context(
     *,
     program_kind: ProgramKind,
     local_interpreter: bool,
-) -> Iterator[None]:
+) -> Generator[None]:
     if program_kind == "rlm" and not local_interpreter:
         with (
             _ephemeral_daytona_interpreter(settings) as interpreter_factory,
