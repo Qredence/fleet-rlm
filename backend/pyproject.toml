@@ -25,6 +25,7 @@ dev = [
     "httpx>=0.28.0",
     "ruff>=0.9.0",
     "import-linter>=2.1",
+    "ty>=0.0.107",
 ]
 
 [tool.ruff]
@@ -41,8 +42,15 @@ known-third-party = ["alembic"]
 testpaths = ["tests"]
 asyncio_default_fixture_loop_scope = "function"
 
+[tool.ty.environment]
+python-version = "3.13"
+
+[tool.ty.terminal]
+error-on-warning = false
+
 [tool.importlinter]
 root_package = "fleet_rlm"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Backend dependency layers"
@@ -72,3 +80,32 @@ name = "Offline optimizer never imports the API or UI stream"
 type = "forbidden"
 source_modules = ["fleet_rlm.optimize"]
 forbidden_modules = ["fleet_rlm.api", "fleet_rlm.ui_stream"]
+
+[[tool.importlinter.contracts]]
+name = "Only interpreter imports daytona"
+type = "forbidden"
+source_modules = [
+    "fleet_rlm.api",
+    "fleet_rlm.optimize",
+    "fleet_rlm.ui_stream",
+    "fleet_rlm.agent",
+    "fleet_rlm.skills",
+    "fleet_rlm.db",
+    "fleet_rlm.config",
+]
+forbidden_modules = ["daytona"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only api imports fastapi"
+type = "forbidden"
+source_modules = [
+    "fleet_rlm.optimize",
+    "fleet_rlm.ui_stream",
+    "fleet_rlm.agent",
+    "fleet_rlm.skills",
+    "fleet_rlm.interpreter",
+    "fleet_rlm.db",
+    "fleet_rlm.config",
+]
+forbidden_modules = ["fastapi"]

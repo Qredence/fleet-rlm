@@ -2,10 +2,11 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,7 @@ from fastapi import (
     FastAPI,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -61,12 +63,28 @@ class Runtime:
     daytona: AsyncDaytona
     skills: SkillRegistry
     lm: dspy.BaseLM
+    sub_lm: dspy.BaseLM
     decision_lm: dspy.BaseLM
-    program: dspy.RLM
+    turn_semaphore: asyncio.Semaphore
+    optimized_program_state: dict[str, Any] | None
+
+
+def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> dict[str, Any] | None:
+    path = settings.optimized_program_path
+    if path is None:
+        return None
+    if path.suffix != ".json":
+        raise ValueError(f"Optimized program path must end with .json, received: {path}")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(state, dict):
+        raise ValueError(f"Optimized program state in {path} must be a JSON object")
+    # Validate artifact state once at startup before serving requests.
+    agent.build_program(settings, [], sub_lm=sub_lm, optimized_state=state)
+    return state
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = Settings()
     engine, sessionmaker = store.create_db(settings)
     try:
@@ -76,15 +94,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mlflow.set_experiment(settings.mlflow_experiment)
             mlflow.dspy.autolog()
         skills = SkillRegistry.load(settings.skills_dir)
+        lm = agent._model(settings, settings.llm_model)
+        sub_lm = agent._model(settings, settings.sub_llm_model)
+        decision_lm = dspy.LM(settings.decision_model)
+        optimized_program_state = _load_optimized_program_state(settings, sub_lm)
+        turn_semaphore = asyncio.Semaphore(settings.max_concurrent_turns_per_worker)
         async with make_daytona_client(settings) as daytona:
             app.state.runtime = Runtime(
-                settings,
-                sessionmaker,
-                daytona,
-                skills,
-                agent._model(settings, settings.llm_model),
-                dspy.LM(settings.decision_model),
-                agent.build_program(settings, []),
+                settings=settings,
+                sessionmaker=sessionmaker,
+                daytona=daytona,
+                skills=skills,
+                lm=lm,
+                sub_lm=sub_lm,
+                decision_lm=decision_lm,
+                turn_semaphore=turn_semaphore,
+                optimized_program_state=optimized_program_state,
             )
             yield
     finally:
@@ -159,11 +184,12 @@ async def get_db(runtime: RuntimeDep) -> AsyncIterator[AsyncSession]:
 DbDep = Annotated[AsyncSession, Depends(get_db, scope="function")]
 
 
-async def turn_slot() -> AsyncIterator[None]:
-    yield
+async def turn_slot(runtime: RuntimeDep) -> AsyncIterator[None]:
+    async with runtime.turn_semaphore:
+        yield
 
 
-TurnConcurrencySlot = Annotated[None, Depends(turn_slot, max_concurrency=16)]
+TurnConcurrencySlot = Annotated[None, Depends(turn_slot)]
 
 
 class SessionCreate(BaseModel):
@@ -192,28 +218,23 @@ _NON_EMPTY_SETTINGS_FIELDS = (
     "llm_model",
     "sub_llm_model",
     "decision_model",
-    "daytona_snapshot",
-    "mlflow_experiment",
 )
-_NULLABLE_SETTINGS_FIELDS = ("llm_base_url", "daytona_target")
+_NULLABLE_SETTINGS_FIELDS = ("daytona_target",)
 
 
 class WorkspaceSettingsFields(BaseModel):
     llm_model: str = Field(min_length=1)
     sub_llm_model: str = Field(min_length=1)
     decision_model: str = Field(min_length=1)
-    llm_base_url: str | None = None
     rlm_max_iters: int = Field(ge=1, le=100)
     rlm_max_llm_calls: int = Field(ge=1, le=500)
-    rlm_max_depth: int = Field(ge=1, le=8)
+    rlm_max_depth: int = Field(ge=1, le=7)
     rlm_max_output_chars: int = Field(ge=500, le=200_000)
     history_max_turns: int = Field(ge=0, le=100)
     history_max_chars: int = Field(ge=1_000, le=200_000)
-    daytona_snapshot: str = Field(min_length=1)
     daytona_target: str | None = None
     daytona_auto_stop_minutes: int = Field(ge=1, le=1440)
     daytona_exec_timeout_seconds: int = Field(ge=5, le=600)
-    mlflow_experiment: str = Field(min_length=1)
 
 
 _EDITABLE_SETTINGS_FIELDS = frozenset(WorkspaceSettingsFields.model_fields)
@@ -225,18 +246,15 @@ class WorkspaceSettingsPatch(BaseModel):
     llm_model: str | None = None
     sub_llm_model: str | None = None
     decision_model: str | None = None
-    llm_base_url: str | None = None
     rlm_max_iters: int | None = Field(default=None, ge=1, le=100)
     rlm_max_llm_calls: int | None = Field(default=None, ge=1, le=500)
-    rlm_max_depth: int | None = Field(default=None, ge=1, le=8)
+    rlm_max_depth: int | None = Field(default=None, ge=1, le=7)
     rlm_max_output_chars: int | None = Field(default=None, ge=500, le=200_000)
     history_max_turns: int | None = Field(default=None, ge=0, le=100)
     history_max_chars: int | None = Field(default=None, ge=1_000, le=200_000)
-    daytona_snapshot: str | None = None
     daytona_target: str | None = None
     daytona_auto_stop_minutes: int | None = Field(default=None, ge=1, le=1440)
     daytona_exec_timeout_seconds: int | None = Field(default=None, ge=5, le=600)
-    mlflow_experiment: str | None = None
 
     @field_validator(*_NON_EMPTY_SETTINGS_FIELDS)
     @classmethod
@@ -261,9 +279,13 @@ class WorkspaceSettingsStatus(BaseModel):
     database_configured: bool
     daytona_configured: bool
     daytona_volume_id: str
+    daytona_snapshot: str
     llm_api_key_configured: bool
+    llm_base_url: str | None
     bearer_auth_enabled: bool
+    max_concurrent_turns_per_worker: int
     mlflow_tracking_uri: str | None
+    mlflow_experiment: str
     optimized_program_path: str | None
     skill_selector_path: str | None
     memory_gate_path: str | None
@@ -389,9 +411,14 @@ async def create_session(db: DbDep, payload: SessionCreate | None = None) -> Ses
 
 
 @app.get("/api/sessions", dependencies=[Depends(require_auth)])
-async def list_sessions(db: DbDep) -> list[SessionView]:
+async def list_sessions(
+    db: DbDep,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[SessionView]:
     sessions = await db.scalars(
-        select(store.Session).order_by(store.Session.updated_at.desc(), store.Session.id.desc())
+        select(store.Session)
+        .order_by(store.Session.updated_at.desc(), store.Session.id.desc())
+        .limit(limit)
     )
     return [SessionView.model_validate(session) for session in sessions]
 
@@ -461,10 +488,14 @@ def _workspace_settings_view(
             database_configured=bool(base.database_url),
             daytona_configured=bool(base.daytona_api_key.get_secret_value()),
             daytona_volume_id=base.daytona_volume_id,
+            daytona_snapshot=base.daytona_snapshot,
             llm_api_key_configured=bool(base.llm_api_key.get_secret_value()),
+            llm_base_url=base.llm_base_url,
             bearer_auth_enabled=base.api_bearer_token is not None
             and bool(base.api_bearer_token.get_secret_value()),
+            max_concurrent_turns_per_worker=base.max_concurrent_turns_per_worker,
             mlflow_tracking_uri=base.mlflow_tracking_uri,
+            mlflow_experiment=base.mlflow_experiment,
             optimized_program_path=str(base.optimized_program_path)
             if base.optimized_program_path is not None
             else None,
@@ -480,21 +511,15 @@ def _workspace_settings_view(
 
 
 def _request_root_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
-    if (
-        effective.llm_model != runtime.settings.llm_model
-        or effective.llm_base_url != runtime.settings.llm_base_url
-    ):
+    if effective.llm_model != runtime.settings.llm_model:
         return agent._model(effective, effective.llm_model)
     return runtime.lm
 
 
 def _request_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
-    if (
-        effective.sub_llm_model != runtime.settings.sub_llm_model
-        or effective.llm_base_url != runtime.settings.llm_base_url
-    ):
+    if effective.sub_llm_model != runtime.settings.sub_llm_model:
         return agent._model(effective, effective.sub_llm_model)
-    return runtime.program.sub_lm
+    return runtime.sub_lm
 
 
 def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
@@ -528,23 +553,28 @@ async def reset_settings(runtime: RuntimeDep) -> WorkspaceSettingsView:
 
 
 @app.delete("/api/sessions/{session_id}", status_code=204, dependencies=[Depends(require_auth)])
-async def delete_session(session_id: UUID, runtime: RuntimeDep, db: DbDep) -> None:
-    async with db.begin():
+async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
+    async with runtime.sessionmaker() as db, db.begin():
         session = await _editable_session(db, session_id)
-        if session.daytona_sandbox_id:
-            try:
-                sandbox = await runtime.daytona.get(session.daytona_sandbox_id)
-                await runtime.daytona.delete(sandbox, wait=True)
-            except DaytonaError as error:
-                if error.status_code != 404:
-                    raise
+        sandbox_id = session.daytona_sandbox_id
         await db.delete(session)
+    if sandbox_id:
+        try:
+            sandbox = await runtime.daytona.get(sandbox_id)
+            await runtime.daytona.delete(sandbox, wait=True)
+        except DaytonaError as error:
+            if error.status_code != 404:
+                _LOG.warning(
+                    "Could not delete Daytona sandbox %s for deleted session %s (%s)",
+                    sandbox_id,
+                    session_id,
+                    type(error).__name__,
+                )
 
 
 @app.get("/api/sessions/{session_id}/messages", dependencies=[Depends(require_auth)])
-async def session_messages(session_id: UUID, db: DbDep, runtime: RuntimeDep) -> list[dict]:
-    await _session(db, session_id)
-    await db.rollback()
+async def session_messages(session_id: UUID, runtime: RuntimeDep) -> list[dict]:
+    await store.get_session_or_raise(runtime.sessionmaker, session_id)
     return await store.get_session_ui_messages(runtime.sessionmaker, session_id)
 
 
@@ -564,6 +594,35 @@ def _valid_file_path(path: str) -> bool:
     return root in {"files", "artifacts"} and bool(parts) and all(map(_safe_component, parts))
 
 
+async def _ensure_bound_sandbox(
+    runtime: Runtime,
+    effective: Settings,
+    session_id: UUID,
+    existing_sandbox_id: str | None,
+) -> tuple[AsyncSandbox, str]:
+    sandbox, sandbox_id, created = await ensure_session_sandbox(
+        runtime.daytona, effective, session_id, existing_sandbox_id
+    )
+    if not created:
+        return sandbox, sandbox_id
+    try:
+        winning_id, won = await store.bind_session_sandbox_if_unset(
+            runtime.sessionmaker, session_id, sandbox_id
+        )
+    except (Exception, asyncio.CancelledError):
+        with suppress(DaytonaError):
+            await runtime.daytona.delete(sandbox, wait=True)
+        raise
+    if won:
+        return sandbox, winning_id
+    with suppress(DaytonaError):
+        await runtime.daytona.delete(sandbox, wait=True)
+    winning_sandbox, _, _ = await ensure_session_sandbox(
+        runtime.daytona, effective, session_id, winning_id
+    )
+    return winning_sandbox, winning_id
+
+
 @app.post(
     "/api/sessions/{session_id}/files",
     status_code=201,
@@ -572,11 +631,24 @@ def _valid_file_path(path: str) -> bool:
     form_limits={"max_files": 1, "max_fields": 4, "max_part_size": 64 * 1024},
 )
 async def upload_file(
-    session_id: UUID, file: Annotated[UploadFile, Upload()], db: DbDep, runtime: RuntimeDep
+    session_id: UUID, file: Annotated[UploadFile, Upload()], runtime: RuntimeDep
 ) -> FileView:
     name = file.filename or ""
     if not _safe_component(name):
         raise HTTPException(400, "Invalid filename")
+
+    async with runtime.sessionmaker() as db:
+        session = await _session(db, session_id)
+        if await db.scalar(
+            select(store.Run.id).where(
+                store.Run.session_id == session_id,
+                store.Run.parent_run_id.is_(None),
+                store.Run.status == "running",
+            )
+        ):
+            raise HTTPException(409, "Session already has a running turn")
+        sandbox_id = session.daytona_sandbox_id
+
     effective = await _effective_settings(runtime)
     path = f"files/{name}"
     temporary = f"{WORKSPACE}/files/.{uuid4().hex}.upload"
@@ -591,38 +663,36 @@ async def upload_file(
             size += len(chunk)
             yield chunk
 
-    sandbox = None
-    created = False
+    sandbox, _ = await _ensure_bound_sandbox(runtime, effective, session_id, sandbox_id)
     try:
-        async with db.begin():
-            session = await _editable_session(db, session_id)
-            sandbox, sandbox_id, created = await ensure_session_sandbox(
-                runtime.daytona, effective, session_id, session.daytona_sandbox_id
-            )
-            session.daytona_sandbox_id = sandbox_id
-            try:
-                await sandbox.fs.upload_file_stream(chunks(), temporary, timeout=timeout)
-                await sandbox.fs.move_files(
-                    temporary, f"{WORKSPACE}/{path}", request_timeout=timeout
-                )
-            except (Exception, asyncio.CancelledError):
-                with suppress(DaytonaError):
-                    await sandbox.fs.delete_file(temporary, request_timeout=timeout)
-                raise
-            record = await db.scalar(
-                select(store.File).where(
-                    store.File.session_id == session_id, store.File.path == path
-                )
-            )
-            if record is None:
-                record = store.File(session_id=session_id, path=path, kind="input")
-                db.add(record)
-            record.size_bytes = size
-            record.sha256 = digest.hexdigest()
+        await sandbox.fs.upload_file_stream(chunks(), temporary, timeout=timeout)
+        await sandbox.fs.move_files(temporary, f"{WORKSPACE}/{path}", request_timeout=timeout)
     except (Exception, asyncio.CancelledError):
-        if created:
+        with suppress(DaytonaError):
+            await sandbox.fs.delete_file(temporary, request_timeout=timeout)
+        raise
+
+    try:
+        await store.get_session_or_raise(runtime.sessionmaker, session_id)
+        record = await store.upsert_file_record(
+            runtime.sessionmaker,
+            session_id,
+            path=path,
+            sha256=digest.hexdigest(),
+            size_bytes=size,
+            kind="input",
+        )
+    except store.SessionNotFoundError:
+        with suppress(DaytonaError):
+            await sandbox.fs.delete_file(f"{WORKSPACE}/{path}", request_timeout=timeout)
+        raise
+    except IntegrityError:
+        try:
+            await store.get_session_or_raise(runtime.sessionmaker, session_id)
+        except store.SessionNotFoundError:
             with suppress(DaytonaError):
-                await runtime.daytona.delete(sandbox, wait=True)
+                await sandbox.fs.delete_file(f"{WORKSPACE}/{path}", request_timeout=timeout)
+            raise
         raise
     return FileView.model_validate(record)
 
@@ -637,21 +707,19 @@ async def session_files(session_id: UUID, db: DbDep) -> list[FileView]:
 
 
 @app.get("/api/sessions/{session_id}/files/{file_path:path}", dependencies=[Depends(require_auth)])
-async def download_file(
-    session_id: UUID, file_path: str, db: DbDep, runtime: RuntimeDep
-) -> Response:
+async def download_file(session_id: UUID, file_path: str, runtime: RuntimeDep) -> Response:
     if not _valid_file_path(file_path):
         raise HTTPException(400, "Invalid workspace path")
-    session = await _session(db, session_id)
-    sandbox_id = session.daytona_sandbox_id
-    file_id = await db.scalar(
-        select(store.File.id).where(
-            store.File.session_id == session_id, store.File.path == file_path
+    async with runtime.sessionmaker() as db:
+        session = await _session(db, session_id)
+        sandbox_id = session.daytona_sandbox_id
+        file_id = await db.scalar(
+            select(store.File.id).where(
+                store.File.session_id == session_id, store.File.path == file_path
+            )
         )
-    )
     if file_id is None or sandbox_id is None:
         raise HTTPException(404, "File not found")
-    await db.rollback()
     effective = await _effective_settings(runtime)
     try:
         sandbox, _, _ = await ensure_session_sandbox(
@@ -674,14 +742,17 @@ async def download_file(
 
 @app.get("/api/memories", dependencies=[Depends(require_auth)])
 async def list_memories(
-    db: DbDep, session_id: UUID | None = None, approved: bool | None = None
+    db: DbDep,
+    session_id: UUID | None = None,
+    approved: bool | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[MemoryView]:
     query = select(store.Memory).order_by(store.Memory.id.desc())
     if session_id is not None:
         query = query.where(store.Memory.session_id == session_id)
     if approved is not None:
         query = query.where(store.Memory.approved.is_(approved))
-    return [MemoryView.model_validate(memory) for memory in await db.scalars(query)]
+    return [MemoryView.model_validate(memory) for memory in await db.scalars(query.limit(limit))]
 
 
 @app.patch("/api/memories/{memory_id}", dependencies=[Depends(require_auth)])
@@ -766,22 +837,34 @@ async def _prepare_turn(
     _slot: TurnConcurrencySlot,
 ) -> AsyncIterator[Turn]:
     prompt = payload.latest_prompt()
-    pinned = payload.pinned_skills or [
+    mentioned = [
         skill.name
         for skill in runtime.skills.skills
         if re.search(rf"(?<![\w@])@{re.escape(skill.name)}(?![\w-])", prompt)
     ]
-    if set(name.removeprefix("@") for name in pinned) - {
-        skill.name for skill in runtime.skills.skills
-    }:
+    pinned = list(
+        dict.fromkeys([*(name.removeprefix("@") for name in payload.pinned_skills), *mentioned])
+    )
+    if set(pinned) - {skill.name for skill in runtime.skills.skills}:
         raise HTTPException(422, "Unknown pinned Skill")
 
     sessionmaker = runtime.sessionmaker
     await store.get_session_or_raise(sessionmaker, session_id)
     try:
-        run = await store.acquire_root_run(sessionmaker, session_id, prompt)
-    except store.TurnConflictError as error:
-        raise HTTPException(409, "Session already has a running turn") from error
+        try:
+            run = await store.acquire_root_run(sessionmaker, session_id, prompt)
+        except store.TurnConflictError as error:
+            reaped = await store.reap_stale_runs(
+                sessionmaker,
+                runtime.settings.stale_run_timeout_seconds,
+                session_id=session_id,
+            )
+            if reaped <= 0:
+                raise HTTPException(409, "Session already has a running turn") from error
+            try:
+                run = await store.acquire_root_run(sessionmaker, session_id, prompt)
+            except store.TurnConflictError as retry_error:
+                raise HTTPException(409, "Session already has a running turn") from retry_error
     except IntegrityError:
         # Resolve a deletion that raced the existence check.
         await store.get_session_or_raise(sessionmaker, session_id)
@@ -806,21 +889,9 @@ async def _chat_sandbox(
     runtime: Runtime, session: store.Session, settings: Settings | None = None
 ) -> AsyncSandbox:
     effective = settings if settings is not None else await _effective_settings(runtime)
-    sandbox, sandbox_id, created = await ensure_session_sandbox(
-        runtime.daytona, effective, session.id, session.daytona_sandbox_id
+    sandbox, _ = await _ensure_bound_sandbox(
+        runtime, effective, session.id, session.daytona_sandbox_id
     )
-    if created:
-        try:
-            async with runtime.sessionmaker() as db, db.begin():
-                await db.execute(
-                    update(store.Session)
-                    .where(store.Session.id == session.id)
-                    .values(daytona_sandbox_id=sandbox_id)
-                )
-        except (Exception, asyncio.CancelledError):
-            with suppress(DaytonaError):
-                await runtime.daytona.delete(sandbox, wait=True)
-            raise
     return sandbox
 
 
@@ -835,6 +906,8 @@ def _file_manifest(file: store.File) -> dict:
 
 async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list[dict]) -> None:
     async def save(candidate: agent.MemoryCandidate) -> None:
+        if candidate.content is None:
+            return
         await store.save_or_update_memory(
             runtime.sessionmaker,
             session_id=turn.session_id if candidate.scope == "session" else None,
@@ -845,8 +918,15 @@ async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list
 
     try:
         effective = await _effective_settings(runtime)
-        with dspy.context(lm=_request_decision_lm(runtime, effective)):
-            await agent.consolidate_memory(effective, turn.prompt, answer, memories, on_save=save)
+        decision_lm = _request_decision_lm(runtime, effective)
+        await agent.consolidate_memory(
+            effective,
+            turn.prompt,
+            answer,
+            memories,
+            on_save=save,
+            decision_lm=decision_lm,
+        )
     except Exception as error:
         _LOG.warning("Memory consolidation failed for %s (%s)", turn.run_id, type(error).__name__)
 
@@ -919,18 +999,27 @@ async def _run_turn(
             for record in records
         ]
         manifest = [_file_manifest(file) for file in files]
+        known_files = {file.path: (file.sha256, file.size_bytes) for file in files}
 
         async def refresh_files() -> list[dict]:
-            for artifact in await list_new_artifacts(sandbox, {file.path for file in files}):
+            by_path = {entry["path"]: entry for entry in manifest}
+            for artifact in await list_new_artifacts(sandbox, known_files):
                 path = artifact["path"].removeprefix(f"{WORKSPACE}/")
                 if _valid_file_path(path) and path.startswith("artifacts/"):
-                    artifacts.append({**artifact, "path": path, "kind": "artifact"})
-            return sorted([*manifest, *artifacts], key=lambda file: file["path"])
+                    entry = {**artifact, "path": path, "kind": "artifact"}
+                    artifacts.append(entry)
+                    by_path[path] = entry
+            return sorted(by_path.values(), key=lambda file: file["path"])
 
-        with dspy.context(lm=_request_decision_lm(runtime, effective)):
-            selection = await asyncio.to_thread(
-                select_skills, effective, runtime.skills, turn.prompt, turn.pinned_skills
-            )
+        decision_lm = _request_decision_lm(runtime, effective)
+        selection = await asyncio.to_thread(
+            select_skills,
+            effective,
+            runtime.skills,
+            turn.prompt,
+            turn.pinned_skills,
+            decision_lm=decision_lm,
+        )
 
         async def emit(run_id: str, event: agent.RunEvent) -> None:
             if run_id == root_id and isinstance(event, agent.RunResultEvent):
@@ -960,6 +1049,7 @@ async def _run_turn(
             selection=selection,
             model_override=session.model_override or _request_root_lm(runtime, effective),
             sub_lm=_request_sub_lm(runtime, effective),
+            optimized_state=runtime.optimized_program_state,
             callbacks=agent.ChildCallbacks(start_child, finish_child),
         )
         if await request.is_disconnected():
@@ -969,7 +1059,8 @@ async def _run_turn(
         status = "cancelled"
         raise
     except Exception as error:
-        if asyncio.current_task().cancelling():
+        current_task = asyncio.current_task()
+        if current_task is not None and current_task.cancelling():
             status = "cancelled"
             raise asyncio.CancelledError from error
         error_text = "Turn failed"
@@ -978,7 +1069,7 @@ async def _run_turn(
         turn.finalizing = True
         try:
             persisted = {}
-            if status == "completed":
+            if status == "completed" and result is not None:
                 for artifact in artifacts:
                     await store.upsert_file_record(sessionmaker, turn.session_id, **artifact)
                 persisted = {
@@ -1006,7 +1097,7 @@ async def _run_turn(
             status = "failed"
             committed = False
 
-    if status == "completed" and committed:
+    if status == "completed" and committed and result is not None:
         background.add_task(_consolidate, runtime, turn, result.answer, memories)
         return terminal_frames
     return [ui_stream.error_frame(error_text or "Could not persist turn")]
