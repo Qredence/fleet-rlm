@@ -13,7 +13,11 @@ from uuid import uuid4
 
 import dspy
 import pytest
-from dspy.primitives.code_interpreter import CodeExecutionError, FinalOutput
+from dspy.primitives.code_interpreter import (
+    CodeExecutionError,
+    CodeInterpreterError,
+    FinalOutput,
+)
 from dspy.utils.dummies import DummyLM
 from pydantic import ValidationError
 
@@ -34,6 +38,7 @@ from fleet_rlm.agent import (
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
+    DaytonaError,
     ensure_session_sandbox,
     list_new_artifacts,
     make_daytona_client,
@@ -475,6 +480,70 @@ async def test_interpreter_outputs_artifacts_and_cancelled_replies(settings, tmp
             "sha256": hashlib.sha256(b"x\n1\n").hexdigest(),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_should_raise_recoverable_execution_error_and_reset_context_when_cell_times_out(
+    settings, tmp_path, monkeypatch
+):
+    sandbox = _LocalSandbox(tmp_path)
+    factory = make_interpreter_factory(
+        sandbox,
+        settings.model_copy(update={"daytona_exec_timeout_seconds": 1}),
+        asyncio.get_running_loop(),
+    )
+    interpreter = factory()
+    interpreter.output_fields = [{"name": "answer"}]
+
+    async def execute(code, values=None):
+        return await asyncio.to_thread(interpreter.execute, code, values)
+
+    try:
+        assert await execute("cached = 42\nprint(cached)") == "42\n"
+        assert len(sandbox.contexts) == 1
+        first_context = sandbox.contexts[0]
+        assert Path(interpreter._mailbox).exists()
+
+        with pytest.raises(
+            CodeExecutionError,
+            match=r"Python execution timed out after 1s; interpreter context was reset",
+        ):
+            await execute("import time\ntime.sleep(5)")
+
+        assert sandbox.deleted == [first_context]
+        assert not Path(interpreter._mailbox).exists()
+        assert interpreter._closed is False
+        assert interpreter._context is None
+
+        assert await execute("print('cached' in globals())\nSUBMIT('recovered')") == FinalOutput(
+            {"answer": "recovered"}
+        )
+        assert len(sandbox.contexts) == 2
+        assert interpreter._context is sandbox.contexts[1]
+        assert interpreter._closed is False
+    finally:
+        await asyncio.to_thread(interpreter.shutdown)
+    assert sandbox.contexts == sandbox.deleted
+
+    original_run_code = sandbox.run_code
+    for failure in (
+        DaytonaError("transport closed"),
+        ExceptionGroup("transport group", [DaytonaError("frame error")]),
+    ):
+        broken = factory()
+        try:
+            await asyncio.to_thread(broken.start)
+            monkeypatch.setattr(sandbox, "run_code", AsyncMock(side_effect=failure))
+            with pytest.raises(
+                CodeInterpreterError,
+                match="Daytona execution transport failed or timed out",
+            ) as exc_info:
+                await asyncio.to_thread(broken.execute, "print('unreachable')")
+            assert not isinstance(exc_info.value, CodeExecutionError)
+            assert broken._closed is True
+        finally:
+            monkeypatch.setattr(sandbox, "run_code", original_run_code)
+            await asyncio.to_thread(broken.shutdown)
 
 
 @pytest.mark.asyncio

@@ -232,7 +232,9 @@ class DaytonaCodeInterpreter:
     execution_instructions = (
         "Execute Python in /workspace. Inputs are under /workspace/files. "
         "Place generated files under /workspace/artifacts. Use spawn_agent for recursive RLM "
-        "delegation through the host's depth limit."
+        "delegation through the host's depth limit. Keep each Python cell well within the "
+        "execution timeout; once an answer is verified with a trusted library or two independent "
+        "checks, call SUBMIT rather than re-implementing heavy algorithms from scratch."
     )
 
     def __init__(
@@ -453,7 +455,13 @@ class DaytonaCodeInterpreter:
                     active = False
                     for task in tasks.copy():
                         task.cancel()
-        except (ExceptionGroup, TimeoutError, DaytonaError) as error:
+        except TimeoutError as error:
+            await self._delete_context()
+            raise CodeExecutionError(
+                f"Python execution timed out after {self._timeout}s; interpreter context was reset "
+                "(in-memory variables cleared, /workspace files preserved)."
+            ) from error
+        except (ExceptionGroup, DaytonaError) as error:
             self._closed = True
             raise CodeInterpreterError("Daytona execution transport failed or timed out") from error
 
