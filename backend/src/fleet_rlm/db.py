@@ -377,6 +377,40 @@ async def get_session_ui_messages(db: SessionFactory, session_id: UUID) -> list[
         return messages
 
 
+async def get_session_prior_turns(
+    db: SessionFactory, session_id: UUID, *, max_turns: int, max_chars: int
+) -> list[dict[str, str]]:
+    """Read bounded prompt/answer pairs from previous successful root turns."""
+    if max_turns <= 0 or max_chars <= 0:
+        return []
+    async with db() as connection:
+        rows = (
+            await connection.execute(
+                select(func.left(Run.prompt, max_chars), func.left(Run.answer, max_chars))
+                .where(
+                    Run.session_id == session_id,
+                    Run.parent_run_id.is_(None),
+                    Run.status == "completed",
+                    Run.answer.is_not(None),
+                )
+                .order_by(Run.id.desc())
+                .limit(max_turns)
+            )
+        ).all()
+
+    turns = []
+    remaining = max_chars
+    for prompt, answer in rows:
+        user = prompt[:remaining]
+        assistant = answer[: remaining - len(user)]
+        turns.append({"user": user, "assistant": assistant})
+        remaining -= len(user) + len(assistant)
+        if remaining == 0:
+            break
+    turns.reverse()
+    return turns
+
+
 async def upsert_file_record(
     db: SessionFactory,
     session_id: UUID,

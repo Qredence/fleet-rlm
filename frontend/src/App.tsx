@@ -4,6 +4,7 @@ import { Moon, PanelLeft, PanelRight, Settings, Sun, Terminal } from 'lucide-rea
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { ChatComposer } from '@/components/agent/ChatComposer'
+import { FilePreview } from '@/components/agent/FilePreview'
 import { MessageParts } from '@/components/agent/MessageParts'
 import type { PanelPresentation } from '@/components/agent/ResponsivePanel'
 import { SessionsSidebar } from '@/components/agent/SessionsSidebar'
@@ -47,6 +48,7 @@ function Chat({
   initialMessages,
   skills,
   recentStops,
+  preview,
   download,
   onComplete,
 }: {
@@ -55,6 +57,7 @@ function Chat({
   initialMessages: FleetMessage[]
   skills: Skill[]
   recentStops: StopTimes
+  preview: (path: string) => void
   download: (path: string) => void
   onComplete: () => void
 }) {
@@ -134,7 +137,7 @@ function Chat({
                         {user ? (
                           <Bubble variant="muted" align="end" className="max-w-[90%] sm:max-w-[80%]">
                             <BubbleContent>
-                              <MessageParts parts={message.parts} download={download} />
+                              <MessageParts parts={message.parts} preview={preview} download={download} />
                             </BubbleContent>
                           </Bubble>
                         ) : (
@@ -145,6 +148,7 @@ function Chat({
                             <MessageParts
                               parts={message.parts}
                               live={active && index === messages.length - 1}
+                              preview={preview}
                               download={download}
                             />
                           </>
@@ -209,6 +213,7 @@ function SessionWorkspace({
   workspacePanel,
   workspaceError,
   onRunComplete,
+  onSkillInstalled,
 }: {
   api: FleetApi
   token: string
@@ -221,11 +226,13 @@ function SessionWorkspace({
   workspacePanel: PanelPresentation
   workspaceError: string
   onRunComplete: () => void
+  onSkillInstalled: (skill: Skill) => void
 }) {
   const [messages, setMessages] = useState<FleetMessage[] | null>(null)
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null)
   const [chatError, setChatError] = useState('')
   const [fileError, setFileError] = useState('')
+  const [previewPath, setPreviewPath] = useState<string>()
   const [pendingUploads, setPendingUploads] = useState(0)
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const fileRequest = useRef<AbortController | null>(null)
@@ -331,6 +338,7 @@ function SessionWorkspace({
             initialMessages={messages}
             skills={skills}
             recentStops={recentStops}
+            preview={setPreviewPath}
             download={download}
             onComplete={handleChatComplete}
           />
@@ -370,8 +378,20 @@ function SessionWorkspace({
         memoryRefreshKey={memoryRefreshKey}
         presentation={workspacePanel}
         onUpload={(batch) => void uploadFiles(batch)}
+        onPreview={setPreviewPath}
         onDownload={download}
       />
+      {sessionId && previewPath && (
+        <FilePreview
+          key={previewPath}
+          api={api}
+          sessionId={sessionId}
+          path={previewPath}
+          onClose={() => setPreviewPath(undefined)}
+          onDownload={() => api.downloadFile(sessionId, previewPath)}
+          onSkillInstalled={onSkillInstalled}
+        />
+      )}
     </>
   )
 }
@@ -420,6 +440,11 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
         // Ignore silent background session refreshes.
       })
   }, [api])
+
+  function addInstalledSkill(skill: Skill) {
+    setSkills((current) => [...current.filter((item) => item.name !== skill.name), skill]
+      .sort((left, right) => left.name.localeCompare(right.name)))
+  }
 
   useEffect(() => {
     const request = new AbortController()
@@ -628,6 +653,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
           }}
           workspaceError={workspaceError}
           onRunComplete={refreshSessions}
+          onSkillInstalled={addInstalledSkill}
         />
       </div>
 

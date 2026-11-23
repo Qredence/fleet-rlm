@@ -214,9 +214,10 @@ def load_rlm_dataset(path: Path) -> list[dspy.Example]:
                 files_manifest=list(row.get("files_manifest") or []),
                 memories=list(row.get("memories") or []),
                 active_skills=str(row.get("active_skills") or ""),
+                prior_turns=list(row.get("prior_turns") or []),
                 answer=answer,
                 artifact_paths=list(row.get("artifact_paths") or []),
-            ).with_inputs("task", "files_manifest", "memories", "active_skills")
+            ).with_inputs("task", "files_manifest", "memories", "active_skills", "prior_turns")
         )
     return examples
 
@@ -272,9 +273,10 @@ async def load_rlm_examples_from_db(
                 files_manifest=_extract_files_manifest(run.ui_parts),
                 memories=[],
                 active_skills="",
+                prior_turns=[],
                 answer=run.answer,
                 artifact_paths=[],
-            ).with_inputs("task", "files_manifest", "memories", "active_skills")
+            ).with_inputs("task", "files_manifest", "memories", "active_skills", "prior_turns")
         )
     return examples
 

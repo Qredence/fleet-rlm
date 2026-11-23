@@ -55,7 +55,7 @@ from .interpreter import (
     make_interpreter_factory,
     upload_workspace_file,
 )
-from .skills import SkillRegistry, select_skills
+from .skills import MAX_SKILL_BYTES, SkillRegistry, select_skills
 
 _STREAM_HEADER = "x-vercel-ai-ui-message-stream"
 _LOG = logging.getLogger(__name__)
@@ -316,6 +316,18 @@ class FileView(BaseModel):
     created_at: datetime
 
 
+class SkillView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    description: str
+
+
+class SkillInstall(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class MemoryView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -324,6 +336,11 @@ class MemoryView(BaseModel):
     content: str
     approved: bool
     created_at: datetime
+
+    @field_validator("content")
+    @classmethod
+    def display_fact(cls, content: str) -> str:
+        return agent.memory_fact(content)
 
 
 class MemoryEdit(BaseModel):
@@ -479,7 +496,11 @@ async def _effective_settings(runtime: Runtime) -> Settings:
     return _merge_settings(runtime.settings, overrides)
 
 
-def _workspace_settings_view(
+async def _skill_registry(runtime: Runtime) -> SkillRegistry:
+    return await asyncio.to_thread(runtime.skills.with_installed, runtime.settings.skills_dir)
+
+
+async def _workspace_settings_view(
     runtime: Runtime, raw_overrides: dict[str, Any]
 ) -> WorkspaceSettingsView:
     overrides = _sanitize_overrides(raw_overrides)
@@ -510,7 +531,7 @@ def _workspace_settings_view(
             memory_gate_path=str(base.memory_gate_path)
             if base.memory_gate_path is not None
             else None,
-            skills_count=len(runtime.skills.skills),
+            skills_count=len((await _skill_registry(runtime)).skills),
         ),
     )
 
@@ -536,7 +557,7 @@ def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
 @app.get("/api/settings", dependencies=[Depends(require_auth)])
 async def get_settings(runtime: RuntimeDep) -> WorkspaceSettingsView:
     overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
-    return _workspace_settings_view(runtime, overrides)
+    return await _workspace_settings_view(runtime, overrides)
 
 
 @app.patch("/api/settings", dependencies=[Depends(require_auth)])
@@ -548,13 +569,13 @@ async def patch_settings(
         overrides = await store.update_workspace_settings_overrides(runtime.sessionmaker, changes)
     else:
         overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
-    return _workspace_settings_view(runtime, overrides)
+    return await _workspace_settings_view(runtime, overrides)
 
 
 @app.delete("/api/settings", dependencies=[Depends(require_auth)])
 async def reset_settings(runtime: RuntimeDep) -> WorkspaceSettingsView:
     overrides = await store.reset_workspace_settings_overrides(runtime.sessionmaker)
-    return _workspace_settings_view(runtime, overrides)
+    return await _workspace_settings_view(runtime, overrides)
 
 
 @app.delete("/api/sessions/{session_id}", status_code=204, dependencies=[Depends(require_auth)])
@@ -703,32 +724,45 @@ async def session_files(session_id: UUID, db: DbDep) -> list[FileView]:
     return [FileView.model_validate(file) for file in files]
 
 
-@app.get("/api/sessions/{session_id}/files/{file_path:path}", dependencies=[Depends(require_auth)])
-async def download_file(session_id: UUID, file_path: str, runtime: RuntimeDep) -> Response:
+async def _workspace_file(
+    runtime: Runtime, session_id: UUID, file_path: str
+) -> tuple[str, store.File]:
     if not _valid_file_path(file_path):
         raise HTTPException(400, "Invalid workspace path")
     async with runtime.sessionmaker() as db:
         session = await _session(db, session_id)
         sandbox_id = session.daytona_sandbox_id
-        file_id = await db.scalar(
-            select(store.File.id).where(
+        file = await db.scalar(
+            select(store.File).where(
                 store.File.session_id == session_id, store.File.path == file_path
             )
         )
-    if file_id is None or sandbox_id is None:
+    if file is None or sandbox_id is None:
         raise HTTPException(404, "File not found")
+    return sandbox_id, file
+
+
+async def _read_workspace_file(
+    runtime: Runtime, session_id: UUID, sandbox_id: str, file_path: str
+) -> bytes:
     effective = await _effective_settings(runtime)
     try:
         sandbox, _, _ = await ensure_session_sandbox(
             runtime.daytona, effective, session_id, sandbox_id
         )
-        content = await download_workspace_file(
+        return await download_workspace_file(
             sandbox, file_path, timeout=effective.daytona_exec_timeout_seconds
         )
     except DaytonaError as error:
         if error.status_code == 404:
             raise HTTPException(404, "File not found") from error
         raise
+
+
+@app.get("/api/sessions/{session_id}/files/{file_path:path}", dependencies=[Depends(require_auth)])
+async def download_file(session_id: UUID, file_path: str, runtime: RuntimeDep) -> Response:
+    sandbox_id, _ = await _workspace_file(runtime, session_id, file_path)
+    content = await _read_workspace_file(runtime, session_id, sandbox_id, file_path)
     filename = quote(file_path.rsplit("/", 1)[-1], safe="")
     return Response(
         content,
@@ -755,6 +789,10 @@ async def list_memories(
 @app.patch("/api/memories/{memory_id}", dependencies=[Depends(require_auth)])
 async def edit_memory(memory_id: UUID, payload: MemoryEdit, db: DbDep) -> MemoryView:
     changes = payload.model_dump(exclude_none=True)
+    if "content" in changes:
+        changes["content"] = agent.memory_fact(changes["content"])
+        if not changes["content"]:
+            raise HTTPException(422, "Memory content is required")
     if not changes:
         raise HTTPException(422, "A content or approval change is required")
     async with db.begin():
@@ -779,10 +817,39 @@ async def delete_memory(memory_id: UUID, db: DbDep) -> None:
 
 
 @app.get("/api/skills", dependencies=[Depends(require_auth)])
-async def list_skills(runtime: RuntimeDep) -> list[dict[str, str]]:
-    return [
-        {"name": skill.name, "description": skill.description} for skill in runtime.skills.skills
-    ]
+async def list_skills(runtime: RuntimeDep) -> list[SkillView]:
+    registry = await _skill_registry(runtime)
+    return [SkillView.model_validate(skill) for skill in registry.skills]
+
+
+@app.post(
+    "/api/sessions/{session_id}/skills", status_code=201, dependencies=[Depends(require_auth)]
+)
+async def install_skill(session_id: UUID, payload: SkillInstall, runtime: RuntimeDep) -> SkillView:
+    if not payload.path.startswith("artifacts/") or not payload.path.endswith("/SKILL.md"):
+        raise HTTPException(400, "Only generated SKILL.md artifacts can be installed")
+    sandbox_id, file = await _workspace_file(runtime, session_id, payload.path)
+    if file.kind != "artifact":
+        raise HTTPException(400, "Only generated SKILL.md artifacts can be installed")
+    if file.size_bytes > MAX_SKILL_BYTES:
+        raise HTTPException(413, "SKILL.md must be at most 64 KiB")
+    if file.sha256 != payload.sha256:
+        raise HTTPException(409, "The artifact changed. Reopen its preview and try again.")
+    content = await _read_workspace_file(runtime, session_id, sandbox_id, payload.path)
+    if hashlib.sha256(content).hexdigest() != payload.sha256:
+        raise HTTPException(409, "The artifact changed. Reopen its preview and try again.")
+    try:
+        skill = await asyncio.to_thread(
+            runtime.skills.install, runtime.settings.skills_dir, content
+        )
+    except FileExistsError as error:
+        raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    except OSError as error:
+        _LOG.exception("Could not store installed Skill")
+        raise HTTPException(503, "Could not store the skill") from error
+    return SkillView.model_validate(skill)
 
 
 @dataclass
@@ -791,6 +858,7 @@ class Turn:
     session_id: UUID
     prompt: str
     pinned_skills: list[str]
+    skills: SkillRegistry
     worker: asyncio.Task[list[dict]] | None = None
     finalizing: bool = False
     finalized: bool = False
@@ -834,15 +902,16 @@ async def _prepare_turn(
     _slot: TurnConcurrencySlot,
 ) -> AsyncIterator[Turn]:
     prompt = payload.latest_prompt()
+    registry = await _skill_registry(runtime)
     mentioned = [
         skill.name
-        for skill in runtime.skills.skills
+        for skill in registry.skills
         if re.search(rf"(?<![\w@])@{re.escape(skill.name)}(?![\w-])", prompt)
     ]
     pinned = list(
         dict.fromkeys([*(name.removeprefix("@") for name in payload.pinned_skills), *mentioned])
     )
-    if set(pinned) - {skill.name for skill in runtime.skills.skills}:
+    if set(pinned) - {skill.name for skill in registry.skills}:
         raise HTTPException(422, "Unknown pinned Skill")
 
     sessionmaker = runtime.sessionmaker
@@ -867,7 +936,7 @@ async def _prepare_turn(
         await store.get_session_or_raise(sessionmaker, session_id)
         raise
 
-    turn = Turn(run.id, session_id, prompt, pinned)
+    turn = Turn(run.id, session_id, prompt, pinned, registry)
     response.headers[_STREAM_HEADER] = "v1"
     # FastAPI's native SSE response supplies X-Accel-Buffering: no.
     try:
@@ -1005,13 +1074,19 @@ async def _run_turn(
         # Read history after acquiring the root so it includes the previous completed turn.
         async with sessionmaker() as db:
             session = await _session(db, turn.session_id)
+        prior_turns = await store.get_session_prior_turns(
+            sessionmaker,
+            turn.session_id,
+            max_turns=effective.history_max_turns,
+            max_chars=effective.history_max_chars,
+        )
         sandbox = await _chat_sandbox(runtime, session, effective)
         files = await store.list_session_files(sessionmaker, turn.session_id)
         decision_lm = _request_decision_lm(runtime, effective)
         selection = await asyncio.to_thread(
             select_skills,
             effective,
-            runtime.skills,
+            turn.skills,
             turn.prompt,
             turn.pinned_skills,
             decision_lm=decision_lm,
@@ -1062,13 +1137,16 @@ async def _run_turn(
             effective,
             task=turn.prompt,
             files_manifest=manifest,
-            memories=[record.content for record in task_memories],
+            memories=[
+                fact for record in task_memories if (fact := agent.memory_fact(record.content))
+            ],
             interpreter_factory=make_interpreter_factory(
                 sandbox, effective, asyncio.get_running_loop()
             ),
             run_id=root_id,
             emit=emit,
             history=dspy.History.model_validate(session.history_json),
+            prior_turns=prior_turns,
             selection=selection,
             model_override=session.model_override or _request_root_lm(runtime, effective),
             sub_lm=_request_sub_lm(runtime, effective),

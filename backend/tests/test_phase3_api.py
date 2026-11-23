@@ -363,6 +363,7 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "finish_run", finish)
     monkeypatch.setattr(db, "list_session_files", list_files)
     monkeypatch.setattr(db, "get_session_ui_messages", ui_messages)
+    monkeypatch.setattr(db, "get_session_prior_turns", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "upsert_file_record", upsert_artifact)
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
@@ -523,6 +524,79 @@ async def test_download_requires_a_safe_registered_path(offline):
     )
 
 
+@pytest.mark.asyncio
+async def test_install_skill_artifact_is_immediately_available_to_new_turns(offline, monkeypatch):
+    artifact_path = "artifacts/receipt-check/SKILL.md"
+    content = b"---\nname: receipt-check\ndescription: Check receipts\n---\nUse code RC-29.\n"
+    digest = hashlib.sha256(content).hexdigest()
+    offline.store.add(db.File(path=artifact_path, sha256=digest, size_bytes=len(content)))
+    offline.sandbox.fs.download_file.return_value = content
+
+    created = await offline.client.post("/api/sessions", json={"title": "Fresh"})
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+    offline.store.sessions[UUID(session_id)].daytona_sandbox_id = "test-sandbox"
+    payload = {
+        "messages": [{"role": "user", "parts": [{"type": "text", "text": "Verify a receipt"}]}],
+        "pinned_skills": ["receipt-check"],
+    }
+    path = f"/api/sessions/{session_id}/chat"
+    assert (await offline.client.post(path, json=payload)).status_code == 422
+
+    endpoint = f"{offline.base}/skills"
+    install = {"path": artifact_path, "sha256": digest}
+    for _ in range(2):
+        installed = await offline.client.post(endpoint, json=install)
+        assert installed.status_code == 201
+        assert installed.json() == {"name": "receipt-check", "description": "Check receipts"}
+    catalog = await offline.client.get("/api/skills")
+    assert [item["name"] for item in catalog.json()] == ["receipt-check", "table"]
+
+    task = AsyncMock(
+        return_value=dspy.Prediction(answer="RC-29", history=dspy.History(messages=[]))
+    )
+    monkeypatch.setattr(api.agent, "run_workspace_task", task)
+    response = await offline.client.post(path, json=payload)
+    assert response.status_code == 200
+    assert response.text.endswith("data: [DONE]\n\n")
+    (skill,) = task.await_args.kwargs["selection"].active_skills
+    assert skill.body == "Use code RC-29."
+
+    different = content.replace(b"RC-29", b"RC-30")
+    digest = hashlib.sha256(different).hexdigest()
+    offline.store.files[(offline.store.session_id, artifact_path)].sha256 = digest
+    offline.sandbox.fs.download_file.return_value = different
+    assert (
+        await offline.client.post(endpoint, json={"path": artifact_path, "sha256": digest})
+    ).status_code == 409
+    assert skill.path.read_bytes() == content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "kind", "name", "changed", "status"),
+    [
+        ("files/SKILL.md", "input", "receipt-check", False, 400),
+        ("artifacts/test/SKILL.md", "input", "receipt-check", False, 400),
+        ("artifacts/test/SKILL.md", "artifact", "../escape", False, 422),
+        ("artifacts/test/SKILL.md", "artifact", "table", False, 409),
+        ("artifacts/test/SKILL.md", "artifact", "receipt-check", True, 409),
+    ],
+)
+async def test_install_skill_rejects_invalid_or_changed_artifacts(
+    offline, path, kind, name, changed, status
+):
+    content = f"---\nname: {name}\ndescription: Test\n---\nDo the thing.\n".encode()
+    digest = hashlib.sha256(content).hexdigest()
+    offline.store.add(db.File(path=path, sha256=digest, size_bytes=len(content), kind=kind))
+    offline.sandbox.fs.download_file.return_value = content + b"Changed" if changed else content
+    response = await offline.client.post(
+        f"{offline.base}/skills", json={"path": path, "sha256": digest}
+    )
+    assert response.status_code == status
+    assert [item["name"] for item in (await offline.client.get("/api/skills")).json()] == ["table"]
+
+
 def test_ui_frames_and_lossless_nested_snapshots():
     root = api.ui_stream.UiPartAccumulator("root")
     assert root.start() == {"type": "start", "messageId": "root"}
@@ -611,7 +685,10 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
         runtime, skills=SkillRegistry((*runtime.skills.skills, creator))
     )
     global_memory = db.Memory(
-        id=uuid4(), session_id=None, content="Use USD for financial totals", approved=True
+        id=uuid4(),
+        session_id=None,
+        content="Memory candidate (pending approval): Use USD for financial totals",
+        approved=True,
     )
     session_memory = db.Memory(
         id=uuid4(),
@@ -622,6 +699,9 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[global_memory]))
     session_lookup = AsyncMock(return_value=[session_memory])
     monkeypatch.setattr(db, "list_approved_session_memories", session_lookup)
+    prior = [{"user": "The earlier marker was ALDER-58.", "assistant": "Acknowledged."}]
+    prior_lookup = AsyncMock(return_value=prior)
+    monkeypatch.setattr(db, "get_session_prior_turns", prior_lookup)
     turn = AsyncMock(return_value=dspy.Prediction(answer="Done", history=dspy.History(messages=[])))
     monkeypatch.setattr(api.agent, "run_workspace_task", turn)
 
@@ -634,12 +714,34 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
     )
 
     assert response.status_code == 200
+    prior_lookup.assert_awaited_once_with(
+        offline.store,
+        offline.store.session_id,
+        max_turns=offline.settings.history_max_turns,
+        max_chars=offline.settings.history_max_chars,
+    )
+    assert turn.await_args.kwargs["prior_turns"] == prior
     if skill_name == "skill-creator":
         session_lookup.assert_awaited_once_with(offline.store, offline.store.session_id)
         assert turn.await_args.kwargs["memories"] == [session_memory.content]
     else:
         session_lookup.assert_not_awaited()
-        assert turn.await_args.kwargs["memories"] == [global_memory.content]
+        assert turn.await_args.kwargs["memories"] == ["Use USD for financial totals"]
+
+
+@pytest.mark.asyncio
+async def test_approving_legacy_memory_displays_only_the_fact(offline):
+    record = db.Memory(
+        id=uuid4(),
+        session_id=None,
+        content="Memory candidate (pending approval): Use code FIR-42 for the handoff.",
+        approved=False,
+    )
+    offline.store.add(record)
+    response = await offline.client.patch(f"/api/memories/{record.id}", json={"approved": True})
+    assert response.status_code == 200
+    assert response.json()["approved"] is True
+    assert response.json()["content"] == "Use code FIR-42 for the handoff."
 
 
 @pytest.mark.asyncio
@@ -1809,6 +1911,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
     monkeypatch.setattr(db, "acquire_root_run", store.acquire_root)
     monkeypatch.setattr(db, "finish_run", AsyncMock(side_effect=store.finish))
     monkeypatch.setattr(db, "list_session_files", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db, "get_session_prior_turns", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
     monkeypatch.setattr(api, "list_new_artifacts", AsyncMock(return_value=[]))

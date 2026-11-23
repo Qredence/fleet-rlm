@@ -14,6 +14,7 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 import dspy
+import mlflow
 import pytest
 from dspy.primitives.code_interpreter import (
     CodeExecutionError,
@@ -22,6 +23,7 @@ from dspy.primitives.code_interpreter import (
 )
 from dspy.primitives.repl_types import REPLVariable
 from dspy.utils.dummies import DummyLM
+from mlflow.entities import SpanStatusCode
 from pydantic import ValidationError
 
 from fleet_rlm.agent import (
@@ -483,6 +485,56 @@ async def test_provisioning_and_reuse(settings, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_daytona_cell_spans_are_nested_and_preserve_execution_results(
+    settings, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'traces.db'}")
+    sandbox = _LocalSandbox(tmp_path)
+    interpreter = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())()
+    interpreter.output_fields = [{"name": "answer"}]
+    waiting = asyncio.Event()
+
+    async def wait_for_abort():
+        waiting.set()
+        await asyncio.Future()
+
+    interpreter.tools["wait_for_abort"] = wait_for_abort
+    try:
+        with mlflow.start_span("rlm-test") as root:
+            assert await asyncio.to_thread(interpreter.execute, "print(6 * 7)") == "42\n"
+            assert await asyncio.to_thread(interpreter.execute, "SUBMIT('done')") == FinalOutput(
+                {"answer": "done"}
+            )
+            with pytest.raises(CodeExecutionError):
+                await asyncio.to_thread(interpreter.execute, "raise ValueError('test error')")
+            cell = asyncio.create_task(asyncio.to_thread(interpreter.execute, "wait_for_abort()"))
+            await asyncio.wait_for(waiting.wait(), timeout=5)
+            await interpreter.abort()
+            with pytest.raises(asyncio.CancelledError):
+                await cell
+    finally:
+        await asyncio.to_thread(interpreter.shutdown)
+
+    mlflow.flush_trace_async_logging()
+    trace = mlflow.get_trace(root.trace_id)
+    assert trace is not None
+    stdout, submitted, failure, cancelled = trace.data.spans[1:]
+    for span in (stdout, submitted, failure, cancelled):
+        assert span.name == "daytona.python.execute"
+        assert span.span_type == "TOOL"
+        assert span.parent_id == root.span_id
+        assert span.attributes["daytona.sandbox_id"] == sandbox.id
+    assert stdout.inputs == {"code": "print(6 * 7)"}
+    assert stdout.outputs == {"stdout": "42\n"}
+    assert submitted.outputs == {"submission": {"answer": "done"}}
+    assert failure.status.status_code == SpanStatusCode.ERROR
+    assert cancelled.inputs == {"code": "wait_for_abort()"}
+    assert cancelled.outputs is None
+    assert cancelled.status.status_code == SpanStatusCode.ERROR
+    assert cancelled.attributes["daytona.execution.status"] == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_interpreter_outputs_artifacts_and_cancelled_replies(settings, tmp_path, monkeypatch):
     sandbox = _LocalSandbox(tmp_path)
     factory = make_interpreter_factory(
@@ -633,7 +685,9 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
             },
             {
                 "plan": "Verify fresh context",
-                "code": "assert 'sentinel' not in globals()\nSUBMIT('Still 7', [])",
+                "code": "assert 'sentinel' not in globals()\n"
+                "assert prior_turns == [{'user': 'Delegate CSV arithmetic', 'assistant': '7'}]\n"
+                "SUBMIT('Still 7', [])",
             },
         ]
     )
@@ -686,6 +740,7 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
         task="Recall the result",
         run_id="followup",
         history=history,
+        prior_turns=[{"user": "Delegate CSV arithmetic", "assistant": "7"}],
         **common,
     )
     assert first.answer == "7" and second.answer == "Still 7"

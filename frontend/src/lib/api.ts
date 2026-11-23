@@ -131,6 +131,11 @@ export function createApi(token?: string) {
     return { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }
   }
 
+  function getFile(id: string, path: string, signal?: AbortSignal) {
+    const encoded = path.split('/').map(encodeURIComponent).join('/')
+    return request(`${sessionPath(id)}/files/${encoded}`, { signal })
+  }
+
   return {
     health: (signal?: AbortSignal) => json<{ status: 'ok' }>('/healthz', { signal }, false),
     readiness: (signal?: AbortSignal) => json<{ status: 'ok' }>('/readyz', { signal }, false),
@@ -150,9 +155,9 @@ export function createApi(token?: string) {
       body.append('file', file)
       return json<WorkspaceFile>(`${sessionPath(id)}/files`, { method: 'POST', body })
     },
+    getFile,
     async downloadFile(id: string, path: string) {
-      const encoded = path.split('/').map(encodeURIComponent).join('/')
-      const response = await request(`${sessionPath(id)}/files/${encoded}`)
+      const response = await getFile(id, path)
       const url = URL.createObjectURL(await response.blob())
       const link = document.createElement('a')
       link.href = url
@@ -172,6 +177,8 @@ export function createApi(token?: string) {
       await request(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' })
     },
     listSkills: (signal?: AbortSignal) => json<Skill[]>('/api/skills', { signal }),
+    installSkill: (id: string, path: string, sha256: string) =>
+      json<Skill>(`${sessionPath(id)}/skills`, writeJson('POST', { path, sha256 })),
     getSettings: (signal?: AbortSignal) => json<WorkspaceSettingsView>(settingsPath, { signal }),
     updateSettings: (changes: Partial<WorkspaceSettingsFields>) =>
       json<WorkspaceSettingsView>(settingsPath, writeJson('PATCH', changes)),
