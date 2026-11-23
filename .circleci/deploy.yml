@@ -33,12 +33,12 @@ jobs:
             test "$CIRCLE_BRANCH" = main
             test "$(git rev-parse HEAD)" = "$FLEET_RELEASE_SHA"
             test "$CIRCLE_SHA1" = "$FLEET_RELEASE_SHA"
-            python .circleci/pypi_release.py preflight
+            uv run --no-project --python 3.13 python .circleci/pypi_release.py preflight
       - run:
           name: Build and smoke-test release distributions
           command: |
-            uv build --clear --out-dir "$PWD/dist" backend
-            uvx --from 'twine>=7,<8' twine check dist/fleet_rlm-*
+            uv build --python 3.13 --clear --out-dir "$PWD/dist" backend
+            uvx --python 3.13 --from 'twine>=7,<8' twine check dist/fleet_rlm-*
             sha256sum dist/fleet_rlm-* > dist/SHA256SUMS
             bash .circleci/smoke-wheel.sh dist/fleet_rlm-*.whl
       - store_artifacts:
@@ -71,7 +71,7 @@ jobs:
               --component-name=fleet-rlm --target-version="$FLEET_RELEASE_VERSION"
             touch /tmp/fleet-pypi-planned
             TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" \
-              uvx --from 'twine>=7,<8' twine upload --non-interactive \
+              uvx --python 3.13 --from 'twine>=7,<8' twine upload --non-interactive \
                 --repository-url https://upload.pypi.org/legacy/ dist/fleet_rlm-*
             circleci run release update fleet-rlm-pypi --status=RUNNING
       - run:
@@ -96,7 +96,7 @@ jobs:
           command: |
             timeout 10m bash -eo pipefail -c '
               sha256sum -c dist/SHA256SUMS
-              python .circleci/pypi_release.py download
+              uv run --no-project --python 3.13 python .circleci/pypi_release.py download
               bash .circleci/smoke-wheel.sh canary/fleet_rlm-*.whl
             '
 
@@ -108,7 +108,7 @@ jobs:
       - run:
           name: Report failed or cancelled canary to Smart Deployments
           command: |
-            if ! python .circleci/pypi_release.py alert; then
+            if ! python3 .circleci/pypi_release.py alert; then
               circleci run release update fleet-rlm-pypi --status=FAILED \
                 --failure-reason="PyPI canary failed and could not send the validation signal"
             fi

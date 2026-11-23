@@ -6,7 +6,6 @@ import os
 import re
 import sys
 import time
-import tomllib
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -20,6 +19,8 @@ def registry_files(version):
 
 
 def preflight(version):
+    import tomllib
+
     project = tomllib.loads(Path("backend/pyproject.toml").read_text())["project"]
     if project["name"] != "fleet-rlm" or project["version"] != version:
         raise SystemExit("Requested release does not match backend/pyproject.toml")
