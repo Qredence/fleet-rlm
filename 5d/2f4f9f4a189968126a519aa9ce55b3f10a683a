@@ -1,0 +1,29 @@
+backend/src/fleet_rlm/db.py
+  s_2fdc5be4a87bca::t_04c6d1b64b52c4 19,416-421,442-447
+backend/tests/test_phase1_locking.py
+  s_4302bf5cfb0645::t_8479c746c517fb 377,398,425-432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5d2f4f9f4a189968126a519aa9ce55b3f10a683a",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_4302bf5cfb0645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a206d8-4a96-7ec2-8b96-bd7f602e3cdd",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
