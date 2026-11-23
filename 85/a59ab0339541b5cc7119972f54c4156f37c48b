@@ -1,0 +1,59 @@
+Makefile
+  s_84de0b0d9d84de::t_40a765f01822b1 21-22,25
+frontend/package.json
+  s_84de0b0d9d84de::t_b2309808e330b4 17,24
+frontend/pnpm-lock.yaml
+  s_84de0b0d9d84de::t_1506149247734c 17,38-40,320-321,1342-1355,1825-1844,2737,3493-3501,4119-4132
+frontend/src/components/agent/FilePreview.tsx
+  s_84de0b0d9d84de::t_924470babf524c 1,59,154-181,189-190,197,217-218
+frontend/src/components/agent/FileTree.tsx
+  s_84de0b0d9d84de::t_1f99e12d7c9fe0 2-3,10-21,24,26,30,33-34,39-43,47,59,61,63,67,69-70,77-78,80-115,117-121
+frontend/src/components/agent/SessionWorkspace.tsx
+  s_84de0b0d9d84de::t_6f442253b32dd8 2,4,23,65,67,100,125-131,144-176,181-196,204,207,238,248,303,314-315
+frontend/src/components/agent/WorkspaceSidePanel.tsx
+  s_84de0b0d9d84de::t_0c561b4a107238 1-3,11-14,17-25,27,31-39,46-57,59-129,131-135,137,146,152-161,164-193,195-198
+frontend/src/components/ui/fluid-tabs.tsx
+  s_84de0b0d9d84de::t_5e06362b2de276 1-472
+frontend/src/hooks/use-workspace-files.ts
+  s_84de0b0d9d84de::t_1b94029b86dd50 2-3,13,24-27,29-42
+frontend/src/index.css
+  s_84de0b0d9d84de::t_b0983de5cdc5c5 4-5,11,216-247
+frontend/src/lib/api.ts
+  s_84de0b0d9d84de::t_a8b20f3e01fe86 18,150,152-161,179-180
+frontend/src/lib/font-weight.ts
+  s_84de0b0d9d84de::t_ff26c104b2bc36 1-5
+frontend/src/lib/icon-context.tsx
+  s_84de0b0d9d84de::t_966b2a086b2c90 1-236
+frontend/src/lib/messages.ts
+  s_84de0b0d9d84de::t_8f859f9b3d90b8 5-7
+frontend/src/lib/shape-context.tsx
+  s_84de0b0d9d84de::t_4c4f0a1317dd21 1-185
+frontend/src/lib/size-context.tsx
+  s_84de0b0d9d84de::t_e32f564b373669 1-196
+frontend/src/lib/springs.ts
+  s_84de0b0d9d84de::t_f518b2485108a7 1-31
+frontend/src/lib/type-scale.ts
+  s_84de0b0d9d84de::t_c538fe5e3e6b22 1-103
+frontend/src/lib/workspace-browser.test.ts
+  s_84de0b0d9d84de::t_43276e4740c4ee 1-37
+frontend/src/lib/workspace-browser.ts
+  s_84de0b0d9d84de::t_26e1a0511f7566 1-45
+frontend/vite.config.ts
+  s_84de0b0d9d84de::t_3e599582c92709 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "85a59ab0339541b5cc7119972f54c4156f37c48b",
+  "prompts": {},
+  "sessions": {
+    "s_84de0b0d9d84de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20991-1e6d-7411-8898-04d1d5e5bac1",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
