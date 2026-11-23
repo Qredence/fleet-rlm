@@ -1,0 +1,25 @@
+docs/evaluation-baseline.md
+  s_2fdc5be4a87bca::t_4d043f0a6e0e76 1-53
+scripts/dspy_baseline.py
+  s_2fdc5be4a87bca::t_64ea282e13deef 1-317
+scripts/fleet_workflow_baseline.py
+  s_2fdc5be4a87bca::t_52caafac133780 1-429
+scripts/gepa_pilot.py
+  s_2fdc5be4a87bca::t_d6b651768cd493 1-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7463af9d3ba9b8652ca840018d1f7527f98364f3",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
