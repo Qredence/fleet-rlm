@@ -1,0 +1,137 @@
+backend/pyproject.toml
+  s_7dbea4a77f7c1c::t_f8f77f0ea3c2d3 31
+backend/src/fleet_rlm/api.py
+  s_7dbea4a77f7c1c::t_ec1cad8f2b22f5 13,18,308-318,338-341,464-468,578-635,904-912
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_88c5a192906ad8 414-425,432-509,644-649,1345-1348,1379-1381,1408-1413,1459-1464
+backend/uv.lock
+  s_7dbea4a77f7c1c::t_131dfbf9ddfa0b 754,777
+frontend/package.json
+  s_7dbea4a77f7c1c::t_1f0fd824a81971 28-29
+frontend/pnpm-lock.yaml
+  s_7dbea4a77f7c1c::t_4d8127628e8fb5 50-55,1168-1171,1969-1988,2057-2059,3308-3309,4251-4265,4365-4366
+frontend/src/App.tsx
+  s_7dbea4a77f7c1c::t_e169542b905d5d 1-9,11-12,15-22,25-29,36-47,49,51-53,56-66,69-72,75-79,81-87,89-90,92,96-102,104,107,112-115,118-120,123-157,159-204,206-207,215
+frontend/src/components/AppSidebar.tsx
+  s_7dbea4a77f7c1c::t_aef8f31cfa18f2 1-312
+frontend/src/components/Deferred.tsx
+  s_7dbea4a77f7c1c::t_9029aa7c713e41 1-3,5-10,12-13,15-20,23-27,29-33
+frontend/src/components/LoadingDialog.tsx
+  s_7dbea4a77f7c1c::t_46f62a1a8a54c0 1-13
+frontend/src/components/PageHeader.tsx
+  s_7dbea4a77f7c1c::t_5d1a1785561149 1-24
+frontend/src/components/SessionActionDialogs.tsx
+  s_7dbea4a77f7c1c::t_49fa59a6d69992 1-2,5-6,8-13,15-25,27-53,55-56,58,60-61,65
+frontend/src/components/agent/ChatComposer.tsx
+  s_7dbea4a77f7c1c::t_3ba17547a0866e 1-2,4-5,30,33,39-42,44,47,51,53,61,69,74-79,81,84-85,89,94,98,100,105,109,120,127-129,137,142-144,155,158-160,164-208,210-241,243-251
+frontend/src/components/agent/ChatPlaceholder.tsx
+  s_7dbea4a77f7c1c::t_b1bfdb0456b76c 1-43
+frontend/src/components/agent/FilePreview.tsx
+  s_7dbea4a77f7c1c::t_348ef10ad6e03f 6,9,162,184-193
+frontend/src/components/agent/MessageParts.tsx
+  s_7dbea4a77f7c1c::t_24eeb410e942ee 9,44,71
+frontend/src/components/agent/ModelPicker.tsx
+  s_7dbea4a77f7c1c::t_d41adc183035da 1-96
+frontend/src/components/agent/ModelSelector.tsx
+  s_7dbea4a77f7c1c::t_4dba945d0725c9 1-77
+frontend/src/components/agent/SessionWorkspace.tsx
+  s_7dbea4a77f7c1c::t_a284b68e605ca8 1-292
+frontend/src/components/agent/SettingsDialog.tsx
+  s_7dbea4a77f7c1c::t_b7592549aa77bc 1-5,7,23-27
+frontend/src/components/agent/SettingsDialogBody.tsx
+  s_7dbea4a77f7c1c::t_be8a87a8c3a0e4 1-693
+frontend/src/components/agent/WorkspaceAttachments.tsx
+  s_7dbea4a77f7c1c::t_2a1c31f35b3fb9 1-63
+frontend/src/components/agent/WorkspaceSidePanel.tsx
+  s_7dbea4a77f7c1c::t_aa828bdc46a742 1-3,7-8,10-11,14-19,23,25,27-31,33-81,83-84,87-98
+frontend/src/components/fluid-hover-highlight.tsx
+  s_7dbea4a77f7c1c::t_3e74cc8a4429a1 1-34
+frontend/src/components/ui/alert-dialog.tsx
+  s_7dbea4a77f7c1c::t_00d911a2587e8c 4-5,43,49,55,58-59,63-65
+frontend/src/components/ui/aspect-ratio.tsx
+  s_7dbea4a77f7c1c::t_eaa1b6ac9d06e8 1-22
+frontend/src/components/ui/attachment.tsx
+  s_7dbea4a77f7c1c::t_02103f4d545e68 1-210
+frontend/src/components/ui/button.tsx
+  s_7dbea4a77f7c1c::t_9f0802580de543 16
+frontend/src/components/ui/card.tsx
+  s_7dbea4a77f7c1c::t_4bbed5f610f7b5 3,11-13,17
+frontend/src/components/ui/combobox.tsx
+  s_7dbea4a77f7c1c::t_250576c5f18cd2 1-303
+frontend/src/components/ui/deferred-dropdown-menu.tsx
+  s_7dbea4a77f7c1c::t_2ccc60886acaf1 1-52
+frontend/src/components/ui/deferred-sheet.tsx
+  s_7dbea4a77f7c1c::t_191ac21cec7812 1-9
+frontend/src/components/ui/dialog.tsx
+  s_7dbea4a77f7c1c::t_fd78acc3b932a8 4-5,50,56,58-59,64
+frontend/src/components/ui/dropdown-menu-popup.tsx
+  s_7dbea4a77f7c1c::t_41846df2bbec53 1-98
+frontend/src/components/ui/dropdown-menu.tsx
+  s_7dbea4a77f7c1c::t_88463adebcc6fc 4-5,23,27,32,34,41,47-52,54-56,101,126,148,172,214
+frontend/src/components/ui/item.tsx
+  s_7dbea4a77f7c1c::t_6aa228dafa8ee8 1-201
+frontend/src/components/ui/popover.tsx
+  s_7dbea4a77f7c1c::t_7fa8ace25b56f2 1-29
+frontend/src/components/ui/prompt-input.tsx
+  s_7dbea4a77f7c1c::t_df2a080efe233a 3,5-6,20-23,32-33,38-39,62,68-77,79-83,85-86,89-91,93-115,117,119-121,123-150
+frontend/src/components/ui/resizable.tsx
+  s_7dbea4a77f7c1c::t_8fd946ac0316e2 1-47
+frontend/src/components/ui/sheet.tsx
+  s_7dbea4a77f7c1c::t_dbe5382f232027 4-5,49,55,58-59,64,132-153,163
+frontend/src/components/ui/sidebar.tsx
+  s_7dbea4a77f7c1c::t_90310d831a5934 1-724
+frontend/src/components/ui/skeleton.tsx
+  s_7dbea4a77f7c1c::t_d1471e66d2a826 1-13
+frontend/src/components/ui/tooltip.tsx
+  s_7dbea4a77f7c1c::t_515bd25b275b94 1-69
+frontend/src/hooks/use-fluid-hover.ts
+  s_7dbea4a77f7c1c::t_ce03e54c1755d6 1-820
+frontend/src/hooks/use-mobile.ts
+  s_7dbea4a77f7c1c::t_d7a1a08b178295 1-7
+frontend/src/hooks/use-session-chat.ts
+  s_7dbea4a77f7c1c::t_0c8e85262e3008 1-94
+frontend/src/hooks/use-sessions.ts
+  s_7dbea4a77f7c1c::t_a6244e01eeaa6a 1-119
+frontend/src/hooks/use-workspace-files.ts
+  s_7dbea4a77f7c1c::t_cdd27d00b5dfa7 1-106
+frontend/src/index.css
+  s_7dbea4a77f7c1c::t_16b289c3a3702e 19-20,51-66,71-72,74,76,84,96,100,104-105,114-140,150,152,170-212,230-233
+frontend/src/lib/api.ts
+  s_7dbea4a77f7c1c::t_ced75c52a67830 38-52,158,169,172,184,188,197-198,201
+frontend/src/lib/chat-stream.ts
+  s_7dbea4a77f7c1c::t_3a206c07945150 1-54
+frontend/src/lib/elevated.tsx
+  s_7dbea4a77f7c1c::t_a03eb3752f3ea1 1-56
+frontend/src/lib/markdown-fragments.ts
+  s_7dbea4a77f7c1c::t_a267e23a7e778f 1-23
+frontend/src/lib/surface-classes.ts
+  s_7dbea4a77f7c1c::t_bdb00c1502aa4b 1-29
+frontend/src/lib/surface-context.tsx
+  s_7dbea4a77f7c1c::t_826f0ceacf809a 1-36
+frontend/src/lib/use-surface-layer.ts
+  s_7dbea4a77f7c1c::t_75af0af097bbd5 1-7
+frontend/src/main.tsx
+  s_7dbea4a77f7c1c::t_5c7f7ca81b355c 3-4,10-14
+frontend/src/pages/CapabilitiesPage.tsx
+  s_7dbea4a77f7c1c::t_3d87f7e2b559c9 1-147
+frontend/src/pages/MemoriesPage.tsx
+  s_7dbea4a77f7c1c::t_e0b32ba3a35703 1-264
+frontend/src/pages/OptimizationPage.tsx
+  s_7dbea4a77f7c1c::t_df767315f01214 1-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "70a65e8b42ff1c0828844194d449a0731275bc44",
+  "prompts": {},
+  "sessions": {
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
