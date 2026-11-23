@@ -18,6 +18,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID, uuid4
 
+import mlflow
 from daytona import AsyncDaytona, DaytonaConfig
 from daytona.v0 import (
     AsyncSandbox,
@@ -378,7 +379,26 @@ class DaytonaCodeInterpreter:
             await self._start()
 
             async def cell() -> str | FinalOutput:
-                return await self._execute(code, variables or {})
+                if mlflow.get_current_active_span() is None:
+                    return await self._execute(code, variables or {})
+                with mlflow.start_span(
+                    name="daytona.python.execute",
+                    span_type="TOOL",
+                    attributes={"daytona.sandbox_id": self._sandbox.id},
+                ) as span:
+                    span.set_inputs({"code": code})
+                    try:
+                        output = await self._execute(code, variables or {})
+                    except asyncio.CancelledError:
+                        span.set_status("ERROR")
+                        span.set_attribute("daytona.execution.status", "cancelled")
+                        raise
+                    span.set_outputs(
+                        {"submission": output.output}
+                        if isinstance(output, FinalOutput)
+                        else {"stdout": output}
+                    )
+                    return output
 
             if self._on_execution is not None:
                 return await self._on_execution(code, cell)
