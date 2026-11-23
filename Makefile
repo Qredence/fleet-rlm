@@ -18,10 +18,11 @@ check-frontend:
 	cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 
 dev-backend:
-	cd backend && uv run uvicorn fleet_rlm.api:app --reload --port 8000
+	cd backend && uv run --locked $(if $(wildcard backend/.env),--env-file .env) \
+		env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL uvicorn fleet_rlm.api:app --reload --port 8000
 
 dev-frontend:
-	cd frontend && pnpm dev
+	cd frontend && pnpm dev --port 5173 --strictPort
 
 mlflow:
 	docker compose up -d mlflow

@@ -15,6 +15,7 @@ export interface SessionUpdate {
 }
 
 export interface WorkspaceFile extends WorkspaceFileEntry {
+  sha256: string
   id: string
   session_id: string
   created_at: string
@@ -146,9 +147,18 @@ export function createApi(token?: string) {
     return { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }
   }
 
-  function getFile(id: string, path: string, signal?: AbortSignal) {
+  async function getFile(id: string, path: string, signal?: AbortSignal) {
     const encoded = path.split('/').map(encodeURIComponent).join('/')
-    return request(`${sessionPath(id)}/files/${encoded}`, { signal })
+    const registered = `${sessionPath(id)}/files/${encoded}`
+    if (path.startsWith('artifacts/')) return request(registered, { signal })
+    if (path.startsWith('files/')) {
+      try {
+        return await request(registered, { signal })
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) throw error
+      }
+    }
+    return request(`${sessionPath(id)}/workspace/${encoded}`, { signal })
   }
 
   return {
@@ -166,6 +176,8 @@ export function createApi(token?: string) {
       json<FleetMessage[]>(`${sessionPath(id)}/messages`, { signal }),
     listFiles: (id: string, signal?: AbortSignal) =>
       json<WorkspaceFile[]>(`${sessionPath(id)}/files`, { signal }),
+    listWorkspace: (id: string, signal?: AbortSignal) =>
+      json<Omit<WorkspaceFileEntry, 'kind' | 'sha256'>[]>(`${sessionPath(id)}/workspace`, { signal }),
     uploadFile(id: string, file: File, signal?: AbortSignal) {
       const body = new FormData()
       body.append('file', file)

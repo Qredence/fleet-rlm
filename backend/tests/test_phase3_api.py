@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -18,7 +20,7 @@ import pytest
 import pytest_asyncio
 from dspy.utils.dummies import DummyLM
 
-from fleet_rlm import api, db
+from fleet_rlm import api, db, interpreter
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import DaytonaError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
@@ -612,6 +614,38 @@ async def test_download_requires_a_safe_registered_path(offline):
     offline.sandbox.fs.download_file.assert_awaited_once_with(
         f"/workspace/{file_path}", offline.settings.daytona_exec_timeout_seconds
     )
+
+
+@pytest.mark.asyncio
+async def test_workspace_browses_checkout_and_skips_symlinks(offline, monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    checkout = workspace / "repo"
+    checkout.mkdir(parents=True)
+    (checkout / "README.md").write_text("# Example checkout")
+    (workspace / "artifacts").mkdir()
+    (workspace / "artifacts" / "report.md").write_text("# Report")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "private.txt").write_text("outside the workspace")
+    (checkout / "link").symlink_to(outside, target_is_directory=True)
+    (checkout / "alias.txt").symlink_to(outside / "private.txt")
+    monkeypatch.setattr(interpreter, "WORKSPACE", str(workspace))
+
+    async def code_run(code, *, timeout):
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=timeout
+        )
+        return SimpleNamespace(exit_code=result.returncode, result=result.stdout)
+
+    offline.sandbox.process = SimpleNamespace(code_run=code_run)
+    route = f"{offline.base}/workspace"
+    response = await offline.client.get(route)
+    assert response.status_code == 200
+    assert [entry["path"] for entry in response.json()] == ["repo/README.md"]
+    assert (await offline.client.get(f"{route}/repo/README.md")).content == b"# Example checkout"
+    assert (await offline.client.get(f"{route}/repo/link/private.txt")).status_code == 404
+    assert (await offline.client.get(f"{route}/repo/alias.txt")).status_code == 404
+    assert (await offline.client.get(f"{route}/repo/%2e%2e/outside")).status_code == 400
 
 
 @pytest.mark.asyncio

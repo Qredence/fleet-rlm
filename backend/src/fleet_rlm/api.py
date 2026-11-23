@@ -46,14 +46,17 @@ from .interpreter import (
     AsyncDaytona,
     AsyncSandbox,
     DaytonaError,
+    WorkspaceBrowseLimit,
     delete_sandbox,
     delete_sandbox_by_id,
     delete_workspace_file,
     download_workspace_file,
     ensure_session_sandbox,
     list_new_artifacts,
+    list_workspace_files,
     make_daytona_client,
     make_interpreter_factory,
+    read_browsable_workspace_file,
     upload_workspace_file,
 )
 from .skills import MAX_SKILL_BYTES, SkillRegistry, select_skills
@@ -801,6 +804,68 @@ async def session_files(session_id: UUID, db: DbDep) -> list[FileView]:
         select(store.File).where(store.File.session_id == session_id).order_by(store.File.path)
     )
     return [FileView.model_validate(file) for file in files]
+
+
+class WorkspaceEntry(BaseModel):
+    path: str
+    size_bytes: int
+    revision: str
+
+
+def _browsable_workspace_path(path: str) -> bool:
+    parts = path.split("/")
+    return parts[0] != "artifacts" and ".git" not in parts and all(map(_safe_component, parts))
+
+
+async def _browse_sandbox(runtime: Runtime, session_id: UUID) -> tuple[AsyncSandbox | None, int]:
+    async with runtime.sessionmaker() as db:
+        sandbox_id = (await _session(db, session_id)).daytona_sandbox_id
+    if sandbox_id is None:
+        return None, 0
+    effective = await _effective_settings(runtime)
+    sandbox, _, _ = await ensure_session_sandbox(runtime.daytona, effective, session_id, sandbox_id)
+    return sandbox, effective.daytona_exec_timeout_seconds
+
+
+@app.get("/api/sessions/{session_id}/workspace", dependencies=[Depends(require_auth)])
+async def browse_workspace(session_id: UUID, runtime: RuntimeDep) -> list[WorkspaceEntry]:
+    sandbox, timeout = await _browse_sandbox(runtime, session_id)
+    if sandbox is None:
+        return []
+    try:
+        entries = await list_workspace_files(sandbox, timeout=timeout)
+    except WorkspaceBrowseLimit as error:
+        raise HTTPException(413, str(error)) from error
+    return [
+        WorkspaceEntry.model_validate(entry)
+        for entry in entries
+        if _browsable_workspace_path(entry["path"])
+    ]
+
+
+@app.get(
+    "/api/sessions/{session_id}/workspace/{file_path:path}", dependencies=[Depends(require_auth)]
+)
+async def download_workspace_entry(
+    session_id: UUID, file_path: str, runtime: RuntimeDep
+) -> Response:
+    if not _browsable_workspace_path(file_path):
+        raise HTTPException(400, "Invalid workspace path")
+    sandbox, timeout = await _browse_sandbox(runtime, session_id)
+    if sandbox is None:
+        raise HTTPException(404, "File not found")
+    try:
+        content = await read_browsable_workspace_file(sandbox, file_path, timeout=timeout)
+    except WorkspaceBrowseLimit as error:
+        raise HTTPException(413, str(error)) from error
+    if content is None:
+        raise HTTPException(404, "File not found")
+    filename = quote(file_path.rsplit("/", 1)[-1], safe="")
+    return Response(
+        content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
 
 
 async def _workspace_file(

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { errorMessage, type FleetApi, type WorkspaceFile } from '@/lib/api'
+import { errorMessage, type FleetApi } from '@/lib/api'
+import type { WorkspaceFileEntry } from '@/lib/messages'
 
 type Upload = {
   id: number
@@ -9,7 +10,7 @@ type Upload = {
 }
 
 export function useWorkspaceFiles(api: FleetApi, sessionId: string, onFilesUploaded: () => void) {
-  const [files, setFiles] = useState<WorkspaceFile[] | null>(null)
+  const [files, setFiles] = useState<WorkspaceFileEntry[] | null>(null)
   const [error, setError] = useState('')
   const [attachments, setAttachments] = useState<Upload[]>([])
   const listRequest = useRef<AbortController | null>(null)
@@ -20,14 +21,25 @@ export function useWorkspaceFiles(api: FleetApi, sessionId: string, onFilesUploa
     listRequest.current?.abort()
     const request = new AbortController()
     listRequest.current = request
-    void api.listFiles(sessionId, request.signal).then((result) => {
+    void Promise.allSettled([
+      api.listFiles(sessionId, request.signal),
+      api.listWorkspace(sessionId, request.signal),
+    ]).then(([registered, workspace]) => {
       if (request.signal.aborted) return
-      setFiles(result)
-      setError('')
-    }).catch((failure) => {
-      if (request.signal.aborted) return
-      setFiles((current) => current ?? [])
-      setError(errorMessage(failure))
+      setFiles((current) => {
+        const known = registered.status === 'fulfilled'
+          ? registered.value : (current ?? []).filter(({ kind }) => kind !== 'workspace')
+        const entries: WorkspaceFileEntry[] = workspace.status === 'fulfilled'
+          ? workspace.value.map((entry) => ({ ...entry, kind: 'workspace' }))
+          : (current ?? []).filter(({ kind }) => kind === 'workspace')
+        const merged = new Map(known.map((entry) => [entry.path, entry]))
+        for (const entry of entries) {
+          if (!merged.has(entry.path)) merged.set(entry.path, entry)
+        }
+        return [...merged.values()]
+      })
+      const failure = registered.status === 'rejected' ? registered : workspace
+      setError(failure.status === 'rejected' ? errorMessage(failure.reason) : '')
     })
   }, [api, sessionId])
 

@@ -1,7 +1,7 @@
 import { PanelRight, Terminal } from 'lucide-react'
-import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from 'react'
+import { lazy, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { Deferred } from '@/components/Deferred'
-import { PageHeader, PaneHeader } from '@/components/PageHeader'
+import { PageHeader } from '@/components/PageHeader'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
@@ -20,6 +20,7 @@ import { useSessionChat } from '@/hooks/use-session-chat'
 import { useWorkspaceFiles } from '@/hooks/use-workspace-files'
 import { errorMessage, type FleetApi, type Session, type Skill } from '@/lib/api'
 import type { FleetMessage } from '@/lib/messages'
+import { initialWorkspaceSelection, workspaceSelection } from '@/lib/workspace-browser'
 import { ChatComposer } from './ChatComposer'
 import { ChatPlaceholder } from './ChatPlaceholder'
 import { ModelSelector } from './ModelSelector'
@@ -27,7 +28,6 @@ import { WorkspaceAttachments } from './WorkspaceAttachments'
 import { WorkspaceSidePanel } from './WorkspaceSidePanel'
 
 const FilePreview = lazy(() => import('./FilePreview').then(({ FilePreview }) => ({ default: FilePreview })))
-const LoadingDialog = lazy(() => import('@/components/LoadingDialog').then(({ LoadingDialog }) => ({ default: LoadingDialog })))
 const MessageParts = lazy(() => import('./MessageParts').then(({ MessageParts }) => ({ default: MessageParts })))
 const paneLayout = 'flex w-full min-h-0 min-w-0 flex-col'
 const dockedPaneClassName = `${paneLayout} my-2 h-[calc(100%-1rem)] overflow-hidden bg-surface-2`
@@ -62,8 +62,9 @@ export function SessionWorkspace({
   const [modelError, setModelError] = useState('')
   const modelSavePending = useRef(false)
   const [filesDrawerOpen, setFilesDrawerOpen] = useState(false)
-  const [previewPath, setPreviewPath] = useState<string>()
+  const [selection, selectFile] = useReducer(workspaceSelection, initialWorkspaceSelection)
   const filesTrigger = useRef<HTMLButtonElement>(null)
+  const restoreFilesFocus = useRef(false)
   const wide = useMediaQuery('(min-width: 80rem)')
   const files = useWorkspaceFiles(api, session.id, onFilesUploaded)
   const { refresh } = files
@@ -96,7 +97,7 @@ export function SessionWorkspace({
   }, [active, onActivity, session.id])
 
   if ((!visible || wide) && filesDrawerOpen) setFilesDrawerOpen(false)
-  if (!visible && previewPath) setPreviewPath(undefined)
+  if (!visible && selection.path) selectFile({ type: 'close' })
 
   async function submit(text: string) {
     if (!text || active || modelSavePending.current || files.isUploading() || files.hasFailed) return
@@ -121,6 +122,13 @@ export function SessionWorkspace({
     }
   }
 
+  const dockFiles = wide && filesDocked
+  useEffect(() => {
+    if (!visible || !restoreFilesFocus.current) return
+    restoreFilesFocus.current = false
+    filesTrigger.current?.focus()
+  }, [dockFiles, visible])
+
   if (!visible) return <>{observer}</>
 
   const canUpload = !active && !files.uploading
@@ -133,33 +141,70 @@ export function SessionWorkspace({
   const attachments = (
     <WorkspaceAttachments attachments={files.attachments} canUpload={canUpload} onRetry={retryUpload} onDismiss={files.dismiss} />
   )
+  const filesOpen = wide ? dockFiles : filesDrawerOpen
+
+  function openFromChat(path: string) {
+    selectFile({ type: 'open', path, fromChat: true })
+    if (wide) setFilesDocked(true)
+    else setFilesDrawerOpen(true)
+  }
+
+  function closePreview() {
+    selectFile({ type: 'close', restoreFocus: true })
+  }
+
+  const previewPath = selection.path
+  const previewFile = files.files?.find(({ path }) => path === previewPath)
+  const filesToggle = (
+    <Tooltip>
+      <TooltipTrigger render={<Button
+        ref={filesTrigger} variant={filesOpen ? 'secondary' : 'ghost'} size="icon-sm"
+        aria-label="Toggle Files panel" aria-expanded={filesOpen} aria-haspopup={wide ? undefined : 'dialog'}
+        onClick={() => {
+          if (wide) {
+            restoreFilesFocus.current = true
+            setFilesDocked(!dockFiles)
+          } else {
+            setFilesDrawerOpen(!filesDrawerOpen)
+          }
+        }}
+      />}>
+        <PanelRight aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent>Toggle Files panel</TooltipContent>
+    </Tooltip>
+  )
   const inspector = (
     <WorkspaceSidePanel
       session={session} files={files.files} error={files.error} canUpload={canUpload}
       attachments={wide ? undefined : attachments}
-      onUpload={upload} onPreview={setPreviewPath} onDownload={files.download}
+      wide={wide} tab={selection.tab} selectedPath={previewPath}
+      reveal={selection.reveal} focusPath={selection.focus}
+      onTabChange={(tab) => selectFile({ type: 'tab', tab })}
+      onBack={closePreview}
+      filesToggle={dockFiles ? filesToggle : undefined}
+      onUpload={upload} onPreview={(path) => selectFile({ type: 'open', path })} onDownload={files.download}
+      filePreview={previewPath && (
+        <Deferred fallback={<Skeleton role="status" aria-label="Loading preview" className="m-3 h-32 motion-reduce:animate-none" />}>
+          <FilePreview
+            key={`${previewPath}:${previewFile?.revision ?? previewFile?.sha256 ?? ''}`} api={api} sessionId={session.id} path={previewPath}
+            onClose={wide ? closePreview : undefined}
+            onDownload={() => api.downloadFile(session.id, previewPath)}
+            onSkillInstalled={onSkillInstalled}
+          />
+        </Deferred>
+      )}
     />
   )
-  const dockFiles = wide && filesDocked
-  const filesOpen = wide ? dockFiles : filesDrawerOpen
 
   return (
     <>
       {observer}
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel id="chat">
+        <ResizablePanel id="chat" minSize={dockFiles ? "22rem" : undefined}>
           <section className={dockFiles ? `${dockedPaneClassName} rounded-l-xl` : `${paneLayout} h-full`} aria-label="Chat">
             <PageHeader title={session.title}>
-              <Tooltip>
-                <TooltipTrigger render={<Button
-                  ref={filesTrigger} variant={filesOpen ? 'secondary' : 'ghost'} size="icon-sm"
-                  aria-label="Toggle Files panel" aria-expanded={filesOpen} aria-haspopup={wide ? undefined : 'dialog'}
-                  onClick={() => wide ? setFilesDocked(!filesDocked) : setFilesDrawerOpen(!filesDrawerOpen)}
-                />}>
-                  <PanelRight aria-hidden="true" />
-                </TooltipTrigger>
-                <TooltipContent>Toggle Files panel</TooltipContent>
-              </Tooltip>
+              {!dockFiles && filesToggle}
             </PageHeader>
             {initialMessages === null ? (
               <ChatPlaceholder showHeader={false} loading={!transcriptError} error={transcriptError} actionLabel="Retry" onAction={() => {
@@ -190,7 +235,7 @@ export function SessionWorkspace({
                                 {user ? (
                                   <Bubble variant="muted" align="end" className="max-w-[90%] sm:max-w-[80%]">
                                     <BubbleContent>
-                                      <MessageParts parts={message.parts} preview={setPreviewPath} download={files.download} />
+                                      <MessageParts parts={message.parts} preview={openFromChat} download={files.download} />
                                     </BubbleContent>
                                   </Bubble>
                                 ) : (
@@ -200,7 +245,7 @@ export function SessionWorkspace({
                                     </MessageHeader>
                                     <MessageParts
                                       parts={message.parts} live={active && index === messages.length - 1}
-                                      preview={setPreviewPath} download={files.download}
+                                      preview={openFromChat} download={files.download}
                                     />
                                   </>
                                 )}
@@ -255,9 +300,8 @@ export function SessionWorkspace({
         {dockFiles && (
           <>
             <ResizableHandle withHandle aria-label="Resize Files panel" className="my-2 bg-foreground/20" />
-            <ResizablePanel id="files" defaultSize="20rem" minSize="16rem" maxSize="26rem" groupResizeBehavior="preserve-pixel-size">
+            <ResizablePanel id="files" defaultSize="48%" minSize="32rem" maxSize="64%">
               <aside aria-label="Workspace files" className={`${dockedPaneClassName} rounded-r-xl`}>
-                <PaneHeader><h2 className="text-sm font-medium">Files</h2></PaneHeader>
                 {inspector}
               </aside>
             </ResizablePanel>
@@ -267,25 +311,11 @@ export function SessionWorkspace({
       {!wide && (
         <DeferredSheet
           open={filesDrawerOpen} onOpenChange={setFilesDrawerOpen} title="Workspace files"
-          headerClassName="h-(--pane-header-height) shrink-0 flex-row items-center border-b px-2 py-0 pr-12 sm:pl-4 [&_[data-slot=sheet-title]]:text-sm"
-          content={{ side: 'right', finalFocus: filesTrigger, className: 'w-[min(100%,26rem)] gap-0 [&>[data-slot=sheet-close]]:top-2.5' }}
+          headerClassName="sr-only"
+          content={{ side: 'right', finalFocus: filesTrigger, className: 'w-[min(100%,32rem)] gap-0 data-[side=right]:w-[min(100%,32rem)] data-[side=right]:sm:max-w-none [&>[data-slot=sheet-close]]:top-2' }}
         >
           {inspector}
         </DeferredSheet>
-      )}
-      {previewPath && (
-        <Deferred fallback={(
-          <Suspense fallback={null}>
-            <LoadingDialog title="File preview" onClose={() => setPreviewPath(undefined)} />
-          </Suspense>
-        )}>
-          <FilePreview
-            key={previewPath} api={api} sessionId={session.id} path={previewPath}
-            onClose={() => setPreviewPath(undefined)}
-            onDownload={() => api.downloadFile(session.id, previewPath)}
-            onSkillInstalled={onSkillInstalled}
-          />
-        </Deferred>
       )}
     </>
   )

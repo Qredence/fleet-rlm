@@ -1,13 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter/standard.css";
+@import "@fontsource-variable/inter/standard-italic.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: 'Inter Variable', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -209,6 +210,38 @@
     [data-surface] {
         animation: none;
         transition: none;
+    }
+}
+
+.workspace-fluid-tabs {
+    --focus-ring: var(--ring);
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .workspace-fluid-tabs {
+        /* The registry animates pill coordinates, which Motion's transform
+           and layout opt-out does not cover. */
+        & > div {
+            display: none;
+        }
+
+        & [role="tab"][aria-selected="true"] {
+            background: var(--active);
+        }
+
+        & [role="tab"]:focus-visible {
+            outline: 1px solid var(--ring);
+            outline-offset: 2px;
+        }
+
+        & [role="tab"] :is(span, svg) {
+            transition: none;
+        }
     }
 }
 

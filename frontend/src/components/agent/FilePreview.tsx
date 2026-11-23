@@ -1,11 +1,10 @@
-import { Download, PackagePlus } from 'lucide-react'
+import { Download, FileText, PackagePlus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AspectRatio } from '@/components/ui/aspect-ratio'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage, type FleetApi, type Skill } from '@/lib/api'
 import { formatFileSize } from '@/lib/file-tree'
@@ -57,7 +56,7 @@ export function FilePreview({ api, sessionId, path, onClose, onDownload, onSkill
   api: FleetApi
   sessionId: string
   path: string
-  onClose: () => void
+  onClose?: () => void
   onDownload: () => Promise<void>
   onSkillInstalled: (skill: Skill) => void
 }) {
@@ -152,13 +151,34 @@ export function FilePreview({ api, sessionId, path, onClose, onDownload, onSkill
   const skillDigest = preview?.kind === 'text' ? preview.skillDigest : undefined
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90dvh] min-w-0 overflow-y-auto sm:max-w-4xl">
-        <DialogHeader className="min-w-0 gap-1 pr-10">
-          <DialogTitle className="break-all">{name}</DialogTitle>
-          <DialogDescription className="break-all">{path}</DialogDescription>
-        </DialogHeader>
-        <div className="min-h-32 min-w-0 overflow-hidden rounded-lg border bg-background">
+    <section aria-label="File preview" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+        <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium" title={path}>{name}</h3>
+        {skillDigest && !installed && (
+          <Button size="xs" disabled={installing} onClick={() => void install(skillDigest)}>
+            <PackagePlus data-icon="inline-start" /> {installing ? 'Installing…' : 'Install skill'}
+          </Button>
+        )}
+        <Button variant="ghost" size="icon-sm" aria-label="Download file" title="Download file"
+          disabled={downloading} onClick={() => void download()}>
+          <Download />
+        </Button>
+        {onClose && (
+          <Button variant="ghost" size="icon-sm" aria-label="Close file preview" title="Close file preview" onClick={onClose}>
+            <X />
+          </Button>
+        )}
+      </header>
+      {downloadError && <Alert variant="destructive"><AlertDescription>{downloadError}</AlertDescription></Alert>}
+      {installError && <Alert variant="destructive"><AlertDescription>{installError}</AlertDescription></Alert>}
+      {installed && (
+        <p role="status" className="shrink-0 border-b px-3 py-2 text-sm">
+          Installed @{installed.name}. It is available in Skills for all sessions.
+        </p>
+      )}
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-background">
+        <div className="min-h-32 min-w-0">
           {!preview && <Skeleton role="status" aria-label="Loading preview" className="h-32 motion-reduce:animate-none" />}
           {preview?.kind === 'unavailable' && <p className="p-4 text-muted-foreground">{preview.message}</p>}
           {preview?.kind === 'error' && <Alert variant="destructive"><AlertDescription>{preview.message}</AlertDescription></Alert>}
@@ -166,15 +186,15 @@ export function FilePreview({ api, sessionId, path, onClose, onDownload, onSkill
             <>
               {preview.truncated && <p className="border-b px-4 py-2 text-xs text-muted-foreground">Showing the first 128 KiB.</p>}
               {isMarkdown && preview.content ? (
-                <div aria-label="File contents" tabIndex={0} className="max-h-[62dvh] overflow-auto p-4">
-                  <div className="markdown">
+                <div aria-label="File contents" tabIndex={0} className="min-w-0 wrap-anywhere p-4">
+                  <div className="markdown min-w-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
                     <Markdown remarkPlugins={[remarkGfm]} skipHtml disallowedElements={['a', 'img']} unwrapDisallowed>
                       {preview.content}
                     </Markdown>
                   </div>
                 </div>
               ) : (
-                <pre aria-label="File contents" tabIndex={0} className="max-h-[62dvh] overflow-auto whitespace-pre-wrap wrap-break-word p-4 font-mono text-xs leading-relaxed">
+                <pre aria-label="File contents" tabIndex={0} className="whitespace-pre-wrap wrap-anywhere p-4 font-mono text-xs leading-relaxed">
                   {preview.content || 'This file is empty.'}
                 </pre>
               )}
@@ -194,20 +214,7 @@ export function FilePreview({ api, sessionId, path, onClose, onDownload, onSkill
           )}
           {preview?.kind === 'pdf' && <PdfPreview bytes={preview.bytes} />}
         </div>
-        {downloadError && <Alert variant="destructive"><AlertDescription>{downloadError}</AlertDescription></Alert>}
-        {installError && <Alert variant="destructive"><AlertDescription>{installError}</AlertDescription></Alert>}
-        {installed && <p role="status" className="text-sm">Installed @{installed.name}. It is available in Skills for all sessions.</p>}
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={downloading} onClick={() => void download()}>
-            <Download data-icon="inline-start" /> {downloading ? 'Downloading…' : 'Download'}
-          </Button>
-          {skillDigest && !installed && (
-            <Button size="sm" disabled={installing} onClick={() => void install(skillDigest)}>
-              <PackagePlus data-icon="inline-start" /> {installing ? 'Installing…' : 'Install skill'}
-            </Button>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </section>
   )
 }

@@ -1,6 +1,7 @@
 """Daytona workspace and the synchronous DSPy interpreter boundary."""
 
 import asyncio
+import base64
 import inspect
 import json
 import re
@@ -180,6 +181,105 @@ async def download_workspace_file(
 ) -> bytes:
     """Download a workspace file under /workspace."""
     return await sandbox.fs.download_file(f"{WORKSPACE}/{relative_path}", timeout)
+
+
+class WorkspaceBrowseLimit(RuntimeError):
+    pass
+
+
+async def _workspace_query(sandbox: AsyncSandbox, code: str, timeout: int):
+    result = await sandbox.process.code_run(code, timeout=timeout)
+    if result.exit_code != 0:
+        raise RuntimeError("Could not read the Daytona workspace")
+    return json.loads(result.result)
+
+
+async def list_workspace_files(sandbox: AsyncSandbox, *, timeout: int) -> list[dict]:
+    entries = await _workspace_query(
+        sandbox,
+        f"root = {WORKSPACE!r}\n"
+        + """
+import json
+import os
+import stat
+
+entries = []
+for directory, folders, names, fd in os.fwalk(root, follow_symlinks=False):
+    folders[:] = sorted(name for name in folders if name != ".git"
+                        and not (directory == root and name == "artifacts"))
+    for name in sorted(names):
+        if name == ".git":
+            continue
+        try:
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            entries.append({
+                "path": os.path.relpath(os.path.join(directory, name), root),
+                "size_bytes": info.st_size,
+                "revision": str(info.st_mtime_ns),
+            })
+        if len(entries) > 5000:
+            break
+    if len(entries) > 5000:
+        entries = None
+        break
+print(json.dumps(entries, separators=(",", ":")))
+""",
+        timeout,
+    )
+    if entries is None:
+        raise WorkspaceBrowseLimit("Workspace browsing supports up to 5,000 files")
+    return entries
+
+
+async def read_browsable_workspace_file(
+    sandbox: AsyncSandbox, relative_path: str, *, timeout: int
+) -> bytes | None:
+    # Open each component relative to an already-open directory. A symlink
+    # swap cannot redirect the read to another mount or outside the volume.
+    result = await _workspace_query(
+        sandbox,
+        f"root = {WORKSPACE!r}\nparts = {relative_path.split('/')!r}\n"
+        + """
+import base64
+from contextlib import ExitStack
+import errno
+import json
+import os
+import stat
+
+limit = 1024 * 1024
+result = None
+try:
+    with ExitStack() as stack:
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        fd = os.open(root, directory_flags)
+        stack.callback(os.close, fd)
+        for part in parts[:-1]:
+            fd = os.open(part, directory_flags, dir_fd=fd)
+            stack.callback(os.close, fd)
+        file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        with os.fdopen(file_fd, "rb") as file:
+            info = os.fstat(file.fileno())
+            if stat.S_ISREG(info.st_mode):
+                data = file.read(limit + 1) if info.st_size <= limit else None
+                result = {"data": base64.b64encode(data).decode()} if (
+                    data is not None and len(data) <= limit
+                ) else {"too_large": True}
+except OSError as error:
+    if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EACCES):
+        raise
+print(json.dumps(result))
+""",
+        timeout,
+    )
+    if result is None:
+        return None
+    if result.get("too_large"):
+        raise WorkspaceBrowseLimit("Workspace file preview and download support files up to 1 MiB")
+    return base64.b64decode(result["data"], validate=True)
 
 
 # The interpreter socket only sends output. Upload each response to a private

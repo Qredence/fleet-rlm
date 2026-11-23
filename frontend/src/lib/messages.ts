@@ -2,8 +2,9 @@ import type { UIMessage } from 'ai'
 
 export interface WorkspaceFileEntry {
   path: string
-  kind: 'input' | 'artifact'
-  sha256: string
+  kind: 'input' | 'artifact' | 'workspace'
+  sha256?: string
+  revision?: string
   size_bytes: number
 }
 
