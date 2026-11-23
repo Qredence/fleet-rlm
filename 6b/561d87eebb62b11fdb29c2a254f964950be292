@@ -1,0 +1,45 @@
+backend/skills/chart-visualization/SKILL.md
+  s_84de0b0d9d84de::t_7278138351767d 3,6
+backend/skills/data-analysis/SKILL.md
+  s_84de0b0d9d84de::t_6157db5cd56674 3,6
+backend/skills/document-extraction/SKILL.md
+  s_84de0b0d9d84de::t_15cd7ed99ec64a 3,6
+backend/skills/recursive-synthesis/SKILL.md
+  s_84de0b0d9d84de::t_653ca8ac205315 3,6
+backend/skills/scientific-computing/SKILL.md
+  s_84de0b0d9d84de::t_4feee10c001e23 3,6
+backend/skills/skill-creator/SKILL.md
+  s_84de0b0d9d84de::t_82bb17353f217b 3,6
+backend/skills/spreadsheet-audit/SKILL.md
+  s_84de0b0d9d84de::t_97c013103d4f58 3,6
+backend/src/fleet_rlm/agent.py
+  s_84de0b0d9d84de::t_ffa843ccd35865 34-40,43-48
+backend/src/fleet_rlm/api.py
+  s_84de0b0d9d84de::t_4353309ec6717c 49,402-413,1333-1336
+backend/src/fleet_rlm/interpreter.py
+  s_84de0b0d9d84de::t_22d6d67be7f7d8 7,44,66-74,76-86,94-117,129-138,147-148
+backend/src/fleet_rlm/skills.py
+  s_84de0b0d9d84de::t_96fca34ca8bd76 247-258,316-323
+backend/tests/test_phase2_engine.py
+  s_84de0b0d9d84de::t_a7332fbaa218d6 49,488-514,1137,1140,1429-1461,1594,1597,1640-1734
+backend/tests/test_phase3_api.py
+  s_84de0b0d9d84de::t_4383f52cf2b6e8 941-958
+docs/evaluation-baseline.md
+  s_84de0b0d9d84de::t_c5bb64a3e19407 16-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6b561d87eebb62b11fdb29c2a254f964950be292",
+  "prompts": {},
+  "sessions": {
+    "s_84de0b0d9d84de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20991-1e6d-7411-8898-04d1d5e5bac1",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
