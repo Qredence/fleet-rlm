@@ -1436,6 +1436,17 @@ async def test_live_two_turn_csv(tmp_path):
         ),
         ("Plot the CSV as an SVG chart.", None, ["chart-visualization"]),
         (
+            "Analyze this sales data and create charts.",
+            None,
+            ["chart-visualization", "data-analysis"],
+        ),
+        ("Create a chart analyzing sales data.", None, ["chart-visualization", "data-analysis"]),
+        (
+            "Audit workbook formulas and analyze sales data with charts.",
+            None,
+            ["chart-visualization", "spreadsheet-audit"],
+        ),
+        (
             "Analyze this sales data and create an SVG bar chart.",
             ["chart-visualization"],
             ["chart-visualization"],
@@ -1450,7 +1461,11 @@ def test_compound_analysis_and_chart_selection(settings, monkeypatch, prompt, pi
             needs_skill=SimpleNamespace(value=True),
             primary_skill=SimpleNamespace(
                 value="chart-visualization",
-                probabilities={"chart-visualization": 0.96, "data-analysis": 0.03},
+                probabilities={
+                    "chart-visualization": 0.96,
+                    "data-analysis": 0.03,
+                    "spreadsheet-audit": 0.9 if "formulas" in prompt else 0.01,
+                },
             ),
         )
 

@@ -15,6 +15,7 @@ from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
 import dspy
+import mlflow
 from dspy.experimental import Choice, Noul
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.primitives.sandbox_guest import CALL_TOOL, LM_TOOL, TAG, WIRE
@@ -433,7 +434,10 @@ async def run_workspace_task(
         factory = _ScopedInterpreterFactory()
 
         def invoke() -> dspy.Prediction:
-            with dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory):
+            with (
+                mlflow.tracing.context(tags={"fleet.run_id": current_run_id}),
+                dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory),
+            ):
                 program = build_program(
                     settings,
                     [*tools, spawn_agent],

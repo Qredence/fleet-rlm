@@ -910,8 +910,9 @@ async def _read_workspace_file(
         return await download_workspace_file(
             sandbox, file_path, timeout=effective.daytona_exec_timeout_seconds
         )
-    except DaytonaError as error:
-        if error.status_code == 404:
+    except (DaytonaError, SandboxStartupError) as error:
+        provider_error = error.__cause__ if isinstance(error, SandboxStartupError) else error
+        if isinstance(provider_error, DaytonaError) and provider_error.status_code == 404:
             raise HTTPException(404, "File not found") from error
         raise
 

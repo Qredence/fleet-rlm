@@ -616,6 +616,18 @@ async def test_download_requires_a_safe_registered_path(offline):
     )
 
 
+@pytest.mark.parametrize(("status", "expected"), [(404, 404), (502, 503)])
+@pytest.mark.asyncio
+async def test_download_handles_sandbox_lookup_errors(offline, status, expected):
+    offline.store.add(db.File(path="artifacts/report.txt"))
+    offline.daytona.v0.get.side_effect = DaytonaError("Sandbox lookup failed", status_code=status)
+    response = await offline.client.get(f"{offline.base}/files/artifacts/report.txt")
+    assert response.status_code == expected
+    assert response.json()["detail"] == (
+        "File not found" if expected == 404 else api._WORKSPACE_STARTUP_HELP
+    )
+
+
 @pytest.mark.asyncio
 async def test_workspace_browses_checkout_and_skips_symlinks(offline, monkeypatch, tmp_path):
     workspace = tmp_path / "workspace"

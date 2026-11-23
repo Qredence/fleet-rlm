@@ -246,10 +246,10 @@ def _resolve_decision_lm(
 
 def _analysis_and_chart(task: str) -> bool:
     return bool(
-        re.search(r"\b(?:chart|plot|graph|visuali[sz]ation)\b", task, re.I)
+        re.search(r"\b(?:charts?|plots?|graphs?|visuali[sz]ations?)\b", task, re.I)
         and re.search(r"\b(?:data|dataset|rows?|records?|csv|parquet)\b", task, re.I)
         and re.search(
-            r"\b(?:analy[sz]e|aggregat\w*|group\w*|reconcil\w*|filter\w*|summari[sz]e)\b",
+            r"\b(?:analy[sz](?:e[ds]?|ing)|aggregat\w*|group\w*|reconcil\w*|filter\w*|summari[sz]e)\b",
             task,
             re.I,
         )
@@ -313,7 +313,7 @@ def select_skills(
             if isinstance(primary, str) and primary in by_name:
                 active = (by_name[primary],)
                 scores.setdefault(primary, float(probabilities.get(primary, 1.0)))
-    if active and active[0].name in {"data-analysis", "chart-visualization"}:
+    if len(active) == 1 and active[0].name in {"data-analysis", "chart-visualization"}:
         pair = ("data-analysis", "chart-visualization")
         by_name = {skill.name: skill for skill in candidates}
         if all(name in by_name for name in pair) and _analysis_and_chart(task):

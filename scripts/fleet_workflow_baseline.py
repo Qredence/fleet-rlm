@@ -123,7 +123,20 @@ async def evaluate(
             )
             if message["role"] != "assistant" or not answer:
                 raise RuntimeError("Fleet did not persist a final answer")
+            image_queries = {
+                frame["toolCallId"]
+                for frame in frames
+                if frame["type"] == "tool-input-available"
+                and frame.get("toolName") == "subagent"
+                and frame.get("input", {}).get("kind") == "llm_query"
+                and "data:image/png;base64," in frame["input"].get("task", "")
+            }
             return {
+                "failed_image_query": any(
+                    frame["type"] == "tool-output-error"
+                    and frame.get("toolCallId") in image_queries
+                    for frame in frames
+                ),
                 "session_id": session_id,
                 "run_id": message["id"],
                 "task": prompt,
@@ -210,6 +223,8 @@ async def evaluate(
                     if case.artifact.endswith((".png", ".svg")):
                         chart, _ = await fetch_artifact(session_id, case.artifact)
                         passed &= verify_chart(case.artifact, chart)
+                    if case.id == "chart-png-fallback":
+                        passed &= row["failed_image_query"]
                     if case.id == "recursive-artifacts":
                         merged, _ = await fetch_artifact(session_id, case.artifact)
                         north, _ = await fetch_artifact(
@@ -579,7 +594,7 @@ async def evaluate(
                             or trace.info.trace_id in used
                             or root.inputs.get("task") != row.get("task")
                             or root.outputs.get("answer") != row.get("answer")
-                            or trace.info.request_time < row.get("start_ms", 0)
+                            or trace.info.tags.get("fleet.run_id") != row["run_id"]
                         ):
                             continue
                         matches.append(trace)
