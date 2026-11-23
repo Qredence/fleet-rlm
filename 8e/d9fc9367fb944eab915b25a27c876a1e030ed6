@@ -1,0 +1,135 @@
+AGENTS.md
+  s_4302bf5cfb0645::t_5147d1e39b586a 1-36,40-44,46,48-51
+Makefile
+  s_4302bf5cfb0645::t_747b81366475c4 1,4-10,12,14-15,17-18,20-21,23-24,26-27
+README.md
+  s_2fdc5be4a87bca::t_41e0cea887caba 3,5,7-15,17,19-20,22,24-28,30-37,39-42,44-48,50,52,55-58,61,63
+backend/.env.example
+  s_4302bf5cfb0645::t_46fb828f3a902a 25-26,40
+backend/pyproject.toml
+  s_7dbea4a77f7c1c::t_e7449ad822b017 51-53,62-74
+backend/skills/data-analysis/SKILL.md
+  s_4302bf5cfb0645::t_3fd6b609eb20f6 1-10
+backend/src/fleet_rlm/agent.py
+  s_2fdc5be4a87bca::t_b7cfb33d7e6356 1,3-7,9-14,17-183,185-207,210-235,237-263,265-282,284-300,302-385,387-401,403-408,410-413,415,417-538
+backend/src/fleet_rlm/api.py
+  s_7dbea4a77f7c1c::t_ad45270a7dc5d5 1,3-14,16,18-26,28-49,51,53-54,56-328,330-364,366-394,396,399-405,408-423,425-439,441-502,504-513,515-520,522-526,529-548,550-577,579-597,599-610,612-614,617-670,672-682,684-697,699-705,707-710,712,714-737,739-761,763-769,771-812
+backend/src/fleet_rlm/interpreter.py
+  s_2fdc5be4a87bca::t_5027b0b391b9aa 1,3-5,7-9,11-22,24-100,102-220,222-226,229-230,232-236,240-241,243-262,264-270,272-273,275-277,279-280,282-284,286,288-289,291-298,300-350,352-359,362-381,383-483,485-486,489-498,500-520,522-524
+backend/src/fleet_rlm/optimize.py
+  s_2fdc5be4a87bca::t_ac9f729b5fcf15 1,4,6-10,12-13,17-65,67-86,88-95,98-104,107-108,110-114,117-129,132-167,170-178,181-193,195-207,209,211-274,276-331,333-345,347-352,354-415,419-420,422-440,442-449,451-505,509-510,512-515,517-528,530-531,533-534,536-540,542-550,552-555,557-792
+backend/src/fleet_rlm/skills.py
+  s_2fdc5be4a87bca::t_ba36a590608e26 1,5-7,10,13,15,19,21-25,29-30,32-37,40-44,47-50,52-81,85-87,90-93,95-97,99,102-112,114-118,121,123-179
+backend/src/fleet_rlm/ui_stream.py
+  s_4302bf5cfb0645::t_7cfaa64d1ab642 1,3-78,80-81,83-85,87-90,93-100,102-150,152-157,159-200
+backend/tests/test_phase1_locking.py
+  s_4302bf5cfb0645::t_bf48cc575b33f5 7,11,36-43
+backend/tests/test_phase2_engine.py
+  s_2fdc5be4a87bca::t_38e5ffcd0a826a 1,3-5,7,9-17,20-57,60-125,128-169,172-217,220-223,225,227-229,231-233,235-237,239-240,242-245,247-277,279-319,321-322,325-350,353-357,359-361,363-364,366-442,444-462,464-482,484-485,487-493,495-507,509-513,515-518,520-546,549-559,561-640,642-645
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_d24a1854248dc4 1,3,6-30,32,35-279,282-290,292-319,323-492,494-523,525-571,573-618,620-630
+backend/tests/test_phase5_optimize.py
+  s_4302bf5cfb0645::t_58eceea712b9c6 1,4-7,10-49,51-66,68-122,124-132,134-307,309-311,313-343,345-403,405-437,439,441-476,478-490
+docker-compose.yml
+  s_4302bf5cfb0645::t_313f034f1b9388 5
+docs/phases/PHASE-2-CORE-ENGINE.md
+  s_4302bf5cfb0645::t_e410c9e307817a 94-102
+docs/phases/PHASE-4-FRONTEND.md
+  s_4302bf5cfb0645::t_79321fe76099d6 42,66
+frontend/.gitignore
+  s_4302bf5cfb0645::t_5a58931ad211f0 1-24
+frontend/.oxlintrc.json
+  s_4302bf5cfb0645::t_4f317ec4c82094 1-8
+frontend/README.md
+  s_4302bf5cfb0645::t_c1dcebcbda0dee 1-12
+frontend/components.json
+  s_4302bf5cfb0645::t_117115cda358ec 1-25
+frontend/index.html
+  s_4302bf5cfb0645::t_dcc88d16f69ec7 1-13
+frontend/package.json
+  s_7dbea4a77f7c1c::t_2da9bc95227fbb 1-40
+frontend/pnpm-lock.yaml
+  s_7dbea4a77f7c1c::t_4e493ce9da00d2 1-1011,1013-1016,1018-1019,1021-1022,1024-1026,1028-1030,1032-1034,1036-1037,1039-1041,1043-1044,1046-1048,1050-1057,1059-1060,1062-1068,1070-1072,1074-1076,1078-1080,1082-1084,1086-1088,1090-1111,1113-1114,1116-1133,1135-1137,1139-1142,1144-1145,1147-1149,1151-1153,1155-1157,1159-1160,1162-1163,1165-1167,1169-1170,1172-1173,1175-4308
+frontend/src/App.tsx
+  s_7dbea4a77f7c1c::t_658e59126b637c 1-381
+frontend/src/components/agent/FileTree.tsx
+  s_2fdc5be4a87bca::t_49d74cd57bd972 1-63
+frontend/src/components/agent/MessageParts.tsx
+  s_7dbea4a77f7c1c::t_f5125a1a5501bb 1-77
+frontend/src/components/agent/PythonToolTrace.tsx
+  s_4302bf5cfb0645::t_5ad02ae854fa7b 1-34,36-89
+frontend/src/components/agent/SubagentTrace.tsx
+  s_4302bf5cfb0645::t_f15841edb4493f 1-34
+frontend/src/components/ui/badge.tsx
+  s_4302bf5cfb0645::t_7b8cbaf8a18f4c 1-51
+frontend/src/components/ui/button.tsx
+  s_7dbea4a77f7c1c::t_003583fa5f2b1a 1-57
+frontend/src/components/ui/code-block.tsx
+  s_4302bf5cfb0645::t_f3e0299790d98b 1-249
+frontend/src/components/ui/collapsible.tsx
+  s_4302bf5cfb0645::t_10204d57393d11 1-21
+frontend/src/components/ui/dialog.tsx
+  s_7dbea4a77f7c1c::t_6d48a3a8a83358 1-3,5-6,8-158
+frontend/src/components/ui/scroll-area.tsx
+  s_4302bf5cfb0645::t_1b8c774417c9bf 1-2,4-25,27-49,51
+frontend/src/components/ui/textarea.tsx
+  s_4302bf5cfb0645::t_71396013fd1135 1-17
+frontend/src/components/ui/trace.tsx
+  s_4302bf5cfb0645::t_c93a39129ce044 1-162
+frontend/src/hooks/use-highlighted-code.ts
+  s_4302bf5cfb0645::t_f7b01eebced1b6 1,3,5-12,14-15,17-24,26-29,31-38,40,42-44,46,48-52,54-60,62-76
+frontend/src/index.css
+  s_7dbea4a77f7c1c::t_74f34cc62cb6d0 1-180
+frontend/src/lib/api.ts
+  s_7dbea4a77f7c1c::t_f589f303992eda 1,3-7,9-13,15-21,23-27,29-131
+frontend/src/lib/chat-fetch.ts
+  s_4302bf5cfb0645::t_93658e9db583d9 1-47
+frontend/src/lib/highlighter.tsx
+  s_4302bf5cfb0645::t_bd6065386864bc 1-124
+frontend/src/lib/messages.ts
+  s_4302bf5cfb0645::t_ed66dc9e7ba844 1,3-8,10-14,16-19,21-30
+frontend/src/lib/utils.ts
+  s_4302bf5cfb0645::t_c8f5d38643dd1a 1
+frontend/src/main.tsx
+  s_7dbea4a77f7c1c::t_9c7b1bb25c9fa3 1-10
+frontend/tsconfig.app.json
+  s_4302bf5cfb0645::t_2e4e06c8d923d2 1-27
+frontend/tsconfig.json
+  s_4302bf5cfb0645::t_cb5c0b35c34a83 2-8
+frontend/tsconfig.node.json
+  s_4302bf5cfb0645::t_b876b16091c2dc 1-23
+frontend/vite.config.ts
+  s_4302bf5cfb0645::t_ccce28e9b664aa 1-24,26-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8ed9fc9367fb944eab915b25a27c876a1e030ed6",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_4302bf5cfb0645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a206d8-4a96-7ec2-8b96-bd7f602e3cdd",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
