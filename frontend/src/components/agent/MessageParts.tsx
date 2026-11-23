@@ -11,9 +11,10 @@ import { FileTree } from './FileTree'
 import { PythonToolTrace } from './PythonToolTrace'
 import { SubagentTrace } from './SubagentTrace'
 
-export function MessageParts({ parts, live = false, download }: {
+export function MessageParts({ parts, live = false, preview, download }: {
   parts: FleetPart[]
   live?: boolean
+  preview: (path: string) => void
   download: (path: string) => void
 }) {
   function renderPart(part: FleetPart, index: number) {
@@ -50,7 +51,7 @@ export function MessageParts({ parts, live = false, download }: {
         return (
           <SubagentTrace key={part.toolCallId} part={part} live={live}>
             {part.state === 'output-available' && (
-              <MessageParts parts={part.output.parts} live={live && part.preliminary === true} download={download} />
+              <MessageParts parts={part.output.parts} live={live && part.preliminary === true} preview={preview} download={download} />
             )}
           </SubagentTrace>
         )
@@ -61,7 +62,7 @@ export function MessageParts({ parts, live = false, download }: {
             <TraceCollapsibleTrigger>
               <TraceLine><TraceIcon><FolderDown /></TraceIcon><TraceTitle>Artifacts</TraceTitle></TraceLine>
             </TraceCollapsibleTrigger>
-            <TraceCollapsibleContent><FileTree files={artifacts} download={download} /></TraceCollapsibleContent>
+            <TraceCollapsibleContent><FileTree files={artifacts} preview={preview} download={download} /></TraceCollapsibleContent>
           </TraceCollapsible>
         )
       }

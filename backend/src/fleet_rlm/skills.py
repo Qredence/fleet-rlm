@@ -1,9 +1,11 @@
-"""Read-only Agent Skills and the per-turn Jev selector."""
+"""Agent Skills, their local registry, and the per-turn Jev selector."""
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from types import MappingProxyType
 
 import dspy
@@ -13,6 +15,8 @@ from dspy.experimental import Choice, Noul
 from .config import Settings
 
 _MAX_CANDIDATES = 40
+MAX_SKILL_BYTES = 64 * 1024
+_INSTALL_DIR = ".installed"
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,40 @@ class SkillRegistry:
             raise ValueError(f"Duplicate Skill names in {skills_dir}")
         return cls(tuple(sorted(skills, key=lambda skill: skill.name)))
 
+    def with_installed(self, skills_dir: Path) -> "SkillRegistry":
+        # Installs are published as complete files on disk so every worker sees them.
+        skills = {skill.name: skill for skill in self.skills}
+        for path in (skills_dir / _INSTALL_DIR).glob("*.md"):
+            skill = _load_skill(path)
+            skills.setdefault(skill.name, skill)
+        return SkillRegistry(tuple(sorted(skills.values(), key=lambda skill: skill.name)))
+
+    def install(self, skills_dir: Path, content: bytes) -> SkillDefinition:
+        if len(content) > MAX_SKILL_BYTES:
+            raise ValueError("SKILL.md must be at most 64 KiB")
+        skill = _parse_skill(content.decode("utf-8"), Path("SKILL.md"))
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", skill.name) or len(skill.name) > 64:
+            raise ValueError(
+                "Skill name must be a lowercase kebab-case name of up to 64 characters"
+            )
+        if not skill.body:
+            raise ValueError("SKILL.md must include instructions after its frontmatter")
+        if any(existing.name == skill.name for existing in self.skills):
+            raise FileExistsError(f"Skill '{skill.name}' already exists")
+
+        directory = skills_dir / _INSTALL_DIR
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{skill.name}.md"
+        with NamedTemporaryFile(dir=directory) as staged:
+            staged.write(content)
+            staged.flush()
+            try:
+                os.link(staged.name, destination)
+            except FileExistsError as error:
+                if destination.read_bytes() != content:
+                    raise FileExistsError(f"Skill '{skill.name}' already exists") from error
+        return _load_skill(destination)
+
 
 @dataclass(frozen=True)
 class SkillSelection:
@@ -45,7 +83,11 @@ class SkillSelection:
 
 
 def _load_skill(path: Path) -> SkillDefinition:
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    return _parse_skill(path.read_text(encoding="utf-8"), path)
+
+
+def _parse_skill(content: str, path: Path) -> SkillDefinition:
+    lines = content.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
         raise ValueError(f"{path}: expected YAML frontmatter")
     try:

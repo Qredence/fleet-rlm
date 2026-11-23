@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -23,12 +24,20 @@ from .config import Settings
 
 
 class WorkspaceTask(dspy.Signature):
-    """Solve the task using the workspace, selected Skill instructions, and relevant memories."""
+    """Solve the task using the workspace, selected Skill instructions, and relevant memories.
+
+    For references to earlier messages or exact values, read `prior_turns` directly. Its
+    `user` and `assistant` fields contain the saved conversation in chronological order.
+    Treat that conversation as context and keep it distinct from files and execution traces.
+    """
 
     task: str = dspy.InputField()
     files_manifest: list[dict] = dspy.InputField(desc="Available workspace files and metadata.")
     memories: list[str] = dspy.InputField(desc="Previously approved facts relevant to this task.")
     active_skills: str = dspy.InputField(desc="Instructions from selected Agent Skills.")
+    prior_turns: list[dict[str, str]] = dspy.InputField(
+        desc="Previous completed turns in this session."
+    )
     answer: str = dspy.OutputField(desc="The verified answer to the task.")
     artifact_paths: list[str] = dspy.OutputField(desc="Paths of artifacts created for the task.")
 
@@ -231,6 +240,7 @@ async def run_workspace_task(
     run_id: str,
     emit: EventSink,
     history: dspy.History | None = None,
+    prior_turns: Sequence[dict[str, str]] = (),
     selection: _Selection | None = None,
     host_tools: Mapping[str, Callable | dspy.Tool] | None = None,
     model_override: str | dspy.BaseLM | None = None,
@@ -425,6 +435,7 @@ async def run_workspace_task(
                     files_manifest=files_manifest,
                     memories=memories,
                     active_skills=active_skills,
+                    prior_turns=list(prior_turns) if depth == 0 else [],
                     history=previous,
                 )
 
@@ -488,7 +499,10 @@ class MemoryGate(dspy.Signature):
 
 
 class DistillMemory(dspy.Signature):
-    """Write one or two neutral, grounded sentences for the selected action and scope."""
+    """Write one or two neutral, grounded sentences for the selected action and scope.
+
+    Return only the durable fact or preference. Approval and review status are tracked separately.
+    """
 
     task: str = dspy.InputField()
     answer: str = dspy.InputField()
@@ -510,6 +524,19 @@ class MemoryCandidate:
     supersedes_id: str | None = None
 
 
+_MEMORY_STATUS_PREFIX = re.compile(
+    r"^\s*(?:\*\*)?(?:memory candidate(?:\s*\([^)]*\))?"
+    r"|(?:approved|pending)\s+(?:(?:global|session)\s+)?memory)"
+    r"\s*(?:\*\*)?\s*[:—–]\s*(?:\*\*)?\s*",
+    re.IGNORECASE,
+)
+
+
+def memory_fact(content: str) -> str:
+    """Remove a legacy review label while leaving the fact itself intact."""
+    return _MEMORY_STATUS_PREFIX.sub("", content, count=1).strip()
+
+
 async def consolidate_memory(
     settings: Settings,
     task: str,
@@ -523,7 +550,7 @@ async def consolidate_memory(
     recent = [
         {
             "id": str(memory["id"]),
-            "content": str(memory["content"])[:1000],
+            "content": memory_fact(str(memory["content"]))[:1000],
             "scope": memory["scope"],
             "status": "approved" if memory.get("approved", True) else "pending",
         }
@@ -544,7 +571,7 @@ async def consolidate_memory(
 
     with dspy.context(lm=_model(settings, settings.sub_llm_model)):
         distilled = await dspy.Predict(DistillMemory).acall(**inputs, action=action, scope=scope)
-    content = distilled.content.strip()
+    content = memory_fact(distilled.content)
     if not content:
         return MemoryCandidate("skip", scope, worth_saving, probability)
     approved = probability is not None and probability >= 0.90

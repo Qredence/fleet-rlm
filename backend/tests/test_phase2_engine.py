@@ -633,7 +633,9 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
             },
             {
                 "plan": "Verify fresh context",
-                "code": "assert 'sentinel' not in globals()\nSUBMIT('Still 7', [])",
+                "code": "assert 'sentinel' not in globals()\n"
+                "assert prior_turns == [{'user': 'Delegate CSV arithmetic', 'assistant': '7'}]\n"
+                "SUBMIT('Still 7', [])",
             },
         ]
     )
@@ -686,6 +688,7 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
         task="Recall the result",
         run_id="followup",
         history=history,
+        prior_turns=[{"user": "Delegate CSV arithmetic", "assistant": "7"}],
         **common,
     )
     assert first.answer == "7" and second.answer == "Still 7"

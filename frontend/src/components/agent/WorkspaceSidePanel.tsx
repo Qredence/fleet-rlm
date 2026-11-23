@@ -153,6 +153,7 @@ export interface WorkspaceSidePanelProps {
   presentation: PanelPresentation
   onUpload: (files: File[]) => void
   onDownload: (path: string) => void
+  onPreview: (path: string) => void
 }
 
 export function WorkspaceSidePanel({
@@ -166,6 +167,7 @@ export function WorkspaceSidePanel({
   presentation,
   onUpload,
   onDownload,
+  onPreview,
 }: WorkspaceSidePanelProps) {
   const [activeTab, setActiveTab] = useState<'files' | 'memories'>('files')
   const [dragging, setDragging] = useState(false)
@@ -339,7 +341,7 @@ export function WorkspaceSidePanel({
           <ScrollArea className="min-h-0 flex-1">
             <div className="px-3 pb-3">
               {files.length ? (
-                <FileTree files={files} download={onDownload} />
+                <FileTree files={files} preview={onPreview} download={onDownload} />
               ) : (
                 <Empty className="border border-dashed p-4">
                   <EmptyHeader>
