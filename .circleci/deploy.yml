@@ -1,0 +1,158 @@
+version: 2.1
+
+parameters:
+  release_version:
+    type: string
+    default: ""
+  release_sha:
+    type: string
+    default: ""
+
+commands:
+  install-uv:
+    steps:
+      - run:
+          name: Install uv
+          command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+
+jobs:
+  prepare:
+    docker: &python
+      - image: cimg/python:3.13
+    environment: &release
+      FLEET_RELEASE_VERSION: << pipeline.parameters.release_version >>
+      FLEET_RELEASE_SHA: << pipeline.parameters.release_sha >>
+    steps:
+      - checkout
+      - install-uv
+      - run:
+          name: Verify the exact main source and unpublished version
+          command: |
+            test "$CIRCLE_BRANCH" = main
+            test "$(git rev-parse HEAD)" = "$FLEET_RELEASE_SHA"
+            test "$CIRCLE_SHA1" = "$FLEET_RELEASE_SHA"
+            python .circleci/pypi_release.py preflight
+      - run:
+          name: Build and smoke-test release distributions
+          command: |
+            uv build --clear --out-dir "$PWD/dist" backend
+            uvx --from 'twine>=7,<8' twine check dist/fleet_rlm-*
+            sha256sum dist/fleet_rlm-* > dist/SHA256SUMS
+            bash .circleci/smoke-wheel.sh dist/fleet_rlm-*.whl
+      - store_artifacts:
+          path: dist
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+
+  check-validation-context:
+    docker: *python
+    steps:
+      - run:
+          name: Require the canary validation webhook before publishing
+          command: test -n "${CIRCLECI_VALIDATION_WEBHOOK_TOKEN:?Missing Smart Deployments webhook token}"
+
+  publish:
+    docker: *python
+    environment: *release
+    steps:
+      - attach_workspace:
+          at: .
+      - install-uv
+      - run:
+          name: Plan the Smart Deployment and publish verified distributions
+          command: |
+            sha256sum -c dist/SHA256SUMS
+            : "${PYPI_API_TOKEN:?Missing restricted PyPI token}"
+            circleci run release plan fleet-rlm-pypi --environment-name=pypi \
+              --component-name=fleet-rlm --target-version="$FLEET_RELEASE_VERSION"
+            touch /tmp/fleet-pypi-planned
+            TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" \
+              uvx --from 'twine>=7,<8' twine upload --non-interactive \
+                --repository-url https://upload.pypi.org/legacy/ dist/fleet_rlm-*
+            circleci run release update fleet-rlm-pypi --status=RUNNING
+      - run:
+          name: Mark a failed upload
+          when: on_fail
+          command: |
+            if test -f /tmp/fleet-pypi-planned; then
+              circleci run release update fleet-rlm-pypi --status=FAILED \
+                --failure-reason="PyPI upload failed"
+            fi
+
+  pypi-canary:
+    docker: *python
+    environment: *release
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - install-uv
+      - run:
+          name: Verify PyPI checksums and smoke-test the downloaded wheel
+          command: |
+            timeout 10m bash -eo pipefail -c '
+              sha256sum -c dist/SHA256SUMS
+              python .circleci/pypi_release.py download
+              bash .circleci/smoke-wheel.sh canary/fleet_rlm-*.whl
+            '
+
+  canary-failed:
+    docker: *python
+    environment: *release
+    steps:
+      - checkout
+      - run:
+          name: Report failed or cancelled canary to Smart Deployments
+          command: |
+            if ! python .circleci/pypi_release.py alert; then
+              circleci run release update fleet-rlm-pypi --status=FAILED \
+                --failure-reason="PyPI canary failed and could not send the validation signal"
+            fi
+
+  release-validation:
+    type: release
+    plan_name: fleet-rlm-pypi
+    validation:
+      enabled: true
+      evaluation_time: 20m
+      auto_rollback_on_failure: false
+      webhooks:
+        - name: pypi_canary
+          provider: custom
+          data_points:
+            component_name: request.component_name
+            version: request.version
+            project_id: request.project_id
+            env: request.env
+            signal_name: request.signal_name
+            criteria: request.alert_transition
+          fail_when: 'criteria == "triggered"'
+          max_failures: 1
+
+workflows:
+  publish-pypi:
+    when: pipeline.git.branch == "main" and pipeline.parameters.release_version != "" and pipeline.parameters.release_sha != ""
+    jobs:
+      - prepare
+      - check-validation-context:
+          context: fleet-pypi-validation-webhook
+      - publish:
+          context: fleet-pypi-upload-token
+          serial-group: << pipeline.project.slug >>/pypi-publication
+          requires:
+            - prepare
+            - check-validation-context
+      - pypi-canary:
+          requires:
+            - publish
+      - release-validation:
+          requires:
+            - publish
+      - canary-failed:
+          context: fleet-pypi-validation-webhook
+          requires:
+            - pypi-canary: [failed, canceled]
