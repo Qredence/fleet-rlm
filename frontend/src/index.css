@@ -16,6 +16,8 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-hover: var(--hover);
+    --color-active: var(--active);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -46,15 +48,32 @@
     --radius-2xl: calc(var(--radius) * 1.667);
     --radius-3xl: calc(var(--radius) * 2.0);
     --radius-4xl: calc(var(--radius) * 2.5);
+    --color-surface-1: var(--surface-1);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+    --color-surface-4: var(--surface-4);
+    --color-surface-5: var(--surface-5);
+    --color-surface-6: var(--surface-6);
+    --color-surface-7: var(--surface-7);
+    --color-surface-8: var(--surface-8);
+    --shadow-surface-1: var(--shadow-1);
+    --shadow-surface-2: var(--shadow-2);
+    --shadow-surface-3: var(--shadow-3);
+    --shadow-surface-4: var(--shadow-4);
+    --shadow-surface-5: var(--shadow-5);
+    --shadow-surface-6: var(--shadow-6);
+    --shadow-surface-7: var(--shadow-7);
+    --shadow-surface-8: var(--shadow-8);
 }
 
 :root {
     color-scheme: light dark;
-    --background: oklch(0.99 0 0);
+    --pane-header-height: 3rem;
+    --background: var(--surface-1);
     --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
+    --card: var(--surface-3);
     --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
+    --popover: var(--surface-3);
     --popover-foreground: oklch(0.145 0 0);
     --primary: oklch(0.18 0 0);
     --primary-foreground: oklch(0.985 0 0);
@@ -62,7 +81,7 @@
     --secondary-foreground: oklch(0.18 0 0);
     --muted: oklch(0.962 0 0);
     --muted-foreground: oklch(0.495 0 0);
-    --accent: oklch(0.945 0 0);
+    --accent: var(--hover);
     --accent-foreground: oklch(0.16 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.908 0 0);
@@ -74,14 +93,16 @@
     --chart-4: oklch(0.708 0 0);
     --chart-5: oklch(0.87 0 0);
     --radius: 0.75rem;
-    --sidebar: oklch(0.975 0 0);
+    --sidebar: var(--surface-1);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.18 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.93 0 0);
+    --sidebar-accent: var(--active);
     --sidebar-accent-foreground: oklch(0.145 0 0);
     --sidebar-border: oklch(0.908 0 0);
     --sidebar-ring: oklch(0.556 0 0);
+    --hover: rgb(0 0 0 / 0.04);
+    --active: rgb(0 0 0 / 0.07);
 
     &:has(> head > meta[name="color-scheme"][content="dark"]) {
         color-scheme: dark;
@@ -90,23 +111,46 @@
     &:has(> head > meta[name="color-scheme"][content="light"]) {
         color-scheme: light;
     }
+
+    --surface-1: #FAFAFA;
+    --surface-2: #FCFCFC;
+    --surface-3: #FFFFFF;
+    --surface-4: #FFFFFF;
+    --surface-5: #FFFFFF;
+    --surface-6: #FFFFFF;
+    --surface-7: #FFFFFF;
+    --surface-8: #FFFFFF;
+
+    --shadow-color: rgb(0 0 0 / 0.06);
+
+    --shadow-1: 0 0 0 1px var(--shadow-color);
+
+    --shadow-2: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
+
+    --shadow-3: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color);
+
+    --shadow-4: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color);
+
+    --shadow-5: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color);
+
+    --shadow-6: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color);
+
+    --shadow-7: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color);
+
+    --shadow-8: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color), 0 96px 96px -48px var(--shadow-color);
 }
 
 .dark {
     color-scheme: dark;
-    --background: oklch(0.125 0 0);
     --foreground: oklch(0.965 0 0);
-    --card: oklch(0.162 0 0);
     --card-foreground: oklch(0.965 0 0);
-    --popover: oklch(0.175 0 0);
     --popover-foreground: oklch(0.965 0 0);
     --primary: oklch(0.95 0 0);
     --primary-foreground: oklch(0.145 0 0);
-    --secondary: oklch(0.228 0 0);
+    --secondary: oklch(0.285 0 0);
     --secondary-foreground: oklch(0.965 0 0);
-    --muted: oklch(0.215 0 0);
+    --muted: oklch(0.276 0 0);
     --muted-foreground: oklch(0.66 0 0);
-    --accent: oklch(0.24 0 0);
     --accent-foreground: oklch(0.965 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
@@ -117,14 +161,55 @@
     --chart-3: oklch(0.556 0 0);
     --chart-4: oklch(0.439 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.145 0 0);
     --sidebar-foreground: oklch(0.965 0 0);
     --sidebar-primary: oklch(0.95 0 0);
     --sidebar-primary-foreground: oklch(0.145 0 0);
-    --sidebar-accent: oklch(0.228 0 0);
     --sidebar-accent-foreground: oklch(0.965 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.58 0 0);
+    --hover: rgb(255 255 255 / 0.06);
+    --active: rgb(255 255 255 / 0.10);
+    --surface-1: #171717;
+    --surface-2: #1E1E1E;
+    --surface-3: #252525;
+    --surface-4: #2C2C2C;
+    --surface-5: #333333;
+    --surface-6: #3A3A3A;
+    --surface-7: #414141;
+    --surface-8: #484848;
+    --dm-hi-base: rgba(255,255,255,0.01);
+    --dm-hi-mid: rgba(255,255,255,0.02);
+    --dm-hi-high: rgba(255,255,255,0.04);
+    --dm-hi-peak: rgba(255,255,255,0.06);
+    --dm-ring-base: rgba(255,255,255,0.02);
+    --dm-ring-mid: rgba(255,255,255,0.04);
+    --dm-ring-high: rgba(255,255,255,0.06);
+    --dm-drop: rgba(0,0,0,0.18);
+    --shadow-1: inset 0 0 0 1px var(--dm-ring-base);
+    --shadow-2: inset 0 1px 0 0 var(--dm-hi-base), inset 0 0 0 1px var(--dm-ring-base), 0 1px 1px -0.5px var(--dm-drop);
+    --shadow-3: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-base), 0 0 0 1px rgba(0,0,0,0.12), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop);
+    --shadow-4: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.14), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop);
+    --shadow-5: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.16), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop);
+    --shadow-6: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.18), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop);
+    --shadow-7: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.20), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop);
+    --shadow-8: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.22), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop), 0 96px 96px -48px var(--dm-drop);
+}
+
+/* Fleet's sidebar rows share a Fluid hover fill while keeping shadcn's selected and focus styles. */
+@media (hover: hover) {
+    .fleet-sidebar-row > [data-sidebar="menu-button"]:not([data-active], :active):hover {
+        background-color: transparent;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-slot="sidebar-gap"],
+    [data-slot="sidebar-container"],
+    [data-mobile="true"][data-sidebar="sidebar"],
+    [data-surface] {
+        animation: none;
+        transition: none;
+    }
 }
 
 @layer base {
@@ -142,6 +227,10 @@
 }
 
 @layer components {
+    [data-slot="prompt-input"] {
+        --prompt-inner-radius: max(0px, calc(var(--radius-2xl) - (var(--spacing) * 2) - 1px));
+    }
+
     .markdown {
         @apply flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-break-word;
     }

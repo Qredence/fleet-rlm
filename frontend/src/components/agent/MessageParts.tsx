@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
 } from '@/components/ui/trace'
+import { followMarkdownFragment } from '@/lib/markdown-fragments'
 import type { FleetPart } from '@/lib/messages'
 import { FileTree } from './FileTree'
 import { PythonToolTrace } from './PythonToolTrace'
@@ -40,7 +41,7 @@ export function MessageParts({ parts, live = false, preview, download }: {
               </TraceLine>
             </TraceCollapsibleTrigger>
             <TraceCollapsibleContent>
-              <div className="markdown text-sm"><Markdown remarkPlugins={[remarkGfm]}>{part.text}</Markdown></div>
+              <div className="markdown text-sm" onClick={followMarkdownFragment}><Markdown remarkPlugins={[remarkGfm]}>{part.text}</Markdown></div>
             </TraceCollapsibleContent>
           </TraceCollapsible>
         )
@@ -67,7 +68,7 @@ export function MessageParts({ parts, live = false, preview, download }: {
         )
       }
       case 'text':
-        return <div className="markdown min-w-0" key={index}><Markdown remarkPlugins={[remarkGfm]}>{part.text}</Markdown></div>
+        return <div className="markdown min-w-0" key={index} onClick={followMarkdownFragment}><Markdown remarkPlugins={[remarkGfm]}>{part.text}</Markdown></div>
       default:
         return null
     }

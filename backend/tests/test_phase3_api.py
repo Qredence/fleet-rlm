@@ -411,10 +411,100 @@ async def test_auth_and_cors(offline):
     assert response.headers["access-control-allow-origin"] == "https://client.example"
     assert response.headers["access-control-expose-headers"] == "x-vercel-ai-ui-message-stream"
 
+    for path in (offline.base, "/api/skills/table"):
+        assert (
+            await offline.client.get(path, headers={"Authorization": "Bearer wrong"})
+        ).status_code == 401
+    preview = await offline.client.get("/api/skills/table")
+    assert preview.json() == {
+        "name": "table",
+        "description": "Analyze tabular data",
+        "body": "Inspect the data first.",
+    }
+    assert (await offline.client.get("/api/skills/missing")).status_code == 404
+
     offline.settings.api_bearer_token = None
     assert (
         await offline.client.get("/api/skills", headers={"Authorization": ""})
     ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_models_reads_the_configured_gateway(offline, monkeypatch):
+    offline.settings.llm_base_url = "https://gateway.example/openai/v1/"
+    offline.store.workspace_overrides = {"llm_model": "openai/default"}
+    requests = []
+
+    def gateway(request):
+        requests.append(request)
+        assert offline.store.checkouts == 0
+        assert request.url == httpx.URL("https://gateway.example/openai/v1/models")
+        assert request.headers["authorization"] == "Bearer offline"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "org/z-model"},
+                    {"id": "openai/a-model", "architecture": {"output_modalities": ["text"]}},
+                    {"id": "org/z-model"},
+                    {"id": "org/chat-model", "type": "language"},
+                    {"id": "bfl/flux-2-pro", "type": "image"},
+                    {"id": "openai/text-embedding-3-small", "type": "embedding"},
+                    {"id": "image-only", "architecture": {"output_modalities": ["image"]}},
+                    {"id": "invalid id"},
+                    {},
+                ]
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(gateway), follow_redirects=False)
+    monkeypatch.setattr(api.httpx, "AsyncClient", lambda **kwargs: client)
+    assert (
+        await offline.client.get("/api/models", headers={"Authorization": ""})
+    ).status_code == 401
+    assert not requests
+    response = await offline.client.get("/api/models")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.json() == {
+        "workspace_default": "openai/default",
+        "catalog_status": "ready",
+        "models": [
+            {"id": "openai/openai/a-model", "label": "openai/a-model"},
+            {"id": "openai/org/chat-model", "label": "org/chat-model"},
+            {"id": "openai/org/z-model", "label": "org/z-model"},
+        ],
+    }
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["unconfigured", "redirect", "bad-shape", "timeout"])
+async def test_models_falls_back_to_default(offline, monkeypatch, failure):
+    offline.settings.llm_base_url = (
+        None if failure == "unconfigured" else "https://gateway.example/v1"
+    )
+    requests = []
+
+    def gateway(request):
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("private upstream error", request=request)
+        if failure == "redirect":
+            return httpx.Response(302, headers={"Location": "https://other.example/models"})
+        return httpx.Response(200, json={"private upstream response": True})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(gateway), follow_redirects=False)
+    monkeypatch.setattr(api.httpx, "AsyncClient", lambda **kwargs: client)
+    response = await offline.client.get("/api/models")
+    unconfigured = failure == "unconfigured"
+    assert response.status_code == 200
+    assert response.json() == {
+        "workspace_default": offline.settings.llm_model,
+        "catalog_status": "unconfigured" if unconfigured else "unavailable",
+        "models": [],
+    }
+    assert len(requests) == (0 if unconfigured else 1)
 
 
 @pytest.mark.asyncio
@@ -551,6 +641,12 @@ async def test_install_skill_artifact_is_immediately_available_to_new_turns(offl
         assert installed.json() == {"name": "receipt-check", "description": "Check receipts"}
     catalog = await offline.client.get("/api/skills")
     assert [item["name"] for item in catalog.json()] == ["receipt-check", "table"]
+    preview = await offline.client.get("/api/skills/receipt-check")
+    assert preview.json() == {
+        "name": "receipt-check",
+        "description": "Check receipts",
+        "body": "Use code RC-29.",
+    }
 
     task = AsyncMock(
         return_value=dspy.Prediction(answer="RC-29", history=dspy.History(messages=[]))
@@ -1246,7 +1342,10 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
 
 
 @pytest.mark.asyncio
-async def test_run_turn_and_files_apply_neon_settings_overrides(offline, monkeypatch):
+@pytest.mark.parametrize("session_model", [None, "openai/provider/catalog-model"])
+async def test_run_turn_and_files_apply_neon_settings_overrides(
+    offline, monkeypatch, session_model
+):
     runtime = api.app.state.runtime
     startup_lm = runtime.lm
     startup_sub_lm = runtime.sub_lm
@@ -1277,6 +1376,9 @@ async def test_run_turn_and_files_apply_neon_settings_overrides(offline, monkeyp
         },
     )
     assert patch_resp.status_code == 200
+    if session_model:
+        saved = await offline.client.patch(offline.base, json={"model_override": session_model})
+        assert saved.status_code == 200
 
     observed: dict[str, object] = {}
 
@@ -1303,13 +1405,14 @@ async def test_run_turn_and_files_apply_neon_settings_overrides(offline, monkeyp
     assert effective.llm_base_url is None
     assert effective.rlm_max_iters == 7
     assert effective.daytona_exec_timeout_seconds == 33
-    assert observed["model_override"] is not startup_lm
+    if session_model:
+        assert observed["model_override"] == session_model
+        assert created_models == [("openai/gpt-4.1-mini", None)]
+    else:
+        assert observed["model_override"] is not startup_lm
+        assert created_models == [("openai/gpt-4.1", None), ("openai/gpt-4.1-mini", None)]
     assert observed["sub_lm"] is not startup_sub_lm
     assert observed["optimized_state"] is None
-    assert created_models == [
-        ("openai/gpt-4.1", None),
-        ("openai/gpt-4.1-mini", None),
-    ]
     assert created_decision_models == ["typesafe:jev-2026-01", "typesafe:jev-2026-01"]
     assert offline.memory.await_args.args[0].decision_model == "typesafe:jev-2026-01"
     assert offline.memory.await_args.kwargs["decision_lm"] is not startup_decision_lm
@@ -1353,6 +1456,12 @@ async def test_sessions_crud_messages_files_and_limit(offline, caplog):
     assert len(listed_limited.json()) == 2
     assert (await offline.client.get("/api/sessions", params={"limit": 0})).status_code == 422
     assert (await offline.client.get("/api/sessions", params={"limit": 501})).status_code == 422
+    original = next(
+        item for item in listed_all.json() if item["id"] == str(offline.store.session_id)
+    )
+    assert all(item["id"] != original["id"] for item in listed_limited.json())
+    assert (await offline.client.get(offline.base)).json() == original
+    assert (await offline.client.get(f"/api/sessions/{uuid4()}")).status_code == 404
 
     # Messages endpoint: 404 for unknown session, 200 returns persisted UI messages.
     assert (await offline.client.get(f"/api/sessions/{uuid4()}/messages")).status_code == 404
