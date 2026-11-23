@@ -15,6 +15,8 @@ All notable changes to this project are documented in this file.
 - Two-stage post-turn `MemoryGate` + `DistillMemory` consolidation and offline `python -m fleet_rlm.optimize` (`dspy.GEPA` & `dspy.experimental.ReAnchor`) CLI with isolated Neon branch safety guard and external MLflow `3.18.0` tracking.
 - Zero-BFF Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui (Base UI AI Elements) SPA (`frontend/`) with 3-pane workspace layout, `@skill` `ChatComposer`, streaming `PythonToolTrace`, recursive `SubagentTrace`, file uploads/downloads, memory review, and `SettingsDialog`.
 - Canonical domain glossary (`GLOSSARY.md`) at the repository root and CircleCI dynamic path-filtering CI (`.circleci/`).
+- Preview workspace text, Markdown, images, and PDFs, and install reviewed `SKILL.md` artifacts for reuse across sessions. See [PR #707](https://github.com/Qredence/fleet-rlm/pull/707).
+- Record Daytona Python execution, output, failures, and cancellation in MLflow. Add trace-backed DSPy evaluation and GEPA pilot runners. See [PR #707](https://github.com/Qredence/fleet-rlm/pull/707).
 
 ### Changed
 
