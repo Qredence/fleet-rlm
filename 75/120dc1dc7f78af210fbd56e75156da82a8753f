@@ -1,0 +1,59 @@
+README.md
+  s_2fdc5be4a87bca::t_859130b33fe05d 12
+backend/src/fleet_rlm/agent.py
+  s_2fdc5be4a87bca::t_afbb2a8cfbcf67 5,27-32,38-40,243,438,502-505,527-539,553,574
+backend/src/fleet_rlm/api.py
+  s_7dbea4a77f7c1c::t_3264f2236de547 58,319-330,340-344,499-503,534,560,572,578,727-729,735-736,740,742-747,753,760-765,792-795,820-852,861,905,908,914,939,1077-1082,1089,1140-1142,1149
+backend/src/fleet_rlm/db.py
+  s_2fdc5be4a87bca::t_53449171803915 380-413
+backend/src/fleet_rlm/optimize.py
+  s_2fdc5be4a87bca::t_fd0712b737910f 217,220,276,279
+backend/src/fleet_rlm/skills.py
+  s_2fdc5be4a87bca::t_c51a66c455ace0 1,4,8,18-19,43-76,86-90
+backend/tests/test_phase2_engine.py
+  s_2fdc5be4a87bca::t_e2753b74d1668d 636-638,691
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_966cf48628e603 366,527-599,688-691,702-704,717-723,729-744,1914
+frontend/package.json
+  s_7dbea4a77f7c1c::t_6dc9b09fbc22c8 25
+frontend/pnpm-lock.yaml
+  s_7dbea4a77f7c1c::t_7fa20b9e08d91e 41-43,341-415,1936-1939,2734-2781,4212-4215
+frontend/src/App.tsx
+  s_7dbea4a77f7c1c::t_a8ab1369afb003 7,51,60,140,151,216,229,235,341,381,384-394,444-448,656
+frontend/src/components/agent/FilePreview.tsx
+  s_7dbea4a77f7c1c::t_c47b5c7a3c9c79 1-207
+frontend/src/components/agent/FileTree.tsx
+  s_2fdc5be4a87bca::t_a1a1b0383f1b7f 7-9,12-36,57,64,68
+frontend/src/components/agent/MessageParts.tsx
+  s_7dbea4a77f7c1c::t_3587aec41131c6 14,17,54,65
+frontend/src/components/agent/PdfPreview.tsx
+  s_2fdc5be4a87bca::t_736beadf1509e8 1-96
+frontend/src/components/agent/WorkspaceSidePanel.tsx
+  s_7dbea4a77f7c1c::t_b6e0a9cd72c586 156,170,344
+frontend/src/lib/api.ts
+  s_7dbea4a77f7c1c::t_82e736ac887bbc 134-138,158,160,180-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "75120dc1dc7f78af210fbd56e75156da82a8753f",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
