@@ -1,0 +1,24 @@
+backend/src/fleet_rlm/agent.py
+  h_f276322eb5eb9f 18,437-440
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 913-915
+backend/src/fleet_rlm/skills.py
+  h_f276322eb5eb9f 249,252,316
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 1438-1448,1464-1468
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 619-630
+scripts/fleet_workflow_baseline.py
+  h_f276322eb5eb9f 126-133,135-139,226-227,597
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "30289d8e12d93da8409d10d15275ec92a6d993dd",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
