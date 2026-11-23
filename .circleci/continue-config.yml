@@ -1,0 +1,131 @@
+version: 2.1
+
+parameters:
+  run-backend:
+    type: boolean
+    default: false
+  run-frontend:
+    type: boolean
+    default: false
+  run-all:
+    type: boolean
+    default: false
+
+jobs:
+  backend-check:
+    docker:
+      - image: cimg/python:3.13
+    environment:
+      UV_LINK_MODE: copy
+    steps:
+      - checkout
+      - run:
+          name: Install uv
+          command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - restore_cache:
+          keys:
+            - v1-uv-{{ arch }}-{{ checksum "backend/uv.lock" }}
+            - v1-uv-{{ arch }}-
+      - run:
+          name: Install backend dependencies
+          command: cd backend && uv sync --frozen
+      - save_cache:
+          key: v1-uv-{{ arch }}-{{ checksum "backend/uv.lock" }}
+          paths:
+            - ~/.cache/uv
+      - run:
+          name: Ruff lint
+          command: cd backend && uv run ruff check .
+      - run:
+          name: Ruff format check
+          command: cd backend && uv run ruff format --check .
+      - run:
+          name: Architecture boundaries (import-linter)
+          command: cd backend && uv run lint-imports
+      - run:
+          name: Type check (ty)
+          command: cd backend && uv run ty check src
+      - run:
+          name: Backend tests (pytest)
+          command: |
+            export PYTHONPATH="$PWD/.circleci${PYTHONPATH:+:$PYTHONPATH}"
+            cd backend
+            uv run pytest -p fleet_ci_pytest
+
+  frontend-check:
+    docker:
+      - image: cimg/node:22.14
+    environment:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - checkout
+      - run:
+          name: Enable Corepack and pnpm
+          command: |
+            sudo npm install -g corepack@latest
+            sudo corepack enable
+            corepack prepare pnpm@latest --activate
+            pnpm config set store-dir ~/.pnpm-store
+            pnpm --version
+      - restore_cache:
+          keys:
+            - v1-pnpm-{{ arch }}-{{ checksum "frontend/pnpm-lock.yaml" }}
+            - v1-pnpm-{{ arch }}-
+      - run:
+          name: Install frontend dependencies
+          command: cd frontend && pnpm install --frozen-lockfile
+      - save_cache:
+          key: v1-pnpm-{{ arch }}-{{ checksum "frontend/pnpm-lock.yaml" }}
+          paths:
+            - ~/.pnpm-store
+      - run:
+          name: Lint
+          command: cd frontend && pnpm lint
+      - run:
+          name: Typecheck
+          command: cd frontend && pnpm typecheck
+      - run:
+          name: Unit tests (Vitest)
+          command: cd frontend && pnpm test
+      - run:
+          name: Build
+          command: cd frontend && pnpm build
+
+  skip-notice:
+    docker:
+      - image: cimg/base:current
+    resource_class: small
+    steps:
+      - run:
+          name: No backend or frontend changes detected
+          command: echo "Skipping backend and frontend CI checks (no matching paths changed)."
+
+workflows:
+  required-ci:
+    when: pipeline.event.name == "pull_request" or pipeline.git.branch == "main"
+    jobs:
+      - backend-check
+      - frontend-check
+
+  backend:
+    when: >-
+      pipeline.event.name != "pull_request" and pipeline.git.branch != "main" and
+      (pipeline.parameters.run-backend or pipeline.parameters.run-all)
+    jobs:
+      - backend-check
+
+  frontend:
+    when: >-
+      pipeline.event.name != "pull_request" and pipeline.git.branch != "main" and
+      (pipeline.parameters.run-frontend or pipeline.parameters.run-all)
+    jobs:
+      - frontend-check
+
+  skip-notice:
+    when: >-
+      pipeline.event.name != "pull_request" and pipeline.git.branch != "main" and
+      not (pipeline.parameters.run-backend or pipeline.parameters.run-frontend or pipeline.parameters.run-all)
+    jobs:
+      - skip-notice

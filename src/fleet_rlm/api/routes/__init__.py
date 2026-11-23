@@ -1,1 +1,0 @@
-"""One APIRouter per area."""

@@ -1,79 +1,54 @@
-# Working on Fleet RLM Lite
+# Fleet-RLM Engineering Guide
 
-Run `git status --short` and inspect the diff first. Preserve existing work,
-including deletions. Use the [source layout](docs/reference/source-layout.md) to
-find the owning code, check [pyproject.toml](pyproject.toml) and [uv.lock](uv.lock)
-for pinned dependencies, and read the [architecture](ARCHITECTURE.md) before
-changing a runtime boundary.
+Fleet-RLM is a stateless, recursive agentic system built on DSPy 3.5.0 `dspy.RLM`, Daytona isolated sandboxes, Neon Postgres 18, external MLflow 3.18.0, and a Vite + React + shadcn/ui (Base UI AI Elements) frontend.
 
-## Working agreements
+## Repository Layout
 
-- Use Python 3.11–3.13, `uv`, four-space indentation, and Ruff. Prefer `pnpm` for
-  JavaScript. Reuse existing code and native DSPy mechanisms. Keep new abstractions
-  and regression tests focused on real callers.
-- Get explicit authorization before live Daytona, model-provider, database, or
-  evaluation runs and before committing, pushing, publishing, or deploying.
-  Use conventional commit prefixes. Keep credentials and `.env` files out of Git
-  and treat traces and artifacts as sensitive.
-- User Skills belong in `.fleet/skills/`. Exclude `.agents/skills/` from Skill sync.
-  Bundled names are reserved. Ignore colliding local or Volume copies with a warning.
-- Default to loopback API binding. External exposure needs explicit opt-in and a
-  separately secured boundary. MLflow is local OSS.
+- `backend/` — FastAPI 0.165+ + DSPy 3.5.0 backend (`uv`, Python `>=3.13,<3.14`), structured as 8 focused modules under `backend/src/fleet_rlm/`:
+  1. `config.py` — Flat `pydantic-settings` (`FLEET_*`) configuration
+  2. `db.py` — Neon Postgres 18 SQLAlchemy 2.1 async models (5 tables: `sessions`, `runs`, `files`, `memories`, `workspace_settings`), PgBouncer pool, `uuidv7()`, and root-turn partial unique index lock
+  3. `interpreter.py` — All Daytona SDK 2.x (`daytona[v0-sdk]>=2.1.0,<3` on `.v0`) client/FS interactions and `DaytonaCodeInterpreter` adapter
+  4. `skills.py` — Read-only `SKILL.md` registry and TypeSafe Jev (`Noul` + `Choice`) selector
+  5. `agent.py` — DSPy 3.5 `dspy.RLM` runner, recursive `spawn_agent` / `llm_query`, bounded history, and `MemoryGate` consolidation
+  6. `ui_stream.py` — Domain-event-to-AI-SDK-v1 (`x-vercel-ai-ui-message-stream: v1`) encoder
+  7. `api.py` — Stateless FastAPI 0.165 app with native `EventSourceResponse` SSE over `POST`
+  8. `optimize.py` — Offline `dspy.GEPA` & `dspy.experimental.ReAnchor` optimization CLI (`python -m fleet_rlm.optimize`)
+- `frontend/` — Vite + React + TypeScript + Tailwind v4 + shadcn/ui (Base UI preset) AI Elements SPA consuming `/api/sessions/{id}/chat` natively via `@ai-sdk/react` `useChat`.
+- `GLOSSARY.md` — Canonical ubiquitous domain language (`Session`, `Workspace`, `Artifact`, `Turn`, `Run`, `Deployment Settings`, `Compiled Program`, `Calibrated Gate`).
+- `docs/PRD.md` & `docs/phases/` — Authoritative specification and phase plans.
+- `docker-compose.yml` — External MLflow 3.18.0 local development server (`127.0.0.1:5001`).
 
-## Runtime contracts
+## Architecture Boundaries (`import-linter`)
 
-- Preserve `direct`, `flex`, and `rlm`, strict-mode triage bypass, dataset routing
-  constraints, and native DSPy tuning and delegation. Keep DSPy overrides scoped
-  with `dspy.context` and verify tracing, evaluation, and serialization on pinned
-  dependency upgrades. The one-job evaluation worker can configure callbacks
-  process-wide for MLflow scorer threads that do not inherit the context.
-- Run generated Python in Daytona. Keep model and host-tool credentials on the
-  server, including Serper and You.com keys. Preserve shared Turn budgets,
-  isolated children, and success-only promotion from host artifact receipts.
-- Give each Turn one terminal outcome and teardown owner. On failure, cancellation,
-  expiry, or disconnect before commit, fence host replies, stop the root, and
-  finish required child cleanup before acknowledgment. Serialize generation-bound
-  watchdogs with Turn end/reset. Success keeps the warm root.
-- Preserve Store migrations, lease fencing, resource floors, provider provenance,
-  and historical `pre-provenance` readability. Stored history cannot restore a
-  live interpreter. Set lease-fenced workspace state to `unknown` before Volume
-  mutations, and retain local Skill files in `known_empty` Direct replays.
+Enforced via `uv run lint-imports` in `backend/pyproject.toml`:
+1. Layer order: `(api | optimize)` → `ui_stream` → `(agent | skills | interpreter | db)` → `config`.
+2. `db`, `interpreter`, and `skills` are mutually independent.
+3. Only `api` may import `ui_stream`.
+4. `optimize` never imports `api` or `ui_stream`.
+5. Only `interpreter` may import `daytona`; only `api` may import `fastapi`.
 
-## Evaluation contracts
+## Non-Negotiable Guardrails
 
-- Keep `fleet_metric`'s five positional arguments and its
-  `dspy.Prediction(score, feedback, objective_scores)` result. Keep serving,
-  judging, and reflection roles separate and use their model-format helpers.
-  Diagnostic MLflow scorers are independent of GEPA objectives.
-- Preserve route-judge backend metadata, `Noul` at `JEV_ROUTE_THRESHOLD`, route
-  `Choice`, and evidence-derived rationale. Judge sandbox success separately,
-  allow task-justified calls, and treat evaluated content as data. Bump
-  `fleet.jev.rubric_version` for rubric changes. Keep the `execution-evidence-v3`
-  JSON-object string and validate booleans, rationales, and `span_id=` citations.
-- Recover completed work using saved run and trace IDs before rerunning. GEPA
-  metric-call budgets cover only part of total cost. Use immutable approved
-  replays grouped by lineage in isolated runtimes. Keep gold out of inputs,
-  holdout out of search, and benchmarks out of curation. Score artifacts and
-  delegation from host receipts.
-- Keep paired validation, critical holdout, correctness, and usage gates.
-  Separate candidate creation from installation. Approval and rollback must
-  recheck artifact, incumbent, configuration, code, and dependency identities.
-- The worker owns stages and counters. The API drains merged output into a
-  bounded private log and arbitrates managed terminal outcomes after exit.
-  Required persistence failures stop native GEPA and block publication.
-  Optional telemetry failures stay outside that latch. Preserve database and
-  file cancellation checks.
+1. **No In-Process Session State:** Never store sandboxes, locks, or session runtimes in module-level globals or `app.state` keyed by `session_id`.
+2. **DSPy 3.5 Discipline:** Never import `dspy.experimental.TypeSafe` (use `dspy.LM("typesafe:jev-latest")` or a pinned snapshot). Never name custom Signature fields `history`, `repl_entry`, `variables_info`, or `iteration`. Keep `Noul`/`Choice`/`Score` outputs in standalone `dspy.Predict` gates, not inside `dspy.RLM`.
+3. **FastAPI 0.165 Discipline:** Use `fastapi.sse.EventSourceResponse` + `ServerSentEvent`, never `StreamingResponse`. Never hold `Depends(get_db)` across an SSE stream; use short `async with sessionmaker()` transactions.
+4. **Neon PgBouncer Discipline:** Runtime uses pooled `FLEET_DATABASE_URL` with `prepare_threshold=None`; Alembic uses direct `FLEET_DATABASE_DIRECT_URL` with `NullPool`. Never use `pg_advisory_lock`, `LISTEN/NOTIFY`, or SQL `PREPARE`.
+5. **Daytona Isolation:** Keep 100% of `daytona` imports, `.v0` client calls, and `sandbox.fs.*` helpers inside `interpreter.py`. Never inject host LLM/DB keys into sandbox env vars, and unset `DAYTONA_API_URL` / `DAYTONA_V2_API_URL` in shells using SDK 2.x.
+6. **Zero Custom Wire Protocols:** Frontend consumes `x-vercel-ai-ui-message-stream: v1` natively via `@ai-sdk/react` `useChat` + `DefaultChatTransport` (no custom SSE parsers, no BFF proxy).
+7. **Offline Optimization Safety:** Always target an isolated Neon branch via `--database-url` and pin the exact TypeSafe Jev snapshot in `FLEET_DECISION_MODEL` when deploying `ReAnchor` artifacts.
+8. **Read-Only Env Settings Boundary:** Infrastructure-bound settings (`llm_base_url`, `daytona_snapshot`, `mlflow_experiment`, credentials, and worker concurrency) are managed strictly via `.env` / environment variables and exposed only as read-only `status` in `GET /api/settings` — never accept them in `PATCH /api/settings` or persist them in `workspace_settings`.
 
 ## Verification
 
-Use the [Makefile](Makefile) and keep ordinary CI independent of live services.
+Run all checks from the repository root:
 
-| Change | Required checks |
-| --- | --- |
-| Code | Add focused regression coverage, run `uv run pytest <focused-test>`, then `make check`. |
-| HTTP API | Run the code checks, update the [HTTP reference](docs/reference/http-api.md), and run `make api-sync` and `make api-check`. |
-| Docs only | Run `make check-docs` and `git diff --check`. |
+```bash
+make check
+```
 
-Report what changed, what ran, and what remains unverified. Distinguish offline
-checks, live canaries, and measured improvements. See the [evaluation
-reference](docs/reference/evaluation.md) and [canary runbook](docs/runbooks/evaluation-canary.md).
+Or run per-package checks directly:
+
+```bash
+cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports && uv run ty check src && uv run pytest
+cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+```

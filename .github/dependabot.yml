@@ -1,15 +1,10 @@
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: "uv"
+    directory: "/backend"
     schedule:
       interval: "weekly"
-    groups:
-      dependencies:
-        patterns:
-          - "*"
-  - package-ecosystem: "pip"
-    directory: "/"
+  - package-ecosystem: "npm"
+    directory: "/frontend"
     schedule:
       interval: "weekly"
-    # uv.lock is not yet fully supported but we can track pyproject.toml changes if any

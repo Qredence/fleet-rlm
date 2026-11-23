@@ -7,8 +7,8 @@
 ### Core Architectural Shift
 Fleet-RLM is **not** a local stateful runtime or process daemon.
 - **Compute is stateless:** Any FastAPI worker can handle any request for any session. Zero in-process `SessionRuntime` caches, zero PostgreSQL advisory-lock heartbeats, zero setup HTTP servers, and zero embedded MLflow process supervision.
-- **State is durable and minimal:** Neon Postgres 18 holds conversation history, the recursive execution tree (`runs`), file manifests, and unified memories. Daytona holds workspace files and artifacts.
-- **Native framework primitives only:** Never duplicate what DSPy 3.5.0, FastAPI 0.165.0, Daytona 0.232.0, Neon Postgres 18, MLflow 3.18.0, or shadcn/ui Base UI AI Elements already provide.
+- **State is durable and minimal:** Neon Postgres 18 holds 5 tables: conversation history (`sessions`), the recursive execution tree (`runs`), file manifests (`files`), unified memories (`memories`), and workspace setting overrides (`workspace_settings`). Daytona holds workspace files and artifacts.
+- **Native framework primitives only:** Never duplicate what DSPy 3.5.0, FastAPI 0.165+, Daytona SDK 2.x (`.v0`), Neon Postgres 18, MLflow 3.18.0, or shadcn/ui Base UI AI Elements already provide.
 
 ---
 
@@ -44,7 +44,7 @@ Fleet-RLM is **not** a local stateful runtime or process daemon.
 | **FastAPI** | `fastapi[standard]>=0.165.0` | Stateless HTTP + native `fastapi.sse.EventSourceResponse` over `POST` |
 | **DSPy** | `dspy==3.5.0` | `dspy.RLM`, `dspy.Flex`, `dspy.History`, `interpreter_factory`, `dspy.streamify`, Decision Types (`Noul`, `Choice`, `Score`, `ReAnchor`), `dspy.GEPA` |
 | **Decision Model** | `dspy.LM("typesafe:jev-latest")` (pin snapshot after `ReAnchor`) | Fast, probability-calibrated Skill selection & Memory gating |
-| **Daytona** | `daytona==0.232.0` *(stable)* | `AsyncDaytona`, `VolumeMount(subpath=...)`, `AsyncCodeInterpreter` contexts |
+| **Daytona** | `daytona[v0-sdk]>=2.1.0,<3` *(SDK 2.x `.v0`)* | `AsyncDaytona.v0`, `VolumeMount(subpath=...)`, `AsyncCodeInterpreter` contexts |
 | **Database** | **Neon Postgres 18** (`sqlalchemy[asyncio]>=2.1.9`, `alembic>=1.20.1`, `psycopg[binary]>=3.3.9`) | `uuidv7()`, recursive `runs`, partial unique index lock, `tsvector`, DB branching |
 | **Observability** | **MLflow `>=3.18.0`** (external server) | `mlflow.dspy.autolog()` + offline GEPA compile/eval tracking |
 | **Frontend** | **Vite + React + TypeScript + Tailwind + shadcn/ui (Base UI AI Elements)** + `@ai-sdk/react` | `useChat` consuming `x-vercel-ai-ui-message-stream: v1` directly (`Trace`, `Subagent`, `Code Block`, `File Tree`, `Badge`) |
@@ -53,7 +53,7 @@ Fleet-RLM is **not** a local stateful runtime or process daemon.
 
 ## 4. Target Repository Structure & Module Boundaries
 
-The entire backend consists of **7 focused Python modules** enforcing a strict one-way DAG (`import-linter` enforced in CI):
+The entire backend consists of **8 focused Python modules** enforcing a strict one-way DAG (`import-linter` enforced in CI):
 
 ```text
 fleet-rlm/
@@ -66,11 +66,12 @@ fleet-rlm/
 │   ├── skills/                        # Agent Skills (SKILL.md folders)
 │   ├── src/fleet_rlm/
 │   │   ├── config.py                  # Flat pydantic-settings (env / .env)
-│   │   ├── db.py                      # Neon Postgres 18 ORM, pooling, run lock, memories
+│   │   ├── db.py                      # Neon Postgres 18 ORM (5 tables), pooling, run lock, memories, workspace_settings
 │   │   ├── interpreter.py             # 100% of Daytona SDK + DSPy CodeInterpreter adapter
 │   │   ├── skills.py                  # SKILL.md loader + TypeSafe Jev selector + tool scoping
-│   │   ├── agent.py                   # DSPy 3.5 RLM, UiPartAccumulator, AI SDK v1 encoder, Jev MemoryGate
-│   │   ├── api.py                     # FastAPI 0.165 app, lifespan, Depends, 7 route groups
+│   │   ├── agent.py                   # DSPy 3.5 RLM, recursive spawn_agent/llm_query, Jev MemoryGate
+│   │   ├── ui_stream.py               # Domain-event-to-AI-SDK-v1 (x-vercel-ai-ui-message-stream: v1) encoder
+│   │   ├── api.py                     # FastAPI 0.165 app, lifespan, Depends, REST + SSE route groups
 │   │   └── optimize.py                # Offline CLI: Neon branch + MLflow 3.18 + GEPA + ReAnchor
 │   └── tests/
 ├── frontend/                          # Vite + React + shadcn/ui Base UI AI Elements
@@ -79,10 +80,10 @@ fleet-rlm/
 
 ### Dependency Rules (Enforced by `import-linter`)
 1. `config.py` imports no internal module.
-2. `db.py`, `interpreter.py`, `skills.py`, and `agent.py` may import `config.py`, and **never** import `fastapi` or `api.py`.
+2. `db.py`, `interpreter.py`, `skills.py`, `agent.py`, and `ui_stream.py` may import `config.py`, and **never** import `fastapi` or `api.py`.
 3. `db.py`, `interpreter.py`, and `skills.py` are strictly independent of one another.
-4. Only `interpreter.py` imports `daytona`. Only `api.py` imports `fastapi`.
-5. `optimize.py` never imports `api.py`.
+4. Only `api.py` imports `ui_stream.py`. Only `interpreter.py` imports `daytona`. Only `api.py` imports `fastapi`.
+5. `optimize.py` never imports `api.py` or `ui_stream.py`.
 
 ---
 
@@ -103,13 +104,16 @@ fleet-rlm/
    - Use `FLEET_DATABASE_URL` (`-pooler`) for runtime with `connect_args={"prepare_threshold": None}`, `pool_size=2`, `max_overflow=5`, `pool_pre_ping=True`, `pool_recycle=300`.
    - Use `FLEET_DATABASE_DIRECT_URL` (non-pooled) strictly for Alembic migrations.
    - Never use `pg_advisory_lock`, `LISTEN/NOTIFY`, or SQL `PREPARE`.
-5. **Daytona Isolation & 2.0 Forward Compatibility:**
-   - Target stable `daytona==0.232.0` (`AsyncDaytona`, `VolumeMount(..., subpath=...)`, `sandbox.code_interpreter`).
-   - Keep every Daytona import inside `interpreter.py` so migrating to Daytona 2.0 (`d.v2`, `sandbox.interpreter`, `sandbox.fork()`, `network_policy`, `replace_secrets`) is a single-file change.
-   - Never pass host API keys into Daytona sandbox env vars.
+5. **Daytona Isolation & `.v2` Workload Migration Path:**
+   - Run Daytona SDK 2.x (`daytona[v0-sdk]>=2.1.0,<3`) on the `daytona.v0` namespace (`AsyncDaytona.v0`, `VolumeMount(..., subpath=...)`, `sandbox.code_interpreter`).
+   - Keep 100% of `daytona` imports, `.v0` client operations, and `sandbox.fs.*` helpers inside `interpreter.py` so moving workloads to `daytona.v2` later is isolated cleanly. Note that cutting over to `.v2` requires redesigning four `.v0` assumptions: `sandbox.interpreter.run()` removes `on_stdout`/`on_stderr` callbacks needed by the live RPC bridge, v2 Linux sandboxes are ephemeral (no stop/start), `upload_file_stream` is replaced by `presigned_upload_url`, and v0 volumes/sandbox IDs do not carry over automatically.
+   - Never pass host API keys into Daytona sandbox env vars, and unset legacy `DAYTONA_API_URL` / `DAYTONA_V2_API_URL` before calling `.v2`.
 6. **Zero Custom Wire Protocols:**
    - FastAPI emits the standard AI SDK UI Message Stream Protocol (`x-vercel-ai-ui-message-stream: v1`, ending with `data: [DONE]`).
    - Never write a BFF proxy or custom SSE parser in Vite.
 7. **No Per-Turn Sandbox Probing:**
    - Compute file SHA-256 hashes at upload ingress in `api.py` and store in Neon `files`.
    - Trust the pinned Daytona snapshot for installed Python packages and `/opt/skills`.
+8. **Read-Only Env Settings Boundary:**
+   - Safe per-workspace overrides (models, RLM/history budgets, Daytona target/timeouts) persist in the singleton Neon `workspace_settings` table via `PATCH /api/settings`.
+   - Infrastructure-bound settings (`llm_base_url`, `daytona_snapshot`, `mlflow_experiment`, credentials, and worker concurrency) remain strictly `.env`-managed and are surfaced only as read-only `status` fields in `GET /api/settings`.

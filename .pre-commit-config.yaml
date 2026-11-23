@@ -34,8 +34,8 @@ repos:
   - repo: local
     hooks:
       - id: backend-tests
-        name: Run full backend test suite
-        entry: make test
+        name: Run full backend checks
+        entry: make check-backend
         language: system
         pass_filenames: false
         stages: [manual]

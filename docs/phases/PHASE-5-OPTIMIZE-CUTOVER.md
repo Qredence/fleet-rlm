@@ -16,7 +16,7 @@ Runs strictly out-of-band as a CLI (`uv run python -m fleet_rlm.optimize ...`). 
 2. **MLflow 3.18 Auto-Tracking:**
    - Enable `mlflow.dspy.autolog(log_compiles=True, log_evals=True, log_traces_from_compile=True)`.
 3. **Three Independent Optimization Targets (`--target rlm | skills | memory`):**
-   - **`rlm` (`dspy.GEPA`):** Loads labeled evaluation examples from approved Neon `runs` / JSONL dataset, splits train/holdout (e.g., 70/30), compiles `dspy.RLM` (or `dspy.Flex`) with `dspy.GEPA`, compares holdout score against baseline, and writes `artifacts/rlm_program.json` **only** when holdout improves (or `--force`).
+   - **`rlm` (`dspy.GEPA`):** Loads labeled evaluation examples from approved Neon `runs` / JSONL dataset, performs a disjoint 3-way `train`/`val`/`holdout` split (default `60/20/20`, passing `trainset` and `valset` to `dspy.GEPA` while keeping `holdout` untouched for baseline vs. optimized evaluation), runs `--program rlm` inside an ephemeral Daytona sandbox torn down in `finally` (with `--local-interpreter` opt-in for local-only execution), and writes `artifacts/rlm_program.json` **only** when holdout improves (or `--force`).
    - **`skills` (`dspy.experimental.ReAnchor`):** Fits 5-fold cross-validated thresholds and choice weights for `SkillSelector` from labeled `(task, expected_skill)` pairs; writes `artifacts/skill_selector.json`.
    - **`memory` (`dspy.experimental.ReAnchor`):** Fits calibrated thresholds for `MemoryGate` from labeled `(turn_exchange, should_save, action, scope)` pairs; writes `artifacts/memory_gate.json`.
    - **Important:** When deploying `ReAnchor`-calibrated JSON files, pin the exact TypeSafe Jev model snapshot in `FLEET_DECISION_MODEL` (do not keep floating `typesafe:jev-latest`) so decision probabilities remain aligned with calibrated thresholds.
@@ -26,23 +26,25 @@ Runs strictly out-of-band as a CLI (`uv run python -m fleet_rlm.optimize ...`). 
 ## Legacy Deletion Checklist (Hard Cutover)
 
 Remove all of the following from the repository once Phases 1–4 pass their exit gates:
-- [ ] In-memory `SessionRuntime` registry, `max_active_sessions` eviction, and stale-runtime trackers.
-- [ ] PostgreSQL advisory-lock lease tables, heartbeat reconnect tasks, and lease-loss cancellation handlers.
-- [ ] Per-turn remote Daytona probing scripts (installed package checks, workspace SHA-256 crawlers, `/learned` volume readers).
-- [ ] Daytona-volume `shared/learned-notes` storage and word-overlap deduplication logic.
-- [ ] TOML schema v5 config loaders, 6-tier config precedence resolvers, and the private loopback setup HTTP server.
-- [ ] 4-mode execution router (`direct`/`rlm`/`flex`/`hybrid`) and ad-hoc triage layers.
-- [ ] Custom 200-turn / 8-turn / 16k-char prompt truncation and custom SSE event vocabularies.
-- [ ] Embedded MLflow process supervision and legacy Textual/web-TUI wrappers (unless intentionally archived in a separate repo).
-- [ ] Live GEPA candidate/approval tables inside the serving FastAPI database.
+- [x] In-memory `SessionRuntime` registry, `max_active_sessions` eviction, and stale-runtime trackers.
+- [x] PostgreSQL advisory-lock lease tables, heartbeat reconnect tasks, and lease-loss cancellation handlers.
+- [x] Per-turn remote Daytona probing scripts (installed package checks, workspace SHA-256 crawlers, `/learned` volume readers).
+- [x] Daytona-volume `shared/learned-notes` storage and word-overlap deduplication logic.
+- [x] TOML schema v5 config loaders, 6-tier config precedence resolvers, and the private loopback setup HTTP server.
+- [x] 4-mode execution router (`direct`/`rlm`/`flex`/`hybrid`) and ad-hoc triage layers.
+- [x] Custom 200-turn / 8-turn / 16k-char prompt truncation and custom SSE event vocabularies.
+- [x] Embedded MLflow process supervision and legacy Textual/web-TUI wrappers (unless intentionally archived in a separate repo).
+- [x] Live GEPA candidate/approval tables inside the serving FastAPI database.
 
 ## Final Release Exit Gate
 ```bash
 cd backend
 uv run ruff check .
+uv run ruff format --check .
 uv run lint-imports
+uv run ty check src
 uv run pytest
 cd ../frontend
-pnpm typecheck && pnpm build
+pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
-- **Done criteria:** Backend consists of the 7 clean modules (`config`, `db`, `interpreter`, `skills`, `agent`, `api`, `optimize`), passes `import-linter` with zero violations, scales cleanly across multiple Uvicorn workers against Neon Postgres 18, and streams recursive RLM + Subagent traces directly into the Vite + shadcn Base UI frontend.
+- **Done criteria:** Backend consists of the 8 clean modules (`config`, `db`, `interpreter`, `skills`, `agent`, `ui_stream`, `api`, `optimize`), passes `import-linter` and `ty` with zero violations, scales cleanly across multiple Uvicorn workers against Neon Postgres 18, and streams recursive RLM + Subagent traces directly into the Vite + shadcn Base UI frontend.

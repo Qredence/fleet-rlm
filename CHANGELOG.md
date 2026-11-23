@@ -4,35 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-23
+
 ### Added
 
-- Host-mediated `web_search(query, max_results=5)` builtin in the sandbox REPL,
-  backed by Serper (`SERPER_API_KEY`) or You.com (`YOU_API_KEY`). Keys stay on the
-  host, results are bounded, and each call charges one `web_search` budget unit.
+- Stateless 8-module FastAPI `0.165+` backend (`backend/src/fleet_rlm/`): `config`, `db`, `interpreter`, `skills`, `agent`, `ui_stream`, `api`, and `optimize`, enforced via 6 `import-linter` contracts.
+- Neon Postgres 18 schema (`alembic` migrations `0001`–`0003`) with 5 tables (`sessions`, `runs`, `files`, `memories`, `workspace_settings`), `uuidv7()`, PgBouncer transaction-pool compatibility (`prepare_threshold=None`), partial unique index single-writer lock (`uq_runs_one_running_root_per_session`), stale-run reaping, and `tsvector` GIN memory search with relaxed lexeme-overlap fallback.
+- Native AI SDK v1 (`x-vercel-ai-ui-message-stream: v1`) `EventSourceResponse` SSE over `POST /api/sessions/{session_id}/chat`, including nested `preliminary: true` child `subagent` and `llm_query` updates.
+- Seven read-only `SKILL.md` skills (`chart-visualization`, `data-analysis`, `document-extraction`, `recursive-synthesis`, `scientific-computing`, `skill-creator`, `spreadsheet-audit`) baked into `/opt/skills` in `backend/snapshot/Dockerfile`, selected per turn via TypeSafe Jev (`Noul` + `Choice`) or `@skill` pinning.
+- Two-stage post-turn `MemoryGate` + `DistillMemory` consolidation and offline `python -m fleet_rlm.optimize` (`dspy.GEPA` & `dspy.experimental.ReAnchor`) CLI with isolated Neon branch safety guard and external MLflow `3.18.0` tracking.
+- Zero-BFF Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui (Base UI AI Elements) SPA (`frontend/`) with 3-pane workspace layout, `@skill` `ChatComposer`, streaming `PythonToolTrace`, recursive `SubagentTrace`, file uploads/downloads, memory review, and `SettingsDialog`.
+- Canonical domain glossary (`GLOSSARY.md`) at the repository root and CircleCI dynamic path-filtering CI (`.circleci/`).
 
 ### Changed
 
-- The web-research Skill's `auto` search tries the host `web_search` first. Its
-  in-sandbox `serper` and `eco` providers are removed.
-- `fetch_json` refuses non-public destinations, as `fetch_page` already did.
+- Replaced the legacy single-host runtime, `fleet` CLI, and Textual TUI from `0.13.0` with a stateless API + browser workspace architecture.
+- Upgraded Daytona Python SDK to `daytona[v0-sdk]>=2.1.0,<3` operating on `daytona.v0` (`AsyncDaytona.v0`), encapsulating 100% of Daytona client and workspace filesystem operations inside `fleet_rlm.interpreter`.
+- Enforced strict `.env` vs mutable Neon `workspace_settings` boundaries (`GET`/`PATCH`/`DELETE /api/settings`) so infrastructure settings remain read-only.
 
-- Bundled Skill names are reserved across every Skill source. A `.fleet/skills/`
-  or Volume Skill with a bundled name is ignored with a warning, and required
-  Skills resolve to the bundled copy.
+### Migration
 
-### Fixed
-
-- A `.fleet/skills/` Skill named like a bundled Skill no longer fails every
-  non-Direct Turn, GEPA proposer load, or Skill sync.
-- Optimizer code identity ignores bytecode caches under bundled Skills, and a
-  failed Skill resource listing is logged instead of silently dropped.
-
-### Removed
-
-- Fleet now uses local MLflow OSS exclusively. Databricks tracking, Unity Catalog
-  trace binding, and the Databricks launcher selector were removed. Existing local
-  MLflow connection settings still apply. Use external tooling for historical
-  Unity Catalog traces.
+- **Clean database & volume cutover:** `0.14.0` starts from a clean 5-table Neon Postgres 18 schema and replaces the legacy `0.13.0` database layout, CLI, and TUI. Provision a fresh Neon database, run `cd backend && uv run alembic upgrade head`, and create a dedicated Daytona Volume (`FLEET_DAYTONA_VOLUME_ID`) + snapshot from `backend/snapshot/Dockerfile`.
+- **Environment hygiene:** Configure `backend/.env` from `backend/.env.example` using `FLEET_*` variables. Unset legacy `DAYTONA_API_URL` and `DAYTONA_V2_API_URL` from any shell or deployment environment before invoking `daytona.v2` in the future (`daytona.v0` ignores both, whereas `.v2` redirects on them).
+- **Offline optimization:** Always pass an isolated Neon branch to `--database-url` and pin the exact TypeSafe Jev snapshot in `FLEET_DECISION_MODEL` before deploying calibrated `ReAnchor` artifacts.
 
 ## [0.13.0] - 2026-11-14
 
