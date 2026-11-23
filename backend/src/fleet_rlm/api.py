@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any
 from urllib.parse import quote
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import dspy
 import mlflow
@@ -45,10 +45,15 @@ from .interpreter import (
     AsyncDaytona,
     AsyncSandbox,
     DaytonaError,
+    delete_sandbox,
+    delete_sandbox_by_id,
+    delete_workspace_file,
+    download_workspace_file,
     ensure_session_sandbox,
     list_new_artifacts,
     make_daytona_client,
     make_interpreter_factory,
+    upload_workspace_file,
 )
 from .skills import SkillRegistry, select_skills
 
@@ -560,8 +565,7 @@ async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
         await db.delete(session)
     if sandbox_id:
         try:
-            sandbox = await runtime.daytona.get(sandbox_id)
-            await runtime.daytona.delete(sandbox, wait=True)
+            await delete_sandbox_by_id(runtime.daytona, sandbox_id)
         except DaytonaError as error:
             if error.status_code != 404:
                 _LOG.warning(
@@ -611,12 +615,12 @@ async def _ensure_bound_sandbox(
         )
     except (Exception, asyncio.CancelledError):
         with suppress(DaytonaError):
-            await runtime.daytona.delete(sandbox, wait=True)
+            await delete_sandbox(runtime.daytona, sandbox)
         raise
     if won:
         return sandbox, winning_id
     with suppress(DaytonaError):
-        await runtime.daytona.delete(sandbox, wait=True)
+        await delete_sandbox(runtime.daytona, sandbox)
     winning_sandbox, _, _ = await ensure_session_sandbox(
         runtime.daytona, effective, session_id, winning_id
     )
@@ -651,7 +655,6 @@ async def upload_file(
 
     effective = await _effective_settings(runtime)
     path = f"files/{name}"
-    temporary = f"{WORKSPACE}/files/.{uuid4().hex}.upload"
     timeout = effective.daytona_exec_timeout_seconds
     digest = hashlib.sha256()
     size = 0
@@ -664,13 +667,7 @@ async def upload_file(
             yield chunk
 
     sandbox, _ = await _ensure_bound_sandbox(runtime, effective, session_id, sandbox_id)
-    try:
-        await sandbox.fs.upload_file_stream(chunks(), temporary, timeout=timeout)
-        await sandbox.fs.move_files(temporary, f"{WORKSPACE}/{path}", request_timeout=timeout)
-    except (Exception, asyncio.CancelledError):
-        with suppress(DaytonaError):
-            await sandbox.fs.delete_file(temporary, request_timeout=timeout)
-        raise
+    await upload_workspace_file(sandbox, chunks(), path, timeout=timeout)
 
     try:
         await store.get_session_or_raise(runtime.sessionmaker, session_id)
@@ -684,14 +681,14 @@ async def upload_file(
         )
     except store.SessionNotFoundError:
         with suppress(DaytonaError):
-            await sandbox.fs.delete_file(f"{WORKSPACE}/{path}", request_timeout=timeout)
+            await delete_workspace_file(sandbox, path, timeout=timeout)
         raise
     except IntegrityError:
         try:
             await store.get_session_or_raise(runtime.sessionmaker, session_id)
         except store.SessionNotFoundError:
             with suppress(DaytonaError):
-                await sandbox.fs.delete_file(f"{WORKSPACE}/{path}", request_timeout=timeout)
+                await delete_workspace_file(sandbox, path, timeout=timeout)
             raise
         raise
     return FileView.model_validate(record)
@@ -725,8 +722,8 @@ async def download_file(session_id: UUID, file_path: str, runtime: RuntimeDep) -
         sandbox, _, _ = await ensure_session_sandbox(
             runtime.daytona, effective, session_id, sandbox_id
         )
-        content = await sandbox.fs.download_file(
-            f"{WORKSPACE}/{file_path}", effective.daytona_exec_timeout_seconds
+        content = await download_workspace_file(
+            sandbox, file_path, timeout=effective.daytona_exec_timeout_seconds
         )
     except DaytonaError as error:
         if error.status_code == 404:
@@ -919,11 +916,32 @@ async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list
     try:
         effective = await _effective_settings(runtime)
         decision_lm = _request_decision_lm(runtime, effective)
+        candidates = await store.search_memories(
+            runtime.sessionmaker,
+            turn.session_id,
+            f"{turn.prompt}\n{answer}",
+            limit=3,
+            include_unapproved=True,
+        )
+        merged = [
+            {
+                "id": str(record.id),
+                "content": record.content,
+                "scope": "global" if record.session_id is None else "session",
+                "approved": bool(record.approved),
+            }
+            for record in candidates
+        ]
+        seen_ids = {item["id"] for item in merged}
+        for memory in memories:
+            if memory["id"] not in seen_ids:
+                merged.append(memory)
+                seen_ids.add(memory["id"])
         await agent.consolidate_memory(
             effective,
             turn.prompt,
             answer,
-            memories,
+            merged[:3],
             on_save=save,
             decision_lm=decision_lm,
         )
@@ -1009,6 +1027,7 @@ async def _run_turn(
                 "id": str(record.id),
                 "content": record.content,
                 "scope": "global" if record.session_id is None else "session",
+                "approved": bool(record.approved),
             }
             for record in records
         ]

@@ -45,11 +45,16 @@ from fleet_rlm.interpreter import (
     DaytonaError,
     DaytonaTimeoutError,
     _is_recoverable_timeout,
+    delete_sandbox,
+    delete_sandbox_by_id,
+    delete_workspace_file,
+    download_workspace_file,
     ensure_session_sandbox,
     ephemeral_sandbox,
     list_new_artifacts,
     make_daytona_client,
     make_interpreter_factory,
+    upload_workspace_file,
 )
 from fleet_rlm.skills import SkillRegistry, build_skill_selector, select_skills
 
@@ -273,6 +278,48 @@ async def test_memory_gate(
         assert candidate.supersedes_id == ("current" if saved_action == "update" else None)
 
 
+@pytest.mark.asyncio
+async def test_memory_gate_updates_pending_in_place_without_touching_approved(
+    settings, monkeypatch
+):
+    seen_statuses: list[list[str]] = []
+
+    async def predict(self, **kwargs):
+        if self.signature is DistillMemory:
+            target_id = kwargs["existing_memories"][0]["id"]
+            return SimpleNamespace(content="Refined memory fact.", supersedes_id=target_id)
+        seen_statuses.append([item["status"] for item in kwargs["existing_memories"]])
+        return SimpleNamespace(
+            worth_saving=SimpleNamespace(value=True, probability=0.75),
+            action=SimpleNamespace(value="update"),
+            scope=SimpleNamespace(value="global"),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "aforward", predict)
+    pending_candidate = await consolidate_memory(
+        settings,
+        "remember it",
+        "Remembered.",
+        [{"id": "pending-1", "content": "Old pending.", "scope": "global", "approved": False}],
+        decision_lm=dspy.LM("typesafe:jev-latest"),
+    )
+    assert pending_candidate.action == "update"
+    assert pending_candidate.supersedes_id == "pending-1"
+    assert pending_candidate.approved is False
+
+    approved_candidate = await consolidate_memory(
+        settings,
+        "remember it",
+        "Remembered.",
+        [{"id": "approved-1", "content": "Approved rule.", "scope": "global", "approved": True}],
+        decision_lm=dspy.LM("typesafe:jev-latest"),
+    )
+    assert approved_candidate.action == "insert"
+    assert approved_candidate.supersedes_id is None
+    assert approved_candidate.approved is False
+    assert seen_statuses == [["pending"], ["approved"]]
+
+
 def test_bounded_history_and_optimized_state(settings, tmp_path):
     base = dspy.History(
         messages=[
@@ -410,7 +457,9 @@ async def test_provisioning_and_reuse(settings, tmp_path):
     sandbox = _LocalSandbox(tmp_path)
     sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
     daytona = SimpleNamespace(
-        create=AsyncMock(return_value=sandbox), get=AsyncMock(return_value=sandbox)
+        v0=SimpleNamespace(
+            create=AsyncMock(return_value=sandbox), get=AsyncMock(return_value=sandbox)
+        )
     )
     session_id = uuid4()
     assert await ensure_session_sandbox(daytona, settings, session_id, None) == (
@@ -418,7 +467,7 @@ async def test_provisioning_and_reuse(settings, tmp_path):
         sandbox.id,
         True,
     )
-    params = daytona.create.call_args.args[0]
+    params = daytona.v0.create.call_args.args[0]
     assert params.snapshot == settings.daytona_snapshot and not params.env_vars
     (mount,) = params.volumes
     assert mount.mount_path == "/workspace" and mount.subpath == f"sessions/{session_id}"
@@ -967,8 +1016,10 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
     sandbox = _LocalSandbox(tmp_path)
     sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
     daytona = SimpleNamespace(
-        create=AsyncMock(return_value=sandbox),
-        delete=AsyncMock(),
+        v0=SimpleNamespace(
+            create=AsyncMock(return_value=sandbox),
+            delete=AsyncMock(),
+        )
     )
     configured = settings.model_copy(
         update={
@@ -980,30 +1031,86 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
 
     async with ephemeral_sandbox(daytona, configured) as yielded:
         assert yielded is sandbox
-        params = daytona.create.call_args.args[0]
+        params = daytona.v0.create.call_args.args[0]
         assert params.snapshot == "custom-snap"
         assert params.language == "python"
         assert params.target == "us"
         assert params.auto_stop_interval == 7
         assert params.volumes is None
         assert params.env_vars is None
-        daytona.delete.assert_not_awaited()
-    daytona.delete.assert_awaited_once_with(sandbox, wait=True)
+        daytona.v0.delete.assert_not_awaited()
+    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
 
     # Also cleans up when the caller raises inside the context block.
-    daytona.delete.reset_mock()
+    daytona.v0.delete.reset_mock()
     with pytest.raises(RuntimeError, match="eval crashed"):
         async with ephemeral_sandbox(daytona, configured):
             raise RuntimeError("eval crashed")
-    daytona.delete.assert_awaited_once_with(sandbox, wait=True)
+    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
 
     # Also cleans up if workspace directory init fails.
-    daytona.delete.reset_mock()
+    daytona.v0.delete.reset_mock()
     sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
     with pytest.raises(RuntimeError, match="ephemeral Daytona workspace"):
         async with ephemeral_sandbox(daytona, configured):
             pytest.fail("must not yield when init fails")
-    daytona.delete.assert_awaited_once_with(sandbox, wait=True)
+    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+
+
+@pytest.mark.asyncio
+async def test_daytona_v0_and_workspace_file_helpers(settings):
+    client = make_daytona_client(settings)
+    assert hasattr(client, "v0")
+    await client.close()
+
+    sandbox = SimpleNamespace(
+        id="sb-1",
+        fs=SimpleNamespace(
+            upload_file_stream=AsyncMock(),
+            move_files=AsyncMock(),
+            delete_file=AsyncMock(),
+            download_file=AsyncMock(return_value=b"payload"),
+        ),
+    )
+    daytona = SimpleNamespace(
+        v0=SimpleNamespace(
+            get=AsyncMock(return_value=sandbox),
+            delete=AsyncMock(),
+        )
+    )
+
+    await delete_sandbox(daytona, sandbox)
+    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+
+    daytona.v0.delete.reset_mock()
+    await delete_sandbox_by_id(daytona, "sb-1")
+    daytona.v0.get.assert_awaited_once_with("sb-1")
+    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+
+    async def sample_chunks():
+        yield b"abc"
+
+    await upload_workspace_file(sandbox, sample_chunks(), "files/a.csv", timeout=30)
+    temp_path = sandbox.fs.upload_file_stream.await_args.args[1]
+    assert temp_path.startswith("/workspace/files/.") and temp_path.endswith(".upload")
+    assert sandbox.fs.upload_file_stream.await_args.kwargs == {"timeout": 30}
+    sandbox.fs.move_files.assert_awaited_once_with(
+        temp_path, "/workspace/files/a.csv", request_timeout=30
+    )
+
+    # Failed move cleans up the temporary upload path before re-raising.
+    sandbox.fs.move_files.side_effect = DaytonaError("move failed")
+    with pytest.raises(DaytonaError, match="move failed"):
+        await upload_workspace_file(sandbox, sample_chunks(), "files/b.csv", timeout=15)
+    failed_temp = sandbox.fs.upload_file_stream.await_args.args[1]
+    sandbox.fs.delete_file.assert_awaited_once_with(failed_temp, request_timeout=15)
+
+    sandbox.fs.delete_file.reset_mock()
+    await delete_workspace_file(sandbox, "files/b.csv", timeout=12)
+    sandbox.fs.delete_file.assert_awaited_once_with("/workspace/files/b.csv", request_timeout=12)
+
+    assert await download_workspace_file(sandbox, "artifacts/out.txt", timeout=20) == b"payload"
+    sandbox.fs.download_file.assert_awaited_once_with("/workspace/artifacts/out.txt", 20)
 
 
 @pytest.mark.asyncio
@@ -1226,7 +1333,7 @@ async def test_live_two_turn_csv(tmp_path):
                     if uploaded:
                         await sandbox.fs.delete_file(path)
                 finally:
-                    await daytona.delete(sandbox, wait=True)
+                    await daytona.v0.delete(sandbox, wait=True)
         traces = mlflow.search_traces(
             locations=[experiment.experiment_id], return_type="list", flush=True
         )

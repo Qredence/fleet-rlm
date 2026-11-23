@@ -4,17 +4,24 @@ import asyncio
 import inspect
 import json
 import re
-from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Coroutine, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Mapping,
+)
 from contextlib import asynccontextmanager, suppress
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID, uuid4
 
-from daytona import (
-    AsyncDaytona,
+from daytona import AsyncDaytona, DaytonaConfig
+from daytona.v0 import (
     AsyncSandbox,
     CreateSandboxFromSnapshotParams,
-    DaytonaConfig,
     DaytonaConnectionTimeoutError,
     DaytonaError,
     DaytonaFileNotFoundError,
@@ -58,7 +65,7 @@ async def ephemeral_sandbox(
     settings: Settings,
 ) -> AsyncGenerator[AsyncSandbox]:
     """Create a volume-free Daytona sandbox for offline optimization and always delete it."""
-    sandbox = await daytona.create(
+    sandbox = await daytona.v0.create(
         CreateSandboxFromSnapshotParams(
             snapshot=settings.daytona_snapshot,
             language="python",
@@ -77,7 +84,7 @@ async def ephemeral_sandbox(
             raise RuntimeError("Could not initialize the ephemeral Daytona workspace")
         yield sandbox
     finally:
-        await daytona.delete(sandbox, wait=True)
+        await daytona.v0.delete(sandbox, wait=True)
 
 
 async def ensure_session_sandbox(
@@ -87,12 +94,12 @@ async def ensure_session_sandbox(
     existing_sandbox_id: str | None,
 ) -> tuple[AsyncSandbox, str, bool]:
     if existing_sandbox_id:
-        sandbox = await daytona.get(existing_sandbox_id)
+        sandbox = await daytona.v0.get(existing_sandbox_id)
         if sandbox.state != SandboxState.STARTED:
             await sandbox.start()
         return sandbox, sandbox.id, False
 
-    sandbox = await daytona.create(
+    sandbox = await daytona.v0.create(
         CreateSandboxFromSnapshotParams(
             snapshot=settings.daytona_snapshot,
             language="python",
@@ -118,9 +125,60 @@ async def ensure_session_sandbox(
         if result.exit_code != 0:
             raise RuntimeError("Could not initialize the Daytona workspace")
     except (Exception, asyncio.CancelledError):
-        await daytona.delete(sandbox, wait=True)
+        await daytona.v0.delete(sandbox, wait=True)
         raise
     return sandbox, sandbox.id, True
+
+
+async def delete_sandbox(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
+    """Delete a resolved Daytona v0 sandbox and wait for removal."""
+    await daytona.v0.delete(sandbox, wait=True)
+
+
+async def delete_sandbox_by_id(daytona: AsyncDaytona, sandbox_id: str) -> None:
+    """Look up a Daytona v0 sandbox by ID and delete it."""
+    sandbox = await daytona.v0.get(sandbox_id)
+    await daytona.v0.delete(sandbox, wait=True)
+
+
+async def upload_workspace_file(
+    sandbox: AsyncSandbox,
+    chunks: AsyncIterator[bytes],
+    relative_path: str,
+    *,
+    timeout: int,
+) -> None:
+    """Stream chunks to a temporary file under /workspace/files and atomically rename."""
+    temporary = f"{WORKSPACE}/files/.{uuid4().hex}.upload"
+    try:
+        await sandbox.fs.upload_file_stream(chunks, temporary, timeout=timeout)
+        await sandbox.fs.move_files(
+            temporary, f"{WORKSPACE}/{relative_path}", request_timeout=timeout
+        )
+    except (Exception, asyncio.CancelledError):
+        with suppress(DaytonaError):
+            await sandbox.fs.delete_file(temporary, request_timeout=timeout)
+        raise
+
+
+async def delete_workspace_file(
+    sandbox: AsyncSandbox,
+    relative_path: str,
+    *,
+    timeout: int,
+) -> None:
+    """Delete a workspace file under /workspace."""
+    await sandbox.fs.delete_file(f"{WORKSPACE}/{relative_path}", request_timeout=timeout)
+
+
+async def download_workspace_file(
+    sandbox: AsyncSandbox,
+    relative_path: str,
+    *,
+    timeout: int,
+) -> bytes:
+    """Download a workspace file under /workspace."""
+    return await sandbox.fs.download_file(f"{WORKSPACE}/{relative_path}", timeout)
 
 
 # The interpreter socket only sends output. Upload each response to a private

@@ -340,8 +340,10 @@ async def offline(monkeypatch, tmp_path):
         ),
     )
     daytona = SimpleNamespace(
-        get=AsyncMock(return_value=sandbox),
-        delete=AsyncMock(side_effect=delete_sandbox),
+        v0=SimpleNamespace(
+            get=AsyncMock(return_value=sandbox),
+            delete=AsyncMock(side_effect=delete_sandbox),
+        )
     )
 
     @asynccontextmanager
@@ -429,7 +431,7 @@ async def test_active_root_is_http_409(offline):
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.status_code == 409
     assert response.headers["content-type"] == "application/json"
-    offline.daytona.get.assert_not_awaited()
+    offline.daytona.v0.get.assert_not_awaited()
     offline.finish.assert_not_awaited()
 
 
@@ -491,7 +493,7 @@ async def test_form_limits(offline):
         files={"file": ("a", b"x"), "note": (None, "y" * (64 * 1024 + 1))},
     )
     assert response.status_code == 400
-    offline.daytona.get.assert_not_awaited()
+    offline.daytona.v0.get.assert_not_awaited()
 
 
 @pytest.mark.parametrize("name", ["../outside.csv", r"..\outside.csv", "/absolute.csv", "C:one"])
@@ -499,7 +501,7 @@ async def test_form_limits(offline):
 async def test_upload_rejects_unsafe_names(offline, name):
     response = await offline.client.post(f"{offline.base}/files", files={"file": (name, b"x")})
     assert response.status_code == 400
-    offline.daytona.get.assert_not_awaited()
+    offline.daytona.v0.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -509,7 +511,7 @@ async def test_download_requires_a_safe_registered_path(offline):
     assert response.status_code == 400
     response = await offline.client.get(f"{path}/artifacts/report.txt")
     assert response.status_code == 404
-    offline.daytona.get.assert_not_awaited()
+    offline.daytona.v0.get.assert_not_awaited()
 
     file_path = "artifacts/report 1.txt"
     offline.store.add(db.File(path=file_path))
@@ -638,6 +640,70 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
     else:
         session_lookup.assert_not_awaited()
         assert turn.await_args.kwargs["memories"] == [global_memory.content]
+
+
+@pytest.mark.asyncio
+async def test_consolidate_searches_prompt_and_answer_including_unapproved_memories(
+    offline, monkeypatch
+):
+    pending_id = uuid4()
+    approved_id = uuid4()
+    pending_memory = db.Memory(
+        id=pending_id,
+        session_id=None,
+        content="The user's name is Zachary.",
+        approved=False,
+    )
+    approved_memory = db.Memory(
+        id=approved_id,
+        session_id=offline.store.session_id,
+        content="Prefix summaries with COBALT-QA.",
+        approved=True,
+    )
+    search_calls: list[dict] = []
+
+    async def fake_search(_sessionmaker, session_id, query, **kwargs):
+        search_calls.append({"session_id": session_id, "query": query, "kwargs": kwargs})
+        if kwargs.get("include_unapproved"):
+            return [pending_memory, approved_memory]
+        return [approved_memory]
+
+    monkeypatch.setattr(db, "search_memories", fake_search)
+    turn = AsyncMock(
+        return_value=dspy.Prediction(
+            answer="Remembered Zachary.", history=dspy.History(messages=[])
+        )
+    )
+    monkeypatch.setattr(api.agent, "run_workspace_task", turn)
+
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "remember it"}]}]},
+    )
+
+    assert response.status_code == 200
+    # Turn execution still receives approved memories only.
+    assert turn.await_args.kwargs["memories"] == [approved_memory.content]
+    assert len(search_calls) == 2
+    assert search_calls[0]["query"] == "remember it"
+    assert not search_calls[0]["kwargs"].get("include_unapproved", False)
+    # Consolidation searches prompt + answer including pending unapproved candidates.
+    assert search_calls[1]["query"] == "remember it\nRemembered Zachary."
+    assert search_calls[1]["kwargs"] == {"limit": 3, "include_unapproved": True}
+    assert offline.memory.await_args.args[3] == [
+        {
+            "id": str(pending_id),
+            "content": "The user's name is Zachary.",
+            "scope": "global",
+            "approved": False,
+        },
+        {
+            "id": str(approved_id),
+            "content": "Prefix summaries with COBALT-QA.",
+            "scope": "session",
+            "approved": True,
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -1231,20 +1297,20 @@ async def test_sessions_crud_messages_files_and_limit(offline, caplog):
     deleted_resp = await offline.client.delete(offline.base)
     assert deleted_resp.status_code == 204
     assert offline.store.session_id not in offline.store.sessions
-    offline.daytona.get.assert_awaited_once_with("test-sandbox")
-    offline.daytona.delete.assert_awaited_once_with(offline.sandbox, wait=True)
+    offline.daytona.v0.get.assert_awaited_once_with("test-sandbox")
+    offline.daytona.v0.delete.assert_awaited_once_with(offline.sandbox, wait=True)
     assert offline.store.checkouts == 0
 
     # Deleting a session whose remote sandbox cleanup returns 404 or 500 still returns 204.
     custom_uuid = UUID(custom_id)
     offline.store.sessions[custom_uuid].daytona_sandbox_id = "remote-missing"
-    offline.daytona.get.side_effect = DaytonaError("Not found", status_code=404)
+    offline.daytona.v0.get.side_effect = DaytonaError("Not found", status_code=404)
     assert (await offline.client.delete(f"/api/sessions/{custom_id}")).status_code == 204
     assert custom_uuid not in offline.store.sessions
 
     default_uuid = UUID(default_body["id"])
     offline.store.sessions[default_uuid].daytona_sandbox_id = "remote-error"
-    offline.daytona.get.side_effect = DaytonaError("Gateway down", status_code=503)
+    offline.daytona.v0.get.side_effect = DaytonaError("Gateway down", status_code=503)
     with caplog.at_level(logging.WARNING, logger=api.__name__):
         assert (await offline.client.delete(f"/api/sessions/{default_uuid}")).status_code == 204
     assert default_uuid not in offline.store.sessions
@@ -1359,7 +1425,7 @@ async def test_zero_db_checkouts_across_daytona_io_and_sandbox_bind_races(offlin
     offline.sandbox.fs.upload_file_stream = AsyncMock(side_effect=checked_upload)
     offline.sandbox.fs.move_files = AsyncMock(side_effect=checked_move)
     offline.sandbox.fs.download_file = AsyncMock(side_effect=checked_download)
-    offline.daytona.delete = AsyncMock(side_effect=checked_delete)
+    offline.daytona.v0.delete = AsyncMock(side_effect=checked_delete)
 
     # 1. Normal upload + download + delete never hold DB checkouts during Daytona calls.
     upload_resp = await offline.client.post(
@@ -1423,13 +1489,13 @@ async def test_zero_db_checkouts_across_daytona_io_and_sandbox_bind_races(offlin
 
     monkeypatch.setattr(api, "ensure_session_sandbox", fake_ensure)
     monkeypatch.setattr(db, "bind_session_sandbox_if_unset", AsyncMock(side_effect=lose_race))
-    offline.daytona.delete.reset_mock()
+    offline.daytona.v0.delete.reset_mock()
 
     race_resp = await offline.client.post(
         f"/api/sessions/{race_id}/files", files={"file": ("race.csv", b"x\n1\n")}
     )
     assert race_resp.status_code == 201
-    offline.daytona.delete.assert_awaited_once_with(dup_sandbox, wait=True)
+    offline.daytona.v0.delete.assert_awaited_once_with(dup_sandbox, wait=True)
     assert len(winner_uploads) == 1
     assert offline.store.checkouts == 0
 
@@ -1450,10 +1516,10 @@ async def test_zero_db_checkouts_across_daytona_io_and_sandbox_bind_races(offlin
     # 4. _chat_sandbox also deletes duplicate and adopts winner on concurrent race.
     chat_session = db.Session(id=uuid4(), title="Chat race", daytona_sandbox_id=None)
     offline.store.add(chat_session)
-    offline.daytona.delete.reset_mock()
+    offline.daytona.v0.delete.reset_mock()
     adopted = await api._chat_sandbox(api.app.state.runtime, chat_session, offline.settings)
     assert adopted is winner_sandbox
-    offline.daytona.delete.assert_awaited_once_with(dup_sandbox, wait=True)
+    offline.daytona.v0.delete.assert_awaited_once_with(dup_sandbox, wait=True)
 
     # 5. Session deleted while sandbox is being created deletes orphan sandbox and returns 404.
     vanishing_session = db.Session(id=uuid4(), title="Vanishing", daytona_sandbox_id=None)
@@ -1464,12 +1530,12 @@ async def test_zero_db_checkouts_across_daytona_io_and_sandbox_bind_races(offlin
         raise db.SessionNotFoundError(sid)
 
     monkeypatch.setattr(db, "bind_session_sandbox_if_unset", AsyncMock(side_effect=vanish_on_bind))
-    offline.daytona.delete.reset_mock()
+    offline.daytona.v0.delete.reset_mock()
     vanish_resp = await offline.client.post(
         f"/api/sessions/{vanishing_session.id}/files", files={"file": ("gone.csv", b"z\n3\n")}
     )
     assert vanish_resp.status_code == 404
-    offline.daytona.delete.assert_awaited_once_with(dup_sandbox, wait=True)
+    offline.daytona.v0.delete.assert_awaited_once_with(dup_sandbox, wait=True)
 
 
 @pytest.mark.asyncio
@@ -1727,7 +1793,9 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
     store = OfflineStore()
     engine = SimpleNamespace(dispose=AsyncMock())
     sandbox = SimpleNamespace(id="test-sandbox", state="started", fs=SimpleNamespace())
-    daytona = SimpleNamespace(get=AsyncMock(return_value=sandbox), delete=AsyncMock())
+    daytona = SimpleNamespace(
+        v0=SimpleNamespace(get=AsyncMock(return_value=sandbox), delete=AsyncMock())
+    )
 
     @asynccontextmanager
     async def daytona_client(_settings):

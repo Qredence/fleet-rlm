@@ -406,7 +406,12 @@ async def list_session_files(db: SessionFactory, session_id: UUID) -> list[File]
 
 
 async def search_memories(
-    db: SessionFactory, session_id: UUID | None, query: str, *, limit: int = 10
+    db: SessionFactory,
+    session_id: UUID | None,
+    query: str,
+    *,
+    limit: int = 10,
+    include_unapproved: bool = False,
 ) -> list[Memory]:
     strict_q = func.websearch_to_tsquery("english", query)
     relaxed_q = cast(
@@ -422,11 +427,12 @@ async def search_memories(
     scope = Memory.session_id.is_(None)
     if session_id is not None:
         scope = scope | (Memory.session_id == session_id)
+    approval_filter = () if include_unapproved else (Memory.approved.is_(True),)
     async with db() as connection:
         matches = list(
             await connection.scalars(
                 select(Memory)
-                .where(scope, Memory.approved.is_(True), Memory.search_tsv.bool_op("@@")(strict_q))
+                .where(scope, *approval_filter, Memory.search_tsv.bool_op("@@")(strict_q))
                 .order_by(func.ts_rank(Memory.search_tsv, strict_q).desc(), Memory.id.desc())
                 .limit(limit)
             )
@@ -437,7 +443,7 @@ async def search_memories(
                 select(Memory)
                 .where(
                     scope,
-                    Memory.approved.is_(True),
+                    *approval_filter,
                     Memory.search_tsv.bool_op("@@")(relaxed_q),
                     overlap_count >= min_overlap,
                 )

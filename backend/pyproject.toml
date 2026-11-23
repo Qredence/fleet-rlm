@@ -1,11 +1,35 @@
 [project]
 name = "fleet-rlm"
-version = "0.1.0"
+version = "0.14.0"
+description = "Stateless recursive agent workspace powered by DSPy 3.5 RLM, Daytona sandboxes, Neon Postgres 18, and MLflow"
 requires-python = ">=3.13,<3.14"
+license = "MIT"
+authors = [{ name = "Qredence" }]
+keywords = [
+    "dspy",
+    "llm",
+    "daytona",
+    "recursive-language-model",
+    "rlm",
+    "agents",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic :: 2",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "fastapi[standard]>=0.165.0",
     "dspy==3.5.0",
-    "daytona==0.232.0",
+    "daytona[v0-sdk]>=2.1.0,<3",
     "sqlalchemy[asyncio]>=2.1.9",
     "alembic>=1.20.1",
     "psycopg[binary]>=3.3.9",
@@ -13,6 +37,12 @@ dependencies = [
     "pyyaml>=6.0.2",
     "mlflow>=3.18.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/qredence/fleet-rlm"
+Repository = "https://github.com/qredence/fleet-rlm"
+Issues = "https://github.com/qredence/fleet-rlm/issues"
+Documentation = "https://docs.qredence.ai/"
 
 [build-system]
 requires = ["hatchling"]

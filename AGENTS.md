@@ -7,13 +7,14 @@ Fleet-RLM is a stateless, recursive agentic system built on DSPy 3.5.0 `dspy.RLM
 - `backend/` — FastAPI 0.165+ + DSPy 3.5.0 backend (`uv`, Python `>=3.13,<3.14`), structured as 8 focused modules under `backend/src/fleet_rlm/`:
   1. `config.py` — Flat `pydantic-settings` (`FLEET_*`) configuration
   2. `db.py` — Neon Postgres 18 SQLAlchemy 2.1 async models (5 tables: `sessions`, `runs`, `files`, `memories`, `workspace_settings`), PgBouncer pool, `uuidv7()`, and root-turn partial unique index lock
-  3. `interpreter.py` — All Daytona 0.232.0 SDK interactions and `DaytonaCodeInterpreter` adapter
+  3. `interpreter.py` — All Daytona SDK 2.x (`daytona[v0-sdk]>=2.1.0,<3` on `.v0`) client/FS interactions and `DaytonaCodeInterpreter` adapter
   4. `skills.py` — Read-only `SKILL.md` registry and TypeSafe Jev (`Noul` + `Choice`) selector
   5. `agent.py` — DSPy 3.5 `dspy.RLM` runner, recursive `spawn_agent` / `llm_query`, bounded history, and `MemoryGate` consolidation
   6. `ui_stream.py` — Domain-event-to-AI-SDK-v1 (`x-vercel-ai-ui-message-stream: v1`) encoder
   7. `api.py` — Stateless FastAPI 0.165 app with native `EventSourceResponse` SSE over `POST`
   8. `optimize.py` — Offline `dspy.GEPA` & `dspy.experimental.ReAnchor` optimization CLI (`python -m fleet_rlm.optimize`)
 - `frontend/` — Vite + React + TypeScript + Tailwind v4 + shadcn/ui (Base UI preset) AI Elements SPA consuming `/api/sessions/{id}/chat` natively via `@ai-sdk/react` `useChat`.
+- `GLOSSARY.md` — Canonical ubiquitous domain language (`Session`, `Workspace`, `Artifact`, `Turn`, `Run`, `Deployment Settings`, `Compiled Program`, `Calibrated Gate`).
 - `docs/PRD.md` & `docs/phases/` — Authoritative specification and phase plans.
 - `docker-compose.yml` — External MLflow 3.18.0 local development server (`127.0.0.1:5001`).
 
@@ -32,7 +33,7 @@ Enforced via `uv run lint-imports` in `backend/pyproject.toml`:
 2. **DSPy 3.5 Discipline:** Never import `dspy.experimental.TypeSafe` (use `dspy.LM("typesafe:jev-latest")` or a pinned snapshot). Never name custom Signature fields `history`, `repl_entry`, `variables_info`, or `iteration`. Keep `Noul`/`Choice`/`Score` outputs in standalone `dspy.Predict` gates, not inside `dspy.RLM`.
 3. **FastAPI 0.165 Discipline:** Use `fastapi.sse.EventSourceResponse` + `ServerSentEvent`, never `StreamingResponse`. Never hold `Depends(get_db)` across an SSE stream; use short `async with sessionmaker()` transactions.
 4. **Neon PgBouncer Discipline:** Runtime uses pooled `FLEET_DATABASE_URL` with `prepare_threshold=None`; Alembic uses direct `FLEET_DATABASE_DIRECT_URL` with `NullPool`. Never use `pg_advisory_lock`, `LISTEN/NOTIFY`, or SQL `PREPARE`.
-5. **Daytona Isolation:** Keep 100% of `daytona` imports inside `interpreter.py`. Never inject host LLM/DB keys into sandbox env vars.
+5. **Daytona Isolation:** Keep 100% of `daytona` imports, `.v0` client calls, and `sandbox.fs.*` helpers inside `interpreter.py`. Never inject host LLM/DB keys into sandbox env vars, and unset `DAYTONA_API_URL` / `DAYTONA_V2_API_URL` in shells using SDK 2.x.
 6. **Zero Custom Wire Protocols:** Frontend consumes `x-vercel-ai-ui-message-stream: v1` natively via `@ai-sdk/react` `useChat` + `DefaultChatTransport` (no custom SSE parsers, no BFF proxy).
 7. **Offline Optimization Safety:** Always target an isolated Neon branch via `--database-url` and pin the exact TypeSafe Jev snapshot in `FLEET_DECISION_MODEL` when deploying `ReAnchor` artifacts.
 8. **Read-Only Env Settings Boundary:** Infrastructure-bound settings (`llm_base_url`, `daytona_snapshot`, `mlflow_experiment`, credentials, and worker concurrency) are managed strictly via `.env` / environment variables and exposed only as read-only `status` in `GET /api/settings` — never accept them in `PATCH /api/settings` or persist them in `workspace_settings`.

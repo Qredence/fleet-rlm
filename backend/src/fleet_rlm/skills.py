@@ -111,11 +111,12 @@ def build_skill_selector(
         needs_skill = Noul[
             (
                 True,
-                f"The task needs the '{skill.name}' skill: {skill.description}",
+                f"The task matches and needs the '{skill.name}' skill: {skill.description}",
             ),
             (
                 False,
-                f"The task can proceed without the '{skill.name}' skill.",
+                f"General conversation, greetings, remembering user facts, or tasks that do "
+                f"not need the '{skill.name}' skill.",
             ),
         ]
         signature = dspy.make_signature(
@@ -144,13 +145,24 @@ def build_skill_selector(
 
     options = {skill.name: {"what": skill.description} for skill in candidates}
     needs_skill = Noul[
-        (True, "A listed skill supplies specific instructions needed for the task."),
-        (False, "The task can proceed without a listed skill."),
+        (
+            True,
+            "A listed skill matches this task and supplies specialized instructions "
+            "or formatting rules needed to complete it.",
+        ),
+        (
+            False,
+            "General conversation, greetings, remembering user facts, short ambiguous "
+            "follow-ups, or tasks that do not match any listed skill.",
+        ),
     ]
     signature = dspy.make_signature(
         {
             "task": (str, dspy.InputField()),
-            "needs_skill": (needs_skill, dspy.OutputField(desc="Does this task need a skill?")),
+            "needs_skill": (
+                needs_skill,
+                dspy.OutputField(desc="Does this task need a listed skill?"),
+            ),
             "primary_skill": (
                 Choice[tuple(options.items())],
                 dspy.OutputField(desc="Which available skill best supports the task?"),

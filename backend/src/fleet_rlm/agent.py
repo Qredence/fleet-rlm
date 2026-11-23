@@ -476,7 +476,12 @@ class MemoryGate(dspy.Signature):
 
     task: str = dspy.InputField()
     answer: str = dspy.InputField()
-    existing_memories: list[dict] = dspy.InputField(desc="Up to three relevant approved memories.")
+    existing_memories: list[dict] = dspy.InputField(
+        desc=(
+            "Up to three relevant existing memories (approved or pending review); "
+            "choose skip if already covered."
+        )
+    )
     worth_saving: _WorthSaving = dspy.OutputField(desc="Is the turn worth retaining as a memory?")
     action: _MemoryAction = dspy.OutputField(desc="How should this turn affect stored memories?")
     scope: _MemoryScope = dspy.OutputField(desc="Where should this memory be available?")
@@ -520,6 +525,7 @@ async def consolidate_memory(
             "id": str(memory["id"]),
             "content": str(memory["content"])[:1000],
             "scope": memory["scope"],
+            "status": "approved" if memory.get("approved", True) else "pending",
         }
         for memory in existing_memories[:3]
     ]
@@ -542,17 +548,18 @@ async def consolidate_memory(
     if not content:
         return MemoryCandidate("skip", scope, worth_saving, probability)
     approved = probability is not None and probability >= 0.90
-    supersedes_id = (
-        distilled.supersedes_id
-        if action == "update"
-        and approved
-        and any(
-            memory["id"] == distilled.supersedes_id and memory["scope"] == scope
+    target = next(
+        (
+            memory
             for memory in recent
-        )
-        else None
+            if memory["id"] == distilled.supersedes_id and memory["scope"] == scope
+        ),
+        None,
     )
-    # The current schema updates a row in place. Keep approved memories visible during review.
+    can_update = target is not None and (approved or target["status"] == "pending")
+    supersedes_id = distilled.supersedes_id if action == "update" and can_update else None
+    # Approved memories are only overwritten in place by high-confidence updates; pending
+    # candidates in the same scope can be refined in place to prevent duplicate review items.
     candidate = MemoryCandidate(
         "update" if supersedes_id is not None else "insert",
         scope,

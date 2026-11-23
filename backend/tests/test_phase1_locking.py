@@ -411,6 +411,9 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
         global_hits = await search_memories(db, None, token)
         assert [m.id for m in global_hits] == [global_approved.id]
 
+        global_hits_all = await search_memories(db, None, token, include_unapproved=True)
+        assert {m.id for m in global_hits_all} == {global_approved.id, global_draft.id}
+
         session_a_hits = await search_memories(db, session_a.id, token)
         assert {m.id for m in session_a_hits} == {global_approved.id, session_a_mem.id}
         assert session_b_mem.id not in {m.id for m in session_a_hits}
