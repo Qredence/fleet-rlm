@@ -374,6 +374,7 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
     session_b = await create_session(db, title="Memory scope B")
     global_ids: list[UUID] = []
     token = f"nebula{uuid4().hex[:8]}"
+    calibration_token = f"calibration{uuid4().hex[:8]}"
     try:
         global_approved = await save_or_update_memory(
             db,
@@ -394,7 +395,7 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
         session_a_mem = await save_or_update_memory(
             db,
             session_id=session_a.id,
-            content=f"Session A {token} calibration result",
+            content=f"Session A {token} {calibration_token} result",
             approved=True,
         )
         session_b_mem = await save_or_update_memory(
@@ -420,6 +421,14 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
         )
         assert {m.id for m in conversational_hits} == {global_approved.id, session_a_mem.id}
         assert session_b_mem.id not in {m.id for m in conversational_hits}
+
+        # Fixture-specific terms keep both overlap cases independent of existing global memories.
+        unmatched_terms = f"samples{uuid4().hex[:8]} analysis{uuid4().hex[:8]}"
+        incidental_prompt = f"{token} {unmatched_terms}"
+        assert await search_memories(db, session_a.id, incidental_prompt) == []
+        topical_prompt = f"{token} {calibration_token} {unmatched_terms}"
+        topical_hits = await search_memories(db, session_a.id, topical_prompt)
+        assert [m.id for m in topical_hits] == [session_a_mem.id]
 
         # Ordinary prompts without lexical matches should not receive arbitrary memories.
         assert await search_memories(db, session_a.id, f"unmatched{uuid4().hex[:8]}") == []

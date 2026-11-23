@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    case,
     cast,
     func,
     literal,
@@ -412,6 +413,12 @@ async def search_memories(
         func.replace(cast(func.plainto_tsquery("english", query), Text), " & ", " | "),
         TSQUERY,
     )
+    query_lexemes = func.tsvector_to_array(func.to_tsvector("english", query))
+    memory_lexeme = func.unnest(func.tsvector_to_array(Memory.search_tsv)).column_valued("lexeme")
+    overlap_count = (
+        select(func.count()).where(memory_lexeme == func.any_(query_lexemes)).scalar_subquery()
+    )
+    min_overlap = case((func.cardinality(query_lexemes) <= 2, 1), else_=2)
     scope = Memory.session_id.is_(None)
     if session_id is not None:
         scope = scope | (Memory.session_id == session_id)
@@ -432,8 +439,13 @@ async def search_memories(
                     scope,
                     Memory.approved.is_(True),
                     Memory.search_tsv.bool_op("@@")(relaxed_q),
+                    overlap_count >= min_overlap,
                 )
-                .order_by(func.ts_rank(Memory.search_tsv, relaxed_q).desc(), Memory.id.desc())
+                .order_by(
+                    overlap_count.desc(),
+                    func.ts_rank(Memory.search_tsv, relaxed_q).desc(),
+                    Memory.id.desc(),
+                )
                 .limit(limit - len(matches))
             )
             if seen_ids:
