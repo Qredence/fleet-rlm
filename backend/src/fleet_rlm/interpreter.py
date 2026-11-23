@@ -4,6 +4,7 @@ import asyncio
 import base64
 import inspect
 import json
+import logging
 import re
 from collections.abc import (
     AsyncGenerator,
@@ -40,6 +41,7 @@ from .config import Settings
 WORKSPACE = "/workspace"
 ARTIFACTS = f"{WORKSPACE}/artifacts"
 _MAX_FRAME = 1024 * 1024
+_LOG = logging.getLogger(__name__)
 
 Execution = Callable[[], Awaitable[str | FinalOutput]]
 ExecutionObserver = Callable[[str, Execution], Awaitable[str | FinalOutput]]
@@ -61,21 +63,27 @@ def _is_recoverable_timeout(error: BaseException) -> bool:
     return isinstance(error, (TimeoutError, DaytonaTimeoutError))
 
 
-@asynccontextmanager
-async def ephemeral_sandbox(
-    daytona: AsyncDaytona,
-    settings: Settings,
-) -> AsyncGenerator[AsyncSandbox]:
-    """Create a volume-free Daytona sandbox for offline optimization and always delete it."""
-    sandbox = await daytona.v0.create(
-        CreateSandboxFromSnapshotParams(
-            snapshot=settings.daytona_snapshot,
-            language="python",
-            target=settings.daytona_target,
-            auto_stop_interval=settings.daytona_auto_stop_minutes,
-        )
-    )
+class SandboxStartupError(RuntimeError):
+    """The Session workspace could not be started."""
+
+
+async def _provision_sandbox(
+    daytona: AsyncDaytona, settings: Settings, *, volumes: list[VolumeMount] | None = None
+) -> AsyncSandbox:
+    name = f"fleet-{uuid4().hex}"
+    sandbox = None
     try:
+        sandbox = await daytona.v0.create(
+            CreateSandboxFromSnapshotParams(
+                name=name,
+                snapshot=settings.daytona_snapshot,
+                language="python",
+                target=settings.daytona_target,
+                auto_stop_interval=settings.daytona_auto_stop_minutes,
+                volumes=volumes,
+            )
+        )
+        # Mounting a new Volume subpath can hide the image's workspace directories.
         result = await sandbox.process.code_run(
             "from pathlib import Path\n"
             "Path('/workspace/files').mkdir(parents=True, exist_ok=True)\n"
@@ -83,7 +91,30 @@ async def ephemeral_sandbox(
             timeout=settings.daytona_exec_timeout_seconds,
         )
         if result.exit_code != 0:
-            raise RuntimeError("Could not initialize the ephemeral Daytona workspace")
+            raise SandboxStartupError("Could not initialize the Daytona workspace")
+        return sandbox
+    except (Exception, asyncio.CancelledError):
+        # Create can allocate a remote sandbox and then fail while waiting for startup.
+        try:
+            if sandbox is None:
+                sandbox = await daytona.v0.get(name, request_timeout=10)
+            await daytona.v0.delete(sandbox, timeout=15, wait=True)
+        except DaytonaError as error:
+            if error.status_code != 404:
+                _LOG.warning(
+                    "Could not clean up failed Daytona sandbox %s (%s)", name, type(error).__name__
+                )
+        raise
+
+
+@asynccontextmanager
+async def ephemeral_sandbox(
+    daytona: AsyncDaytona,
+    settings: Settings,
+) -> AsyncGenerator[AsyncSandbox]:
+    """Create a volume-free Daytona sandbox for offline optimization and always delete it."""
+    sandbox = await _provision_sandbox(daytona, settings)
+    try:
         yield sandbox
     finally:
         await daytona.v0.delete(sandbox, wait=True)
@@ -95,18 +126,16 @@ async def ensure_session_sandbox(
     session_id: UUID,
     existing_sandbox_id: str | None,
 ) -> tuple[AsyncSandbox, str, bool]:
-    if existing_sandbox_id:
-        sandbox = await daytona.v0.get(existing_sandbox_id)
-        if sandbox.state != SandboxState.STARTED:
-            await sandbox.start()
-        return sandbox, sandbox.id, False
+    try:
+        if existing_sandbox_id:
+            sandbox = await daytona.v0.get(existing_sandbox_id)
+            if sandbox.state != SandboxState.STARTED:
+                await sandbox.start()
+            return sandbox, sandbox.id, False
 
-    sandbox = await daytona.v0.create(
-        CreateSandboxFromSnapshotParams(
-            snapshot=settings.daytona_snapshot,
-            language="python",
-            target=settings.daytona_target,
-            auto_stop_interval=settings.daytona_auto_stop_minutes,
+        sandbox = await _provision_sandbox(
+            daytona,
+            settings,
             volumes=[
                 VolumeMount(
                     volume_id=settings.daytona_volume_id,
@@ -115,20 +144,8 @@ async def ensure_session_sandbox(
                 )
             ],
         )
-    )
-    # Mounting a new Volume subpath can hide the image's workspace directories.
-    try:
-        result = await sandbox.process.code_run(
-            "from pathlib import Path\n"
-            "Path('/workspace/files').mkdir(exist_ok=True)\n"
-            "Path('/workspace/artifacts').mkdir(exist_ok=True)",
-            timeout=settings.daytona_exec_timeout_seconds,
-        )
-        if result.exit_code != 0:
-            raise RuntimeError("Could not initialize the Daytona workspace")
-    except (Exception, asyncio.CancelledError):
-        await daytona.v0.delete(sandbox, wait=True)
-        raise
+    except DaytonaError as error:
+        raise SandboxStartupError("Daytona workspace startup failed") from error
     return sandbox, sandbox.id, True
 
 

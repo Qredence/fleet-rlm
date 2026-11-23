@@ -6,18 +6,30 @@ import hashlib
 import json
 import time
 from collections import Counter
+from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import mlflow
+import yaml
+from bundled_skill_cases import cases as bundled_cases
+from bundled_skill_cases import verify_chart
 from dspy_baseline import CASES, answer_passes
 from fleet_rlm.config import Settings
+from fleet_rlm.db import create_db, save_or_update_memory
 from mlflow import MlflowClient
 
 
 async def evaluate(
-    url: str, output: Path, repeats: int, *, large: bool, resume: Path | None
+    url: str,
+    output: Path,
+    repeats: int,
+    *,
+    large: bool,
+    resume: Path | None,
+    bundled: bool = False,
+    requested_cases: tuple[str, ...] = (),
 ) -> None:
     settings = Settings()
     if not settings.mlflow_tracking_uri:
@@ -32,11 +44,22 @@ async def evaluate(
         )
     output.mkdir(parents=True, exist_ok=True)
     cases = {case.id: case for case in CASES}
-    tasks = {
-        case.id: tracker.get_trace(case.source_trace).data.spans[0].inputs["task"]
-        for case in CASES
-    }
-    tasks["birch-invalid"] = tasks["birch-valid"].replace("C = 13.", "C = 13.5.")
+    tasks = {}
+    skill_cases = (
+        bundled_cases(vision_fallback="chart-png-fallback" in requested_cases)
+        if bundled
+        else []
+    )
+    if bundled:
+        known_cases = {"skill-creator", *(case.id for case in skill_cases)}
+        if unknown := set(requested_cases) - known_cases:
+            raise ValueError(f"Unknown bundled cases: {sorted(unknown)}")
+    else:
+        tasks = {
+            case.id: tracker.get_trace(case.source_trace).data.spans[0].inputs["task"]
+            for case in CASES
+        }
+        tasks["birch-invalid"] = tasks["birch-valid"].replace("C = 13.", "C = 13.5.")
     run_tag = uuid4().hex[:6]
     rows = (
         [
@@ -66,7 +89,7 @@ async def evaluate(
             )
             return response.json()["id"]
 
-        async def turn(session_id, prompt, skill=None):
+        async def turn(session_id, prompt, skill=None, *, pins=()):
             started = time.monotonic()
             start_ms = time.time_ns() // 1_000_000
             payload = {
@@ -74,8 +97,8 @@ async def evaluate(
                     {"role": "user", "parts": [{"type": "text", "text": prompt}]}
                 ]
             }
-            if skill:
-                payload["pinned_skills"] = [skill]
+            if pins or skill:
+                payload["pinned_skills"] = list(pins) if pins else [skill]
             result = await call(
                 "POST", f"/api/sessions/{session_id}/chat", json=payload
             )
@@ -107,6 +130,12 @@ async def evaluate(
                 "answer": answer,
                 "seconds": time.monotonic() - started,
                 "start_ms": start_ms,
+                "child_runs": sum(
+                    frame["type"] == "tool-input-available"
+                    and frame.get("toolName") == "subagent"
+                    and frame.get("input", {}).get("kind") == "subagent"
+                    for frame in frames
+                ),
                 "python": sum(
                     frame.get("toolName") == "python_exec"
                     and frame["type"] == "tool-input-start"
@@ -140,6 +169,160 @@ async def evaluate(
             (output / "workflow-progress.json").write_text(
                 json.dumps(rows, indent=2) + "\n"
             )
+
+        @asynccontextmanager
+        async def test_session(label):
+            session_id = await new(label)
+            try:
+                yield session_id
+            finally:
+                await call("DELETE", f"/api/sessions/{session_id}")
+
+        async def fetch_artifact(session_id, path):
+            endpoint = f"/api/sessions/{session_id}/files"
+            files = (await call("GET", endpoint)).json()
+            entry = next((entry for entry in files if entry["path"] == path), None)
+            if entry is None or entry["kind"] != "artifact":
+                raise ValueError(f"Artifact is missing: {path}")
+            content = (await call("GET", f"{endpoint}/{path}")).content
+            if entry["sha256"] != hashlib.sha256(content).hexdigest():
+                raise ValueError(f"Artifact checksum mismatch: {path}")
+            return content, entry["sha256"]
+
+        async def bundled_case(case, repeat):
+            async with test_session(f"{repeat} {case.id}") as session_id:
+                if case.filename:
+                    await call(
+                        "POST",
+                        f"/api/sessions/{session_id}/files",
+                        files={"file": (case.filename, case.contents)},
+                    )
+                row = await turn(
+                    session_id, case.prompt, pins=() if case.automatic else case.skills
+                )
+                passed = set(row["active_skills"]) == set(case.skills)
+                if isinstance(case.expected, dict):
+                    try:
+                        passed &= json.loads(row["answer"]) == case.expected
+                    except ValueError:
+                        passed = False
+                try:
+                    if case.artifact.endswith((".png", ".svg")):
+                        chart, _ = await fetch_artifact(session_id, case.artifact)
+                        passed &= verify_chart(case.artifact, chart)
+                    if case.id == "recursive-artifacts":
+                        merged, _ = await fetch_artifact(session_id, case.artifact)
+                        north, _ = await fetch_artifact(
+                            session_id, "artifacts/north.txt"
+                        )
+                        south, _ = await fetch_artifact(
+                            session_id, "artifacts/south.txt"
+                        )
+                        passed &= (
+                            row["child_runs"] >= 2
+                            and json.loads(merged) == case.expected
+                            and north.strip() == b"12"
+                            and south.strip() == b"17"
+                        )
+                except (ValueError, SyntaxError, OSError) as error:
+                    row["verification_error"] = str(error)
+                    passed = False
+                record(case.id, repeat, row, case.expected, passed=passed)
+
+        async def creator(repeat):
+            name = f"receipt-audit-{run_tag}-{repeat}"
+            token = f"APPROVED-{run_tag.upper()}-{repeat}"
+            pending = f"PENDING-{run_tag.upper()}-{repeat}"
+            global_token = f"GLOBAL-{run_tag.upper()}-{repeat}"
+            path = f"artifacts/{name}/SKILL.md"
+            global_id = None
+            async with test_session(f"{repeat} skill-creator") as source:
+                engine, db = create_db(settings)
+                try:
+                    await save_or_update_memory(
+                        db,
+                        session_id=UUID(source),
+                        approved=True,
+                        content=f"For receipt audits with three or more receipts, return {token}.",
+                    )
+                    await save_or_update_memory(
+                        db,
+                        session_id=UUID(source),
+                        content=f"For receipt audits, also print {pending}.",
+                    )
+                    global_rule = await save_or_update_memory(
+                        db,
+                        session_id=None,
+                        approved=True,
+                        content=f"For receipt audits, also print {global_token}.",
+                    )
+                    global_id = global_rule.id
+                    draft = await turn(
+                        source,
+                        f"Create a reusable Fleet skill named {name} from the approved Session "
+                        f"receipt-audit workflow. Save it at {path} for installation.",
+                        "skill-creator",
+                    )
+                    passed = draft["active_skills"] == ["skill-creator"]
+                    try:
+                        payload, digest = await fetch_artifact(source, path)
+                        text = payload.decode("utf-8")
+                        opening, separator, rest = text.partition("\n")
+                        frontmatter, closing, body = rest.partition("\n---\n")
+                        metadata = yaml.safe_load(frontmatter)
+                        draft["skill_body_chars"] = len(body.strip())
+                        passed &= (
+                            opening.strip() == "---"
+                            and bool(separator and closing)
+                            and isinstance(metadata, dict)
+                            and metadata.get("name") == name
+                            and isinstance(metadata.get("description"), str)
+                            and 0 < len(metadata["description"].strip()) <= 1024
+                            and 0 < len(body.strip()) <= 450
+                            and token in body
+                            and pending not in text
+                            and global_token not in text
+                        )
+                        installed = (
+                            await call(
+                                "POST",
+                                f"/api/sessions/{source}/skills",
+                                json={"path": path, "sha256": digest},
+                            )
+                        ).json()
+                        detail = (await call("GET", f"/api/skills/{name}")).json()
+                        passed &= (
+                            installed["name"] == name and detail["body"] == body.strip()
+                        )
+                    except (
+                        ValueError,
+                        KeyError,
+                        yaml.YAMLError,
+                        httpx.HTTPError,
+                    ) as error:
+                        draft["verification_error"] = str(error)
+                        passed = False
+                    record("skill-creator", repeat, draft, token, passed=passed)
+                    if passed:
+                        async with test_session(f"{repeat} installed-skill") as fresh:
+                            reused = await turn(
+                                fresh,
+                                "Audit these four receipt IDs: A, B, C, and D. Return only "
+                                "the audit code from the selected skill.",
+                                name,
+                            )
+                            record(
+                                "skill-creator-reuse",
+                                repeat,
+                                reused,
+                                token,
+                                passed=reused["active_skills"] == [name]
+                                and reused["answer"].strip() == token,
+                            )
+                finally:
+                    await engine.dispose()
+                    if global_id is not None:
+                        await call("DELETE", f"/api/memories/{global_id}")
 
         async def simple(case, repeat, skill=None):
             row = await turn(await new(f"{repeat} {case}"), tasks[case], skill)
@@ -317,6 +500,22 @@ async def evaluate(
                 )
 
         async def lane(repeat):
+            if bundled:
+                for case in skill_cases:
+                    if (not requested_cases or case.id in requested_cases) and (
+                        case.id,
+                        repeat,
+                    ) not in completed:
+                        await run_group(
+                            f"{case.id}-{repeat}",
+                            lambda case=case: bundled_case(case, repeat),
+                        )
+                if (not requested_cases or "skill-creator" in requested_cases) and not {
+                    ("skill-creator", repeat),
+                    ("skill-creator-reuse", repeat),
+                } <= completed:
+                    await run_group(f"skill-creator-{repeat}", lambda: creator(repeat))
+                return
             if (
                 not {("memory-pending", repeat), ("memory-approved", repeat)}
                 <= completed
@@ -343,7 +542,10 @@ async def evaluate(
                     lambda case=case, skill=skill: simple(case, repeat, skill),
                 )
 
-        with mlflow.start_run(run_name="fleet-live-workflow-baseline") as run:
+        run_name = (
+            "fleet-live-bundled-skills" if bundled else "fleet-live-workflow-baseline"
+        )
+        with mlflow.start_run(run_name=run_name) as run:
             # Capture the original long-file sessions before the short cases fill the sidebar.
             jobs = (
                 [run_group("large-checks", large_checks)]
@@ -351,42 +553,51 @@ async def evaluate(
                 else []
             )
             await asyncio.gather(*jobs, *(lane(i) for i in range(1, repeats + 1)))
-            unresolved = [
-                row for row in rows if "start_ms" in row and not row.get("trace_id")
-            ]
-            candidates = (
-                tracker.search_traces(
+            # The server exports traces asynchronously, including after the final response.
+            for attempt in range(4 if bundled else 1):
+                if attempt:
+                    await asyncio.sleep(2)
+                unresolved = [
+                    row for row in rows if "start_ms" in row and not row.get("trace_id")
+                ]
+                if not unresolved:
+                    break
+                candidates = tracker.search_traces(
                     locations=[run.info.experiment_id],
                     filter_string=f"timestamp_ms >= {min(row['start_ms'] for row in unresolved)}",
                     max_results=500,
                 )
-                if unresolved
-                else []
-            )
-            used = {row["trace_id"] for row in rows if "trace_id" in row}
-            for row in sorted(unresolved, key=lambda item: item["start_ms"]):
-                matches = []
-                for trace in candidates:
-                    root = trace.data.spans[0] if trace.data.spans else None
-                    if (
-                        root is None
-                        or not isinstance(root.inputs, dict)
-                        or not isinstance(root.outputs, dict)
-                        or trace.info.trace_id in used
-                        or root.inputs.get("task") != row.get("task")
-                        or root.outputs.get("answer") != row.get("answer")
-                        or trace.info.request_time < row.get("start_ms", 0)
-                    ):
-                        continue
-                    matches.append(trace)
-                if matches:
-                    trace = min(matches, key=lambda match: match.info.request_time)
-                    used.add(trace.info.trace_id)
-                    row["trace_id"] = trace.info.trace_id
-                    row["tokens"] = (trace.info.token_usage or {}).get("total_tokens")
-                    row["model_calls"] = sum(
-                        span.name == "LM.__call__" for span in trace.data.spans
-                    )
+                used = {row["trace_id"] for row in rows if "trace_id" in row}
+                for row in sorted(unresolved, key=lambda item: item["start_ms"]):
+                    matches = []
+                    for trace in candidates:
+                        root = trace.data.spans[0] if trace.data.spans else None
+                        if (
+                            root is None
+                            or not isinstance(root.inputs, dict)
+                            or not isinstance(root.outputs, dict)
+                            or trace.info.trace_id in used
+                            or root.inputs.get("task") != row.get("task")
+                            or root.outputs.get("answer") != row.get("answer")
+                            or trace.info.request_time < row.get("start_ms", 0)
+                        ):
+                            continue
+                        matches.append(trace)
+                    if matches:
+                        trace = min(matches, key=lambda match: match.info.request_time)
+                        used.add(trace.info.trace_id)
+                        row["trace_id"] = trace.info.trace_id
+                        row["tokens"] = (trace.info.token_usage or {}).get(
+                            "total_tokens"
+                        )
+                        if bundled:
+                            row["daytona_execution"] = any(
+                                span.attributes.get("daytona.sandbox_id")
+                                for span in trace.data.spans
+                            )
+                        row["model_calls"] = sum(
+                            span.name == "LM.__call__" for span in trace.data.spans
+                        )
             path = output / "workflow.json"
             path.write_text(
                 json.dumps(
@@ -394,6 +605,16 @@ async def evaluate(
                         "run_id": run.info.run_id,
                         "experiment": run.info.experiment_id,
                         "rows": rows,
+                        **(
+                            {
+                                "snapshot": settings.daytona_snapshot,
+                                "model": settings.llm_model,
+                                "sub_model": settings.sub_llm_model,
+                                "decision_model": settings.decision_model,
+                            }
+                            if bundled
+                            else {}
+                        ),
                     },
                     indent=2,
                 )
@@ -409,11 +630,22 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--repeats", type=int, choices=range(1, 6), default=5)
-    parser.add_argument("--large", action="store_true")
+    suites = parser.add_mutually_exclusive_group()
+    suites.add_argument("--large", action="store_true")
+    suites.add_argument(
+        "--bundled-skills",
+        action="store_true",
+        help="Run synthetic Skill cases against a disposable Fleet deployment and its database.",
+    )
+    parser.add_argument(
+        "--case", action="append", default=[], help="Select a bundled Skill case."
+    )
     parser.add_argument(
         "--resume", type=Path, help="Keep scored results and retry missing executions."
     )
     args = parser.parse_args()
+    if args.case and not args.bundled_skills:
+        parser.error("--case requires --bundled-skills")
     asyncio.run(
         evaluate(
             args.url,
@@ -421,6 +653,8 @@ def main():
             args.repeats,
             large=args.large,
             resume=args.resume,
+            bundled=args.bundled_skills,
+            requested_cases=tuple(args.case),
         )
     )
 

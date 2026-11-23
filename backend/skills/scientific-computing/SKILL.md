@@ -1,6 +1,6 @@
 ---
 name: scientific-computing
-description: Perform statistical hypothesis tests, regression, optimization, and numerical verification with SciPy and NumPy.
+description: Use when a task requires a statistical test, regression, optimization, or numerical solving with verified results.
 ---
 
-Use `numpy` and `scipy` (`scipy.stats`, `scipy.optimize`, `scipy.linalg`) for statistical tests, confidence intervals, curve fitting, and numerical solving. Validate input distributions and sample sizes first. Verify every key numeric result using two independent calculations (e.g., analytical formula vs simulation/solver) with `np.isclose`. Report test statistics, p-values, degrees of freedom, and precision in `SUBMIT`.
+Use NumPy and SciPy. Check finite inputs, sample sizes, and the method's assumptions (e.g. independent groups for Welch). Verify key results with a reference calculation, residual, or invariant and scale-appropriate tolerances. Report the method, units, and relevant statistics or diagnostics; explain when invalid inputs limit inference.

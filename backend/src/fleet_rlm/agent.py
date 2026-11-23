@@ -31,10 +31,21 @@ class WorkspaceTask(dspy.Signature):
     Treat that conversation as context and keep it distinct from files and execution traces.
     """
 
-    task: str = dspy.InputField()
+    task: str = dspy.InputField(
+        desc=(
+            "The user's request in Fleet-RLM, the agent workspace you power. In this app, Fleet "
+            "means Fleet-RLM. You can analyze uploaded workspace files, run sandboxed Python, "
+            "create artifacts, and use Agent Skills."
+        )
+    )
     files_manifest: list[dict] = dspy.InputField(desc="Available workspace files and metadata.")
     memories: list[str] = dspy.InputField(desc="Previously approved facts relevant to this task.")
-    active_skills: str = dspy.InputField(desc="Instructions from selected Agent Skills.")
+    active_skills: str = dspy.InputField(
+        desc=(
+            "Instructions from selected Agent Skills. If the preview is truncated, read the "
+            "full active_skills variable in bounded slices using print before following it."
+        )
+    )
     prior_turns: list[dict[str, str]] = dspy.InputField(
         desc="Previous completed turns in this session."
     )

@@ -939,6 +939,24 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
 
 
 @pytest.mark.asyncio
+async def test_workspace_startup_failure_returns_actionable_stream_error(offline, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "_chat_sandbox",
+        AsyncMock(side_effect=api.SandboxStartupError("private provider diagnostics")),
+    )
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
+    )
+    assert response.status_code == 200
+    assert json.loads(response.text.splitlines()[0].removeprefix("data: "))["type"] == "error"
+    assert "Fleet could not start the workspace. Try again." in response.text
+    assert "private provider diagnostics" not in response.text
+    assert response.text.endswith("data: [DONE]\n\n")
+
+
+@pytest.mark.asyncio
 async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     child_id, nested_id = uuid4(), uuid4()
     offline.create_child.side_effect = [SimpleNamespace(id=child_id), SimpleNamespace(id=nested_id)]

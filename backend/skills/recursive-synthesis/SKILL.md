@@ -1,9 +1,6 @@
 ---
 name: recursive-synthesis
-description: Decompose complex multi-file or multi-step workspace problems using llm_query_batched, dspy.Predict, and spawn_agent.
+description: Use when a complex workspace task needs independent subtasks, semantic map-reduce across files, or structured extraction across many chunks.
 ---
 
-Match recursion primitives to subtask complexity within the shared call budget:
-1. `llm_query_batched(prompts)`: concurrent semantic map-reduce over text chunks in one REPL step.
-2. `dspy.Predict` / `dspy.ChainOfThought`: structured single-step extraction in Python.
-3. `spawn_agent(task)`: delegate isolated multi-step Python workspace subtasks (never instantiate nested `dspy.RLM` directly). Verify child results and artifacts before `SUBMIT`.
+Use bounded `llm_query_batched` for text chunks; retry or report failed items. Use `dspy.Predict` for single-step structured extraction and `spawn_agent(task)` for independent multi-step work. Child interpreters share workspace files and the call budget; assign distinct artifact paths. Verify child results and merge artifacts before `SUBMIT`.

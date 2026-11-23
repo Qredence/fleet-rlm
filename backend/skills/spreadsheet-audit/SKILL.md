@@ -1,6 +1,6 @@
 ---
 name: spreadsheet-audit
-description: Audit multi-sheet Excel workbooks (.xlsx), inspect formulas and merged cells with openpyxl, and reconcile sheet totals.
+description: Use when auditing an Excel workbook for formulas, cached values, hidden rows, merged cells, or cross-sheet discrepancies.
 ---
 
-Open `.xlsx` files from `/workspace/files` with `openpyxl.load_workbook()` (inspecting both `data_only=False` for formulas and `data_only=True` for cached values). Enumerate `sheetnames`, header offsets, merged ranges, and hidden rows before loading into `pandas`. Reconcile subtotals across sheets with `assert` checks, write cleaned exports to `/workspace/artifacts`, and report discrepancies in `SUBMIT`.
+Read `.xlsx` with `openpyxl.load_workbook` in both formula and `data_only` modes. Inspect sheets, headers, merged ranges, and hidden rows. Keep formulas separate from caches and report missing caches as unverified. Reconcile explicit sheet ranges, state whether hidden rows were included, and explain discrepancies. Save requested exports in `/workspace/artifacts`.
