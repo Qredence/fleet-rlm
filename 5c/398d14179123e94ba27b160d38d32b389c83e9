@@ -1,0 +1,29 @@
+.circleci/continue-config.yml
+  s_4302bf5cfb0645::t_8d2152a7cb9462 103-108,110-112,117-119,124-126
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_6d6e459f8b1da8 681-684
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5c398d14179123e94ba27b160d38d32b389c83e9",
+  "prompts": {},
+  "sessions": {
+    "s_4302bf5cfb0645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a206d8-4a96-7ec2-8b96-bd7f602e3cdd",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
