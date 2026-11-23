@@ -35,6 +35,21 @@ export interface Skill {
   description: string
 }
 
+export interface SkillDetail extends Skill {
+  body: string
+}
+
+export interface CatalogModel {
+  id: string
+  label: string
+}
+
+export interface ModelCatalog {
+  workspace_default: string
+  catalog_status: 'ready' | 'unavailable' | 'unconfigured'
+  models: CatalogModel[]
+}
+
 export interface WorkspaceSettingsFields {
   llm_model: string
   sub_llm_model: string
@@ -140,6 +155,7 @@ export function createApi(token?: string) {
     health: (signal?: AbortSignal) => json<{ status: 'ok' }>('/healthz', { signal }, false),
     readiness: (signal?: AbortSignal) => json<{ status: 'ok' }>('/readyz', { signal }, false),
     listSessions: (signal?: AbortSignal) => json<Session[]>(sessionsPath, { signal }),
+    getSession: (id: string, signal?: AbortSignal) => json<Session>(sessionPath(id), { signal }),
     createSession: (title?: string) => json<Session>(sessionsPath, writeJson('POST', { title })),
     updateSession: (id: string, changes: SessionUpdate) =>
       json<Session>(sessionPath(id), writeJson('PATCH', changes)),
@@ -150,10 +166,10 @@ export function createApi(token?: string) {
       json<FleetMessage[]>(`${sessionPath(id)}/messages`, { signal }),
     listFiles: (id: string, signal?: AbortSignal) =>
       json<WorkspaceFile[]>(`${sessionPath(id)}/files`, { signal }),
-    uploadFile(id: string, file: File) {
+    uploadFile(id: string, file: File, signal?: AbortSignal) {
       const body = new FormData()
       body.append('file', file)
-      return json<WorkspaceFile>(`${sessionPath(id)}/files`, { method: 'POST', body })
+      return json<WorkspaceFile>(`${sessionPath(id)}/files`, { method: 'POST', body, signal })
     },
     getFile,
     async downloadFile(id: string, path: string) {
@@ -165,10 +181,11 @@ export function createApi(token?: string) {
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     },
-    listMemories(filters: { session_id?: string; approved?: boolean } = {}, signal?: AbortSignal) {
+    listMemories(filters: { session_id?: string; approved?: boolean; limit?: number } = {}, signal?: AbortSignal) {
       const params = new URLSearchParams()
       if (filters.session_id) params.set('session_id', filters.session_id)
       if (filters.approved !== undefined) params.set('approved', String(filters.approved))
+      if (filters.limit !== undefined) params.set('limit', String(filters.limit))
       return json<Memory[]>(`/api/memories${params.size ? `?${params}` : ''}`, { signal })
     },
     editMemory: (id: string, changes: MemoryEdit) =>
@@ -177,8 +194,11 @@ export function createApi(token?: string) {
       await request(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' })
     },
     listSkills: (signal?: AbortSignal) => json<Skill[]>('/api/skills', { signal }),
+    getSkill: (name: string, signal?: AbortSignal) =>
+      json<SkillDetail>(`/api/skills/${encodeURIComponent(name)}`, { signal }),
     installSkill: (id: string, path: string, sha256: string) =>
       json<Skill>(`${sessionPath(id)}/skills`, writeJson('POST', { path, sha256 })),
+    listModels: (signal?: AbortSignal) => json<ModelCatalog>('/api/models', { signal }),
     getSettings: (signal?: AbortSignal) => json<WorkspaceSettingsView>(settingsPath, { signal }),
     updateSettings: (changes: Partial<WorkspaceSettingsFields>) =>
       json<WorkspaceSettingsView>(settingsPath, writeJson('PATCH', changes)),

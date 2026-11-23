@@ -751,6 +751,7 @@ dependencies = [
     { name = "daytona", extra = ["v0-sdk"] },
     { name = "dspy" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "httpx" },
     { name = "mlflow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -760,7 +761,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "import-linter" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -774,6 +774,7 @@ requires-dist = [
     { name = "daytona", extras = ["v0-sdk"], specifier = ">=2.1.0,<3" },
     { name = "dspy", specifier = "==3.5.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.165.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "mlflow", specifier = ">=3.18.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9" },
     { name = "pydantic-settings", specifier = ">=2.16.3" },
@@ -783,7 +784,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.0" },
     { name = "import-linter", specifier = ">=2.1" },
     { name = "pytest", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", specifier = ">=0.25.0" },

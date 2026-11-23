@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AspectRatio } from '@/components/ui/aspect-ratio'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage, type FleetApi, type Skill } from '@/lib/api'
 import { formatFileSize } from '@/lib/file-tree'
 import { PdfPreview } from './PdfPreview'
@@ -157,7 +159,7 @@ export function FilePreview({ api, sessionId, path, onClose, onDownload, onSkill
           <DialogDescription className="break-all">{path}</DialogDescription>
         </DialogHeader>
         <div className="min-h-32 min-w-0 overflow-hidden rounded-lg border bg-background">
-          {!preview && <p role="status" className="p-4 text-muted-foreground">Loading preview…</p>}
+          {!preview && <Skeleton role="status" aria-label="Loading preview" className="h-32 motion-reduce:animate-none" />}
           {preview?.kind === 'unavailable' && <p className="p-4 text-muted-foreground">{preview.message}</p>}
           {preview?.kind === 'error' && <Alert variant="destructive"><AlertDescription>{preview.message}</AlertDescription></Alert>}
           {preview?.kind === 'text' && (
@@ -179,12 +181,16 @@ export function FilePreview({ api, sessionId, path, onClose, onDownload, onSkill
             </>
           )}
           {preview?.kind === 'image' && (
-            <img
-              src={preview.url}
-              alt={name}
-              className="mx-auto max-h-[66dvh] w-full object-contain"
-              onError={() => setPreview({ kind: 'error', message: 'The browser could not display this image.' })}
-            />
+            <div className="mx-auto max-w-[min(100%,112dvh)]">
+              <AspectRatio ratio={16 / 9}>
+                <img
+                  src={preview.url}
+                  alt={name}
+                  className="size-full object-contain"
+                  onError={() => setPreview({ kind: 'error', message: 'The browser could not display this image.' })}
+                />
+              </AspectRatio>
+            </div>
           )}
           {preview?.kind === 'pdf' && <PdfPreview bytes={preview.bytes} />}
         </div>

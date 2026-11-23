@@ -10,11 +10,12 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
 import dspy
+import httpx
 import mlflow
 from fastapi import (
     BackgroundTasks,
@@ -304,6 +305,17 @@ class WorkspaceSettingsView(BaseModel):
     status: WorkspaceSettingsStatus
 
 
+class CatalogModel(BaseModel):
+    id: str
+    label: str
+
+
+class ModelCatalog(BaseModel):
+    workspace_default: str
+    catalog_status: Literal["ready", "unavailable", "unconfigured"]
+    models: list[CatalogModel] = Field(default_factory=list)
+
+
 class FileView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -321,6 +333,10 @@ class SkillView(BaseModel):
 
     name: str
     description: str
+
+
+class SkillDetail(SkillView):
+    body: str
 
 
 class SkillInstall(BaseModel):
@@ -445,6 +461,11 @@ async def list_sessions(
     return [SessionView.model_validate(session) for session in sessions]
 
 
+@app.get("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
+async def get_session(session_id: UUID, db: DbDep) -> SessionView:
+    return SessionView.model_validate(await _session(db, session_id))
+
+
 @app.patch("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
 async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> SessionView:
     if not payload.model_fields_set:
@@ -552,6 +573,64 @@ def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
     if effective.decision_model != runtime.settings.decision_model:
         return dspy.LM(effective.decision_model)
     return runtime.decision_lm
+
+
+async def _gateway_model_labels(base_url: str, api_key: str) -> list[str]:
+    base = httpx.URL(base_url)
+    if (
+        base.scheme not in {"http", "https"}
+        or not base.host
+        or base.userinfo
+        or base.query
+        or base.fragment
+    ):
+        raise ValueError("Invalid model gateway base URL")
+    url = base.copy_with(raw_path=base.raw_path.rstrip(b"/") + b"/models")
+    async with asyncio.timeout(5), httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
+        response = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        response.raise_for_status()
+        payload = response.json()
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise ValueError("Invalid model catalog response")
+    labels: set[str] = set()
+    for entry in payload["data"]:
+        if not isinstance(entry, dict) or not isinstance(label := entry.get("id"), str):
+            continue
+        if not label or any(char.isspace() or not char.isprintable() for char in label):
+            continue
+        model_type = entry.get("type")
+        if (
+            isinstance(model_type, str)
+            and model_type
+            and model_type not in {"language", "chat", "text"}
+        ):
+            continue
+        architecture = entry.get("architecture")
+        output = architecture.get("output_modalities") if isinstance(architecture, dict) else None
+        if isinstance(output, list) and output and "text" not in output:
+            continue
+        labels.add(label)
+    return sorted(labels, key=lambda label: (label.casefold(), label))
+
+
+@app.get("/api/models", dependencies=[Depends(require_auth)])
+async def list_models(runtime: RuntimeDep, response: Response) -> ModelCatalog:
+    effective = await _effective_settings(runtime)
+    response.headers["Cache-Control"] = "private, no-store"
+    if not effective.llm_base_url:
+        return ModelCatalog(workspace_default=effective.llm_model, catalog_status="unconfigured")
+    try:
+        labels = await _gateway_model_labels(
+            effective.llm_base_url, effective.llm_api_key.get_secret_value()
+        )
+    except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, ValueError):
+        return ModelCatalog(workspace_default=effective.llm_model, catalog_status="unavailable")
+    return ModelCatalog(
+        workspace_default=effective.llm_model,
+        catalog_status="ready",
+        models=[CatalogModel(id=f"openai/{label}", label=label) for label in labels],
+    )
 
 
 @app.get("/api/settings", dependencies=[Depends(require_auth)])
@@ -820,6 +899,15 @@ async def delete_memory(memory_id: UUID, db: DbDep) -> None:
 async def list_skills(runtime: RuntimeDep) -> list[SkillView]:
     registry = await _skill_registry(runtime)
     return [SkillView.model_validate(skill) for skill in registry.skills]
+
+
+@app.get("/api/skills/{name}", dependencies=[Depends(require_auth)])
+async def get_skill(name: str, runtime: RuntimeDep) -> SkillDetail:
+    registry = await _skill_registry(runtime)
+    for skill in registry.skills:
+        if skill.name == name:
+            return SkillDetail.model_validate(skill)
+    raise HTTPException(404, "Skill not found")
 
 
 @app.post(
