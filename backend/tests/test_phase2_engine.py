@@ -46,6 +46,7 @@ from fleet_rlm.interpreter import (
     DaytonaConnectionTimeoutError,
     DaytonaError,
     DaytonaTimeoutError,
+    SandboxStartupError,
     _is_recoverable_timeout,
     delete_sandbox,
     delete_sandbox_by_id,
@@ -482,6 +483,33 @@ async def test_provisioning_and_reuse(settings, tmp_path):
     sandbox.state = "stopped"
     await ensure_session_sandbox(daytona, settings, session_id, sandbox.id)
     sandbox.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_create", [True, False])
+async def test_failed_workspace_startup_deletes_new_sandbox(settings, tmp_path, during_create):
+    sandbox = _LocalSandbox(tmp_path)
+    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
+    daytona = SimpleNamespace(
+        v0=SimpleNamespace(
+            create=AsyncMock(
+                return_value=sandbox,
+                side_effect=DaytonaError("Provider rejected startup") if during_create else None,
+            ),
+            get=AsyncMock(return_value=sandbox),
+            delete=AsyncMock(),
+        )
+    )
+
+    with pytest.raises(SandboxStartupError):
+        await ensure_session_sandbox(daytona, settings, uuid4(), None)
+
+    if during_create:
+        params = daytona.v0.create.call_args.args[0]
+        daytona.v0.get.assert_awaited_once_with(params.name, request_timeout=10)
+    else:
+        daytona.v0.get.assert_not_awaited()
+    daytona.v0.delete.assert_awaited_once_with(sandbox, timeout=15, wait=True)
 
 
 @pytest.mark.asyncio
@@ -1106,10 +1134,10 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
     # Also cleans up if workspace directory init fails.
     daytona.v0.delete.reset_mock()
     sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
-    with pytest.raises(RuntimeError, match="ephemeral Daytona workspace"):
+    with pytest.raises(SandboxStartupError, match="initialize the Daytona workspace"):
         async with ephemeral_sandbox(daytona, configured):
             pytest.fail("must not yield when init fails")
-    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+    daytona.v0.delete.assert_awaited_once_with(sandbox, timeout=15, wait=True)
 
 
 @pytest.mark.asyncio
@@ -1398,6 +1426,54 @@ async def test_live_two_turn_csv(tmp_path):
         mlflow.dspy.autolog(disable=True)
 
 
+@pytest.mark.parametrize(
+    ("prompt", "pins", "expected"),
+    [
+        (
+            "Analyze this sales data and create an SVG bar chart. Reconcile all four rows.",
+            None,
+            ["chart-visualization", "data-analysis"],
+        ),
+        ("Plot the CSV as an SVG chart.", None, ["chart-visualization"]),
+        (
+            "Analyze this sales data and create charts.",
+            None,
+            ["chart-visualization", "data-analysis"],
+        ),
+        ("Create a chart analyzing sales data.", None, ["chart-visualization", "data-analysis"]),
+        (
+            "Audit workbook formulas and analyze sales data with charts.",
+            None,
+            ["chart-visualization", "spreadsheet-audit"],
+        ),
+        (
+            "Analyze this sales data and create an SVG bar chart.",
+            ["chart-visualization"],
+            ["chart-visualization"],
+        ),
+    ],
+)
+def test_compound_analysis_and_chart_selection(settings, monkeypatch, prompt, pins, expected):
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+
+    def decide(*args, **kwargs):
+        return SimpleNamespace(
+            needs_skill=SimpleNamespace(value=True),
+            primary_skill=SimpleNamespace(
+                value="chart-visualization",
+                probabilities={
+                    "chart-visualization": 0.96,
+                    "data-analysis": 0.03,
+                    "spreadsheet-audit": 0.9 if "formulas" in prompt else 0.01,
+                },
+            ),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "forward", decide)
+    selection = select_skills(settings, registry, prompt, pins)
+    assert [skill.name for skill in selection.active_skills] == expected
+
+
 @pytest.mark.asyncio
 async def test_production_skills_catalog_repl_preview_budget_and_choice_selection(
     settings, tmp_path, monkeypatch
@@ -1530,9 +1606,10 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
     assert prediction.artifact_paths == ["artifacts/summary.csv"]
     prompt_dump = json.dumps(root_lm.get_convo(0)[0])
     assert "## chart-visualization" in prompt_dump
+    assert "In this app, Fleet means Fleet-RLM" in prompt_dump
     assert "## data-analysis" in prompt_dump
     assert "PIL.Image.open()" in prompt_dump
-    assert "Never mutate input files" in prompt_dump
+    assert "make the null-key policy explicit" in prompt_dump
 
     # Verify @skill-creator synthesizes and validates a SKILL.md artifact from memories.
     creator_sel = select_skills(prod_settings, registry, "Create a skill", ["@skill-creator"])
@@ -1573,6 +1650,101 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
     assert created.artifact_paths == ["artifacts/eur-revenue/SKILL.md"]
     generated_registry = SkillRegistry.load(tmp_path / "artifacts")
     assert [s.name for s in generated_registry.skills] == ["eur-revenue"]
+
+
+@pytest.mark.asyncio
+async def test_recursive_synthesis_can_recover_a_failed_batch_item(settings, tmp_path):
+    class PartiallyFailingLM(DummyLM):
+        def __call__(self, prompt=None, **kwargs):
+            if prompt == "failed chunk":
+                raise dspy.LMError("Synthetic provider failure")
+            return ["12" if prompt == "first chunk" else "17"]
+
+    root_lm = DummyLM(
+        [
+            {
+                "plan": "Extract figures concurrently and isolate a partial failure.",
+                "code": (
+                    "results = llm_query_batched(['first chunk', 'failed chunk'])\n"
+                    "assert results == ['12', '[ERROR] Model query failed']\n"
+                    "replacement = llm_query('retry chunk')\n"
+                    "assert replacement == '17'\n"
+                    "SUBMIT(str(int(results[0]) + int(replacement)), [])"
+                ),
+            }
+        ]
+    )
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+    selection = select_skills(settings, registry, "Synthesize chunks", ["recursive-synthesis"])
+
+    async def emit(_run_id, _event):
+        pass
+
+    result = await run_workspace_task(
+        settings,
+        task="Synthesize chunks",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=make_interpreter_factory(
+            _LocalSandbox(tmp_path), settings, asyncio.get_running_loop()
+        ),
+        run_id="partial-batch",
+        emit=emit,
+        selection=selection,
+        model_override=root_lm,
+        sub_lm=PartiallyFailingLM([]),
+    )
+    assert result.answer == "29"
+
+
+@pytest.mark.asyncio
+async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path):
+    registry = SkillRegistry.load(tmp_path)
+    rule = "Return the synthetic code GROVE-27."
+    padding = "Verify each output against the fixture. " * 16
+    registry.install(
+        tmp_path,
+        (
+            "---\nname: long-review\ndescription: Review synthetic output\n---\n"
+            f"{padding}\n{rule}\n{padding.strip()}\n"
+        ).encode(),
+    )
+    selection = select_skills(
+        settings, registry.with_installed(tmp_path), "Review output", ["long-review"]
+    )
+    factory = make_interpreter_factory(
+        _LocalSandbox(tmp_path), settings, asyncio.get_running_loop()
+    )
+    root_lm = DummyLM(
+        [
+            {
+                "plan": "Read the omitted instructions.",
+                "code": "print(active_skills[500:850])",
+            },
+            {"plan": "Follow the revealed rule.", "code": "SUBMIT('GROVE-27', [])"},
+        ]
+    )
+
+    async def emit(_run_id, _event):
+        pass
+
+    result = await run_workspace_task(
+        settings,
+        task="Review output",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=factory,
+        run_id="long-installed-skill",
+        emit=emit,
+        selection=selection,
+        model_override=root_lm,
+        sub_lm=DummyLM([]),
+    )
+    first_prompt = json.dumps(root_lm.get_convo(0)[0])
+    assert "read the full active_skills variable in bounded slices" in first_prompt
+    assert rule not in first_prompt
+    assert rule in json.dumps(root_lm.get_convo(1)[0])
+    assert result.answer == "GROVE-27"
 
 
 @pytest.mark.skipif(

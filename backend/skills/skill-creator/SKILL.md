@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Author and export a reusable SKILL.md Agent Skill file to /workspace/artifacts when explicitly asked to create a skill.
+description: Use when explicitly asked to create an installable Fleet skill or turn a workflow into a reusable SKILL.md for future sessions.
 ---
 
-Preserve relevant approved session rules from `memories` and workflow steps from the conversation/workspace. Write `/workspace/artifacts/<name>/SKILL.md` with YAML frontmatter (kebab-case `name`, `description`, optional `allowed_tools` or `mcp_servers`). Parse only the frontmatter between `---` delimiters with `yaml.safe_load`, assert `0 < len(body) <= 450`, and verify the saved file before `SUBMIT`.
+Use approved Session memories and generalize workflows; omit private details. Save UTF-8 `/workspace/artifacts/<name>/SKILL.md`: YAML matching kebab-case name (1–64), description with trigger (1–1024), then steps and a check. Try one known input. Reopen and parse YAML; verify fields and assert `0 < len(body.strip()) <= 450` for ALL Markdown after the closing YAML delimiter. Shorten and recheck before SUBMIT; return the path.

@@ -15,6 +15,7 @@ from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
 import dspy
+import mlflow
 from dspy.experimental import Choice, Noul
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.primitives.sandbox_guest import CALL_TOOL, LM_TOOL, TAG, WIRE
@@ -31,10 +32,21 @@ class WorkspaceTask(dspy.Signature):
     Treat that conversation as context and keep it distinct from files and execution traces.
     """
 
-    task: str = dspy.InputField()
+    task: str = dspy.InputField(
+        desc=(
+            "The user's request in Fleet-RLM, the agent workspace you power. In this app, Fleet "
+            "means Fleet-RLM. You can analyze uploaded workspace files, run sandboxed Python, "
+            "create artifacts, and use Agent Skills."
+        )
+    )
     files_manifest: list[dict] = dspy.InputField(desc="Available workspace files and metadata.")
     memories: list[str] = dspy.InputField(desc="Previously approved facts relevant to this task.")
-    active_skills: str = dspy.InputField(desc="Instructions from selected Agent Skills.")
+    active_skills: str = dspy.InputField(
+        desc=(
+            "Instructions from selected Agent Skills. If the preview is truncated, read the "
+            "full active_skills variable in bounded slices using print before following it."
+        )
+    )
     prior_turns: list[dict[str, str]] = dspy.InputField(
         desc="Previous completed turns in this session."
     )
@@ -422,7 +434,10 @@ async def run_workspace_task(
         factory = _ScopedInterpreterFactory()
 
         def invoke() -> dspy.Prediction:
-            with dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory):
+            with (
+                mlflow.tracing.context(tags={"fleet.run_id": current_run_id}),
+                dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory),
+            ):
                 program = build_program(
                     settings,
                     [*tools, spawn_agent],

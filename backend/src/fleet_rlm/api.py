@@ -46,6 +46,7 @@ from .interpreter import (
     AsyncDaytona,
     AsyncSandbox,
     DaytonaError,
+    SandboxStartupError,
     WorkspaceBrowseLimit,
     delete_sandbox,
     delete_sandbox_by_id,
@@ -396,6 +397,18 @@ class ChatPayload(BaseModel):
 @app.exception_handler(store.SessionNotFoundError)
 async def session_not_found(_request: Request, _error: store.SessionNotFoundError) -> JSONResponse:
     return JSONResponse({"detail": "Session not found"}, status_code=404)
+
+
+_WORKSPACE_STARTUP_HELP = (
+    "Fleet could not start the workspace. Try again. If the problem persists, "
+    "ask your administrator to check the Daytona snapshot and volume."
+)
+
+
+@app.exception_handler(SandboxStartupError)
+async def sandbox_startup_error(_request: Request, error: SandboxStartupError) -> JSONResponse:
+    _LOG.warning("Workspace startup failed (%s)", type(error.__cause__ or error).__name__)
+    return JSONResponse({"detail": _WORKSPACE_STARTUP_HELP}, status_code=503)
 
 
 @app.exception_handler(DaytonaError)
@@ -897,8 +910,9 @@ async def _read_workspace_file(
         return await download_workspace_file(
             sandbox, file_path, timeout=effective.daytona_exec_timeout_seconds
         )
-    except DaytonaError as error:
-        if error.status_code == 404:
+    except (DaytonaError, SandboxStartupError) as error:
+        provider_error = error.__cause__ if isinstance(error, SandboxStartupError) else error
+        if isinstance(provider_error, DaytonaError) and provider_error.status_code == 404:
             raise HTTPException(404, "File not found") from error
         raise
 
@@ -1317,8 +1331,10 @@ async def _run_turn(
         if current_task is not None and current_task.cancelling():
             status = "cancelled"
             raise asyncio.CancelledError from error
-        error_text = "Turn failed"
-        _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error).__name__)
+        error_text = (
+            _WORKSPACE_STARTUP_HELP if isinstance(error, SandboxStartupError) else "Turn failed"
+        )
+        _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
         try:

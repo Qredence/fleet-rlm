@@ -616,6 +616,18 @@ async def test_download_requires_a_safe_registered_path(offline):
     )
 
 
+@pytest.mark.parametrize(("status", "expected"), [(404, 404), (502, 503)])
+@pytest.mark.asyncio
+async def test_download_handles_sandbox_lookup_errors(offline, status, expected):
+    offline.store.add(db.File(path="artifacts/report.txt"))
+    offline.daytona.v0.get.side_effect = DaytonaError("Sandbox lookup failed", status_code=status)
+    response = await offline.client.get(f"{offline.base}/files/artifacts/report.txt")
+    assert response.status_code == expected
+    assert response.json()["detail"] == (
+        "File not found" if expected == 404 else api._WORKSPACE_STARTUP_HELP
+    )
+
+
 @pytest.mark.asyncio
 async def test_workspace_browses_checkout_and_skips_symlinks(offline, monkeypatch, tmp_path):
     workspace = tmp_path / "workspace"
@@ -936,6 +948,24 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
             "approved": True,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_workspace_startup_failure_returns_actionable_stream_error(offline, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "_chat_sandbox",
+        AsyncMock(side_effect=api.SandboxStartupError("private provider diagnostics")),
+    )
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
+    )
+    assert response.status_code == 200
+    assert json.loads(response.text.splitlines()[0].removeprefix("data: "))["type"] == "error"
+    assert "Fleet could not start the workspace. Try again." in response.text
+    assert "private provider diagnostics" not in response.text
+    assert response.text.endswith("data: [DONE]\n\n")
 
 
 @pytest.mark.asyncio

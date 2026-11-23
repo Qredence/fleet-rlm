@@ -13,6 +13,29 @@ The workflow runner creates labeled sessions and synthetic memory candidates, th
 
 The DSPy runner disables model caching to measure independent inference. Seven fixture-free cases share the same reviewed inputs and serving model. It retains only relevant synthetic memories from the source traces. RLM runs with Fleet's Daytona interpreter and no additional tools. Tool-free Flex starts with its single-predictor implementation. The comparison excludes workspace-dependent cases, including the missing-file check, and makes no claim about Flex serving, delegation, or workspace execution.
 
+## Live bundled Skill checks
+
+Start the baseline and candidate against separate test Neon branches, Daytona volumes,
+skills directories, and MLflow experiments. Use the same model IDs, snapshot, and budgets
+for both arms, with model caching disabled. The environment file must point to the same
+test database as the target HTTP server. The creator case seeds synthetic test memories
+there and installs a test skill in the deployment's skills directory.
+
+```sh
+cd backend
+uv run --locked --with openpyxl --with matplotlib --with pillow \
+  --env-file "$FLEET_EVAL_ENV" python ../scripts/fleet_workflow_baseline.py \
+  --bundled-skills --url "$FLEET_EVAL_URL" --repeats 5 \
+  --output-dir "$FLEET_EVAL_OUTPUT"
+```
+
+Check `workflow.json` for the per-case outcomes, trace IDs, model calls, tokens, latency,
+and Daytona execution evidence. Use `--case` to repeat a specific fixture or run
+`--case skill-creator --case route-data-and-chart --case chart-svg` on the rebuilt
+snapshot. Use `--case chart-png-fallback` with a sub-model endpoint that rejects image
+inputs to verify the local PNG checks and artifact survive the failure. The runner deletes its test sessions and seeded global memories.
+Discard the isolated skills directories when the evaluation is complete.
+
 ## Baseline results
 
 | Surface | Correct | Median model calls | Median tokens | Median trace time |
