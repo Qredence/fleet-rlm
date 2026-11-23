@@ -1,0 +1,67 @@
+AGENTS.md
+  s_4302bf5cfb0645::t_d24ee001925e38 10,17,36
+CHANGELOG.md
+  s_2fdc5be4a87bca::t_fa966f9f68925d 7-8,11-17,21-23,25,27-29
+GLOSSARY.md
+  s_4302bf5cfb0645::t_f3faadf27637b3 1-121
+README.md
+  s_2fdc5be4a87bca::t_76f57d3977dd58 3,5,7-14,16,18,20,22,26,28,30,32-33,36,41,43-44,47-65,68,77,79-81,87-93
+backend/pyproject.toml
+  s_7dbea4a77f7c1c::t_a6c459ddf92adc 3-4,6-28,32,41-46
+backend/skills/skill-creator/SKILL.md
+  s_4302bf5cfb0645::t_4d8bb862cb0062 3,6
+backend/src/fleet_rlm/agent.py
+  s_2fdc5be4a87bca::t_3cefe512b7da22 479-484,528,551-553,555-557,559-562
+backend/src/fleet_rlm/api.py
+  s_7dbea4a77f7c1c::t_f60e7a5d1db4c4 15,48-51,56,568,618,623,670,684,691,725-726,919-939,944,1030
+backend/src/fleet_rlm/db.py
+  s_2fdc5be4a87bca::t_8d4ff6342e29ee 409-414,430,435,446
+backend/src/fleet_rlm/interpreter.py
+  s_2fdc5be4a87bca::t_ad55003ff56e44 7-15,21-22,68,87,97,102,128,133-183
+backend/src/fleet_rlm/skills.py
+  s_2fdc5be4a87bca::t_eb126d011c572d 114,118-119,148-157,162-165
+backend/tests/test_phase1_locking.py
+  s_4302bf5cfb0645::t_76632e3a37db45 414-416
+backend/tests/test_phase2_engine.py
+  s_2fdc5be4a87bca::t_21f099a5dc00de 48-51,57,281-322,460-462,470,1019-1022,1034,1041-1042,1045,1049,1052,1057-1113,1336
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_b71afb89dbd001 343-346,434,496,504,514,645-708,1300-1301,1307,1313,1428,1492,1498,1519,1522,1533,1538,1796-1798
+backend/uv.lock
+  s_7dbea4a77f7c1c::t_255f91e4bc0b32 390,393-405,434,442,444,449,458,460,465,473,475,480,489,491,496,504,506,511,520,522,747,751,774
+docs/PRD.md
+  s_4302bf5cfb0645::t_7ecc7a65b90387 11,47,107-110
+frontend/README.md
+  s_4302bf5cfb0645::t_9f80b6002bc6df 3,10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "98454a7317ac3308fad1e908b796a1dac170e0dc",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_4302bf5cfb0645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a206d8-4a96-7ec2-8b96-bd7f602e3cdd",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
