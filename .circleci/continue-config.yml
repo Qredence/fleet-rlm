@@ -100,31 +100,29 @@ jobs:
           command: echo "Skipping backend and frontend CI checks (no matching paths changed)."
 
 workflows:
+  required-ci:
+    when: pipeline.event.name == "pull_request" or pipeline.git.branch == "main"
+    jobs:
+      - backend-check
+      - frontend-check
+
   backend:
-    when:
-      or:
-        - << pipeline.parameters.run-backend >>
-        - << pipeline.parameters.run-all >>
-        - equal: [ main, << pipeline.git.branch >> ]
+    when: >-
+      pipeline.event.name != "pull_request" and pipeline.git.branch != "main" and
+      (pipeline.parameters.run-backend or pipeline.parameters.run-all)
     jobs:
       - backend-check
 
   frontend:
-    when:
-      or:
-        - << pipeline.parameters.run-frontend >>
-        - << pipeline.parameters.run-all >>
-        - equal: [ main, << pipeline.git.branch >> ]
+    when: >-
+      pipeline.event.name != "pull_request" and pipeline.git.branch != "main" and
+      (pipeline.parameters.run-frontend or pipeline.parameters.run-all)
     jobs:
       - frontend-check
 
   skip-notice:
-    when:
-      and:
-        - not: << pipeline.parameters.run-backend >>
-        - not: << pipeline.parameters.run-frontend >>
-        - not: << pipeline.parameters.run-all >>
-        - not:
-            equal: [ main, << pipeline.git.branch >> ]
+    when: >-
+      pipeline.event.name != "pull_request" and pipeline.git.branch != "main" and
+      not (pipeline.parameters.run-backend or pipeline.parameters.run-frontend or pipeline.parameters.run-all)
     jobs:
       - skip-notice

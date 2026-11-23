@@ -678,7 +678,10 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
 
     response = await offline.client.post(
         f"{offline.base}/chat",
-        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "remember it"}]}]},
+        json={
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": "remember it"}]}],
+            "pinned_skills": ["table"],
+        },
     )
 
     assert response.status_code == 200
