@@ -49,7 +49,10 @@ jobs:
           command: cd backend && uv run ty check src
       - run:
           name: Backend tests (pytest)
-          command: cd backend && uv run pytest
+          command: |
+            export PYTHONPATH="$PWD/.circleci${PYTHONPATH:+:$PYTHONPATH}"
+            cd backend
+            uv run pytest -p fleet_ci_pytest
 
   frontend-check:
     docker:
