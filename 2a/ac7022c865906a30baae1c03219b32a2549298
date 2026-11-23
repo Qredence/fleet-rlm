@@ -1,0 +1,97 @@
+frontend/components.json
+  s_4302bf5cfb0645::t_607eb4b8a2edda 24-26
+frontend/package.json
+  s_7dbea4a77f7c1c::t_904448397d6e20 18,24
+frontend/pnpm-lock.yaml
+  s_7dbea4a77f7c1c::t_19ea2f2a6d7221 20-22,38-40,589-599,1254-1267,1737-1756,2786-2790,3328-3336,3954-3967
+frontend/src/App.tsx
+  s_7dbea4a77f7c1c::t_4d4877257ca9ea 3-4,6,8-9,12,15-21,23,94,105,118-174,176,178,181,185-194,206-209,218-221,325,340-343,346-357,371,375,389-397,402-409,460,513,515-520,540,565-566,568-569,571-574,585,592,595-609,612-632
+frontend/src/components/agent/ChatComposer.tsx
+  s_7dbea4a77f7c1c::t_bd1ece137e3416 1-240
+frontend/src/components/agent/FileTree.tsx
+  s_2fdc5be4a87bca::t_393fde7bced9d8 11,18-19,23,35,39-41
+frontend/src/components/agent/MessageParts.tsx
+  s_7dbea4a77f7c1c::t_37762d36ffe860 2,19-98
+frontend/src/components/agent/PythonToolTrace.tsx
+  s_4302bf5cfb0645::t_7888f112e11a0e 3,5,17-18,49-50,69-77,80-93
+frontend/src/components/agent/SettingsDialog.tsx
+  s_7dbea4a77f7c1c::t_0b612846cd74ff 4-6,9,13,15-16,19,39,43-44,46,49-51,53,55-56,58-60,76-82,109-111,265-274,276-317,319-359,363-417,419-479,481-486,488-489,491-518,520,522,524-531,533-555,558-570,572,574-603,605-606,608-693,704,706
+frontend/src/components/agent/SubagentTrace.tsx
+  s_4302bf5cfb0645::t_b989b1a50952d4 13,19-26,29-35
+frontend/src/components/agent/WorkspaceSidePanel.tsx
+  s_7dbea4a77f7c1c::t_003e99e8c67d9b 2,4-6,9-11,14,20,37,67-70,73-96,100-110,112-137,139-141,153,166,254-258,260-271,273-279,281,283-285,287-297,299-313,315-316,320-334,336-337,339-347,349-352,354-384,386-398,404-426
+frontend/src/components/ui/alert-dialog.tsx
+  s_7dbea4a77f7c1c::t_4c589935b57f71 1-185
+frontend/src/components/ui/alert.tsx
+  s_4302bf5cfb0645::t_7de3bd320c87d7 1-75
+frontend/src/components/ui/badge.tsx
+  s_4302bf5cfb0645::t_c0dc4fcd7edf2a 51-52
+frontend/src/components/ui/bubble.tsx
+  s_4302bf5cfb0645::t_1d053d3afc825b 1-127
+frontend/src/components/ui/button.tsx
+  s_7dbea4a77f7c1c::t_8e2ad761c824f5 57-58
+frontend/src/components/ui/card.tsx
+  s_7dbea4a77f7c1c::t_940cdb42857f57 1-102
+frontend/src/components/ui/dropdown-menu.tsx
+  s_7dbea4a77f7c1c::t_48daaecb5e9aea 1-265
+frontend/src/components/ui/empty.tsx
+  s_4302bf5cfb0645::t_ee22d6a7f0d8a0 1-103
+frontend/src/components/ui/field.tsx
+  s_4302bf5cfb0645::t_7c4189b51a939b 1-236
+frontend/src/components/ui/input-group.tsx
+  s_4302bf5cfb0645::t_5dc34b2a90c268 1-156
+frontend/src/components/ui/label.tsx
+  s_4302bf5cfb0645::t_c8b3e4cd0359e0 1-17
+frontend/src/components/ui/message-scroller.tsx
+  s_4302bf5cfb0645::t_08743701991151 1-130
+frontend/src/components/ui/message.tsx
+  s_4302bf5cfb0645::t_c58fc1d7d3ad71 1-91
+frontend/src/components/ui/prompt-input.tsx
+  s_7dbea4a77f7c1c::t_c76bada026631f 1-138
+frontend/src/components/ui/radio-group.tsx
+  s_4302bf5cfb0645::t_badc01bf531322 1-35
+frontend/src/components/ui/sheet.tsx
+  s_7dbea4a77f7c1c::t_a4ab9fd66bcf69 1-136
+frontend/src/components/ui/tabs.tsx
+  s_4302bf5cfb0645::t_e7fd33862e67d1 80-81
+frontend/src/components/ui/toggle-group.tsx
+  s_4302bf5cfb0645::t_080e22c07f271f 1-87
+frontend/src/components/ui/toggle.tsx
+  s_4302bf5cfb0645::t_d46a54dd756b67 1-43
+frontend/src/hooks/use-media-query.ts
+  s_4302bf5cfb0645::t_67994e100265f0 1-11
+frontend/src/index.css
+  s_7dbea4a77f7c1c::t_441feacc51ea28 146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2aac7022c865906a30baae1c03219b32a2549298",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_4302bf5cfb0645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a206d8-4a96-7ec2-8b96-bd7f602e3cdd",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
