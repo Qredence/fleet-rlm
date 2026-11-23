@@ -1,0 +1,59 @@
+backend/skills/chart-visualization/SKILL.md
+  s_4302bf5cfb0645::t_f6d6c308dee4f6 1-6
+backend/skills/data-analysis/SKILL.md
+  s_4302bf5cfb0645::t_dff37df4159aa2 3,6
+backend/skills/document-extraction/SKILL.md
+  s_4302bf5cfb0645::t_93e378ad8554b7 1-6
+backend/skills/recursive-synthesis/SKILL.md
+  s_4302bf5cfb0645::t_a75b8ea2fa4d5b 1-9
+backend/skills/scientific-computing/SKILL.md
+  s_4302bf5cfb0645::t_eb76deb9d034ac 1-6
+backend/skills/skill-creator/SKILL.md
+  s_4302bf5cfb0645::t_0947d02d92de6d 1-6
+backend/skills/spreadsheet-audit/SKILL.md
+  s_4302bf5cfb0645::t_f0df370a0fc43a 1-6
+backend/src/fleet_rlm/api.py
+  s_7dbea4a77f7c1c::t_68bd80da9f8d13 992-1000,1002-1006,1046
+backend/src/fleet_rlm/db.py
+  s_2fdc5be4a87bca::t_0a6085471c8893 19,26,410-414,418-448,452-453
+backend/tests/test_phase1_locking.py
+  s_4302bf5cfb0645::t_93537380036aff 36,406-408,417-428
+backend/tests/test_phase2_engine.py
+  s_2fdc5be4a87bca::t_d6f6616fb19ea5 9,14,23,1237-1587
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_64688b376a7626 10,601-642
+backend/tests/test_phase5_optimize.py
+  s_4302bf5cfb0645::t_bbca5fd4a6ce84 1062-1146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e03a0800c7317adf38ecd34e6668130c85253e65",
+  "prompts": {},
+  "sessions": {
+    "s_2fdc5be4a87bca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20778-77da-7f51-8ecd-43a56c6daa4f",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_4302bf5cfb0645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a206d8-4a96-7ec2-8b96-bd7f602e3cdd",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
