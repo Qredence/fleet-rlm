@@ -1,0 +1,19 @@
+backend/tests/test_phase3_api.py
+  s_7dbea4a77f7c1c::t_f7bafb5fc3b46b 681
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "93714a00db6fffae9a02cd5b81328f04b0b920a0",
+  "prompts": {},
+  "sessions": {
+    "s_7dbea4a77f7c1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208df-bf08-7ad2-9742-d6b13d50de96",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
